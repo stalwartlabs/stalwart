@@ -24,7 +24,7 @@ Potential impact:
 
 ### Resources
 
-- [Stalwart Security Policy](https://github.com/stalwartlabs/stalwart/blob/main/SECURITY.mdy)
+- [Stalwart Security Policy](https://github.com/stalwartlabs/stalwart/blob/main/SECURITY.md)
 - [CVE Scoring Calculator](https://nvd.nist.gov/vuln-metrics/cvss/v3-calculator)
 - [Rust Security Advisory Database](https://rustsec.org/)
 
