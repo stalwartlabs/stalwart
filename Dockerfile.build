@@ -142,14 +142,18 @@ FROM --platform=$TARGETPLATFORM docker.io/library/debian:bookworm-slim AS gnu
 WORKDIR /opt/stalwart
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
-    apt-get install -yq ca-certificates tzdata
+    apt-get install -yq --no-install-recommends \
+      ca-certificates \
+      tzdata \
+      curl && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 COPY --from=builder /app/artifact/stalwart /usr/local/bin
 COPY --from=builder /app/artifact/stalwart-cli /usr/local/bin
 COPY ./resources/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod -R 755 /usr/local/bin
 CMD ["/usr/local/bin/stalwart"]
 VOLUME [ "/opt/stalwart" ]
-EXPOSE	443 25 110 587 465 143 993 995 4190 8080
+EXPOSE 443 25 110 587 465 143 993 995 4190 8080
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/entrypoint.sh"]
 
 # *****************
@@ -157,12 +161,12 @@ ENTRYPOINT ["/bin/sh", "/usr/local/bin/entrypoint.sh"]
 # *****************
 FROM --platform=$TARGETPLATFORM alpine AS musl
 WORKDIR /opt/stalwart
-RUN apk add --update --no-cache ca-certificates tzdata && rm -rf /var/cache/apk/*
+RUN apk add --no-cache ca-certificates tzdata curl
 COPY --from=builder /app/artifact/stalwart /usr/local/bin
 COPY --from=builder /app/artifact/stalwart-cli /usr/local/bin
 COPY ./resources/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod -R 755 /usr/local/bin
 CMD ["/usr/local/bin/stalwart"]
 VOLUME [ "/opt/stalwart" ]
-EXPOSE	443 25 110 587 465 143 993 995 4190 8080
+EXPOSE 443 25 110 587 465 143 993 995 4190 8080
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/entrypoint.sh"]
