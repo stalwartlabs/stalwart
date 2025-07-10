@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 pub mod account;
 pub mod cli;
 pub mod database;
+pub mod dkim;
 pub mod domain;
 pub mod export;
 pub mod group;
