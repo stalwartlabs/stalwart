@@ -20,7 +20,7 @@ jmap_proto = { path = "../jmap-proto" }
 directory = { path =  "../directory" }
 services = { path =  "../services" }
 smtp-proto = { version = "0.1" }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
+mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
 mail-builder = { version = "0.4" }
 mail-auth = { version = "0.7.1", features = ["generate"] }
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }

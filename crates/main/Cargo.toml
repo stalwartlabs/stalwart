@@ -54,12 +54,12 @@ nats = ["store/nats"]
 azure = ["store/azure"]
 zenoh = ["store/zenoh"]
 kafka = ["store/kafka"]
-enterprise = [ "jmap/enterprise", 
-               "smtp/enterprise", 
-               "common/enterprise", 
-               "store/enterprise", 
-               "managesieve/enterprise", 
-               "directory/enterprise", 
+enterprise = [ "jmap/enterprise",
+               "smtp/enterprise",
+               "common/enterprise",
+               "store/enterprise",
+               "managesieve/enterprise",
+               "directory/enterprise",
                "email/enterprise",
                "spam-filter/enterprise",
                "http/enterprise",

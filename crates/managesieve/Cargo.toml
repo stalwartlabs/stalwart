@@ -14,9 +14,9 @@ store = { path = "../store" }
 utils = { path = "../utils" }
 email = { path = "../email" }
 trc = { path = "../trc" }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
+mail-parser = { version = "0.11", features = ["full_encoding"] }
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-sieve-rs = { version = "0.7", features = ["rkyv"] } 
+sieve-rs = { version = "0.7", features = ["rkyv"] }
 rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
 rustls-pemfile = "2.0"
 tokio = { version = "1.45", features = ["full"] }
