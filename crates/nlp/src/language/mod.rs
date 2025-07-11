@@ -128,6 +128,7 @@ impl Language {
             "it" => Language::Italian,
             "fr" => Language::French,
             "de" => Language::German,
+            "da" => Language::Danish,
             "ru" => Language::Russian,
             "zh" => Language::Mandarin,
             "ja" => Language::Japanese,
