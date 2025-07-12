@@ -69,6 +69,7 @@ async fn main() -> std::io::Result<()> {
         Commands::Domain(command) => command.exec(client).await,
         Commands::List(command) => command.exec(client).await,
         Commands::Group(command) => command.exec(client).await,*/
+        Commands::Dkim(command) => command.exec(client).await,
         Commands::Queue(command) => command.exec(client).await,
         Commands::Report(command) => command.exec(client).await,
     }

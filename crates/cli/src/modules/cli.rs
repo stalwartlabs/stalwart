@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::dkim::Algorithm;
 use clap::{Parser, Subcommand, ValueEnum};
 use jmap_client::client::Credentials;
 use mail_parser::DateTime;
@@ -44,6 +45,11 @@ pub enum Commands {
         #[clap(subcommand)]
         Group(GroupCommands),
     */
+
+    /// Manage DKIM signatures
+    #[clap(subcommand)]
+    Dkim(DkimCommands),
+
     /// Import JMAP accounts and Maildir/mbox mailboxes
     #[clap(subcommand)]
     Import(ImportCommands),
@@ -342,6 +348,27 @@ pub enum DomainCommands {
         from: Option<String>,
         /// Maximum number of domains to list
         limit: Option<usize>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DkimCommands {
+    /// Create DKIM signature
+    Create {
+        /// Algorithm to use
+        algorithm: Algorithm,
+        /// Domain name for which to create
+        domain: String,
+        /// Id
+        signature_id: Option<String>,
+        /// Selector
+        selector: Option<String>,
+    },
+
+    /// Get DKIM public key
+    GetPublicKey {
+        /// Signature id
+        signature_id: String,
     },
 }
 
