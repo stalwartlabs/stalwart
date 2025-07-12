@@ -142,7 +142,7 @@ FROM --platform=$TARGETPLATFORM docker.io/library/debian:bookworm-slim AS gnu
 WORKDIR /opt/stalwart
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
-    apt-get install -yq ca-certificates tzdata
+    apt-get install -yq ca-certificates tzdata curl
 COPY --from=builder /app/artifact/stalwart /usr/local/bin
 COPY --from=builder /app/artifact/stalwart-cli /usr/local/bin
 COPY ./resources/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -157,7 +157,7 @@ ENTRYPOINT ["/bin/sh", "/usr/local/bin/entrypoint.sh"]
 # *****************
 FROM --platform=$TARGETPLATFORM alpine AS musl
 WORKDIR /opt/stalwart
-RUN apk add --update --no-cache ca-certificates tzdata && rm -rf /var/cache/apk/*
+RUN apk add --update --no-cache ca-certificates tzdata curl && rm -rf /var/cache/apk/*
 COPY --from=builder /app/artifact/stalwart /usr/local/bin
 COPY --from=builder /app/artifact/stalwart-cli /usr/local/bin
 COPY ./resources/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
