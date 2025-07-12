@@ -1,5 +1,5 @@
 # Stalwart Dockerfile
-# Credits: https://github.com/33KK 
+# Credits: https://github.com/33KK
 
 FROM --platform=$BUILDPLATFORM docker.io/lukemathwalker/cargo-chef:latest-rust-slim-bookworm AS chef
 WORKDIR /build
