@@ -1,0 +1,2 @@
+[env]
+CXXFLAGS = "--std=c++20"
