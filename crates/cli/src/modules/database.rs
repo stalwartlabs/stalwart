@@ -5,7 +5,6 @@
  */
 
 use std::collections::HashMap;
-
 use prettytable::{Attr, Cell, Row, Table};
 use reqwest::Method;
 use serde_json::Value;
@@ -111,6 +110,21 @@ impl ServerCommands {
                     results.len(),
                     if results.len() == 1 { "" } else { "s" }
                 );
+            }
+            ServerCommands::Healthcheck { check } => {
+                let request_base: String = "healthz".to_owned();
+                let default_check: String = "ready".to_owned();
+                let request: String;
+                if check.is_some() {
+                    request = format!("/{request_base}/{}", check.unwrap());
+                } else {
+                    request = format!("/{request_base}/{default_check}");
+                }
+
+                client
+                    .http_request::<String, Value>(Method::GET, &request, None)
+                    .await;
+                eprintln!("Success.");
             }
         }
     }
