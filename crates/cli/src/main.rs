@@ -179,8 +179,9 @@ async fn oauth(url: &str) -> Credentials {
 pub enum Response<T> {
     Error(ManagementApiError),
     Data { data: T },
-    HealthcheckStatus {
+    HttpResponseData {
         r#type: String,
+        title: Option<String>,
         status: u16,
         detail: String,
     },
@@ -289,7 +290,7 @@ impl Client {
             String::from_utf8_lossy(bytes.as_ref())
         )) {
             Response::Data { data } => Some(data),
-            Response::HealthcheckStatus { r#type: _, status, detail: _} => {
+            Response::HttpResponseData { r#type: _, title: _, status, detail: _} => {
                 if status == 200 {
                     eprintln!("Success.");
                     std::process::exit(0);
