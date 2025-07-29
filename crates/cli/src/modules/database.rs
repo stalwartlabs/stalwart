@@ -120,10 +120,7 @@ impl ServerCommands {
                 } else {
                     request = format!("/{request_base}/{default_check}");
                 }
-
-                client
-                    .http_request::<String, Value>(Method::GET, &request, None)
-                    .await;
+                reqwest::get(&request).await?.status() == 200;
                 eprintln!("Success.");
             }
         }
