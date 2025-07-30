@@ -11,7 +11,7 @@ use crate::smtp::{
     session::TestSession,
 };
 use mail_auth::MX;
-use smtp::queue::{DomainPart, Message, QueueEnvelope, Recipient, throttle::IsAllowed};
+use smtp::queue::{Message, QueueEnvelope, Recipient, throttle::IsAllowed};
 use std::{
     net::{IpAddr, Ipv4Addr},
     time::{Duration, Instant},
@@ -286,7 +286,7 @@ impl<'x> TestQueueEnvelope<'x> for QueueEnvelope<'x> {
             mx,
             remote_ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             local_ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-            domain: rcpt.address.domain_part(),
+            domain: rcpt.domain_part(),
             rcpt,
         }
     }

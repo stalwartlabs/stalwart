@@ -6,7 +6,7 @@
 
 use common::{KV_BAYES_MODEL_USER, Server, auth::AccessToken};
 use directory::{
-    DirectoryInner, Permission, QueryBy, Type,
+    DirectoryInner, Permission, QueryBy, QueryParams, Type,
     backend::internal::{
         PrincipalAction, PrincipalField, PrincipalSet, PrincipalUpdate, PrincipalValue,
         SpecialSecrets,
@@ -252,12 +252,11 @@ impl PrincipalManager for Server {
                     })?;
                 }
 
+                let mut tenant = access_token.tenant.map(|t| t.id);
+
                 // SPDX-SnippetBegin
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                 // SPDX-License-Identifier: LicenseRef-SEL
-
-                let mut tenant = access_token.tenant.map(|t| t.id);
-
                 #[cfg(feature = "enterprise")]
                 if self.core.is_enterprise_edition() {
                     if tenant.is_none() {
@@ -276,7 +275,6 @@ impl PrincipalManager for Server {
                 } else if types.contains(&Type::Tenant) {
                     return Err(manage::enterprise());
                 }
-
                 // SPDX-SnippetEnd
 
                 let principals = self
@@ -347,6 +345,9 @@ impl PrincipalManager for Server {
 
                 let mut tenant = access_token.tenant.map(|t| t.id);
 
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(feature = "enterprise")]
                 if self.core.is_enterprise_edition() {
                     if tenant.is_none() {
@@ -365,6 +366,7 @@ impl PrincipalManager for Server {
                 } else if typ == Type::Tenant {
                     return Err(manage::enterprise());
                 }
+                // SPDX-SnippetEnd
 
                 let principals = self
                     .store()
@@ -474,7 +476,7 @@ impl PrincipalManager for Server {
 
                         let principal = self
                             .store()
-                            .query(QueryBy::Id(account_id), true)
+                            .query(QueryParams::id(account_id).with_return_member_of(true))
                             .await?
                             .ok_or_else(|| trc::ManageEvent::NotFound.into_err())?;
 
@@ -572,6 +574,7 @@ impl PrincipalManager for Server {
                         })?;
 
                         // Validate changes
+                        let mut invalidate_logo_cache = false;
                         for change in &changes {
                             match change.field {
                                 PrincipalField::Secrets
@@ -581,13 +584,16 @@ impl PrincipalManager for Server {
                                 | PrincipalField::UsedQuota
                                 | PrincipalField::Description
                                 | PrincipalField::Type
-                                | PrincipalField::Picture
                                 | PrincipalField::MemberOf
                                 | PrincipalField::Members
                                 | PrincipalField::Lists
                                 | PrincipalField::Urls
                                 | PrincipalField::ExternalMembers
                                 | PrincipalField::Locale => (),
+                                PrincipalField::Picture => {
+                                    invalidate_logo_cache |=
+                                        matches!(typ, Type::Domain | Type::Tenant);
+                                }
                                 PrincipalField::Tenant => {
                                     // Tenants are not allowed to change their tenantId
                                     if access_token.tenant.is_some() {
@@ -671,6 +677,11 @@ impl PrincipalManager for Server {
                         // Increment revision
                         self.invalidate_principal_caches(changed_principals).await;
 
+                        // Invalidate logo cache if needed
+                        if invalidate_logo_cache {
+                            self.inner.data.logos.lock().clear();
+                        }
+
                         Ok(JsonResponse::new(json!({
                             "data": (),
                         }))
@@ -696,7 +707,7 @@ impl PrincipalManager for Server {
         if access_token.primary_id() != u32::MAX {
             let principal = self
                 .directory()
-                .query(QueryBy::Id(access_token.primary_id()), false)
+                .query(QueryParams::id(access_token.primary_id()).with_return_member_of(false))
                 .await?
                 .ok_or_else(|| trc::ManageEvent::NotFound.into_err())?;
 
@@ -792,7 +803,16 @@ impl PrincipalManager for Server {
         }
 
         // Make sure the current directory supports updates
-        self.assert_supported_directory(false)?;
+        if requests.iter().any(|r| {
+            matches!(
+                r,
+                AccountAuthRequest::SetPassword { .. }
+                    | AccountAuthRequest::EnableOtpAuth { .. }
+                    | AccountAuthRequest::DisableOtpAuth { .. }
+            )
+        }) {
+            self.assert_supported_directory(false)?;
+        }
 
         // Build actions
         let mut actions = Vec::with_capacity(requests.len());

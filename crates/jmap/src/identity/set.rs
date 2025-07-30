@@ -5,7 +5,7 @@
  */
 
 use common::{Server, storage::index::ObjectIndexBuilder};
-use directory::QueryBy;
+use directory::QueryParams;
 use email::identity::{EmailAddress, Identity};
 use jmap_proto::{
     error::set::SetError,
@@ -61,7 +61,7 @@ impl IdentitySet for Server {
             if !identity.email.is_empty() {
                 if self
                     .directory()
-                    .query(QueryBy::Id(account_id), false)
+                    .query(QueryParams::id(account_id).with_return_member_of(false))
                     .await?
                     .is_none_or(|p| !p.emails.iter().any(|e| e == &identity.email))
                 {

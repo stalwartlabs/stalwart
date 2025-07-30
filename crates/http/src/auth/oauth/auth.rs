@@ -130,8 +130,13 @@ impl OAuthApiHandler for Server {
 
                 #[cfg(not(feature = "enterprise"))]
                 let is_enterprise = false;
+
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(feature = "enterprise")]
                 let is_enterprise = self.core.is_enterprise_edition();
+                // SPDX-SnippetEnd
 
                 json!({
                     "data": {

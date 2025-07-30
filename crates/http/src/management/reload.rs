@@ -83,8 +83,13 @@ impl ManageReload for Server {
 
                     if let Some(tracers) = result.tracers {
                         // Update tracers
+
+                        // SPDX-SnippetBegin
+                        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                        // SPDX-License-Identifier: LicenseRef-SEL
                         #[cfg(feature = "enterprise")]
                         tracers.update(self.inner.shared_core.load().is_enterprise_edition());
+                        // SPDX-SnippetEnd
                         #[cfg(not(feature = "enterprise"))]
                         tracers.update(false);
                     }

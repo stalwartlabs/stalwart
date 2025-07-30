@@ -267,7 +267,7 @@ impl TestSession for Session<DummyIo> {
         let rcpts = ["a@foobar.org", "b@test.net", "c@foobar.org", "d@test.net"];
         for rcpt in &message.message.recipients {
             let idx = (rcpt.flags - 1) as usize;
-            assert_eq!(rcpts[idx], rcpt.address);
+            assert_eq!(rcpts[idx], rcpt.address());
         }
     }
 }

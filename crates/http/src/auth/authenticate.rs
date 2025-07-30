@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
+use common::auth::AccessToken;
 use common::{HttpAuthCache, Server, auth::AuthRequest, listener::limiter::InFlight};
 use http_proto::{HttpRequest, HttpSessionData};
 use hyper::header;
 use mail_parser::decoders::base64::base64_decode;
 use mail_send::Credentials;
-
-use common::auth::AccessToken;
 use std::future::Future;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub trait Authenticator: Sync + Send {
     fn authenticate_headers(
@@ -34,19 +33,20 @@ impl Authenticator for Server {
         if let Some((mechanism, token)) = req.authorization() {
             // Check if the credentials are cached
             if let Some(http_cache) = self.inner.cache.http_auth.get(token) {
-                let access_token = self.get_access_token(http_cache.account_id).await?;
-
                 // Make sure the revision is still valid
-                if access_token.revision == http_cache.revision {
-                    // Enforce authenticated rate limit
-                    return self
-                        .is_http_authenticated_request_allowed(&access_token)
-                        .await
-                        .map(|in_flight| (in_flight, access_token));
-                } else {
-                    // If the revision is not valid, remove the cached credentials
-                    self.inner.cache.http_auth.remove(token);
+                if http_cache.expires <= Instant::now() {
+                    let access_token = self.get_access_token(http_cache.account_id).await?;
+                    if access_token.revision == http_cache.revision {
+                        // Enforce authenticated rate limit
+                        return self
+                            .is_http_authenticated_request_allowed(&access_token)
+                            .await
+                            .map(|in_flight| (in_flight, access_token));
+                    }
                 }
+
+                // If the revision is not valid, remove the cached credentials
+                self.inner.cache.http_auth.remove(token);
             }
 
             let credentials = if mechanism.eq_ignore_ascii_case("basic") {
@@ -100,6 +100,8 @@ impl Authenticator for Server {
                 HttpAuthCache {
                     account_id: access_token.primary_id(),
                     revision: access_token.revision,
+                    expires: Instant::now()
+                        + Duration::from_secs(self.core.oauth.oauth_expiry_token),
                 },
             );
 

@@ -173,8 +173,12 @@ pub enum Store {
     MySQL(Arc<backend::mysql::MysqlStore>),
     #[cfg(feature = "rocks")]
     RocksDb(Arc<backend::rocksdb::RocksDbStore>),
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
     SQLReadReplica(Arc<backend::composite::read_replica::SQLReadReplica>),
+    // SPDX-SnippetEnd
     #[default]
     None,
 }
@@ -199,8 +203,12 @@ pub enum BlobBackend {
     S3(Arc<backend::s3::S3Store>),
     #[cfg(feature = "azure")]
     Azure(Arc<backend::azure::AzureStore>),
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     Sharded(Arc<backend::composite::sharded_blob::ShardedBlob>),
+    // SPDX-SnippetEnd
 }
 
 #[derive(Clone)]
@@ -217,8 +225,12 @@ pub enum InMemoryStore {
     Redis(Arc<backend::redis::RedisStore>),
     Http(Arc<HttpStore>),
     Static(Arc<StaticMemoryStore>),
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     Sharded(Arc<backend::composite::sharded_lookup::ShardedInMemory>),
+    // SPDX-SnippetEnd
 }
 
 #[derive(Clone, Default)]
@@ -706,8 +718,12 @@ impl Store {
             Store::PostgreSQL(_) => true,
             #[cfg(feature = "mysql")]
             Store::MySQL(_) => true,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
             Store::SQLReadReplica(_) => true,
+            // SPDX-SnippetEnd
             _ => false,
         }
     }
@@ -722,6 +738,9 @@ impl Store {
         }
     }
 
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     pub fn is_enterprise_store(&self) -> bool {
         match self {
@@ -730,6 +749,7 @@ impl Store {
             _ => false,
         }
     }
+    // SPDX-SnippetEnd
 
     #[cfg(not(feature = "enterprise"))]
     pub fn is_enterprise_store(&self) -> bool {
@@ -750,8 +770,13 @@ impl std::fmt::Debug for Store {
             Self::MySQL(_) => f.debug_tuple("MySQL").finish(),
             #[cfg(feature = "rocks")]
             Self::RocksDb(_) => f.debug_tuple("RocksDb").finish(),
+
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
             Self::SQLReadReplica(_) => f.debug_tuple("SQLReadReplica").finish(),
+            // SPDX-SnippetEnd
             Self::None => f.debug_tuple("None").finish(),
         }
     }
@@ -781,6 +806,9 @@ impl From<Value<'static>> for () {
 
 impl Stores {
     pub fn disable_enterprise_only(&mut self) {
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
         #[cfg(feature = "enterprise")]
         {
             #[cfg(any(feature = "postgres", feature = "mysql"))]
@@ -789,5 +817,6 @@ impl Stores {
             self.blob_stores
                 .retain(|_, store| !matches!(store.backend, BlobBackend::Sharded(_)));
         }
+        // SPDX-SnippetEnd
     }
 }

@@ -193,7 +193,7 @@ async fn lmtp_delivery() {
             .message
             .recipients
             .into_iter()
-            .map(|r| r.address)
+            .map(|r| r.address().to_string())
             .collect::<Vec<_>>(),
         vec![
             "bill@foobar.org".to_string(),

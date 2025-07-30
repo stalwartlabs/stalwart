@@ -260,7 +260,7 @@ async fn smtp_delivery() {
         .message
         .recipients
         .into_iter()
-        .map(|r| r.address)
+        .map(|r| r.address().to_string())
         .collect::<Vec<_>>();
     recipients.extend(
         remote
@@ -270,7 +270,7 @@ async fn smtp_delivery() {
             .message
             .recipients
             .into_iter()
-            .map(|r| r.address),
+            .map(|r| r.address().to_string()),
     );
     recipients.sort();
     assert_eq!(

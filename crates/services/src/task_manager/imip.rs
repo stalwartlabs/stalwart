@@ -310,6 +310,9 @@ pub async fn build_itip_template(
     summary: &ArchivedItipSummary,
     logo_cid: &str,
 ) -> Details {
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     let template = server
         .core
@@ -317,6 +320,7 @@ pub async fn build_itip_template(
         .as_ref()
         .and_then(|e| e.template_scheduling_email.as_ref())
         .unwrap_or(&server.core.groupware.itip_template);
+    // SPDX-SnippetEnd
     #[cfg(not(feature = "enterprise"))]
     let template = &server.core.groupware.itip_template;
     let locale = i18n::locale_or_default(access_token.locale.as_deref().unwrap_or("en"));

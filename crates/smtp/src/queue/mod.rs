@@ -399,6 +399,49 @@ pub fn instant_to_timestamp(now: Instant, time: Instant) -> u64 {
         + time.checked_duration_since(now).map_or(0, |d| d.as_secs())
 }
 
+impl Recipient {
+    pub fn new(address: impl AsRef<str>) -> Self {
+        Recipient {
+            address: address.to_lowercase_domain(),
+            status: Status::Scheduled,
+            flags: 0,
+            orcpt: None,
+            retry: Schedule::now(),
+            notify: Schedule::now(),
+            expires: QueueExpiry::Attempts(0),
+            queue: QueueName::default(),
+        }
+    }
+
+    pub fn with_flags(mut self, flags: u64) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn with_orcpt(mut self, orcpt: Option<String>) -> Self {
+        self.orcpt = orcpt;
+        self
+    }
+
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+
+    pub fn domain_part(&self) -> &str {
+        self.address.domain_part()
+    }
+}
+
+impl ArchivedRecipient {
+    pub fn address(&self) -> &str {
+        self.address.as_str()
+    }
+
+    pub fn domain_part(&self) -> &str {
+        self.address.domain_part()
+    }
+}
+
 pub trait InstantFromTimestamp {
     fn to_instant(&self) -> Instant;
 }
@@ -418,10 +461,28 @@ impl InstantFromTimestamp for u64 {
 }
 
 pub trait DomainPart {
+    fn to_lowercase_domain(&self) -> String;
     fn domain_part(&self) -> &str;
 }
 
 impl<T: AsRef<str>> DomainPart for T {
+    fn to_lowercase_domain(&self) -> String {
+        let address = self.as_ref();
+        if let Some((local, domain)) = address.rsplit_once('@') {
+            let mut address = String::with_capacity(address.len());
+            address.push_str(local);
+            address.push('@');
+            for ch in domain.chars() {
+                for ch in ch.to_lowercase() {
+                    address.push(ch);
+                }
+            }
+            address
+        } else {
+            address.to_string()
+        }
+    }
+
     #[inline(always)]
     fn domain_part(&self) -> &str {
         self.as_ref()

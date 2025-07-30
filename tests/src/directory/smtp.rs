@@ -7,7 +7,7 @@
 use super::dummy_tls_acceptor;
 use crate::directory::{DirectoryTest, Item, LookupResult};
 use common::listener::limiter::{ConcurrencyLimiter, InFlight};
-use directory::{QueryBy, backend::RcptType};
+use directory::{QueryParams, backend::RcptType};
 use mail_parser::decoders::base64::base64_decode;
 use mail_send::Credentials;
 use std::sync::Arc;
@@ -76,7 +76,7 @@ async fn lmtp_directory() {
                 (core.rcpt(&handle, v, 0).await.unwrap() == RcptType::Mailbox).into()
             }
             Item::Authenticate(v) => handle
-                .query(QueryBy::Credentials(v), true)
+                .query(QueryParams::credentials(v).with_return_member_of(true))
                 .await
                 .unwrap()
                 .is_some()
@@ -122,7 +122,7 @@ async fn lmtp_directory() {
                         (core.rcpt(&handle, v, 0).await.unwrap() == RcptType::Mailbox).into()
                     }
                     Item::Authenticate(v) => handle
-                        .query(QueryBy::Credentials(v), true)
+                        .query(QueryParams::credentials(v).with_return_member_of(true))
                         .await
                         .unwrap()
                         .is_some()

@@ -1036,6 +1036,9 @@ const SERVER: &str = r#"
 [server]
 hostname = "webdav.example.org"
 
+[spam-filter]
+enable = false
+
 [http]
 url = "'https://127.0.0.1:8899'"
 

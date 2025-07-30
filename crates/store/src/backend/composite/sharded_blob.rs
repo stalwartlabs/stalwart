@@ -71,11 +71,15 @@ impl ShardedBlob {
                     Store::MySQL(store) => store.get_blob(key, read_range).await,
                     #[cfg(feature = "rocks")]
                     Store::RocksDb(store) => store.get_blob(key, read_range).await,
+                    // SPDX-SnippetBegin
+                    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                    // SPDX-License-Identifier: LicenseRef-SEL
                     #[cfg(all(
                         feature = "enterprise",
                         any(feature = "postgres", feature = "mysql")
                     ))]
                     Store::SQLReadReplica(store) => store.get_blob(key, read_range).await,
+                    // SPDX-SnippetEnd
                     Store::None => Err(trc::StoreEvent::NotConfigured.into()),
                 },
                 BlobBackend::Fs(store) => store.get_blob(key, read_range).await,
@@ -103,10 +107,14 @@ impl ShardedBlob {
                     Store::MySQL(store) => store.put_blob(key, data).await,
                     #[cfg(feature = "rocks")]
                     Store::RocksDb(store) => store.put_blob(key, data).await,
+                    // SPDX-SnippetBegin
+                    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                    // SPDX-License-Identifier: LicenseRef-SEL
                     #[cfg(all(
                         feature = "enterprise",
                         any(feature = "postgres", feature = "mysql")
                     ))]
+                    // SPDX-SnippetEnd
                     Store::SQLReadReplica(store) => store.put_blob(key, data).await,
                     Store::None => Err(trc::StoreEvent::NotConfigured.into()),
                 },
@@ -135,11 +143,15 @@ impl ShardedBlob {
                     Store::MySQL(store) => store.delete_blob(key).await,
                     #[cfg(feature = "rocks")]
                     Store::RocksDb(store) => store.delete_blob(key).await,
+                    // SPDX-SnippetBegin
+                    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                    // SPDX-License-Identifier: LicenseRef-SEL
                     #[cfg(all(
                         feature = "enterprise",
                         any(feature = "postgres", feature = "mysql")
                     ))]
                     Store::SQLReadReplica(store) => store.delete_blob(key).await,
+                    // SPDX-SnippetEnd
                     Store::None => Err(trc::StoreEvent::NotConfigured.into()),
                 },
                 BlobBackend::Fs(store) => store.delete_blob(key).await,

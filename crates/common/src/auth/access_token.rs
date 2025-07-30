@@ -12,7 +12,7 @@ use crate::{
 };
 use ahash::AHashSet;
 use directory::{
-    Permission, Principal, PrincipalData, QueryBy, Type,
+    Permission, Principal, PrincipalData, QueryParams, Type,
     backend::internal::{
         lookup::DirectoryStore,
         manage::{ChangedPrincipals, ManageDirectory},
@@ -62,16 +62,18 @@ impl Server {
 
         // Apply principal permissions
         let mut permissions = role_permissions.finalize();
+        let mut tenant = None;
 
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
         // SPDX-License-Identifier: LicenseRef-SEL
 
-        let mut tenant = None;
         #[cfg(feature = "enterprise")]
         if self.is_enterprise_edition() {
             if let Some(tenant_id) = principal.tenant {
                 // Limit tenant permissions
+
+                use directory::QueryParams;
                 permissions.intersection(&self.get_role_permissions(tenant_id).await?.enabled);
 
                 // Obtain tenant quota
@@ -79,7 +81,7 @@ impl Server {
                     id: tenant_id,
                     quota: self
                         .store()
-                        .query(QueryBy::Id(tenant_id), false)
+                        .query(QueryParams::id(tenant_id).with_return_member_of(false))
                         .await
                         .caused_by(trc::location!())?
                         .ok_or_else(|| {
@@ -97,18 +99,35 @@ impl Server {
 
         // SPDX-SnippetEnd
 
+        // Build member of and e-mail addresses
+        let primary_id = principal.id();
+        let member_of = principal
+            .member_of_mut()
+            .map(std::mem::take)
+            .unwrap_or_default();
+        let mut emails = principal.emails;
+        for &group_id in &member_of {
+            if let Some(group) = self
+                .store()
+                .query(QueryParams::id(group_id).with_return_member_of(false))
+                .await
+                .caused_by(trc::location!())?
+            {
+                if group.typ == Type::Group {
+                    emails.extend(group.emails);
+                }
+            }
+        }
+
         // Build access token
         let mut access_token = AccessToken {
-            primary_id: principal.id(),
-            member_of: principal
-                .member_of_mut()
-                .map(std::mem::take)
-                .unwrap_or_default(),
+            primary_id,
+            member_of,
             access_to: VecMap::new(),
             tenant,
             name: principal.name,
             description: principal.description,
-            emails: principal.emails,
+            emails,
             quota: principal.quota.unwrap_or_default(),
             locale: principal.data.iter().find_map(|data| {
                 if let PrincipalData::Locale(v) = data {
@@ -178,7 +197,11 @@ impl Server {
     }
 
     async fn build_access_token(&self, account_id: u32, revision: u64) -> trc::Result<AccessToken> {
-        let err = match self.directory().query(QueryBy::Id(account_id), true).await {
+        let err = match self
+            .directory()
+            .query(QueryParams::id(account_id).with_return_member_of(true))
+            .await
+        {
             Ok(Some(principal)) => {
                 return self
                     .build_access_token_from_principal(principal, revision)

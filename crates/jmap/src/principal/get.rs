@@ -5,7 +5,7 @@
  */
 
 use common::Server;
-use directory::QueryBy;
+use directory::QueryParams;
 use jmap_proto::{
     method::get::{GetRequest, GetResponse, RequestArguments},
     types::{
@@ -65,7 +65,7 @@ impl PrincipalGet for Server {
                 .core
                 .storage
                 .directory
-                .query(QueryBy::Id(id.document_id()), false)
+                .query(QueryParams::id(id.document_id()).with_return_member_of(false))
                 .await?
             {
                 principal

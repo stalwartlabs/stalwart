@@ -220,14 +220,14 @@ impl TestMessage for Message {
     fn rcpt(&self, name: &str) -> &Recipient {
         self.recipients
             .iter()
-            .find(|d| d.address == name)
+            .find(|d| d.address() == name)
             .unwrap_or_else(|| panic!("Expected rcpt {name} not found in {:?}", self.recipients))
     }
 
     fn rcpt_mut(&mut self, name: &str) -> &mut Recipient {
         self.recipients
             .iter_mut()
-            .find(|d| d.address == name)
+            .find(|d| d.address() == name)
             .unwrap()
     }
 }

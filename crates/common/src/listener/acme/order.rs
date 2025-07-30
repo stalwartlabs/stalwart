@@ -3,7 +3,7 @@
 use chrono::{DateTime, TimeZone, Utc};
 
 use compact_str::CompactString;
-use dns_update::DnsRecord;
+use dns_update::{DnsRecord, DnsRecordType};
 use futures::future::try_join_all;
 use rcgen::{CertificateParams, DistinguishedName, PKCS_ECDSA_P256_SHA256};
 use rustls::crypto::ring::sign::any_ecdsa_type;
@@ -252,7 +252,7 @@ impl Server {
                             .to_string();
 
                         // First try deleting the record
-                        if let Err(err) = updater.delete(&name, &origin).await {
+                        if let Err(err) = updater.delete(&name, &origin, DnsRecordType::TXT).await {
                             // Errors are expected if the record does not exist
                             trc::event!(
                                 Acme(AcmeEvent::DnsRecordDeletionFailed),

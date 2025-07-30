@@ -17,10 +17,12 @@ use directory::{
     backend::internal::manage::{self, ManageDirectory},
 };
 use email::message::{ingest::EmailIngest, metadata::MessageData};
+use http_proto::{request::decode_path_element, *};
 use hyper::Method;
 use jmap_proto::types::{collection::Collection, property::Property};
 use serde_json::json;
 use services::task_manager::fts::FtsIndexTask;
+use std::future::Future;
 use store::{
     Serialize, rand,
     write::{Archiver, BatchBuilder, ValueClass},
@@ -28,11 +30,12 @@ use store::{
 use trc::AddContext;
 use utils::url_params::UrlParams;
 
-use http_proto::{request::decode_path_element, *};
-
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
 #[cfg(feature = "enterprise")]
 use super::enterprise::undelete::UndeleteApi;
-use std::future::Future;
+// SPDX-SnippetEnd
 
 pub trait ManageStore: Sync + Send {
     fn handle_manage_store(

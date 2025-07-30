@@ -101,7 +101,7 @@ pub async fn test(params: &mut JMAPTest) {
             .unwrap()
             .unwrap();
         assert_eq!(identity.email().unwrap(), email);
-        assert_eq!(identity.name().unwrap(), format!("John Doe <{email}>"));
+        assert_eq!(identity.name().unwrap(), "John Doe");
     }
 
     // Create an identity without using a valid address should fail

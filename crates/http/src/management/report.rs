@@ -46,12 +46,12 @@ impl ManageReports for Server {
         path: Vec<&str>,
         access_token: &AccessToken,
     ) -> trc::Result<HttpResponse> {
+        let mut tenant_domains: Option<Vec<String>> = None;
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
         // SPDX-License-Identifier: LicenseRef-SEL
 
         // Limit to tenant domains
-        let mut tenant_domains: Option<Vec<String>> = None;
         #[cfg(feature = "enterprise")]
         if self.core.is_enterprise_edition() {
             if let Some(tenant) = access_token.tenant {

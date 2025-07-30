@@ -5,7 +5,7 @@
  */
 
 use super::{PrincipalInfo, manage::ManageDirectory};
-use crate::{Principal, PrincipalData, QueryBy, Type, backend::RcptType};
+use crate::{Principal, PrincipalData, QueryBy, QueryParams, Type, backend::RcptType};
 
 use mail_send::Credentials;
 use store::{
@@ -16,11 +16,7 @@ use trc::AddContext;
 
 #[allow(async_fn_in_trait)]
 pub trait DirectoryStore: Sync + Send {
-    async fn query(
-        &self,
-        by: QueryBy<'_>,
-        return_member_of: bool,
-    ) -> trc::Result<Option<Principal>>;
+    async fn query(&self, by: QueryParams<'_>) -> trc::Result<Option<Principal>>;
     async fn email_to_id(&self, address: &str) -> trc::Result<Option<u32>>;
     async fn is_local_domain(&self, domain: &str) -> trc::Result<bool>;
     async fn rcpt(&self, address: &str) -> trc::Result<RcptType>;
@@ -30,12 +26,8 @@ pub trait DirectoryStore: Sync + Send {
 }
 
 impl DirectoryStore for Store {
-    async fn query(
-        &self,
-        by: QueryBy<'_>,
-        return_member_of: bool,
-    ) -> trc::Result<Option<Principal>> {
-        let (account_id, secret) = match by {
+    async fn query(&self, by: QueryParams<'_>) -> trc::Result<Option<Principal>> {
+        let (account_id, secret) = match by.by {
             QueryBy::Name(name) => (self.get_principal_id(name).await?, None),
             QueryBy::Id(account_id) => (account_id.into(), None),
             QueryBy::Credentials(credentials) => match credentials {
@@ -56,12 +48,12 @@ impl DirectoryStore for Store {
         if let Some(account_id) = account_id {
             if let Some(mut principal) = self.get_principal(account_id).await? {
                 if let Some(secret) = secret {
-                    if !principal.verify_secret(secret).await? {
+                    if !principal.verify_secret(secret, by.only_app_pass).await? {
                         return Ok(None);
                     }
                 }
 
-                if return_member_of {
+                if by.return_member_of {
                     let mut roles = vec![];
                     let mut lists = vec![];
                     let mut member_of = vec![];

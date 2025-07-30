@@ -18,8 +18,7 @@ use crate::queue::dsn::SendDsn;
 use crate::queue::spool::SmtpSpool;
 use crate::queue::throttle::IsAllowed;
 use crate::queue::{
-    DomainPart, Error, FROM_REPORT, HostResponse, MessageWrapper, QueueEnvelope, QueuedMessage,
-    Status,
+    Error, FROM_REPORT, HostResponse, MessageWrapper, QueueEnvelope, QueuedMessage, Status,
 };
 use crate::reporting::SmtpReporting;
 use crate::{queue::ErrorDetails, reporting::tls::TlsRptOptions};
@@ -74,7 +73,7 @@ impl QueuedMessage {
                                     Status::Scheduled | Status::TemporaryFailure(_)
                                 ) && r.queue == message.queue_name
                                 {
-                                    Some(trc::Value::String(r.address.as_str().into()))
+                                    Some(trc::Value::String(r.address().into()))
                                 } else {
                                     None
                                 }
@@ -236,7 +235,7 @@ impl QueuedMessage {
                 );
 
                 routes
-                    .entry((rcpt.address.domain_part(), route))
+                    .entry((rcpt.domain_part(), route))
                     .or_default()
                     .push(rcpt_idx);
             }
@@ -1325,7 +1324,7 @@ impl MessageWrapper {
                         SpanId = self.span_id,
                         QueueId = self.queue_id,
                         QueueName = self.queue_name.as_str().to_string(),
-                        To = rcpt.address.clone(),
+                        To = rcpt.address().to_string(),
                         Reason = from_error_details(&err.details),
                         Details = trc::Value::Timestamp(now),
                         Expires = rcpt
@@ -1344,7 +1343,7 @@ impl MessageWrapper {
                         SpanId = self.span_id,
                         QueueId = self.queue_id,
                         QueueName = self.queue_name.as_str().to_string(),
-                        To = rcpt.address.clone(),
+                        To = rcpt.address().to_string(),
                         Reason = "Message expired without any delivery attempts made.",
                         Details = trc::Value::Timestamp(now),
                         Expires = rcpt
@@ -1355,7 +1354,7 @@ impl MessageWrapper {
                     );
 
                     rcpt.status = Status::PermanentFailure(ErrorDetails {
-                        entity: rcpt.address.domain_part().to_string(),
+                        entity: rcpt.domain_part().to_string(),
                         details: Error::Io(
                             "Message expired without any delivery attempts made.".into(),
                         ),

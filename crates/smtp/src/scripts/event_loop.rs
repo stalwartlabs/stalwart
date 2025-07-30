@@ -158,8 +158,7 @@ impl RunScript for Server {
                         message_id,
                     } => {
                         // Build message
-                        let mut message =
-                            self.new_message(params.return_path.to_lowercase(), session_id);
+                        let mut message = self.new_message(params.return_path.as_str(), session_id);
                         match recipient {
                             Recipient::Address(rcpt) => {
                                 message.add_recipient(rcpt, self).await;
@@ -327,7 +326,7 @@ impl RunScript for Server {
                                         .message
                                         .recipients
                                         .into_iter()
-                                        .map(|r| trc::Value::from(r.address))
+                                        .map(|r| trc::Value::from(r.address().to_string()))
                                         .collect::<Vec<_>>(),
                                 );
                             }

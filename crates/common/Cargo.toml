@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "0.13.1"
+version = "0.13.2"
 edition = "2024"
 resolver = "2"
 build = "build.rs"
@@ -19,7 +19,7 @@ mail-builder = { version = "0.4" }
 mail-auth = { version = "0.7.1" }
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
 smtp-proto = { version = "0.1", features = ["rkyv"] }
-dns-update = { version = "0.1.3" }
+dns-update = { version = "0.1.5" }
 calcard = { version = "0.1.3", features = ["rkyv"] }
 ahash = { version = "0.8.2", features = ["serde"] }
 parking_lot = "0.12.1"

@@ -108,12 +108,15 @@ impl TelemetrySubscriberType {
             TelemetrySubscriberType::JournalTracer(subscriber) => {
                 tracers::journald::spawn_journald_tracer(builder, subscriber)
             }
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             TelemetrySubscriberType::StoreTracer(subscriber) => {
                 if is_enterprise {
                     tracers::store::spawn_store_tracer(builder, subscriber)
                 }
-            }
+            } // SPDX-SnippetEnd
         }
     }
 }

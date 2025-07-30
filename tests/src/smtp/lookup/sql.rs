@@ -12,7 +12,7 @@ use common::{
 };
 
 use directory::{
-    QueryBy, Type,
+    QueryParams, Type,
     backend::internal::{PrincipalField, PrincipalSet, PrincipalValue, manage::ManageDirectory},
 };
 use mail_auth::MX;
@@ -279,7 +279,7 @@ async fn lookup_sql() {
         .core
         .storage
         .directory
-        .query(QueryBy::Name("john@foobar.org"), true)
+        .query(QueryParams::name("john@foobar.org").with_return_member_of(true))
         .await
         .unwrap()
         .unwrap();
@@ -288,7 +288,7 @@ async fn lookup_sql() {
         .core
         .storage
         .directory
-        .query(QueryBy::Name("jane@foobar.org"), true)
+        .query(QueryParams::name("jane@foobar.org").with_return_member_of(true))
         .await
         .unwrap()
         .unwrap();

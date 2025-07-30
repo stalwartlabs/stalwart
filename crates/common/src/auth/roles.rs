@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::{Arc, LazyLock};
-
+use crate::Server;
 use ahash::AHashSet;
 use directory::{
-    Permission, Permissions, QueryBy, ROLE_ADMIN, ROLE_TENANT_ADMIN, ROLE_USER,
+    Permission, Permissions, QueryParams, ROLE_ADMIN, ROLE_TENANT_ADMIN, ROLE_USER,
     backend::internal::lookup::DirectoryStore,
 };
+use std::sync::{Arc, LazyLock};
 use trc::AddContext;
 use utils::cache::CacheItemWeight;
-
-use crate::Server;
 
 #[derive(Debug, Clone, Default)]
 pub struct RolePermissions {
@@ -97,7 +95,7 @@ impl Server {
                             // Obtain principal
                             let mut principal = self
                                 .store()
-                                .query(QueryBy::Id(role_id), true)
+                                .query(QueryParams::id(role_id).with_return_member_of(true))
                                 .await
                                 .caused_by(trc::location!())?
                                 .ok_or_else(|| {

@@ -4,21 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::SystemTime;
-
-use directory::QueryBy;
+use super::{CLIENT_ID_MAX_LEN, GrantType, RANDOM_CODE_LEN, crypto::SymmetricEncrypt};
+use crate::Server;
+use directory::QueryParams;
 use mail_builder::encoders::base64::base64_encode;
 use mail_parser::decoders::base64::base64_decode;
+use std::time::SystemTime;
 use store::{
     blake3,
     rand::{Rng, rng},
 };
 use trc::AddContext;
 use utils::codec::leb128::{Leb128Iterator, Leb128Vec};
-
-use crate::Server;
-
-use super::{CLIENT_ID_MAX_LEN, GrantType, RANDOM_CODE_LEN, crypto::SymmetricEncrypt};
 
 pub struct TokenInfo {
     pub grant_type: GrantType,
@@ -223,7 +220,7 @@ impl Server {
             self.core
                 .storage
                 .directory
-                .query(QueryBy::Id(account_id), false)
+                .query(QueryParams::id(account_id).with_return_member_of(false))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or_else(|| {

@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{collections::hash_map::Entry, fmt, str::FromStr};
-
+use crate::{
+    ArchivedPrincipal, FALLBACK_ADMIN_ID, Permission, PermissionGrant, Principal, PrincipalData,
+    ROLE_ADMIN, Type,
+    backend::internal::{PrincipalField, PrincipalSet, PrincipalUpdate, PrincipalValue},
+};
 use ahash::AHashSet;
 use nlp::tokenizers::word::WordTokenizer;
 use serde::{
@@ -13,15 +16,11 @@ use serde::{
     de::{self, IgnoredAny, Visitor},
     ser::SerializeMap,
 };
+use std::{collections::hash_map::Entry, fmt, str::FromStr};
 use store::{
     U64_LEN,
     backend::MAX_TOKEN_LENGTH,
     write::{BatchBuilder, DirectoryClass},
-};
-
-use crate::{
-    ArchivedPrincipal, Permission, PermissionGrant, Principal, PrincipalData, ROLE_ADMIN, Type,
-    backend::internal::{PrincipalField, PrincipalSet, PrincipalUpdate, PrincipalValue},
 };
 
 impl Principal {
@@ -75,10 +74,17 @@ impl Principal {
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
+
+    #[cfg(feature = "enterprise")]
     pub fn tenant(&self) -> Option<u32> {
         self.tenant
     }
     // SPDX-SnippetEnd
+
+    #[cfg(not(feature = "enterprise"))]
+    pub fn tenant(&self) -> Option<u32> {
+        None
+    }
 
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
@@ -306,7 +312,7 @@ impl Principal {
 
     pub fn fallback_admin(fallback_pass: impl Into<String>) -> Self {
         Principal {
-            id: u32::MAX,
+            id: FALLBACK_ADMIN_ID,
             typ: Type::Individual,
             name: "Fallback Administrator".into(),
             secrets: vec![fallback_pass.into()],
@@ -351,10 +357,16 @@ impl PrincipalSet {
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
     pub fn tenant(&self) -> Option<u32> {
         self.get_int(PrincipalField::Tenant).map(|v| v as u32)
     }
     // SPDX-SnippetEnd
+
+    #[cfg(not(feature = "enterprise"))]
+    pub fn tenant(&self) -> Option<u32> {
+        None
+    }
 
     pub fn description(&self) -> Option<&str> {
         self.get_str(PrincipalField::Description)
@@ -912,7 +924,7 @@ impl Type {
             1 => Type::Group,
             2 => Type::Resource,
             3 => Type::Location,
-            4 => Type::Individual, // legacy
+            4 => Type::Other, // legacy
             5 => Type::List,
             6 => Type::Other,
             7 => Type::Domain,
@@ -1414,10 +1426,16 @@ impl Permission {
         )
     }
 
+    #[cfg(not(feature = "enterprise"))]
+    pub const fn is_tenant_admin_permission(&self) -> bool {
+        false
+    }
+
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
 
+    #[cfg(feature = "enterprise")]
     pub const fn is_tenant_admin_permission(&self) -> bool {
         matches!(
             self,

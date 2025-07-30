@@ -186,6 +186,10 @@ impl AcmeProviders {
 
 #[allow(clippy::unnecessary_to_owned)]
 fn build_dns_updater(config: &mut Config, acme_id: &str) -> Option<DnsUpdater> {
+    let timeout = config
+        .property_or_default(("acme", acme_id, "timeout"), "30s")
+        .unwrap_or_else(|| Duration::from_secs(30));
+
     match config.value_require(("acme", acme_id, "provider"))? {
         "rfc2136-tsig" => {
             let algorithm: TsigAlgorithm = config
@@ -231,47 +235,79 @@ fn build_dns_updater(config: &mut Config, acme_id: &str) -> Option<DnsUpdater> {
             })
             .ok()
         }
-        "cloudflare" => {
-            let timeout = config
-                .property_or_default(("acme", acme_id, "timeout"), "30s")
-                .unwrap_or_else(|| Duration::from_secs(30));
-
-            DnsUpdater::new_cloudflare(
-                config
-                    .value_require(("acme", acme_id, "secret"))?
-                    .trim()
-                    .to_string(),
-                config.value(("acme", acme_id, "user")).map(|s| s.trim()),
-                timeout.into(),
+        "cloudflare" => DnsUpdater::new_cloudflare(
+            config
+                .value_require(("acme", acme_id, "secret"))?
+                .trim()
+                .to_string(),
+            config.value(("acme", acme_id, "user")).map(|s| s.trim()),
+            timeout.into(),
+        )
+        .map_err(|err| {
+            config.new_build_error(
+                ("acme", acme_id, "provider"),
+                format!("Failed to create Cloudflare DNS updater: {err}"),
             )
-            .map_err(|err| {
-                config.new_build_error(
-                    ("acme", acme_id, "provider"),
-                    format!("Failed to create Cloudflare DNS updater: {err}"),
-                )
-            })
-            .ok()
-        }
-        "digitalocean" => {
-            let timeout = config
-                .property_or_default(("acme", acme_id, "timeout"), "30s")
-                .unwrap_or_else(|| Duration::from_secs(30));
-
-            DnsUpdater::new_digitalocean(
-                config
-                    .value_require(("acme", acme_id, "secret"))?
-                    .trim()
-                    .to_string(),
-                timeout.into(),
+        })
+        .ok(),
+        "digitalocean" => DnsUpdater::new_digitalocean(
+            config
+                .value_require(("acme", acme_id, "secret"))?
+                .trim()
+                .to_string(),
+            timeout.into(),
+        )
+        .map_err(|err| {
+            config.new_build_error(
+                ("acme", acme_id, "provider"),
+                format!("Failed to create DigitalOcean DNS updater: {err}"),
             )
-            .map_err(|err| {
-                config.new_build_error(
-                    ("acme", acme_id, "provider"),
-                    format!("Failed to create DigitalOcean DNS updater: {err}"),
-                )
-            })
-            .ok()
-        }
+        })
+        .ok(),
+        "desec" => DnsUpdater::new_desec(
+            config
+                .value_require(("acme", acme_id, "secret"))?
+                .trim()
+                .to_string(),
+            timeout.into(),
+        )
+        .map_err(|err| {
+            config.new_build_error(
+                ("acme", acme_id, "provider"),
+                format!("Failed to create Desec DNS updater: {err}"),
+            )
+        })
+        .ok(),
+        "ovh" => DnsUpdater::new_ovh(
+            config
+                .value_require(("acme", acme_id, "key"))
+                .map(|s| s.trim())?
+                .to_string(),
+            config
+                .value_require(("acme", acme_id, "secret"))?
+                .trim()
+                .to_string(),
+            config
+                .value_require(("acme", acme_id, "consumer-key"))?
+                .trim()
+                .to_string(),
+            config
+                .value_require(("acme", acme_id, "ovh-endpoint"))?
+                .parse()
+                .map_err(|_| {
+                    config
+                        .new_parse_error(("acme", acme_id, "ovh-endpoint"), "Invalid OVH endpoint")
+                })
+                .ok()?,
+            timeout.into(),
+        )
+        .map_err(|err| {
+            config.new_build_error(
+                ("acme", acme_id, "provider"),
+                format!("Failed to create Desec DNS updater: {err}"),
+            )
+        })
+        .ok(),
         _ => {
             config.new_parse_error(("acme", acme_id, "provider"), "Unsupported provider");
             None

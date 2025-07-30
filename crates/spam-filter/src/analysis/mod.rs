@@ -27,8 +27,6 @@ pub mod headers;
 pub mod html;
 pub mod init;
 pub mod ip;
-#[cfg(feature = "enterprise")]
-pub mod llm;
 pub mod messageid;
 pub mod mime;
 pub mod pyzor;
@@ -41,6 +39,13 @@ pub mod score;
 pub mod subject;
 pub mod trusted_reply;
 pub mod url;
+
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+pub mod llm;
+// SPDX-SnippetEnd
 
 impl SpamFilterInput<'_> {
     pub fn header_as_address(&self, header: &Header<'_>) -> Option<Cow<'_, str>> {

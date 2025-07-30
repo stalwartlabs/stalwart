@@ -75,7 +75,7 @@ async fn queue_retry() {
     let message = qr.expect_message().await;
     assert_eq!(message.message.return_path, "");
     assert_eq!(
-        message.message.recipients.first().unwrap().address,
+        message.message.recipients.first().unwrap().address(),
         "john@test.org"
     );
     message

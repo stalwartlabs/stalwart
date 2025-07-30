@@ -33,6 +33,8 @@ pub struct Directory {
     pub cache: Option<CachedDirectory>,
 }
 
+pub const FALLBACK_ADMIN_ID: u32 = u32::MAX;
+
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct Principal {
     pub id: u32,
@@ -403,6 +405,12 @@ pub enum QueryBy<'x> {
     Credentials(&'x Credentials<String>),
 }
 
+pub struct QueryParams<'x> {
+    pub by: QueryBy<'x>,
+    pub return_member_of: bool,
+    pub only_app_pass: bool,
+}
+
 impl Default for Directory {
     fn default() -> Self {
         Self {
@@ -502,5 +510,49 @@ impl From<&ArchivedType> for Type {
             ArchivedType::ApiKey => Type::ApiKey,
             ArchivedType::OauthClient => Type::OauthClient,
         }
+    }
+}
+
+impl<'x> QueryParams<'x> {
+    pub fn name(name: &'x str) -> Self {
+        QueryParams {
+            by: QueryBy::Name(name),
+            return_member_of: false,
+            only_app_pass: false,
+        }
+    }
+
+    pub fn credentials(credentials: &'x Credentials<String>) -> Self {
+        QueryParams {
+            by: QueryBy::Credentials(credentials),
+            return_member_of: false,
+            only_app_pass: false,
+        }
+    }
+
+    pub fn id(id: u32) -> Self {
+        QueryParams {
+            by: QueryBy::Id(id),
+            return_member_of: false,
+            only_app_pass: false,
+        }
+    }
+
+    pub fn by(by: QueryBy<'x>) -> Self {
+        QueryParams {
+            by,
+            return_member_of: false,
+            only_app_pass: false,
+        }
+    }
+
+    pub fn with_return_member_of(mut self, return_member_of: bool) -> Self {
+        self.return_member_of = return_member_of;
+        self
+    }
+
+    pub fn with_only_app_pass(mut self, only_app_pass: bool) -> Self {
+        self.only_app_pass = only_app_pass;
+        self
     }
 }

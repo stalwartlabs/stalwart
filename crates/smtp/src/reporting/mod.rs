@@ -114,7 +114,7 @@ impl SmtpReporting for Server {
         parent_session_id: u64,
     ) {
         // Build message
-        let mut message = self.new_message(from_addr.to_lowercase(), parent_session_id);
+        let mut message = self.new_message(from_addr, parent_session_id);
         for rcpt_ in rcpts {
             message.add_recipient(rcpt_.as_ref(), self).await;
         }
@@ -161,7 +161,7 @@ impl SmtpReporting for Server {
         parent_session_id: u64,
     ) {
         // Build message
-        let mut message = self.new_message(from_addr.as_ref().to_lowercase(), parent_session_id);
+        let mut message = self.new_message(from_addr.as_ref(), parent_session_id);
         for rcpt in rcpts {
             message.add_recipient(rcpt, self).await;
         }

@@ -12,7 +12,7 @@ use common::{
 };
 
 use directory::{
-    Permission, QueryBy, Type,
+    Permission, QueryParams, Type,
     backend::internal::{
         PrincipalField, PrincipalSet, lookup::DirectoryStore, manage::ManageDirectory,
     },
@@ -113,7 +113,7 @@ impl ClientRegistrationHandler for Server {
         // Fetch client registration
         let found_registration = if let Some(client) = self
             .store()
-            .query(QueryBy::Name(client_id), false)
+            .query(QueryParams::name(client_id).with_return_member_of(false))
             .await
             .caused_by(trc::location!())?
             .filter(|p| p.typ() == Type::OauthClient)

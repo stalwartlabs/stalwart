@@ -278,33 +278,32 @@ where
                 .into_iter()
                 .map(|r| {
                     let domain = &domains[r.domain_idx.as_u64() as usize];
-                    Recipient {
-                        address: r.address_lcase,
-                        status: match r.status {
-                            Status::Scheduled => match &domain.status {
-                                Status::Scheduled | Status::Completed(_) => Status::Scheduled,
-                                Status::TemporaryFailure(err) => Status::TemporaryFailure(
-                                    migrate_legacy_error(&domain.domain, err),
-                                ),
-                                Status::PermanentFailure(err) => Status::PermanentFailure(
-                                    migrate_legacy_error(&domain.domain, err),
-                                ),
-                            },
-                            Status::Completed(details) => Status::Completed(details),
+                    let mut rcpt = Recipient::new(r.address);
+                    rcpt.status = match r.status {
+                        Status::Scheduled => match &domain.status {
+                            Status::Scheduled | Status::Completed(_) => Status::Scheduled,
                             Status::TemporaryFailure(err) => {
-                                Status::TemporaryFailure(migrate_host_response(err))
+                                Status::TemporaryFailure(migrate_legacy_error(&domain.domain, err))
                             }
                             Status::PermanentFailure(err) => {
-                                Status::PermanentFailure(migrate_host_response(err))
+                                Status::PermanentFailure(migrate_legacy_error(&domain.domain, err))
                             }
                         },
-                        flags: r.flags,
-                        orcpt: r.orcpt,
-                        retry: domain.retry.clone(),
-                        notify: domain.notify.clone(),
-                        queue: QueueName::default(),
-                        expires: QueueExpiry::Ttl(domain.expires.saturating_sub(now())),
-                    }
+                        Status::Completed(details) => Status::Completed(details),
+                        Status::TemporaryFailure(err) => {
+                            Status::TemporaryFailure(migrate_host_response(err))
+                        }
+                        Status::PermanentFailure(err) => {
+                            Status::PermanentFailure(migrate_host_response(err))
+                        }
+                    };
+                    rcpt.flags = r.flags;
+                    rcpt.orcpt = r.orcpt;
+                    rcpt.retry = domain.retry.clone();
+                    rcpt.notify = domain.notify.clone();
+                    rcpt.queue = QueueName::default();
+                    rcpt.expires = QueueExpiry::Ttl(domain.expires.saturating_sub(now()));
+                    rcpt
                 })
                 .collect(),
             flags: message.flags,

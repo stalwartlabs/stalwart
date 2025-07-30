@@ -450,7 +450,7 @@ pub async fn test(params: &mut JMAPTest) {
         &mut smtp_rx,
         MockMessage::new(
             "<jdoe@example.com>",
-            ["<sms_route@remote.org>"],
+            ["<sms_gateway@remote.org>"],
             "@It's TPS-o-clock",
         ),
     )

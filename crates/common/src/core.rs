@@ -16,7 +16,7 @@ use crate::{
     },
     ipc::{BroadcastEvent, StateEvent},
 };
-use directory::{Directory, QueryBy, Type, backend::internal::manage::ManageDirectory};
+use directory::{Directory, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use jmap_proto::types::{
     blob::BlobId,
     collection::{Collection, SyncCollection},
@@ -451,7 +451,7 @@ impl Server {
                 .core
                 .storage
                 .directory
-                .query(QueryBy::Id(account_id), false)
+                .query(QueryParams::id(account_id).with_return_member_of(false))
                 .await
                 .add_context(|err| err.caused_by(trc::location!()).account_id(account_id))?
             {
@@ -470,7 +470,7 @@ impl Server {
                                 .core
                                 .storage
                                 .directory
-                                .query(QueryBy::Id(tenant_id), false)
+                                .query(QueryParams::id(tenant_id).with_return_member_of(false))
                                 .await
                                 .add_context(|err| {
                                     err.caused_by(trc::location!()).account_id(tenant_id)

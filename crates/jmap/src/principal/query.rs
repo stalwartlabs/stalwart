@@ -4,17 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::JmapMethods;
 use common::Server;
-use directory::QueryBy;
+use directory::QueryParams;
 use http_proto::HttpSessionData;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse, RequestArguments},
     types::{collection::Collection, state::State},
 };
-use store::{query::ResultSet, roaring::RoaringBitmap};
-
-use crate::JmapMethods;
 use std::future::Future;
+use store::{query::ResultSet, roaring::RoaringBitmap};
 
 pub trait PrincipalQuery: Sync + Send {
     fn principal_query(
@@ -45,7 +44,7 @@ impl PrincipalQuery for Server {
                         .core
                         .storage
                         .directory
-                        .query(QueryBy::Name(name.as_str()), false)
+                        .query(QueryParams::name(name.as_str()).with_return_member_of(false))
                         .await?
                     {
                         if is_set || result_set.results.contains(principal.id()) {

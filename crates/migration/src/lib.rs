@@ -47,15 +47,19 @@ const LOCK_WAIT_TIME_CORE: u64 = 5 * 60;
 const LOCK_RETRY_TIME: Duration = Duration::from_secs(30);
 
 pub async fn try_migrate(server: &Server) -> trc::Result<()> {
-    if std::env::var("FORCE_MIGRATE_QUEUE").is_ok() {
-        migrate_queue_v012(server)
-            .await
-            .caused_by(trc::location!())?;
-        return Ok(());
-    } else if std::env::var("FORCE_MIGRATE_QUEUE_V011").is_ok() {
-        migrate_queue_v011(server)
-            .await
-            .caused_by(trc::location!())?;
+    if let Some(version) = std::env::var("FORCE_MIGRATE_QUEUE")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        if version == 12 {
+            migrate_queue_v012(server)
+                .await
+                .caused_by(trc::location!())?;
+        } else {
+            migrate_queue_v011(server)
+                .await
+                .caused_by(trc::location!())?;
+        }
         return Ok(());
     } else if let Some(account_id) = std::env::var("FORCE_MIGRATE_ACCOUNT")
         .ok()
@@ -64,6 +68,26 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
         migrate_principal(server, account_id)
             .await
             .caused_by(trc::location!())?;
+        return Ok(());
+    } else if let Some(version) = std::env::var("FORCE_MIGRATE")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        match version {
+            1 => {
+                migrate_v0_12(server, true)
+                    .await
+                    .caused_by(trc::location!())?;
+            }
+            2 => {
+                migrate_v0_12(server, false)
+                    .await
+                    .caused_by(trc::location!())?;
+            }
+            _ => {
+                panic!("Unknown migration version: {version}");
+            }
+        }
         return Ok(());
     }
 

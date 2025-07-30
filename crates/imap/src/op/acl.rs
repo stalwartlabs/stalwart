@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::Instant};
-
+use crate::{
+    core::{MailboxId, Session, SessionData, State},
+    op::ImapContext,
+    spawn_op,
+};
 use common::{
     auth::AccessToken, listener::SessionStream, sharing::EffectiveAcl,
     storage::index::ObjectIndexBuilder,
 };
-
 use compact_str::ToCompactString;
 use directory::{
-    Permission, QueryBy, Type,
+    Permission, QueryParams, Type,
     backend::internal::{
         PrincipalField,
         manage::{ChangedPrincipals, ManageDirectory},
@@ -26,17 +28,11 @@ use imap_proto::{
     },
     receiver::Request,
 };
-
 use jmap_proto::types::{acl::Acl, collection::Collection, value::AclGrant};
+use std::{sync::Arc, time::Instant};
 use store::write::{AlignedBytes, Archive, BatchBuilder};
 use trc::AddContext;
 use utils::map::bitmap::Bitmap;
-
-use crate::{
-    core::{MailboxId, Session, SessionData, State},
-    op::ImapContext,
-    spawn_op,
-};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_get_acl(&mut self, request: Request<Command>) -> trc::Result<()> {
@@ -248,7 +244,10 @@ impl<T: SessionStream> Session<T> {
                 .core
                 .storage
                 .directory
-                .query(QueryBy::Name(arguments.identifier.as_ref().unwrap()), false)
+                .query(
+                    QueryParams::name(arguments.identifier.as_ref().unwrap())
+                        .with_return_member_of(false),
+                )
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .ok_or_else(|| {

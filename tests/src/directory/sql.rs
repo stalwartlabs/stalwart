@@ -5,7 +5,7 @@
  */
 
 use directory::{
-    QueryBy, ROLE_USER, Type,
+    QueryParams, ROLE_USER, Type,
     backend::{RcptType, internal::manage::ManageDirectory},
 };
 use mail_send::Credentials;
@@ -113,11 +113,11 @@ async fn sql_directory() {
         assert_eq!(
             handle
                 .query(
-                    QueryBy::Credentials(&Credentials::Plain {
+                    QueryParams::credentials(&Credentials::Plain {
                         username: "john".into(),
                         secret: "12345".into()
-                    }),
-                    true
+                    })
+                    .with_return_member_of(true)
                 )
                 .await
                 .unwrap()
@@ -146,11 +146,11 @@ async fn sql_directory() {
         assert_eq!(
             handle
                 .query(
-                    QueryBy::Credentials(&Credentials::Plain {
+                    QueryParams::credentials(&Credentials::Plain {
                         username: "bill".into(),
                         secret: "password".into()
-                    }),
-                    true
+                    })
+                    .with_return_member_of(true)
                 )
                 .await
                 .unwrap()
@@ -173,11 +173,11 @@ async fn sql_directory() {
         assert_eq!(
             handle
                 .query(
-                    QueryBy::Credentials(&Credentials::Plain {
+                    QueryParams::credentials(&Credentials::Plain {
                         username: "admin".into(),
                         secret: "very_secret".into()
-                    }),
-                    true
+                    })
+                    .with_return_member_of(true)
                 )
                 .await
                 .unwrap()
@@ -196,11 +196,11 @@ async fn sql_directory() {
         assert!(
             handle
                 .query(
-                    QueryBy::Credentials(&Credentials::Plain {
+                    QueryParams::credentials(&Credentials::Plain {
                         username: "bill".into(),
                         secret: "invalid".into()
-                    }),
-                    true
+                    })
+                    .with_return_member_of(true)
                 )
                 .await
                 .unwrap()
@@ -210,7 +210,7 @@ async fn sql_directory() {
         // Get user by name
         assert_eq!(
             handle
-                .query(QueryBy::Name("jane"), true)
+                .query(QueryParams::name("jane").with_return_member_of(true))
                 .await
                 .unwrap()
                 .unwrap()
@@ -235,7 +235,7 @@ async fn sql_directory() {
         // Get group by name
         assert_eq!(
             handle
-                .query(QueryBy::Name("sales"), true)
+                .query(QueryParams::name("sales").with_return_member_of(true))
                 .await
                 .unwrap()
                 .unwrap()

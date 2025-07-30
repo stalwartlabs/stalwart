@@ -6,7 +6,7 @@
 
 use ahash::AHashSet;
 use directory::{
-    Permission, QueryBy, Type,
+    Permission, QueryBy, QueryParams, Type,
     backend::{
         RcptType,
         internal::{
@@ -178,8 +178,8 @@ async fn internal_directory() {
         assert_eq!(
             store
                 .query(
-                    QueryBy::Credentials(&Credentials::new("jane".into(), "my_secret".into())),
-                    true
+                    QueryParams::credentials(&Credentials::new("jane".into(), "my_secret".into()))
+                        .with_return_member_of(true)
                 )
                 .await
                 .unwrap()
@@ -197,8 +197,11 @@ async fn internal_directory() {
         assert_eq!(
             store
                 .query(
-                    QueryBy::Credentials(&Credentials::new("jane".into(), "wrong_password".into())),
-                    true
+                    QueryParams::credentials(&Credentials::new(
+                        "jane".into(),
+                        "wrong_password".into()
+                    ))
+                    .with_return_member_of(true)
                 )
                 .await
                 .unwrap(),
@@ -275,7 +278,7 @@ async fn internal_directory() {
 
         assert_eq!(
             store
-                .query(QueryBy::Name("list"), true)
+                .query(QueryParams::name("list").with_return_member_of(true))
                 .await
                 .unwrap()
                 .unwrap()
@@ -353,7 +356,7 @@ async fn internal_directory() {
                 .is_ok()
         );
         let principal = store
-            .query(QueryBy::Name("john"), true)
+            .query(QueryParams::name("john").with_return_member_of(true))
             .await
             .unwrap()
             .unwrap();
@@ -398,7 +401,7 @@ async fn internal_directory() {
                 .is_ok()
         );
         let principal = store
-            .query(QueryBy::Name("john"), true)
+            .query(QueryParams::name("john").with_return_member_of(true))
             .await
             .unwrap()
             .unwrap();
@@ -448,7 +451,7 @@ async fn internal_directory() {
         );
 
         let principal = store
-            .query(QueryBy::Name("john.doe"), true)
+            .query(QueryParams::name("john.doe").with_return_member_of(true))
             .await
             .unwrap()
             .unwrap();
@@ -791,7 +794,11 @@ impl TestInternalDirectory for Store {
     ) -> u32 {
         let role = if login == "admin" { "admin" } else { "user" };
         self.create_test_domains(emails).await;
-        if let Some(principal) = self.query(QueryBy::Name(login), false).await.unwrap() {
+        if let Some(principal) = self
+            .query(QueryParams::name(login).with_return_member_of(false))
+            .await
+            .unwrap()
+        {
             self.update_principal(UpdatePrincipal::by_id(principal.id()).with_updates(vec![
                 PrincipalUpdate::set(
                     PrincipalField::Secrets,
@@ -841,7 +848,11 @@ impl TestInternalDirectory for Store {
 
     async fn create_test_group(&self, login: &str, name: &str, emails: &[&str]) -> u32 {
         self.create_test_domains(emails).await;
-        if let Some(principal) = self.query(QueryBy::Name(login), false).await.unwrap() {
+        if let Some(principal) = self
+            .query(QueryParams::name(login).with_return_member_of(false))
+            .await
+            .unwrap()
+        {
             principal.id()
         } else {
             self.create_principal(
@@ -866,7 +877,11 @@ impl TestInternalDirectory for Store {
     }
 
     async fn create_test_list(&self, login: &str, name: &str, members: &[&str]) -> u32 {
-        if let Some(principal) = self.query(QueryBy::Name(login), false).await.unwrap() {
+        if let Some(principal) = self
+            .query(QueryParams::name(login).with_return_member_of(false))
+            .await
+            .unwrap()
+        {
             principal.id()
         } else {
             self.create_test_domains(&[login]).await;
@@ -958,7 +973,7 @@ impl TestInternalDirectory for Store {
         for domain in domains {
             let domain = domain.rsplit_once('@').map_or(*domain, |(_, d)| d);
             if self
-                .query(QueryBy::Name(domain), false)
+                .query(QueryParams::name(domain).with_return_member_of(false))
                 .await
                 .unwrap()
                 .is_none()

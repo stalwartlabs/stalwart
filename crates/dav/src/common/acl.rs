@@ -17,7 +17,7 @@ use dav_proto::{
         response::{Ace, BaseCondition, GrantDeny, Href, MultiStatus, Principal},
     },
 };
-use directory::{QueryBy, Type, backend::internal::manage::ManageDirectory};
+use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
 use groupware::RFC_3986;
 use groupware::{cache::GroupwareCache, calendar::Calendar, contact::AddressBook, file::FileNode};
 use http_proto::HttpResponse;
@@ -412,7 +412,7 @@ impl DavAclHandler for Server {
             // Verify that the principal is a valid principal
             let principal = self
                 .directory()
-                .query(QueryBy::Id(principal_id), false)
+                .query(QueryParams::id(principal_id).with_return_member_of(false))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or_else(|| {

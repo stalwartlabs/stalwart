@@ -173,7 +173,7 @@ impl MessageWrapper {
                             Delivery(DeliveryEvent::RcptTo),
                             SpanId = params.session_id,
                             Hostname = params.hostname.to_string(),
-                            To = rcpt.address.to_string(),
+                            To = rcpt.address().to_string(),
                             Code = response.code,
                             Details = response.message.to_string(),
                             Elapsed = time.elapsed(),
@@ -193,7 +193,7 @@ impl MessageWrapper {
                             Delivery(DeliveryEvent::RcptToRejected),
                             SpanId = params.session_id,
                             Hostname = params.hostname.to_string(),
-                            To = rcpt.address.to_string(),
+                            To = rcpt.address().to_string(),
                             Code = response.code,
                             Details = response.message.to_string(),
                             Elapsed = time.elapsed(),
@@ -221,7 +221,7 @@ impl MessageWrapper {
                         Delivery(DeliveryEvent::RcptToFailed),
                         SpanId = params.session_id,
                         Hostname = params.hostname.to_string(),
-                        To = rcpt.address.to_string(),
+                        To = rcpt.address().to_string(),
                         CausedBy = from_mail_send_error(&err),
                         Elapsed = time.elapsed(),
                     );
@@ -272,7 +272,7 @@ impl MessageWrapper {
                                     Delivery(DeliveryEvent::Delivered),
                                     SpanId = params.session_id,
                                     Hostname = params.hostname.to_string(),
-                                    To = rcpt.address.to_string(),
+                                    To = rcpt.address().to_string(),
                                     Code = response.code,
                                     Details = response.message.to_string(),
                                     Elapsed = time.elapsed(),
@@ -332,7 +332,7 @@ impl MessageWrapper {
                                         Delivery(DeliveryEvent::Delivered),
                                         SpanId = params.session_id,
                                         Hostname = params.hostname.to_string(),
-                                        To = rcpt.address.to_string(),
+                                        To = rcpt.address().to_string(),
                                         Code = response.code,
                                         Details = response.message.to_string(),
                                         Elapsed = time.elapsed(),
@@ -348,7 +348,7 @@ impl MessageWrapper {
                                         Delivery(DeliveryEvent::RcptToRejected),
                                         SpanId = params.session_id,
                                         Hostname = params.hostname.to_string(),
-                                        To = rcpt.address.to_string(),
+                                        To = rcpt.address().to_string(),
                                         Code = response.code,
                                         Details = response.message.to_string(),
                                         Elapsed = time.elapsed(),
@@ -420,8 +420,8 @@ impl MessageWrapper {
     }
 
     fn build_rcpt_to(&self, rcpt: &Recipient, capabilities: &EhloResponse<String>) -> String {
-        let mut rcpt_to = String::with_capacity(rcpt.address.len() + 60);
-        let _ = write!(rcpt_to, "RCPT TO:<{}>", rcpt.address);
+        let mut rcpt_to = String::with_capacity(rcpt.address().len() + 60);
+        let _ = write!(rcpt_to, "RCPT TO:<{}>", rcpt.address());
         if capabilities.has_capability(EXT_DSN) {
             if rcpt.has_flag(RCPT_NOTIFY_SUCCESS | RCPT_NOTIFY_FAILURE | RCPT_NOTIFY_DELAY) {
                 rcpt_to.push_str(" NOTIFY=");

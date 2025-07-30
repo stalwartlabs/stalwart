@@ -189,8 +189,12 @@ impl Core {
         }
 
         Self {
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             enterprise,
+            // SPDX-SnippetEnd
             sieve: Scripting::parse(config, &stores).await,
             network: Network::parse(config),
             smtp: SmtpConfig::parse(config).await,

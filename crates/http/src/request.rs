@@ -581,12 +581,11 @@ impl ParseHttp for Server {
                 }
                 _ => (),
             },
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             "logo.svg" if self.is_enterprise_edition() => {
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-
                 match self
                     .logo_resource(
                         req.headers()
@@ -611,9 +610,8 @@ impl ParseHttp for Server {
                 if !resource.is_empty() {
                     return Ok(resource.into_http_response());
                 }
-
-                // SPDX-SnippetEnd
             }
+            // SPDX-SnippetEnd
             "form" => {
                 if let Some(form) = &self.core.network.contact_form {
                     match *req.method() {

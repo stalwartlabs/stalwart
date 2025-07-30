@@ -1,6 +1,6 @@
 [package]
 name = "tests"
-version = "0.13.1"
+version = "0.13.2"
 edition = "2024"
 resolver = "2"
 
@@ -40,7 +40,7 @@ common = { path = "../crates/common", features = ["test_mode", "enterprise"] }
 email = { path = "../crates/email", features = ["test_mode", "enterprise"] }
 spam-filter = { path = "../crates/spam-filter", features = ["test_mode", "enterprise"] }
 migration = { path = "../crates/migration", features = ["test_mode", "enterprise"] }
-trc = { path = "../crates/trc" }
+trc = { path = "../crates/trc", features = ["enterprise"] }
 managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterprise"] }
 smtp-proto = { version = "0.1" }
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }

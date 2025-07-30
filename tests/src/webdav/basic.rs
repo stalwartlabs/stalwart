@@ -66,6 +66,32 @@ pub async fn test(test: &WebDavTest) {
     jane.request("PROPFIND", "/dav/cal/jane/default/", "")
         .await
         .with_status(StatusCode::MULTI_STATUS);
+    jane.request(
+        "REPORT",
+        "/dav/cal/jane/default/",
+        concat!(
+            r#"<CAL:calendar-query xmlns="DAV:" "#,
+            r#"xmlns:CAL="urn:ietf:params:xml:ns:caldav"><prop><getetag />"#,
+            r#"</prop><CAL:filter><CAL:comp-filter name="VCALENDAR">"#,
+            r#"<CAL:comp-filter name="VTODO" /></CAL:comp-filter></CAL:filter>"#,
+            r#"</CAL:calendar-query>"#
+        ),
+    )
+    .await
+    .with_status(StatusCode::MULTI_STATUS);
+    jane.request(
+        "REPORT",
+        "/dav/cal/jane/test-404/",
+        concat!(
+            r#"<CAL:calendar-query xmlns="DAV:" "#,
+            r#"xmlns:CAL="urn:ietf:params:xml:ns:caldav"><prop><getetag />"#,
+            r#"</prop><CAL:filter><CAL:comp-filter name="VCALENDAR">"#,
+            r#"<CAL:comp-filter name="VTODO" /></CAL:comp-filter></CAL:filter>"#,
+            r#"</CAL:calendar-query>"#
+        ),
+    )
+    .await
+    .with_status(StatusCode::MULTI_STATUS);
     jane.request("PROPFIND", "/dav/cal/jane/test-404/", "")
         .await
         .with_status(StatusCode::NOT_FOUND);

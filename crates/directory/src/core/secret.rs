@@ -23,7 +23,7 @@ use crate::Principal;
 use crate::backend::internal::SpecialSecrets;
 
 impl Principal {
-    pub async fn verify_secret(&self, mut code: &str) -> trc::Result<bool> {
+    pub async fn verify_secret(&self, mut code: &str, only_app_pass: bool) -> trc::Result<bool> {
         let mut totp_token = None;
         let mut is_totp_token_missing = false;
         let mut is_totp_required = false;
@@ -68,7 +68,7 @@ impl Principal {
                     secret.strip_prefix("$app$").and_then(|s| s.split_once('$'))
                 {
                     is_app_authenticated = verify_secret_hash(app_secret, code).await?;
-                } else {
+                } else if !only_app_pass {
                     is_authenticated = verify_secret_hash(secret, code).await?;
                 }
             }

@@ -6,8 +6,6 @@
 
 #[cfg(feature = "azure")]
 pub mod azure;
-#[cfg(feature = "enterprise")]
-pub mod composite;
 #[cfg(feature = "elastic")]
 pub mod elastic;
 #[cfg(feature = "foundation")]
@@ -33,6 +31,13 @@ pub mod s3;
 pub mod sqlite;
 #[cfg(feature = "zenoh")]
 pub mod zenoh;
+
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+pub mod composite;
+// SPDX-SnippetEnd
 
 pub const MAX_TOKEN_LENGTH: usize = (u8::MAX >> 1) as usize;
 pub const MAX_TOKEN_MASK: usize = MAX_TOKEN_LENGTH - 1;

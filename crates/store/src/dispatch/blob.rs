@@ -30,8 +30,12 @@ impl BlobStore {
                 Store::MySQL(store) => store.get_blob(key, read_range).await,
                 #[cfg(feature = "rocks")]
                 Store::RocksDb(store) => store.get_blob(key, read_range).await,
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
                 Store::SQLReadReplica(store) => store.get_blob(key, read_range).await,
+                // SPDX-SnippetEnd
                 Store::None => Err(trc::StoreEvent::NotConfigured.into()),
             },
             BlobBackend::Fs(store) => store.get_blob(key, read_range).await,
@@ -39,8 +43,12 @@ impl BlobStore {
             BlobBackend::S3(store) => store.get_blob(key, read_range).await,
             #[cfg(feature = "azure")]
             BlobBackend::Azure(store) => store.get_blob(key, read_range).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             BlobBackend::Sharded(store) => store.get_blob(key, read_range).await,
+            // SPDX-SnippetEnd
         };
 
         trc::event!(
@@ -112,8 +120,12 @@ impl BlobStore {
                 Store::MySQL(store) => store.put_blob(key, data.as_ref()).await,
                 #[cfg(feature = "rocks")]
                 Store::RocksDb(store) => store.put_blob(key, data.as_ref()).await,
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
                 Store::SQLReadReplica(store) => store.put_blob(key, data.as_ref()).await,
+                // SPDX-SnippetEnd
                 Store::None => Err(trc::StoreEvent::NotConfigured.into()),
             },
             BlobBackend::Fs(store) => store.put_blob(key, data.as_ref()).await,
@@ -121,8 +133,12 @@ impl BlobStore {
             BlobBackend::S3(store) => store.put_blob(key, data.as_ref()).await,
             #[cfg(feature = "azure")]
             BlobBackend::Azure(store) => store.put_blob(key, data.as_ref()).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             BlobBackend::Sharded(store) => store.put_blob(key, data.as_ref()).await,
+            // SPDX-SnippetEnd
         }
         .caused_by(trc::location!());
 
@@ -150,8 +166,12 @@ impl BlobStore {
                 Store::MySQL(store) => store.delete_blob(key).await,
                 #[cfg(feature = "rocks")]
                 Store::RocksDb(store) => store.delete_blob(key).await,
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
                 Store::SQLReadReplica(store) => store.delete_blob(key).await,
+                // SPDX-SnippetEnd
                 Store::None => Err(trc::StoreEvent::NotConfigured.into()),
             },
             BlobBackend::Fs(store) => store.delete_blob(key).await,
@@ -159,8 +179,12 @@ impl BlobStore {
             BlobBackend::S3(store) => store.delete_blob(key).await,
             #[cfg(feature = "azure")]
             BlobBackend::Azure(store) => store.delete_blob(key).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             BlobBackend::Sharded(store) => store.delete_blob(key).await,
+            // SPDX-SnippetEnd
         }
         .caused_by(trc::location!());
 

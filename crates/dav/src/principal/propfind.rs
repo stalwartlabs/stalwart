@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
+use super::CurrentUserPrincipal;
+use crate::{
+    DavResourceName,
+    common::propfind::{PropFindRequestHandler, SyncTokenUrn},
+};
 use common::{Server, auth::AccessToken};
 use dav_proto::schema::{
     Namespace,
@@ -16,19 +19,13 @@ use dav_proto::schema::{
     request::{DavPropertyValue, PropFind},
     response::{Href, MultiStatus, PropStat, Response},
 };
-use directory::{QueryBy, Type, backend::internal::manage::ManageDirectory};
+use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
 use groupware::RFC_3986;
 use groupware::cache::GroupwareCache;
 use hyper::StatusCode;
 use jmap_proto::types::collection::Collection;
+use std::borrow::Cow;
 use trc::AddContext;
-
-use crate::{
-    DavResourceName,
-    common::propfind::{PropFindRequestHandler, SyncTokenUrn},
-};
-
-use super::CurrentUserPrincipal;
 
 pub(crate) trait PrincipalPropFind: Sync + Send {
     fn prepare_principal_propfind_response(
@@ -120,7 +117,7 @@ impl PrincipalPropFind for Server {
                 )
             } else {
                 self.directory()
-                    .query(QueryBy::Id(account_id), false)
+                    .query(QueryParams::id(account_id).with_return_member_of(false))
                     .await
                     .caused_by(trc::location!())?
                     .map(|p| {

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::freebusy::freebusy_in_range;
 use crate::{
     DavError,
     common::{
@@ -27,6 +28,7 @@ use dav_proto::{
     schema::{
         property::{CalDavProperty, CalendarData, DavProperty, TimeRange},
         request::{CalendarQuery, Filter, FilterOp, PropFind, Timezone},
+        response::MultiStatus,
     },
 };
 use groupware::{cache::GroupwareCache, calendar::ArchivedCalendarEvent};
@@ -39,8 +41,6 @@ use store::{
     write::serialize::rkyv_deserialize,
 };
 use trc::AddContext;
-
-use super::freebusy::freebusy_in_range;
 
 pub(crate) trait CalendarQueryRequestHandler: Sync + Send {
     fn handle_calendar_query_request(
@@ -68,13 +68,14 @@ impl CalendarQueryRequestHandler for Server {
             .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
             .await
             .caused_by(trc::location!())?;
-        let resource = resources
-            .by_path(
-                resource_
-                    .resource
-                    .ok_or(DavError::Code(StatusCode::METHOD_NOT_ALLOWED))?,
-            )
-            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let Some(resource) = resources.by_path(
+            resource_
+                .resource
+                .ok_or(DavError::Code(StatusCode::METHOD_NOT_ALLOWED))?,
+        ) else {
+            return Ok(HttpResponse::new(StatusCode::MULTI_STATUS)
+                .with_xml_body(MultiStatus::not_found(headers.uri).to_string()));
+        };
         if !resource.is_container() {
             return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
         }

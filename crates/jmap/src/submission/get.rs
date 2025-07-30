@@ -113,7 +113,7 @@ impl EmailSubmissionGet for Server {
                         .unarchive::<Message>()
                         .caused_by(trc::location!())?;
                     for rcpt in queued_message.recipients.iter() {
-                        *delivery_status.get_mut_or_insert(rcpt.address.to_string()) =
+                        *delivery_status.get_mut_or_insert(rcpt.address().to_string()) =
                             DeliveryStatus {
                                 smtp_reply: match &rcpt.status {
                                     ArchivedStatus::Completed(reply) => {

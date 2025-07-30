@@ -6,7 +6,7 @@
 
 use super::{SqlDirectory, SqlMappings};
 use crate::{
-    Principal, PrincipalData, QueryBy, ROLE_ADMIN, ROLE_USER, Type,
+    Principal, PrincipalData, QueryBy, QueryParams, ROLE_ADMIN, ROLE_USER, Type,
     backend::{
         RcptType,
         internal::{
@@ -21,12 +21,8 @@ use store::{NamedRows, Rows, Value};
 use trc::AddContext;
 
 impl SqlDirectory {
-    pub async fn query(
-        &self,
-        by: QueryBy<'_>,
-        return_member_of: bool,
-    ) -> trc::Result<Option<Principal>> {
-        let (external_principal, stored_principal) = match by {
+    pub async fn query(&self, by: QueryParams<'_>) -> trc::Result<Option<Principal>> {
+        let (external_principal, stored_principal) = match by.by {
             QueryBy::Name(username) => (
                 self.mappings
                     .row_to_principal(
@@ -48,7 +44,7 @@ impl SqlDirectory {
             QueryBy::Id(uid) => {
                 if let Some(principal) = self
                     .data_store
-                    .query(QueryBy::Id(uid), return_member_of)
+                    .query(QueryParams::id(uid).with_return_member_of(by.return_member_of))
                     .await
                     .caused_by(trc::location!())?
                 {
@@ -108,7 +104,7 @@ impl SqlDirectory {
                         }
 
                         if principal
-                            .verify_secret(secret)
+                            .verify_secret(secret, false)
                             .await
                             .caused_by(trc::location!())?
                         {
@@ -131,7 +127,7 @@ impl SqlDirectory {
         };
 
         // Obtain members
-        if return_member_of && !self.mappings.query_members.is_empty() {
+        if by.return_member_of && !self.mappings.query_members.is_empty() {
             let mut data = Vec::new();
             for row in self
                 .sql_store
@@ -185,7 +181,7 @@ impl SqlDirectory {
                 .caused_by(trc::location!())?;
 
             self.data_store
-                .query(QueryBy::Id(id), return_member_of)
+                .query(QueryParams::id(id).with_return_member_of(by.return_member_of))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or_else(|| manage::not_found(id).caused_by(trc::location!()))?

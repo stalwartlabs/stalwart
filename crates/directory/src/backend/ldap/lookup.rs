@@ -10,7 +10,7 @@ use store::xxhash_rust;
 use trc::AddContext;
 
 use crate::{
-    IntoError, Principal, PrincipalData, QueryBy, ROLE_ADMIN, ROLE_USER, Type,
+    IntoError, Principal, PrincipalData, QueryBy, QueryParams, ROLE_ADMIN, ROLE_USER, Type,
     backend::{
         RcptType,
         internal::{
@@ -23,13 +23,9 @@ use crate::{
 use super::{AuthBind, LdapDirectory, LdapMappings};
 
 impl LdapDirectory {
-    pub async fn query(
-        &self,
-        by: QueryBy<'_>,
-        return_member_of: bool,
-    ) -> trc::Result<Option<Principal>> {
+    pub async fn query(&self, by: QueryParams<'_>) -> trc::Result<Option<Principal>> {
         let mut conn = self.pool.get().await.map_err(|err| err.into_error())?;
-        let (mut external_principal, member_of, stored_principal) = match by {
+        let (mut external_principal, member_of, stored_principal) = match by.by {
             QueryBy::Name(username) => {
                 let filter = self.mappings.filter_name.build(username);
                 if let Some(mut result) = self.find_principal(&mut conn, &filter).await? {
@@ -49,7 +45,7 @@ impl LdapDirectory {
             QueryBy::Id(uid) => {
                 if let Some(stored_principal_) = self
                     .data_store
-                    .query(QueryBy::Id(uid), return_member_of)
+                    .query(QueryParams::id(uid).with_return_member_of(by.return_member_of))
                     .await?
                 {
                     if let Some(result) = self
@@ -190,7 +186,7 @@ impl LdapDirectory {
                     AuthBind::None => {
                         let filter = self.mappings.filter_name.build(username);
                         if let Some(mut result) = self.find_principal(&mut conn, &filter).await? {
-                            if result.principal.verify_secret(secret).await? {
+                            if result.principal.verify_secret(secret, false).await? {
                                 if result.principal.name.is_empty() {
                                     result.principal.name = username.into();
                                 }
@@ -217,7 +213,7 @@ impl LdapDirectory {
         };
 
         // Query groups
-        if !member_of.is_empty() && return_member_of {
+        if !member_of.is_empty() && by.return_member_of {
             let mut data = Vec::with_capacity(member_of.len());
             for mut name in member_of {
                 if name.contains('=') {
@@ -268,7 +264,7 @@ impl LdapDirectory {
                 .caused_by(trc::location!())?;
 
             self.data_store
-                .query(QueryBy::Id(id), return_member_of)
+                .query(QueryParams::id(id).with_return_member_of(by.return_member_of))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or_else(|| manage::not_found(id).caused_by(trc::location!()))?

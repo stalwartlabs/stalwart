@@ -11,7 +11,7 @@ use reqwest::{StatusCode, header::AUTHORIZATION};
 use trc::{AddContext, AuthEvent};
 
 use crate::{
-    Principal, PrincipalData, QueryBy, ROLE_USER, Type,
+    Principal, PrincipalData, QueryBy, QueryParams, ROLE_USER, Type,
     backend::{
         RcptType,
         internal::{
@@ -27,12 +27,8 @@ use super::{OpenIdConfig, OpenIdDirectory};
 type OpenIdResponse = HashMap<String, serde_json::Value>;
 
 impl OpenIdDirectory {
-    pub async fn query(
-        &self,
-        by: QueryBy<'_>,
-        return_member_of: bool,
-    ) -> trc::Result<Option<Principal>> {
-        match &by {
+    pub async fn query(&self, by: QueryParams<'_>) -> trc::Result<Option<Principal>> {
+        match &by.by {
             QueryBy::Credentials(Credentials::OAuthBearer { token }) => {
                 // Send request
                 #[cfg(feature = "test_mode")]
@@ -102,7 +98,7 @@ impl OpenIdDirectory {
                             .caused_by(trc::location!())?;
                         let mut principal = self
                             .data_store
-                            .query(QueryBy::Id(id), return_member_of)
+                            .query(QueryParams::id(id).with_return_member_of(by.return_member_of))
                             .await
                             .caused_by(trc::location!())?
                             .ok_or_else(|| manage::not_found(id).caused_by(trc::location!()))?;
@@ -133,7 +129,7 @@ impl OpenIdDirectory {
                         .details("Unexpected status code")),
                 }
             }
-            _ => self.data_store.query(by, return_member_of).await,
+            _ => self.data_store.query(by.with_only_app_pass(true)).await,
         }
     }
 

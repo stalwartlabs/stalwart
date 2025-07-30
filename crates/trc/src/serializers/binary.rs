@@ -8,11 +8,9 @@
  *
  */
 
-use std::net::{Ipv4Addr, Ipv6Addr};
-
-use compact_str::format_compact;
-
 use crate::*;
+use compact_str::format_compact;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 const VERSION: u8 = 1;
 

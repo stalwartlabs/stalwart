@@ -4,31 +4,33 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    collections::BinaryHeap,
-    future::Future,
-    sync::Arc,
-    time::{Duration, Instant, SystemTime},
-};
-
 use common::{
     Inner, KV_LOCK_HOUSEKEEPER, LONG_1D_SLUMBER, Server,
     config::telemetry::OtelMetrics,
     core::BuildServer,
     ipc::{BroadcastEvent, HousekeeperEvent, PurgeType},
 };
+use email::message::delete::EmailDeletion;
+use smtp::reporting::SmtpReporting;
+use std::{
+    collections::BinaryHeap,
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime},
+};
+use store::{PurgeStore, write::now};
+use tokio::sync::mpsc;
+use trc::{Collector, MetricType, PurgeEvent};
 
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
 #[cfg(feature = "enterprise")]
 use common::telemetry::{
     metrics::store::{MetricsStore, SharedMetricHistory},
     tracers::store::TracingStore,
 };
-
-use email::message::delete::EmailDeletion;
-use smtp::reporting::SmtpReporting;
-use store::{PurgeStore, write::now};
-use tokio::sync::mpsc;
-use trc::{Collector, MetricType, PurgeEvent};
+// SPDX-SnippetEnd
 
 #[derive(PartialEq, Eq)]
 struct Action {
@@ -42,13 +44,17 @@ enum ActionClass {
     Store(usize),
     Acme(String),
     OtelMetrics,
+    CalculateMetrics,
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     InternalMetrics,
-    CalculateMetrics,
     #[cfg(feature = "enterprise")]
     AlertMetrics,
     #[cfg(feature = "enterprise")]
     RenewLicense,
+    // SPDX-SnippetEnd
 }
 
 #[derive(Default)]
@@ -56,8 +62,12 @@ struct Queue {
     heap: BinaryHeap<Action>,
 }
 
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
 #[cfg(feature = "enterprise")]
 const METRIC_ALERTS_INTERVAL: Duration = Duration::from_secs(5 * 60);
+// SPDX-SnippetEnd
 
 pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEvent>) {
     tokio::spawn(async move {
@@ -143,12 +153,18 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                     );
                 }
             }
+
             // SPDX-SnippetEnd
         }
 
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
         // Metrics history
         #[cfg(feature = "enterprise")]
         let metrics_history = SharedMetricHistory::default();
+        // SPDX-SnippetEnd
+
         let mut next_metric_update = Instant::now();
 
         loop {
@@ -383,8 +399,12 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
 
                                     let otel = otel.clone();
 
+                                    // SPDX-SnippetBegin
+                                    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                                    // SPDX-License-Identifier: LicenseRef-SEL
                                     #[cfg(feature = "enterprise")]
                                     let is_enterprise = server.is_enterprise_edition();
+                                    // SPDX-SnippetEnd
 
                                     #[cfg(not(feature = "enterprise"))]
                                     let is_enterprise = false;
@@ -417,6 +437,9 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                 let server = server.clone();
                                 tokio::spawn(async move {
                                     if server.core.network.roles.calculate_metrics {
+                                        // SPDX-SnippetBegin
+                                        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                                        // SPDX-License-Identifier: LicenseRef-SEL
                                         #[cfg(feature = "enterprise")]
                                         if server.is_enterprise_edition() {
                                             // Obtain queue size
@@ -434,6 +457,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                                 }
                                             }
                                         }
+                                        // SPDX-SnippetEnd
 
                                         if update_other_metrics {
                                             match server.total_accounts().await {

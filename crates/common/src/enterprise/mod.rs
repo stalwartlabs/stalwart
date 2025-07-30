@@ -14,14 +14,12 @@ pub mod license;
 pub mod llm;
 pub mod undelete;
 
-use std::{sync::Arc, time::Duration};
-
 use ahash::{AHashMap, AHashSet};
-
-use directory::{QueryBy, Type, backend::internal::lookup::DirectoryStore};
+use directory::{QueryParams, Type, backend::internal::lookup::DirectoryStore};
 use license::LicenseKey;
 use llm::AiApiConfig;
 use mail_parser::DateTime;
+use std::{sync::Arc, time::Duration};
 use store::Store;
 use trc::{AddContext, EventType, MetricType};
 use utils::{HttpLimitResponse, config::cron::SimpleCron, template::Template};
@@ -165,7 +163,7 @@ impl Server {
                 // Try fetching the logo for the domain
                 let logo_url = if let Some(mut principal) = self
                     .store()
-                    .query(QueryBy::Name(domain), false)
+                    .query(QueryParams::name(domain).with_return_member_of(false))
                     .await
                     .caused_by(trc::location!())?
                     .filter(|p| p.typ() == Type::Domain)
@@ -175,7 +173,7 @@ impl Server {
                     } else if let Some(tenant_id) = principal.tenant {
                         if let Some(logo) = self
                             .store()
-                            .query(QueryBy::Id(tenant_id), false)
+                            .query(QueryParams::id(tenant_id).with_return_member_of(false))
                             .await
                             .caused_by(trc::location!())?
                             .and_then(|mut p| p.picture_mut().map(std::mem::take))

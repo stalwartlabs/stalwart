@@ -175,7 +175,7 @@ async fn dmarc() {
     // Expect SPF auth failure report
     let message = qr.expect_message().await;
     assert_eq!(
-        message.message.recipients.last().unwrap().address,
+        message.message.recipients.last().unwrap().address(),
         "spf-failures@example.com"
     );
     message
@@ -206,7 +206,7 @@ async fn dmarc() {
     // Expect DKIM auth failure report
     let message = qr.expect_message().await;
     assert_eq!(
-        message.message.recipients.last().unwrap().address,
+        message.message.recipients.last().unwrap().address(),
         "dkim-failures@example.com"
     );
     message
@@ -257,7 +257,7 @@ async fn dmarc() {
     // Expect DMARC auth failure report
     let message = qr.expect_message().await;
     assert_eq!(
-        message.message.recipients.last().unwrap().address,
+        message.message.recipients.last().unwrap().address(),
         "dmarc-failures@example.com"
     );
     message

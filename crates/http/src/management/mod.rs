@@ -7,8 +7,6 @@
 pub mod crypto;
 pub mod dkim;
 pub mod dns;
-#[cfg(feature = "enterprise")]
-pub mod enterprise;
 pub mod log;
 pub mod principal;
 pub mod queue;
@@ -19,15 +17,23 @@ pub mod spam;
 pub mod stores;
 pub mod troubleshoot;
 
-use std::{str::FromStr, sync::Arc};
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+pub mod enterprise;
 
+#[cfg(feature = "enterprise")]
+use enterprise::telemetry::TelemetryApi;
+// SPDX-SnippetEnd
+
+use crate::auth::oauth::auth::OAuthApiHandler;
 use common::{Server, auth::AccessToken};
 use crypto::CryptoHandler;
 use directory::{Permission, backend::internal::manage};
 use dkim::DkimManagement;
 use dns::DnsManagement;
-#[cfg(feature = "enterprise")]
-use enterprise::telemetry::TelemetryApi;
+use http_proto::{request::fetch_body, *};
 use hyper::{Method, StatusCode, header};
 use jmap::api::{ToJmapHttpResponse, ToRequestError};
 use jmap_proto::error::request::RequestError;
@@ -40,14 +46,11 @@ use report::ManageReports;
 use serde::Serialize;
 use settings::ManageSettings;
 use spam::ManageSpamHandler;
+use std::future::Future;
+use std::{str::FromStr, sync::Arc};
 use store::write::now;
 use stores::ManageStore;
 use troubleshoot::TroubleshootApi;
-
-use crate::auth::oauth::auth::OAuthApiHandler;
-
-use http_proto::{request::fetch_body, *};
-use std::future::Future;
 
 #[derive(Serialize)]
 #[serde(tag = "error")]

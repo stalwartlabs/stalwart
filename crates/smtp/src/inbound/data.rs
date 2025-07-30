@@ -9,7 +9,8 @@ use crate::{
     core::{Session, SessionAddress, State},
     inbound::milter::Modification,
     queue::{
-        self, Message, MessageSource, MessageWrapper, QueueEnvelope, Schedule, quota::HasQueueQuota,
+        self, DomainPart, Message, MessageSource, MessageWrapper, QueueEnvelope,
+        quota::HasQueueQuota,
     },
     reporting::analysis::AnalyzeReport,
     scripts::ScriptResult,
@@ -709,7 +710,7 @@ impl<T: SessionStream> Session<T> {
             .map_or(0, |d| d.as_secs());
         let mut message = Message {
             created,
-            return_path: mail_from.address_lcase,
+            return_path: mail_from.address.to_lowercase_domain(),
             recipients: Vec::with_capacity(rcpt_to.len()),
             flags: mail_from.flags,
             priority: self.data.priority,
@@ -725,26 +726,23 @@ impl<T: SessionStream> Session<T> {
         let future_release = self.data.future_release;
         rcpt_to.sort_unstable();
         for rcpt in rcpt_to {
-            message.recipients.push(queue::Recipient {
-                address: rcpt.address_lcase,
-                status: queue::Status::Scheduled,
-                flags: if rcpt.flags
-                    & (RCPT_NOTIFY_DELAY
-                        | RCPT_NOTIFY_FAILURE
-                        | RCPT_NOTIFY_SUCCESS
-                        | RCPT_NOTIFY_NEVER)
-                    != 0
-                {
-                    rcpt.flags
-                } else {
-                    rcpt.flags | RCPT_NOTIFY_DELAY | RCPT_NOTIFY_FAILURE
-                },
-                orcpt: rcpt.dsn_info,
-                retry: Schedule::now(),
-                notify: Schedule::now(),
-                expires: QueueExpiry::Attempts(0),
-                queue: QueueName::default(),
-            });
+            message.recipients.push(
+                queue::Recipient::new(rcpt.address)
+                    .with_flags(
+                        if rcpt.flags
+                            & (RCPT_NOTIFY_DELAY
+                                | RCPT_NOTIFY_FAILURE
+                                | RCPT_NOTIFY_SUCCESS
+                                | RCPT_NOTIFY_NEVER)
+                            != 0
+                        {
+                            rcpt.flags
+                        } else {
+                            rcpt.flags | RCPT_NOTIFY_DELAY | RCPT_NOTIFY_FAILURE
+                        },
+                    )
+                    .with_orcpt(rcpt.dsn_info),
+            );
 
             let envelope = QueueEnvelope::new(&message, message.recipients.last().unwrap());
 

@@ -22,6 +22,7 @@ use dav_proto::{
     schema::{
         property::CardDavPropertyName,
         request::{AddressbookQuery, Filter, FilterOp, VCardPropertyWithGroup},
+        response::MultiStatus,
     },
 };
 use groupware::cache::GroupwareCache;
@@ -57,13 +58,14 @@ impl CardQueryRequestHandler for Server {
             .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
             .await
             .caused_by(trc::location!())?;
-        let resource = resources
-            .by_path(
-                resource_
-                    .resource
-                    .ok_or(DavError::Code(StatusCode::METHOD_NOT_ALLOWED))?,
-            )
-            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let Some(resource) = resources.by_path(
+            resource_
+                .resource
+                .ok_or(DavError::Code(StatusCode::METHOD_NOT_ALLOWED))?,
+        ) else {
+            return Ok(HttpResponse::new(StatusCode::MULTI_STATUS)
+                .with_xml_body(MultiStatus::not_found(headers.uri).to_string()));
+        };
         if !resource.is_container() {
             return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
         }

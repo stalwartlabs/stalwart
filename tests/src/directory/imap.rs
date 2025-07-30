@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use common::listener::limiter::{ConcurrencyLimiter, InFlight};
-use directory::QueryBy;
+use directory::QueryParams;
 use mail_parser::decoders::base64::base64_decode;
 use mail_send::Credentials;
 use tokio::{
@@ -61,7 +61,9 @@ async fn imap_directory() {
         assert_eq!(
             &LookupResult::from(
                 handle
-                    .query(QueryBy::Credentials(item.as_credentials()), true)
+                    .query(
+                        QueryParams::credentials(item.as_credentials()).with_return_member_of(true)
+                    )
                     .await
                     .unwrap()
                     .is_some()
@@ -81,7 +83,10 @@ async fn imap_directory() {
             tokio::spawn(async move {
                 LookupResult::from(
                     handle
-                        .query(QueryBy::Credentials(item.as_credentials()), true)
+                        .query(
+                            QueryParams::credentials(item.as_credentials())
+                                .with_return_member_of(true),
+                        )
                         .await
                         .unwrap()
                         .is_some(),

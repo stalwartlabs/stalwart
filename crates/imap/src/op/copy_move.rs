@@ -11,6 +11,7 @@ use crate::{
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
 use directory::Permission;
 use email::{
+    cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{JUNK_ID, UidMailbox},
     message::{
         bayes::EmailBayesTrain, copy::EmailCopy, ingest::EmailIngest, metadata::MessageData,
@@ -122,10 +123,32 @@ impl<T: SessionStream> SessionData<T> {
             .imap_ctx(&arguments.tag, trc::location!())?;
 
         if ids.is_empty() {
-            return Err(trc::ImapEvent::Error
-                .into_err()
-                .details("No messages were found.")
-                .id(arguments.tag));
+            trc::event!(
+                Imap(if is_move {
+                    trc::ImapEvent::Move
+                } else {
+                    trc::ImapEvent::Copy
+                }),
+                SpanId = self.session_id,
+                Source = src_mailbox.id.account_id,
+                Details = trc::Value::None,
+                Uid = trc::Value::None,
+                AccountId = dest_mailbox.account_id,
+                MailboxId = dest_mailbox.mailbox_id,
+                Elapsed = op_start.elapsed()
+            );
+
+            return self
+                .write_bytes(
+                    StatusResponse::ok(if is_move {
+                        "No messages were moved."
+                    } else {
+                        "No messages were copied."
+                    })
+                    .with_tag(arguments.tag)
+                    .into_bytes(),
+                )
+                .await;
         }
 
         // Verify that the user can delete messages from the source mailbox.
@@ -343,6 +366,11 @@ impl<T: SessionStream> SessionData<T> {
             let dest_account_id = dest_mailbox.account_id;
             let resource_token = access_token.as_resource_token();
             let mut destroy_ids = RoaringBitmap::new();
+            let cache = self
+                .server
+                .get_cached_messages(src_account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?;
             for (id, imap_id) in ids {
                 match self
                     .server
@@ -351,7 +379,10 @@ impl<T: SessionStream> SessionData<T> {
                         id,
                         &resource_token,
                         vec![dest_mailbox_id],
-                        Vec::new(),
+                        cache
+                            .email_by_id(&id)
+                            .map(|e| cache.expand_keywords(e).collect())
+                            .unwrap_or_default(),
                         None,
                         self.session_id,
                     )
@@ -417,19 +448,39 @@ impl<T: SessionStream> SessionData<T> {
 
         // Map copied JMAP Ids to IMAP UIDs in the destination folder.
         if copied_ids.is_empty() {
-            return Err(if response.rtype != ResponseType::Ok {
-                trc::ImapEvent::Error
+            return if response.rtype != ResponseType::Ok {
+                Err(trc::ImapEvent::Error
                     .into_err()
                     .details(response.message)
                     .ctx_opt(trc::Key::Code, response.code)
+                    .id(arguments.tag))
             } else {
-                trc::ImapEvent::Error.into_err().details(if is_move {
-                    "No messages were moved."
-                } else {
-                    "No messages were copied."
-                })
-            }
-            .id(arguments.tag));
+                trc::event!(
+                    Imap(if is_move {
+                        trc::ImapEvent::Move
+                    } else {
+                        trc::ImapEvent::Copy
+                    }),
+                    SpanId = self.session_id,
+                    Source = src_mailbox.id.account_id,
+                    Details = trc::Value::None,
+                    Uid = trc::Value::None,
+                    AccountId = dest_mailbox.account_id,
+                    MailboxId = dest_mailbox.mailbox_id,
+                    Elapsed = op_start.elapsed()
+                );
+
+                self.write_bytes(
+                    StatusResponse::ok(if is_move {
+                        "No messages were moved."
+                    } else {
+                        "No messages were copied."
+                    })
+                    .with_tag(arguments.tag)
+                    .into_bytes(),
+                )
+                .await
+            };
         }
 
         // Prepare response

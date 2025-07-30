@@ -113,7 +113,7 @@ async fn report_dmarc() {
     qr.assert_no_events();
     assert_eq!(message.message.recipients.len(), 1);
     assert_eq!(
-        message.message.recipients.last().unwrap().address,
+        message.message.recipients.last().unwrap().address(),
         "reports@foobar.net"
     );
     assert_eq!(message.message.return_path, "reports@example.org");

@@ -40,8 +40,12 @@ pub enum TelemetrySubscriberType {
     Webhook(WebhookTracer),
     #[cfg(unix)]
     JournalTracer(crate::telemetry::tracers::journald::Subscriber),
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     StoreTracer(StoreTracer),
+    // SPDX-SnippetEnd
 }
 
 #[derive(Debug)]
@@ -88,11 +92,15 @@ pub struct WebhookTracer {
     pub headers: HeaderMap,
 }
 
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
 #[derive(Debug)]
 #[cfg(feature = "enterprise")]
 pub struct StoreTracer {
     pub store: store::Store,
 }
+// SPDX-SnippetEnd
 
 #[derive(Debug)]
 pub enum RotationStrategy {
@@ -477,8 +485,12 @@ impl Tracers {
                 TelemetrySubscriberType::JournalTracer(_) => {
                     EventType::Telemetry(TelemetryEvent::JournalError).into()
                 }
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(feature = "enterprise")]
                 TelemetrySubscriberType::StoreTracer(_) => None,
+                // SPDX-SnippetEnd
             };
 
             // Parse disabled events
@@ -508,6 +520,10 @@ impl Tracers {
                 config.new_build_warning(("tracer", "id"), "No events enabled for tracer");
             }
         }
+
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
 
         // Parse tracing history
         #[cfg(feature = "enterprise")]
@@ -540,6 +556,7 @@ impl Tracers {
                 }
             }
         }
+        // SPDX-SnippetEnd
 
         // Parse webhooks
         for id in config.sub_keys("webhook", ".url") {

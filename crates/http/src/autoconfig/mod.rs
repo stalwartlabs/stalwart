@@ -4,18 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Write;
-
 use common::{Server, manager::webadmin::Resource};
-
-use directory::QueryBy;
+use directory::QueryParams;
+use http_proto::*;
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use std::fmt::Write;
+use std::future::Future;
 use trc::AddContext;
 use utils::url_params::UrlParams;
-
-use http_proto::*;
-use std::future::Future;
 
 pub trait Autoconfig: Sync + Send {
     fn handle_autoconfig_request(
@@ -211,7 +208,7 @@ impl Autoconfig for Server {
                 .core
                 .storage
                 .directory
-                .query(QueryBy::Id(id), false)
+                .query(QueryParams::id(id).with_return_member_of(false))
                 .await
             {
                 if principal

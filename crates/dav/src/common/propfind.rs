@@ -1134,11 +1134,8 @@ impl PropFindRequestHandler for Server {
         if !response.response.0.is_empty() || !query.sync_type.is_none() {
             Ok(HttpResponse::new(StatusCode::MULTI_STATUS).with_xml_body(response.to_string()))
         } else if !is_propfind {
-            response.add_response(
-                Response::new_status([query.uri], StatusCode::NOT_FOUND)
-                    .with_response_description("No resources found"),
-            );
-            Ok(HttpResponse::new(StatusCode::MULTI_STATUS).with_xml_body(response.to_string()))
+            Ok(HttpResponse::new(StatusCode::MULTI_STATUS)
+                .with_xml_body(MultiStatus::not_found(query.uri).to_string()))
         } else {
             Ok(HttpResponse::new(StatusCode::NOT_FOUND))
         }

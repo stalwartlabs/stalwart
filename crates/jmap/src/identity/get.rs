@@ -5,7 +5,7 @@
  */
 
 use common::{Server, storage::index::ObjectIndexBuilder};
-use directory::QueryBy;
+use directory::QueryParams;
 use email::identity::{ArchivedEmailAddress, Identity};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse, RequestArguments},
@@ -147,7 +147,7 @@ impl IdentityGet for Server {
             .core
             .storage
             .directory
-            .query(QueryBy::Id(account_id), false)
+            .query(QueryParams::id(account_id).with_return_member_of(false))
             .await
             .caused_by(trc::location!())?
         {

@@ -10,6 +10,9 @@ use crate::{
 };
 use utils::config::{Config, cron::SimpleCron, utils::ParseValue};
 
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
 #[cfg(feature = "enterprise")]
 enum CompositeStore {
     #[cfg(any(feature = "postgres", feature = "mysql"))]
@@ -17,6 +20,7 @@ enum CompositeStore {
     ShardedBlob(String),
     ShardedInMemory(String),
 }
+// SPDX-SnippetEnd
 
 impl Stores {
     pub async fn parse_all(config: &mut Config, is_reload: bool) -> Self {
@@ -33,8 +37,13 @@ impl Stores {
 
     pub async fn parse_stores(&mut self, config: &mut Config) {
         let is_reload = !self.stores.is_empty();
+
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
         #[cfg(feature = "enterprise")]
         let mut composite_stores = Vec::new();
+        // SPDX-SnippetEnd
 
         for store_id in config.sub_keys("store", ".type") {
             let id = store_id.as_str();
@@ -239,6 +248,9 @@ impl Stores {
                             .insert(store_id, crate::PubSubStore::Kafka(db));
                     }
                 }
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(feature = "enterprise")]
                 "sql-read-replica" => {
                     #[cfg(any(feature = "postgres", feature = "mysql"))]
@@ -252,6 +264,7 @@ impl Stores {
                 "sharded-in-memory" => {
                     composite_stores.push(CompositeStore::ShardedInMemory(store_id));
                 }
+                // SPDX-SnippetEnd
                 #[cfg(feature = "azure")]
                 "azure" => {
                     if let Some(db) = crate::backend::azure::AzureStore::open(config, prefix)
@@ -271,6 +284,9 @@ impl Stores {
             }
         }
 
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
         #[cfg(feature = "enterprise")]
         for composite_store in composite_stores {
             match composite_store {
@@ -332,6 +348,8 @@ impl Stores {
                 }
             }
         }
+
+        // SPDX-SnippetEnd
     }
 
     pub async fn parse_in_memory(&mut self, config: &mut Config, is_reload: bool) {

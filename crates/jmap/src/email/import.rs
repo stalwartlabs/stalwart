@@ -46,6 +46,25 @@ impl EmailImport for Server {
             None
         };
 
+        // Obtain import access token
+        let import_access_token = if account_id != access_token.primary_id() {
+            #[cfg(feature = "test_mode")]
+            {
+                std::sync::Arc::new(AccessToken::from_id(account_id)).into()
+            }
+
+            #[cfg(not(feature = "test_mode"))]
+            {
+                use trc::AddContext;
+                self.get_access_token(account_id)
+                    .await
+                    .caused_by(trc::location!())?
+                    .into()
+            }
+        } else {
+            None
+        };
+
         let mut response = ImportEmailResponse {
             account_id: request.account_id,
             new_state: old_state.clone(),
@@ -114,7 +133,7 @@ impl EmailImport for Server {
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
                     message: MessageParser::new().parse(&raw_message),
-                    access_token,
+                    access_token: import_access_token.as_deref().unwrap_or(access_token),
                     mailbox_ids,
                     keywords: email.keywords,
                     received_at: email.received_at.map(|r| r.into()),

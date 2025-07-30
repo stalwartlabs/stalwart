@@ -9,9 +9,9 @@ use super::{
     SpecialSecrets, lookup::DirectoryStore,
 };
 use crate::{
-    MemberOf, Permission, PermissionGrant, Permissions, Principal, PrincipalData, PrincipalQuota,
-    QueryBy, ROLE_ADMIN, ROLE_TENANT_ADMIN, ROLE_USER, Type, backend::RcptType,
-    core::principal::build_search_index,
+    FALLBACK_ADMIN_ID, MemberOf, Permission, PermissionGrant, Permissions, Principal,
+    PrincipalData, PrincipalQuota, QueryBy, QueryParams, ROLE_ADMIN, ROLE_TENANT_ADMIN, ROLE_USER,
+    Type, backend::RcptType, core::principal::build_search_index,
 };
 use ahash::{AHashMap, AHashSet};
 use compact_str::CompactString;
@@ -182,6 +182,12 @@ impl ManageDirectory for Store {
                     .assign_document_ids(u32::MAX, Collection::Principal, 1)
                     .await
                     .caused_by(trc::location!())?;
+                if principal_id_ == FALLBACK_ADMIN_ID {
+                    return Err(trc::StoreEvent::UnexpectedError
+                        .into_err()
+                        .details("ID assignment failed")
+                        .caused_by(trc::location!()));
+                }
                 principal_id = Some(principal_id_);
                 principal_id_
             };
@@ -268,7 +274,7 @@ impl ManageDirectory for Store {
         #[cfg(feature = "enterprise")]
         if let Some(tenant_id) = tenant_id {
             let tenant = self
-                .query(QueryBy::Id(tenant_id), false)
+                .query(crate::QueryParams::id(tenant_id).with_return_member_of(false))
                 .await?
                 .ok_or_else(|| {
                     trc::ManageEvent::NotFound
@@ -394,13 +400,15 @@ impl ManageDirectory for Store {
             let mut principal_quotas = Vec::new();
 
             for (idx, quota) in quotas.into_iter().take(Type::MAX_ID + 2).enumerate() {
-                if idx != 0 {
-                    principal_quotas.push(PrincipalQuota {
-                        quota,
-                        typ: Type::from_u8((idx - 1) as u8),
-                    });
-                } else if quota != 0 {
-                    principal_create.quota = Some(quota);
+                if quota != 0 {
+                    if idx != 0 {
+                        principal_quotas.push(PrincipalQuota {
+                            quota,
+                            typ: Type::from_u8((idx - 1) as u8),
+                        });
+                    } else {
+                        principal_create.quota = Some(quota);
+                    }
                 }
             }
 
@@ -534,6 +542,12 @@ impl ManageDirectory for Store {
             .assign_document_ids(u32::MAX, Collection::Principal, 1)
             .await
             .caused_by(trc::location!())?;
+        if principal_id == FALLBACK_ADMIN_ID {
+            return Err(trc::StoreEvent::UnexpectedError
+                .into_err()
+                .details("ID assignment failed")
+                .caused_by(trc::location!()));
+        }
         principal_create.id = principal_id;
         let mut batch = BatchBuilder::new();
         let pinfo_name = PrincipalInfo::new(principal_id, principal_create.typ, tenant_id);
@@ -644,12 +658,13 @@ impl ManageDirectory for Store {
         let mut batch = BatchBuilder::new();
         batch.with_account_id(u32::MAX);
 
+        let tenant = principal.tenant.as_ref().map(|t| t.to_native());
+
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
         // SPDX-License-Identifier: LicenseRef-SEL
 
         // Make sure tenant has no data
-        let tenant = principal.tenant.as_ref().map(|t| t.to_native());
         #[cfg(feature = "enterprise")]
         match typ {
             Type::Individual | Type::Group => {
@@ -1209,13 +1224,15 @@ impl ManageDirectory for Store {
                     let mut principal_quotas = Vec::new();
 
                     for (idx, quota) in quotas.into_iter().enumerate() {
-                        if idx != 0 {
-                            principal_quotas.push(PrincipalQuota {
-                                quota,
-                                typ: Type::from_u8((idx - 1) as u8),
-                            });
-                        } else if quota != 0 {
-                            new_quota = Some(quota);
+                        if quota != 0 {
+                            if idx != 0 {
+                                principal_quotas.push(PrincipalQuota {
+                                    quota,
+                                    typ: Type::from_u8((idx - 1) as u8),
+                                });
+                            } else {
+                                new_quota = Some(quota);
+                            }
                         }
                     }
 
@@ -2020,7 +2037,7 @@ impl ManageDirectory for Store {
 
             for principal in result.items {
                 items.push(
-                    self.query(QueryBy::Id(principal.id), fetch)
+                    self.query(QueryParams::id(principal.id).with_return_member_of(fetch))
                         .await
                         .caused_by(trc::location!())?
                         .ok_or_else(|| not_found(principal.name().to_string()))?,
@@ -2231,8 +2248,9 @@ impl ManageDirectory for Store {
             match principal.typ {
                 Type::Group | Type::List | Type::Role => {
                     for member_id in self.get_members(principal.id).await? {
-                        if let Some(member_principal) =
-                            self.query(QueryBy::Id(member_id), false).await?
+                        if let Some(member_principal) = self
+                            .query(QueryParams::id(member_id).with_return_member_of(false))
+                            .await?
                         {
                             result.append_str(PrincipalField::Members, member_principal.name);
                         }

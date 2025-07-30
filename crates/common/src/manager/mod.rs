@@ -4,14 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use hyper::HeaderMap;
-use utils::HttpLimitResponse;
-
-use crate::USER_AGENT;
-
 use self::config::ConfigManager;
+use crate::USER_AGENT;
+use hyper::HeaderMap;
+use std::time::Duration;
+use utils::HttpLimitResponse;
 
 pub mod backup;
 pub mod boot;
@@ -23,9 +20,19 @@ pub mod webadmin;
 
 const DEFAULT_SPAMFILTER_URL: &str =
     "https://github.com/stalwartlabs/spam-filter/releases/latest/download/spam-filter.toml";
+pub const WEBADMIN_KEY: &[u8] = "STALWART_WEBADMIN".as_bytes();
+
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
 const DEFAULT_WEBADMIN_URL: &str =
     "https://github.com/stalwartlabs/webadmin/releases/latest/download/webadmin.zip";
-pub const WEBADMIN_KEY: &[u8] = "STALWART_WEBADMIN".as_bytes();
+// SPDX-SnippetEnd
+
+#[cfg(not(feature = "enterprise"))]
+const DEFAULT_WEBADMIN_URL: &str =
+    "https://github.com/stalwartlabs/webadmin/releases/latest/download/webadmin-oss.zip";
 
 impl ConfigManager {
     pub async fn fetch_resource(&self, resource_id: &str) -> Result<Vec<u8>, String> {

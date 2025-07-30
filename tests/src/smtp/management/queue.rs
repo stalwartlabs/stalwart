@@ -170,9 +170,9 @@ async fn manage_queue() {
             .message
             .recipients
             .into_iter()
-            .map(|r| r.address)
+            .map(|r| r.address().to_string())
             .collect::<Vec<_>>(),
-        vec!["success@foobar.org".to_string()]
+        vec!["success@foobar.org"]
     );
 
     // Fetch and validate messages
@@ -322,7 +322,7 @@ async fn manage_queue() {
             .message
             .recipients
             .into_iter()
-            .map(|r| r.address)
+            .map(|r| r.address().to_string())
             .collect::<Vec<_>>(),
         vec!["john@foobar.org".to_string()]
     );

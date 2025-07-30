@@ -80,6 +80,15 @@ impl MultiStatus {
         self
     }
 
+    pub fn not_found(href: impl Into<String>) -> Self {
+        let mut response = Self::new(Vec::with_capacity(1));
+        response.response.0.push(
+            Response::new_status([href], StatusCode::NOT_FOUND)
+                .with_response_description("No resources found"),
+        );
+        response
+    }
+
     pub fn add_response(&mut self, response: Response) {
         self.response.0.push(response);
     }

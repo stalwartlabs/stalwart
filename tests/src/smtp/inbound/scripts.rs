@@ -246,11 +246,11 @@ async fn sieve_scripts() {
     assert_eq!(notification.message.return_path, "");
     assert_eq!(notification.message.recipients.len(), 2);
     assert_eq!(
-        notification.message.recipients.first().unwrap().address,
+        notification.message.recipients.first().unwrap().address(),
         "john@example.net"
     );
     assert_eq!(
-        notification.message.recipients.last().unwrap().address,
+        notification.message.recipients.last().unwrap().address(),
         "jane@example.org"
     );
     notification
@@ -326,7 +326,7 @@ async fn sieve_scripts() {
     assert_eq!(redirect.message.return_path, "");
     assert_eq!(redirect.message.recipients.len(), 1);
     assert_eq!(
-        redirect.message.recipients.first().unwrap().address,
+        redirect.message.recipients.first().unwrap().address(),
         "redirect@here.email"
     );
     redirect
@@ -354,7 +354,7 @@ async fn sieve_scripts() {
     assert_eq!(redirect.message.return_path, "");
     assert_eq!(redirect.message.recipients.len(), 1);
     assert_eq!(
-        redirect.message.recipients.first().unwrap().address,
+        redirect.message.recipients.first().unwrap().address(),
         "redirect@somewhere.email"
     );
     redirect
