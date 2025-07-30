@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+
 use super::dkim::Algorithm;
 use clap::{Parser, Subcommand, ValueEnum};
 use jmap_client::client::Credentials;
