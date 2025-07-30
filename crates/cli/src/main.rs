@@ -43,14 +43,20 @@ async fn main() -> std::io::Result<()> {
         } else if let Ok(credentials) = std::env::var("CREDENTIALS") {
             parse_credentials(&credentials)
         } else {
-            let credentials = rpassword::prompt_password(
-                "\nEnter administrator credentials or press [ENTER] to use OAuth: ",
-            )
-            .unwrap();
-            if !credentials.is_empty() {
+            if args.anonymous {
+                let credentials = "anonymous:".to_string();
                 parse_credentials(&credentials)
             } else {
-                oauth(&url).await
+                let credentials = rpassword::prompt_password(
+                    "\nEnter administrator credentials or press [ENTER] to use OAuth: ",
+                )
+                .unwrap();
+
+                if !credentials.is_empty() {
+                    parse_credentials(&credentials)
+                } else {
+                    oauth(&url).await
+                }
             }
         },
         timeout: args.timeout,
@@ -172,7 +178,7 @@ async fn oauth(url: &str) -> Credentials {
 #[serde(untagged)]
 pub enum Response<T> {
     Error(ManagementApiError),
-    Data { data: T },
+    Data { data: T }
 }
 
 #[derive(Deserialize)]
@@ -281,7 +287,7 @@ impl Client {
             Response::Error(error) => {
                 eprintln!("Request failed: {error})");
                 std::process::exit(1);
-            }
+            },
         }
     }
 }

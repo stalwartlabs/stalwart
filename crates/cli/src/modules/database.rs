@@ -5,12 +5,11 @@
  */
 
 use std::collections::HashMap;
-
 use prettytable::{Attr, Cell, Row, Table};
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use serde_json::Value;
 
-use crate::modules::Response;
+use crate::modules::{Response, UnwrapResult};
 
 use super::cli::{Client, ServerCommands};
 
@@ -111,6 +110,28 @@ impl ServerCommands {
                     results.len(),
                     if results.len() == 1 { "" } else { "s" }
                 );
+            }
+            ServerCommands::Healthcheck { check } => {
+                let response = reqwest::get(
+                    format!("{}/healthz/{}",
+                            client.url,
+                            check.unwrap_or("ready".to_string()))
+                )
+                    .await
+                    .unwrap();
+
+                match response.status() {
+                    StatusCode::OK => {
+                        eprintln!("Success")
+                    },
+                    _ => {
+                        eprintln!(
+                            "Request failed: {}",
+                            response.text().await.unwrap_result("fetch text")
+                        );
+                        std::process::exit(1);
+                    }
+                }
             }
         }
     }
