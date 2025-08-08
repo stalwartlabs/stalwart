@@ -1,0 +1,143 @@
+#!/usr/bin/env sh
+# shellcheck shell=dash
+
+#
+# SPDX-FileCopyrightText: 2025 Stalwart Labs LLC <hello@stalw.art>
+#
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
+#
+
+# Stalwart ignite script -- based on install.sh
+
+set -e
+set -u
+
+main() {
+    need_cmd uname
+    need_cmd mktemp
+    need_cmd chmod
+    need_cmd mkdir
+
+    # Make sure we are running as root
+    if [ "$(id -u)" -ne 0 ] ; then
+        err "❌ Install failed: This program needs to run as root."
+    fi
+
+        _account="_stalwart"
+
+    # Read arguments
+    local _dir="/opt/stalwart"
+
+    # Default component setting
+    local _component="stalwart"
+
+    # Loop through the arguments
+    for arg in "$@"; do
+        case "$arg" in
+            --fdb)
+                _component="stalwart-foundationdb"
+                ;;
+            *)
+                if [ -n "$arg" ]; then
+                    _dir=$arg
+                fi
+                ;;
+        esac
+    done
+
+    # Create directories
+    ensure mkdir -p "$_dir" "$_dir/bin" "$_dir/etc" "$_dir/logs"
+
+    # Download latest binary
+
+    # Create system account
+    if ! id -u ${_account} > /dev/null 2>&1; then
+        say "🖥️  Creating '${_account}' account..."
+            ensure useradd ${_account} -s /usr/sbin/nologin -M -r -U
+    fi
+
+    # Run init
+    ignore $_dir/bin/stalwart --init "$_dir"
+
+    # Set permissions
+    say "🔐 Setting permissions..."
+    ensure chown -R ${_account}:${_account} "$_dir"
+    ensure chmod -R 755 "$_dir"
+    ensure chmod 700 "$_dir/etc/config.toml"
+
+    # Create service file
+    say "🚀 Starting service..."
+        create_service_linux "$_dir"
+
+    # Installation complete
+    local _host=$(hostname -f)
+    say "🎉 Installation complete! Continue the setup at http://$_host:8080/login"
+
+    return 0
+}
+
+# Functions to create service files
+create_service_linux() {
+    local _dir="$1"
+    cat <<EOF | sed "s|__PATH__|$_dir|g" > /etc/systemd/system/stalwart.service
+[Unit]
+Description=Stalwart
+Conflicts=postfix.service sendmail.service exim4.service
+ConditionPathExists=__PATH__/etc/config.toml
+After=network-online.target
+
+[Service]
+Type=simple
+LimitNOFILE=65536
+KillMode=process
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5
+ExecStart=__PATH__/bin/stalwart --config=__PATH__/etc/config.toml
+SyslogIdentifier=stalwart
+User=stalwart
+Group=stalwart
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable stalwart.service
+    systemctl restart stalwart.service
+}
+
+say() {
+    printf '%s\n' "$1"
+}
+
+err() {
+    say "$1" >&2
+    exit 1
+}
+
+need_cmd() {
+    if ! check_cmd "$1"; then
+        err "need '$1' (command not found)"
+    fi
+}
+
+check_cmd() {
+    command -v "$1" > /dev/null 2>&1
+}
+
+# Run a command that should never fail. If the command fails execution
+# will immediately terminate with an error showing the failing
+# command.
+ensure() {
+    if ! "$@"; then err "command failed: $*"; fi
+}
+
+# This is just for indicating that commands' results are being
+# intentionally ignored. Usually, because it's being executed
+# as part of error handling.
+ignore() {
+    "$@"
+}
+
+main "$@" || exit 1
