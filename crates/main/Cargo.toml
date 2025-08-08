@@ -67,3 +67,14 @@ enterprise = [ "jmap/enterprise",
                "groupware/enterprise",
                "trc/enterprise",
                "services/enterprise" ]
+
+# Information for `cargo deb`
+[package.metadata.deb]
+# NOTE: Work in progress
+# Status is at https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1109537
+# and at https://github.com/stalwartlabs/stalwart/discussions/1949
+assets = [
+    # What from here, Destination in Debian package, File permission in .deb
+    ["target/release/stalwart", "usr/bin/", "755"],
+    ["target/release/stalwart-cli", "usr/bin/", "755"],
+]
