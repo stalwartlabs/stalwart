@@ -4,7 +4,7 @@ RUN apt-get update && \
     apt-get install -yq \
     build-essential \
     cmake \
-    clang \ 
+    clang \
     curl \
     protobuf-compiler
 ENV RUSTUP_HOME=/opt/rust/rustup \
