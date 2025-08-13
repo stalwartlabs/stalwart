@@ -113,6 +113,7 @@ impl<T: SessionStream> SessionData<T> {
                     spam_classify: false,
                     spam_train,
                     session_id: self.session_id,
+                    force_skip_duplicate: false,
                 })
                 .await
             {

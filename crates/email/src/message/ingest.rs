@@ -75,6 +75,7 @@ pub struct IngestEmail<'x> {
     pub spam_classify: bool,
     pub spam_train: bool,
     pub session_id: u64,
+    pub force_skip_duplicate: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -445,7 +446,7 @@ impl EmailIngest for Server {
                 }
             }
 
-            let skip_duplicate = if params.source.is_smtp() {
+            let skip_duplicate = if params.source.is_smtp() || params.force_skip_duplicate {
                 message_id.as_deref().map(|message_id| {
                     (
                         message_id.as_bytes(),

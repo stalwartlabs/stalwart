@@ -168,6 +168,7 @@ impl MailDelivery for Server {
                                     .has_permission(Permission::SpamFilterClassify),
                                 spam_train: self.email_bayes_can_train(&access_token),
                                 session_id: message.session_id,
+                                force_skip_duplicate: false,
                             })
                             .await
                         }

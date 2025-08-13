@@ -524,6 +524,7 @@ impl SieveScriptIngest for Server {
                             && !sieve_message.did_file_into,
                         spam_train: can_spam_train,
                         session_id,
+                        force_skip_duplicate: false,
                     })
                     .await
                 {

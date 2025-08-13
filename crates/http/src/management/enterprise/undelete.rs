@@ -210,6 +210,7 @@ impl UndeleteApi for Server {
                                             spam_classify: false,
                                             spam_train: false,
                                             session_id: session.session_id,
+                                            force_skip_duplicate: false,
                                         })
                                         .await
                                     {

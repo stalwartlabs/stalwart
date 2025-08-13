@@ -141,6 +141,7 @@ impl EmailImport for Server {
                     spam_classify: false,
                     spam_train: can_train_spam,
                     session_id: session.session_id,
+                    force_skip_duplicate: true,
                 })
                 .await
             {
