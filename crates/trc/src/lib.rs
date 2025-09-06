@@ -115,6 +115,7 @@ pub enum Key {
     RangeTo,
     Reason,
     RemoteIp,
+    ClientIp,
     RemotePort,
     ReportId,
     Result,

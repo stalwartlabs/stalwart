@@ -120,7 +120,7 @@ impl common::listener::SessionManager for HttpSessionManager {
                                         (k.as_str().to_lowercase(), v.to_str().unwrap().to_string())
                                     })
                                     .collect(),
-                                body: fetch_body(&mut req, 1024 * 1024, 0).await,
+                                body: fetch_body(&mut req, 1024 * 1024, 0, std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)).await,
                             });
 
                             Ok::<_, hyper::Error>(response.build())

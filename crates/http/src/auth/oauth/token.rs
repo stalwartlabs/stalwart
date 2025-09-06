@@ -36,6 +36,7 @@ pub trait TokenHandler: Sync + Send {
         req: &mut HttpRequest,
         access_token: &AccessToken,
         session_id: u64,
+        remote_ip: std::net::IpAddr,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
 
     fn issue_token(
@@ -57,7 +58,7 @@ impl TokenHandler for Server {
         session: HttpSessionData,
     ) -> trc::Result<HttpResponse> {
         // Parse form
-        let params = FormData::from_request(req, MAX_POST_LEN, session.session_id).await?;
+        let params = FormData::from_request(req, MAX_POST_LEN, session.session_id, session.remote_ip).await?;
         let grant_type = params.get("grant_type").unwrap_or_default();
 
         let mut response = TokenResponse::error(ErrorType::InvalidGrant);
@@ -266,9 +267,10 @@ impl TokenHandler for Server {
         req: &mut HttpRequest,
         access_token: &AccessToken,
         session_id: u64,
+        remote_ip: std::net::IpAddr,
     ) -> trc::Result<HttpResponse> {
         // Parse token
-        let token = FormData::from_request(req, 1024, session_id)
+        let token = FormData::from_request(req, 1024, session_id, remote_ip)
             .await?
             .remove("token")
             .ok_or_else(|| {

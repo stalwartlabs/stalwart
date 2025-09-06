@@ -57,7 +57,7 @@ impl ClientRegistrationHandler for Server {
         }
 
         // Parse request
-        let body = fetch_body(req, 20 * 1024, session.session_id).await;
+        let body = fetch_body(req, 20 * 1024, session.session_id, session.remote_ip).await;
         let request = serde_json::from_slice::<ClientRegistrationRequest>(
             body.as_deref().unwrap_or_default(),
         )

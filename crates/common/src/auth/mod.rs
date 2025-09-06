@@ -112,6 +112,7 @@ impl Server {
                     AccountName = principal.name().to_string(),
                     AccountId = principal.id(),
                     SpanId = req.session_id,
+                    ClientIp = req.remote_ip,
                 );
 
                 return Ok(principal);
@@ -136,6 +137,7 @@ impl Server {
                                 Auth(trc::AuthEvent::Success),
                                 AccountName = username.clone(),
                                 SpanId = req.session_id,
+                                ClientIp = req.remote_ip,
                             );
 
                             return Ok(Principal::fallback_admin(fallback_pass));
@@ -157,6 +159,7 @@ impl Server {
                                     Auth(trc::AuthEvent::Success),
                                     AccountName = username.to_string(),
                                     SpanId = req.session_id,
+                                    ClientIp = req.remote_ip,
                                     AccountId = principal.id(),
                                     Type = principal.typ().as_str(),
                                 );
@@ -182,6 +185,7 @@ impl Server {
                                 AccountName = principal.name().to_string(),
                                 AccountId = principal.id(),
                                 SpanId = req.session_id,
+                                ClientIp = req.remote_ip,
                             );
 
                             return Ok(principal);
@@ -214,6 +218,7 @@ impl Server {
                             AccountName = principal.name().to_string(),
                             AccountId = principal.id(),
                             SpanId = req.session_id,
+                            ClientIp = req.remote_ip,
                         );
 
                         return Ok(principal);

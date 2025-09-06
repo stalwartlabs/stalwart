@@ -560,6 +560,7 @@ impl DavRequestHandler for Server {
                     0
                 },
                 session.session_id,
+                session.remote_ip,
             )
             .await
             {

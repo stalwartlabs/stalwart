@@ -187,13 +187,14 @@ impl FormData {
         req: &mut HttpRequest,
         max_len: usize,
         session_id: u64,
+        remote_ip: std::net::IpAddr,
     ) -> trc::Result<Self> {
         match (
             req.headers()
                 .get(CONTENT_TYPE)
                 .and_then(|h| h.to_str().ok())
                 .and_then(|val| val.parse::<mime::Mime>().ok()),
-            fetch_body(req, max_len, session_id).await,
+            fetch_body(req, max_len, session_id, remote_ip).await,
         ) {
             (Some(content_type), Some(body)) => {
                 let mut fields = VecMap::new();

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
+use std::{borrow::Cow, net::IpAddr};
 
 use compact_str::ToCompactString;
 use http_body_util::BodyExt;
@@ -22,6 +22,7 @@ pub async fn fetch_body(
     req: &mut HttpRequest,
     max_size: usize,
     session_id: u64,
+    remote_ip: IpAddr,
 ) -> Option<Vec<u8>> {
     let mut bytes = Vec::with_capacity(1024);
     while let Some(Ok(frame)) = req.frame().await {
@@ -32,6 +33,7 @@ pub async fn fetch_body(
                 trc::event!(
                     Http(trc::HttpEvent::RequestBody),
                     SpanId = session_id,
+                    RemoteIp = remote_ip,
                     Details = req
                         .headers()
                         .iter()
@@ -55,6 +57,7 @@ pub async fn fetch_body(
     trc::event!(
         Http(trc::HttpEvent::RequestBody),
         SpanId = session_id,
+        RemoteIp = remote_ip,
         Details = req
             .headers()
             .iter()

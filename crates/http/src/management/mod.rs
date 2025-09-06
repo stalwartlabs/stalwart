@@ -93,7 +93,7 @@ impl ManagementApi for Server {
         access_token: Arc<AccessToken>,
         session: &HttpSessionData,
     ) -> trc::Result<HttpResponse> {
-        let body = fetch_body(req, 1024 * 1024, session.session_id).await;
+        let body = fetch_body(req, 1024 * 1024, session.session_id, session.remote_ip).await;
         let path = req.uri().path().split('/').skip(2).collect::<Vec<_>>();
 
         match path.first().copied().unwrap_or_default() {

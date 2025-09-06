@@ -103,6 +103,7 @@ impl ParseHttp for Server {
                                 0
                             },
                             session.session_id,
+                            session.remote_ip,
                         )
                         .await
                         .ok_or_else(|| trc::LimitEvent::SizeRequest.into_err())
@@ -164,6 +165,7 @@ impl ParseHttp for Server {
                                     0
                                 },
                                 session.session_id,
+                                session.remote_ip,
                             )
                             .await
                             {
@@ -358,7 +360,7 @@ impl ParseHttp for Server {
                         self.authenticate_headers(&req, &session, false).await?;
 
                     return self
-                        .handle_token_introspect(&mut req, &access_token, session.session_id)
+                        .handle_token_introspect(&mut req, &access_token, session.session_id, session.remote_ip)
                         .await;
                 }
                 ("userinfo", &Method::GET) => {
@@ -517,7 +519,7 @@ impl ParseHttp for Server {
 
                     return self
                         .handle_autodiscover_request(
-                            fetch_body(&mut req, 8192, session.session_id).await,
+                            fetch_body(&mut req, 8192, session.session_id, session.remote_ip).await,
                         )
                         .await;
                 }
@@ -619,7 +621,7 @@ impl ParseHttp for Server {
                                 .await?;
 
                             let form_data =
-                                FormData::from_request(&mut req, form.max_size, session.session_id)
+                                FormData::from_request(&mut req, form.max_size, session.session_id, session.remote_ip)
                                     .await?;
 
                             return self.handle_contact_form(&session, form, form_data).await;
@@ -678,83 +680,40 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                 async move {
                     let server = inner.build_server();
 
-                    // Obtain remote IP
-                    let remote_ip = if !server.core.jmap.http_use_forwarded {
+                    // Resolve remote IP using helper function
+                    let remote_ip = resolve_remote_ip_from_headers(
+                        req.headers(),
+                        session.remote_ip,
+                        server.core.jmap.http_use_forwarded,
+                        session.session_id,
+                    );
+
+                    // Check if the resolved IP is blocked
+                    if server.is_ip_blocked(&remote_ip) {
                         trc::event!(
-                            Http(trc::HttpEvent::RequestUrl),
-                            SpanId = session.session_id,
-                            Url = req.uri().to_string(),
-                        );
-
-                        session.remote_ip
-                    } else if let Some(forwarded_for) = req
-                        .headers()
-                        .get(header::FORWARDED)
-                        .and_then(|h| h.to_str().ok())
-                        .and_then(|h| {
-                            let h = h.to_ascii_lowercase();
-                            h.split_once("for=").and_then(|(_, rest)| {
-                                let mut start_ip = usize::MAX;
-                                let mut end_ip = usize::MAX;
-
-                                for (pos, ch) in rest.char_indices() {
-                                    match ch {
-                                        '0'..='9' | 'a'..='f' | ':' | '.' => {
-                                            if start_ip == usize::MAX {
-                                                start_ip = pos;
-                                            }
-                                            end_ip = pos;
-                                        }
-                                        '"' | '[' | ' ' if start_ip == usize::MAX => {}
-                                        _ => {
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                rest.get(start_ip..=end_ip)
-                                    .and_then(|h| h.parse::<IpAddr>().ok())
-                            })
-                        })
-                        .or_else(|| {
-                            req.headers()
-                                .get("X-Forwarded-For")
-                                .and_then(|h| h.to_str().ok())
-                                .map(|h| h.split_once(',').map_or(h, |(ip, _)| ip).trim())
-                                .and_then(|h| h.parse::<IpAddr>().ok())
-                        })
-                    {
-                        // Check if the forwarded IP has been blocked
-                        if server.is_ip_blocked(&forwarded_for) {
-                            trc::event!(
-                                Security(trc::SecurityEvent::IpBlocked),
-                                ListenerId = instance.id.clone(),
-                                RemoteIp = forwarded_for,
-                                SpanId = session.session_id,
-                            );
-
-                            return Ok::<_, hyper::Error>(
-                                JsonProblemResponse(StatusCode::FORBIDDEN)
-                                    .into_http_response()
-                                    .build(),
-                            );
-                        }
-
-                        trc::event!(
-                            Http(trc::HttpEvent::RequestUrl),
-                            SpanId = session.session_id,
-                            RemoteIp = forwarded_for,
-                            Url = req.uri().to_string(),
-                        );
-
-                        forwarded_for
-                    } else {
-                        trc::event!(
-                            Http(trc::HttpEvent::XForwardedMissing),
+                            Security(trc::SecurityEvent::IpBlocked),
+                            ListenerId = instance.id.clone(),
+                            ClientIp = remote_ip,
                             SpanId = session.session_id,
                         );
-                        session.remote_ip
-                    };
+
+                        return Ok::<_, hyper::Error>(
+                            JsonProblemResponse(StatusCode::FORBIDDEN)
+                                .into_http_response()
+                                .build(),
+                        );
+                    }
+
+                    // Log request URL with resolved IP
+                    trc::event!(
+                        Http(trc::HttpEvent::RequestUrl),
+                        SpanId = session.session_id,
+                        ClientIp = remote_ip,
+                        Url = req.uri().to_string(),
+                    );
+
+                    // Note: fail2ban check should only happen on parse errors or auth failures,
+                    // not on every request. The existing error handling will use the resolved IP.
 
                     // Parse HTTP request
                     let response = match Box::pin(server.parse_http_request(
@@ -813,30 +772,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
         .with_upgrades()
         .await
     {
-        if http_err.is_parse() {
-            match inner
-                .build_server()
-                .is_scanner_fail2banned(session.remote_ip)
-                .await
-            {
-                Ok(true) => {
-                    trc::event!(
-                        Security(SecurityEvent::ScanBan),
-                        SpanId = session.session_id,
-                        RemoteIp = session.remote_ip,
-                        Reason = http_err.to_string(),
-                    );
-                    return;
-                }
-                Ok(false) => {}
-                Err(err) => {
-                    trc::error!(
-                        err.span_id(session.session_id)
-                            .details("Failed to check for fail2ban")
-                    );
-                }
-            }
-        }
+        // fail2ban check is now handled earlier in the request processing
 
         trc::event!(
             Http(trc::HttpEvent::Error),
@@ -844,6 +780,67 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
             Reason = http_err.to_string(),
         );
     }
+}
+
+fn resolve_remote_ip_from_headers(
+    headers: &hyper::HeaderMap,
+    original_ip: IpAddr,
+    use_forwarded: bool,
+    session_id: u64,
+) -> IpAddr {
+    if !use_forwarded {
+        return original_ip;
+    }
+
+    // Try Forwarded header first
+    if let Some(forwarded_for) = headers
+        .get(hyper::header::FORWARDED)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| {
+            let h = h.to_ascii_lowercase();
+            h.split_once("for=").and_then(|(_, rest)| {
+                let mut start_ip = usize::MAX;
+                let mut end_ip = usize::MAX;
+
+                for (pos, ch) in rest.char_indices() {
+                    match ch {
+                        '0'..='9' | 'a'..='f' | ':' | '.' => {
+                            if start_ip == usize::MAX {
+                                start_ip = pos;
+                            }
+                            end_ip = pos;
+                        }
+                        '"' | '[' | ' ' if start_ip == usize::MAX => {}
+                        _ => {
+                            break;
+                        }
+                    }
+                }
+
+                rest.get(start_ip..=end_ip)
+                    .and_then(|h| h.parse::<IpAddr>().ok())
+            })
+        })
+    {
+        return forwarded_for;
+    }
+
+    // Try X-Forwarded-For header
+    if let Some(forwarded_for) = headers
+        .get("X-Forwarded-For")
+        .and_then(|h| h.to_str().ok())
+        .map(|h| h.split_once(',').map_or(h.trim(), |(ip, _)| ip.trim()))
+        .and_then(|h| h.parse::<IpAddr>().ok())
+    {
+        return forwarded_for;
+    }
+
+    // Log missing header warning and return original IP
+    trc::event!(
+        Http(trc::HttpEvent::XForwardedMissing),
+        SpanId = session_id,
+    );
+    original_ip
 }
 
 impl SessionManager for HttpSessionManager {
