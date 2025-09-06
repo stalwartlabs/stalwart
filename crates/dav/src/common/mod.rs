@@ -261,7 +261,7 @@ impl<'x> DavQuery<'x> {
             depth: match changes.depth {
                 Depth::One => 1,
                 Depth::Infinity => usize::MAX,
-                _ => 0,
+                _ => 1, // Default to depth 1 for sync-collection compatibility with clients like eM Client
             },
             limit: changes.limit,
             ret: headers.ret,

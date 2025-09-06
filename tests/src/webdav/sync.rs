@@ -287,6 +287,48 @@ pub async fn test(test: &WebDavTest) {
             );
     }
 
+    // Test eM Client specific issue: sync-collection with getetag + getcontenttype (no address-data)
+    println!("Running eM Client compatibility test for CardDAV sync-collection...");
+    let card_base_path = format!("/dav/card/john/");
+    
+    // Create a contact first
+    let contact_path = format!("{card_base_path}test-contact.vcf");
+    let vcard_content = concat!(
+        "BEGIN:VCARD\r\n",
+        "VERSION:4.0\r\n", 
+        "FN:Test Contact\r\n",
+        "N:Contact;Test;;;\r\n",
+        "EMAIL:test@example.com\r\n",
+        "END:VCARD\r\n"
+    );
+    client
+        .request("PUT", &contact_path, vcard_content)
+        .await
+        .with_status(StatusCode::CREATED);
+
+    // Test sync-collection with getetag + getcontenttype (like eM Client does)
+    let response = client
+        .sync_collection(&card_base_path, "", Depth::One, None, ["D:getetag", "D:getcontenttype"])
+        .await;
+    
+    // This should NOT be empty - it should return the contact with etag and content-type
+    assert!(response.hrefs().len() >= 1, 
+        "eM Client fix failed: sync-collection with getetag+getcontenttype returned empty result: {:?}", 
+        response.hrefs());
+        
+    // Verify the contact path is included in results
+    let hrefs = response.hrefs();
+    assert!(hrefs.iter().any(|href| href.contains("test-contact.vcf")),
+        "eM Client fix failed: contact not found in sync-collection results: {:?}", hrefs);
+    
+    println!("eM Client CardDAV compatibility test passed!");
+    
+    // Clean up
+    client
+        .request("DELETE", &contact_path, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+
     client.delete_default_containers().await;
     test.assert_is_empty().await;
 }
