@@ -304,7 +304,7 @@ fn build_dns_updater(config: &mut Config, acme_id: &str) -> Option<DnsUpdater> {
         .map_err(|err| {
             config.new_build_error(
                 ("acme", acme_id, "provider"),
-                format!("Failed to create Desec DNS updater: {err}"),
+                format!("Failed to create OVH DNS updater: {err}"),
             )
         })
         .ok(),
