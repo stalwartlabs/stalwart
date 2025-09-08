@@ -88,14 +88,14 @@ jobs:
           cosign sign --yes $(jq --arg DOCKERHUB_DIGEST_SHA "$(cat DOCKERHUB_DIGEST_SHA)" -cr '.target."docker-metadata-action".tags | map(select(startswith("index.docker.io/${{github.repository}}")) | . + "@" + $DOCKERHUB_DIGEST_SHA) | join(" ")' ${{ runner.temp }}/${{matrix.variant}}/bake-meta.json)
 
       - name: Attest GHCR
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-name: ghcr.io/${{github.repository}}
           subject-digest: ${{ env.GHCR_DIGEST_SHA }}
           push-to-registry: true
 
       - name: Attest Dockerhub
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-name: index.docker.io/${{github.repository}}
           subject-digest: ${{ env.DOCKERHUB_DIGEST_SHA }}
@@ -412,7 +412,7 @@ jobs:
 
       - name: Attest binary
         id: attest
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             archive/**/*.tar.gz
