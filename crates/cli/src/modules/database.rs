@@ -126,7 +126,7 @@ impl ServerCommands {
                             _ => {
                                 eprintln!(
                                     "Request failed: {}",
-                                    response.text().await.unwrap_result("fetch text")
+                                    resp.text().await.unwrap_result("fetch text")
                                 );
                                 std::process::exit(1);
                             }
