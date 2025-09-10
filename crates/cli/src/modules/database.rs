@@ -116,22 +116,27 @@ impl ServerCommands {
                     format!("{}/healthz/{}",
                             client.url,
                             check.unwrap_or("ready".to_string()))
-                )
-                    .await
-                    .unwrap();
-
-                match response.status() {
-                    StatusCode::OK => {
-                        eprintln!("Success")
-                    },
-                    _ => {
-                        eprintln!(
-                            "Request failed: {}",
-                            response.text().await.unwrap_result("fetch text")
-                        );
-                        std::process::exit(1);
+                ).await;
+                match response {
+                    Ok(resp) => {
+                        match resp.status() {
+                            StatusCode::OK => {
+                                eprintln!("Success")
+                            },
+                            _ => {
+                                eprintln!(
+                                    "Request failed: {}",
+                                    response.text().await.unwrap_result("fetch text")
+                                );
+                                std::process::exit(1);
+                            }
+                        }
                     }
-                }
+                    Err(err) => {
+                        eprintln!("Request failed: {}", err);
+                        std::process::exit(1);                        
+                    }
+                }               
             }
         }
     }
