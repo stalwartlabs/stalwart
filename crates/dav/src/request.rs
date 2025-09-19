@@ -80,7 +80,7 @@ pub(crate) trait DavRequestDispatcher: Sync + Send {
 impl DavRequestDispatcher for Server {
     async fn dispatch_dav_request(
         &self,
-        request: &HttpRequest,
+        _request: &HttpRequest,
         headers: &RequestHeaders<'_>,
         access_token: Arc<AccessToken>,
         resource: DavResourceName,
