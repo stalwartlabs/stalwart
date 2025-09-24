@@ -457,7 +457,7 @@ pub enum ServerCommands {
     /// Perform Healthcheck
     Healthcheck {
         /// Status `ready` (default) or `live` to check for
-        check: Option<String>
+        check: Option<String>,
     },
 }
 

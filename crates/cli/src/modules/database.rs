@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::collections::HashMap;
 use prettytable::{Attr, Cell, Row, Table};
 use reqwest::{Method, StatusCode};
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::modules::{Response, UnwrapResult};
 
@@ -112,31 +112,30 @@ impl ServerCommands {
                 );
             }
             ServerCommands::Healthcheck { check } => {
-                let response = reqwest::get(
-                    format!("{}/healthz/{}",
-                            client.url,
-                            check.unwrap_or("ready".to_string()))
-                ).await;
+                let response = reqwest::get(format!(
+                    "{}/healthz/{}",
+                    client.url,
+                    check.unwrap_or("ready".to_string())
+                ))
+                .await;
                 match response {
-                    Ok(resp) => {
-                        match resp.status() {
-                            StatusCode::OK => {
-                                eprintln!("Success")
-                            },
-                            _ => {
-                                eprintln!(
-                                    "Request failed: {}",
-                                    resp.text().await.unwrap_result("fetch text")
-                                );
-                                std::process::exit(1);
-                            }
+                    Ok(resp) => match resp.status() {
+                        StatusCode::OK => {
+                            eprintln!("Success")
                         }
-                    }
+                        _ => {
+                            eprintln!(
+                                "Request failed: {}",
+                                resp.text().await.unwrap_result("fetch text")
+                            );
+                            std::process::exit(1);
+                        }
+                    },
                     Err(err) => {
                         eprintln!("Request failed: {}", err);
-                        std::process::exit(1);                        
+                        std::process::exit(1);
                     }
-                }               
+                }
             }
         }
     }
