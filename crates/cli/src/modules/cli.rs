@@ -28,6 +28,9 @@ pub struct Cli {
     /// Do not ask for credentials
     #[clap(short, long)]
     pub anonymous: bool,
+    /// Output server list-config in YAML
+    #[clap(short, long)]
+    pub yaml: bool,
 }
 
 #[derive(Subcommand)]

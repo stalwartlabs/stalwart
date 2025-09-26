@@ -33,7 +33,7 @@ pub enum UpdateSettings {
 }
 
 impl ServerCommands {
-    pub async fn exec(self, client: Client) {
+    pub async fn exec(self, client: Client, yaml: bool) {
         match self {
             ServerCommands::DatabaseMaintenance {} => {
                 client
@@ -90,21 +90,30 @@ impl ServerCommands {
                     .items;
 
                 if !results.is_empty() {
-                    let mut table = Table::new();
-                    table.add_row(Row::new(vec![
-                        Cell::new("Key").with_style(Attr::Bold),
-                        Cell::new("Value").with_style(Attr::Bold),
-                    ]));
-
-                    for (key, value) in &results {
-                        table.add_row(Row::new(vec![Cell::new(key), Cell::new(value)]));
+                    if yaml {
+                        for (key, value) in &results {
+                            let val: String;
+                            if value.contains('\n') {
+                                val = "|\n  ".to_owned() + &value.replace("\n", "\n  ").trim_end();
+                            } else {
+                                val = "\"".to_owned() + value + "\"";
+                            }
+                            println!("{key}: {val}");
+                        }
+                    } else {
+                        let mut table = Table::new();
+                        table.add_row(Row::new(vec![
+                            Cell::new("Key").with_style(Attr::Bold),
+                            Cell::new("Value").with_style(Attr::Bold),
+                        ]));
+                        for (key, value) in &results {
+                            table.add_row(Row::new(vec![Cell::new(key), Cell::new(value)]));
+                        }
+                        eprintln!();
+                        table.printstd();
+                        eprintln!();
                     }
-
-                    eprintln!();
-                    table.printstd();
-                    eprintln!();
                 }
-
                 eprintln!(
                     "\n\n{} key{} found.\n",
                     results.len(),
