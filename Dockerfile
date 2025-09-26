@@ -1,7 +1,7 @@
 # Stalwart Dockerfile
 # Credits: https://github.com/33KK 
 
-FROM --platform=$BUILDPLATFORM docker.io/lukemathwalker/cargo-chef:latest-rust-slim-bookworm AS chef
+FROM --platform=$BUILDPLATFORM docker.io/lukemathwalker/cargo-chef:latest-rust-slim-trixie AS chef
 WORKDIR /build
 
 FROM --platform=$BUILDPLATFORM chef AS planner
@@ -17,7 +17,7 @@ RUN case "${TARGETPLATFORM}" in \
     esac
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
-    apt-get install -yq build-essential libclang-16-dev \
+    apt-get install -yq --no-install-recommends build-essential libclang-16-dev \
     g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
     g++-x86-64-linux-gnu binutils-x86-64-linux-gnu
 RUN rustup target add "$(cat /target.txt)"
@@ -28,11 +28,11 @@ RUN RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --re
 RUN RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --release -p stalwart-cli
 RUN mv "/build/target/$(cat /target.txt)/release" "/output"
 
-FROM docker.io/debian:bookworm-slim
+FROM docker.io/debian:trixie-slim
 WORKDIR /opt/stalwart
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
-    apt-get install -yq ca-certificates
+    apt-get install -yq --no-install-recommends ca-certificates
 COPY --from=builder /output/stalwart /usr/local/bin
 COPY --from=builder /output/stalwart-cli /usr/local/bin
 COPY ./resources/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
