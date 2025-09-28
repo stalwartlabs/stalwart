@@ -8,7 +8,7 @@ use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
     types::date::UTCDate,
 };
-use jmap_tools::{Element, Key, Null, Property};
+use jmap_tools::{Element, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::id::Id;
 
@@ -118,15 +118,13 @@ impl JmapObject for VacationResponse {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = ();
 
     type Comparator = ();
 
     type GetArguments = ();
 
-    type SetArguments = ();
+    type SetArguments<'de> = ();
 
     type QueryArguments = ();
 
@@ -138,12 +136,6 @@ impl JmapObject for VacationResponse {
 impl From<Id> for VacationResponseValue {
     fn from(id: Id) -> Self {
         VacationResponseValue::Id(id)
-    }
-}
-
-impl From<Null> for VacationResponseProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }
 

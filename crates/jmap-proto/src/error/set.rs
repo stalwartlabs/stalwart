@@ -198,6 +198,12 @@ impl<T: Property> From<(T, T)> for InvalidProperty<T> {
     }
 }
 
+impl<T: Property> From<Key<'static, T>> for InvalidProperty<T> {
+    fn from(property: Key<'static, T>) -> Self {
+        InvalidProperty::Property(property)
+    }
+}
+
 impl<T: Property> serde::Serialize for InvalidProperty<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

@@ -68,8 +68,19 @@ pub enum Keyword {
 }
 
 impl Keyword {
+    pub const MAX_LENGTH: usize = 128;
+
     pub fn parse(value: &str) -> Self {
-        Self::try_parse(value).unwrap_or_else(|| Keyword::Other(value.to_string()))
+        Self::try_parse(value)
+            .unwrap_or_else(|| Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect()))
+    }
+
+    pub fn from_other(value: String) -> Self {
+        if value.len() <= Keyword::MAX_LENGTH {
+            Keyword::Other(value)
+        } else {
+            Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect())
+        }
     }
 
     pub fn try_parse(value: &str) -> Option<Self> {
@@ -151,7 +162,7 @@ impl Keyword {
 
 impl From<String> for Keyword {
     fn from(value: String) -> Self {
-        Keyword::try_parse(&value).unwrap_or(Keyword::Other(value))
+        Keyword::try_parse(&value).unwrap_or_else(|| Keyword::from_other(value))
     }
 }
 

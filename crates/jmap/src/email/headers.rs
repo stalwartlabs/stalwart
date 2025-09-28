@@ -24,7 +24,6 @@ use mail_parser::{
     Addr, ArchivedHeader, ArchivedHeaderValue, DateTime, Group, Header, HeaderName, HeaderValue,
     parsers::MessageStream,
 };
-use std::borrow::Cow;
 use store::rkyv::vec::ArchivedVec;
 
 pub trait IntoForm {
@@ -46,11 +45,11 @@ pub trait ValueToHeader<'x> {
     fn try_into_address(self) -> Option<EmailAddress<'x>>;
 }
 
-pub trait BuildHeader: Sized {
+pub trait BuildHeader<'x>: Sized {
     fn build_header(
         self,
         header: HeaderProperty,
-        value: Value<'static, EmailProperty, EmailValue>,
+        value: Value<'x, EmailProperty, EmailValue>,
     ) -> Result<Self, HeaderProperty>;
 }
 
@@ -198,14 +197,13 @@ impl IntoForm for HeaderValue<'_> {
     }
 }
 
-impl<'x> ValueToHeader<'x> for Value<'static, EmailProperty, EmailValue> {
+impl<'x> ValueToHeader<'x> for Value<'x, EmailProperty, EmailValue> {
     fn try_into_grouped_addresses(self) -> Option<GroupedAddresses<'x>> {
         let mut obj = self.into_object()?;
         Some(GroupedAddresses {
             name: obj
                 .remove(&Key::Property(EmailProperty::Name))
-                .and_then(|n| n.into_string())
-                .map(|n| n.into()),
+                .and_then(|n| n.into_string()),
             addresses: obj
                 .remove(&Key::Property(EmailProperty::Addresses))?
                 .try_into_address_list()?,
@@ -226,21 +224,19 @@ impl<'x> ValueToHeader<'x> for Value<'static, EmailProperty, EmailValue> {
         Some(EmailAddress {
             name: obj
                 .remove(&Key::Property(EmailProperty::Name))
-                .and_then(|n| n.into_string())
-                .map(|n| n.into()),
+                .and_then(|n| n.into_string()),
             email: obj
                 .remove(&Key::Property(EmailProperty::Email))?
-                .into_string()?
-                .into(),
+                .into_string()?,
         })
     }
 }
 
-impl BuildHeader for MessageBuilder<'_> {
+impl<'x> BuildHeader<'x> for MessageBuilder<'x> {
     fn build_header(
         self,
         header: HeaderProperty,
-        value: Value<'static, EmailProperty, EmailValue>,
+        value: Value<'x, EmailProperty, EmailValue>,
     ) -> Result<Self, HeaderProperty> {
         Ok(match (&header.form, header.all, value) {
             (HeaderForm::Raw, false, Value::Str(value)) => {
@@ -275,7 +271,7 @@ impl BuildHeader for MessageBuilder<'_> {
                 URL {
                     url: value
                         .into_iter()
-                        .filter_map(|v| Cow::from(v.into_string()?).into())
+                        .filter_map(|v| v.into_string()?.into())
                         .collect(),
                 },
             ),
@@ -286,7 +282,7 @@ impl BuildHeader for MessageBuilder<'_> {
                         url: value
                             .into_array()?
                             .into_iter()
-                            .filter_map(|v| Cow::from(v.into_string()?).into())
+                            .filter_map(|v| v.into_string()?.into())
                             .collect(),
                     }
                     .into()
@@ -297,7 +293,7 @@ impl BuildHeader for MessageBuilder<'_> {
                 MessageId {
                     id: value
                         .into_iter()
-                        .filter_map(|v| Cow::from(v.into_string()?).into())
+                        .filter_map(|v| v.into_string()?.into())
                         .collect(),
                 },
             ),
@@ -308,7 +304,7 @@ impl BuildHeader for MessageBuilder<'_> {
                         id: value
                             .into_array()?
                             .into_iter()
-                            .filter_map(|v| Cow::from(v.into_string()?).into())
+                            .filter_map(|v| v.into_string()?.into())
                             .collect(),
                     }
                     .into()
@@ -466,7 +462,7 @@ impl ByteTrim for &[u8] {
 }
 
 #[inline]
-fn unwrap_date(value: Value<'static, EmailProperty, EmailValue>) -> Option<UTCDate> {
+pub(crate) fn unwrap_date(value: Value<'_, EmailProperty, EmailValue>) -> Option<UTCDate> {
     match value {
         Value::Element(EmailValue::Date(date)) => Some(date),
         _ => None,

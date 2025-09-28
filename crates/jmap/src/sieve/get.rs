@@ -66,7 +66,7 @@ impl SieveScriptGet for Server {
             // Obtain the sieve script object
             let document_id = id.document_id();
             if !push_ids.contains(document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let sieve_ = if let Some(sieve) = self
@@ -75,7 +75,7 @@ impl SieveScriptGet for Server {
             {
                 sieve
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
             let sieve = sieve_

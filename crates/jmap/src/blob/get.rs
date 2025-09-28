@@ -149,7 +149,7 @@ impl BlobOperations for Server {
                 // Add result to response
                 response.list.push(blob.into());
             } else {
-                response.not_found.push(blob_id.into());
+                response.not_found.push(blob_id);
             }
         }
 

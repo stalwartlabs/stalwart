@@ -13,7 +13,7 @@ use ::email::message::ingest::{EmailIngest, IngestEmail, IngestSource};
 use common::auth::AccessToken;
 use jmap_client::{email, mailbox::Role};
 use mail_parser::{MessageParser, mailbox::mbox::MessageIterator};
-use std::{io::Cursor, time::Duration};
+use std::{io::Cursor, str::FromStr, time::Duration};
 use store::{
     ahash::{AHashMap, AHashSet},
     rand::{self, Rng},
@@ -159,7 +159,7 @@ async fn test_single_thread(params: &mut JMAPTest) {
             let thread_ids: AHashSet<u32> = result
                 .ids()
                 .iter()
-                .map(|id| Id::from_bytes(id.as_bytes()).unwrap().prefix_id())
+                .map(|id| Id::from_str(id).unwrap().prefix_id())
                 .collect();
 
             assert_eq!(
@@ -212,7 +212,7 @@ async fn test_multi_thread(params: &mut JMAPTest) {
     //let semaphore = sync::Arc::Arc::new(tokio::sync::Semaphore::new(100));
     let mut handles = vec![];
 
-    let mailbox_id = Id::from_bytes(
+    let mailbox_id = Id::from_str(
         params
             .client
             .set_default_account_id(Id::new(0u64).to_string())
@@ -220,8 +220,7 @@ async fn test_multi_thread(params: &mut JMAPTest) {
             .await
             .unwrap()
             .id()
-            .unwrap()
-            .as_bytes(),
+            .unwrap(),
     )
     .unwrap()
     .document_id();

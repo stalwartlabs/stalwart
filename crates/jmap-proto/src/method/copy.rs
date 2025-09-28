@@ -50,7 +50,7 @@ pub struct CopyResponse<T: JmapObject> {
 
     #[serde(rename = "notCreated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_created: VecMap<MaybeInvalid<Id>, SetError<T::Property>>,
+    pub not_created: VecMap<Id, SetError<T::Property>>,
 }
 
 #[derive(Debug, Clone, Default)]

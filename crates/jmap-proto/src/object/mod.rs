@@ -36,14 +36,18 @@ pub trait JmapObject: std::fmt::Debug {
     type Filter: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
     type Comparator: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
 
-    type Right: JmapRight + Into<Self::Property> + Debug + Sync + Send;
-
     type GetArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
-    type SetArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
+    type SetArguments<'de>: Default + DeserializeArguments<'de> + Debug + Sync + Send;
     type QueryArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
     type CopyArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
 
     const ID_PROPERTY: Self::Property;
+}
+
+pub trait JmapSharedObject: JmapObject {
+    type Right: JmapRight + Into<Self::Property> + Debug + Sync + Send;
+
+    const SHARE_WITH_PROPERTY: Self::Property;
 }
 
 pub trait JmapRight: Clone + Copy + Sized + 'static {
@@ -148,10 +152,8 @@ impl JmapObject for NullObject {
     type Filter = ();
     type Comparator = ();
 
-    type Right = Null;
-
     type GetArguments = ();
-    type SetArguments = ();
+    type SetArguments<'de> = ();
     type QueryArguments = ();
     type CopyArguments = ();
 

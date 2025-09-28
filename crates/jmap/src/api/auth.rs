@@ -1,35 +1,16 @@
-use common::{Server, auth::AccessToken};
-use directory::{Permission, QueryParams, backend::internal::manage::ManageDirectory};
-use jmap_proto::{
-    error::set::SetError,
-    request::{
-        CopyRequestMethod, GetRequestMethod, QueryChangesRequestMethod, QueryRequestMethod,
-        RequestMethod, SetRequestMethod, method::MethodObject,
-    },
-};
-use types::{
-    acl::{Acl, AclGrant},
-    collection::Collection,
-    id::Id,
-};
-use utils::map::bitmap::Bitmap;
+/*
+ * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
+ */
 
-pub trait JmapAcl {
-    fn acl_set(
-        &self,
-        changes: &mut Vec<AclGrant>,
-        current: Option<&[AclGrant]>,
-        acl_changes: MaybePatchValue,
-    ) -> impl Future<Output = Result<(), SetError>> + Send;
-    fn map_acl_set(
-        &self,
-        acl_set: Vec<Value>,
-    ) -> impl Future<Output = Result<Vec<AclGrant>, SetError>> + Send;
-    fn map_acl_patch(
-        &self,
-        acl_patch: Vec<Value>,
-    ) -> impl Future<Output = Result<(AclGrant, Option<bool>), SetError>> + Send;
-}
+use common::auth::AccessToken;
+use directory::Permission;
+use jmap_proto::request::{
+    CopyRequestMethod, GetRequestMethod, QueryChangesRequestMethod, QueryRequestMethod,
+    RequestMethod, SetRequestMethod, method::MethodObject,
+};
+use types::{collection::Collection, id::Id};
 
 pub trait JmapAuthorization {
     fn assert_is_member(&self, account_id: Id) -> trc::Result<&Self>;
@@ -40,136 +21,6 @@ pub trait JmapAuthorization {
     ) -> trc::Result<()>;
     fn assert_has_access(&self, to_account_id: Id, to_collection: Collection)
     -> trc::Result<&Self>;
-}
-
-impl JmapAcl for Server {
-    async fn acl_set(
-        &self,
-        changes: &mut Vec<AclGrant>,
-        current: Option<&[AclGrant]>,
-        acl_changes: MaybePatchValue,
-    ) -> Result<(), SetError> {
-        match acl_changes {
-            MaybePatchValue::Value(Value::Array(values)) => {
-                *changes = self.map_acl_set(values).await?;
-            }
-            MaybePatchValue::Patch(patch) => {
-                let (mut patch, is_update) = self.map_acl_patch(patch).await?;
-                if let Some(changes_) = current {
-                    *changes = changes_.to_vec();
-                }
-
-                if let Some(is_set) = is_update {
-                    if !patch.grants.is_empty() {
-                        if let Some(acl_item) = changes
-                            .iter_mut()
-                            .find(|item| item.account_id == patch.account_id)
-                        {
-                            let item = patch.grants.pop().unwrap();
-                            if is_set {
-                                acl_item.grants.insert(item);
-                            } else {
-                                acl_item.grants.remove(item);
-                                if acl_item.grants.is_empty() {
-                                    changes.retain(|item| item.account_id != patch.account_id);
-                                }
-                            }
-                        } else if is_set {
-                            changes.push(patch);
-                        }
-                    }
-                } else if !patch.grants.is_empty() {
-                    if let Some(acl_item) = changes
-                        .iter_mut()
-                        .find(|item| item.account_id == patch.account_id)
-                    {
-                        acl_item.grants = patch.grants;
-                    } else {
-                        changes.push(patch);
-                    }
-                } else {
-                    changes.retain(|item| item.account_id != patch.account_id);
-                }
-            }
-            _ => {
-                return Err(SetError::invalid_properties()
-                    .with_key_value(Property::Acl)
-                    .with_description("Invalid ACL property."));
-            }
-        }
-        Ok(())
-    }
-
-    async fn map_acl_set(&self, acl_set: Vec<Value>) -> Result<Vec<AclGrant>, SetError> {
-        let mut acls = Vec::with_capacity(acl_set.len() / 2);
-        for item in acl_set.chunks_exact(2) {
-            if let (Value::Str(account_name), Value::Number(grants)) = (&item[0], &item[1]) {
-                match self
-                    .core
-                    .storage
-                    .directory
-                    .query(QueryParams::name(account_name).with_return_member_of(false))
-                    .await
-                {
-                    Ok(Some(principal)) => {
-                        acls.push(AclGrant {
-                            account_id: principal.id(),
-                            grants: Bitmap::from(*grants),
-                        });
-                    }
-                    Ok(None) => {
-                        return Err(SetError::invalid_properties()
-                            .with_key_value(Property::Acl)
-                            .with_description(format!("Account {account_name} does not exist.")));
-                    }
-                    _ => {
-                        return Err(SetError::forbidden()
-                            .with_key_value(Property::Acl)
-                            .with_description("Temporary server failure during lookup"));
-                    }
-                }
-            } else {
-                return Err(SetError::invalid_properties()
-                    .with_key_value(Property::Acl)
-                    .with_description("Invalid ACL value found."));
-            }
-        }
-
-        Ok(acls)
-    }
-
-    async fn map_acl_patch(
-        &self,
-        acl_patch: Vec<Value>,
-    ) -> Result<(AclGrant, Option<bool>), SetError> {
-        if let (Value::Str(account_name), Value::Number(grants)) = (&acl_patch[0], &acl_patch[1]) {
-            match self
-                .core
-                .storage
-                .directory
-                .query(QueryParams::name(account_name).with_return_member_of(false))
-                .await
-            {
-                Ok(Some(principal)) => Ok((
-                    AclGrant {
-                        account_id: principal.id(),
-                        grants: Bitmap::from(*grants),
-                    },
-                    acl_patch.get(2).map(|v| v.as_bool().unwrap_or(false)),
-                )),
-                Ok(None) => Err(SetError::invalid_properties()
-                    .with_key_value(Property::Acl)
-                    .with_description(format!("Account {account_name} does not exist."))),
-                _ => Err(SetError::forbidden()
-                    .with_key_value(Property::Acl)
-                    .with_description("Temporary server failure during lookup")),
-            }
-        } else {
-            Err(SetError::invalid_properties()
-                .with_key_value(Property::Acl)
-                .with_description("Invalid ACL value found."))
-        }
-    }
 }
 
 impl JmapAuthorization for AccessToken {

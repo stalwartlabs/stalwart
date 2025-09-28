@@ -30,7 +30,7 @@ pub struct SetRequest<'x, T: JmapObject> {
     pub create: Option<VecMap<String, Value<'x, T::Property, T::Element>>>,
     pub update: Option<VecMap<MaybeInvalid<Id>, Value<'x, T::Property, T::Element>>>,
     pub destroy: Option<MaybeResultReference<Vec<MaybeInvalid<Id>>>>,
-    pub arguments: T::SetArguments,
+    pub arguments: T::SetArguments<'x>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -66,11 +66,11 @@ pub struct SetResponse<T: JmapObject> {
 
     #[serde(rename = "notUpdated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_updated: VecMap<MaybeInvalid<Id>, SetError<T::Property>>,
+    pub not_updated: VecMap<Id, SetError<T::Property>>,
 
     #[serde(rename = "notDestroyed")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_destroyed: VecMap<MaybeInvalid<Id>, SetError<T::Property>>,
+    pub not_destroyed: VecMap<Id, SetError<T::Property>>,
 }
 
 impl<'de, T: JmapObject> DeserializeArguments<'de> for SetRequest<'de, T> {
@@ -236,7 +236,7 @@ impl<T: JmapObject> SetResponse<T> {
 
     pub fn invalid_property_update(
         &mut self,
-        id: MaybeInvalid<Id>,
+        id: Id,
         property: impl Into<InvalidProperty<T::Property>>,
     ) {
         self.not_updated.append(
@@ -256,6 +256,30 @@ impl<T: JmapObject> SetResponse<T> {
                 response.created_ids.insert(user_id.clone(), id);
             }
         }
+    }
+
+    pub fn get_object_by_id(
+        &mut self,
+        id: Id,
+    ) -> Option<&mut Value<'static, T::Property, T::Element>> {
+        if let Some(obj) = self.updated.get_mut(&id) {
+            if let Some(obj) = obj {
+                return Some(obj);
+            } else {
+                *obj = Some(Value::Object(Map::with_capacity(1)));
+                return obj.as_mut().unwrap().into();
+            }
+        }
+
+        (&mut self.created)
+            .into_iter()
+            .map(|(_, obj)| obj)
+            .find(|obj| {
+                obj.as_object_and_get(&Key::Property(T::ID_PROPERTY))
+                    .and_then(|v| v.as_element())
+                    .and_then(|v| v.as_id())
+                    .is_some_and(|oid| oid == id)
+            })
     }
 
     pub fn has_changes(&self) -> bool {

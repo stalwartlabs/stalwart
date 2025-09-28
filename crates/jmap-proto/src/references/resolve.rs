@@ -5,6 +5,7 @@
  */
 
 use crate::{
+    error::set::SetError,
     method::{
         copy::CopyRequest,
         get::GetRequest,
@@ -72,7 +73,7 @@ where
 {
     fn get_created_id(&self, id_ref: &str) -> Option<AnyId>;
 
-    fn resolve_self_references(&mut self, value: &mut Value<'_, P, E>) -> trc::Result<()> {
+    fn resolve_self_references(&self, value: &mut Value<'_, P, E>) -> Result<(), SetError<P>> {
         match value {
             Value::Element(element) => {
                 if let Some(id_ref) = element.as_id_ref() {
@@ -82,17 +83,14 @@ where
                                 *element = eid;
                             }
                             Err(_) => {
-                                return Err(trc::JmapEvent::InvalidResultReference
-                                    .into_err()
-                                    .details(format_compact!(
-                                        "Id reference {id_ref:?} points to invalid type."
-                                    )));
+                                return Err(SetError::invalid_properties().with_description(
+                                    format!("Id reference {id_ref:?} points to invalid type."),
+                                ));
                             }
                         }
                     } else {
-                        return Err(trc::JmapEvent::InvalidResultReference
-                            .into_err()
-                            .details(format_compact!("Id reference {id_ref:?} not found.")));
+                        return Err(SetError::not_found()
+                            .with_description(format!("Id reference {id_ref:?} not found.")));
                     }
                 }
             }

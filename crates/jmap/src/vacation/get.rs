@@ -150,10 +150,10 @@ impl VacationResponseGet for Server {
                     }
                     response.list.push(result.into());
                 } else {
-                    response.not_found.push(Id::singleton().into());
+                    response.not_found.push(Id::singleton());
                 }
             } else {
-                response.not_found.push(Id::singleton().into());
+                response.not_found.push(Id::singleton());
             }
         }
 

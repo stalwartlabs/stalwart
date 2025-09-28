@@ -147,7 +147,7 @@ impl EmailGet for Server {
         for id in ids {
             // Obtain the email object
             if !message_ids.contains(id.document_id()) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let metadata_ = match self
@@ -161,7 +161,7 @@ impl EmailGet for Server {
             {
                 Some(metadata) => metadata,
                 None => {
-                    response.not_found.push(id.into());
+                    response.not_found.push(id);
                     continue;
                 }
             };
@@ -173,7 +173,7 @@ impl EmailGet for Server {
             let data = match cache.email_by_id(&id.document_id()) {
                 Some(data) => data,
                 None => {
-                    response.not_found.push(id.into());
+                    response.not_found.push(id);
                     continue;
                 }
             };
@@ -194,7 +194,7 @@ impl EmailGet for Server {
                         CausedBy = trc::location!(),
                     );
 
-                    response.not_found.push(id.into());
+                    response.not_found.push(id);
                     continue;
                 }
             } else {

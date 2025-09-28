@@ -10,7 +10,7 @@ use jmap_proto::{
     method::changes::{ChangesRequest, ChangesResponse},
     object::{JmapObject, NullObject, mailbox::MailboxProperty},
     request::method::MethodObject,
-    response::ChangesResponseMethod,
+    response::{ChangesResponseMethod, ResponseMethod},
     types::state::State,
 };
 use std::future::Future;
@@ -205,8 +205,8 @@ impl ChangesLookup for Server {
 }
 
 impl IntermediateChangesResponse {
-    pub fn into_method_response(self) -> ChangesResponseMethod {
-        match self.object {
+    pub fn into_method_response(self) -> ResponseMethod<'static> {
+        ResponseMethod::Changes(match self.object {
             MethodObject::Email => ChangesResponseMethod::Email(transmute_response(self.response)),
             MethodObject::Mailbox => {
                 let mut response = transmute_response(self.response);
@@ -238,7 +238,7 @@ impl IntermediateChangesResponse {
             | MethodObject::SieveScript
             | MethodObject::Principal
             | MethodObject::Quota => unreachable!(),
-        }
+        })
     }
 }
 

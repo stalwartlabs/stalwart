@@ -63,7 +63,7 @@ impl QuotaGet for Server {
             // Obtain the sieve script object
             let document_id = id.document_id();
             if !quota_ids.contains(&document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
 

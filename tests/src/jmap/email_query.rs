@@ -11,19 +11,19 @@ use crate::{
 };
 use ::email::{cache::MessageCacheFetch, mailbox::Mailbox};
 use ahash::AHashSet;
-use common::{config::jmap::settings::SpecialUse, storage::index::ObjectIndexBuilder};
+use common::storage::index::ObjectIndexBuilder;
 use jmap_client::{
     client::Client,
     core::query::{Comparator, Filter},
     email,
 };
 use mail_parser::{DateTime, HeaderName};
-use std::{collections::hash_map::Entry, time::Instant};
+use std::{collections::hash_map::Entry, str::FromStr, time::Instant};
 use store::{
     ahash::AHashMap,
     write::{BatchBuilder, now},
 };
-use types::{collection::Collection, id::Id};
+use types::{collection::Collection, id::Id, special_use::SpecialUse};
 
 const MAX_THREADS: usize = 100;
 const MAX_MESSAGES: usize = 1000;
@@ -37,7 +37,7 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
     if insert {
         // Add some "virtual" mailbox ids so create doesn't fail
         let mut batch = BatchBuilder::new();
-        let account_id = Id::from_bytes(client.default_account_id().as_bytes())
+        let account_id = Id::from_str(client.default_account_id())
             .unwrap()
             .document_id();
         batch

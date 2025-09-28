@@ -13,7 +13,7 @@ use crate::{
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
     types::date::UTCDate,
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Null, Property, Value};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property, Value};
 use std::{borrow::Cow, str::FromStr};
 use types::{blob::BlobId, id::Id};
 use utils::map::vec_map::VecMap;
@@ -317,15 +317,13 @@ impl JmapObject for EmailSubmission {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = EmailSubmissionFilter;
 
     type Comparator = EmailSubmissionComparator;
 
     type GetArguments = ();
 
-    type SetArguments = ();
+    type SetArguments<'de> = EmailSubmissionSetArguments<'de>;
 
     type QueryArguments = ();
 
@@ -468,11 +466,5 @@ impl TryFrom<AnyId> for EmailSubmissionValue {
             AnyId::Id(id) => Ok(EmailSubmissionValue::Id(id)),
             AnyId::BlobId(blob_id) => Ok(EmailSubmissionValue::BlobId(blob_id)),
         }
-    }
-}
-
-impl From<Null> for EmailSubmissionProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }

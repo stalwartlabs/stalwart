@@ -17,7 +17,7 @@ use jmap_client::{
     core::set::{SetErrorType, SetObject},
     mailbox::{self, Mailbox, Role},
 };
-use std::{sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use store::{
     rand::{self, Rng},
     roaring::RoaringBitmap,
@@ -213,7 +213,7 @@ async fn email_tests(server: Server, client: Arc<Client>) {
         assert_eq!(mailbox_ids.len(), 8);
 
         for mailbox in mailboxes.iter() {
-            let mailbox_id = Id::from_bytes(mailbox.as_bytes()).unwrap().document_id();
+            let mailbox_id = Id::from_str(mailbox).unwrap().document_id();
             let email_ids_in_mailbox = RoaringBitmap::from_iter(
                 server
                     .get_cached_messages(TEST_USER_ID)

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_tools::{Element, Key, Null, Property};
+use jmap_tools::{Element, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::id::Id;
 
@@ -89,15 +89,13 @@ impl JmapObject for Thread {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = ();
 
     type Comparator = ();
 
     type GetArguments = ();
 
-    type SetArguments = ();
+    type SetArguments<'de> = ();
 
     type QueryArguments = ();
 
@@ -136,11 +134,5 @@ impl TryFrom<AnyId> for ThreadValue {
             AnyId::Id(id) => Ok(ThreadValue::Id(id)),
             _ => Err(()),
         }
-    }
-}
-
-impl From<Null> for ThreadProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }

@@ -10,7 +10,9 @@ use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use types::{acl::Acl, id::Id, special_use::SpecialUse};
 
 use crate::{
-    object::{AnyId, JmapObject, JmapObjectId, JmapRight, MaybeReference, parse_ref},
+    object::{
+        AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference, parse_ref,
+    },
     request::deserialize::DeserializeArguments,
 };
 
@@ -249,21 +251,55 @@ impl JmapObject for Mailbox {
 
     type Id = Id;
 
-    type Right = MailboxRight;
-
     type Filter = MailboxFilter;
 
     type Comparator = MailboxComparator;
 
     type GetArguments = ();
 
-    type SetArguments = MailboxSetArguments;
+    type SetArguments<'de> = MailboxSetArguments;
 
     type QueryArguments = MailboxQueryArguments;
 
     type CopyArguments = ();
 
     const ID_PROPERTY: Self::Property = MailboxProperty::Id;
+}
+
+impl JmapSharedObject for Mailbox {
+    type Right = MailboxRight;
+
+    const SHARE_WITH_PROPERTY: Self::Property = MailboxProperty::ShareWith;
+}
+
+impl From<Id> for MailboxProperty {
+    fn from(id: Id) -> Self {
+        MailboxProperty::IdValue(id)
+    }
+}
+
+impl TryFrom<MailboxProperty> for Id {
+    type Error = ();
+
+    fn try_from(value: MailboxProperty) -> Result<Self, Self::Error> {
+        if let MailboxProperty::IdValue(id) = value {
+            Ok(id)
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl TryFrom<MailboxProperty> for MailboxRight {
+    type Error = ();
+
+    fn try_from(value: MailboxProperty) -> Result<Self, Self::Error> {
+        if let MailboxProperty::Rights(right) = value {
+            Ok(right)
+        } else {
+            Err(())
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

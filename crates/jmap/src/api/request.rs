@@ -42,21 +42,21 @@ use types::collection::Collection;
 use std::future::Future;
 
 pub trait RequestHandler: Sync + Send {
-    fn handle_jmap_request(
+    fn handle_jmap_request<'x>(
         &self,
-        request: Request,
+        request: Request<'x>,
         access_token: Arc<AccessToken>,
         session: &HttpSessionData,
-    ) -> impl Future<Output = Response> + Send;
+    ) -> impl Future<Output = Response<'x>> + Send;
 
-    fn handle_method_call(
+    fn handle_method_call<'x>(
         &self,
-        method: RequestMethod,
+        method: RequestMethod<'x>,
         method_name: MethodName,
         access_token: &AccessToken,
-        next_call: &mut Option<Call<RequestMethod>>,
+        next_call: &mut Option<Call<RequestMethod<'x>>>,
         session: &HttpSessionData,
-    ) -> impl Future<Output = trc::Result<ResponseMethod>> + Send;
+    ) -> impl Future<Output = trc::Result<ResponseMethod<'x>>> + Send;
 }
 
 impl RequestHandler for Server {
@@ -189,7 +189,7 @@ impl RequestHandler for Server {
 
         // Handle method
         let response = match method {
-            RequestMethod::Get(mut req) => match req {
+            RequestMethod::Get(req) => match req {
                 GetRequestMethod::Email(req) => {
                     access_token.assert_has_access(req.account_id, Collection::Email)?;
 
@@ -240,7 +240,7 @@ impl RequestHandler for Server {
                     self.blob_get(req, access_token).await?.into()
                 }
             },
-            RequestMethod::Query(mut req) => match req {
+            RequestMethod::Query(req) => match req {
                 QueryRequestMethod::Email(req) => {
                     access_token.assert_has_access(req.account_id, Collection::Email)?;
 
@@ -270,7 +270,7 @@ impl RequestHandler for Server {
                     self.quota_query(req, access_token).await?.into()
                 }
             },
-            RequestMethod::Set(mut req) => match req {
+            RequestMethod::Set(req) => match req {
                 SetRequestMethod::Email(req) => {
                     access_token.assert_has_access(req.account_id, Collection::Email)?;
 
@@ -312,8 +312,7 @@ impl RequestHandler for Server {
             RequestMethod::Changes(req) => self
                 .changes(req, method_name.obj, access_token)
                 .await?
-                .into_method_response()
-                .into(),
+                .into_method_response(),
             RequestMethod::Copy(req) => match req {
                 CopyRequestMethod::Email(req) => {
                     access_token

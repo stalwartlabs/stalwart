@@ -6,7 +6,7 @@
 
 use crate::object::{AnyId, JmapObject, JmapObjectId};
 use crate::types::date::UTCDate;
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Null};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem};
 use jmap_tools::{Key, Property};
 use std::borrow::Cow;
 use std::str::FromStr;
@@ -150,15 +150,13 @@ impl JmapObject for PushSubscription {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = ();
 
     type Comparator = ();
 
     type GetArguments = ();
 
-    type SetArguments = ();
+    type SetArguments<'de> = ();
 
     type QueryArguments = ();
 
@@ -201,11 +199,5 @@ impl TryFrom<AnyId> for PushSubscriptionValue {
             AnyId::Id(id) => Ok(PushSubscriptionValue::Id(id)),
             _ => Err(()),
         }
-    }
-}
-
-impl From<Null> for PushSubscriptionProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }

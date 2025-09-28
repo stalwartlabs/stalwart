@@ -68,7 +68,7 @@ impl PrincipalGet for Server {
             {
                 principal
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
 

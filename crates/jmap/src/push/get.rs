@@ -78,7 +78,7 @@ impl PushSubscriptionFetch for Server {
             // Obtain the push subscription object
             let document_id = id.document_id();
             if !push_ids.contains(document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let push_ = if let Some(push) = self
@@ -87,7 +87,7 @@ impl PushSubscriptionFetch for Server {
             {
                 push
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
             let push = push_

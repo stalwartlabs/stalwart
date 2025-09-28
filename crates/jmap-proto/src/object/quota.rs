@@ -8,7 +8,7 @@ use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
     request::deserialize::DeserializeArguments,
 };
-use jmap_tools::{Element, Key, Null, Property};
+use jmap_tools::{Element, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::{id::Id, type_state::DataType};
 
@@ -121,15 +121,13 @@ impl JmapObject for Quota {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = QuotaFilter;
 
     type Comparator = QuotaComparator;
 
     type GetArguments = ();
 
-    type SetArguments = ();
+    type SetArguments<'de> = ();
 
     type QueryArguments = ();
 
@@ -257,11 +255,5 @@ impl TryFrom<AnyId> for QuotaValue {
         } else {
             Err(())
         }
-    }
-}
-
-impl From<Null> for QuotaProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }

@@ -80,7 +80,7 @@ impl EmailSubmissionGet for Server {
             // Obtain the email_submission object
             let document_id = id.document_id();
             if !email_submission_ids.contains(document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let submission_ = if let Some(submission) = self
@@ -89,7 +89,7 @@ impl EmailSubmissionGet for Server {
             {
                 submission
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
             let submission = submission_

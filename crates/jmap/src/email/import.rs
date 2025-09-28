@@ -16,6 +16,8 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::import::{ImportEmailRequest, ImportEmailResponse},
+    object::email::EmailProperty,
+    request::MaybeInvalid,
     types::state::State,
 };
 use mail_parser::MessageParser;
@@ -83,13 +85,13 @@ impl EmailImport for Server {
                 .mailbox_ids
                 .unwrap()
                 .into_iter()
-                .map(|m| m.unwrap().document_id())
+                .filter_map(|m| m.try_unwrap().map(|m| m.document_id()))
                 .collect::<Vec<_>>();
             if mailbox_ids.is_empty() {
                 response.not_created.append(
                     id,
                     SetError::invalid_properties()
-                        .with_key_value(Property::MailboxIds)
+                        .with_property(EmailProperty::MailboxIds)
                         .with_description("Message must belong to at least one mailbox."),
                 );
                 continue;
@@ -99,7 +101,7 @@ impl EmailImport for Server {
                     response.not_created.append(
                         id,
                         SetError::invalid_properties()
-                            .with_key_value(Property::MailboxIds)
+                            .with_property(EmailProperty::MailboxIds)
                             .with_description(format!(
                                 "Mailbox {} does not exist.",
                                 Id::from(*mailbox_id)
@@ -118,14 +120,24 @@ impl EmailImport for Server {
                 }
             }
 
+            let MaybeInvalid::Value(blob_id) = email.blob_id else {
+                response.not_created.append(
+                    id,
+                    SetError::invalid_properties()
+                        .with_property(EmailProperty::BlobId)
+                        .with_description("Invalid blob id."),
+                );
+                continue;
+            };
+
             // Fetch raw message to import
-            let raw_message = match self.blob_download(&email.blob_id, access_token).await? {
+            let raw_message = match self.blob_download(&blob_id, access_token).await? {
                 Some(raw_message) => raw_message,
                 None => {
                     response.not_created.append(
                         id,
                         SetError::new(SetErrorType::BlobNotFound)
-                            .with_description(format!("BlobId {} not found.", email.blob_id)),
+                            .with_description(format!("BlobId {} not found.", blob_id)),
                     );
                     continue;
                 }
@@ -148,7 +160,9 @@ impl EmailImport for Server {
                 .await
             {
                 Ok(email) => {
-                    response.created.append(id, ingested_into_object(email));
+                    response
+                        .created
+                        .append(id, ingested_into_object(email).into());
                 }
                 Err(mut err) => match err.as_ref() {
                     trc::EventType::Limit(trc::LimitEvent::Quota) => {

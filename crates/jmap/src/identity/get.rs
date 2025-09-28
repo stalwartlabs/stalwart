@@ -76,7 +76,7 @@ impl IdentityGet for Server {
             // Obtain the identity object
             let document_id = id.document_id();
             if !identity_ids.contains(document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let _identity = if let Some(identity) = self
@@ -85,7 +85,7 @@ impl IdentityGet for Server {
             {
                 identity
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
             let identity = _identity

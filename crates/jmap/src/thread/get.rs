@@ -104,7 +104,7 @@ impl ThreadGet for Server {
                 }
                 response.list.push(thread.into());
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
             }
         }
 

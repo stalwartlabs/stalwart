@@ -130,7 +130,7 @@ impl<'x> WebSocketMessage<'x> {
     }
 }
 
-impl<'de: 'x, 'x> Deserialize<'de> for WebSocketMessage<'x> {
+impl<'de: 'x, 'x: 'de> Deserialize<'de> for WebSocketMessage<'x> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,

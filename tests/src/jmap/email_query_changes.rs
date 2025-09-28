@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use std::str::FromStr;
+
 use super::JMAPTest;
 use crate::jmap::{
     assert_is_empty,
@@ -88,7 +90,7 @@ pub async fn test(params: &mut JMAPTest) {
     {
         match &change {
             LogAction::Insert(id) => {
-                let jmap_id = Id::from_bytes(
+                let jmap_id = Id::from_str(
                     params
                         .client
                         .email_import(
@@ -109,8 +111,7 @@ pub async fn test(params: &mut JMAPTest) {
                         .await
                         .unwrap()
                         .id()
-                        .unwrap()
-                        .as_bytes(),
+                        .unwrap(),
                 )
                 .unwrap();
 
@@ -237,7 +238,7 @@ pub async fn test(params: &mut JMAPTest) {
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.
                     for id in changes.removed() {
-                        let id = Id::from_bytes(id.as_bytes()).unwrap();
+                        let id = Id::from_str(id).unwrap();
                         assert!(
                             removed_ids.contains(&id),
                             "{:?} (id: {:?})",
@@ -249,7 +250,7 @@ pub async fn test(params: &mut JMAPTest) {
                 if test_num == 1 || test_num == 2 {
                     // Only type 1 results should be added to the list.
                     for item in changes.added() {
-                        let id = Id::from_bytes(item.id().as_bytes()).unwrap();
+                        let id = Id::from_str(item.id()).unwrap();
                         assert!(
                             type1_ids.contains(&id),
                             "{:?} (id: {:?})",
@@ -261,7 +262,7 @@ pub async fn test(params: &mut JMAPTest) {
                 if test_num == 3 {
                     // Only ids up to 7 should be added to the list.
                     for item in changes.added() {
-                        let item_id = Id::from_bytes(item.id().as_bytes()).unwrap();
+                        let item_id = Id::from_str(item.id()).unwrap();
                         let id = id_map.iter().find(|(_, v)| **v == item_id).unwrap().0;
                         assert!(id < &7, "{:?} (id: {})", changes, id);
                     }

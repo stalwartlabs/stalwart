@@ -34,7 +34,7 @@ pub struct GetSearchSnippetResponse {
 
     #[serde(rename = "notFound")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub not_found: Vec<MaybeInvalid<Id>>,
+    pub not_found: Vec<Id>,
 }
 
 #[derive(serde::Serialize, Clone, Debug)]

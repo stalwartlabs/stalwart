@@ -36,6 +36,7 @@ use crate::{
 };
 use jmap_tools::{Null, Value};
 use std::{collections::HashMap, fmt::Debug, str::FromStr};
+use utils::map::vec_map::VecMap;
 
 #[derive(Debug)]
 pub struct Request<'x> {
@@ -202,5 +203,23 @@ impl<T: FromStr> IntoValid for Vec<MaybeIdReference<T>> {
 
     fn into_valid(self) -> impl Iterator<Item = Self::Item> {
         self.into_iter().filter_map(|v| v.try_unwrap())
+    }
+}
+
+impl<T: FromStr + Eq, V> IntoValid for VecMap<MaybeInvalid<T>, V> {
+    type Item = (T, V);
+
+    fn into_valid(self) -> impl Iterator<Item = Self::Item> {
+        self.into_iter()
+            .filter_map(|(k, v)| k.try_unwrap().map(|k| (k, v)))
+    }
+}
+
+impl<T: FromStr + Eq, V> IntoValid for VecMap<MaybeIdReference<T>, V> {
+    type Item = (T, V);
+
+    fn into_valid(self) -> impl Iterator<Item = Self::Item> {
+        self.into_iter()
+            .filter_map(|(k, v)| k.try_unwrap().map(|k| (k, v)))
     }
 }

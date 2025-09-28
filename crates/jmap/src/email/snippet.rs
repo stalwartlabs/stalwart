@@ -10,9 +10,13 @@ use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::metadata::{ArchivedMetadataPartType, DecodedPartContent, MessageMetadata},
 };
-use jmap_proto::method::{
-    query::Filter,
-    search_snippet::{GetSearchSnippetRequest, GetSearchSnippetResponse, SearchSnippet},
+use jmap_proto::{
+    method::{
+        query::Filter,
+        search_snippet::{GetSearchSnippetRequest, GetSearchSnippetResponse, SearchSnippet},
+    },
+    object::email::EmailFilter,
+    request::IntoValid,
 };
 use mail_parser::{
     ArchivedHeaderName, core::rkyv::ArchivedGetHeader, decoders::html::html_to_text,
@@ -45,8 +49,12 @@ impl EmailSearchSnippet for Server {
 
         for cond in request.filter {
             match cond {
-                Filter::Text(text) | Filter::Subject(text) | Filter::Body(text) => {
-                    if include_term {
+                Filter::Property(cond) => {
+                    if let EmailFilter::Text(text)
+                    | EmailFilter::Subject(text)
+                    | EmailFilter::Body(text) = cond
+                        && include_term
+                    {
                         let (text, language_) =
                             Language::detect(text, self.core.jmap.default_language);
                         language = language_;
@@ -79,7 +87,6 @@ impl EmailSearchSnippet for Server {
                         include_term = !include_term;
                     }
                 }
-                _ => (),
             }
         }
         let account_id = request.account_id.document_id();
@@ -104,7 +111,7 @@ impl EmailSearchSnippet for Server {
             return Err(trc::JmapEvent::RequestTooLarge.into_err());
         }
 
-        for email_id in email_ids {
+        for email_id in email_ids.into_valid() {
             let document_id = email_id.document_id();
             let mut snippet = SearchSnippet {
                 email_id,

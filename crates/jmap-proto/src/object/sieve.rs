@@ -8,7 +8,7 @@ use crate::{
     object::{AnyId, DeserializeArguments, JmapObject, JmapObjectId, MaybeReference, parse_ref},
     request::reference::MaybeIdReference,
 };
-use jmap_tools::{Element, Key, Null, Property};
+use jmap_tools::{Element, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::{blob::BlobId, id::Id};
 
@@ -140,15 +140,13 @@ impl JmapObject for Sieve {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = SieveFilter;
 
     type Comparator = SieveComparator;
 
     type GetArguments = ();
 
-    type SetArguments = SieveSetArguments;
+    type SetArguments<'de> = SieveSetArguments;
 
     type QueryArguments = ();
 
@@ -270,11 +268,5 @@ impl TryFrom<AnyId> for SieveValue {
             AnyId::Id(id) => Ok(SieveValue::Id(id)),
             AnyId::BlobId(id) => Ok(SieveValue::BlobId(id)),
         }
-    }
-}
-
-impl From<Null> for SieveProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }

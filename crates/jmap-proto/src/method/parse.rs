@@ -43,7 +43,7 @@ pub struct ParseEmailResponse {
 
     #[serde(rename = "notFound")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub not_found: Vec<MaybeInvalid<BlobId>>,
+    pub not_found: Vec<BlobId>,
 }
 
 impl<'de> DeserializeArguments<'de> for ParseEmailRequest {

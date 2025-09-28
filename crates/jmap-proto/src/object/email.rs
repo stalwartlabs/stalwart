@@ -10,7 +10,7 @@ use crate::{
     request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Null, Property};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use mail_parser::HeaderName;
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 use store::fts::{FilterItem, FilterType};
@@ -292,6 +292,20 @@ impl EmailProperty {
             _ => unreachable!(),
         }
     }
+
+    pub fn try_into_id(self) -> Option<Id> {
+        match self {
+            EmailProperty::IdValue(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn try_into_keyword(self) -> Option<Keyword> {
+        match self {
+            EmailProperty::Keyword(keyword) => Some(keyword),
+            _ => None,
+        }
+    }
 }
 
 impl HeaderProperty {
@@ -442,15 +456,13 @@ impl JmapObject for Email {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = EmailFilter;
 
     type Comparator = EmailComparator;
 
     type GetArguments = EmailGetArguments;
 
-    type SetArguments = ();
+    type SetArguments<'de> = ();
 
     type QueryArguments = EmailQueryArguments;
 
@@ -859,11 +871,5 @@ impl From<BlobId> for EmailValue {
 impl From<UTCDate> for EmailValue {
     fn from(date: UTCDate) -> Self {
         EmailValue::Date(date)
-    }
-}
-
-impl From<Null> for EmailProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_tools::{Element, Key, Null, Property};
+use jmap_tools::{Element, Key, Property};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 use types::id::Id;
 
@@ -144,15 +144,13 @@ impl JmapObject for Principal {
 
     type Id = Id;
 
-    type Right = Null;
-
     type Filter = PrincipalFilter;
 
     type Comparator = PrincipalComparator;
 
     type GetArguments = ();
 
-    type SetArguments = ();
+    type SetArguments<'de> = ();
 
     type QueryArguments = ();
 
@@ -316,11 +314,5 @@ impl Display for PrincipalFilter {
             PrincipalFilter::Timezone(_) => "timezone",
             PrincipalFilter::_T(other) => other,
         })
-    }
-}
-
-impl From<Null> for PrincipalProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }

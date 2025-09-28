@@ -17,9 +17,15 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
-    object::sieve::Sieve,
+    object::{
+        AnyId,
+        sieve::{Sieve, SieveProperty, SieveValue},
+    },
+    references::resolve::ResolveCreatedReference,
+    request::{IntoValid, reference::MaybeIdReference},
     types::state::State,
 };
+use jmap_tools::{Key, Map, Value};
 use rand::distr::Alphanumeric;
 use sieve::compiler::ErrorType;
 use std::future::Future;
@@ -54,7 +60,7 @@ pub trait SieveScriptSet: Sync + Send {
     #[allow(clippy::type_complexity)]
     fn sieve_set_item<'x>(
         &self,
-        changes_: Object<SetValue>,
+        changes_: Value<'_, SieveProperty, SieveValue>,
         update: Option<(u32, Archive<&'x ArchivedSieveScript>)>,
         ctx: &SetContext,
         session_id: u64,
@@ -65,7 +71,7 @@ pub trait SieveScriptSet: Sync + Send {
                     ObjectIndexBuilder<&'x ArchivedSieveScript, SieveScript>,
                     Option<Vec<u8>>,
                 ),
-                SetError,
+                SetError<SieveProperty>,
             >,
         >,
     > + Send;
@@ -74,10 +80,10 @@ pub trait SieveScriptSet: Sync + Send {
 impl SieveScriptSet for Server {
     async fn sieve_script_set(
         &self,
-        mut request: SetRequest<SetArguments>,
+        mut request: SetRequest<'_, Sieve>,
         access_token: &AccessToken,
         session: &HttpSessionData,
-    ) -> trc::Result<SetResponse> {
+    ) -> trc::Result<SetResponse<Sieve>> {
         let account_id = request.account_id.document_id();
         let sieve_ids = self
             .get_document_ids(account_id, Collection::SieveScript)
@@ -98,7 +104,7 @@ impl SieveScriptSet for Server {
                 )
                 .await?,
         };
-        let will_destroy = request.unwrap_destroy();
+        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -133,10 +139,13 @@ impl SieveScriptSet for Server {
                         ctx.response.created.insert(
                             id,
                             Map::with_capacity(1)
-                                .with_key_value(Property::Id, Value::Id(document_id.into()))
                                 .with_key_value(
-                                    Property::BlobId,
-                                    BlobId {
+                                    SieveProperty::Id,
+                                    SieveValue::Id(document_id.into()),
+                                )
+                                .with_key_value(
+                                    SieveProperty::BlobId,
+                                    SieveValue::BlobId(BlobId {
                                         hash: blob_hash,
                                         class: BlobClass::Linked {
                                             account_id,
@@ -148,8 +157,9 @@ impl SieveScriptSet for Server {
                                             ..Default::default()
                                         }
                                         .into(),
-                                    },
-                                ),
+                                    }),
+                                )
+                                .into(),
                         );
                     }
                     Err(err) => {
@@ -169,7 +179,7 @@ impl SieveScriptSet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update() {
+        'update: for (id, object) in request.unwrap_update().into_valid() {
             // Make sure id won't be destroyed
             if will_destroy.contains(&id) {
                 ctx.response
@@ -237,7 +247,10 @@ impl SieveScriptSet for Server {
                         ctx.response.updated.append(
                             id,
                             blob_id.map(|blob_id| {
-                                Map::with_capacity(1).with_key_value(Property::BlobId, blob_id)
+                                Value::Object(Map::with_capacity(1).with_key_value(
+                                    SieveProperty::BlobId,
+                                    SieveValue::BlobId(blob_id),
+                                ))
                             }),
                         );
                     }
@@ -298,49 +311,33 @@ impl SieveScriptSet for Server {
                     .on_success_deactivate_script
                     .unwrap_or(false))
         {
-            let (change_id, changed_ids) = if let Some(id) =
-                request.arguments.on_success_activate_script
-            {
-                self.sieve_activate_script(
-                    account_id,
-                    match id {
-                        MaybeReference::Value(id) => id.document_id(),
-                        MaybeReference::Reference(id_ref) => match ctx.response.get_id(&id_ref) {
-                            Some(Value::Id(id)) => id.document_id(),
-                            _ => return Ok(ctx.response),
-                        },
-                    }
-                    .into(),
-                )
-                .await?
-            } else {
-                self.sieve_activate_script(account_id, None).await?
-            };
-
-            /*
-
-                        pub fn get_object_by_id(&mut self, id: Id) -> Option<&mut Value<'x, P, E>> {
-                if let Some(obj) = self.updated.get_mut(&id) {
-                    if let Some(obj) = obj {
-                        return Some(obj);
-                    } else {
-                        *obj = Some(Map::with_capacity(1));
-                        return obj.as_mut().unwrap().into();
-                    }
-                }
-
-                (&mut self.created)
-                    .into_iter()
-                    .map(|(_, obj)| obj)
-                    .find(|obj| obj.0.get(&Property::Id) == Some(&Value::Id(id)))
-            }
-
-                     */
+            let (change_id, changed_ids) =
+                if let Some(id) = request.arguments.on_success_activate_script {
+                    self.sieve_activate_script(
+                        account_id,
+                        match id {
+                            MaybeIdReference::Id(id) => id.document_id(),
+                            MaybeIdReference::Reference(id_ref) => {
+                                match ctx.response.get_created_id(&id_ref) {
+                                    Some(AnyId::Id(id)) => id.document_id(),
+                                    _ => return Ok(ctx.response),
+                                }
+                            }
+                            MaybeIdReference::Invalid(_) => return Ok(ctx.response),
+                        }
+                        .into(),
+                    )
+                    .await?
+                } else {
+                    self.sieve_activate_script(account_id, None).await?
+                };
 
             if !changed_ids.is_empty() {
                 for (document_id, is_active) in changed_ids {
-                    if let Some(obj) = ctx.response.get_object_by_id(Id::from(document_id)) {
-                        obj.append(Property::IsActive, Value::Bool(is_active));
+                    if let Some(Value::Object(obj)) =
+                        ctx.response.get_object_by_id(Id::from(document_id))
+                    {
+                        obj.insert(SieveProperty::IsActive, Value::Bool(is_active));
                     }
                 }
                 if change_id > 0 {
@@ -355,7 +352,7 @@ impl SieveScriptSet for Server {
     #[allow(clippy::blocks_in_conditions)]
     async fn sieve_set_item<'x>(
         &self,
-        changes_: Object<SetValue>,
+        changes_: Value<'_, SieveProperty, SieveValue>,
         update: Option<(u32, Archive<&'x ArchivedSieveScript>)>,
         ctx: &SetContext<'_>,
         session_id: u64,
@@ -365,7 +362,7 @@ impl SieveScriptSet for Server {
                 ObjectIndexBuilder<&'x ArchivedSieveScript, SieveScript>,
                 Option<Vec<u8>>,
             ),
-            SetError,
+            SetError<SieveProperty>,
         >,
     > {
         // Vacation script cannot be modified
@@ -385,28 +382,25 @@ impl SieveScriptSet for Server {
             .map(|(_, obj)| obj.deserialize().unwrap_or_default())
             .unwrap_or_default();
         let mut blob_id = None;
-        for (property, value) in changes_.0 {
-            let value = match ctx.response.eval_object_references(value) {
-                Ok(value) => value,
-                Err(err) => {
-                    return Ok(Err(err));
-                }
+        for (property, mut value) in changes_.into_expanded_object() {
+            if let Err(err) = ctx.response.resolve_self_references(&mut value) {
+                return Ok(Err(err));
             };
             match (&property, value) {
-                (Property::Name, MaybePatchValue::Value(Value::Str(value))) => {
+                (Key::Property(SieveProperty::Name), Value::Str(value)) => {
                     if value.len() > self.core.jmap.sieve_max_script_name {
                         return Ok(Err(SetError::invalid_properties()
-                            .with_key_value(property)
+                            .with_property(property.into_owned())
                             .with_description("Script name is too long.")));
                     } else if value.eq_ignore_ascii_case("vacation") {
                         return Ok(Err(SetError::forbidden()
-                            .with_key_value(property)
+                            .with_property(property.into_owned())
                             .with_description(
                                 "The 'vacation' name is reserved, please use a different name.",
                             )));
                     } else if update
                         .as_ref()
-                        .is_none_or(|(_, obj)| obj.inner.name != value)
+                        .is_none_or(|(_, obj)| obj.inner.name != value.as_ref())
                         && let Some(id) = self
                             .filter(
                                 ctx.resource_token.account_id,
@@ -425,18 +419,21 @@ impl SieveScriptSet for Server {
                             ))));
                     }
 
-                    changes.name = value;
+                    changes.name = value.into_owned();
                 }
-                (Property::BlobId, MaybePatchValue::Value(Value::BlobId(value))) => {
+                (
+                    Key::Property(SieveProperty::BlobId),
+                    Value::Element(SieveValue::BlobId(value)),
+                ) => {
                     blob_id = value.into();
                     continue;
                 }
-                (Property::Name, MaybePatchValue::Value(Value::Null)) => {
+                (Key::Property(SieveProperty::Name), Value::Null) => {
                     continue;
                 }
                 _ => {
                     return Ok(Err(SetError::invalid_properties()
-                        .with_key_value(property)
+                        .with_property(property.into_owned())
                         .with_description("Invalid property or value.".to_string())));
                 }
             }
@@ -500,7 +497,7 @@ impl SieveScriptSet for Server {
                     }
                 } else {
                     return Ok(Err(SetError::new(SetErrorType::BlobNotFound)
-                        .with_key_value(Property::BlobId)
+                        .with_property(SieveProperty::BlobId)
                         .with_description("Blob does not exist.")));
                 }
             } else {
@@ -508,7 +505,7 @@ impl SieveScriptSet for Server {
             }
         } else if update.is_none() {
             return Ok(Err(SetError::invalid_properties()
-                .with_key_value(Property::BlobId)
+                .with_property(SieveProperty::BlobId)
                 .with_description("Missing blobId.")));
         } else {
             None

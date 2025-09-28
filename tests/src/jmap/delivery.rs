@@ -13,7 +13,7 @@ use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{INBOX_ID, JUNK_ID},
 };
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf},
     net::TcpStream,
@@ -94,9 +94,7 @@ pub async fn test(params: &mut JMAPTest) {
     )
     .await;
 
-    let john_id = Id::from_bytes(account_id_1.as_bytes())
-        .unwrap()
-        .document_id();
+    let john_id = Id::from_str(&account_id_1).unwrap().document_id();
     let john_cache = server.get_cached_messages(john_id).await.unwrap();
 
     assert_eq!(
@@ -172,7 +170,7 @@ pub async fn test(params: &mut JMAPTest) {
         assert_eq!(
             server
                 .get_document_ids(
-                    Id::from_bytes(account_id.as_bytes()).unwrap().document_id(),
+                    Id::from_str(account_id).unwrap().document_id(),
                     Collection::Email
                 )
                 .await
@@ -212,7 +210,7 @@ pub async fn test(params: &mut JMAPTest) {
         assert_eq!(
             server
                 .get_document_ids(
-                    Id::from_bytes(account_id.as_bytes()).unwrap().document_id(),
+                    Id::from_str(account_id).unwrap().document_id(),
                     Collection::Email
                 )
                 .await
@@ -250,7 +248,7 @@ pub async fn test(params: &mut JMAPTest) {
         assert_eq!(
             server
                 .get_document_ids(
-                    Id::from_bytes(account_id.as_bytes()).unwrap().document_id(),
+                    Id::from_str(account_id).unwrap().document_id(),
                     Collection::Email
                 )
                 .await

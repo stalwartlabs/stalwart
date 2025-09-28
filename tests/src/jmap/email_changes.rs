@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use std::str::FromStr;
+
 use super::JMAPTest;
 use crate::jmap::assert_is_empty;
-use jmap_proto::{
-    parser::{JsonObjectParser, json::Parser},
-    types::state::State,
-};
+use jmap_proto::types::state::State;
 use store::{ahash::AHashSet, write::BatchBuilder};
 use types::{
     collection::{Collection, SyncCollection},
@@ -191,7 +190,7 @@ pub async fn test(params: &mut JMAPTest) {
                     .map(|list| {
                         let mut list = list
                             .iter()
-                            .map(|i| Id::from_bytes(i.as_bytes()).unwrap().into())
+                            .map(|i| Id::from_str(i).unwrap().into())
                             .collect::<Vec<u64>>();
                         list.sort_unstable();
                         list
@@ -243,26 +242,26 @@ pub async fn test(params: &mut JMAPTest) {
 
                     changes.created().iter().for_each(|id| {
                         assert!(
-                            insertions.remove(&Id::from_bytes(id.as_bytes()).unwrap()),
+                            insertions.remove(&Id::from_str(id).unwrap()),
                             "{:?} != {}",
                             insertions,
-                            Id::from_bytes(id.as_bytes()).unwrap()
+                            Id::from_str(id).unwrap()
                         );
                     });
                     changes.updated().iter().for_each(|id| {
                         assert!(
-                            updates.remove(&Id::from_bytes(id.as_bytes()).unwrap()),
+                            updates.remove(&Id::from_str(id).unwrap()),
                             "{:?} != {}",
                             updates,
-                            Id::from_bytes(id.as_bytes()).unwrap()
+                            Id::from_str(id).unwrap()
                         );
                     });
                     changes.destroyed().iter().for_each(|id| {
                         assert!(
-                            deletions.remove(&Id::from_bytes(id.as_bytes()).unwrap()),
+                            deletions.remove(&Id::from_str(id).unwrap()),
                             "{:?} != {}",
                             deletions,
-                            Id::from_bytes(id.as_bytes()).unwrap()
+                            Id::from_str(id).unwrap()
                         );
                     });
 
@@ -311,7 +310,7 @@ pub async fn test(params: &mut JMAPTest) {
     let mut created = changes
         .created()
         .iter()
-        .map(|i| Id::from_bytes(i.as_bytes()).unwrap().into())
+        .map(|i| Id::from_str(i).unwrap().into())
         .collect::<Vec<u64>>();
     created.sort_unstable();
 
@@ -336,8 +335,6 @@ pub trait ParseState: Sized {
 
 impl ParseState for State {
     fn parse_str(state: &str) -> Option<Self> {
-        let state = format!("{state}\"");
-        let mut parser = Parser::new(state.as_bytes());
-        State::parse(&mut parser).ok()
+        State::parse(state)
     }
 }

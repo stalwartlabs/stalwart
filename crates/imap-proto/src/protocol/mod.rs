@@ -316,7 +316,7 @@ impl From<Flag> for Keyword {
             Flag::Deleted => Keyword::Deleted,
             Flag::Forwarded => Keyword::Forwarded,
             Flag::MDNSent => Keyword::MdnSent,
-            Flag::Keyword(value) => Keyword::Other(value),
+            Flag::Keyword(value) => Keyword::from_other(value),
         }
     }
 }

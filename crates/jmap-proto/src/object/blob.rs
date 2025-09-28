@@ -8,7 +8,7 @@ use crate::{
     object::{AnyId, JmapObject, JmapObjectId, MaybeReference, parse_ref},
     request::deserialize::DeserializeArguments,
 };
-use jmap_tools::{Element, Key, Null, Property};
+use jmap_tools::{Element, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::{blob::BlobId, id::Id};
 
@@ -171,15 +171,13 @@ impl JmapObject for Blob {
 
     type Id = BlobId;
 
-    type Right = Null;
-
     type Filter = ();
 
     type Comparator = ();
 
     type GetArguments = BlobGetArguments;
 
-    type SetArguments = ();
+    type SetArguments<'de> = ();
 
     type QueryArguments = ();
 
@@ -191,12 +189,6 @@ impl JmapObject for Blob {
 impl From<BlobId> for BlobValue {
     fn from(id: BlobId) -> Self {
         BlobValue::BlobId(id)
-    }
-}
-
-impl From<Null> for BlobProperty {
-    fn from(_: Null) -> Self {
-        unimplemented!()
     }
 }
 
