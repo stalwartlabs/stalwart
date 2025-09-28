@@ -129,7 +129,7 @@ calendar.date_template:
   # Catalan: "diu 25 mai 2025 9h" (day month year hour)
   ca: "%a %-d %b %Y %-Hh"
   # Greek: "Κυρ 25 Μαϊ 2025 9πμ" (day month year hour)
-  el: "%a %-d %b %Y %-I%P"
+  el: "%a %-d %b %Y %-H η ώρα"
 
 calendar.date_template_long:
   # English: "Sunday May 25, 2025 9am"
@@ -151,7 +151,7 @@ calendar.date_template_long:
   # Catalan: "diumenge 25 maig 2025 9h" (day month year hour)
   ca: "%A %-d %B %Y %-Hh"
   # Greek: "Κυριακή 25 Μαΐου 2025 9πμ" (day month year hour)
-  el: "%A %-d %B %Y %-I%P"
+  el: "%A %-d %B %Y %-H η ώρα"
   
 
 calendar.invitation:
