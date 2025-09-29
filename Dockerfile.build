@@ -4,7 +4,7 @@
 # *****************
 # Base image for planner & builder
 # *****************
-FROM --platform=$BUILDPLATFORM rust:slim-bookworm AS base
+FROM --platform=$BUILDPLATFORM rust:slim-trixie AS base
 
 ENV DEBIAN_FRONTEND="noninteractive" \
     BINSTALL_DISABLE_TELEMETRY=true \
@@ -138,7 +138,7 @@ COPY --from=builder /app/artifact /
 # *****************
 # Runtime image for GNU targets
 # *****************
-FROM --platform=$TARGETPLATFORM docker.io/library/debian:bookworm-slim AS gnu
+FROM --platform=$TARGETPLATFORM docker.io/library/debian:trixie-slim AS gnu
 WORKDIR /opt/stalwart
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
