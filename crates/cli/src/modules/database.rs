@@ -91,7 +91,9 @@ impl ServerCommands {
 
                 if !results.is_empty() {
                     if yaml {
-                        for (key, value) in &results {
+                        let mut sorted: Vec<_> = results.iter().collect();
+                        sorted.sort_by_key(|tuple| tuple.0.clone());
+                        for (key, value) in &sorted {
                             let val: String;
                             if value.contains('\n') {
                                 val = "|\n  ".to_owned() + &value.replace("\n", "\n  ").trim_end();
