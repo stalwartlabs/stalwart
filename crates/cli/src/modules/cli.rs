@@ -28,9 +28,6 @@ pub struct Cli {
     /// Do not ask for credentials
     #[clap(short, long)]
     pub anonymous: bool,
-    /// Output server list-config in sorted YAML
-    #[clap(short, long)]
-    pub yaml: bool,
 }
 
 #[derive(Subcommand)]
@@ -455,6 +452,9 @@ pub enum ServerCommands {
     ListConfig {
         /// Prefix to filter configuration entries by
         prefix: Option<String>,
+        /// Output in sorted YAML
+        #[clap(short, long)]
+        yaml: bool,
     },
 
     /// Perform Healthcheck

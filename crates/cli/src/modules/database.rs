@@ -33,7 +33,7 @@ pub enum UpdateSettings {
 }
 
 impl ServerCommands {
-    pub async fn exec(self, client: Client, yaml: bool) {
+    pub async fn exec(self, client: Client) {
         match self {
             ServerCommands::DatabaseMaintenance {} => {
                 client
@@ -79,7 +79,7 @@ impl ServerCommands {
                     .await;
                 eprintln!("Successfully deleted key {key}.");
             }
-            ServerCommands::ListConfig { prefix } => {
+            ServerCommands::ListConfig { prefix, yaml } => {
                 let results = client
                     .http_request::<Response<HashMap<String, String>>, String>(
                         Method::GET,
