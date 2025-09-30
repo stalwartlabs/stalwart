@@ -282,10 +282,10 @@ impl CalendarSchedulingHandler for Server {
                 let tz_id = entry.tz_id();
                 match (&entry.name, entry.values.first()) {
                     (ICalendarProperty::Dtstart, Some(ICalendarValue::PartialDateTime(dt))) => {
-                        from_date = dt.to_date_time_with_tz(tz_resolver.resolve(tz_id));
+                        from_date = dt.to_date_time_with_tz(tz_resolver.resolve_or_default(tz_id));
                     }
                     (ICalendarProperty::Dtend, Some(ICalendarValue::PartialDateTime(dt))) => {
-                        to_date = dt.to_date_time_with_tz(tz_resolver.resolve(tz_id));
+                        to_date = dt.to_date_time_with_tz(tz_resolver.resolve_or_default(tz_id));
                     }
                     (ICalendarProperty::Uid, Some(ICalendarValue::Text(_))) => {
                         uid = Some(entry);

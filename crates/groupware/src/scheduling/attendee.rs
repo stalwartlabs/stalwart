@@ -68,7 +68,7 @@ pub(crate) fn attendee_handle_update(
                                     part_stat = &ICalendarParticipationStatus::Declined;
 
                                     // Add cancel component
-                                    let comp_id = message.components.len() as u16;
+                                    let comp_id = message.components.len() as u32;
                                     message.components[0].component_ids.push(comp_id);
                                     message.components.push(cancel_comp);
                                     mail_from = Some(&attendee_email.email);
@@ -132,7 +132,7 @@ pub(crate) fn attendee_handle_update(
                             attendee_entry_uids.push(external_attendee.entry_id);
                         }
 
-                        let comp_id = message.components.len() as u16;
+                        let comp_id = message.components.len() as u32;
                         message.components[0].component_ids.push(comp_id);
                         message.components.push(itip_export_component(
                             instance.comp,
@@ -183,7 +183,7 @@ pub(crate) fn attendee_handle_update(
             }
 
             // A new instance has been added
-            let comp_id = message.components.len() as u16;
+            let comp_id = message.components.len() as u32;
             message.components[0].component_ids.push(comp_id);
             message.components.push(itip_export_component(
                 instance.comp,
@@ -211,7 +211,7 @@ pub(crate) fn attendee_handle_update(
                     false,
                 ) {
                     // Add cancel component
-                    let comp_id = message.components.len() as u16;
+                    let comp_id = message.components.len() as u32;
                     message.components[0].component_ids.push(comp_id);
                     message.components.push(cancel_comp);
                     mail_from = Some(&attendee_email.email);
@@ -313,7 +313,7 @@ pub(crate) fn attendee_decline<'x>(
         );
         cancel_comp.add_property_with_params(
             ICalendarProperty::Attendee,
-            [ICalendarParameter::Partstat(
+            [ICalendarParameter::partstat(
                 ICalendarParticipationStatus::Declined,
             )],
             ICalendarValue::Text(local_attendee.email.to_string()),

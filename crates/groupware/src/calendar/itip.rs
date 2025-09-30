@@ -17,10 +17,11 @@ use crate::{
     },
 };
 use calcard::{
-    common::timezone::Tz,
+    common::{IanaString, timezone::Tz},
     icalendar::{
         ICalendar, ICalendarComponentType, ICalendarEntry, ICalendarMethod, ICalendarParameter,
-        ICalendarParticipationStatus, ICalendarProperty, ICalendarValue,
+        ICalendarParameterName, ICalendarParameterValue, ICalendarParticipationStatus,
+        ICalendarProperty, ICalendarValue,
     },
 };
 use common::{
@@ -422,7 +423,11 @@ impl ItipIngest for Server {
                             {
                                 let mut add_partstat = true;
                                 for param in &mut entry.params {
-                                    if let ICalendarParameter::Partstat(partstat) = param {
+                                    if let (
+                                        ICalendarParameterName::Partstat,
+                                        ICalendarParameterValue::Partstat(partstat),
+                                    ) = (&param.name, &mut param.value)
+                                    {
                                         if partstat != &rsvp.partstat {
                                             *partstat = rsvp.partstat.clone();
                                             add_partstat = false;
@@ -435,7 +440,7 @@ impl ItipIngest for Server {
                                 if add_partstat {
                                     entry
                                         .params
-                                        .push(ICalendarParameter::Partstat(rsvp.partstat.clone()));
+                                        .push(ICalendarParameter::partstat(rsvp.partstat.clone()));
                                 }
                                 found_participant = true;
                                 did_change = true;

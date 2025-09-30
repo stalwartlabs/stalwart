@@ -8,9 +8,9 @@ use crate::task_manager::Task;
 use calcard::{
     common::timezone::Tz,
     icalendar::{
-        ArchivedICalendarDay, ArchivedICalendarFrequency, ArchivedICalendarParticipationStatus,
-        ArchivedICalendarRecurrenceRule, ArchivedICalendarWeekday, ICalendarParticipationStatus,
-        ICalendarProperty,
+        ArchivedICalendarDay, ArchivedICalendarFrequency, ArchivedICalendarMonth,
+        ArchivedICalendarParticipationStatus, ArchivedICalendarRecurrenceRule,
+        ArchivedICalendarWeekday, ICalendarParticipationStatus, ICalendarProperty,
     },
 };
 use chrono::{DateTime, Locale};
@@ -587,7 +587,7 @@ fn format_field(value: &ArchivedItipValue, template: &str, chrono_locale: Locale
                         .naive_local()
                 )
                 .format_localized(template, chrono_locale),
-                tz.name()
+                tz.name().unwrap_or_default()
             )
         }
         ArchivedItipValue::Rrule(rrule) => RecurrenceFormatter.format(rrule),
@@ -758,8 +758,11 @@ impl RecurrenceFormatter {
         format!("on the {}", self.format_list(&day_strings))
     }
 
-    fn format_months(&self, months: &[u8]) -> String {
-        let month_names: Vec<String> = months.iter().map(|&month| self.month_name(month)).collect();
+    fn format_months(&self, months: &[ArchivedICalendarMonth]) -> String {
+        let month_names: Vec<String> = months
+            .iter()
+            .map(|month| self.month_name(month.month()))
+            .collect();
 
         format!("in {}", self.format_list(&month_names))
     }

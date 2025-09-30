@@ -268,7 +268,7 @@ pub(crate) fn organizer_handle_update(
                 };
 
                 // Add component to message
-                let comp_id = message.components.len() as u16;
+                let comp_id = message.components.len() as u32;
                 message.components.push(component);
                 message.components[0].component_ids.push(comp_id);
             }
@@ -359,7 +359,9 @@ pub(crate) fn organizer_request_full(
 
         // Add component to message
         message.components[comp.comp_id as usize] = component;
-        message.components[0].component_ids.push(comp.comp_id);
+        message.components[0]
+            .component_ids
+            .push(comp.comp_id as u32);
 
         // Add attendees
         for attendee in &comp.attendees {
@@ -375,8 +377,8 @@ pub(crate) fn organizer_request_full(
     for (comp_id, comp) in ical.components.iter().enumerate() {
         if matches!(comp.component_type, ICalendarComponentType::VTimezone) {
             copy_components.extend(comp.component_ids.iter().copied());
-            message.components[0].component_ids.push(comp_id as u16);
-        } else if !copy_components.contains(&(comp_id as u16)) {
+            message.components[0].component_ids.push(comp_id as u32);
+        } else if !copy_components.contains(&(comp_id as u32)) {
             continue;
         }
         message.components[comp_id] = comp.clone();

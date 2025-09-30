@@ -21,7 +21,7 @@ impl ArchivedCalendarEventData {
             let instances = range.instances.as_ref();
             let (offset_or_count, bytes_read) = instances.read_leb128::<u32>()?;
 
-            let comp_id = range.id.to_native();
+            let comp_id = range.id.to_native() as u32;
             let duration = range.duration.to_native() as i64;
             let mut start_tz = Tz::from_id(range.start_tz.to_native())?;
             let mut end_tz = Tz::from_id(range.end_tz.to_native())?;

@@ -39,7 +39,6 @@ pub enum AddressBookRight {
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
-#[rkyv(derive(Debug))]
 pub struct ContactCard {
     pub names: Vec<DavName>,
     pub display_name: Option<String>,

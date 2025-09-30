@@ -9,11 +9,11 @@ use crate::{DavError, calendar::query::is_resource_in_time_range, common::uri::D
 use calcard::{
     common::{PartialDateTime, timezone::Tz},
     icalendar::{
-        ArchivedICalendarComponentType, ArchivedICalendarEntry, ArchivedICalendarParameter,
-        ArchivedICalendarProperty, ArchivedICalendarStatus, ArchivedICalendarValue, ICalendar,
-        ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarFreeBusyType,
-        ICalendarParameter, ICalendarPeriod, ICalendarProperty, ICalendarTransparency,
-        ICalendarValue,
+        ArchivedICalendarComponentType, ArchivedICalendarEntry, ArchivedICalendarParameterName,
+        ArchivedICalendarParameterValue, ArchivedICalendarProperty, ArchivedICalendarStatus,
+        ArchivedICalendarValue, ICalendar, ICalendarComponent, ICalendarComponentType,
+        ICalendarEntry, ICalendarFreeBusyType, ICalendarParameter, ICalendarPeriod,
+        ICalendarProperty, ICalendarTransparency, ICalendarValue,
     },
 };
 use common::{DavResourcePath, DavResources, PROD_ID, Server, auth::AccessToken};
@@ -200,16 +200,13 @@ impl CalendarFreebusyRequestHandler for Server {
                 }
 
                 for (component_id, component) in components {
-                    let component_id = component_id as u16;
+                    let component_id = component_id as u32;
                     match component.component_type {
                         ArchivedICalendarComponentType::VEvent => {
                             let fbtype = match component.status() {
                                 Some(ArchivedICalendarStatus::Cancelled) => continue,
                                 Some(ArchivedICalendarStatus::Tentative) => {
                                     ICalendarFreeBusyType::BusyTentative
-                                }
-                                Some(ArchivedICalendarStatus::Other(v)) => {
-                                    ICalendarFreeBusyType::Other(v.as_str().to_string())
                                 }
                                 _ => ICalendarFreeBusyType::Busy,
                             };
@@ -240,8 +237,10 @@ impl CalendarFreebusyRequestHandler for Server {
                                             .params
                                             .iter()
                                             .find_map(|param| {
-                                                if let ArchivedICalendarParameter::Fbtype(param) =
-                                                    param
+                                                if let (
+                                                    ArchivedICalendarParameterName::Fbtype,
+                                                    ArchivedICalendarParameterValue::Fbtype(param),
+                                                ) = (&param.name, &param.value)
                                                 {
                                                     rkyv_deserialize(param).ok()
                                                 } else {
@@ -263,7 +262,7 @@ impl CalendarFreebusyRequestHandler for Server {
             for (fbtype, events_in_range) in fb_entries {
                 entries.push(ICalendarEntry {
                     name: ICalendarProperty::Freebusy,
-                    params: vec![ICalendarParameter::Fbtype(fbtype)],
+                    params: vec![ICalendarParameter::fbtype(fbtype)],
                     values: merge_intervals(events_in_range),
                 });
             }

@@ -5,7 +5,7 @@
  */
 
 use calcard::{
-    common::PartialDateTime,
+    common::{IanaParse, PartialDateTime},
     icalendar::{ICalendar, ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardProperty},
     Entry, Parser,
@@ -637,7 +637,7 @@ impl AttributeValue for ICalendarComponentType {
     where
         Self: Sized,
     {
-        ICalendarComponentType::try_from(s.as_bytes()).ok()
+        ICalendarComponentType::parse(s.as_bytes())
     }
 }
 
@@ -646,8 +646,8 @@ impl AttributeValue for ICalendarProperty {
     where
         Self: Sized,
     {
-        ICalendarProperty::try_from(s.as_bytes())
-            .unwrap_or_else(|_| ICalendarProperty::Other(s.to_string()))
+        ICalendarProperty::parse(s.as_bytes())
+            .unwrap_or_else(|| ICalendarProperty::Other(s.to_string()))
             .into()
     }
 }
@@ -668,15 +668,15 @@ impl AttributeValue for VCardPropertyWithGroup {
     {
         if let Some((group, s)) = s.split_once('.') {
             VCardPropertyWithGroup {
-                name: VCardProperty::try_from(s.as_bytes())
-                    .unwrap_or_else(|_| VCardProperty::Other(s.to_string())),
+                name: VCardProperty::parse(s.as_bytes())
+                    .unwrap_or_else(|| VCardProperty::Other(s.to_string())),
                 group: group.to_string().into(),
             }
             .into()
         } else {
             VCardPropertyWithGroup {
-                name: VCardProperty::try_from(s.as_bytes())
-                    .unwrap_or_else(|_| VCardProperty::Other(s.to_string())),
+                name: VCardProperty::parse(s.as_bytes())
+                    .unwrap_or_else(|| VCardProperty::Other(s.to_string())),
                 group: None,
             }
             .into()

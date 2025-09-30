@@ -157,7 +157,7 @@ pub(crate) fn vcard_query(card: &ArchivedVCard, filters: &AddressbookFilter) -> 
                         FilterOp::Exists => true,
                         FilterOp::Undefined => false,
                         FilterOp::TextMatch(text_match) => {
-                            if let Some(text) = entry.as_text() {
+                            if let Some(text) = entry.value.as_text() {
                                 text_match.matches(text)
                             } else {
                                 false
@@ -197,7 +197,7 @@ fn find_parameter<'x>(
     entry: &'x ArchivedVCardEntry,
     name: &VCardParameterName,
 ) -> Option<&'x ArchivedVCardParameter> {
-    entry.params.iter().find(|param| param.matches_name(name))
+    entry.params.iter().find(|param| param.name == *name)
 }
 
 pub(crate) fn serialize_vcard_with_props(

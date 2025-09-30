@@ -6,7 +6,7 @@
 
 use ahash::{AHashMap, AHashSet};
 use calcard::{
-    common::PartialDateTime,
+    common::{IanaString, PartialDateTime},
     icalendar::{
         ICalendarComponent, ICalendarDuration, ICalendarEntry, ICalendarMethod, ICalendarParameter,
         ICalendarParticipationRole, ICalendarParticipationStatus, ICalendarPeriod,
@@ -333,7 +333,7 @@ impl ItipDateTime<'_> {
             name,
             params: self
                 .tz_id
-                .map(|tz_id| vec![ICalendarParameter::Tzid(tz_id.to_string())])
+                .map(|tz_id| vec![ICalendarParameter::tzid(tz_id.to_string())])
                 .unwrap_or_default(),
             values: vec![ICalendarValue::PartialDateTime(Box::new(self.date.clone()))],
         }

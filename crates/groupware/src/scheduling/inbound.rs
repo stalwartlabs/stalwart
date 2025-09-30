@@ -371,33 +371,33 @@ fn handle_reply(
                     if changed_part_stat {
                         remove_parameters.push(ICalendarParameterName::Partstat);
                         if let Some(part_stat) = updated_attendee.part_stat {
-                            add_parameters.push(ICalendarParameter::Partstat(part_stat.clone()));
+                            add_parameters.push(ICalendarParameter::partstat(part_stat.clone()));
                         }
                     }
 
                     if changed_rsvp {
                         remove_parameters.push(ICalendarParameterName::Rsvp);
                         if let Some(rsvp) = updated_attendee.rsvp {
-                            add_parameters.push(ICalendarParameter::Rsvp(rsvp));
+                            add_parameters.push(ICalendarParameter::rsvp(rsvp));
                         }
                     }
 
                     if changed_delegated_to {
                         remove_parameters.push(ICalendarParameterName::DelegatedTo);
                         if !updated_attendee.delegated_to.is_empty() {
-                            add_parameters.push(ICalendarParameter::DelegatedTo(
-                                updated_attendee
-                                    .delegated_to
-                                    .iter()
-                                    .map(|email| Uri::Location(email.to_string()))
-                                    .collect::<Vec<_>>(),
+                            add_parameters.extend(updated_attendee.delegated_to.iter().map(
+                                |email| {
+                                    ICalendarParameter::delegated_to(Uri::Location(
+                                        email.to_string(),
+                                    ))
+                                },
                             ));
                         }
                     }
 
                     if has_request_status {
                         remove_parameters.push(ICalendarParameterName::ScheduleStatus);
-                        add_parameters.push(ICalendarParameter::ScheduleStatus(
+                        add_parameters.push(ICalendarParameter::schedule_status(
                             itip_snapshot.request_status.join(","),
                         ));
                     }
@@ -442,13 +442,13 @@ fn handle_reply(
                                             .iter()
                                             .filter(|param| {
                                                 matches!(
-                                                    param,
-                                                    ICalendarParameter::DelegatedTo(_)
-                                                        | ICalendarParameter::DelegatedFrom(_)
-                                                        | ICalendarParameter::Partstat(_)
-                                                        | ICalendarParameter::Rsvp(_)
-                                                        | ICalendarParameter::ScheduleStatus(_)
-                                                        | ICalendarParameter::Role(_)
+                                                    param.name,
+                                                    ICalendarParameterName::DelegatedTo
+                                                        | ICalendarParameterName::DelegatedFrom
+                                                        | ICalendarParameterName::Partstat
+                                                        | ICalendarParameterName::Rsvp
+                                                        | ICalendarParameterName::ScheduleStatus
+                                                        | ICalendarParameterName::Role
                                                 )
                                             })
                                             .cloned()
@@ -540,7 +540,7 @@ fn handle_reply(
 }
 
 pub fn itip_merge_changes(ical: &mut ICalendar, changes: Vec<MergeAction>) {
-    let mut remove_component_ids = Vec::new();
+    let mut remove_component_ids: Vec<u32> = Vec::new();
     for action in changes {
         match action {
             MergeAction::AddEntries {
@@ -575,10 +575,10 @@ pub fn itip_merge_changes(ical: &mut ICalendar, changes: Vec<MergeAction>) {
             } => {
                 ical.components[component_id as usize].entries[entry_id as usize]
                     .params
-                    .retain(|param| !parameters.iter().any(|p| param.matches_name(p)));
+                    .retain(|param| !parameters.contains(&param.name));
             }
             MergeAction::AddComponent { component } => {
-                let comp_id = ical.components.len() as u16;
+                let comp_id = ical.components.len() as u32;
                 if let Some(root) = ical
                     .components
                     .get_mut(0)
@@ -589,7 +589,7 @@ pub fn itip_merge_changes(ical: &mut ICalendar, changes: Vec<MergeAction>) {
                 }
             }
             MergeAction::RemoveComponent { component_id } => {
-                remove_component_ids.push(component_id);
+                remove_component_ids.push(component_id as u32);
             }
         }
     }

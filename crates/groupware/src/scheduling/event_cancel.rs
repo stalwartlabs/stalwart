@@ -98,7 +98,7 @@ pub fn itip_cancel(
                 is_deletion,
             ) {
                 // Add cancel component
-                let comp_id = message.components.len() as u16;
+                let comp_id = message.components.len() as u32;
                 message.components[0].component_ids.push(comp_id);
                 message.components.push(cancel_comp);
                 mail_from = Some(&attendee_email.email);

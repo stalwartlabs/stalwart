@@ -7,7 +7,7 @@
 use super::Task;
 use calcard::{
     common::timezone::Tz,
-    icalendar::{ArchivedICalendarParameter, ArchivedICalendarProperty},
+    icalendar::{ArchivedICalendarParameterName, ArchivedICalendarProperty},
 };
 use chrono::{DateTime, Locale};
 use common::{
@@ -391,8 +391,8 @@ async fn build_template(
                     .and_then(|v| v.as_text())
                     .map(|v| v.strip_prefix("mailto:").unwrap_or(v));
                 let name = entry.params.iter().find_map(|param| {
-                    if let ArchivedICalendarParameter::Cn(name) = param {
-                        Some(name.as_str())
+                    if let ArchivedICalendarParameterName::Cn = param.name {
+                        param.value.as_text()
                     } else {
                         None
                     }
@@ -456,14 +456,20 @@ async fn build_template(
         DateTime::from_timestamp(alarm.event_start, 0)
             .unwrap_or_default()
             .format_localized(locale.calendar_date_template, chrono_locale),
-        Tz::from_id(alarm.event_start_tz).unwrap_or(Tz::UTC).name()
+        Tz::from_id(alarm.event_start_tz)
+            .unwrap_or(Tz::UTC)
+            .name()
+            .unwrap_or_default()
     );
     let end = format!(
         "{} ({})",
         DateTime::from_timestamp(alarm.event_end, 0)
             .unwrap_or_default()
             .format_localized(locale.calendar_date_template, chrono_locale),
-        Tz::from_id(alarm.event_end_tz).unwrap_or(Tz::UTC).name()
+        Tz::from_id(alarm.event_end_tz)
+            .unwrap_or(Tz::UTC)
+            .name()
+            .unwrap_or_default()
     );
     let subject = format!(
         "{}: {} @ {}",

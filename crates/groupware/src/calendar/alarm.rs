@@ -8,7 +8,8 @@ use super::{Alarm, AlarmDelta, ArchivedAlarmDelta, ArchivedCalendarEventData};
 use calcard::{
     common::timezone::Tz,
     icalendar::{
-        ICalendarComponent, ICalendarParameter, ICalendarProperty, ICalendarValue, Related,
+        ICalendarComponent, ICalendarParameterName, ICalendarParameterValue, ICalendarProperty,
+        ICalendarRelated, ICalendarValue,
     },
 };
 use chrono::{DateTime, TimeZone};
@@ -176,11 +177,17 @@ impl ExpandAlarm for ICalendarComponent {
                     let mut trigger_start = true;
 
                     for param in entry.params.iter() {
-                        match param {
-                            ICalendarParameter::Related(related) => {
-                                trigger_start = matches!(related, Related::Start);
+                        match (&param.name, &param.value) {
+                            (
+                                ICalendarParameterName::Related,
+                                ICalendarParameterValue::Related(related),
+                            ) => {
+                                trigger_start = matches!(related, ICalendarRelated::Start);
                             }
-                            ICalendarParameter::Tzid(tz_id) => {
+                            (
+                                ICalendarParameterName::Tzid,
+                                ICalendarParameterValue::Text(tz_id),
+                            ) => {
                                 tz = Tz::from_str(tz_id).ok();
                             }
                             _ => {}

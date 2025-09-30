@@ -69,7 +69,7 @@ impl CalendarEventData {
                     .filter_map(|alarm_id| {
                         ical.component_by_id(*alarm_id).and_then(|alarm| {
                             if alarm.component_type == ICalendarComponentType::VAlarm {
-                                alarm.expand_alarm(*alarm_id, event.comp_id)
+                                alarm.expand_alarm(*alarm_id as u16, event.comp_id as u16)
                             } else {
                                 None
                             }
@@ -122,7 +122,7 @@ impl CalendarEventData {
                 .entry((
                     start_tz,
                     end_tz,
-                    event.comp_id,
+                    event.comp_id as u16,
                     (end_timestamp_naive - start_timestamp_naive) as i32,
                 ))
                 .or_default()

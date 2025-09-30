@@ -12,7 +12,7 @@ types = { path = "../types" }
 trc = { path = "../trc" }
 directory = { path =  "../directory" }
 dav-proto = { path =  "../dav-proto" }
-calcard = { version = "0.1.3", features = ["rkyv"] }
+calcard = { path = "/Users/me/code/calcard", features = ["rkyv"] }
 hashify = "0.2"
 tokio = { version = "1.47", features = ["net", "macros"] }
 rkyv = { version = "0.8.10", features = ["little_endian"] }
