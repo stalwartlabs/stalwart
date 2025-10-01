@@ -330,6 +330,8 @@ impl JmapObject for EmailSubmission {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = EmailSubmissionProperty::Id;
 }
 

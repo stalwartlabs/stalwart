@@ -101,6 +101,8 @@ impl JmapObject for Thread {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = ThreadProperty::Id;
 }
 

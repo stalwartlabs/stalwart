@@ -9,8 +9,8 @@ use super::{
     method::{MethodFunction, MethodName, MethodObject},
 };
 use crate::request::{
-    CopyRequestMethod, GetRequestMethod, QueryChangesRequestMethod, QueryRequestMethod,
-    SetRequestMethod,
+    CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
+    QueryRequestMethod, SetRequestMethod,
     deserialize::{DeserializeArguments, deserialize_request},
 };
 use serde::{
@@ -181,6 +181,20 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Get, MethodObject::AddressBook) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::AddressBook(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::ContactCard) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::ContactCard(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Get, MethodObject::SearchSnippet) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::SearchSnippet(value),
                 Err(err) => RequestMethod::invalid(err),
@@ -237,6 +251,20 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Set, MethodObject::AddressBook) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::AddressBook(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::ContactCard) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::ContactCard(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Query, MethodObject::Email) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Email(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -274,6 +302,13 @@ impl<'de> Visitor<'de> for CallVisitor {
             },
             (MethodFunction::Query, MethodObject::Quota) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Quota(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::ContactCard) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::ContactCard(value)),
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));
@@ -335,6 +370,15 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::QueryChanges, MethodObject::ContactCard) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::QueryChanges(QueryChangesRequestMethod::ContactCard(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Changes, _) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Changes(value),
                 Err(err) => RequestMethod::invalid(err),
@@ -351,6 +395,13 @@ impl<'de> Visitor<'de> for CallVisitor {
             },
             (MethodFunction::Copy, MethodObject::Blob) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Copy(CopyRequestMethod::Blob(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Copy, MethodObject::ContactCard) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Copy(CopyRequestMethod::ContactCard(value)),
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));
@@ -378,7 +429,14 @@ impl<'de> Visitor<'de> for CallVisitor {
                 }
             },
             (MethodFunction::Parse, MethodObject::Email) => match seq.next_element() {
-                Ok(Some(value)) => RequestMethod::ParseEmail(value),
+                Ok(Some(value)) => RequestMethod::Parse(ParseRequestMethod::Email(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Parse, MethodObject::ContactCard) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Parse(ParseRequestMethod::ContactCard(value)),
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));

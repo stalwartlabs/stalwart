@@ -27,6 +27,8 @@ pub enum MethodObject {
     SieveScript,
     Principal,
     Quota,
+    AddressBook,
+    ContactCard,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +124,18 @@ impl MethodName {
             (MethodFunction::Lookup, MethodObject::Blob) => "Blob/lookup",
             (MethodFunction::Upload, MethodObject::Blob) => "Blob/upload",
 
+            (MethodFunction::Get, MethodObject::AddressBook) => "AddressBook/get",
+            (MethodFunction::Changes, MethodObject::AddressBook) => "AddressBook/changes",
+            (MethodFunction::Set, MethodObject::AddressBook) => "AddressBook/set",
+
+            (MethodFunction::Get, MethodObject::ContactCard) => "ContactCard/get",
+            (MethodFunction::Changes, MethodObject::ContactCard) => "ContactCard/changes",
+            (MethodFunction::Query, MethodObject::ContactCard) => "ContactCard/query",
+            (MethodFunction::QueryChanges, MethodObject::ContactCard) => "ContactCard/queryChanges",
+            (MethodFunction::Set, MethodObject::ContactCard) => "ContactCard/set",
+            (MethodFunction::Copy, MethodObject::ContactCard) => "ContactCard/copy",
+            (MethodFunction::Parse, MethodObject::ContactCard) => "ContactCard/parse",
+
             (MethodFunction::Echo, MethodObject::Core) => "Core/echo",
             _ => "error",
         }
@@ -184,6 +198,18 @@ impl MethodName {
             "Blob/lookup" => (MethodObject::Blob, MethodFunction::Lookup),
             "Blob/upload" => (MethodObject::Blob, MethodFunction::Upload),
 
+            "AddressBook/get" => (MethodObject::AddressBook, MethodFunction::Get),
+            "AddressBook/changes" => (MethodObject::AddressBook, MethodFunction::Changes),
+            "AddressBook/set" => (MethodObject::AddressBook, MethodFunction::Set),
+
+            "ContactCard/get" => (MethodObject::ContactCard, MethodFunction::Get),
+            "ContactCard/changes" => (MethodObject::ContactCard, MethodFunction::Changes),
+            "ContactCard/query" => (MethodObject::ContactCard, MethodFunction::Query),
+            "ContactCard/queryChanges" => (MethodObject::ContactCard, MethodFunction::QueryChanges),
+            "ContactCard/set" => (MethodObject::ContactCard, MethodFunction::Set),
+            "ContactCard/copy" => (MethodObject::ContactCard, MethodFunction::Copy),
+            "ContactCard/parse" => (MethodObject::ContactCard, MethodFunction::Parse),
+
             "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
 
         ).map(|(obj, fnc)| MethodName { obj, fnc })
@@ -207,6 +233,8 @@ impl Display for MethodObject {
             MethodObject::Thread => "Thread",
             MethodObject::Email => "Email",
             MethodObject::Quota => "Quota",
+            MethodObject::AddressBook => "AddressBook",
+            MethodObject::ContactCard => "ContactCard",
         })
     }
 }

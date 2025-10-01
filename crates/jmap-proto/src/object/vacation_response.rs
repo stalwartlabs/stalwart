@@ -130,6 +130,8 @@ impl JmapObject for VacationResponse {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = VacationResponseProperty::Id;
 }
 

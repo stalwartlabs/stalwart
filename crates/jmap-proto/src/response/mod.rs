@@ -16,7 +16,7 @@ use crate::{
         get::GetResponse,
         import::ImportEmailResponse,
         lookup::BlobLookupResponse,
-        parse::ParseEmailResponse,
+        parse::ParseResponse,
         query::QueryResponse,
         query_changes::QueryChangesResponse,
         search_snippet::GetSearchSnippetResponse,
@@ -25,9 +25,10 @@ use crate::{
         validate::ValidateSieveScriptResponse,
     },
     object::{
-        AnyId, blob::Blob, email::Email, email_submission::EmailSubmission, identity::Identity,
-        mailbox::Mailbox, principal::Principal, push_subscription::PushSubscription, quota::Quota,
-        sieve::Sieve, thread::Thread, vacation_response::VacationResponse,
+        AnyId, addressbook::AddressBook, blob::Blob, contact::ContactCard, email::Email,
+        email_submission::EmailSubmission, identity::Identity, mailbox::Mailbox,
+        principal::Principal, push_subscription::PushSubscription, quota::Quota, sieve::Sieve,
+        thread::Thread, vacation_response::VacationResponse,
     },
     request::{Call, method::MethodName},
 };
@@ -42,7 +43,7 @@ pub enum ResponseMethod<'x> {
     Changes(ChangesResponseMethod),
     Copy(CopyResponseMethod),
     ImportEmail(ImportEmailResponse),
-    ParseEmail(ParseEmailResponse),
+    Parse(ParseResponseMethod),
     QueryChanges(QueryChangesResponse),
     Query(QueryResponse),
     SearchSnippet(GetSearchSnippetResponse),
@@ -67,6 +68,8 @@ pub enum GetResponseMethod {
     Principal(GetResponse<Principal>),
     Quota(GetResponse<Quota>),
     Blob(GetResponse<Blob>),
+    AddressBook(GetResponse<AddressBook>),
+    ContactCard(GetResponse<ContactCard>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -79,6 +82,8 @@ pub enum SetResponseMethod {
     PushSubscription(SetResponse<PushSubscription>),
     Sieve(SetResponse<Sieve>),
     VacationResponse(SetResponse<VacationResponse>),
+    AddressBook(SetResponse<AddressBook>),
+    ContactCard(SetResponse<ContactCard>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -90,13 +95,23 @@ pub enum ChangesResponseMethod {
     Identity(ChangesResponse<Identity>),
     EmailSubmission(ChangesResponse<EmailSubmission>),
     Quota(ChangesResponse<Quota>),
+    AddressBook(ChangesResponse<AddressBook>),
+    ContactCard(ChangesResponse<ContactCard>),
 }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(untagged)]
 pub enum CopyResponseMethod {
     Email(CopyResponse<Email>),
+    ContactCard(CopyResponse<ContactCard>),
     Blob(CopyBlobResponse),
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
+pub enum ParseResponseMethod {
+    Email(ParseResponse<Email>),
+    ContactCard(ParseResponse<ContactCard>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -229,7 +244,18 @@ impl<'x> From<GetResponse<Blob>> for ResponseMethod<'x> {
     }
 }
 
-// Direct SetResponse conversions to ResponseMethod
+impl<'x> From<GetResponse<ContactCard>> for ResponseMethod<'x> {
+    fn from(value: GetResponse<ContactCard>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::ContactCard(value))
+    }
+}
+
+impl<'x> From<GetResponse<AddressBook>> for ResponseMethod<'x> {
+    fn from(value: GetResponse<AddressBook>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::AddressBook(value))
+    }
+}
+
 impl<'x> From<SetResponse<Email>> for ResponseMethod<'x> {
     fn from(value: SetResponse<Email>) -> Self {
         ResponseMethod::Set(SetResponseMethod::Email(value))
@@ -272,7 +298,18 @@ impl<'x> From<SetResponse<VacationResponse>> for ResponseMethod<'x> {
     }
 }
 
-// Direct ChangesResponse conversions to ResponseMethod
+impl<'x> From<SetResponse<AddressBook>> for ResponseMethod<'x> {
+    fn from(value: SetResponse<AddressBook>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::AddressBook(value))
+    }
+}
+
+impl<'x> From<SetResponse<ContactCard>> for ResponseMethod<'x> {
+    fn from(value: SetResponse<ContactCard>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::ContactCard(value))
+    }
+}
+
 impl<'x> From<ChangesResponse<Email>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<Email>) -> Self {
         ResponseMethod::Changes(ChangesResponseMethod::Email(value))
@@ -309,7 +346,12 @@ impl<'x> From<ChangesResponse<Quota>> for ResponseMethod<'x> {
     }
 }
 
-// Direct CopyResponse conversions to ResponseMethod
+impl<'x> From<ChangesResponse<AddressBook>> for ResponseMethod<'x> {
+    fn from(value: ChangesResponse<AddressBook>) -> Self {
+        ResponseMethod::Changes(ChangesResponseMethod::AddressBook(value))
+    }
+}
+
 impl<'x> From<CopyResponse<Email>> for ResponseMethod<'x> {
     fn from(value: CopyResponse<Email>) -> Self {
         ResponseMethod::Copy(CopyResponseMethod::Email(value))
@@ -322,16 +364,27 @@ impl<'x> From<CopyBlobResponse> for ResponseMethod<'x> {
     }
 }
 
-// Other direct conversions
+impl<'x> From<CopyResponse<ContactCard>> for ResponseMethod<'x> {
+    fn from(value: CopyResponse<ContactCard>) -> Self {
+        ResponseMethod::Copy(CopyResponseMethod::ContactCard(value))
+    }
+}
+
 impl<'x> From<ImportEmailResponse> for ResponseMethod<'x> {
     fn from(value: ImportEmailResponse) -> Self {
         ResponseMethod::ImportEmail(value)
     }
 }
 
-impl<'x> From<ParseEmailResponse> for ResponseMethod<'x> {
-    fn from(value: ParseEmailResponse) -> Self {
-        ResponseMethod::ParseEmail(value)
+impl<'x> From<ParseResponse<Email>> for ResponseMethod<'x> {
+    fn from(value: ParseResponse<Email>) -> Self {
+        ResponseMethod::Parse(ParseResponseMethod::Email(value))
+    }
+}
+
+impl<'x> From<ParseResponse<ContactCard>> for ResponseMethod<'x> {
+    fn from(value: ParseResponse<ContactCard>) -> Self {
+        ResponseMethod::Parse(ParseResponseMethod::ContactCard(value))
     }
 }
 

@@ -230,6 +230,9 @@ impl IntermediateChangesResponse {
             MethodObject::EmailSubmission => {
                 ChangesResponseMethod::EmailSubmission(transmute_response(self.response))
             }
+            MethodObject::ContactCard => {
+                ChangesResponseMethod::ContactCard(transmute_response(self.response))
+            }
             MethodObject::Core
             | MethodObject::Blob
             | MethodObject::PushSubscription
@@ -237,7 +240,8 @@ impl IntermediateChangesResponse {
             | MethodObject::VacationResponse
             | MethodObject::SieveScript
             | MethodObject::Principal
-            | MethodObject::Quota => unreachable!(),
+            | MethodObject::Quota
+            | MethodObject::AddressBook => unreachable!(),
         })
     }
 }

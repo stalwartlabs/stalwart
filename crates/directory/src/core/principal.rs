@@ -1465,6 +1465,16 @@ impl Permission {
                 | Permission::CalendarAlarms
                 | Permission::CalendarSchedulingSend
                 | Permission::CalendarSchedulingReceive
+                | Permission::JmapAddressBookGet
+                | Permission::JmapAddressBookSet
+                | Permission::JmapAddressBookChanges
+                | Permission::JmapContactCardGet
+                | Permission::JmapContactCardChanges
+                | Permission::JmapContactCardQuery
+                | Permission::JmapContactCardQueryChanges
+                | Permission::JmapContactCardSet
+                | Permission::JmapContactCardCopy
+                | Permission::JmapContactCardParse
         )
     }
 

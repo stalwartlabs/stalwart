@@ -70,6 +70,10 @@ pub enum Capability {
     Blob = 1 << 8,
     #[serde(rename(serialize = "urn:ietf:params:jmap:quota"))]
     Quota = 1 << 9,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:principals"))]
+    Principals = 1 << 10,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:principals:owner"))]
+    PrincipalsOwner = 1 << 11,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -87,6 +91,9 @@ pub enum Capabilities {
     SieveAccount(SieveAccountCapabilities),
     SieveSession(SieveSessionCapabilities),
     Blob(BlobCapabilities),
+    Contacts(ContactsCapabilities),
+    Principals(PrincipalsCapabilities),
+    PrincipalsOwner(PrincipalsOwnerCapabilities),
     Empty(EmptyCapabilities),
 }
 
@@ -176,6 +183,29 @@ pub struct BlobCapabilities {
     pub supported_type_names: Vec<DataType>,
     #[serde(rename(serialize = "supportedDigestAlgorithms"))]
     pub supported_digest_algorithms: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContactsCapabilities {
+    #[serde(rename(serialize = "maxAddressBooksPerCard"))]
+    pub max_address_books_per_card: Option<usize>,
+    #[serde(rename(serialize = "mayCreateAddressBook"))]
+    pub may_create_address_book: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalsCapabilities {
+    #[serde(rename(serialize = "currentUserPrincipalId"))]
+    pub current_user_principal_id: Option<Id>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalsOwnerCapabilities {
+    #[serde(rename(serialize = "accountIdForPrincipal"))]
+    pub account_id_for_principal: Id,
+
+    #[serde(rename(serialize = "principalId"))]
+    pub principal_id: Id,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -332,6 +362,8 @@ impl Capability {
             "urn:ietf:params:jmap:sieve" => Capability::Sieve,
             "urn:ietf:params:jmap:blob" => Capability::Blob,
             "urn:ietf:params:jmap:quota" => Capability::Quota,
+            "urn:ietf:params:jmap:principals" => Capability::Principals,
+            "urn:ietf:params:jmap:principals:owner" => Capability::PrincipalsOwner
         )
     }
 }

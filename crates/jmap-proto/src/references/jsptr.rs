@@ -136,7 +136,7 @@ impl ResponsePtr for BlobId {
     }
 }
 
-impl<T: Property + serde::Serialize> ResponsePtr for PropertyWrapper<T> {
+impl<T: Property> ResponsePtr for PropertyWrapper<T> {
     fn eval_jptr(&self, _: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
         results.0.push(EvalResult::Property(self.0.to_cow()));
         true

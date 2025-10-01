@@ -396,6 +396,15 @@ pub struct EmailQueryArguments {
     pub collapse_threads: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct EmailParseArguments {
+    pub body_properties: Option<Vec<MaybeInvalid<EmailProperty>>>,
+    pub fetch_text_body_values: Option<bool>,
+    pub fetch_html_body_values: Option<bool>,
+    pub fetch_all_body_values: Option<bool>,
+    pub max_body_value_bytes: Option<usize>,
+}
+
 impl<'de> DeserializeArguments<'de> for EmailGetArguments {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
@@ -441,6 +450,36 @@ impl<'de> DeserializeArguments<'de> for EmailQueryArguments {
     }
 }
 
+impl<'de> DeserializeArguments<'de> for EmailParseArguments {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        hashify::fnc_map!(key.as_bytes(),
+            b"bodyProperties" => {
+                self.body_properties = map.next_value()?;
+            },
+            b"fetchTextBodyValues" => {
+                self.fetch_text_body_values = map.next_value()?;
+            },
+            b"fetchHTMLBodyValues" => {
+                self.fetch_html_body_values = map.next_value()?;
+            },
+            b"fetchAllBodyValues" => {
+                self.fetch_all_body_values = map.next_value()?;
+            },
+            b"maxBodyValueBytes" => {
+                self.max_body_value_bytes = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+            }
+        );
+
+        Ok(())
+    }
+}
+
 impl serde::Serialize for EmailProperty {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -468,6 +507,8 @@ impl JmapObject for Email {
     type QueryArguments = EmailQueryArguments;
 
     type CopyArguments = ();
+
+    type ParseArguments = EmailParseArguments;
 
     const ID_PROPERTY: Self::Property = EmailProperty::Id;
 }

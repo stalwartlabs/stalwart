@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "calcard"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "chrono",
@@ -3951,6 +3951,7 @@ name = "jmap_proto"
 version = "0.13.4"
 dependencies = [
  "ahash",
+ "calcard",
  "compact_str",
  "hashify",
  "jmap-tools",

@@ -12,12 +12,12 @@ If you are upgrading from v0.11.x or v0.12.x, this version includes **breaking c
 - JMAP: Protocol layer rewrite for zero-copy deserialization and architectural improvements.
 
 ## Fixed
+- IMAP: Unbounded memory allocation in request parser ([CVE-2025-61600 ](https://github.com/stalwartlabs/stalwart/security/advisories/GHSA-8jqj-qj5p-v5rr)).
+- IMAP: Wrong permission checked for GETACL.
 - JMAP: References to previous method fail when there are no results (#1507).
 - JMAP: Enforce quota checks on `Blob/copy`.
 - JMAP: `Mailbox/get` fails without `accountId` argument (#1936).
 - JMAP: Do not return `invalidProperties` when email update doesn't contain changes (#1139)
-- IMAP: Unbounded memory allocation in request parser.
-- IMAP: Wrong permission checked for GETACL.
 - iTIP: Include date properties in `REPLY` (#2102).
 - OIDC: Do not set `username` field if it is the same as the `email` field.
 - Telemetry: Fix `calculateMetrics` housekeeper task (#2155).

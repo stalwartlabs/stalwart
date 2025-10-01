@@ -251,6 +251,18 @@ impl Permission {
             Permission::CalendarSchedulingReceive => {
                 "Receive calendar scheduling requests via e-mail"
             }
+            Permission::JmapAddressBookGet => "Retrieve address books via JMAP",
+            Permission::JmapAddressBookSet => "Create or update address books via JMAP",
+            Permission::JmapAddressBookChanges => "Track address book changes via JMAP",
+            Permission::JmapContactCardGet => "Retrieve contact cards via JMAP",
+            Permission::JmapContactCardChanges => "Track contact card changes via JMAP",
+            Permission::JmapContactCardQuery => {
+                "Search for contact cards matching criteria via JMAP"
+            }
+            Permission::JmapContactCardQueryChanges => "Track contact card query changes via JMAP",
+            Permission::JmapContactCardSet => "Create or update contact cards via JMAP",
+            Permission::JmapContactCardCopy => "Copy contact cards to new locations via JMAP",
+            Permission::JmapContactCardParse => "Parse contact cards via JMAP",
         }
     }
 }

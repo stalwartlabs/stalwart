@@ -156,6 +156,8 @@ impl JmapObject for Principal {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = PrincipalProperty::Id;
 }
 

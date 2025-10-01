@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use types::id::Id;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(bound(serialize = "InvalidProperty<P>: serde::Serialize"))]
 pub struct SetError<P: Property> {
     #[serde(rename = "type")]
     pub type_: SetErrorType,
@@ -82,6 +83,8 @@ pub enum SetErrorType {
     InvalidScript,
     #[serde(rename = "scriptIsActive")]
     ScriptIsActive,
+    #[serde(rename = "addressBookHasContents")]
+    AddressBookHasContents,
 }
 
 impl SetErrorType {
@@ -112,6 +115,7 @@ impl SetErrorType {
             SetErrorType::AlreadyExists => "alreadyExists",
             SetErrorType::InvalidScript => "invalidScript",
             SetErrorType::ScriptIsActive => "scriptIsActive",
+            SetErrorType::AddressBookHasContents => "addressBookHasContents",
         }
     }
 }

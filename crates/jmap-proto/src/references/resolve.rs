@@ -42,6 +42,8 @@ impl Response<'_> {
                 GetRequestMethod::Principal(request) => request.resolve_references(self)?,
                 GetRequestMethod::Quota(request) => request.resolve_references(self)?,
                 GetRequestMethod::Blob(request) => request.resolve_references(self)?,
+                GetRequestMethod::AddressBook(request) => request.resolve_references(self)?,
+                GetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
             },
             RequestMethod::Set(request) => match request {
                 SetRequestMethod::Email(request) => request.resolve_references(self)?,
@@ -51,9 +53,12 @@ impl Response<'_> {
                 SetRequestMethod::PushSubscription(request) => request.resolve_references(self)?,
                 SetRequestMethod::Sieve(request) => request.resolve_references(self)?,
                 SetRequestMethod::VacationResponse(request) => request.resolve_references(self)?,
+                SetRequestMethod::AddressBook(request) => request.resolve_references(self)?,
+                SetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
             },
             RequestMethod::Copy(request) => match request {
                 CopyRequestMethod::Email(request) => request.resolve_references(self)?,
+                CopyRequestMethod::ContactCard(request) => request.resolve_references(self)?,
                 CopyRequestMethod::Blob(_) => (),
             },
             RequestMethod::ImportEmail(request) => request.resolve_references(self)?,

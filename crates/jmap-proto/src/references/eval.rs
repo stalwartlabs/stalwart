@@ -57,6 +57,12 @@ impl Response<'_> {
                             response.eval_jptr(path, &mut results)
                         }
                         GetResponseMethod::Blob(response) => response.eval_jptr(path, &mut results),
+                        GetResponseMethod::AddressBook(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        GetResponseMethod::ContactCard(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
                     },
                     ResponseMethod::Changes(response) => match response {
                         ChangesResponseMethod::Email(response) => {
@@ -75,6 +81,12 @@ impl Response<'_> {
                             response.eval_jptr(path, &mut results)
                         }
                         ChangesResponseMethod::Quota(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        ChangesResponseMethod::AddressBook(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        ChangesResponseMethod::ContactCard(response) => {
                             response.eval_jptr(path, &mut results)
                         }
                     },

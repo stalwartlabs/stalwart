@@ -6,8 +6,8 @@
 
 use super::get::ChangesLookup;
 use crate::{
-    api::request::set_account_id_if_missing, email::query::EmailQuery,
-    mailbox::query::MailboxQuery, sieve::query::SieveScriptQuery,
+    api::request::set_account_id_if_missing, contact::query::ContactCardQuery,
+    email::query::EmailQuery, mailbox::query::MailboxQuery, sieve::query::SieveScriptQuery,
     submission::query::EmailSubmissionQuery,
 };
 use common::{Server, auth::AccessToken};
@@ -136,6 +136,30 @@ impl QueryChanges for Server {
 
                 up_to_id = request.up_to_id;
                 results = self.sieve_script_query(request.into()).await?;
+            }
+            QueryChangesRequestMethod::ContactCard(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::ContactCard,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self
+                    .contact_card_query(request.into(), access_token)
+                    .await?;
             }
             QueryChangesRequestMethod::Principal(_) => {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());

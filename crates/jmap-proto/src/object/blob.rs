@@ -183,6 +183,8 @@ impl JmapObject for Blob {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = BlobProperty::Id;
 }
 

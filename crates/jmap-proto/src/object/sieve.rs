@@ -152,6 +152,8 @@ impl JmapObject for Sieve {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = SieveProperty::Id;
 }
 

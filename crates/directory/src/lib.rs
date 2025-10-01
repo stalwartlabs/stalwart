@@ -379,6 +379,18 @@ pub enum Permission {
     CalendarAlarms,
     CalendarSchedulingSend,
     CalendarSchedulingReceive,
+
+    JmapAddressBookGet,
+    JmapAddressBookSet,
+    JmapAddressBookChanges,
+
+    JmapContactCardGet,
+    JmapContactCardChanges,
+    JmapContactCardQuery,
+    JmapContactCardQueryChanges,
+    JmapContactCardSet,
+    JmapContactCardCopy,
+    JmapContactCardParse,
     // WARNING: add new ids at the end (TODO: use static ids)
 }
 

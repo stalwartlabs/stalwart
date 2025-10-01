@@ -7,8 +7,8 @@
 use common::auth::AccessToken;
 use directory::Permission;
 use jmap_proto::request::{
-    CopyRequestMethod, GetRequestMethod, QueryChangesRequestMethod, QueryRequestMethod,
-    RequestMethod, SetRequestMethod, method::MethodObject,
+    CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
+    QueryRequestMethod, RequestMethod, SetRequestMethod, method::MethodObject,
 };
 use types::{collection::Collection, id::Id};
 
@@ -67,6 +67,8 @@ impl JmapAuthorization for AccessToken {
                 GetRequestMethod::Principal(_) => Permission::JmapPrincipalGet,
                 GetRequestMethod::Quota(_) => Permission::JmapQuotaGet,
                 GetRequestMethod::Blob(_) => Permission::JmapBlobGet,
+                GetRequestMethod::AddressBook(_) => Permission::JmapAddressBookGet,
+                GetRequestMethod::ContactCard(_) => Permission::JmapContactCardGet,
             },
             RequestMethod::Set(m) => match &m {
                 SetRequestMethod::Email(_) => Permission::JmapEmailSet,
@@ -76,6 +78,8 @@ impl JmapAuthorization for AccessToken {
                 SetRequestMethod::PushSubscription(_) => Permission::JmapPushSubscriptionSet,
                 SetRequestMethod::Sieve(_) => Permission::JmapSieveScriptSet,
                 SetRequestMethod::VacationResponse(_) => Permission::JmapVacationResponseSet,
+                SetRequestMethod::AddressBook(_) => Permission::JmapAddressBookSet,
+                SetRequestMethod::ContactCard(_) => Permission::JmapContactCardSet,
             },
             RequestMethod::Changes(_) => match object {
                 MethodObject::Email => Permission::JmapEmailChanges,
@@ -84,20 +88,26 @@ impl JmapAuthorization for AccessToken {
                 MethodObject::Identity => Permission::JmapIdentityChanges,
                 MethodObject::EmailSubmission => Permission::JmapEmailSubmissionChanges,
                 MethodObject::Quota => Permission::JmapQuotaChanges,
+                MethodObject::ContactCard => Permission::JmapContactCardChanges,
                 MethodObject::Core
                 | MethodObject::Blob
                 | MethodObject::PushSubscription
                 | MethodObject::SearchSnippet
                 | MethodObject::VacationResponse
                 | MethodObject::SieveScript
-                | MethodObject::Principal => Permission::JmapEmailChanges, // Unimplemented
+                | MethodObject::Principal
+                | MethodObject::AddressBook => Permission::JmapEmailChanges,
             },
             RequestMethod::Copy(m) => match &m {
                 CopyRequestMethod::Email(_) => Permission::JmapEmailCopy,
                 CopyRequestMethod::Blob(_) => Permission::JmapBlobCopy,
+                CopyRequestMethod::ContactCard(_) => Permission::JmapContactCardCopy,
             },
             RequestMethod::ImportEmail(_) => Permission::JmapEmailImport,
-            RequestMethod::ParseEmail(_) => Permission::JmapEmailParse,
+            RequestMethod::Parse(m) => match &m {
+                ParseRequestMethod::Email(_) => Permission::JmapEmailParse,
+                ParseRequestMethod::ContactCard(_) => Permission::JmapContactCardParse,
+            },
             RequestMethod::QueryChanges(m) => match m {
                 QueryChangesRequestMethod::Email(_) => Permission::JmapEmailQueryChanges,
                 QueryChangesRequestMethod::Mailbox(_) => Permission::JmapMailboxQueryChanges,
@@ -107,6 +117,9 @@ impl JmapAuthorization for AccessToken {
                 QueryChangesRequestMethod::Sieve(_) => Permission::JmapSieveScriptQueryChanges,
                 QueryChangesRequestMethod::Principal(_) => Permission::JmapPrincipalQueryChanges,
                 QueryChangesRequestMethod::Quota(_) => Permission::JmapQuotaQueryChanges,
+                QueryChangesRequestMethod::ContactCard(_) => {
+                    Permission::JmapContactCardQueryChanges
+                }
             },
             RequestMethod::Query(m) => match m {
                 QueryRequestMethod::Email(_) => Permission::JmapEmailQuery,
@@ -115,6 +128,7 @@ impl JmapAuthorization for AccessToken {
                 QueryRequestMethod::Sieve(_) => Permission::JmapSieveScriptQuery,
                 QueryRequestMethod::Principal(_) => Permission::JmapPrincipalQuery,
                 QueryRequestMethod::Quota(_) => Permission::JmapQuotaQuery,
+                QueryRequestMethod::ContactCard(_) => Permission::JmapContactCardQuery,
             },
             RequestMethod::SearchSnippet(_) => Permission::JmapSearchSnippet,
             RequestMethod::ValidateScript(_) => Permission::JmapSieveScriptValidate,

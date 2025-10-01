@@ -133,6 +133,8 @@ impl JmapObject for Quota {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = QuotaProperty::Id;
 }
 

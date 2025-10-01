@@ -19,7 +19,7 @@ use crate::{
         get::GetRequest,
         import::ImportEmailRequest,
         lookup::BlobLookupRequest,
-        parse::ParseEmailRequest,
+        parse::ParseRequest,
         query::QueryRequest,
         query_changes::QueryChangesRequest,
         search_snippet::GetSearchSnippetRequest,
@@ -28,9 +28,10 @@ use crate::{
         validate::ValidateSieveScriptRequest,
     },
     object::{
-        AnyId, blob::Blob, email::Email, email_submission::EmailSubmission, identity::Identity,
-        mailbox::Mailbox, principal::Principal, push_subscription::PushSubscription, quota::Quota,
-        sieve::Sieve, thread::Thread, vacation_response::VacationResponse,
+        AnyId, addressbook::AddressBook, blob::Blob, contact::ContactCard, email::Email,
+        email_submission::EmailSubmission, identity::Identity, mailbox::Mailbox,
+        principal::Principal, push_subscription::PushSubscription, quota::Quota, sieve::Sieve,
+        thread::Thread, vacation_response::VacationResponse,
     },
     request::{capability::CapabilityIds, reference::MaybeIdReference},
 };
@@ -59,7 +60,7 @@ pub enum RequestMethod<'x> {
     Changes(ChangesRequest),
     Copy(CopyRequestMethod<'x>),
     ImportEmail(ImportEmailRequest),
-    ParseEmail(ParseEmailRequest),
+    Parse(ParseRequestMethod),
     Query(QueryRequestMethod),
     QueryChanges(QueryChangesRequestMethod),
     SearchSnippet(GetSearchSnippetRequest),
@@ -83,6 +84,8 @@ pub enum GetRequestMethod {
     Principal(GetRequest<Principal>),
     Quota(GetRequest<Quota>),
     Blob(GetRequest<Blob>),
+    AddressBook(GetRequest<AddressBook>),
+    ContactCard(GetRequest<ContactCard>),
 }
 
 #[derive(Debug)]
@@ -94,11 +97,14 @@ pub enum SetRequestMethod<'x> {
     PushSubscription(SetRequest<'x, PushSubscription>),
     Sieve(SetRequest<'x, Sieve>),
     VacationResponse(SetRequest<'x, VacationResponse>),
+    AddressBook(SetRequest<'x, AddressBook>),
+    ContactCard(SetRequest<'x, ContactCard>),
 }
 
 #[derive(Debug)]
 pub enum CopyRequestMethod<'x> {
     Email(CopyRequest<'x, Email>),
+    ContactCard(CopyRequest<'x, ContactCard>),
     Blob(CopyBlobRequest),
 }
 
@@ -110,6 +116,7 @@ pub enum QueryRequestMethod {
     Sieve(QueryRequest<Sieve>),
     Principal(QueryRequest<Principal>),
     Quota(QueryRequest<Quota>),
+    ContactCard(QueryRequest<ContactCard>),
 }
 
 #[derive(Debug)]
@@ -120,6 +127,13 @@ pub enum QueryChangesRequestMethod {
     Sieve(QueryChangesRequest<Sieve>),
     Principal(QueryChangesRequest<Principal>),
     Quota(QueryChangesRequest<Quota>),
+    ContactCard(QueryChangesRequest<ContactCard>),
+}
+
+#[derive(Debug)]
+pub enum ParseRequestMethod {
+    Email(ParseRequest<Email>),
+    ContactCard(ParseRequest<ContactCard>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

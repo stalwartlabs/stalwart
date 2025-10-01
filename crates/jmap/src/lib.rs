@@ -24,9 +24,11 @@ use store::{
 use trc::AddContext;
 use types::collection::Collection;
 
+pub mod addressbook;
 pub mod api;
 pub mod blob;
 pub mod changes;
+pub mod contact;
 pub mod email;
 pub mod identity;
 pub mod mailbox;

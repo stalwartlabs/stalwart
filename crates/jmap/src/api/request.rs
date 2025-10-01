@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::Instant};
-
 use crate::{
+    addressbook::{get::AddressBookGet, set::AddressBookSet},
     api::auth::JmapAuthorization,
     blob::{copy::BlobCopy, get::BlobOperations, upload::BlobUpload},
     changes::{get::ChangesLookup, query::QueryChanges},
+    contact::{
+        copy::JmapContactCardCopy, get::ContactCardGet, parse::ContactCardParse,
+        query::ContactCardQuery, set::ContactCardSet,
+    },
     email::{
         copy::JmapEmailCopy, get::EmailGet, import::EmailImport, parse::EmailParse,
         query::EmailQuery, set::EmailSet, snippet::EmailSearchSnippet,
@@ -31,15 +34,15 @@ use common::{Server, auth::AccessToken};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     request::{
-        Call, CopyRequestMethod, GetRequestMethod, QueryRequestMethod, Request, RequestMethod,
-        SetRequestMethod, method::MethodName,
+        Call, CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryRequestMethod, Request,
+        RequestMethod, SetRequestMethod, method::MethodName,
     },
     response::{Response, ResponseMethod, SetResponseMethod},
 };
+use std::future::Future;
+use std::{sync::Arc, time::Instant};
 use trc::JmapEvent;
 use types::{collection::Collection, id::Id};
-
-use std::future::Future;
 
 pub trait RequestHandler: Sync + Send {
     fn handle_jmap_request<'x>(
@@ -124,6 +127,12 @@ impl RequestHandler for Server {
                                         set_response.update_created_ids(&mut response);
                                     }
                                     SetResponseMethod::VacationResponse(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::AddressBook(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::ContactCard(set_response) => {
                                         set_response.update_created_ids(&mut response);
                                     }
                                 }
@@ -248,6 +257,18 @@ impl RequestHandler for Server {
 
                     self.blob_get(req, access_token).await?.into()
                 }
+                GetRequestMethod::AddressBook(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::AddressBook)?;
+
+                    self.address_book_get(req, access_token).await?.into()
+                }
+                GetRequestMethod::ContactCard(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::ContactCard)?;
+
+                    self.contact_card_get(req, access_token).await?.into()
+                }
             },
             RequestMethod::Query(req) => match req {
                 QueryRequestMethod::Email(mut req) => {
@@ -283,6 +304,12 @@ impl RequestHandler for Server {
                     access_token.assert_is_member(req.account_id)?;
 
                     self.quota_query(req, access_token).await?.into()
+                }
+                QueryRequestMethod::ContactCard(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::ContactCard)?;
+
+                    self.contact_card_query(req, access_token).await?.into()
                 }
             },
             RequestMethod::Set(req) => match req {
@@ -330,6 +357,22 @@ impl RequestHandler for Server {
 
                     self.vacation_response_set(req, access_token).await?.into()
                 }
+                SetRequestMethod::AddressBook(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::AddressBook)?;
+
+                    self.address_book_set(req, access_token, session)
+                        .await?
+                        .into()
+                }
+                SetRequestMethod::ContactCard(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::ContactCard)?;
+
+                    self.contact_card_set(req, access_token, session)
+                        .await?
+                        .into()
+                }
             },
             RequestMethod::Changes(mut req) => {
                 set_account_id_if_missing(&mut req.account_id, access_token);
@@ -356,6 +399,16 @@ impl RequestHandler for Server {
 
                     self.blob_copy(req, access_token).await?.into()
                 }
+                CopyRequestMethod::ContactCard(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token
+                        .assert_has_access(req.account_id, Collection::ContactCard)?
+                        .assert_has_access(req.from_account_id, Collection::ContactCard)?;
+
+                    self.contact_card_copy(req, access_token, next_call, session)
+                        .await?
+                        .into()
+                }
             },
             RequestMethod::ImportEmail(mut req) => {
                 set_account_id_if_missing(&mut req.account_id, access_token);
@@ -363,12 +416,20 @@ impl RequestHandler for Server {
 
                 self.email_import(req, access_token, session).await?.into()
             }
-            RequestMethod::ParseEmail(mut req) => {
-                set_account_id_if_missing(&mut req.account_id, access_token);
-                access_token.assert_has_access(req.account_id, Collection::Email)?;
+            RequestMethod::Parse(req) => match req {
+                ParseRequestMethod::Email(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Email)?;
 
-                self.email_parse(req, access_token).await?.into()
-            }
+                    self.email_parse(req, access_token).await?.into()
+                }
+                ParseRequestMethod::ContactCard(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::ContactCard)?;
+
+                    self.contact_card_parse(req, access_token).await?.into()
+                }
+            },
             RequestMethod::QueryChanges(req) => self.query_changes(req, access_token).await?.into(),
             RequestMethod::SearchSnippet(mut req) => {
                 set_account_id_if_missing(&mut req.account_id, access_token);

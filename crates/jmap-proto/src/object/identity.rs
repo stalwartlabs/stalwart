@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::object::{AnyId, JmapObject, JmapObjectId};
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::id::Id;
-
-use crate::object::{AnyId, JmapObject, JmapObjectId};
 
 #[derive(Debug, Clone, Default)]
 pub struct Identity;
@@ -142,6 +141,8 @@ impl JmapObject for Identity {
     type QueryArguments = ();
 
     type CopyArguments = ();
+
+    type ParseArguments = ();
 
     const ID_PROPERTY: Self::Property = IdentityProperty::Id;
 }
