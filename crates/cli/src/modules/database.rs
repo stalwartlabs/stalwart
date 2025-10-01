@@ -96,7 +96,7 @@ impl ServerCommands {
                         for (key, value) in &sorted {
                             let val: String;
                             if value.contains('\n') {
-                                val = "|\n  ".to_owned() + &value.replace("\n", "\n  ");
+                                val = "|\n  ".to_owned() + &value.trim_end().replace("\n", "\n  ");
                             } else {
                                 val = "\"".to_owned() + value + "\"";
                             }
