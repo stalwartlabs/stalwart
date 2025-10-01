@@ -452,6 +452,9 @@ pub enum ServerCommands {
     ListConfig {
         /// Prefix to filter configuration entries by
         prefix: Option<String>,
+        /// Output in sorted YAML
+        #[clap(short, long)]
+        yaml: bool,
     },
 
     /// Perform Healthcheck

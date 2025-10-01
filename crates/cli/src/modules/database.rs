@@ -79,7 +79,7 @@ impl ServerCommands {
                     .await;
                 eprintln!("Successfully deleted key {key}.");
             }
-            ServerCommands::ListConfig { prefix } => {
+            ServerCommands::ListConfig { prefix, yaml } => {
                 let results = client
                     .http_request::<Response<HashMap<String, String>>, String>(
                         Method::GET,
@@ -90,19 +90,33 @@ impl ServerCommands {
                     .items;
 
                 if !results.is_empty() {
-                    let mut table = Table::new();
-                    table.add_row(Row::new(vec![
-                        Cell::new("Key").with_style(Attr::Bold),
-                        Cell::new("Value").with_style(Attr::Bold),
-                    ]));
+                    if yaml {
+                        let mut sorted: Vec<_> = results.iter().collect();
+                        sorted.sort_by_key(|tuple| tuple.0.clone());
+                        for (key, value) in &sorted {
+                            let val: String;
+                            if value.contains('\n') {
+                                val = "|\n  ".to_owned() + &value.replace("\n", "\n  ");
+                            } else {
+                                val = "\"".to_owned() + value + "\"";
+                            }
+                            println!("{key}: {val}");
+                        }
+                    } else {
+                        let mut table = Table::new();
+                        table.add_row(Row::new(vec![
+                            Cell::new("Key").with_style(Attr::Bold),
+                            Cell::new("Value").with_style(Attr::Bold),
+                        ]));
 
-                    for (key, value) in &results {
-                        table.add_row(Row::new(vec![Cell::new(key), Cell::new(value)]));
+                        for (key, value) in &results {
+                            table.add_row(Row::new(vec![Cell::new(key), Cell::new(value)]));
+                        }
+
+                        eprintln!();
+                        table.printstd();
+                        eprintln!();
                     }
-
-                    eprintln!();
-                    table.printstd();
-                    eprintln!();
                 }
 
                 eprintln!(
