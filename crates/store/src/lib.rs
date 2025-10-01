@@ -92,28 +92,6 @@ pub const U64_LEN: usize = std::mem::size_of::<u64>();
 pub const U32_LEN: usize = std::mem::size_of::<u32>();
 pub const U16_LEN: usize = std::mem::size_of::<u16>();
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum BlobClass {
-    Reserved {
-        account_id: u32,
-        expires: u64,
-    },
-    Linked {
-        account_id: u32,
-        collection: u8,
-        document_id: u32,
-    },
-}
-
-impl Default for BlobClass {
-    fn default() -> Self {
-        BlobClass::Reserved {
-            account_id: 0,
-            expires: 0,
-        }
-    }
-}
-
 pub const SUBSPACE_ACL: u8 = b'a';
 pub const SUBSPACE_BITMAP_ID: u8 = b'b';
 pub const SUBSPACE_BITMAP_TAG: u8 = b'c';

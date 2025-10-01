@@ -14,8 +14,8 @@ use jmap_client::{
         set::SetObject,
     },
 };
-use jmap_proto::types::id::Id;
 use std::time::Duration;
+use types::id::Id;
 
 use tokio::sync::mpsc;
 

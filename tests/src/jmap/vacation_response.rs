@@ -6,8 +6,8 @@
 
 use chrono::{TimeDelta, Utc};
 
-use jmap_proto::types::id::Id;
 use std::time::Instant;
+use types::id::Id;
 
 use crate::{
     directory::internal::TestInternalDirectory,

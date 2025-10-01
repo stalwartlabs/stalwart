@@ -13,15 +13,12 @@ use crate::{
         ingest::{EmailIngest, IngestEmail, IngestSource, IngestedEmail},
     },
 };
-use common::{
-    Server, auth::AccessToken, config::jmap::settings::SpecialUse, scripts::plugins::PluginContext,
-};
+use common::{Server, auth::AccessToken, scripts::plugins::PluginContext};
 use directory::{Permission, QueryParams};
-use jmap_proto::types::{collection::Collection, id::Id, keyword::Keyword, property::Property};
 use mail_parser::MessageParser;
 use sieve::{Envelope, Event, Input, Mailbox, Recipient, Sieve};
-use std::future::Future;
 use std::{borrow::Cow, sync::Arc};
+use std::{future::Future, str::FromStr};
 use store::{
     Deserialize, Serialize, SerializeInfallible,
     ahash::AHashMap,
@@ -30,6 +27,9 @@ use store::{
     write::{AlignedBytes, Archive, ArchiveVersion, Archiver, BatchBuilder, BlobOp},
 };
 use trc::{AddContext, SieveEvent};
+use types::{
+    collection::Collection, field::SieveField, id::Id, keyword::Keyword, special_use::SpecialUse,
+};
 use utils::config::utils::ParseValue;
 
 struct SieveMessage<'x> {
@@ -142,7 +142,8 @@ impl SieveScriptIngest for Server {
             did_file_into: false,
         }];
         let mut ingested_message = IngestedEmail {
-            id: Id::default(),
+            document_id: 0,
+            thread_id: 0,
             change_id: u64::MAX,
             blob_id: Default::default(),
             size: raw_message.len(),
@@ -210,10 +211,10 @@ impl SieveScriptIngest for Server {
                                         }
                                     }
                                     Mailbox::Id(id) => {
-                                        if !matches!(Id::from_bytes(id.as_bytes()), Some(id) if
-                                                            cache.has_mailbox_id(&id.document_id()) &&
-                                                            (special_use_ids.is_empty() ||
-                                                            special_use_ids.contains(&id.document_id())))
+                                        if !matches!(Id::from_str(&id), Ok(id) if
+                                                        cache.has_mailbox_id(&id.document_id()) &&
+                                                        (special_use_ids.is_empty() ||
+                                                        special_use_ids.contains(&id.document_id())))
                                         {
                                             result = false;
                                             break;
@@ -307,9 +308,7 @@ impl SieveScriptIngest for Server {
                         let mut target_id = u32::MAX;
 
                         // Find mailbox by Id
-                        if let Some(mailbox_id) =
-                            mailbox_id.and_then(|m| Id::from_bytes(m.as_bytes()))
-                        {
+                        if let Some(mailbox_id) = mailbox_id.and_then(|m| Id::from_str(&m).ok()) {
                             let mailbox_id = mailbox_id.document_id();
                             if cache.has_mailbox_id(&mailbox_id) {
                                 target_id = mailbox_id;
@@ -560,7 +559,7 @@ impl SieveScriptIngest for Server {
             .filter(
                 account_id,
                 Collection::SieveScript,
-                vec![Filter::eq(Property::IsActive, vec![1u8])],
+                vec![Filter::eq(SieveField::IsActive, vec![1u8])],
             )
             .await
             .caused_by(trc::location!())?
@@ -591,7 +590,7 @@ impl SieveScriptIngest for Server {
             .filter(
                 account_id,
                 Collection::SieveScript,
-                vec![Filter::eq(Property::Name, name.serialize())],
+                vec![Filter::eq(SieveField::Name, name.serialize())],
             )
             .await
             .caused_by(trc::location!())?
@@ -693,9 +692,9 @@ impl SieveScriptIngest for Server {
                         .with_account_id(account_id)
                         .with_collection(Collection::SieveScript)
                         .update_document(document_id)
-                        .assert_value(Property::Value, &script_object)
+                        .assert_value(SieveField::Archive, &script_object)
                         .set(
-                            Property::Value,
+                            SieveField::Archive,
                             new_archive.serialize().caused_by(trc::location!())?,
                         )
                         .clear(BlobOp::Link { hash: blob_hash })

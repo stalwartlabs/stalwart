@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
-use jmap_proto::types::{
-    property::{HeaderForm, HeaderProperty, Property},
-    value::{Object, Value},
+use jmap_proto::{
+    object::email::{EmailProperty, EmailValue, HeaderForm, HeaderProperty},
+    types::date::UTCDate,
 };
+use jmap_tools::{Key, Map, Value};
 use mail_builder::{
     MessageBuilder,
     headers::{
@@ -22,18 +21,22 @@ use mail_builder::{
     },
 };
 use mail_parser::{
-    Addr, ArchivedHeader, ArchivedHeaderValue, Header, HeaderName, HeaderValue,
+    Addr, ArchivedHeader, ArchivedHeaderValue, DateTime, Group, Header, HeaderName, HeaderValue,
     parsers::MessageStream,
 };
 use store::rkyv::vec::ArchivedVec;
 
 pub trait IntoForm {
-    fn into_form(self, form: &HeaderForm) -> Value;
+    fn into_form(self, form: &HeaderForm) -> Value<'static, EmailProperty, EmailValue>;
 }
 
 pub trait HeaderToValue {
-    fn header_to_value(&self, property: &Property, raw_message: &[u8]) -> Value;
-    fn headers_to_value(&self, raw_message: &[u8]) -> Value;
+    fn header_to_value(
+        &self,
+        property: &EmailProperty,
+        raw_message: &[u8],
+    ) -> Value<'static, EmailProperty, EmailValue>;
+    fn headers_to_value(&self, raw_message: &[u8]) -> Value<'static, EmailProperty, EmailValue>;
 }
 
 pub trait ValueToHeader<'x> {
@@ -42,30 +45,38 @@ pub trait ValueToHeader<'x> {
     fn try_into_address(self) -> Option<EmailAddress<'x>>;
 }
 
-pub trait BuildHeader: Sized {
-    fn build_header(self, header: HeaderProperty, value: Value) -> Result<Self, HeaderProperty>;
+pub trait BuildHeader<'x>: Sized {
+    fn build_header(
+        self,
+        header: HeaderProperty,
+        value: Value<'x, EmailProperty, EmailValue>,
+    ) -> Result<Self, HeaderProperty>;
 }
 
 impl HeaderToValue for Vec<Header<'_>> {
-    fn header_to_value(&self, property: &Property, raw_message: &[u8]) -> Value {
+    fn header_to_value(
+        &self,
+        property: &EmailProperty,
+        raw_message: &[u8],
+    ) -> Value<'static, EmailProperty, EmailValue> {
         let (header_name, form, all) = match property {
-            Property::Header(header) => (
+            EmailProperty::Header(header) => (
                 HeaderName::parse(header.header.as_str())
                     .unwrap_or_else(|| HeaderName::Other(header.header.as_str().into())),
                 header.form,
                 header.all,
             ),
-            Property::Sender => (HeaderName::Sender, HeaderForm::Addresses, false),
-            Property::From => (HeaderName::From, HeaderForm::Addresses, false),
-            Property::To => (HeaderName::To, HeaderForm::Addresses, false),
-            Property::Cc => (HeaderName::Cc, HeaderForm::Addresses, false),
-            Property::Bcc => (HeaderName::Bcc, HeaderForm::Addresses, false),
-            Property::ReplyTo => (HeaderName::ReplyTo, HeaderForm::Addresses, false),
-            Property::Subject => (HeaderName::Subject, HeaderForm::Text, false),
-            Property::MessageId => (HeaderName::MessageId, HeaderForm::MessageIds, false),
-            Property::InReplyTo => (HeaderName::InReplyTo, HeaderForm::MessageIds, false),
-            Property::References => (HeaderName::References, HeaderForm::MessageIds, false),
-            Property::SentAt => (HeaderName::Date, HeaderForm::Date, false),
+            EmailProperty::Sender => (HeaderName::Sender, HeaderForm::Addresses, false),
+            EmailProperty::From => (HeaderName::From, HeaderForm::Addresses, false),
+            EmailProperty::To => (HeaderName::To, HeaderForm::Addresses, false),
+            EmailProperty::Cc => (HeaderName::Cc, HeaderForm::Addresses, false),
+            EmailProperty::Bcc => (HeaderName::Bcc, HeaderForm::Addresses, false),
+            EmailProperty::ReplyTo => (HeaderName::ReplyTo, HeaderForm::Addresses, false),
+            EmailProperty::Subject => (HeaderName::Subject, HeaderForm::Text, false),
+            EmailProperty::MessageId => (HeaderName::MessageId, HeaderForm::MessageIds, false),
+            EmailProperty::InReplyTo => (HeaderName::InReplyTo, HeaderForm::MessageIds, false),
+            EmailProperty::References => (HeaderName::References, HeaderForm::MessageIds, false),
+            EmailProperty::SentAt => (HeaderName::Date, HeaderForm::Date, false),
             _ => return Value::Null,
         };
 
@@ -104,18 +115,18 @@ impl HeaderToValue for Vec<Header<'_>> {
             if headers.len() > 1 {
                 headers.reverse();
             }
-            Value::List(headers)
+            Value::Array(headers)
         }
     }
 
-    fn headers_to_value(&self, raw_message: &[u8]) -> Value {
+    fn headers_to_value(&self, raw_message: &[u8]) -> Value<'static, EmailProperty, EmailValue> {
         let mut headers = Vec::with_capacity(self.len());
         for header in self.iter() {
             headers.push(Value::Object(
-                Object::with_capacity(2)
-                    .with_property(Property::Name, header.name().to_string())
-                    .with_property(
-                        Property::Value,
+                Map::with_capacity(2)
+                    .with_key_value(EmailProperty::Name, header.name().to_string())
+                    .with_key_value(
+                        EmailProperty::Value,
                         String::from_utf8_lossy(
                             raw_message
                                 .get(header.offset_start as usize..header.offset_end as usize)
@@ -131,79 +142,86 @@ impl HeaderToValue for Vec<Header<'_>> {
 }
 
 impl IntoForm for HeaderValue<'_> {
-    fn into_form(self, form: &HeaderForm) -> Value {
+    fn into_form(self, form: &HeaderForm) -> Value<'static, EmailProperty, EmailValue> {
         match (self, form) {
-            (HeaderValue::Text(text), HeaderForm::Raw | HeaderForm::Text) => text.into(),
+            (HeaderValue::Text(text), HeaderForm::Raw | HeaderForm::Text) => {
+                text.into_owned().into()
+            }
             (HeaderValue::TextList(texts), HeaderForm::Raw | HeaderForm::Text) => {
                 texts.join(", ").into()
             }
-            (HeaderValue::Text(text), HeaderForm::MessageIds) => Value::List(vec![text.into()]),
-            (HeaderValue::TextList(texts), HeaderForm::MessageIds) => texts.into(),
-            (HeaderValue::DateTime(datetime), HeaderForm::Date) => datetime.into(),
+            (HeaderValue::Text(text), HeaderForm::MessageIds) => {
+                Value::Array(vec![text.into_owned().into()])
+            }
+            (HeaderValue::TextList(texts), HeaderForm::MessageIds) => {
+                Value::Array(texts.into_iter().map(|t| t.into_owned().into()).collect())
+            }
+            (HeaderValue::DateTime(datetime), HeaderForm::Date) => from_mail_datetime(datetime),
             (HeaderValue::Address(mail_parser::Address::List(addrlist)), HeaderForm::URLs) => {
-                Value::List(
+                Value::Array(
                     addrlist
                         .into_iter()
                         .filter_map(|addr| match addr {
                             Addr {
                                 address: Some(addr),
                                 ..
-                            } if addr.contains(':') => Some(addr.into()),
+                            } if addr.contains(':') => Some(addr.into_owned().into()),
                             _ => None,
                         })
                         .collect(),
                 )
             }
             (HeaderValue::Address(mail_parser::Address::List(addrlist)), HeaderForm::Addresses) => {
-                addrlist.into()
+                from_mail_addrlist(addrlist)
             }
             (
                 HeaderValue::Address(mail_parser::Address::Group(grouplist)),
                 HeaderForm::Addresses,
-            ) => Value::List(
+            ) => Value::Array(
                 grouplist
                     .into_iter()
-                    .flat_map(|group| group.addresses)
-                    .map(Value::from)
+                    .flat_map(|group| group.addresses.into_iter().map(from_mail_addr))
                     .collect(),
             ),
             (
                 HeaderValue::Address(mail_parser::Address::List(addrlist)),
                 HeaderForm::GroupedAddresses,
-            ) => Value::List(vec![
-                Object::with_capacity(2)
-                    .with_property(Property::Name, Value::Null)
-                    .with_property(Property::Addresses, addrlist)
+            ) => Value::Array(vec![
+                Map::with_capacity(2)
+                    .with_key_value(EmailProperty::Name, Value::Null)
+                    .with_key_value(EmailProperty::Addresses, from_mail_addrlist(addrlist))
                     .into(),
             ]),
             (
                 HeaderValue::Address(mail_parser::Address::Group(grouplist)),
                 HeaderForm::GroupedAddresses,
-            ) => grouplist.into(),
+            ) => Value::Array(
+                grouplist
+                    .into_iter()
+                    .map(from_mail_group)
+                    .collect::<Vec<Value<'static, EmailProperty, EmailValue>>>(),
+            ),
 
             _ => Value::Null,
         }
     }
 }
 
-impl<'x> ValueToHeader<'x> for Value {
+impl<'x> ValueToHeader<'x> for Value<'x, EmailProperty, EmailValue> {
     fn try_into_grouped_addresses(self) -> Option<GroupedAddresses<'x>> {
-        let mut obj = self.try_unwrap_object()?;
+        let mut obj = self.into_object()?;
         Some(GroupedAddresses {
             name: obj
-                .0
-                .remove(&Property::Name)
-                .and_then(|n| n.try_unwrap_string())
-                .map(|n| n.into()),
+                .remove(&Key::Property(EmailProperty::Name))
+                .and_then(|n| n.into_string()),
             addresses: obj
-                .0
-                .remove(&Property::Addresses)?
+                .remove(&Key::Property(EmailProperty::Addresses))?
                 .try_into_address_list()?,
         })
     }
 
     fn try_into_address_list(self) -> Option<Vec<Address<'x>>> {
-        let list = self.try_unwrap_list()?;
+        let list = self.into_array()?;
         let mut addresses = Vec::with_capacity(list.len());
         for value in list {
             addresses.push(Address::Address(value.try_into_address()?));
@@ -212,93 +230,97 @@ impl<'x> ValueToHeader<'x> for Value {
     }
 
     fn try_into_address(self) -> Option<EmailAddress<'x>> {
-        let mut obj = self.try_unwrap_object()?;
+        let mut obj = self.into_object()?;
         Some(EmailAddress {
             name: obj
-                .0
-                .remove(&Property::Name)
-                .and_then(|n| n.try_unwrap_string())
-                .map(|n| n.into()),
-            email: obj.0.remove(&Property::Email)?.try_unwrap_string()?.into(),
+                .remove(&Key::Property(EmailProperty::Name))
+                .and_then(|n| n.into_string()),
+            email: obj
+                .remove(&Key::Property(EmailProperty::Email))?
+                .into_string()?,
         })
     }
 }
 
-impl BuildHeader for MessageBuilder<'_> {
-    fn build_header(self, header: HeaderProperty, value: Value) -> Result<Self, HeaderProperty> {
+impl<'x> BuildHeader<'x> for MessageBuilder<'x> {
+    fn build_header(
+        self,
+        header: HeaderProperty,
+        value: Value<'x, EmailProperty, EmailValue>,
+    ) -> Result<Self, HeaderProperty> {
         Ok(match (&header.form, header.all, value) {
-            (HeaderForm::Raw, false, Value::Text(value)) => {
+            (HeaderForm::Raw, false, Value::Str(value)) => {
                 self.header(header.header, Raw::from(value))
             }
-            (HeaderForm::Raw, true, Value::List(value)) => self.headers(
+            (HeaderForm::Raw, true, Value::Array(value)) => self.headers(
                 header.header,
                 value
                     .into_iter()
-                    .filter_map(|v| Raw::from(v.try_unwrap_string()?).into()),
+                    .filter_map(|v| Raw::from(v.into_string()?).into()),
             ),
-            (HeaderForm::Date, false, Value::Date(value)) => {
+            (HeaderForm::Date, false, Value::Element(EmailValue::Date(value))) => {
                 self.header(header.header, Date::new(value.timestamp()))
             }
-            (HeaderForm::Date, true, Value::List(value)) => self.headers(
+            (HeaderForm::Date, true, Value::Array(value)) => self.headers(
                 header.header,
                 value
                     .into_iter()
-                    .filter_map(|v| Date::new(v.try_unwrap_date()?.timestamp()).into()),
+                    .filter_map(|v| Date::new(unwrap_date(v)?.timestamp()).into()),
             ),
-            (HeaderForm::Text, false, Value::Text(value)) => {
+            (HeaderForm::Text, false, Value::Str(value)) => {
                 self.header(header.header, Text::from(value))
             }
-            (HeaderForm::Text, true, Value::List(value)) => self.headers(
+            (HeaderForm::Text, true, Value::Array(value)) => self.headers(
                 header.header,
                 value
                     .into_iter()
-                    .filter_map(|v| Text::from(v.try_unwrap_string()?).into()),
+                    .filter_map(|v| Text::from(v.into_string()?).into()),
             ),
-            (HeaderForm::URLs, false, Value::List(value)) => self.header(
+            (HeaderForm::URLs, false, Value::Array(value)) => self.header(
                 header.header,
                 URL {
                     url: value
                         .into_iter()
-                        .filter_map(|v| Cow::from(v.try_unwrap_string()?).into())
+                        .filter_map(|v| v.into_string()?.into())
                         .collect(),
                 },
             ),
-            (HeaderForm::URLs, true, Value::List(value)) => self.headers(
+            (HeaderForm::URLs, true, Value::Array(value)) => self.headers(
                 header.header,
                 value.into_iter().filter_map(|value| {
                     URL {
                         url: value
-                            .try_unwrap_list()?
+                            .into_array()?
                             .into_iter()
-                            .filter_map(|v| Cow::from(v.try_unwrap_string()?).into())
+                            .filter_map(|v| v.into_string()?.into())
                             .collect(),
                     }
                     .into()
                 }),
             ),
-            (HeaderForm::MessageIds, false, Value::List(value)) => self.header(
+            (HeaderForm::MessageIds, false, Value::Array(value)) => self.header(
                 header.header,
                 MessageId {
                     id: value
                         .into_iter()
-                        .filter_map(|v| Cow::from(v.try_unwrap_string()?).into())
+                        .filter_map(|v| v.into_string()?.into())
                         .collect(),
                 },
             ),
-            (HeaderForm::MessageIds, true, Value::List(value)) => self.headers(
+            (HeaderForm::MessageIds, true, Value::Array(value)) => self.headers(
                 header.header,
                 value.into_iter().filter_map(|value| {
                     MessageId {
                         id: value
-                            .try_unwrap_list()?
+                            .into_array()?
                             .into_iter()
-                            .filter_map(|v| Cow::from(v.try_unwrap_string()?).into())
+                            .filter_map(|v| v.into_string()?.into())
                             .collect(),
                     }
                     .into()
                 }),
             ),
-            (HeaderForm::Addresses, false, Value::List(value)) => self.header(
+            (HeaderForm::Addresses, false, Value::Array(value)) => self.header(
                 header.header,
                 Address::new_list(
                     value
@@ -307,13 +329,13 @@ impl BuildHeader for MessageBuilder<'_> {
                         .collect(),
                 ),
             ),
-            (HeaderForm::Addresses, true, Value::List(value)) => self.headers(
+            (HeaderForm::Addresses, true, Value::Array(value)) => self.headers(
                 header.header,
                 value
                     .into_iter()
                     .filter_map(|v| Address::new_list(v.try_into_address_list()?).into()),
             ),
-            (HeaderForm::GroupedAddresses, false, Value::List(value)) => self.header(
+            (HeaderForm::GroupedAddresses, false, Value::Array(value)) => self.header(
                 header.header,
                 Address::new_list(
                     value
@@ -322,11 +344,11 @@ impl BuildHeader for MessageBuilder<'_> {
                         .collect(),
                 ),
             ),
-            (HeaderForm::GroupedAddresses, true, Value::List(value)) => self.headers(
+            (HeaderForm::GroupedAddresses, true, Value::Array(value)) => self.headers(
                 header.header,
                 value.into_iter().filter_map(|v| {
                     Address::new_list(
-                        v.try_unwrap_list()?
+                        v.into_array()?
                             .into_iter()
                             .filter_map(|v| Address::Group(v.try_into_grouped_addresses()?).into())
                             .collect::<Vec<_>>(),
@@ -342,25 +364,29 @@ impl BuildHeader for MessageBuilder<'_> {
 }
 
 impl HeaderToValue for ArchivedVec<ArchivedHeader<'_>> {
-    fn header_to_value(&self, property: &Property, raw_message: &[u8]) -> Value {
+    fn header_to_value(
+        &self,
+        property: &EmailProperty,
+        raw_message: &[u8],
+    ) -> Value<'static, EmailProperty, EmailValue> {
         let (header_name, form, all) = match property {
-            Property::Header(header) => (
+            EmailProperty::Header(header) => (
                 HeaderName::parse(header.header.as_str())
                     .unwrap_or_else(|| HeaderName::Other(header.header.as_str().into())),
                 header.form,
                 header.all,
             ),
-            Property::Sender => (HeaderName::Sender, HeaderForm::Addresses, false),
-            Property::From => (HeaderName::From, HeaderForm::Addresses, false),
-            Property::To => (HeaderName::To, HeaderForm::Addresses, false),
-            Property::Cc => (HeaderName::Cc, HeaderForm::Addresses, false),
-            Property::Bcc => (HeaderName::Bcc, HeaderForm::Addresses, false),
-            Property::ReplyTo => (HeaderName::ReplyTo, HeaderForm::Addresses, false),
-            Property::Subject => (HeaderName::Subject, HeaderForm::Text, false),
-            Property::MessageId => (HeaderName::MessageId, HeaderForm::MessageIds, false),
-            Property::InReplyTo => (HeaderName::InReplyTo, HeaderForm::MessageIds, false),
-            Property::References => (HeaderName::References, HeaderForm::MessageIds, false),
-            Property::SentAt => (HeaderName::Date, HeaderForm::Date, false),
+            EmailProperty::Sender => (HeaderName::Sender, HeaderForm::Addresses, false),
+            EmailProperty::From => (HeaderName::From, HeaderForm::Addresses, false),
+            EmailProperty::To => (HeaderName::To, HeaderForm::Addresses, false),
+            EmailProperty::Cc => (HeaderName::Cc, HeaderForm::Addresses, false),
+            EmailProperty::Bcc => (HeaderName::Bcc, HeaderForm::Addresses, false),
+            EmailProperty::ReplyTo => (HeaderName::ReplyTo, HeaderForm::Addresses, false),
+            EmailProperty::Subject => (HeaderName::Subject, HeaderForm::Text, false),
+            EmailProperty::MessageId => (HeaderName::MessageId, HeaderForm::MessageIds, false),
+            EmailProperty::InReplyTo => (HeaderName::InReplyTo, HeaderForm::MessageIds, false),
+            EmailProperty::References => (HeaderName::References, HeaderForm::MessageIds, false),
+            EmailProperty::SentAt => (HeaderName::Date, HeaderForm::Date, false),
             _ => return Value::Null,
         };
 
@@ -402,18 +428,18 @@ impl HeaderToValue for ArchivedVec<ArchivedHeader<'_>> {
             if headers.len() > 1 {
                 headers.reverse();
             }
-            Value::List(headers)
+            Value::Array(headers)
         }
     }
 
-    fn headers_to_value(&self, raw_message: &[u8]) -> Value {
+    fn headers_to_value(&self, raw_message: &[u8]) -> Value<'static, EmailProperty, EmailValue> {
         let mut headers = Vec::with_capacity(self.len());
         for header in self.iter() {
             headers.push(Value::Object(
-                Object::with_capacity(2)
-                    .with_property(Property::Name, header.name.to_string())
-                    .with_property(
-                        Property::Value,
+                Map::with_capacity(2)
+                    .with_key_value(EmailProperty::Name, header.name.to_string())
+                    .with_key_value(
+                        EmailProperty::Value,
                         String::from_utf8_lossy(
                             raw_message
                                 .get(
@@ -443,4 +469,57 @@ impl ByteTrim for &[u8] {
         }
         &self[..end]
     }
+}
+
+#[inline]
+pub(crate) fn unwrap_date(value: Value<'_, EmailProperty, EmailValue>) -> Option<UTCDate> {
+    match value {
+        Value::Element(EmailValue::Date(date)) => Some(date),
+        _ => None,
+    }
+}
+
+fn from_mail_datetime(date: DateTime) -> Value<'static, EmailProperty, EmailValue> {
+    Value::Element(EmailValue::Date(UTCDate {
+        year: date.year,
+        month: date.month,
+        day: date.day,
+        hour: date.hour,
+        minute: date.minute,
+        second: date.second,
+        tz_before_gmt: date.tz_before_gmt,
+        tz_hour: date.tz_hour,
+        tz_minute: date.tz_minute,
+    }))
+}
+
+fn from_mail_addr(value: Addr<'_>) -> Value<'static, EmailProperty, EmailValue> {
+    Value::Object(
+        Map::with_capacity(2)
+            .with_key_value(EmailProperty::Name, value.name.map(|v| v.into_owned()))
+            .with_key_value(
+                EmailProperty::Email,
+                value.address.unwrap_or_default().into_owned(),
+            ),
+    )
+}
+
+fn from_mail_group(group: Group<'_>) -> Value<'static, EmailProperty, EmailValue> {
+    Value::Object(
+        Map::with_capacity(2)
+            .with_key_value(EmailProperty::Name, group.name.map(|v| v.into_owned()))
+            .with_key_value(
+                EmailProperty::Addresses,
+                from_mail_addrlist(group.addresses),
+            ),
+    )
+}
+
+fn from_mail_addrlist(addrlist: Vec<Addr<'_>>) -> Value<'static, EmailProperty, EmailValue> {
+    Value::Array(
+        addrlist
+            .into_iter()
+            .map(from_mail_addr)
+            .collect::<Vec<Value<'static, EmailProperty, EmailValue>>>(),
+    )
 }

@@ -4,228 +4,436 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::collections::HashMap;
-
-use compact_str::ToCompactString;
-
-use crate::{
-    method::{
-        changes::ChangesRequest,
-        copy::{CopyBlobRequest, CopyRequest},
-        get::GetRequest,
-        import::ImportEmailRequest,
-        lookup::BlobLookupRequest,
-        parse::ParseEmailRequest,
-        query::QueryRequest,
-        query_changes::QueryChangesRequest,
-        search_snippet::GetSearchSnippetRequest,
-        set::SetRequest,
-        upload::BlobUploadRequest,
-        validate::ValidateSieveScriptRequest,
-    },
-    parser::{Ignore, JsonObjectParser, Token, json::Parser},
-    types::any_id::AnyId,
-};
-
 use super::{
     Call, Request, RequestMethod,
-    capability::Capability,
-    echo::Echo,
     method::{MethodFunction, MethodName, MethodObject},
 };
+use crate::request::{
+    CopyRequestMethod, GetRequestMethod, QueryChangesRequestMethod, QueryRequestMethod,
+    SetRequestMethod,
+    deserialize::{DeserializeArguments, deserialize_request},
+};
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, SeqAccess, Visitor},
+};
+use std::fmt::{self, Display};
 
-impl Request {
-    pub fn parse(json: &[u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
+impl<'x> Request<'x> {
+    pub fn parse(json: &'x [u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
         if json.len() <= max_size {
-            let mut request = Request {
-                using: 0,
-                method_calls: Vec::new(),
-                created_ids: None,
-            };
-            let mut found_valid_keys = false;
-            let mut parser = Parser::new(json);
-            parser.next_token::<String>()?.assert(Token::DictStart)?;
-            while let Some(key) = parser.next_dict_key::<u128>()? {
-                found_valid_keys |= request.parse_key(&mut parser, max_calls, key)?;
-            }
-
-            if found_valid_keys {
-                Ok(request)
-            } else {
-                Err(trc::JmapEvent::NotRequest
+            match serde_json::from_slice::<Request>(json) {
+                Ok(request) => {
+                    if request.method_calls.len() <= max_calls {
+                        Ok(request)
+                    } else {
+                        Err(trc::LimitEvent::CallsIn.into_err())
+                    }
+                }
+                Err(err) => Err(trc::JmapEvent::NotRequest
                     .into_err()
-                    .details("Invalid JMAP request"))
+                    .details(err.to_string())),
             }
         } else {
             Err(trc::LimitEvent::SizeRequest.into_err())
         }
     }
+}
 
-    pub(crate) fn parse_key(
-        &mut self,
-        parser: &mut Parser,
-        max_calls: usize,
-        key: u128,
-    ) -> trc::Result<bool> {
-        match key {
-            0x0067_6e69_7375 => {
-                parser.next_token::<Ignore>()?.assert(Token::ArrayStart)?;
-                loop {
-                    match parser.next_token::<Capability>()? {
-                        Token::String(capability) => {
-                            self.using |= capability as u32;
-                        }
-                        Token::Comma => (),
-                        Token::ArrayEnd => break,
-                        token => return Err(token.error("capability", &token.to_string())),
-                    }
-                }
-                Ok(true)
-            }
-            0x0073_6c6c_6143_646f_6874_656d => {
-                parser
-                    .next_token::<Ignore>()?
-                    .assert_jmap(Token::ArrayStart)?;
-                loop {
-                    match parser.next_token::<Ignore>()? {
-                        Token::ArrayStart => (),
-                        Token::Comma => continue,
-                        Token::ArrayEnd => break,
-                        _ => {
-                            return Err(trc::JmapEvent::NotRequest
-                                .into_err()
-                                .details("Invalid JMAP request"));
-                        }
-                    };
-                    if self.method_calls.len() < max_calls {
-                        let method_name = match parser.next_token::<MethodName>() {
-                            Ok(Token::String(method)) => method,
-                            Ok(_) => {
-                                return Err(trc::JmapEvent::NotRequest
-                                    .into_err()
-                                    .details("Invalid JMAP request"));
-                            }
-                            Err(err)
-                                if err.matches(trc::EventType::Jmap(
-                                    trc::JmapEvent::InvalidArguments,
-                                )) =>
-                            {
-                                MethodName::error()
-                            }
-                            Err(err) => {
-                                return Err(err);
-                            }
-                        };
-                        parser.next_token::<Ignore>()?.assert_jmap(Token::Comma)?;
-                        parser.ctx = method_name.obj;
-                        let start_depth_array = parser.depth_array;
-                        let start_depth_dict = parser.depth_dict;
-
-                        let method = match (&method_name.fnc, &method_name.obj) {
-                            (
-                                MethodFunction::Get,
-                                MethodObject::Email
-                                | MethodObject::Mailbox
-                                | MethodObject::Thread
-                                | MethodObject::Identity
-                                | MethodObject::EmailSubmission
-                                | MethodObject::PushSubscription
-                                | MethodObject::VacationResponse
-                                | MethodObject::SieveScript
-                                | MethodObject::Principal
-                                | MethodObject::Quota
-                                | MethodObject::Blob,
-                            ) => GetRequest::parse(parser).map(RequestMethod::Get),
-                            (MethodFunction::Get, MethodObject::SearchSnippet) => {
-                                GetSearchSnippetRequest::parse(parser)
-                                    .map(RequestMethod::SearchSnippet)
-                            }
-                            (MethodFunction::Query, _) => {
-                                QueryRequest::parse(parser).map(RequestMethod::Query)
-                            }
-                            (MethodFunction::Set, _) => {
-                                SetRequest::parse(parser).map(RequestMethod::Set)
-                            }
-                            (MethodFunction::Changes, _) => {
-                                ChangesRequest::parse(parser).map(RequestMethod::Changes)
-                            }
-                            (MethodFunction::QueryChanges, _) => {
-                                QueryChangesRequest::parse(parser).map(RequestMethod::QueryChanges)
-                            }
-                            (MethodFunction::Copy, MethodObject::Email) => {
-                                CopyRequest::parse(parser).map(RequestMethod::Copy)
-                            }
-                            (MethodFunction::Copy, MethodObject::Blob) => {
-                                CopyBlobRequest::parse(parser).map(RequestMethod::CopyBlob)
-                            }
-                            (MethodFunction::Lookup, MethodObject::Blob) => {
-                                BlobLookupRequest::parse(parser).map(RequestMethod::LookupBlob)
-                            }
-                            (MethodFunction::Upload, MethodObject::Blob) => {
-                                BlobUploadRequest::parse(parser).map(RequestMethod::UploadBlob)
-                            }
-                            (MethodFunction::Import, MethodObject::Email) => {
-                                ImportEmailRequest::parse(parser).map(RequestMethod::ImportEmail)
-                            }
-                            (MethodFunction::Parse, MethodObject::Email) => {
-                                ParseEmailRequest::parse(parser).map(RequestMethod::ParseEmail)
-                            }
-                            (MethodFunction::Validate, MethodObject::SieveScript) => {
-                                ValidateSieveScriptRequest::parse(parser)
-                                    .map(RequestMethod::ValidateScript)
-                            }
-                            (MethodFunction::Echo, MethodObject::Core) => {
-                                Echo::parse(parser).map(RequestMethod::Echo)
-                            }
-                            _ => Err(trc::JmapEvent::UnknownMethod
-                                .into_err()
-                                .details(method_name.to_compact_string())),
-                        };
-
-                        let method = match method {
-                            Ok(method) => method,
-                            Err(err) if !err.is_jmap_method_error() => {
-                                parser.skip_token(start_depth_array, start_depth_dict)?;
-                                RequestMethod::Error(err)
-                            }
-                            Err(err) => {
-                                return Err(err);
-                            }
-                        };
-
-                        parser.next_token::<Ignore>()?.assert_jmap(Token::Comma)?;
-                        let id = parser.next_token::<String>()?.unwrap_string("")?;
-                        parser
-                            .next_token::<Ignore>()?
-                            .assert_jmap(Token::ArrayEnd)?;
-                        self.method_calls.push(Call {
-                            id,
-                            method,
-                            name: method_name,
-                        });
-                    } else {
-                        return Err(trc::LimitEvent::CallsIn.into_err());
-                    }
-                }
-                Ok(true)
-            }
-            0x7364_4964_6574_6165_7263 => {
-                let mut created_ids = HashMap::new();
-                parser.next_token::<Ignore>()?.assert(Token::DictStart)?;
-                while let Some(key) = parser.next_dict_key::<String>()? {
-                    created_ids.insert(
-                        key,
-                        parser.next_token::<AnyId>()?.unwrap_string("createdIds")?,
-                    );
-                }
-                self.created_ids = Some(created_ids);
-                Ok(true)
-            }
+impl<'de> DeserializeArguments<'de> for Request<'de> {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        hashify::fnc_map!(key.as_bytes(),
+            b"using" => {
+                self.using = map.next_value()?;
+            },
+            b"methodCalls" => {
+                self.method_calls = map.next_value()?;
+            },
+            b"createdIds" => {
+                self.created_ids = map.next_value()?;
+            },
             _ => {
-                parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                Ok(false)
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
+
+        Ok(())
+    }
+}
+
+struct CallVisitor;
+
+impl<'de> Visitor<'de> for CallVisitor {
+    type Value = Call<RequestMethod<'de>>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an array with 3 elements")
+    }
+
+    fn visit_seq<V>(self, mut seq: V) -> Result<Call<RequestMethod<'de>>, V::Error>
+    where
+        V: SeqAccess<'de>,
+    {
+        let method_name = seq
+            .next_element::<&str>()?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+        let name = match MethodName::parse(method_name) {
+            Some(name) => name,
+            None => {
+                // Ignore the rest of the call
+                let _ = seq
+                    .next_element::<serde::de::IgnoredAny>()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                let id = seq
+                    .next_element::<String>()?
+                    .ok_or_else(|| de::Error::invalid_length(2, &self))?;
+
+                return Ok(Call {
+                    id,
+                    method: RequestMethod::Error(
+                        trc::JmapEvent::UnknownMethod
+                            .into_err()
+                            .details(method_name.to_string()),
+                    ),
+                    name: MethodName::error(),
+                });
+            }
+        };
+
+        let method = match (&name.fnc, &name.obj) {
+            (MethodFunction::Get, MethodObject::Email) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Email(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::Mailbox) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Mailbox(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::Thread) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Thread(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::Identity) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Identity(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::EmailSubmission) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::EmailSubmission(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::PushSubscription) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::PushSubscription(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::VacationResponse) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::VacationResponse(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::SieveScript) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Sieve(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::Principal) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Principal(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::Quota) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Quota(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::Blob) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Blob(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Get, MethodObject::SearchSnippet) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::SearchSnippet(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::Email) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Email(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::Mailbox) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Mailbox(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::Identity) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Identity(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::EmailSubmission) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::EmailSubmission(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::PushSubscription) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::PushSubscription(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::VacationResponse) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::VacationResponse(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::SieveScript) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Sieve(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::Email) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Email(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::Mailbox) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Mailbox(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::EmailSubmission) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::EmailSubmission(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::SieveScript) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Sieve(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::Principal) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Principal(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::Quota) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Quota(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::QueryChanges, MethodObject::Email) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::QueryChanges(QueryChangesRequestMethod::Email(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::QueryChanges, MethodObject::Mailbox) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::QueryChanges(QueryChangesRequestMethod::Mailbox(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::QueryChanges, MethodObject::EmailSubmission) => {
+                match seq.next_element() {
+                    Ok(Some(value)) => RequestMethod::QueryChanges(
+                        QueryChangesRequestMethod::EmailSubmission(value),
+                    ),
+                    Err(err) => RequestMethod::invalid(err),
+                    Ok(None) => {
+                        return Err(de::Error::invalid_length(1, &self));
+                    }
+                }
+            }
+            (MethodFunction::QueryChanges, MethodObject::SieveScript) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::QueryChanges(QueryChangesRequestMethod::Sieve(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::QueryChanges, MethodObject::Principal) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::QueryChanges(QueryChangesRequestMethod::Principal(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::QueryChanges, MethodObject::Quota) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::QueryChanges(QueryChangesRequestMethod::Quota(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Changes, _) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Changes(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Copy, MethodObject::Email) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Copy(CopyRequestMethod::Email(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Copy, MethodObject::Blob) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Copy(CopyRequestMethod::Blob(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Lookup, MethodObject::Blob) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::LookupBlob(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Upload, MethodObject::Blob) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::UploadBlob(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Import, MethodObject::Email) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::ImportEmail(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Parse, MethodObject::Email) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::ParseEmail(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Validate, MethodObject::SieveScript) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::ValidateScript(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Echo, MethodObject::Core) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Echo(value),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            _ => unreachable!(),
+        };
+
+        let id = seq
+            .next_element::<String>()?
+            .ok_or_else(|| de::Error::invalid_length(2, &self))?;
+
+        Ok(Call { id, method, name })
+    }
+}
+
+impl RequestMethod<'_> {
+    fn invalid(err: impl Display) -> Self {
+        RequestMethod::Error(
+            trc::JmapEvent::InvalidArguments
+                .into_err()
+                .details(err.to_string()),
+        )
+    }
+}
+
+impl<'de> Deserialize<'de> for Request<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Call<RequestMethod<'de>> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(CallVisitor)
     }
 }
 
@@ -252,6 +460,45 @@ mod tests {
             "c2": "m2"
         }
       }
+    "#;
+
+    const TEST1: &str = r#"
+    {
+    "using": [
+        "urn:ietf:params:jmap:core",
+        "urn:ietf:params:jmap:mail"
+    ],
+    "methodCalls": [
+        [
+        "Email/query",
+        {
+            "accountId": "0",
+            "filter": { "conditions": [ { "hasKeyword": "music" }, { "hasKeyword": "video" }, { "operator": "AND", "conditions": [ { "subject": "test" }, { "minSize": 100 } ] } ], "operator": "OR" },
+            "sort": [
+            {
+                "property": "subject",
+                "isAscending": true
+            },
+            {
+                "property": "allInThreadHaveKeyword",
+                "isAscending": false,
+                "keyword": "$seen"
+            },
+            {
+                "keyword": "$junk",
+                "property": "someInThreadHaveKeyword",
+                "collation": "i;octet",
+                "isAscending": false
+            }
+            ],
+            "position": 0,
+            "limit": 10
+        },
+        "c1"
+        ]
+    ],
+    "createdIds": {}
+    }
     "#;
 
     const TEST2: &str = r##"
@@ -348,7 +595,8 @@ mod tests {
 
     #[test]
     fn parse_request() {
-        println!("{:?}", Request::parse(TEST.as_bytes(), 10, 10240));
-        println!("{:?}", Request::parse(TEST2.as_bytes(), 10, 10240));
+        println!("{:#?}", Request::parse(TEST.as_bytes(), 10, 10240));
+        println!("{:#?}", Request::parse(TEST1.as_bytes(), 10, 10240));
+        println!("{:#?}", Request::parse(TEST2.as_bytes(), 10, 10240));
     }
 }

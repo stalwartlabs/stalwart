@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::ETag;
+use super::uri::{DavUriResource, OwnedUri, UriResource, Urn};
+use crate::{DavError, DavErrorCondition, DavMethod};
 use common::KV_LOCK_DAV;
 use common::{Server, auth::AccessToken};
 use dav_proto::schema::property::{ActiveLock, LockScope, WebDavProperty};
@@ -11,21 +14,16 @@ use dav_proto::schema::request::{DavPropertyValue, DeadProperty};
 use dav_proto::schema::response::{BaseCondition, List, PropResponse};
 use dav_proto::{Condition, Depth, Timeout};
 use dav_proto::{RequestHeaders, schema::request::LockInfo};
-
 use groupware::cache::GroupwareCache;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::collection::Collection;
 use std::collections::HashMap;
 use store::dispatch::lookup::KeyValue;
 use store::write::serialize::rkyv_deserialize;
 use store::write::{AlignedBytes, Archive, Archiver, now};
 use store::{Serialize, U32_LEN};
 use trc::AddContext;
-
-use super::ETag;
-use super::uri::{DavUriResource, OwnedUri, UriResource, Urn};
-use crate::{DavError, DavErrorCondition, DavMethod};
+use types::collection::Collection;
 
 #[derive(Debug, Default, Clone)]
 pub struct ResourceState<'x> {

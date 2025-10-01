@@ -5,11 +5,8 @@
  */
 
 use crate::auth::AccessToken;
-use jmap_proto::types::{
-    acl::Acl,
-    value::{AclGrant, ArchivedAclGrant},
-};
 use rkyv::vec::ArchivedVec;
+use types::acl::{Acl, AclGrant, ArchivedAclGrant};
 use utils::map::bitmap::Bitmap;
 
 pub mod acl;

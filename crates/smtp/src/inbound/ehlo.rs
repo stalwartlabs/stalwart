@@ -4,32 +4,33 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant, SystemTime};
-
 use crate::{core::Session, scripts::ScriptResult};
 use common::{
     config::smtp::session::{Mechanism, Stage},
     listener::SessionStream,
 };
-
 use mail_auth::{
     SpfResult,
     spf::verify::{HasValidLabels, SpfParameters},
 };
 use smtp_proto::*;
+use std::{
+    borrow::Cow,
+    time::{Duration, Instant, SystemTime},
+};
 use trc::SmtpEvent;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_ehlo(&mut self, domain: String, is_extended: bool) -> Result<(), ()> {
+    pub async fn handle_ehlo(&mut self, domain: Cow<'_, str>, is_extended: bool) -> Result<(), ()> {
         // Set EHLO domain
 
         if domain != self.data.helo_domain {
             // Reject non-FQDN EHLO domains - simply checks that the hostname has at least one dot
-            if self.params.ehlo_reject_non_fqdn && !domain.as_str().has_valid_labels() {
+            if self.params.ehlo_reject_non_fqdn && !domain.as_ref().has_valid_labels() {
                 trc::event!(
                     Smtp(SmtpEvent::InvalidEhlo),
                     SpanId = self.data.session_id,
-                    Domain = domain,
+                    Domain = domain.as_ref().to_string(),
                 );
 
                 return self.write(b"550 5.5.0 Invalid EHLO domain.\r\n").await;
@@ -38,11 +39,12 @@ impl<T: SessionStream> Session<T> {
             trc::event!(
                 Smtp(SmtpEvent::Ehlo),
                 SpanId = self.data.session_id,
-                Domain = domain.clone(),
+                Domain = domain.as_ref().to_string(),
             );
 
             // SPF check
-            let prev_helo_domain = std::mem::replace(&mut self.data.helo_domain, domain);
+            let prev_helo_domain =
+                std::mem::replace(&mut self.data.helo_domain, domain.into_owned());
             if self.params.spf_ehlo.verify() {
                 let time = Instant::now();
                 let spf_output = self

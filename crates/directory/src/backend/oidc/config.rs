@@ -55,6 +55,8 @@ impl OpenIdDirectory {
             }
         };
 
+        let email_field = config.value_require((&prefix, "fields.email"))?.to_string();
+
         Some(OpenIdDirectory {
             config: OpenIdConfig {
                 endpoint: config.value_require((&prefix, "endpoint.url"))?.to_string(),
@@ -62,10 +64,11 @@ impl OpenIdDirectory {
                 endpoint_timeout: config
                     .property_or_default::<Duration>((&prefix, "timeout"), "30s")
                     .unwrap_or_else(|| Duration::from_secs(30)),
-                email_field: config.value_require((&prefix, "fields.email"))?.to_string(),
                 username_field: config
                     .value((&prefix, "fields.username"))
+                    .filter(|&v| v != email_field)
                     .map(|v| v.to_string()),
+                email_field,
                 full_name_field: config
                     .value((&prefix, "fields.full-name"))
                     .map(|v| v.to_string()),

@@ -144,7 +144,7 @@
       },
       {
         "name": "X-AddressesGroup",
-        "value": " \"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>;\"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>;<addr5@test.com>, \r\n\t<addr6@test.com>;"
+        "value": " \"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>;"
       },
       {
         "name": "X-References",
@@ -196,7 +196,7 @@
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": " 7bit"
+            "value": " quoted-printable"
           }
         ],
         "type": "text/plain",
@@ -220,7 +220,7 @@
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": " 7bit"
+            "value": " quoted-printable"
           }
         ],
         "name": "html-body.html",
@@ -266,7 +266,7 @@
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": " 7bit"
+          "value": " quoted-printable"
         }
       ],
       "type": "text/plain",
@@ -292,7 +292,7 @@
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": " 7bit"
+          "value": " quoted-printable"
         }
       ],
       "name": "html-body.html",

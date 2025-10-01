@@ -17,7 +17,6 @@ use calcard::{
 };
 use common::{CacheSwap, DavResource, DavResources, Server, auth::AccessToken};
 use file::{build_file_resources, build_nested_hierarchy, resource_from_file};
-use jmap_proto::types::collection::{Collection, SyncCollection};
 use std::{sync::Arc, time::Instant};
 use store::{
     ahash::AHashMap,
@@ -26,6 +25,7 @@ use store::{
 };
 use tokio::sync::Semaphore;
 use trc::{AddContext, StoreEvent};
+use types::collection::{Collection, SyncCollection};
 
 pub mod calcard;
 pub mod file;
@@ -119,7 +119,7 @@ impl GroupwareCache for Server {
             .data
             .changes(
                 account_id,
-                collection,
+                collection.into(),
                 Query::Since(cache.highest_change_id),
             )
             .await

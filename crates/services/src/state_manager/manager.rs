@@ -4,26 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    sync::Arc,
-    time::{Instant, SystemTime},
+use super::{
+    Event, PURGE_EVERY, PushUpdate, SEND_TIMEOUT, Subscriber, SubscriberId, SubscriberType,
+    push::spawn_push_manager,
 };
-
 use common::{
     Inner,
     core::BuildServer,
     ipc::{BroadcastEvent, PushSubscription, StateEvent, UpdateSubscription},
 };
-use jmap_proto::types::{id::Id, state::StateChange, type_state::DataType};
+use std::{
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 use store::{ahash::AHashMap, rand};
 use tokio::sync::mpsc;
 use trc::ServerEvent;
-use utils::map::bitmap::Bitmap;
-
-use super::{
-    Event, PURGE_EVERY, PushUpdate, SEND_TIMEOUT, Subscriber, SubscriberId, SubscriberType,
-    push::spawn_push_manager,
+use types::{
+    id::Id,
+    type_state::{DataType, StateChange},
 };
+use utils::map::bitmap::Bitmap;
 
 #[allow(clippy::unwrap_or_default)]
 pub fn spawn_state_manager(inner: Arc<Inner>, mut change_rx: mpsc::Receiver<StateEvent>) {

@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::config::Config;
+use mail_auth::{MX, ResolverCache, Txt};
+use quick_cache::{
+    Equivalent, Weighter,
+    sync::{DefaultLifecycle, PlaceholderGuard},
+};
 use std::{
     borrow::Borrow,
     hash::Hash,
@@ -11,14 +17,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
-use mail_auth::{MX, ResolverCache, Txt};
-use quick_cache::{
-    Equivalent, Weighter,
-    sync::{DefaultLifecycle, PlaceholderGuard},
-};
-
-use crate::config::Config;
 
 pub struct Cache<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight>(
     quick_cache::sync::Cache<K, V, CacheItemWeighter>,

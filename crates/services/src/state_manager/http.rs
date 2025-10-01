@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant};
-
+use super::{Event, PushServer, ece::ece_encrypt};
 use base64::Engine;
 use common::ipc::EncryptionKeys;
-
-use jmap_proto::{response::status::StateChangeResponse, types::id::Id};
+use jmap_proto::response::status::StateChangeResponse;
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use trc::PushSubscriptionEvent;
-
-use super::{Event, PushServer, ece::ece_encrypt};
+use types::id::Id;
 
 impl PushServer {
     pub fn send(&mut self, id: Id, push_tx: mpsc::Sender<Event>, push_timeout: Duration) {

@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
-
+use crate::{
+    AssertConfig, add_test_certs, directory::internal::TestInternalDirectory, store::TempDir,
+};
 use base64::{
     Engine,
     engine::general_purpose::{self, STANDARD},
@@ -29,26 +30,23 @@ use http::HttpSessionManager;
 use hyper::{Method, header::AUTHORIZATION};
 use imap::core::ImapSessionManager;
 use jmap_client::client::{Client, Credentials};
-use jmap_proto::{error::request::RequestError, types::id::Id};
+use jmap_proto::error::request::RequestError;
 use managesieve::core::ManageSieveSessionManager;
 use pop3::Pop3SessionManager;
 use reqwest::header;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use services::SpawnServices;
 use smtp::{SpawnQueueManager, core::SmtpSessionManager};
-
+use std::{fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 use store::{
     IterateParams, SUBSPACE_PROPERTY, Stores, ValueKey,
     roaring::RoaringBitmap,
     write::{AnyKey, TaskQueueClass, ValueClass, key::DeserializeBigEndian},
 };
 use tokio::sync::watch;
-use utils::{BlobHash, config::Config};
+use types::{blob_hash::BlobHash, id::Id};
+use utils::config::Config;
 use webhooks::{MockWebhookEndpoint, spawn_mock_webhook_endpoint};
-
-use crate::{
-    AssertConfig, add_test_certs, directory::internal::TestInternalDirectory, store::TempDir,
-};
 
 pub mod auth_acl;
 pub mod auth_limits;
@@ -100,7 +98,7 @@ async fn jmap_tests() {
     email_copy::test(&mut params).await;
     thread_get::test(&mut params).await;
     thread_merge::test(&mut params).await;
-    mailbox::test(&mut params).await;
+    mailbox::test(&mut params).await;*/
     delivery::test(&mut params).await;
     auth_acl::test(&mut params).await;
     auth_limits::test(&mut params).await;
@@ -113,7 +111,7 @@ async fn jmap_tests() {
     websocket::test(&mut params).await;
     quota::test(&mut params).await;
     crypto::test(&mut params).await;
-    blob::test(&mut params).await;*/
+    blob::test(&mut params).await;
     permissions::test(&params).await;
     purge::test(&mut params).await;
     enterprise::test(&mut params).await;
@@ -981,6 +979,9 @@ WiYrLO4z8/kmkqvA7wGElBok9IqhRANCAAQxZK68FnQtHC0eyh8CA05xRIvxhVHn
 '''
 signature-algorithm = "ES256"
 
+[spam-filter.bayes.auto-learn]
+card-is-ham = false
+
 [session.extensions]
 expn = true
 vrfy = true
@@ -993,6 +994,7 @@ type = "console"
 level = "{LEVEL}"
 multiline = false
 ansi = true
+#disabled-events = ["network.*", "telemetry.webhook-error"]
 disabled-events = ["network.*", "telemetry.webhook-error", "http.request-body"]
 
 [webhook."test"]

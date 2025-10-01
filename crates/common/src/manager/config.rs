@@ -17,8 +17,8 @@ use store::{
     write::{BatchBuilder, ValueClass},
 };
 use trc::AddContext;
+use types::semver::Semver;
 use utils::{
-    Semver,
     config::{Config, ConfigKey},
     glob::GlobPattern,
 };

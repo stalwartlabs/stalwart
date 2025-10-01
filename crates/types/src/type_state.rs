@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
+use crate::collection::SyncCollection;
+use jmap_tools::{Element, Property, Value};
 use serde::Serialize;
-use utils::map::bitmap::{BitmapItem, ShortId};
+use std::{fmt::Display, str::FromStr};
+use utils::map::bitmap::{Bitmap, BitmapItem};
 
-use crate::parser::{JsonObjectParser, json::Parser};
-
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Serialize)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Serialize, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum DataType {
     #[serde(rename = "Email")]
@@ -53,6 +52,36 @@ pub enum DataType {
     #[serde(rename = "FileNode")]
     FileNode = 18,
     None = 19,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct StateChange {
+    pub account_id: u32,
+    pub change_id: u64,
+    pub types: Bitmap<DataType>,
+}
+
+impl StateChange {
+    pub fn new(account_id: u32, change_id: u64) -> Self {
+        Self {
+            account_id,
+            change_id,
+            types: Default::default(),
+        }
+    }
+
+    pub fn set_change(&mut self, type_state: DataType) {
+        self.types.insert(type_state);
+    }
+
+    pub fn with_change(mut self, type_state: DataType) -> Self {
+        self.set_change(type_state);
+        self
+    }
+
+    pub fn has_changes(&self) -> bool {
+        !self.types.is_empty()
+    }
 }
 
 impl BitmapItem for DataType {
@@ -101,97 +130,50 @@ impl From<DataType> for u64 {
     }
 }
 
-impl JsonObjectParser for DataType {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut hash = 0;
-        let mut shift = 0;
-
-        while let Some(ch) = parser.next_unescaped()? {
-            if shift < 128 {
-                hash |= (ch as u128) << shift;
-                shift += 8;
-            } else {
-                return Err(parser.error_value());
-            }
-        }
-
-        match hash {
-            0x006c_6961_6d45 => Ok(DataType::Email),
-            0x0079_7265_7669_6c65_446c_6961_6d45 => Ok(DataType::EmailDelivery),
-            0x006e_6f69_7373_696d_6275_536c_6961_6d45 => Ok(DataType::EmailSubmission),
-            0x0078_6f62_6c69_614d => Ok(DataType::Mailbox),
-            0x6461_6572_6854 => Ok(DataType::Thread),
-            0x7974_6974_6e65_6449 => Ok(DataType::Identity),
-            0x6572_6f43 => Ok(DataType::Core),
-            0x6e6f_6974_7069_7263_7362_7553_6873_7550 => Ok(DataType::PushSubscription),
-            0x0074_6570_7069_6e53_6863_7261_6553 => Ok(DataType::SearchSnippet),
-            0x6573_6e6f_7073_6552_6e6f_6974_6163_6156 => Ok(DataType::VacationResponse),
-            0x004e_444d => Ok(DataType::Mdn),
-            0x0061_746f_7551 => Ok(DataType::Quota),
-            0x0074_7069_7263_5365_7665_6953 => Ok(DataType::SieveScript),
-            _ => Err(parser.error_value()),
-        }
-    }
-}
-
-impl TryFrom<&str> for DataType {
-    type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let mut hash = 0;
-        let mut shift = 0;
-
-        for &ch in value.as_bytes() {
-            if shift < 128 {
-                hash |= (ch as u128) << shift;
-                shift += 8;
-            } else {
-                return Err(());
-            }
-        }
-
-        match hash {
-            0x006c_6961_6d45 => Ok(DataType::Email),
-            0x0079_7265_7669_6c65_446c_6961_6d45 => Ok(DataType::EmailDelivery),
-            0x006e_6f69_7373_696d_6275_536c_6961_6d45 => Ok(DataType::EmailSubmission),
-            0x0078_6f62_6c69_614d => Ok(DataType::Mailbox),
-            0x6461_6572_6854 => Ok(DataType::Thread),
-            0x7974_6974_6e65_6449 => Ok(DataType::Identity),
-            0x6572_6f43 => Ok(DataType::Core),
-            0x6e6f_6974_7069_7263_7362_7553_6873_7550 => Ok(DataType::PushSubscription),
-            0x0074_6570_7069_6e53_6863_7261_6553 => Ok(DataType::SearchSnippet),
-            0x6573_6e6f_7073_6552_6e6f_6974_6163_6156 => Ok(DataType::VacationResponse),
-            0x004e_444d => Ok(DataType::Mdn),
-            0x0061_746f_7551 => Ok(DataType::Quota),
-            0x0074_7069_7263_5365_7665_6953 => Ok(DataType::SieveScript),
-            _ => Err(()),
-        }
-    }
-}
-
 impl DataType {
-    pub fn try_from_id(value: ShortId, is_container: bool) -> Option<Self> {
-        match (value.0, is_container) {
-            (0, false) => DataType::Email.into(),
-            (0, true) => DataType::Mailbox.into(),
-            (1, _) => DataType::Thread.into(),
-            (2, true) => DataType::Calendar.into(),
-            (2, false) => DataType::CalendarEvent.into(),
-            (3, true) => DataType::AddressBook.into(),
-            (3, false) => DataType::ContactCard.into(),
-            (4, _) => DataType::FileNode.into(),
-            (5, _) => DataType::Identity.into(),
-            (6, _) => DataType::EmailSubmission.into(),
-            (7, _) => DataType::SieveScript.into(),
+    pub fn try_from_sync(value: SyncCollection, is_container: bool) -> Option<Self> {
+        match (value, is_container) {
+            (SyncCollection::Email, false) => DataType::Email.into(),
+            (SyncCollection::Email, true) => DataType::Mailbox.into(),
+            (SyncCollection::Thread, _) => DataType::Thread.into(),
+            (SyncCollection::Calendar, true) => DataType::Calendar.into(),
+            (SyncCollection::Calendar, false) => DataType::CalendarEvent.into(),
+            (SyncCollection::AddressBook, true) => DataType::AddressBook.into(),
+            (SyncCollection::AddressBook, false) => DataType::ContactCard.into(),
+            (SyncCollection::FileNode, _) => DataType::FileNode.into(),
+            (SyncCollection::Identity, _) => DataType::Identity.into(),
+            (SyncCollection::EmailSubmission, _) => DataType::EmailSubmission.into(),
+            (SyncCollection::SieveScript, _) => DataType::SieveScript.into(),
             _ => None,
         }
     }
 }
 
 impl DataType {
+    pub fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map!(value.as_bytes(),
+            b"Email" => DataType::Email,
+            b"EmailDelivery" => DataType::EmailDelivery,
+            b"EmailSubmission" => DataType::EmailSubmission,
+            b"Mailbox" => DataType::Mailbox,
+            b"Thread" => DataType::Thread,
+            b"Identity" => DataType::Identity,
+            b"Core" => DataType::Core,
+            b"PushSubscription" => DataType::PushSubscription,
+            b"SearchSnippet" => DataType::SearchSnippet,
+            b"VacationResponse" => DataType::VacationResponse,
+            b"MDN" => DataType::Mdn,
+            b"Quota" => DataType::Quota,
+            b"SieveScript" => DataType::SieveScript,
+            b"Calendar" => DataType::Calendar,
+            b"CalendarEvent" => DataType::CalendarEvent,
+            b"CalendarEventNotification" => DataType::CalendarEventNotification,
+            b"AddressBook" => DataType::AddressBook,
+            b"ContactCard" => DataType::ContactCard,
+            b"FileNode" => DataType::FileNode,
+        )
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             DataType::Email => "Email",
@@ -218,6 +200,14 @@ impl DataType {
     }
 }
 
+impl FromStr for DataType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        DataType::parse(s).ok_or(())
+    }
+}
+
 impl Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
@@ -229,7 +219,13 @@ impl<'de> serde::Deserialize<'de> for DataType {
     where
         D: serde::Deserializer<'de>,
     {
-        DataType::try_from(<&str>::deserialize(deserializer)?)
-            .map_err(|_| serde::de::Error::custom("invalid JMAP data type"))
+        DataType::parse(<&str>::deserialize(deserializer)?)
+            .ok_or_else(|| serde::de::Error::custom("invalid JMAP data type"))
+    }
+}
+
+impl<'x, P: Property, E: Element + From<DataType>> From<DataType> for Value<'x, P, E> {
+    fn from(id: DataType) -> Self {
+        Value::Element(E::from(id))
     }
 }

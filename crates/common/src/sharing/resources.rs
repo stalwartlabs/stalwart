@@ -5,8 +5,8 @@
  */
 
 use crate::{DavResources, auth::AccessToken};
-use jmap_proto::types::acl::Acl;
 use store::roaring::RoaringBitmap;
+use types::acl::Acl;
 use utils::map::bitmap::Bitmap;
 
 impl DavResources {

@@ -4,17 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use utils::{
-    codec::{
-        base32_custom::Base32Writer,
-        leb128::{Leb128Iterator, Leb128Writer},
-    },
-    map::bitmap::Bitmap,
+use types::ChangeId;
+use utils::codec::{
+    base32_custom::{Base32Reader, Base32Writer},
+    leb128::{Leb128Iterator, Leb128Writer},
 };
-
-use crate::parser::{JsonObjectParser, base32::JsonBase32Reader, json::Parser};
-
-use super::{ChangeId, type_state::DataType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JMAPIntermediateState {
@@ -29,36 +23,6 @@ pub enum State {
     Initial,
     Exact(ChangeId),
     Intermediate(JMAPIntermediateState),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct StateChange {
-    pub account_id: u32,
-    pub change_id: u64,
-    pub types: Bitmap<DataType>,
-}
-
-impl StateChange {
-    pub fn new(account_id: u32, change_id: u64) -> Self {
-        Self {
-            account_id,
-            change_id,
-            types: Default::default(),
-        }
-    }
-
-    pub fn set_change(&mut self, type_state: DataType) {
-        self.types.insert(type_state);
-    }
-
-    pub fn with_change(mut self, type_state: DataType) -> Self {
-        self.set_change(type_state);
-        self
-    }
-
-    pub fn has_changes(&self) -> bool {
-        !self.types.is_empty()
-    }
 }
 
 impl From<ChangeId> for State {
@@ -76,25 +40,18 @@ impl From<Option<ChangeId>> for State {
     }
 }
 
-impl JsonObjectParser for State {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
-        match parser
-            .next_unescaped()?
-            .ok_or_else(|| parser.error_value())?
-        {
-            b'n' => Ok(State::Initial),
+impl State {
+    pub fn parse(value: &str) -> Option<Self> {
+        let mut it = value.as_bytes().iter();
+
+        match it.next()? {
+            b'n' => Some(State::Initial),
             b's' => {
-                let mut reader = JsonBase32Reader::new(parser);
-                reader
-                    .next_leb128::<ChangeId>()
-                    .map(State::Exact)
-                    .ok_or_else(|| parser.error_value())
+                let mut reader = Base32Reader::from_iter(it);
+                reader.next_leb128::<ChangeId>().map(State::Exact)
             }
             b'r' => {
-                let mut it = JsonBase32Reader::new(parser);
+                let mut it = Base32Reader::from_iter(it);
 
                 if let (Some(from_id), Some(to_id), Some(items_sent)) = (
                     it.next_leb128::<ChangeId>(),
@@ -102,24 +59,22 @@ impl JsonObjectParser for State {
                     it.next_leb128::<usize>(),
                 ) {
                     if items_sent > 0 {
-                        Ok(State::Intermediate(JMAPIntermediateState {
+                        Some(State::Intermediate(JMAPIntermediateState {
                             from_id,
                             to_id: from_id.saturating_add(to_id),
                             items_sent,
                         }))
                     } else {
-                        Err(parser.error_value())
+                        None
                     }
                 } else {
-                    Err(parser.error_value())
+                    None
                 }
             }
-            _ => Err(parser.error_value()),
+            _ => None,
         }
     }
-}
 
-impl State {
     pub fn new_initial() -> Self {
         State::Initial
     }
@@ -159,10 +114,8 @@ impl<'de> serde::Deserialize<'de> for State {
     where
         D: serde::Deserializer<'de>,
     {
-        // This is inefficient, but serde deserialize on State is only used in test mode
-        let value = format!("{}\"", <&str>::deserialize(deserializer)?);
-        let mut parser = Parser::new(value.as_bytes());
-        State::parse(&mut parser).map_err(|_| serde::de::Error::custom("invalid JMAP State"))
+        State::parse(<&str>::deserialize(deserializer)?)
+            .ok_or_else(|| serde::de::Error::custom("invalid JMAP State"))
     }
 }
 
@@ -194,10 +147,8 @@ impl std::fmt::Display for State {
 
 #[cfg(test)]
 mod tests {
-
-    use crate::{parser::json::Parser, types::ChangeId};
-
     use super::State;
+    use types::ChangeId;
 
     #[test]
     fn test_state_id() {
@@ -215,14 +166,7 @@ mod tests {
             State::new_intermediate(12345678, 87654321, 12345678),
             State::new_intermediate(ChangeId::MAX, ChangeId::MAX, ChangeId::MAX as usize),
         ] {
-            assert_eq!(
-                Parser::new(format!("\"{id}\"").as_bytes())
-                    .next_token::<State>()
-                    .unwrap()
-                    .unwrap_string("")
-                    .unwrap(),
-                id
-            );
+            assert_eq!(State::parse(&id.to_string()).unwrap(), id);
         }
     }
 }

@@ -4,22 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use calcard::{Entry, Parser};
-use common::{DavName, Server, auth::AccessToken};
-use dav_proto::{
-    RequestHeaders, Return,
-    schema::{property::Rfc1123DateTime, response::CardCondition},
-};
-use groupware::{cache::GroupwareCache, contact::ContactCard};
-use http_proto::HttpResponse;
-use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
-use store::write::BatchBuilder;
-use trc::AddContext;
-
+use super::assert_is_unique_uid;
 use crate::{
     DavError, DavErrorCondition, DavMethod,
     common::{
@@ -30,8 +15,21 @@ use crate::{
     file::DavFileResource,
     fix_percent_encoding,
 };
-
-use super::assert_is_unique_uid;
+use calcard::{Entry, Parser};
+use common::{DavName, Server, auth::AccessToken};
+use dav_proto::{
+    RequestHeaders, Return,
+    schema::{property::Rfc1123DateTime, response::CardCondition},
+};
+use groupware::{cache::GroupwareCache, contact::ContactCard};
+use http_proto::HttpResponse;
+use hyper::StatusCode;
+use store::write::BatchBuilder;
+use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+};
 
 pub(crate) trait CardUpdateRequestHandler: Sync + Send {
     fn handle_card_update_request(
@@ -154,17 +152,6 @@ impl CardUpdateRequestHandler for Server {
                 Err(e) => return Err(e),
             }
 
-            // Validate quota
-            let extra_bytes =
-                (bytes.len() as u64).saturating_sub(u32::from(card.inner.size) as u64);
-            if extra_bytes > 0 {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    extra_bytes,
-                )
-                .await?;
-            }
-
             // Validate UID
             match (card.inner.card.uid(), vcard.uid()) {
                 (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
@@ -175,6 +162,17 @@ impl CardUpdateRequestHandler for Server {
                         CardCondition::NoUidConflict(resources.format_resource(resource).into()),
                     )));
                 }
+            }
+
+            // Validate quota
+            let extra_bytes =
+                (bytes.len() as u64).saturating_sub(u32::from(card.inner.size) as u64);
+            if extra_bytes > 0 {
+                self.has_available_quota(
+                    &self.get_resource_token(access_token, account_id).await?,
+                    extra_bytes,
+                )
+                .await?;
             }
 
             // Build node
@@ -225,15 +223,6 @@ impl CardUpdateRequestHandler for Server {
             )
             .await?;
 
-            // Validate quota
-            if !bytes.is_empty() {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    bytes.len() as u64,
-                )
-                .await?;
-            }
-
             // Validate UID
             assert_is_unique_uid(
                 self,
@@ -243,6 +232,15 @@ impl CardUpdateRequestHandler for Server {
                 vcard.uid(),
             )
             .await?;
+
+            // Validate quota
+            if !bytes.is_empty() {
+                self.has_available_quota(
+                    &self.get_resource_token(access_token, account_id).await?,
+                    bytes.len() as u64,
+                )
+                .await?;
+            }
 
             // Build node
             let card = ContactCard {

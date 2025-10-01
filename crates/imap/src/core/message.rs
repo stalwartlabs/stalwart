@@ -4,20 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{
+    ImapUidToId, Mailbox, MailboxId, MailboxState, NextMailboxState, SelectedMailbox, SessionData,
+};
+use crate::core::ImapId;
 use ahash::AHashMap;
 use common::listener::SessionStream;
 use email::cache::MessageCacheFetch;
 use imap_proto::protocol::{Sequence, expunge, select::Exists};
-use jmap_proto::types::{collection::Collection, property::Property};
 use std::collections::BTreeMap;
 use store::{ValueKey, write::ValueClass};
 use trc::AddContext;
-
-use crate::core::ImapId;
-
-use super::{
-    ImapUidToId, Mailbox, MailboxId, MailboxState, NextMailboxState, SelectedMailbox, SessionData,
-};
+use types::{collection::Collection, field::MailboxField};
 
 impl<T: SessionStream> SessionData<T> {
     pub async fn fetch_messages(
@@ -171,7 +169,7 @@ impl<T: SessionStream> SessionData<T> {
                 account_id: mailbox.account_id,
                 collection: Collection::Mailbox.into(),
                 document_id: mailbox.mailbox_id,
-                class: ValueClass::Property(Property::EmailIds.into()),
+                class: ValueClass::Property(MailboxField::UidCounter.into()),
             })
             .await
             .map(|v| (v + 1) as u32)

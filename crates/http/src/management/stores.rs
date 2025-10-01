@@ -19,7 +19,6 @@ use directory::{
 use email::message::{ingest::EmailIngest, metadata::MessageData};
 use http_proto::{request::decode_path_element, *};
 use hyper::Method;
-use jmap_proto::types::{collection::Collection, property::Property};
 use serde_json::json;
 use services::task_manager::fts::FtsIndexTask;
 use std::future::Future;
@@ -28,6 +27,10 @@ use store::{
     write::{Archiver, BatchBuilder, ValueClass},
 };
 use trc::AddContext;
+use types::{
+    collection::Collection,
+    field::{EmailField, MailboxField},
+};
 use utils::url_params::UrlParams;
 
 // SPDX-SnippetBegin
@@ -354,7 +357,7 @@ pub async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u
                     .with_changes(new_mailbox),
             )
             .caused_by(trc::location!())?
-            .clear(Property::EmailIds);
+            .clear(MailboxField::UidCounter);
         server
             .store()
             .write(batch.build_all())
@@ -399,9 +402,9 @@ pub async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u
             .with_account_id(account_id)
             .with_collection(Collection::Email)
             .update_document(message_id)
-            .assert_value(ValueClass::Property(Property::Value.into()), &data)
+            .assert_value(ValueClass::Property(EmailField::Archive.into()), &data)
             .set(
-                Property::Value,
+                EmailField::Archive,
                 Archiver::new(new_data)
                     .serialize()
                     .caused_by(trc::location!())?,

@@ -23,8 +23,8 @@ To: "Greg Vaudreuil" <gvaudre@NRI.Reston.VA.US>,
 X-AddressesGroup: "A Group": "Ed Jones" <c@a.test>, 
 	<joe@where.test>, "John" <jdoe@one.test>;
 X-AddressesGroup: "List 1": <addr1@test.com>, 
-	<addr2@test.com>;"List 2": <addr3@test.com>, 
-	<addr4@test.com>;<addr5@test.com>, 
+	<addr2@test.com>; "List 2": <addr3@test.com>, 
+	<addr4@test.com>; <addr5@test.com>, 
 	<addr6@test.com>;
 X-References: <1234@local.machine.example> <3456@example.net>
 X-References: <789@local.machine.example> <abcd@example.net>
@@ -40,13 +40,16 @@ Content-Language: en
 Content-Type: text/plain; charset="us-ascii"
 X-Header: just a value
 X-Text: more text
-Content-Transfer-Encoding: 7bit
+Content-Transfer-Encoding: quoted-printable
 
-I have the most brilliant plan.  Let me tell you all about it.  What we do is, we
+I have the most brilliant plan.  Let me tell you all about it.  What we do i=
+s, we
 --boundary_0
 Content-Location: https://example.com/html-body.html
 Content-Type: text/html; charset="utf-8"; name="html-body.html"
-Content-Transfer-Encoding: 7bit
+Content-Transfer-Encoding: quoted-printable
 
-<!DOCTYPE html><html><head><title></title><style type="text/css">div{font-size:16px}</style></head><body><div>I have the most <b>brilliant</b> plan.  Let me tell you all about it.  What we do is, we</div></body></html>
+<!DOCTYPE html><html><head><title></title><style type=3D"text/css">div{font-=
+size:16px}</style></head><body><div>I have the most <b>brilliant</b> plan.  =
+Let me tell you all about it.  What we do is, we</div></body></html>
 --boundary_0--

@@ -8,9 +8,8 @@ use crate::{JmapMethods, changes::state::MessageCacheState};
 use common::{MessageStoreCache, Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use jmap_proto::{
-    method::query::{Comparator, Filter, QueryRequest, QueryResponse, SortProperty},
-    object::email::QueryArguments,
-    types::{acl::Acl, collection::Collection, keyword::Keyword, property::Property},
+    method::query::{Comparator, Filter, QueryRequest, QueryResponse},
+    object::email::{Email, EmailComparator, EmailFilter},
 };
 use mail_parser::HeaderName;
 use nlp::language::Language;
@@ -23,11 +22,12 @@ use store::{
     roaring::RoaringBitmap,
 };
 use trc::AddContext;
+use types::{acl::Acl, collection::Collection, field::EmailField, keyword::Keyword};
 
 pub trait EmailQuery: Sync + Send {
     fn email_query(
         &self,
-        request: QueryRequest<QueryArguments>,
+        request: QueryRequest<Email>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
@@ -35,7 +35,7 @@ pub trait EmailQuery: Sync + Send {
 impl EmailQuery for Server {
     async fn email_query(
         &self,
-        mut request: QueryRequest<QueryArguments>,
+        mut request: QueryRequest<Email>,
         access_token: &AccessToken,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
@@ -51,128 +51,134 @@ impl EmailQuery for Server {
                     let mut fts_filters = Vec::with_capacity(filters.len());
                     for cond in conds {
                         match cond {
-                            Filter::Text(text) => {
-                                fts_filters.push(FtsFilter::Or);
-                                fts_filters.push(FtsFilter::has_text(
+                            Filter::Property(cond) => match cond {
+                                EmailFilter::Text(text) => {
+                                    fts_filters.push(FtsFilter::Or);
+                                    fts_filters.push(FtsFilter::has_text(
+                                        Field::Header(HeaderName::From),
+                                        &text,
+                                        Language::None,
+                                    ));
+                                    fts_filters.push(FtsFilter::has_text(
+                                        Field::Header(HeaderName::To),
+                                        &text,
+                                        Language::None,
+                                    ));
+                                    fts_filters.push(FtsFilter::has_text(
+                                        Field::Header(HeaderName::Cc),
+                                        &text,
+                                        Language::None,
+                                    ));
+                                    fts_filters.push(FtsFilter::has_text(
+                                        Field::Header(HeaderName::Bcc),
+                                        &text,
+                                        Language::None,
+                                    ));
+                                    fts_filters.push(FtsFilter::has_text_detect(
+                                        Field::Header(HeaderName::Subject),
+                                        &text,
+                                        self.core.jmap.default_language,
+                                    ));
+                                    fts_filters.push(FtsFilter::has_text_detect(
+                                        Field::Body,
+                                        &text,
+                                        self.core.jmap.default_language,
+                                    ));
+                                    fts_filters.push(FtsFilter::has_text_detect(
+                                        Field::Attachment,
+                                        text,
+                                        self.core.jmap.default_language,
+                                    ));
+                                    fts_filters.push(FtsFilter::End);
+                                }
+                                EmailFilter::From(text) => fts_filters.push(FtsFilter::has_text(
                                     Field::Header(HeaderName::From),
-                                    &text,
-                                    Language::None,
-                                ));
-                                fts_filters.push(FtsFilter::has_text(
-                                    Field::Header(HeaderName::To),
-                                    &text,
-                                    Language::None,
-                                ));
-                                fts_filters.push(FtsFilter::has_text(
-                                    Field::Header(HeaderName::Cc),
-                                    &text,
-                                    Language::None,
-                                ));
-                                fts_filters.push(FtsFilter::has_text(
-                                    Field::Header(HeaderName::Bcc),
-                                    &text,
-                                    Language::None,
-                                ));
-                                fts_filters.push(FtsFilter::has_text_detect(
-                                    Field::Header(HeaderName::Subject),
-                                    &text,
-                                    self.core.jmap.default_language,
-                                ));
-                                fts_filters.push(FtsFilter::has_text_detect(
-                                    Field::Body,
-                                    &text,
-                                    self.core.jmap.default_language,
-                                ));
-                                fts_filters.push(FtsFilter::has_text_detect(
-                                    Field::Attachment,
                                     text,
-                                    self.core.jmap.default_language,
-                                ));
-                                fts_filters.push(FtsFilter::End);
-                            }
-                            Filter::From(text) => fts_filters.push(FtsFilter::has_text(
-                                Field::Header(HeaderName::From),
-                                text,
-                                Language::None,
-                            )),
-                            Filter::To(text) => fts_filters.push(FtsFilter::has_text(
-                                Field::Header(HeaderName::To),
-                                text,
-                                Language::None,
-                            )),
-                            Filter::Cc(text) => fts_filters.push(FtsFilter::has_text(
-                                Field::Header(HeaderName::Cc),
-                                text,
-                                Language::None,
-                            )),
-                            Filter::Bcc(text) => fts_filters.push(FtsFilter::has_text(
-                                Field::Header(HeaderName::Bcc),
-                                text,
-                                Language::None,
-                            )),
-                            Filter::Subject(text) => fts_filters.push(FtsFilter::has_text_detect(
-                                Field::Header(HeaderName::Subject),
-                                text,
-                                self.core.jmap.default_language,
-                            )),
-                            Filter::Body(text) => fts_filters.push(FtsFilter::has_text_detect(
-                                Field::Body,
-                                text,
-                                self.core.jmap.default_language,
-                            )),
-                            Filter::Header(header) => {
-                                let mut header = header.into_iter();
-                                let header_name = header.next().ok_or_else(|| {
-                                    trc::JmapEvent::InvalidArguments
-                                        .into_err()
-                                        .details("Header name is missing.".to_string())
-                                })?;
+                                    Language::None,
+                                )),
+                                EmailFilter::To(text) => fts_filters.push(FtsFilter::has_text(
+                                    Field::Header(HeaderName::To),
+                                    text,
+                                    Language::None,
+                                )),
+                                EmailFilter::Cc(text) => fts_filters.push(FtsFilter::has_text(
+                                    Field::Header(HeaderName::Cc),
+                                    text,
+                                    Language::None,
+                                )),
+                                EmailFilter::Bcc(text) => fts_filters.push(FtsFilter::has_text(
+                                    Field::Header(HeaderName::Bcc),
+                                    text,
+                                    Language::None,
+                                )),
+                                EmailFilter::Subject(text) => {
+                                    fts_filters.push(FtsFilter::has_text_detect(
+                                        Field::Header(HeaderName::Subject),
+                                        text,
+                                        self.core.jmap.default_language,
+                                    ))
+                                }
+                                EmailFilter::Body(text) => {
+                                    fts_filters.push(FtsFilter::has_text_detect(
+                                        Field::Body,
+                                        text,
+                                        self.core.jmap.default_language,
+                                    ))
+                                }
+                                EmailFilter::Header(header) => {
+                                    let mut header = header.into_iter();
+                                    let header_name = header.next().ok_or_else(|| {
+                                        trc::JmapEvent::InvalidArguments
+                                            .into_err()
+                                            .details("Header name is missing.".to_string())
+                                    })?;
 
-                                match HeaderName::parse(header_name) {
-                                    Some(HeaderName::Other(header_name)) => {
-                                        return Err(trc::JmapEvent::InvalidArguments
+                                    match HeaderName::parse(header_name) {
+                                        Some(HeaderName::Other(header_name)) => {
+                                            return Err(trc::JmapEvent::InvalidArguments
                                             .into_err()
                                             .details(format!(
                                                 "Querying header '{header_name}' is not supported.",
                                             )));
-                                    }
-                                    Some(header_name) => {
-                                        if let Some(header_value) = header.next() {
-                                            if matches!(
-                                                header_name,
-                                                HeaderName::MessageId
-                                                    | HeaderName::InReplyTo
-                                                    | HeaderName::References
-                                                    | HeaderName::ResentMessageId
-                                            ) {
-                                                fts_filters.push(FtsFilter::has_keyword(
-                                                    Field::Header(header_name),
-                                                    header_value,
-                                                ));
+                                        }
+                                        Some(header_name) => {
+                                            if let Some(header_value) = header.next() {
+                                                if matches!(
+                                                    header_name,
+                                                    HeaderName::MessageId
+                                                        | HeaderName::InReplyTo
+                                                        | HeaderName::References
+                                                        | HeaderName::ResentMessageId
+                                                ) {
+                                                    fts_filters.push(FtsFilter::has_keyword(
+                                                        Field::Header(header_name),
+                                                        header_value,
+                                                    ));
+                                                } else {
+                                                    fts_filters.push(FtsFilter::has_text(
+                                                        Field::Header(header_name),
+                                                        header_value,
+                                                        Language::None,
+                                                    ));
+                                                }
                                             } else {
-                                                fts_filters.push(FtsFilter::has_text(
-                                                    Field::Header(header_name),
-                                                    header_value,
-                                                    Language::None,
+                                                fts_filters.push(FtsFilter::has_keyword(
+                                                    Field::Keyword,
+                                                    header_name.as_str().to_lowercase(),
                                                 ));
                                             }
-                                        } else {
-                                            fts_filters.push(FtsFilter::has_keyword(
-                                                Field::Keyword,
-                                                header_name.as_str().to_lowercase(),
-                                            ));
                                         }
+                                        None => (),
                                     }
-                                    None => (),
                                 }
-                            }
+                                other => {
+                                    return Err(trc::JmapEvent::UnsupportedFilter
+                                        .into_err()
+                                        .details(other.to_string()));
+                                }
+                            },
                             Filter::And | Filter::Or | Filter::Not | Filter::Close => {
                                 fts_filters.push(cond.into());
-                            }
-                            other => {
-                                return Err(trc::JmapEvent::UnsupportedFilter
-                                    .into_err()
-                                    .details(other.to_string()));
                             }
                         }
                     }
@@ -183,116 +189,131 @@ impl EmailQuery for Server {
                 }
                 FilterGroup::Store(cond) => {
                     match cond {
-                        Filter::InMailbox(mailbox) => {
-                            filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
-                                cached_messages
-                                    .in_mailbox(mailbox.document_id())
-                                    .map(|item| item.document_id),
-                            )))
-                        }
-                        Filter::InMailboxOtherThan(mailboxes) => {
-                            filters.push(query::Filter::Not);
-                            filters.push(query::Filter::Or);
-                            for mailbox in mailboxes {
-                                filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
-                                    cached_messages
-                                        .in_mailbox(mailbox.document_id())
-                                        .map(|item| item.document_id),
-                                )));
-                            }
-                            filters.push(query::Filter::End);
-                            filters.push(query::Filter::End);
-                        }
-                        Filter::Before(date) => {
-                            filters.push(query::Filter::lt(Property::ReceivedAt, date.serialize()))
-                        }
-                        Filter::After(date) => {
-                            filters.push(query::Filter::gt(Property::ReceivedAt, date.serialize()))
-                        }
-                        Filter::MinSize(size) => {
-                            filters.push(query::Filter::ge(Property::Size, size.serialize()))
-                        }
-                        Filter::MaxSize(size) => {
-                            filters.push(query::Filter::lt(Property::Size, size.serialize()))
-                        }
-                        Filter::AllInThreadHaveKeyword(keyword) => {
-                            filters.push(query::Filter::is_in_set(thread_keywords(
-                                &cached_messages,
-                                keyword,
-                                true,
-                            )))
-                        }
-                        Filter::SomeInThreadHaveKeyword(keyword) => {
-                            filters.push(query::Filter::is_in_set(thread_keywords(
-                                &cached_messages,
-                                keyword,
-                                false,
-                            )))
-                        }
-                        Filter::NoneInThreadHaveKeyword(keyword) => {
-                            filters.push(query::Filter::Not);
-                            filters.push(query::Filter::is_in_set(thread_keywords(
-                                &cached_messages,
-                                keyword,
-                                false,
-                            )));
-                            filters.push(query::Filter::End);
-                        }
-                        Filter::HasKeyword(keyword) => {
-                            filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
-                                cached_messages
-                                    .with_keyword(&keyword)
-                                    .map(|item| item.document_id),
-                            )));
-                        }
-                        Filter::NotKeyword(keyword) => {
-                            filters.push(query::Filter::Not);
-                            filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
-                                cached_messages
-                                    .with_keyword(&keyword)
-                                    .map(|item| item.document_id),
-                            )));
-                            filters.push(query::Filter::End);
-                        }
-                        Filter::HasAttachment(has_attach) => {
-                            if !has_attach {
-                                filters.push(query::Filter::Not);
-                            }
-                            filters.push(query::Filter::is_in_bitmap(Property::HasAttachment, ()));
-                            if !has_attach {
-                                filters.push(query::Filter::End);
+                        Filter::Property(cond) => {
+                            match cond {
+                                EmailFilter::InMailbox(mailbox) => filters.push(
+                                    query::Filter::is_in_set(RoaringBitmap::from_iter(
+                                        cached_messages
+                                            .in_mailbox(mailbox.document_id())
+                                            .map(|item| item.document_id),
+                                    )),
+                                ),
+                                EmailFilter::InMailboxOtherThan(mailboxes) => {
+                                    filters.push(query::Filter::Not);
+                                    filters.push(query::Filter::Or);
+                                    for mailbox in mailboxes {
+                                        filters.push(query::Filter::is_in_set(
+                                            RoaringBitmap::from_iter(
+                                                cached_messages
+                                                    .in_mailbox(mailbox.document_id())
+                                                    .map(|item| item.document_id),
+                                            ),
+                                        ));
+                                    }
+                                    filters.push(query::Filter::End);
+                                    filters.push(query::Filter::End);
+                                }
+                                EmailFilter::Before(date) => filters.push(query::Filter::lt(
+                                    EmailField::ReceivedAt,
+                                    date.timestamp().serialize(),
+                                )),
+                                EmailFilter::After(date) => filters.push(query::Filter::gt(
+                                    EmailField::ReceivedAt,
+                                    date.timestamp().serialize(),
+                                )),
+                                EmailFilter::MinSize(size) => filters
+                                    .push(query::Filter::ge(EmailField::Size, size.serialize())),
+                                EmailFilter::MaxSize(size) => filters
+                                    .push(query::Filter::lt(EmailField::Size, size.serialize())),
+                                EmailFilter::AllInThreadHaveKeyword(keyword) => {
+                                    filters.push(query::Filter::is_in_set(thread_keywords(
+                                        &cached_messages,
+                                        keyword,
+                                        true,
+                                    )))
+                                }
+                                EmailFilter::SomeInThreadHaveKeyword(keyword) => {
+                                    filters.push(query::Filter::is_in_set(thread_keywords(
+                                        &cached_messages,
+                                        keyword,
+                                        false,
+                                    )))
+                                }
+                                EmailFilter::NoneInThreadHaveKeyword(keyword) => {
+                                    filters.push(query::Filter::Not);
+                                    filters.push(query::Filter::is_in_set(thread_keywords(
+                                        &cached_messages,
+                                        keyword,
+                                        false,
+                                    )));
+                                    filters.push(query::Filter::End);
+                                }
+                                EmailFilter::HasKeyword(keyword) => {
+                                    filters.push(query::Filter::is_in_set(
+                                        RoaringBitmap::from_iter(
+                                            cached_messages
+                                                .with_keyword(&keyword)
+                                                .map(|item| item.document_id),
+                                        ),
+                                    ));
+                                }
+                                EmailFilter::NotKeyword(keyword) => {
+                                    filters.push(query::Filter::Not);
+                                    filters.push(query::Filter::is_in_set(
+                                        RoaringBitmap::from_iter(
+                                            cached_messages
+                                                .with_keyword(&keyword)
+                                                .map(|item| item.document_id),
+                                        ),
+                                    ));
+                                    filters.push(query::Filter::End);
+                                }
+                                EmailFilter::HasAttachment(has_attach) => {
+                                    if !has_attach {
+                                        filters.push(query::Filter::Not);
+                                    }
+                                    filters.push(query::Filter::is_in_bitmap(
+                                        EmailField::HasAttachment,
+                                        (),
+                                    ));
+                                    if !has_attach {
+                                        filters.push(query::Filter::End);
+                                    }
+                                }
+
+                                // Non-standard
+                                EmailFilter::Id(ids) => {
+                                    let mut set = RoaringBitmap::new();
+                                    for id in ids {
+                                        set.insert(id.document_id());
+                                    }
+                                    filters.push(query::Filter::is_in_set(set));
+                                }
+                                EmailFilter::SentBefore(date) => filters.push(query::Filter::lt(
+                                    EmailField::SentAt,
+                                    date.timestamp().serialize(),
+                                )),
+                                EmailFilter::SentAfter(date) => filters.push(query::Filter::gt(
+                                    EmailField::SentAt,
+                                    date.timestamp().serialize(),
+                                )),
+                                EmailFilter::InThread(id) => filters.push(
+                                    query::Filter::is_in_set(RoaringBitmap::from_iter(
+                                        cached_messages
+                                            .in_thread(id.document_id())
+                                            .map(|item| item.document_id),
+                                    )),
+                                ),
+                                other => {
+                                    return Err(trc::JmapEvent::UnsupportedFilter
+                                        .into_err()
+                                        .details(other.to_string()));
+                                }
                             }
                         }
 
-                        // Non-standard
-                        Filter::Id(ids) => {
-                            let mut set = RoaringBitmap::new();
-                            for id in ids {
-                                set.insert(id.document_id());
-                            }
-                            filters.push(query::Filter::is_in_set(set));
-                        }
-                        Filter::SentBefore(date) => {
-                            filters.push(query::Filter::lt(Property::SentAt, date.serialize()))
-                        }
-                        Filter::SentAfter(date) => {
-                            filters.push(query::Filter::gt(Property::SentAt, date.serialize()))
-                        }
-                        Filter::InThread(id) => {
-                            filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
-                                cached_messages
-                                    .in_thread(id.document_id())
-                                    .map(|item| item.document_id),
-                            )))
-                        }
                         Filter::And | Filter::Or | Filter::Not | Filter::Close => {
                             filters.push(cond.into());
-                        }
-
-                        other => {
-                            return Err(trc::JmapEvent::UnsupportedFilter
-                                .into_err()
-                                .details(other.to_string()));
                         }
                     }
                 }
@@ -313,54 +334,46 @@ impl EmailQuery for Server {
             for comparator in request
                 .sort
                 .and_then(|s| if !s.is_empty() { s.into() } else { None })
-                .unwrap_or_else(|| vec![Comparator::descending(SortProperty::ReceivedAt)])
+                .unwrap_or_else(|| vec![Comparator::descending(EmailComparator::ReceivedAt)])
             {
                 comparators.push(match comparator.property {
-                    SortProperty::ReceivedAt => {
-                        query::Comparator::field(Property::ReceivedAt, comparator.is_ascending)
+                    EmailComparator::ReceivedAt => {
+                        query::Comparator::field(EmailField::ReceivedAt, comparator.is_ascending)
                     }
-                    SortProperty::Size => {
-                        query::Comparator::field(Property::Size, comparator.is_ascending)
+                    EmailComparator::Size => {
+                        query::Comparator::field(EmailField::Size, comparator.is_ascending)
                     }
-                    SortProperty::From => {
-                        query::Comparator::field(Property::From, comparator.is_ascending)
+                    EmailComparator::From => {
+                        query::Comparator::field(EmailField::From, comparator.is_ascending)
                     }
-                    SortProperty::To => {
-                        query::Comparator::field(Property::To, comparator.is_ascending)
+                    EmailComparator::To => {
+                        query::Comparator::field(EmailField::To, comparator.is_ascending)
                     }
-                    SortProperty::Subject => {
-                        query::Comparator::field(Property::Subject, comparator.is_ascending)
+                    EmailComparator::Subject => {
+                        query::Comparator::field(EmailField::Subject, comparator.is_ascending)
                     }
-                    SortProperty::SentAt => {
-                        query::Comparator::field(Property::SentAt, comparator.is_ascending)
+                    EmailComparator::SentAt => {
+                        query::Comparator::field(EmailField::SentAt, comparator.is_ascending)
                     }
-                    SortProperty::HasKeyword => query::Comparator::set(
+                    EmailComparator::HasKeyword(keyword) => query::Comparator::set(
                         RoaringBitmap::from_iter(
                             cached_messages
-                                .with_keyword(&comparator.keyword.unwrap_or(Keyword::Seen))
+                                .with_keyword(&keyword)
                                 .map(|item| item.document_id),
                         ),
                         comparator.is_ascending,
                     ),
-                    SortProperty::AllInThreadHaveKeyword => query::Comparator::set(
-                        thread_keywords(
-                            &cached_messages,
-                            comparator.keyword.unwrap_or(Keyword::Seen),
-                            true,
-                        ),
+                    EmailComparator::AllInThreadHaveKeyword(keyword) => query::Comparator::set(
+                        thread_keywords(&cached_messages, keyword, true),
                         comparator.is_ascending,
                     ),
-                    SortProperty::SomeInThreadHaveKeyword => query::Comparator::set(
-                        thread_keywords(
-                            &cached_messages,
-                            comparator.keyword.unwrap_or(Keyword::Seen),
-                            false,
-                        ),
+                    EmailComparator::SomeInThreadHaveKeyword(keyword) => query::Comparator::set(
+                        thread_keywords(&cached_messages, keyword, false),
                         comparator.is_ascending,
                     ),
                     // Non-standard
-                    SortProperty::Cc => {
-                        query::Comparator::field(Property::Cc, comparator.is_ascending)
+                    EmailComparator::Cc => {
+                        query::Comparator::field(EmailField::Cc, comparator.is_ascending)
                     }
 
                     other => {

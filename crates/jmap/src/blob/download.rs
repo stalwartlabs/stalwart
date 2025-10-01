@@ -7,12 +7,13 @@
 use common::{Server, auth::AccessToken};
 use email::cache::MessageCacheFetch;
 use email::cache::email::MessageCacheAccess;
-use jmap_proto::types::{acl::Acl, blob::BlobId, collection::Collection};
 use std::future::Future;
 use std::ops::Range;
-use store::BlobClass;
 use trc::AddContext;
-use utils::BlobHash;
+use types::acl::Acl;
+use types::blob::{BlobClass, BlobId};
+use types::blob_hash::BlobHash;
+use types::collection::Collection;
 
 pub trait BlobDownload: Sync + Send {
     fn blob_download(

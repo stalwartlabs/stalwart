@@ -12,6 +12,7 @@ use std::{
 use compact_str::ToCompactString;
 use roaring::RoaringBitmap;
 use trc::{AddContext, StoreEvent};
+use types::collection::Collection;
 
 use crate::{
     BitmapKey, Deserialize, IterateParams, Key, QueryResult, SUBSPACE_BITMAP_ID,
@@ -236,7 +237,7 @@ impl Store {
     pub async fn assign_document_ids(
         &self,
         account_id: u32,
-        collection: impl Into<u8>,
+        collection: Collection,
         num_ids: u64,
     ) -> trc::Result<u32> {
         // Increment UID next
@@ -593,8 +594,6 @@ impl Store {
 
     #[cfg(feature = "test_mode")]
     pub async fn blob_expire_all(&self) {
-        use utils::{BLOB_HASH_LEN, BlobHash};
-
         use crate::{U64_LEN, write::BlobOp};
 
         // Delete all temporary hashes
@@ -603,7 +602,7 @@ impl Store {
             collection: 0,
             document_id: 0,
             class: ValueClass::Blob(BlobOp::Reserve {
-                hash: BlobHash::default(),
+                hash: types::blob_hash::BlobHash::default(),
                 until: 0,
             }),
         };
@@ -612,7 +611,7 @@ impl Store {
             collection: 0,
             document_id: 0,
             class: ValueClass::Blob(BlobOp::Reserve {
-                hash: BlobHash::default(),
+                hash: types::blob_hash::BlobHash::default(),
                 until: 0,
             }),
         };
@@ -629,8 +628,9 @@ impl Store {
 
                 batch.any_op(Operation::Value {
                     class: ValueClass::Blob(BlobOp::Reserve {
-                        hash: BlobHash::try_from_hash_slice(
-                            key.get(U32_LEN..U32_LEN + BLOB_HASH_LEN).unwrap(),
+                        hash: types::blob_hash::BlobHash::try_from_hash_slice(
+                            key.get(U32_LEN..U32_LEN + types::blob_hash::BLOB_HASH_LEN)
+                                .unwrap(),
                         )
                         .unwrap(),
                         until: key

@@ -20,11 +20,11 @@ use imap_proto::{
     },
     receiver::Request,
 };
-use jmap_proto::types::{collection::SyncCollection, type_state::DataType};
 use std::{sync::Arc, time::Instant};
 use store::query::log::Query;
 use tokio::io::AsyncReadExt;
 use trc::AddContext;
+use types::{collection::SyncCollection, type_state::DataType};
 use utils::map::bitmap::Bitmap;
 
 impl<T: SessionStream> Session<T> {
@@ -204,7 +204,7 @@ impl<T: SessionStream> SessionData<T> {
                     .store()
                     .changes(
                         mailbox.id.account_id,
-                        SyncCollection::Email,
+                        SyncCollection::Email.into(),
                         Query::Since(modseq),
                     )
                     .await

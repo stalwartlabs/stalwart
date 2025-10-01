@@ -6,20 +6,8 @@
 
 use std::{sync::Arc, time::Instant};
 
-use common::{Server, auth::AccessToken};
-use http_proto::HttpSessionData;
-use jmap_proto::{
-    method::{
-        get, query,
-        set::{self},
-    },
-    request::{Call, Request, RequestMethod, method::MethodName},
-    response::{Response, ResponseMethod},
-    types::collection::Collection,
-};
-use trc::JmapEvent;
-
 use crate::{
+    api::auth::JmapAuthorization,
     blob::{copy::BlobCopy, get::BlobOperations, upload::BlobUpload},
     changes::{get::ChangesLookup, query::QueryChanges},
     email::{
@@ -39,35 +27,46 @@ use crate::{
     thread::get::ThreadGet,
     vacation::{get::VacationResponseGet, set::VacationResponseSet},
 };
+use common::{Server, auth::AccessToken};
+use http_proto::HttpSessionData;
+use jmap_proto::{
+    request::{
+        Call, CopyRequestMethod, GetRequestMethod, QueryRequestMethod, Request, RequestMethod,
+        SetRequestMethod, method::MethodName,
+    },
+    response::{Response, ResponseMethod, SetResponseMethod},
+};
+use trc::JmapEvent;
+use types::{collection::Collection, id::Id};
 
 use std::future::Future;
 
 pub trait RequestHandler: Sync + Send {
-    fn handle_jmap_request(
+    fn handle_jmap_request<'x>(
         &self,
-        request: Request,
+        request: Request<'x>,
         access_token: Arc<AccessToken>,
         session: &HttpSessionData,
-    ) -> impl Future<Output = Response> + Send;
+    ) -> impl Future<Output = Response<'x>> + Send;
 
-    fn handle_method_call(
+    fn handle_method_call<'x>(
         &self,
-        method: RequestMethod,
-        method_name: &'static str,
+        method: RequestMethod<'x>,
+        method_name: MethodName,
         access_token: &AccessToken,
-        next_call: &mut Option<Call<RequestMethod>>,
+        next_call: &mut Option<Call<RequestMethod<'x>>>,
         session: &HttpSessionData,
-    ) -> impl Future<Output = trc::Result<ResponseMethod>> + Send;
+    ) -> impl Future<Output = trc::Result<ResponseMethod<'x>>> + Send;
 }
 
 impl RequestHandler for Server {
     #![allow(clippy::large_futures)]
-    async fn handle_jmap_request(
+    async fn handle_jmap_request<'x>(
         &self,
-        request: Request,
+        request: Request<'x>,
         access_token: Arc<AccessToken>,
         session: &HttpSessionData,
-    ) -> Response {
+    ) -> Response<'x> {
         let mut response = Response::new(
             access_token.state(),
             request.created_ids.unwrap_or_default(),
@@ -94,7 +93,7 @@ impl RequestHandler for Server {
                 match self
                     .handle_method_call(
                         call.method,
-                        method_name,
+                        call.name,
                         &access_token,
                         &mut next_call,
                         session,
@@ -105,7 +104,29 @@ impl RequestHandler for Server {
                         match &mut method_response {
                             ResponseMethod::Set(set_response) => {
                                 // Add created ids
-                                set_response.update_created_ids(&mut response);
+                                match set_response {
+                                    SetResponseMethod::Email(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::Mailbox(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::Identity(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::EmailSubmission(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::PushSubscription(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::Sieve(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::VacationResponse(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                }
                             }
                             ResponseMethod::ImportEmail(import_response) => {
                                 // Add created ids
@@ -152,197 +173,223 @@ impl RequestHandler for Server {
         response
     }
 
-    async fn handle_method_call(
+    async fn handle_method_call<'x>(
         &self,
-        method: RequestMethod,
-        method_name: &'static str,
+        method: RequestMethod<'x>,
+        method_name: MethodName,
         access_token: &AccessToken,
-        next_call: &mut Option<Call<RequestMethod>>,
+        next_call: &mut Option<Call<RequestMethod<'x>>>,
         session: &HttpSessionData,
-    ) -> trc::Result<ResponseMethod> {
+    ) -> trc::Result<ResponseMethod<'x>> {
         let op_start = Instant::now();
 
         // Check permissions
-        access_token.assert_has_jmap_permission(&method)?;
+        access_token.assert_has_jmap_permission(&method, method_name.obj)?;
 
         // Handle method
         let response = match method {
-            RequestMethod::Get(mut req) => match req.take_arguments() {
-                get::RequestArguments::Email(arguments) => {
+            RequestMethod::Get(req) => match req {
+                GetRequestMethod::Email(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Email)?;
 
-                    self.email_get(req.with_arguments(arguments), access_token)
-                        .await?
-                        .into()
+                    self.email_get(req, access_token).await?.into()
                 }
-                get::RequestArguments::Mailbox => {
+                GetRequestMethod::Mailbox(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Mailbox)?;
 
                     self.mailbox_get(req, access_token).await?.into()
                 }
-                get::RequestArguments::Thread => {
+                GetRequestMethod::Thread(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Email)?;
 
                     self.thread_get(req).await?.into()
                 }
-                get::RequestArguments::Identity => {
+                GetRequestMethod::Identity(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.identity_get(req).await?.into()
                 }
-                get::RequestArguments::EmailSubmission => {
+                GetRequestMethod::EmailSubmission(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.email_submission_get(req).await?.into()
                 }
-                get::RequestArguments::PushSubscription => {
+                GetRequestMethod::PushSubscription(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     self.push_subscription_get(req, access_token).await?.into()
                 }
-                get::RequestArguments::SieveScript => {
+                GetRequestMethod::Sieve(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.sieve_script_get(req).await?.into()
                 }
-                get::RequestArguments::VacationResponse => {
+                GetRequestMethod::VacationResponse(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.vacation_response_get(req).await?.into()
                 }
-                get::RequestArguments::Principal => self.principal_get(req).await?.into(),
-                get::RequestArguments::Quota => {
+                GetRequestMethod::Principal(req) => self.principal_get(req).await?.into(),
+                GetRequestMethod::Quota(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.quota_get(req, access_token).await?.into()
                 }
-                get::RequestArguments::Blob(arguments) => {
+                GetRequestMethod::Blob(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
-                    self.blob_get(req.with_arguments(arguments), access_token)
-                        .await?
-                        .into()
+                    self.blob_get(req, access_token).await?.into()
                 }
             },
-            RequestMethod::Query(mut req) => match req.take_arguments() {
-                query::RequestArguments::Email(arguments) => {
+            RequestMethod::Query(req) => match req {
+                QueryRequestMethod::Email(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Email)?;
 
-                    self.email_query(req.with_arguments(arguments), access_token)
-                        .await?
-                        .into()
+                    self.email_query(req, access_token).await?.into()
                 }
-                query::RequestArguments::Mailbox(arguments) => {
+                QueryRequestMethod::Mailbox(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Mailbox)?;
 
-                    self.mailbox_query(req.with_arguments(arguments), access_token)
-                        .await?
-                        .into()
+                    self.mailbox_query(req, access_token).await?.into()
                 }
-                query::RequestArguments::EmailSubmission => {
+                QueryRequestMethod::EmailSubmission(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.email_submission_query(req).await?.into()
                 }
-                query::RequestArguments::SieveScript => {
+                QueryRequestMethod::Sieve(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.sieve_script_query(req).await?.into()
                 }
-                query::RequestArguments::Principal => {
+                QueryRequestMethod::Principal(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     self.principal_query(req, session).await?.into()
                 }
-                query::RequestArguments::Quota => {
+                QueryRequestMethod::Quota(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.quota_query(req, access_token).await?.into()
                 }
             },
-            RequestMethod::Set(mut req) => match req.take_arguments() {
-                set::RequestArguments::Email => {
+            RequestMethod::Set(req) => match req {
+                SetRequestMethod::Email(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Email)?;
 
                     self.email_set(req, access_token, session).await?.into()
                 }
-                set::RequestArguments::Mailbox(arguments) => {
+                SetRequestMethod::Mailbox(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Mailbox)?;
 
-                    self.mailbox_set(req.with_arguments(arguments), access_token)
-                        .await?
-                        .into()
+                    self.mailbox_set(req, access_token).await?.into()
                 }
-                set::RequestArguments::Identity => {
+                SetRequestMethod::Identity(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.identity_set(req).await?.into()
                 }
-                set::RequestArguments::EmailSubmission(arguments) => {
+                SetRequestMethod::EmailSubmission(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
-                    self.email_submission_set(
-                        req.with_arguments(arguments),
-                        &session.instance,
-                        next_call,
-                    )
-                    .await?
-                    .into()
-                }
-                set::RequestArguments::PushSubscription => {
-                    self.push_subscription_set(req, access_token).await?.into()
-                }
-                set::RequestArguments::SieveScript(arguments) => {
-                    access_token.assert_is_member(req.account_id)?;
-
-                    self.sieve_script_set(req.with_arguments(arguments), access_token, session)
+                    self.email_submission_set(req, &session.instance, next_call)
                         .await?
                         .into()
                 }
-                set::RequestArguments::VacationResponse => {
+                SetRequestMethod::PushSubscription(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    self.push_subscription_set(req, access_token).await?.into()
+                }
+                SetRequestMethod::Sieve(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_is_member(req.account_id)?;
+
+                    self.sieve_script_set(req, access_token, session)
+                        .await?
+                        .into()
+                }
+                SetRequestMethod::VacationResponse(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
                     self.vacation_response_set(req, access_token).await?.into()
                 }
             },
-            RequestMethod::Changes(req) => self.changes(req, access_token).await?.into(),
-            RequestMethod::Copy(req) => {
-                access_token
-                    .assert_has_access(req.account_id, Collection::Email)?
-                    .assert_has_access(req.from_account_id, Collection::Email)?;
+            RequestMethod::Changes(mut req) => {
+                set_account_id_if_missing(&mut req.account_id, access_token);
 
-                self.email_copy(req, access_token, next_call, session)
+                self.changes(req, method_name.obj, access_token)
                     .await?
-                    .into()
+                    .into_method_response()
             }
-            RequestMethod::ImportEmail(req) => {
+            RequestMethod::Copy(req) => match req {
+                CopyRequestMethod::Email(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+
+                    access_token
+                        .assert_has_access(req.account_id, Collection::Email)?
+                        .assert_has_access(req.from_account_id, Collection::Email)?;
+
+                    self.email_copy(req, access_token, next_call, session)
+                        .await?
+                        .into()
+                }
+                CopyRequestMethod::Blob(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_is_member(req.account_id)?;
+
+                    self.blob_copy(req, access_token).await?.into()
+                }
+            },
+            RequestMethod::ImportEmail(mut req) => {
+                set_account_id_if_missing(&mut req.account_id, access_token);
                 access_token.assert_has_access(req.account_id, Collection::Email)?;
 
                 self.email_import(req, access_token, session).await?.into()
             }
-            RequestMethod::ParseEmail(req) => {
+            RequestMethod::ParseEmail(mut req) => {
+                set_account_id_if_missing(&mut req.account_id, access_token);
                 access_token.assert_has_access(req.account_id, Collection::Email)?;
 
                 self.email_parse(req, access_token).await?.into()
             }
             RequestMethod::QueryChanges(req) => self.query_changes(req, access_token).await?.into(),
-            RequestMethod::SearchSnippet(req) => {
+            RequestMethod::SearchSnippet(mut req) => {
+                set_account_id_if_missing(&mut req.account_id, access_token);
                 access_token.assert_has_access(req.account_id, Collection::Email)?;
 
                 self.email_search_snippet(req, access_token).await?.into()
             }
-            RequestMethod::ValidateScript(req) => {
+            RequestMethod::ValidateScript(mut req) => {
+                set_account_id_if_missing(&mut req.account_id, access_token);
                 access_token.assert_is_member(req.account_id)?;
 
                 self.sieve_script_validate(req, access_token).await?.into()
             }
-            RequestMethod::CopyBlob(req) => {
-                access_token.assert_is_member(req.account_id)?;
-
-                self.blob_copy(req, access_token).await?.into()
-            }
-            RequestMethod::LookupBlob(req) => {
+            RequestMethod::LookupBlob(mut req) => {
+                set_account_id_if_missing(&mut req.account_id, access_token);
                 access_token.assert_is_member(req.account_id)?;
 
                 self.blob_lookup(req).await?.into()
             }
-            RequestMethod::UploadBlob(req) => {
+            RequestMethod::UploadBlob(mut req) => {
+                set_account_id_if_missing(&mut req.account_id, access_token);
                 access_token.assert_is_member(req.account_id)?;
 
                 self.blob_upload_many(req, access_token).await?.into()
@@ -353,12 +400,19 @@ impl RequestHandler for Server {
 
         trc::event!(
             Jmap(JmapEvent::MethodCall),
-            Id = method_name,
+            Id = method_name.as_str(),
             SpanId = session.session_id,
             AccountId = access_token.primary_id(),
             Elapsed = op_start.elapsed(),
         );
 
         Ok(response)
+    }
+}
+
+#[inline]
+pub(crate) fn set_account_id_if_missing(account_id: &mut Id, access_token: &AccessToken) {
+    if !account_id.is_valid() {
+        *account_id = Id::from(access_token.primary_id());
     }
 }

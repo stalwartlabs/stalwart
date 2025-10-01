@@ -47,6 +47,9 @@ pub struct GroupwareConfig {
 
     // File storage settings
     pub max_file_size: usize,
+
+    // Sharing settings
+    pub max_shares_per_item: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
@@ -178,6 +181,7 @@ impl GroupwareConfig {
             } else {
                 None
             },
+            max_shares_per_item: config.property("sharing.max-shares-per-item").unwrap_or(10),
             itip_http_rsvp_expiration: config
                 .property_or_default::<Duration>("calendar.scheduling.http-rsvp.expiration", "90d")
                 .map(|d| d.as_secs())

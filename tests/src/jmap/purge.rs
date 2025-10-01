@@ -19,8 +19,8 @@ use email::{
     message::delete::EmailDeletion,
 };
 use imap_proto::ResponseType;
-use jmap_proto::types::{collection::Collection, id::Id};
 use store::{IterateParams, LogKey, U32_LEN, U64_LEN, write::key::DeserializeBigEndian};
+use types::{collection::Collection, id::Id};
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running purge tests...");

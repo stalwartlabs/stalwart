@@ -10,6 +10,11 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    directory::internal::TestInternalDirectory,
+    imap::{ImapConnection, Type},
+    jmap::{assert_is_empty, mailbox::destroy_all_mailboxes},
+};
 use common::listener::blocked::BLOCKED_IP_KEY;
 use imap_proto::ResponseType;
 use jmap_client::{
@@ -17,14 +22,8 @@ use jmap_client::{
     core::set::{SetError, SetErrorType},
     mailbox::{self},
 };
-use jmap_proto::types::id::Id;
 use store::write::now;
-
-use crate::{
-    directory::internal::TestInternalDirectory,
-    imap::{ImapConnection, Type},
-    jmap::{assert_is_empty, mailbox::destroy_all_mailboxes},
-};
+use types::id::Id;
 
 use super::JMAPTest;
 

@@ -4,45 +4,47 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{JmapMethods, changes::state::MessageCacheState};
-use common::{
-    Server, auth::AccessToken, config::jmap::settings::SpecialUse, sharing::EffectiveAcl,
-    storage::index::ObjectIndexBuilder,
+use crate::{
+    JmapMethods,
+    api::acl::{JmapAcl, JmapRights},
+    changes::state::MessageCacheState,
 };
+use common::{
+    Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
+};
+#[allow(unused_imports)]
+use email::mailbox::{INBOX_ID, JUNK_ID, TRASH_ID, UidMailbox};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
-    mailbox::{Mailbox, destroy::MailboxDestroy},
-};
-use jmap_proto::{
-    error::set::SetError,
-    method::set::{SetRequest, SetResponse},
-    object::mailbox::SetArguments,
-    response::references::EvalObjectReferences,
-    types::{
-        acl::Acl,
-        collection::Collection,
-        id::Id,
-        property::Property,
-        state::State,
-        value::{MaybePatchValue, Object, SetValue, Value},
+    mailbox::{
+        Mailbox,
+        destroy::{MailboxDestroy, MailboxDestroyError},
     },
 };
+use jmap_proto::{
+    error::set::{SetError, SetErrorType},
+    method::set::{SetRequest, SetResponse},
+    object::mailbox::{self, MailboxProperty, MailboxValue},
+    references::resolve::ResolveCreatedReference,
+    request::IntoValid,
+    types::state::State,
+};
+use jmap_tools::{JsonPointerItem, Key, Map, Value};
+use std::future::Future;
 use store::{
     roaring::RoaringBitmap,
     write::{Archive, BatchBuilder, assert::AssertValue},
 };
 use trc::AddContext;
-use utils::config::utils::ParseValue;
-
-#[allow(unused_imports)]
-use email::mailbox::{INBOX_ID, JUNK_ID, TRASH_ID, UidMailbox};
-use std::future::Future;
+use types::{
+    acl::Acl, collection::Collection, field::MailboxField, id::Id, special_use::SpecialUse,
+};
 
 pub struct SetContext<'x> {
     account_id: u32,
     access_token: &'x AccessToken,
     is_shared: bool,
-    response: SetResponse,
+    response: SetResponse<mailbox::Mailbox>,
     mailbox_ids: RoaringBitmap,
     will_destroy: Vec<Id>,
 }
@@ -50,25 +52,29 @@ pub struct SetContext<'x> {
 pub trait MailboxSet: Sync + Send {
     fn mailbox_set(
         &self,
-        request: SetRequest<SetArguments>,
+        request: SetRequest<'_, mailbox::Mailbox>,
         access_token: &AccessToken,
-    ) -> impl Future<Output = trc::Result<SetResponse>> + Send;
+    ) -> impl Future<Output = trc::Result<SetResponse<mailbox::Mailbox>>> + Send;
 
     fn mailbox_set_item(
         &self,
-        changes_: Object<SetValue>,
+        changes_: Map<'_, MailboxProperty, MailboxValue>,
         update: Option<(u32, Archive<Mailbox>)>,
         ctx: &SetContext,
-    ) -> impl Future<Output = trc::Result<Result<ObjectIndexBuilder<Mailbox, Mailbox>, SetError>>> + Send;
+    ) -> impl Future<
+        Output = trc::Result<
+            Result<ObjectIndexBuilder<Mailbox, Mailbox>, SetError<MailboxProperty>>,
+        >,
+    > + Send;
 }
 
 impl MailboxSet for Server {
     #[allow(clippy::blocks_in_conditions)]
     async fn mailbox_set(
         &self,
-        mut request: SetRequest<SetArguments>,
+        mut request: SetRequest<'_, mailbox::Mailbox>,
         access_token: &AccessToken,
-    ) -> trc::Result<SetResponse> {
+    ) -> trc::Result<SetResponse<mailbox::Mailbox>> {
         // Prepare response
         let account_id = request.account_id.document_id();
         let on_destroy_remove_emails = request.arguments.on_destroy_remove_emails.unwrap_or(false);
@@ -81,13 +87,17 @@ impl MailboxSet for Server {
                 .prepare_set_response(&request, cache.assert_state(true, &request.if_in_state)?)
                 .await?,
             mailbox_ids: RoaringBitmap::from_iter(cache.mailboxes.index.keys()),
-            will_destroy: request.unwrap_destroy(),
+            will_destroy: request.unwrap_destroy().into_valid().collect(),
         };
         let mut change_id = None;
 
         // Process creates
         let mut batch = BatchBuilder::new();
         'create: for (id, object) in request.unwrap_create() {
+            let Some(object) = object.into_object() else {
+                continue;
+            };
+
             match self.mailbox_set_item(object, None, &ctx).await? {
                 Ok(builder) => {
                     batch
@@ -98,7 +108,7 @@ impl MailboxSet for Server {
                     if parent_id > 0 {
                         batch
                             .update_document(parent_id - 1)
-                            .assert_value(Property::Value, AssertValue::Some);
+                            .assert_value(MailboxField::Archive, AssertValue::Some);
                     }
 
                     let document_id = self
@@ -135,7 +145,7 @@ impl MailboxSet for Server {
         // Process updates
         let mut will_update = Vec::with_capacity(request.update.as_ref().map_or(0, |u| u.len()));
         let mut batch = BatchBuilder::new();
-        'update: for (id, object) in request.unwrap_update() {
+        'update: for (id, object) in request.unwrap_update().into_valid() {
             // Make sure id won't be destroyed
             if ctx.will_destroy.contains(&id) {
                 ctx.response
@@ -143,6 +153,9 @@ impl MailboxSet for Server {
                     .append(id, SetError::will_destroy());
                 continue 'update;
             }
+            let Some(object) = object.into_object() else {
+                continue 'update;
+            };
 
             // Obtain mailbox
             let document_id = id.document_id();
@@ -163,7 +176,7 @@ impl MailboxSet for Server {
                                 .with_description("You are not allowed to modify this mailbox."),
                         );
                         continue 'update;
-                    } else if object.0.contains_key(&Property::Acl)
+                    } else if object.contains_key(&Key::Property(MailboxProperty::ShareWith))
                         && !acl.contains(Acl::Administer)
                     {
                         ctx.response.not_updated.append(
@@ -189,7 +202,7 @@ impl MailboxSet for Server {
                         if parent_id > 0 {
                             batch
                                 .update_document(parent_id - 1)
-                                .assert_value(Property::Value, AssertValue::Some);
+                                .assert_value(MailboxField::Archive, AssertValue::Some);
                         }
 
                         batch
@@ -255,7 +268,31 @@ impl MailboxSet for Server {
                     ctx.response.destroyed.push(id);
                 }
                 Err(err) => {
-                    ctx.response.not_destroyed.append(id, err);
+                    ctx.response.not_destroyed.append(
+                        id,
+                        match err {
+                            MailboxDestroyError::CannotDestroy => SetError::forbidden()
+                                .with_description(
+                                    "You are not allowed to delete Inbox, Junk or Trash folders.",
+                                ),
+                            MailboxDestroyError::Forbidden => SetError::forbidden()
+                                .with_description("You are not allowed to delete this mailbox."),
+                            MailboxDestroyError::HasChildren => {
+                                SetError::new(SetErrorType::MailboxHasChild)
+                                    .with_description("Mailbox has at least one children.")
+                            }
+                            MailboxDestroyError::HasEmails => {
+                                SetError::new(SetErrorType::MailboxHasEmail)
+                                    .with_description("Mailbox is not empty.")
+                            }
+                            MailboxDestroyError::NotFound => SetError::not_found(),
+                            MailboxDestroyError::AssertionFailed => SetError::forbidden()
+                                .with_description(concat!(
+                                    "Another process modified a message in this mailbox ",
+                                    "while deleting it, please try again."
+                                )),
+                        },
+                    );
                 }
             }
         }
@@ -271,31 +308,28 @@ impl MailboxSet for Server {
     #[allow(clippy::blocks_in_conditions)]
     async fn mailbox_set_item(
         &self,
-        changes_: Object<SetValue>,
+        changes_: Map<'_, MailboxProperty, MailboxValue>,
         update: Option<(u32, Archive<Mailbox>)>,
         ctx: &SetContext<'_>,
-    ) -> trc::Result<Result<ObjectIndexBuilder<Mailbox, Mailbox>, SetError>> {
+    ) -> trc::Result<Result<ObjectIndexBuilder<Mailbox, Mailbox>, SetError<MailboxProperty>>> {
         // Parse properties
         let mut changes = update
             .as_ref()
             .map(|(_, obj)| obj.inner.clone())
             .unwrap_or_else(|| Mailbox::new(String::new()));
         let mut has_acl_changes = false;
-        for (property, value) in changes_.0 {
-            let value = match ctx.response.eval_object_references(value) {
-                Ok(value) => value,
-                Err(err) => {
-                    return Ok(Err(err));
-                }
+        for (property, mut value) in changes_.into_vec() {
+            if let Err(err) = ctx.response.resolve_self_references(&mut value) {
+                return Ok(Err(err));
             };
             match (&property, value) {
-                (Property::Name, MaybePatchValue::Value(Value::Text(value))) => {
+                (Key::Property(MailboxProperty::Name), Value::Str(value)) => {
                     let value = value.trim();
                     if !value.is_empty() && value.len() < self.core.jmap.mailbox_name_max_len {
                         changes.name = value.into();
                     } else {
                         return Ok(Err(SetError::invalid_properties()
-                            .with_property(Property::Name)
+                            .with_property(MailboxProperty::Name)
                             .with_description(
                                 if !value.is_empty() {
                                     "Mailbox name is too long."
@@ -306,7 +340,10 @@ impl MailboxSet for Server {
                             )));
                     }
                 }
-                (Property::ParentId, MaybePatchValue::Value(Value::Id(value))) => {
+                (
+                    Key::Property(MailboxProperty::ParentId),
+                    Value::Element(MailboxValue::Id(value)),
+                ) => {
                     let parent_id = value.document_id();
                     if ctx.will_destroy.contains(&value) {
                         return Ok(Err(SetError::will_destroy()
@@ -317,10 +354,10 @@ impl MailboxSet for Server {
                     }
                     changes.parent_id = parent_id + 1;
                 }
-                (Property::ParentId, MaybePatchValue::Value(Value::Null)) => {
+                (Key::Property(MailboxProperty::ParentId), Value::Null) => {
                     changes.parent_id = 0;
                 }
-                (Property::IsSubscribed, MaybePatchValue::Value(Value::Bool(subscribe))) => {
+                (Key::Property(MailboxProperty::IsSubscribed), Value::Bool(subscribe)) => {
                     let account_id = ctx.access_token.primary_id();
                     if subscribe {
                         if !changes.subscribers.contains(&account_id) {
@@ -330,33 +367,48 @@ impl MailboxSet for Server {
                         changes.subscribers.retain(|id| *id != account_id);
                     }
                 }
-                (Property::Role, MaybePatchValue::Value(Value::Text(value))) => {
-                    let role = value.trim();
-                    if let Ok(role) = SpecialUse::parse_value(role) {
-                        changes.role = role;
-                    } else {
-                        return Ok(Err(SetError::invalid_properties()
-                            .with_property(Property::Role)
-                            .with_description(format!("Invalid role {role:?}."))));
-                    }
+                (
+                    Key::Property(MailboxProperty::Role),
+                    Value::Element(MailboxValue::Role(role)),
+                ) => {
+                    changes.role = role;
                 }
-                (Property::Role, MaybePatchValue::Value(Value::Null)) => {
+                (Key::Property(MailboxProperty::Role), Value::Null) => {
                     changes.role = SpecialUse::None;
                 }
-                (Property::SortOrder, MaybePatchValue::Value(Value::UnsignedInt(value))) => {
-                    changes.sort_order = Some(value as u32);
+                (Key::Property(MailboxProperty::SortOrder), Value::Number(value)) => {
+                    changes.sort_order = Some(value.cast_to_u64() as u32);
                 }
-                (Property::Acl, value) => {
-                    has_acl_changes = true;
-                    match self
-                        .acl_set(
-                            &mut changes.acls,
-                            update.as_ref().map(|(_, obj)| obj.inner.acls.as_slice()),
-                            value,
-                        )
-                        .await
-                    {
-                        Ok(_) => continue,
+                (Key::Property(MailboxProperty::ShareWith), value) => {
+                    match JmapRights::acl_set::<mailbox::Mailbox>(value) {
+                        Ok(acls) => {
+                            has_acl_changes = true;
+                            changes.acls = acls;
+                            continue;
+                        }
+                        Err(err) => {
+                            return Ok(Err(err));
+                        }
+                    }
+                }
+
+                (Key::Property(MailboxProperty::Pointer(pointer)), value)
+                    if matches!(
+                        pointer.first(),
+                        Some(JsonPointerItem::Key(Key::Property(
+                            MailboxProperty::ShareWith
+                        )))
+                    ) =>
+                {
+                    let mut pointer = pointer.iter();
+                    pointer.next();
+
+                    match JmapRights::acl_patch::<mailbox::Mailbox>(changes.acls, pointer, value) {
+                        Ok(acls) => {
+                            has_acl_changes = true;
+                            changes.acls = acls;
+                            continue;
+                        }
                         Err(err) => {
                             return Ok(Err(err));
                         }
@@ -365,7 +417,7 @@ impl MailboxSet for Server {
 
                 _ => {
                     return Ok(Err(SetError::invalid_properties()
-                        .with_property(property)
+                        .with_property(property.into_owned())
                         .with_description("Invalid property or value.".to_string())));
                 }
             }
@@ -384,7 +436,7 @@ impl MailboxSet for Server {
             for depth in 0..self.core.jmap.mailbox_max_depth {
                 if mailbox_parent_id == current_mailbox_id {
                     return Ok(Err(SetError::invalid_properties()
-                        .with_property(Property::ParentId)
+                        .with_property(MailboxProperty::ParentId)
                         .with_description("Mailbox cannot be a parent of itself.")));
                 } else if mailbox_parent_id == 0 {
                     if depth == 0 && ctx.is_shared {
@@ -422,14 +474,14 @@ impl MailboxSet for Server {
                     break;
                 } else {
                     return Ok(Err(SetError::invalid_properties()
-                        .with_property(Property::ParentId)
+                        .with_property(MailboxProperty::ParentId)
                         .with_description("Mailbox parent does not exist.")));
                 }
             }
 
             if !success {
                 return Ok(Err(SetError::invalid_properties()
-                    .with_property(Property::ParentId)
+                    .with_property(MailboxProperty::ParentId)
                     .with_description(
                         "Mailbox parent-child relationship is too deep.",
                     )));
@@ -447,7 +499,7 @@ impl MailboxSet for Server {
                 && cached_mailboxes.mailbox_by_role(&changes.role).is_some()
             {
                 return Ok(Err(SetError::invalid_properties()
-                    .with_property(Property::Role)
+                    .with_property(MailboxProperty::Role)
                     .with_description(format!(
                         "A mailbox with role '{}' already exists.",
                         changes.role.as_str().unwrap_or_default()
@@ -459,7 +511,7 @@ impl MailboxSet for Server {
                 *document_id == INBOX_ID || *document_id == TRASH_ID
             }) {
                 return Ok(Err(SetError::invalid_properties()
-                    .with_property(Property::Role)
+                    .with_property(MailboxProperty::Role)
                     .with_description(
                         "You are not allowed to change the role of Inbox or Trash folders.",
                     )));
@@ -479,7 +531,7 @@ impl MailboxSet for Server {
                 })
             {
                 return Ok(Err(SetError::invalid_properties()
-                    .with_property(Property::Name)
+                    .with_property(MailboxProperty::Name)
                     .with_description(format!(
                         "A mailbox with name '{}' already exists.",
                         changes.name
@@ -487,13 +539,19 @@ impl MailboxSet for Server {
             }
         } else {
             return Ok(Err(SetError::invalid_properties()
-                .with_property(Property::Name)
+                .with_property(MailboxProperty::Name)
                 .with_description("Mailbox name cannot be empty.")));
         }
 
         // Refresh ACLs
         let current = update.map(|(_, current)| current);
         if has_acl_changes {
+            if !changes.acls.is_empty()
+                && let Err(err) = self.acl_validate(&changes.acls).await
+            {
+                return Ok(Err(err.into()));
+            }
+
             self.refresh_acls(
                 &changes.acls,
                 current.as_ref().map(|m| m.inner.acls.as_slice()),

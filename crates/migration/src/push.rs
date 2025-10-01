@@ -5,18 +5,16 @@
  */
 
 use super::object::Object;
-use crate::object::FromLegacy;
+use crate::object::{FromLegacy, Property, Value};
 use base64::{Engine, engine::general_purpose};
 use common::Server;
 use email::push::{Keys, PushSubscription};
-use jmap_proto::types::{
-    collection::Collection, property::Property, type_state::DataType, value::Value,
-};
 use store::{
     Serialize, ValueKey,
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, ValueClass},
 };
 use trc::AddContext;
+use types::{collection::Collection, field::Field, type_state::DataType};
 
 pub(crate) async fn migrate_push_subscriptions(
     server: &Server,
@@ -41,7 +39,7 @@ pub(crate) async fn migrate_push_subscriptions(
                 account_id,
                 collection: Collection::PushSubscription.into(),
                 document_id: push_subscription_id,
-                class: ValueClass::Property(Property::Value.into()),
+                class: ValueClass::Property(Field::ARCHIVE.into()),
             })
             .await
         {
@@ -52,7 +50,7 @@ pub(crate) async fn migrate_push_subscriptions(
                     .with_collection(Collection::PushSubscription)
                     .update_document(push_subscription_id)
                     .set(
-                        Property::Value,
+                        Field::ARCHIVE,
                         Archiver::new(PushSubscription::from_legacy(legacy))
                             .serialize()
                             .caused_by(trc::location!())?,
@@ -73,7 +71,7 @@ pub(crate) async fn migrate_push_subscriptions(
                         account_id,
                         collection: Collection::PushSubscription.into(),
                         document_id: push_subscription_id,
-                        class: ValueClass::Property(Property::Value.into()),
+                        class: ValueClass::Property(Field::ARCHIVE.into()),
                     })
                     .await
                     .is_err()
@@ -146,7 +144,7 @@ impl FromLegacy for PushSubscription {
                 .map(|l| l.as_slice())
                 .unwrap_or_default()
                 .iter()
-                .filter_map(|v| v.as_string().and_then(|v| DataType::try_from(v).ok()))
+                .filter_map(|v| v.as_string().and_then(DataType::parse))
                 .collect(),
             keys: convert_keys(legacy.get(&Property::Keys)),
         }
@@ -159,7 +157,7 @@ fn convert_keys(value: &Value) -> Option<Keys> {
         auth: Default::default(),
     };
     if let Value::Object(obj) = value {
-        for (key, value) in &obj.0 {
+        for (key, value) in &obj.properties {
             match (key, value) {
                 (Property::Auth, Value::Text(value)) => {
                     addr.auth = general_purpose::URL_SAFE.decode(value).unwrap_or_default();

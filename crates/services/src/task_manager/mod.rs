@@ -31,8 +31,8 @@ use store::{
 };
 use tokio::sync::{mpsc, watch};
 use trc::TaskQueueEvent;
+use types::blob_hash::{BLOB_HASH_LEN, BlobHash};
 use utils::snowflake::SnowflakeIdGenerator;
-use utils::{BLOB_HASH_LEN, BlobHash};
 
 pub mod alarm;
 pub mod bayes;

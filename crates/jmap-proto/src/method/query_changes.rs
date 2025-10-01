@@ -4,26 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::format_compact;
-
 use crate::{
-    parser::{Ignore, JsonObjectParser, Token, json::Parser},
-    request::{RequestProperty, RequestPropertyParser, method::MethodObject},
-    types::{id::Id, state::State},
+    method::query::{Comparator, Filter, FilterWrapper, QueryRequest},
+    object::JmapObject,
+    request::deserialize::{DeserializeArguments, deserialize_request},
+    types::state::State,
 };
-
-use super::query::{Comparator, Filter, RequestArguments, parse_filter, parse_sort};
+use serde::{Deserialize, Deserializer};
+use types::id::Id;
 
 #[derive(Debug, Clone)]
-pub struct QueryChangesRequest {
+pub struct QueryChangesRequest<T: JmapObject> {
     pub account_id: Id,
-    pub filter: Vec<Filter>,
-    pub sort: Option<Vec<Comparator>>,
+    pub filter: Vec<Filter<T::Filter>>,
+    pub sort: Option<Vec<Comparator<T::Comparator>>>,
     pub since_query_state: State,
     pub max_changes: Option<usize>,
     pub up_to_id: Option<Id>,
     pub calculate_total: Option<bool>,
-    pub arguments: RequestArguments,
+    pub arguments: T::QueryArguments,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -60,87 +59,78 @@ impl AddedItem {
     }
 }
 
-impl JsonObjectParser for QueryChangesRequest {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
+impl<'de, T: JmapObject> DeserializeArguments<'de> for QueryChangesRequest<T> {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = QueryChangesRequest {
-            arguments: match &parser.ctx {
-                MethodObject::Email => RequestArguments::Email(Default::default()),
-                MethodObject::Mailbox => RequestArguments::Mailbox(Default::default()),
-                MethodObject::EmailSubmission => RequestArguments::EmailSubmission,
-                MethodObject::Quota => RequestArguments::Quota,
-                _ => {
-                    return Err(trc::JmapEvent::UnknownMethod
-                        .into_err()
-                        .details(format_compact!("{}/queryChanges", parser.ctx)));
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
             },
-            filter: vec![],
-            sort: None,
-            calculate_total: None,
+            b"filter" => {
+                self.filter = map.next_value::<FilterWrapper<T::Filter>>()?.0;
+            },
+            b"sort" => {
+                self.sort = map.next_value()?;
+            },
+            b"sinceQueryState" => {
+                self.since_query_state = map.next_value()?;
+            },
+            b"maxChanges" => {
+                self.max_changes = map.next_value()?;
+            },
+            b"upToId" => {
+                self.up_to_id = map.next_value()?;
+            },
+            b"calculateTotal" => {
+                self.calculate_total = map.next_value()?;
+            },
+            _ => {
+                self.arguments.deserialize_argument(key, map)?;
+            }
+        );
+
+        Ok(())
+    }
+}
+
+impl<'de, T: JmapObject> Deserialize<'de> for QueryChangesRequest<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<T: JmapObject> Default for QueryChangesRequest<T> {
+    fn default() -> Self {
+        Self {
             account_id: Id::default(),
-            since_query_state: State::Initial,
+            filter: Vec::new(),
+            sort: None,
+            since_query_state: State::default(),
             max_changes: None,
             up_to_id: None,
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x7265_746c_6966 => match parser.next_token::<Ignore>()? {
-                    Token::DictStart => {
-                        request.filter = parse_filter(parser)?;
-                    }
-                    Token::Null => (),
-                    token => {
-                        return Err(token.error("filter", "object or null"));
-                    }
-                },
-                0x7472_6f73 => match parser.next_token::<Ignore>()? {
-                    Token::ArrayStart => {
-                        request.sort = parse_sort(parser)?.into();
-                    }
-                    Token::Null => (),
-                    token => {
-                        return Err(token.error("sort", "array or null"));
-                    }
-                },
-                0x0065_7461_7453_7972_6575_5165_636e_6973 => {
-                    request.since_query_state = parser
-                        .next_token::<State>()?
-                        .unwrap_string("sinceQueryState")?;
-                }
-                0x7365_676e_6168_4378_616d => {
-                    request.max_changes = parser
-                        .next_token::<Ignore>()?
-                        .unwrap_usize_or_null("maxChanges")?;
-                }
-                0x6449_6f54_7075 => {
-                    request.up_to_id =
-                        parser.next_token::<Id>()?.unwrap_string_or_null("upToId")?;
-                }
-                0x6c61_746f_5465_7461_6c75_636c_6163 => {
-                    request.calculate_total = parser
-                        .next_token::<Ignore>()?
-                        .unwrap_bool_or_null("calculateTotal")?;
-                }
-
-                _ => {
-                    if !request.arguments.parse(parser, key)? {
-                        parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                    }
-                }
-            }
+            calculate_total: None,
+            arguments: T::QueryArguments::default(),
         }
+    }
+}
 
-        Ok(request)
+impl<T: JmapObject> From<QueryChangesRequest<T>> for QueryRequest<T> {
+    fn from(request: QueryChangesRequest<T>) -> Self {
+        QueryRequest {
+            account_id: request.account_id,
+            filter: request.filter,
+            sort: request.sort,
+            position: None,
+            anchor: None,
+            anchor_offset: None,
+            limit: None,
+            calculate_total: request.calculate_total,
+            arguments: T::QueryArguments::default(),
+        }
     }
 }

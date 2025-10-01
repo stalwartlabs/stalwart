@@ -2,7 +2,7 @@ Date: Sat, 20 Nov 2021 22:22:01 +0000
 From: "Art Vandelay (Vandelay Industries)" <art@vandelay.com>
 Message-ID: <my-message-id>
 Subject: =?utf-8?Q?Why_not_both_importing_AND_exporting=3F_=E2=98=BA?=
-To: "Colleagues": "James Smythe" <james@vandelay.com>;
+To: "Colleagues": "James Smythe" <james@vandelay.com>; 
 	"Friends": <jane@example.com>, 
 	"=?utf-8?Q?John_Sm=C3=AEth?=" <john@example.com>;
 MIME-Version: 1.0
@@ -27,9 +27,11 @@ but then I thought, why not do both? =E2=98=BA
 --boundary_1
 Content-Language: en_US
 Content-Type: text/html
-Content-Transfer-Encoding: 7bit
+Content-Transfer-Encoding: quoted-printable
 
-<html><p>I was thinking about quitting the &ldquo;exporting&rdquo; to focus just on the &ldquo;importing&rdquo;,</p><p>but then I thought, why not do both? &#x263A;</p></html>
+<html><p>I was thinking about quitting the &ldquo;exporting&rdquo; to focus =
+just on the &ldquo;importing&rdquo;,</p><p>but then I thought, why not do bo=
+th? &#x263A;</p></html>
 --boundary_1--
 
 --boundary_0

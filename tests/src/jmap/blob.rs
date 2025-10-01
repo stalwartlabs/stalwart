@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use email::mailbox::INBOX_ID;
-use jmap_proto::types::id::Id;
-use serde_json::Value;
-
+use super::JMAPTest;
 use crate::{
     directory::internal::TestInternalDirectory,
     jmap::{assert_is_empty, jmap_json_request, mailbox::destroy_all_mailboxes},
 };
-
-use super::JMAPTest;
+use email::mailbox::INBOX_ID;
+use serde_json::Value;
+use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running blob tests...");
@@ -177,7 +175,8 @@ pub async fn test(params: &mut JMAPTest) {
                 })
                 .unwrap_or_default(),
             expected,
-            "Pointer {pointer:?} Response: {response:?}",
+            "Pointer {pointer:?} Response: {}",
+            serde_json::to_string_pretty(&response).unwrap()
         );
     }
 

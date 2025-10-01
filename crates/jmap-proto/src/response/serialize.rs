@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::ResponseMethod;
+use crate::request::Call;
 use serde::{Serialize, ser::SerializeSeq};
 
-use crate::request::Call;
-
-use super::ResponseMethod;
-
-impl Serialize for Call<ResponseMethod> {
+impl Serialize for Call<ResponseMethod<'_>> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

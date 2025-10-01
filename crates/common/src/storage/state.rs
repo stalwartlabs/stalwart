@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_proto::types::{state::StateChange, type_state::DataType};
-use tokio::sync::mpsc;
-use utils::map::bitmap::Bitmap;
-
 use crate::{IPC_CHANNEL_BUFFER, Server, ipc::StateEvent};
+use tokio::sync::mpsc;
+use types::type_state::{DataType, StateChange};
+use utils::map::bitmap::Bitmap;
 
 impl Server {
     pub async fn subscribe_state_manager(

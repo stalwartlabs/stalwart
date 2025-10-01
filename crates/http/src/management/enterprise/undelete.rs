@@ -8,8 +8,6 @@
  *
  */
 
-use std::str::FromStr;
-
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use common::{Server, enterprise::undelete::DeletedBlob};
 use directory::backend::internal::manage::ManageDirectory;
@@ -18,13 +16,14 @@ use email::{
     message::ingest::{EmailIngest, IngestEmail, IngestSource},
 };
 use hyper::Method;
-use jmap_proto::types::collection::Collection;
 use mail_parser::{DateTime, MessageParser};
 use serde_json::json;
 use std::future::Future;
+use std::str::FromStr;
 use store::write::{BatchBuilder, BlobOp, ValueClass};
 use trc::AddContext;
-use utils::{BlobHash, url_params::UrlParams};
+use types::{blob_hash::BlobHash, collection::Collection};
+use utils::url_params::UrlParams;
 
 use http_proto::{request::decode_path_element, *};
 

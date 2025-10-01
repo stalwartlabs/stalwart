@@ -527,9 +527,9 @@ async fn import_mailboxes(
             if mailbox.sort_order() > 0 {
                 create_request.sort_order(mailbox.sort_order());
             }
-            if let Some(acls) = mailbox.acl() {
+            /*if let Some(acls) = mailbox.acl() {
                 create_request.acls(acls.clone().into_iter());
-            }
+            }*/
             if mailbox.is_subscribed() {
                 create_request.is_subscribed(true);
             }

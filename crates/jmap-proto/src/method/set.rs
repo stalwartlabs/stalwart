@@ -4,58 +4,38 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::AHashMap;
-use compact_str::format_compact;
-use utils::map::{bitmap::Bitmap, vec_map::VecMap};
-
+use super::ahash_is_empty;
 use crate::{
     error::set::{InvalidProperty, SetError},
-    object::{email_submission, mailbox, sieve},
-    parser::{JsonObjectParser, Token, json::Parser},
+    object::{JmapObject, JmapObjectId},
     request::{
-        RequestProperty, RequestPropertyParser,
-        method::MethodObject,
-        reference::{MaybeReference, ResultReference},
+        MaybeInvalid,
+        deserialize::{DeserializeArguments, deserialize_request},
+        reference::{MaybeResultReference, ResultReference},
     },
     response::Response,
-    types::{
-        acl::Acl,
-        any_id::AnyId,
-        blob::BlobId,
-        date::UTCDate,
-        id::Id,
-        keyword::Keyword,
-        property::{HeaderForm, ObjectProperty, Property, SetProperty},
-        state::State,
-        value::{Object, SetValue, SetValueMap, Value},
-    },
+    types::state::State,
 };
-
-use super::ahash_is_empty;
+use ahash::AHashMap;
+use jmap_tools::{Key, Map, Value};
+use serde::{Deserialize, Deserializer};
+use types::id::Id;
+use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Clone)]
-pub struct SetRequest<T> {
+#[allow(clippy::type_complexity)]
+pub struct SetRequest<'x, T: JmapObject> {
     pub account_id: Id,
     pub if_in_state: Option<State>,
-    pub create: Option<VecMap<String, Object<SetValue>>>,
-    pub update: Option<VecMap<Id, Object<SetValue>>>,
-    pub destroy: Option<MaybeReference<Vec<Id>, ResultReference>>,
-    pub arguments: T,
-}
-
-#[derive(Debug, Clone)]
-pub enum RequestArguments {
-    Email,
-    Mailbox(mailbox::SetArguments),
-    Identity,
-    EmailSubmission(email_submission::SetArguments),
-    PushSubscription,
-    SieveScript(sieve::SetArguments),
-    VacationResponse,
+    pub create: Option<VecMap<String, Value<'x, T::Property, T::Element>>>,
+    pub update: Option<VecMap<MaybeInvalid<Id>, Value<'x, T::Property, T::Element>>>,
+    pub destroy: Option<MaybeResultReference<Vec<MaybeInvalid<Id>>>>,
+    pub arguments: T::SetArguments<'x>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct SetResponse {
+#[allow(clippy::type_complexity)]
+pub struct SetResponse<T: JmapObject> {
     #[serde(rename = "accountId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<Id>,
@@ -70,11 +50,11 @@ pub struct SetResponse {
 
     #[serde(rename = "created")]
     #[serde(skip_serializing_if = "ahash_is_empty")]
-    pub created: AHashMap<String, Object<Value>>,
+    pub created: AHashMap<String, Value<'static, T::Property, T::Element>>,
 
     #[serde(rename = "updated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub updated: VecMap<Id, Option<Object<Value>>>,
+    pub updated: VecMap<Id, Option<Value<'static, T::Property, T::Element>>>,
 
     #[serde(rename = "destroyed")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -82,317 +62,78 @@ pub struct SetResponse {
 
     #[serde(rename = "notCreated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_created: VecMap<String, SetError>,
+    pub not_created: VecMap<String, SetError<T::Property>>,
 
     #[serde(rename = "notUpdated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_updated: VecMap<Id, SetError>,
+    pub not_updated: VecMap<Id, SetError<T::Property>>,
 
     #[serde(rename = "notDestroyed")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_destroyed: VecMap<Id, SetError>,
+    pub not_destroyed: VecMap<Id, SetError<T::Property>>,
 }
 
-impl JsonObjectParser for SetRequest<RequestArguments> {
-    fn parse(parser: &mut Parser) -> trc::Result<Self>
+impl<'de, T: JmapObject> DeserializeArguments<'de> for SetRequest<'de, T> {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = SetRequest {
-            arguments: match &parser.ctx {
-                MethodObject::Email => RequestArguments::Email,
-                MethodObject::Mailbox => RequestArguments::Mailbox(Default::default()),
-                MethodObject::Identity => RequestArguments::Identity,
-                MethodObject::EmailSubmission => {
-                    RequestArguments::EmailSubmission(Default::default())
-                }
-                MethodObject::PushSubscription => RequestArguments::PushSubscription,
-                MethodObject::VacationResponse => RequestArguments::VacationResponse,
-                MethodObject::SieveScript => RequestArguments::SieveScript(Default::default()),
-                _ => {
-                    return Err(trc::JmapEvent::UnknownMethod
-                        .into_err()
-                        .details(format_compact!("{}/set", parser.ctx)));
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
             },
+            b"ifInState" => {
+                self.if_in_state = map.next_value()?;
+            },
+            b"create" => {
+                self.create = map.next_value()?;
+            },
+            b"update" => {
+                self.update = map.next_value()?;
+            },
+            b"destroy" => {
+                self.destroy = map.next_value::<Option<Vec<MaybeInvalid<Id>>>>()?.map(MaybeResultReference::Value);
+            },
+            b"#destroy" => {
+                self.destroy = Some(MaybeResultReference::Reference(map.next_value::<ResultReference>()?));
+            }
+            _ => {
+                self.arguments.deserialize_argument(key, map)?;
+            }
+        );
+
+        Ok(())
+    }
+}
+
+impl<'de, T: JmapObject> Deserialize<'de> for SetRequest<'de, T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<'x, T: JmapObject> Default for SetRequest<'x, T> {
+    fn default() -> Self {
+        Self {
             account_id: Id::default(),
             if_in_state: None,
             create: None,
             update: None,
             destroy: None,
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 if !key.is_ref => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x6574_6165_7263 if !key.is_ref => {
-                    request.create = <Option<VecMap<String, Object<SetValue>>>>::parse(parser)?;
-                }
-                0x6574_6164_7075 if !key.is_ref => {
-                    request.update = <Option<VecMap<Id, Object<SetValue>>>>::parse(parser)?;
-                }
-                0x0079_6f72_7473_6564 => {
-                    request.destroy = if !key.is_ref {
-                        <Option<Vec<Id>>>::parse(parser)?.map(MaybeReference::Value)
-                    } else {
-                        Some(MaybeReference::Reference(ResultReference::parse(parser)?))
-                    };
-                }
-                0x0065_7461_7453_6e49_6669 if !key.is_ref => {
-                    request.if_in_state = parser
-                        .next_token::<State>()?
-                        .unwrap_string_or_null("ifInState")?;
-                }
-                _ => {
-                    if !request.arguments.parse(parser, key)? {
-                        parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                    }
-                }
-            }
-        }
-
-        Ok(request)
-    }
-}
-
-impl JsonObjectParser for Object<SetValue> {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut obj = Object(VecMap::with_capacity(8));
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(mut key) = parser.next_dict_key::<SetProperty>()? {
-            let value = if !key.is_ref {
-                match &key.property {
-                    Property::Id | Property::ThreadId => parser
-                        .next_token::<Id>()?
-                        .unwrap_string_or_null("")?
-                        .map(|id| SetValue::Value(Value::Id(id)))
-                        .unwrap_or(SetValue::Value(Value::Null)),
-                    Property::BlobId | Property::Picture => parser
-                        .next_token::<MaybeReference<BlobId, String>>()?
-                        .unwrap_string_or_null("")?
-                        .map(SetValue::from)
-                        .unwrap_or(SetValue::Value(Value::Null)),
-                    Property::SentAt
-                    | Property::ReceivedAt
-                    | Property::Expires
-                    | Property::FromDate
-                    | Property::ToDate => parser
-                        .next_token::<UTCDate>()?
-                        .unwrap_string_or_null("")?
-                        .map(|date| SetValue::Value(Value::Date(date)))
-                        .unwrap_or(SetValue::Value(Value::Null)),
-                    Property::Subject
-                    | Property::Preview
-                    | Property::Name
-                    | Property::Description
-                    | Property::Timezone
-                    | Property::Email
-                    | Property::Secret
-                    | Property::DeviceClientId
-                    | Property::Url
-                    | Property::VerificationCode
-                    | Property::HtmlSignature
-                    | Property::TextSignature
-                    | Property::Type
-                    | Property::Charset
-                    | Property::Disposition
-                    | Property::Language
-                    | Property::Location
-                    | Property::Cid
-                    | Property::Role
-                    | Property::PartId => parser
-                        .next_token::<String>()?
-                        .unwrap_string_or_null("")?
-                        .map(|text| SetValue::Value(Value::Text(text)))
-                        .unwrap_or(SetValue::Value(Value::Null)),
-                    Property::TextBody | Property::HtmlBody => {
-                        if let MethodObject::Email = &parser.ctx {
-                            SetValue::Value(Value::parse::<ObjectProperty, String>(
-                                parser.next_token()?,
-                                parser,
-                            )?)
-                        } else {
-                            parser
-                                .next_token::<String>()?
-                                .unwrap_string_or_null("")?
-                                .map(|text| SetValue::Value(Value::Text(text)))
-                                .unwrap_or(SetValue::Value(Value::Null))
-                        }
-                    }
-                    Property::HasAttachment
-                    | Property::IsSubscribed
-                    | Property::IsEnabled
-                    | Property::IsActive => parser
-                        .next_token::<String>()?
-                        .unwrap_bool_or_null("")?
-                        .map(|bool| SetValue::Value(Value::Bool(bool)))
-                        .unwrap_or(SetValue::Value(Value::Null)),
-                    Property::Size | Property::SortOrder | Property::Quota => parser
-                        .next_token::<String>()?
-                        .unwrap_uint_or_null("")?
-                        .map(|uint| SetValue::Value(Value::UnsignedInt(uint)))
-                        .unwrap_or(SetValue::Value(Value::Null)),
-                    Property::ParentId | Property::EmailId | Property::IdentityId => parser
-                        .next_token::<MaybeReference<Id, String>>()?
-                        .unwrap_string_or_null("")?
-                        .map(SetValue::from)
-                        .unwrap_or(SetValue::Value(Value::Null)),
-                    Property::MailboxIds => {
-                        if key.patch.is_empty() {
-                            SetValue::from(
-                                <SetValueMap<MaybeReference<Id, String>>>::parse(parser)?.values,
-                            )
-                        } else {
-                            key.patch.push(Value::Bool(bool::parse(parser)?));
-                            SetValue::Patch(key.patch)
-                        }
-                    }
-                    Property::Keywords => {
-                        if key.patch.is_empty() {
-                            SetValue::Value(Value::List(
-                                <SetValueMap<Keyword>>::parse(parser)?
-                                    .values
-                                    .into_iter()
-                                    .map(Value::Keyword)
-                                    .collect(),
-                            ))
-                        } else {
-                            key.patch.push(Value::Bool(bool::parse(parser)?));
-                            SetValue::Patch(key.patch)
-                        }
-                    }
-
-                    Property::Acl => match key.patch.len() {
-                        0 => {
-                            parser
-                                .next_token::<String>()?
-                                .assert_jmap(Token::DictStart)?;
-                            let mut acls = Vec::new();
-                            while let Some(account) = parser.next_dict_key::<String>()? {
-                                acls.push(Value::Text(account));
-                                acls.push(Value::UnsignedInt(<Bitmap<Acl>>::parse(parser)?.into()));
-                            }
-                            SetValue::Value(Value::List(acls))
-                        }
-                        1 => {
-                            key.patch
-                                .push(Value::UnsignedInt(<Bitmap<Acl>>::parse(parser)?.into()));
-                            SetValue::Patch(key.patch)
-                        }
-                        2 => {
-                            key.patch.push(Value::Bool(bool::parse(parser)?));
-                            SetValue::Patch(key.patch)
-                        }
-                        _ => unreachable!(),
-                    },
-                    Property::Aliases
-                    | Property::Attachments
-                    | Property::Bcc
-                    | Property::BodyStructure
-                    | Property::BodyValues
-                    | Property::Capabilities
-                    | Property::Cc
-                    | Property::Envelope
-                    | Property::From
-                    | Property::Headers
-                    | Property::InReplyTo
-                    | Property::Keys
-                    | Property::MessageId
-                    | Property::References
-                    | Property::ReplyTo
-                    | Property::Sender
-                    | Property::SubParts
-                    | Property::To
-                    | Property::UndoStatus
-                    | Property::Types => SetValue::Value(Value::parse::<ObjectProperty, String>(
-                        parser.next_token()?,
-                        parser,
-                    )?),
-                    Property::Parameters => SetValue::Value(Value::parse::<String, String>(
-                        parser.next_token()?,
-                        parser,
-                    )?),
-                    Property::Members => SetValue::Value(Value::parse::<ObjectProperty, Id>(
-                        parser.next_token()?,
-                        parser,
-                    )?),
-                    Property::Header(h) => SetValue::Value(if matches!(h.form, HeaderForm::Date) {
-                        Value::parse::<ObjectProperty, UTCDate>(parser.next_token()?, parser)
-                    } else {
-                        Value::parse::<ObjectProperty, String>(parser.next_token()?, parser)
-                    }?),
-
-                    _ => {
-                        parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                        SetValue::Value(Value::Null)
-                    }
-                }
-            } else {
-                SetValue::ResultReference(ResultReference::parse(parser)?)
-            };
-
-            obj.0.append(key.property, value);
-        }
-
-        Ok(obj)
-    }
-}
-
-impl<T: Into<AnyId>> From<MaybeReference<T, String>> for SetValue {
-    fn from(reference: MaybeReference<T, String>) -> Self {
-        match reference {
-            MaybeReference::Value(id) => SetValue::IdReference(MaybeReference::Value(id.into())),
-            MaybeReference::Reference(reference) => {
-                SetValue::IdReference(MaybeReference::Reference(reference))
-            }
+            arguments: T::SetArguments::default(),
         }
     }
 }
 
-impl<T: Into<AnyId>> From<Vec<MaybeReference<T, String>>> for SetValue {
-    fn from(value: Vec<MaybeReference<T, String>>) -> Self {
-        SetValue::IdReferences(
-            value
-                .into_iter()
-                .map(|reference| match reference {
-                    MaybeReference::Value(id) => MaybeReference::Value(id.into()),
-                    MaybeReference::Reference(reference) => MaybeReference::Reference(reference),
-                })
-                .collect(),
-        )
-    }
-}
-
-impl RequestPropertyParser for RequestArguments {
-    fn parse(&mut self, parser: &mut Parser, property: RequestProperty) -> trc::Result<bool> {
-        match self {
-            RequestArguments::Mailbox(args) => args.parse(parser, property),
-            RequestArguments::EmailSubmission(args) => args.parse(parser, property),
-            RequestArguments::SieveScript(args) => args.parse(parser, property),
-            _ => Ok(false),
-        }
-    }
-}
-
-impl<T> SetRequest<T> {
+impl<'x, T: JmapObject> SetRequest<'x, T> {
     pub fn validate(&self, max_objects_in_set: usize) -> trc::Result<()> {
         if self.create.as_ref().map_or(0, |objs| objs.len())
             + self.update.as_ref().map_or(0, |objs| objs.len())
             + self.destroy.as_ref().map_or(0, |objs| {
-                if let MaybeReference::Value(ids) = objs {
+                if let MaybeResultReference::Value(ids) = objs {
                     ids.len()
                 } else {
                     0
@@ -414,15 +155,17 @@ impl<T> SetRequest<T> {
         self.create.as_ref().is_some_and(|objs| !objs.is_empty())
     }
 
-    pub fn unwrap_create(&mut self) -> VecMap<String, Object<SetValue>> {
+    pub fn unwrap_create(&mut self) -> VecMap<String, Value<'x, T::Property, T::Element>> {
         self.create.take().unwrap_or_default()
     }
 
-    pub fn unwrap_update(&mut self) -> VecMap<Id, Object<SetValue>> {
+    pub fn unwrap_update(
+        &mut self,
+    ) -> VecMap<MaybeInvalid<Id>, Value<'x, T::Property, T::Element>> {
         self.update.take().unwrap_or_default()
     }
 
-    pub fn unwrap_destroy(&mut self) -> Vec<Id> {
+    pub fn unwrap_destroy(&mut self) -> Vec<MaybeInvalid<Id>> {
         self.destroy
             .take()
             .map(|ids| ids.unwrap())
@@ -430,29 +173,12 @@ impl<T> SetRequest<T> {
     }
 }
 
-impl SetRequest<RequestArguments> {
-    pub fn take_arguments(&mut self) -> RequestArguments {
-        std::mem::replace(&mut self.arguments, RequestArguments::VacationResponse)
-    }
-
-    pub fn with_arguments<T>(self, arguments: T) -> SetRequest<T> {
-        SetRequest {
-            account_id: self.account_id,
-            if_in_state: self.if_in_state,
-            create: self.create,
-            update: self.update,
-            destroy: self.destroy,
-            arguments,
-        }
-    }
-}
-
-impl SetResponse {
-    pub fn from_request<T>(request: &SetRequest<T>, max_objects: usize) -> trc::Result<Self> {
+impl<T: JmapObject> SetResponse<T> {
+    pub fn from_request(request: &SetRequest<T>, max_objects: usize) -> trc::Result<Self> {
         let n_create = request.create.as_ref().map_or(0, |objs| objs.len());
         let n_update = request.update.as_ref().map_or(0, |objs| objs.len());
         let n_destroy = request.destroy.as_ref().map_or(0, |objs| {
-            if let MaybeReference::Value(ids) = objs {
+            if let MaybeResultReference::Value(ids) = objs {
                 ids.len()
             } else {
                 0
@@ -485,14 +211,21 @@ impl SetResponse {
         self
     }
 
-    pub fn created(&mut self, id: String, document_id: u32) {
+    pub fn created(&mut self, id: String, document_id: impl Into<T::Id>) {
         self.created.insert(
             id,
-            Object::with_capacity(1).with_property(Property::Id, Value::Id(document_id.into())),
+            Value::Object(Map::from(vec![(
+                Key::Property(T::ID_PROPERTY),
+                Value::Element(T::Element::from(document_id.into())),
+            )])),
         );
     }
 
-    pub fn invalid_property_create(&mut self, id: String, property: impl Into<InvalidProperty>) {
+    pub fn invalid_property_create(
+        &mut self,
+        id: String,
+        property: impl Into<InvalidProperty<T::Property>>,
+    ) {
         self.not_created.append(
             id,
             SetError::invalid_properties()
@@ -501,7 +234,11 @@ impl SetResponse {
         );
     }
 
-    pub fn invalid_property_update(&mut self, id: Id, property: impl Into<InvalidProperty>) {
+    pub fn invalid_property_update(
+        &mut self,
+        id: Id,
+        property: impl Into<InvalidProperty<T::Property>>,
+    ) {
         self.not_updated.append(
             id,
             SetError::invalid_properties()
@@ -512,18 +249,24 @@ impl SetResponse {
 
     pub fn update_created_ids(&self, response: &mut Response) {
         for (user_id, obj) in &self.created {
-            if let Some(id) = obj.get(&Property::Id).as_id() {
-                response.created_ids.insert(user_id.clone(), (*id).into());
+            if let Value::Object(obj) = obj
+                && let Some(Value::Element(id)) = obj.get(&Key::Property(T::ID_PROPERTY))
+                && let Some(id) = id.as_any_id()
+            {
+                response.created_ids.insert(user_id.clone(), id);
             }
         }
     }
 
-    pub fn get_object_by_id(&mut self, id: Id) -> Option<&mut Object<Value>> {
+    pub fn get_object_by_id(
+        &mut self,
+        id: Id,
+    ) -> Option<&mut Value<'static, T::Property, T::Element>> {
         if let Some(obj) = self.updated.get_mut(&id) {
             if let Some(obj) = obj {
                 return Some(obj);
             } else {
-                *obj = Some(Object::with_capacity(1));
+                *obj = Some(Value::Object(Map::with_capacity(1)));
                 return obj.as_mut().unwrap().into();
             }
         }
@@ -531,7 +274,12 @@ impl SetResponse {
         (&mut self.created)
             .into_iter()
             .map(|(_, obj)| obj)
-            .find(|obj| obj.0.get(&Property::Id) == Some(&Value::Id(id)))
+            .find(|obj| {
+                obj.as_object_and_get(&Key::Property(T::ID_PROPERTY))
+                    .and_then(|v| v.as_element())
+                    .and_then(|v| v.as_id())
+                    .is_some_and(|oid| oid == id)
+            })
     }
 
     pub fn has_changes(&self) -> bool {

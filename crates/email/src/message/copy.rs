@@ -11,23 +11,20 @@ use super::{
 };
 use crate::mailbox::UidMailbox;
 use common::{Server, auth::ResourceToken, storage::index::ObjectIndexBuilder};
-use jmap_proto::{
-    error::set::SetError,
-    types::{
-        blob::BlobId,
-        collection::{Collection, SyncCollection},
-        date::UTCDate,
-        id::Id,
-        keyword::Keyword,
-        property::Property,
-    },
-};
 use mail_parser::{HeaderName, HeaderValue, parsers::fields::thread::thread_name};
-use store::{
-    BlobClass,
-    write::{BatchBuilder, TaskQueueClass, ValueClass, now},
-};
+use store::write::{BatchBuilder, TaskQueueClass, ValueClass, now};
 use trc::AddContext;
+use types::{
+    blob::{BlobClass, BlobId},
+    collection::{Collection, SyncCollection},
+    field::EmailField,
+    keyword::Keyword,
+};
+
+pub enum CopyMessageError {
+    NotFound,
+    OverQuota,
+}
 
 pub trait EmailCopy: Sync + Send {
     #[allow(clippy::too_many_arguments)]
@@ -38,9 +35,9 @@ pub trait EmailCopy: Sync + Send {
         resource_token: &ResourceToken,
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
-        received_at: Option<UTCDate>,
+        received_at: Option<u64>,
         session_id: u64,
-    ) -> impl Future<Output = trc::Result<Result<IngestedEmail, SetError>>> + Send;
+    ) -> impl Future<Output = trc::Result<Result<IngestedEmail, CopyMessageError>>> + Send;
 }
 
 impl EmailCopy for Server {
@@ -52,9 +49,9 @@ impl EmailCopy for Server {
         resource_token: &ResourceToken,
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
-        received_at: Option<UTCDate>,
+        received_at: Option<u64>,
         session_id: u64,
-    ) -> trc::Result<Result<IngestedEmail, SetError>> {
+    ) -> trc::Result<Result<IngestedEmail, CopyMessageError>> {
         // Obtain metadata
         let account_id = resource_token.account_id;
         let mut metadata = if let Some(metadata) = self
@@ -62,7 +59,7 @@ impl EmailCopy for Server {
                 from_account_id,
                 Collection::Email,
                 from_message_id,
-                Property::BodyStructure,
+                EmailField::Metadata.into(),
             )
             .await?
         {
@@ -70,10 +67,7 @@ impl EmailCopy for Server {
                 .deserialize::<MessageMetadata>()
                 .caused_by(trc::location!())?
         } else {
-            return Ok(Err(SetError::not_found().with_description(format!(
-                "Message not found not found in account {}.",
-                Id::from(from_account_id)
-            ))));
+            return Ok(Err(CopyMessageError::NotFound));
         };
 
         // Check quota
@@ -87,7 +81,7 @@ impl EmailCopy for Server {
                     || err.matches(trc::EventType::Limit(trc::LimitEvent::TenantQuota))
                 {
                     trc::error!(err.account_id(account_id).span_id(session_id));
-                    return Ok(Err(SetError::over_quota()));
+                    return Ok(Err(CopyMessageError::OverQuota));
                 } else {
                     return Err(err);
                 }
@@ -96,7 +90,7 @@ impl EmailCopy for Server {
 
         // Set receivedAt
         if let Some(received_at) = received_at {
-            metadata.received_at = received_at.timestamp() as u64;
+            metadata.received_at = received_at;
         }
 
         // Obtain threadId
@@ -226,7 +220,8 @@ impl EmailCopy for Server {
         self.notify_task_queue();
 
         // Update response
-        email.id = Id::from_parts(thread_id, document_id);
+        email.document_id = document_id;
+        email.thread_id = thread_id;
         email.change_id = change_id;
         email.blob_id = BlobId::new(
             blob_hash,

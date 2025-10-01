@@ -9,10 +9,10 @@ use directory::{
     Directory, FALLBACK_ADMIN_ID, Permission, Permissions, Principal, QueryParams, Type,
     backend::internal::lookup::DirectoryStore, core::secret::verify_secret_hash,
 };
-use jmap_proto::types::collection::Collection;
 use mail_send::Credentials;
 use oauth::GrantType;
 use std::{net::IpAddr, sync::Arc};
+use types::collection::Collection;
 use utils::{
     cache::CacheItemWeight,
     map::{bitmap::Bitmap, vec_map::VecMap},

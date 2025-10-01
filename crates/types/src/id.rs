@@ -4,63 +4,43 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::ops::Deref;
-
+use crate::DocumentId;
+use jmap_tools::{Element, Property, Value};
+use std::{ops::Deref, str::FromStr};
 use utils::codec::base32_custom::{BASE32_ALPHABET, BASE32_INVERSE};
 
-use crate::parser::{JsonObjectParser, json::Parser};
-
-use super::DocumentId;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
-pub struct Id {
-    id: u64,
-}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Id(u64);
 
 impl Default for Id {
     fn default() -> Self {
-        Id { id: u64::MAX }
+        Id(u64::MAX)
     }
 }
 
-impl JsonObjectParser for Id {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
+impl FromStr for Id {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut id = 0;
 
-        while let Some(ch) = parser.next_unescaped()? {
+        for &ch in s.as_bytes() {
             let i = BASE32_INVERSE[ch as usize];
             if i != u8::MAX {
                 id = (id << 5) | i as u64;
             } else {
-                return Err(parser.error_value());
+                return Err(());
             }
         }
 
-        Ok(Id { id })
+        Ok(Id(id))
     }
 }
 
 impl Id {
     pub fn new(id: u64) -> Self {
-        Self { id }
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let mut id = 0;
-
-        for &ch in bytes {
-            let i = BASE32_INVERSE[ch as usize];
-            if i != u8::MAX {
-                id = (id << 5) | i as u64;
-            } else {
-                return None;
-            }
-        }
-
-        Id { id }.into()
+        Self(id)
     }
 
     pub fn singleton() -> Self {
@@ -70,7 +50,7 @@ impl Id {
     // From https://github.com/archer884/crockford by J/A <archer884@gmail.com>
     // License: MIT/Apache 2.0
     pub fn as_string(&self) -> String {
-        match self.id {
+        match self.0 {
             0 => "a".to_string(),
             mut n => {
                 // Used for the initial shift.
@@ -121,53 +101,51 @@ impl Id {
     }
 
     pub fn from_parts(prefix_id: DocumentId, doc_id: DocumentId) -> Id {
-        Id {
-            id: ((prefix_id as u64) << 32) | doc_id as u64,
-        }
+        Id(((prefix_id as u64) << 32) | doc_id as u64)
     }
 
     pub fn id(&self) -> u64 {
-        self.id
+        self.0
     }
 
     pub fn document_id(&self) -> DocumentId {
-        (self.id & 0xFFFFFFFF) as DocumentId
+        (self.0 & 0xFFFFFFFF) as DocumentId
     }
 
     pub fn prefix_id(&self) -> DocumentId {
-        (self.id >> 32) as DocumentId
+        (self.0 >> 32) as DocumentId
     }
 
     pub fn is_singleton(&self) -> bool {
-        self.id == 20080258862541
+        self.0 == 20080258862541
     }
 
     pub fn is_valid(&self) -> bool {
-        self.id != u64::MAX
+        self.0 != u64::MAX
     }
 }
 
 impl From<u64> for Id {
     fn from(id: u64) -> Self {
-        Id { id }
+        Id(id)
     }
 }
 
 impl From<u32> for Id {
     fn from(id: u32) -> Self {
-        Id { id: id as u64 }
+        Id(id as u64)
     }
 }
 
 impl From<Id> for u64 {
     fn from(id: Id) -> Self {
-        id.id
+        id.0
     }
 }
 
 impl From<&Id> for u64 {
     fn from(id: &Id) -> Self {
-        id.id
+        id.0
     }
 }
 
@@ -181,13 +159,13 @@ impl Deref for Id {
     type Target = u64;
 
     fn deref(&self) -> &Self::Target {
-        &self.id
+        &self.0
     }
 }
 
 impl AsRef<u64> for Id {
     fn as_ref(&self) -> &u64 {
-        &self.id
+        &self.0
     }
 }
 
@@ -217,8 +195,8 @@ impl<'de> serde::Deserialize<'de> for Id {
     where
         D: serde::Deserializer<'de>,
     {
-        Id::from_bytes(<&str>::deserialize(deserializer)?.as_bytes())
-            .ok_or_else(|| serde::de::Error::custom("invalid JMAP ID"))
+        Id::from_str(<&str>::deserialize(deserializer)?)
+            .map_err(|_| serde::de::Error::custom("invalid JMAP ID"))
     }
 }
 
@@ -228,9 +206,17 @@ impl std::fmt::Display for Id {
     }
 }
 
+impl<'x, P: Property, E: Element + From<Id>> From<Id> for Value<'x, P, E> {
+    fn from(id: Id) -> Self {
+        Value::Element(E::from(id))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{parser::json::Parser, types::id::Id};
+    use std::str::FromStr;
+
+    use crate::id::Id;
 
     #[test]
     fn parse_jmap_id() {
@@ -239,26 +225,15 @@ mod tests {
             1,
             10,
             1000,
-            Id::singleton().id,
+            Id::singleton().id(),
             u64::MAX / 2,
             u64::MAX - 1,
             u64::MAX,
         ] {
             let id = Id::from(number);
-            assert_eq!(
-                Parser::new(format!("\"{id}\"").as_bytes())
-                    .next_token::<Id>()
-                    .unwrap()
-                    .unwrap_string("")
-                    .unwrap(),
-                id
-            );
+            assert_eq!(Id::from_str(&id.to_string()).unwrap(), id);
         }
 
-        Parser::new(b"\"p333333333333p333333333333\"")
-            .next_token::<Id>()
-            .unwrap()
-            .unwrap_string("")
-            .unwrap();
+        Id::from_str("p333333333333p333333333333").unwrap();
     }
 }

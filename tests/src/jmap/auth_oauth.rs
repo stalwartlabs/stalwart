@@ -4,30 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant};
-
-use base64::{Engine, engine::general_purpose};
-use biscuit::{JWT, SingleOrMultiple, jwk::JWKSet};
-use bytes::Bytes;
-use common::auth::oauth::{
-    introspect::OAuthIntrospect,
-    oidc::StandardClaims,
-    registration::{ClientRegistrationRequest, ClientRegistrationResponse},
-};
-
-use http::auth::oauth::{
-    DeviceAuthResponse, ErrorType, OAuthCodeRequest, TokenResponse, auth::OAuthMetadata,
-    openid::OpenIdMetadata,
-};
-use imap_proto::ResponseType;
-use jmap_client::{
-    client::{Client, Credentials},
-    mailbox::query::Filter,
-};
-use jmap_proto::types::id::Id;
-use serde::{Serialize, de::DeserializeOwned};
-use store::ahash::AHashMap;
-
+use super::JMAPTest;
 use crate::{
     directory::internal::TestInternalDirectory,
     imap::{
@@ -38,8 +15,27 @@ use crate::{
         ManagementApi, assert_is_empty, delivery::SmtpConnection, mailbox::destroy_all_mailboxes,
     },
 };
-
-use super::JMAPTest;
+use base64::{Engine, engine::general_purpose};
+use biscuit::{JWT, SingleOrMultiple, jwk::JWKSet};
+use bytes::Bytes;
+use common::auth::oauth::{
+    introspect::OAuthIntrospect,
+    oidc::StandardClaims,
+    registration::{ClientRegistrationRequest, ClientRegistrationResponse},
+};
+use http::auth::oauth::{
+    DeviceAuthResponse, ErrorType, OAuthCodeRequest, TokenResponse, auth::OAuthMetadata,
+    openid::OpenIdMetadata,
+};
+use imap_proto::ResponseType;
+use jmap_client::{
+    client::{Client, Credentials},
+    mailbox::query::Filter,
+};
+use serde::{Serialize, de::DeserializeOwned};
+use std::time::{Duration, Instant};
+use store::ahash::AHashMap;
+use types::id::Id;
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]

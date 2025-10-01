@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::Instant};
-
+use super::{ImapContext, ToModSeq};
+use crate::core::{SavedSearch, SelectedMailbox, Session, State};
+use common::listener::SessionStream;
 use directory::Permission;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -16,12 +17,8 @@ use imap_proto::{
     },
     receiver::Request,
 };
-
-use crate::core::{SavedSearch, SelectedMailbox, Session, State};
-use common::listener::SessionStream;
-use jmap_proto::types::id::Id;
-
-use super::{ImapContext, ToModSeq};
+use std::{sync::Arc, time::Instant};
+use types::id::Id;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_select(&mut self, request: Request<Command>) -> trc::Result<()> {

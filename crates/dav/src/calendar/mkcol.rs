@@ -4,6 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::proppatch::CalendarPropPatchRequestHandler;
+use crate::{
+    DavError, DavMethod, PropStatBuilder,
+    common::{
+        ExtractETag,
+        lock::{LockRequestHandler, ResourceState},
+        uri::DavUriResource,
+    },
+};
 use common::{Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders, Return,
@@ -15,20 +24,9 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::collection::{Collection, SyncCollection};
 use store::write::BatchBuilder;
 use trc::AddContext;
-
-use crate::{
-    DavError, DavMethod, PropStatBuilder,
-    common::{
-        ExtractETag,
-        lock::{LockRequestHandler, ResourceState},
-        uri::DavUriResource,
-    },
-};
-
-use super::proppatch::CalendarPropPatchRequestHandler;
+use types::collection::{Collection, SyncCollection};
 
 pub(crate) trait CalendarMkColRequestHandler: Sync + Send {
     fn handle_calendar_mkcol_request(

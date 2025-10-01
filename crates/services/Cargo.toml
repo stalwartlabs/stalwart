@@ -1,6 +1,6 @@
 [package]
 name = "services"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
@@ -12,9 +12,10 @@ trc = { path = "../trc" }
 email = { path = "../email" }
 smtp = { path = "../smtp" }
 groupware = { path = "../groupware" }
+types = { path = "../types" }
 jmap_proto = { path = "../jmap-proto" }
 directory = { path =  "../directory" }
-smtp-proto = { version = "0.1.6", features = ["rkyv", "serde"] }
+smtp-proto = { version = "0.2", features = ["rkyv", "serde"] }
 tokio = { version = "1.47", features = ["rt"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
 mail-builder = { version = "0.4" } 

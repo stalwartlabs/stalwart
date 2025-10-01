@@ -5,12 +5,12 @@
  */
 
 use common::Server;
-use jmap_proto::types::collection::Collection;
 use store::{
     SUBSPACE_BITMAP_ID, U64_LEN,
     write::{AnyKey, key::KeySerializer},
 };
 use trc::AddContext;
+use types::collection::Collection;
 
 pub(crate) async fn migrate_threads(server: &Server, account_id: u32) -> trc::Result<u64> {
     // Obtain email ids

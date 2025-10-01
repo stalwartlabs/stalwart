@@ -7,44 +7,43 @@
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse, RequestArguments},
-    types::{
-        acl::Acl,
-        keyword::Keyword,
-        property::Property,
-        value::{Object, Value},
-    },
+    method::get::{GetRequest, GetResponse},
+    object::mailbox::{Mailbox, MailboxProperty, MailboxValue},
 };
+use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::ahash::AHashSet;
+use types::{acl::Acl, keyword::Keyword, special_use::SpecialUse};
+
+use crate::api::acl::JmapRights;
 
 pub trait MailboxGet: Sync + Send {
     fn mailbox_get(
         &self,
-        request: GetRequest<RequestArguments>,
+        request: GetRequest<Mailbox>,
         access_token: &AccessToken,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+    ) -> impl Future<Output = trc::Result<GetResponse<Mailbox>>> + Send;
 }
 
 impl MailboxGet for Server {
     async fn mailbox_get(
         &self,
-        mut request: GetRequest<RequestArguments>,
+        mut request: GetRequest<Mailbox>,
         access_token: &AccessToken,
-    ) -> trc::Result<GetResponse> {
+    ) -> trc::Result<GetResponse<Mailbox>> {
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
-            Property::Id,
-            Property::Name,
-            Property::ParentId,
-            Property::Role,
-            Property::SortOrder,
-            Property::IsSubscribed,
-            Property::TotalEmails,
-            Property::UnreadEmails,
-            Property::TotalThreads,
-            Property::UnreadThreads,
-            Property::MyRights,
+            MailboxProperty::Id,
+            MailboxProperty::Name,
+            MailboxProperty::ParentId,
+            MailboxProperty::Role,
+            MailboxProperty::SortOrder,
+            MailboxProperty::IsSubscribed,
+            MailboxProperty::TotalEmails,
+            MailboxProperty::UnreadEmails,
+            MailboxProperty::TotalThreads,
+            MailboxProperty::UnreadThreads,
+            MailboxProperty::MyRights,
         ]);
         let account_id = request.account_id.document_id();
         let cache = self.get_cached_messages(account_id).await?;
@@ -84,110 +83,82 @@ impl MailboxGet for Server {
                 }) {
                 mailbox
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
 
-            let mut mailbox = Object::with_capacity(properties.len());
+            let mut mailbox = Map::with_capacity(properties.len());
 
             for property in &properties {
                 let value = match property {
-                    Property::Id => Value::Id(id),
-                    Property::Name => Value::Text(cached_mailbox.name.to_string()),
-                    Property::Role => {
-                        if let Some(role) = cached_mailbox.role.as_str() {
-                            Value::Text(role.to_string())
-                        } else {
-                            Value::Null
-                        }
+                    MailboxProperty::Id => Value::Element(MailboxValue::Id(id)),
+                    MailboxProperty::Name => Value::Str(cached_mailbox.name.to_string().into()),
+                    MailboxProperty::Role => match cached_mailbox.role {
+                        SpecialUse::None => Value::Null,
+                        role => Value::Element(MailboxValue::Role(role)),
+                    },
+                    MailboxProperty::SortOrder => {
+                        Value::Number(cached_mailbox.sort_order().unwrap_or_default().into())
                     }
-                    Property::SortOrder => {
-                        Value::from(cached_mailbox.sort_order().unwrap_or_default())
-                    }
-                    Property::ParentId => {
+                    MailboxProperty::ParentId => {
                         if let Some(parent_id) = cached_mailbox.parent_id() {
-                            Value::Id((parent_id).into())
+                            Value::Element(MailboxValue::Id(parent_id.into()))
                         } else {
                             Value::Null
                         }
                     }
-                    Property::TotalEmails => {
-                        Value::UnsignedInt(cache.in_mailbox(document_id).count() as u64)
+                    MailboxProperty::TotalEmails => {
+                        Value::Number(cache.in_mailbox(document_id).count().into())
                     }
-                    Property::UnreadEmails => Value::UnsignedInt(
+                    MailboxProperty::UnreadEmails => Value::Number(
                         cache
                             .in_mailbox_without_keyword(document_id, &Keyword::Seen)
-                            .count() as u64,
+                            .count()
+                            .into(),
                     ),
-                    Property::TotalThreads => Value::UnsignedInt(
+                    MailboxProperty::TotalThreads => Value::Number(
                         cache
                             .in_mailbox(document_id)
                             .map(|m| m.thread_id)
                             .collect::<AHashSet<_>>()
-                            .len() as u64,
+                            .len()
+                            .into(),
                     ),
-                    Property::UnreadThreads => Value::UnsignedInt(
+                    MailboxProperty::UnreadThreads => Value::Number(
                         cache
                             .in_mailbox_without_keyword(document_id, &Keyword::Seen)
                             .map(|m| m.thread_id)
                             .collect::<AHashSet<_>>()
-                            .len() as u64,
+                            .len()
+                            .into(),
                     ),
-                    Property::MyRights => {
+                    MailboxProperty::MyRights => {
                         if access_token.is_shared(account_id) {
-                            let acl = cached_mailbox.acls.as_slice().effective_acl(access_token);
-                            Object::with_capacity(9)
-                                .with_property(Property::MayReadItems, acl.contains(Acl::ReadItems))
-                                .with_property(Property::MayAddItems, acl.contains(Acl::AddItems))
-                                .with_property(
-                                    Property::MayRemoveItems,
-                                    acl.contains(Acl::RemoveItems),
-                                )
-                                .with_property(Property::MaySetSeen, acl.contains(Acl::ModifyItems))
-                                .with_property(
-                                    Property::MaySetKeywords,
-                                    acl.contains(Acl::ModifyItems),
-                                )
-                                .with_property(
-                                    Property::MayCreateChild,
-                                    acl.contains(Acl::CreateChild),
-                                )
-                                .with_property(Property::MayRename, acl.contains(Acl::Modify))
-                                .with_property(Property::MayDelete, acl.contains(Acl::Delete))
-                                .with_property(Property::MaySubmit, acl.contains(Acl::Submit))
-                                .into()
+                            JmapRights::rights::<Mailbox>(
+                                cached_mailbox.acls.as_slice().effective_acl(access_token),
+                            )
                         } else {
-                            Object::with_capacity(9)
-                                .with_property(Property::MayReadItems, true)
-                                .with_property(Property::MayAddItems, true)
-                                .with_property(Property::MayRemoveItems, true)
-                                .with_property(Property::MaySetSeen, true)
-                                .with_property(Property::MaySetKeywords, true)
-                                .with_property(Property::MayCreateChild, true)
-                                .with_property(Property::MayRename, true)
-                                .with_property(Property::MayDelete, true)
-                                .with_property(Property::MaySubmit, true)
-                                .into()
+                            JmapRights::all_rights::<Mailbox>()
                         }
                     }
-                    Property::IsSubscribed => Value::Bool(
+                    MailboxProperty::IsSubscribed => Value::Bool(
                         cached_mailbox
                             .subscribers
                             .contains(&access_token.primary_id()),
                     ),
-                    Property::Acl => {
-                        self.acl_get(&cached_mailbox.acls, access_token, account_id)
-                            .await
-                    }
-
+                    MailboxProperty::ShareWith => JmapRights::share_with::<Mailbox>(
+                        account_id,
+                        access_token,
+                        &cached_mailbox.acls,
+                    ),
                     _ => Value::Null,
                 };
 
-                mailbox.append(property.clone(), value);
+                mailbox.insert_unchecked(property.clone(), value);
             }
 
             // Add result to response
-            response.list.push(mailbox);
+            response.list.push(mailbox.into());
         }
         Ok(response)
     }

@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::listener::SessionStream;
 use directory::Permission;
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
-use jmap_proto::types::{blob::BlobSection, collection::Collection};
+use std::time::Instant;
 use trc::AddContext;
-use utils::BlobHash;
-
-use crate::core::{Command, ResponseCode, Session, StatusResponse};
+use types::{blob::BlobSection, blob_hash::BlobHash, collection::Collection};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_getscript(&mut self, request: Request<Command>) -> trc::Result<Vec<u8>> {

@@ -4,14 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::cmp::Ordering;
-
-use ahash::{AHashMap, AHashSet};
-use trc::AddContext;
-
-use crate::{IndexKeyPrefix, IterateParams, Store, U32_LEN, write::key::DeserializeBigEndian};
-
 use super::{Comparator, ResultSet, SortedResultSet};
+use crate::{IndexKeyPrefix, IterateParams, Store, U32_LEN, write::key::DeserializeBigEndian};
+use ahash::{AHashMap, AHashSet};
+use std::cmp::Ordering;
+use trc::AddContext;
 
 #[derive(Debug)]
 pub struct Pagination<'x> {
@@ -50,17 +47,18 @@ impl Store {
             match comparators.pop().unwrap() {
                 Comparator::Field { field, ascending } => {
                     let mut results = result_set.results;
+                    let collection = u8::from(result_set.collection);
 
                     self.iterate(
                         IterateParams::new(
                             IndexKeyPrefix {
                                 account_id: result_set.account_id,
-                                collection: result_set.collection,
+                                collection,
                                 field,
                             },
                             IndexKeyPrefix {
                                 account_id: result_set.account_id,
-                                collection: result_set.collection,
+                                collection,
                                 field: field + 1,
                             },
                         )
@@ -144,17 +142,18 @@ impl Store {
                         let mut prev_data = vec![];
                         let mut has_grouped_ids = false;
                         let mut idx = 0;
+                        let collection = u8::from(result_set.collection);
 
                         self.iterate(
                             IterateParams::new(
                                 IndexKeyPrefix {
                                     account_id: result_set.account_id,
-                                    collection: result_set.collection,
+                                    collection,
                                     field,
                                 },
                                 IndexKeyPrefix {
                                     account_id: result_set.account_id,
-                                    collection: result_set.collection,
+                                    collection,
                                     field: field + 1,
                                 },
                             )

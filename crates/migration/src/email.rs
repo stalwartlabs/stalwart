@@ -16,7 +16,6 @@ use email::{
         },
     },
 };
-use jmap_proto::types::{collection::Collection, keyword::*, property::Property};
 use mail_parser::{
     Address, Attribute, ContentType, DateTime, Encoding, Header, HeaderName, HeaderValue, Received,
 };
@@ -31,7 +30,18 @@ use store::{
     },
 };
 use trc::AddContext;
-use utils::{BlobHash, codec::leb128::Leb128Iterator};
+use types::{
+    blob_hash::BlobHash,
+    collection::Collection,
+    field::{EmailField, Field},
+    keyword::*,
+};
+use utils::codec::leb128::Leb128Iterator;
+
+const FIELD_KEYWORDS: u8 = 4;
+const FIELD_THREAD_ID: u8 = 33;
+const FIELD_CID: u8 = 76;
+const FIELD_MAILBOX_IDS: u8 = 7;
 
 const BM_MARKER: u8 = 1 << 7;
 
@@ -52,7 +62,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
             account_id,
             collection: Collection::Email.into(),
             class: BitmapClass::Tag {
-                field: Property::MailboxIds.into(),
+                field: FIELD_MAILBOX_IDS,
                 value: TagValue::Id(TOMBSTONE_ID),
             },
             document_id: 0,
@@ -65,12 +75,12 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
     let mut did_migrate = false;
 
     // Obtain mailboxes
-    for (message_id, uid_mailbox) in get_properties::<Mailboxes, _, _>(
+    for (message_id, uid_mailbox) in get_properties::<Mailboxes, _>(
         server,
         account_id,
         Collection::Email,
         &(),
-        Property::MailboxIds,
+        FIELD_MAILBOX_IDS,
     )
     .await
     .caused_by(trc::location!())?
@@ -79,29 +89,19 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
     }
 
     // Obtain keywords
-    for (message_id, keywords) in get_properties::<Keywords, _, _>(
-        server,
-        account_id,
-        Collection::Email,
-        &(),
-        Property::Keywords,
-    )
-    .await
-    .caused_by(trc::location!())?
+    for (message_id, keywords) in
+        get_properties::<Keywords, _>(server, account_id, Collection::Email, &(), FIELD_KEYWORDS)
+            .await
+            .caused_by(trc::location!())?
     {
         message_data.entry(message_id).or_default().keywords = keywords.0;
     }
 
     // Obtain threadIds
-    for (message_id, thread_id) in get_properties::<u32, _, _>(
-        server,
-        account_id,
-        Collection::Email,
-        &(),
-        Property::ThreadId,
-    )
-    .await
-    .caused_by(trc::location!())?
+    for (message_id, thread_id) in
+        get_properties::<u32, _>(server, account_id, Collection::Email, &(), FIELD_THREAD_ID)
+            .await
+            .caused_by(trc::location!())?
     {
         message_data.entry(message_id).or_default().thread_id = thread_id;
     }
@@ -117,13 +117,13 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                 .update_document(message_id);
 
             for mailbox in &data.mailboxes {
-                batch.untag(Property::MailboxIds, TagValue::Id(mailbox.mailbox_id));
+                batch.untag(EmailField::MailboxIds, TagValue::Id(mailbox.mailbox_id));
             }
 
             did_migrate = true;
 
             batch.set(
-                Property::Value,
+                Field::ARCHIVE,
                 Archiver::new(data)
                     .serialize()
                     .caused_by(trc::location!())?,
@@ -144,7 +144,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                 account_id,
                 collection: Collection::Email.into(),
                 document_id: message_id,
-                class: ValueClass::Property(Property::BodyStructure.into()),
+                class: ValueClass::Property(EmailField::Metadata.into()),
             })
             .await
         {
@@ -161,14 +161,14 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                     if matches!(header.name, HeaderName::MessageId) {
                         header.value.visit_text(|id| {
                             if id.len() < MAX_ID_LENGTH {
-                                batch.index(Property::References, encode_message_id(id));
+                                batch.index(EmailField::References, encode_message_id(id));
                             }
                         });
                     }
                 }
 
                 batch.set(
-                    Property::BodyStructure,
+                    EmailField::Metadata,
                     Archiver::new(metadata)
                         .serialize()
                         .caused_by(trc::location!())?,
@@ -190,7 +190,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: message_id,
-                        class: ValueClass::Property(Property::BodyStructure.into()),
+                        class: ValueClass::Property(EmailField::Metadata.into()),
                     })
                     .await
                     .is_err()
@@ -205,10 +205,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
     }
 
     // Delete keyword bitmaps
-    for field in [
-        u8::from(Property::Keywords),
-        u8::from(Property::Keywords) | BM_MARKER,
-    ] {
+    for field in [FIELD_KEYWORDS, FIELD_KEYWORDS | BM_MARKER] {
         server
             .store()
             .delete_range(
@@ -235,6 +232,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
     }
 
     // Delete messageId index, now in References
+    const MESSAGE_ID_FIELD: u8 = 11;
     server
         .store()
         .delete_range(
@@ -243,7 +241,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                 key: KeySerializer::new(U64_LEN)
                     .write(account_id)
                     .write(u8::from(Collection::Email))
-                    .write(u8::from(Property::MessageId))
+                    .write(MESSAGE_ID_FIELD)
                     .finalize(),
             },
             AnyKey {
@@ -251,7 +249,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                 key: KeySerializer::new(U64_LEN)
                     .write(account_id)
                     .write(u8::from(Collection::Email))
-                    .write(u8::from(Property::MessageId))
+                    .write(MESSAGE_ID_FIELD)
                     .write(&[u8::MAX; 8][..])
                     .finalize(),
             },
@@ -261,12 +259,11 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
 
     // Delete values
     for property in [
-        Property::MailboxIds,
-        Property::Keywords,
-        Property::ThreadId,
-        Property::Cid,
+        FIELD_MAILBOX_IDS,
+        FIELD_KEYWORDS,
+        FIELD_THREAD_ID,
+        FIELD_CID,
     ] {
-        let property: u8 = property.into();
         server
             .store()
             .delete_range(

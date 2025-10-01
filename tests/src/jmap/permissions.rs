@@ -4,21 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
+use super::{JMAPTest, ManagementApi, enterprise::List};
+use crate::jmap::assert_is_empty;
 use ahash::AHashSet;
 use common::auth::{AccessToken, TenantInfo};
-
 use directory::{
     Permission, Type,
     backend::internal::{PrincipalField, PrincipalSet, PrincipalUpdate, PrincipalValue},
 };
 use email::message::delivery::{IngestMessage, LocalDeliveryStatus, MailDelivery};
-use utils::BlobHash;
-
-use crate::jmap::assert_is_empty;
-
-use super::{JMAPTest, ManagementApi, enterprise::List};
+use std::sync::Arc;
+use types::blob_hash::BlobHash;
 
 pub async fn test(params: &JMAPTest) {
     println!("Running permissions tests...");

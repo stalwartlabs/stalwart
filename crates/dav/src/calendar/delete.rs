@@ -22,12 +22,12 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
+use store::write::BatchBuilder;
+use trc::AddContext;
+use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
-use store::write::BatchBuilder;
-use trc::AddContext;
 
 pub(crate) trait CalendarDeleteRequestHandler: Sync + Send {
     fn handle_calendar_delete_request(

@@ -8,8 +8,7 @@ pub mod index;
 pub mod storage;
 
 use dav_proto::schema::request::DeadProperty;
-use jmap_proto::types::value::AclGrant;
-use utils::BlobHash;
+use types::{acl::AclGrant, blob_hash::BlobHash};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,

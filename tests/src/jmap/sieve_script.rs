@@ -10,7 +10,7 @@ use jmap_client::{
     email, mailbox,
     sieve::query::{Comparator, Filter},
 };
-use jmap_proto::types::id::Id;
+use types::id::Id;
 use std::{
     fs,
     path::PathBuf,

@@ -4,36 +4,34 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::format_compact;
-use serde::Serialize;
-use utils::map::vec_map::VecMap;
-
 use crate::{
     error::set::SetError,
-    parser::{JsonObjectParser, Token, json::Parser},
-    request::{RequestProperty, method::MethodObject, reference::MaybeReference},
-    types::{
-        blob::BlobId,
-        id::Id,
-        state::State,
-        value::{Object, SetValue, Value},
+    object::{JmapObject, blob::BlobProperty},
+    request::{
+        MaybeInvalid,
+        deserialize::{DeserializeArguments, deserialize_request},
+        reference::MaybeIdReference,
     },
+    types::state::State,
 };
+use jmap_tools::Value;
+use serde::{Deserialize, Deserializer, Serialize};
+use types::{blob::BlobId, id::Id};
+use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Clone)]
-pub struct CopyRequest<T> {
+pub struct CopyRequest<'x, T: JmapObject> {
     pub from_account_id: Id,
     pub if_from_in_state: Option<State>,
     pub account_id: Id,
     pub if_in_state: Option<State>,
-    pub create: VecMap<MaybeReference<Id, String>, Object<SetValue>>,
+    pub create: VecMap<MaybeIdReference<Id>, Value<'x, T::Property, T::Element>>,
     pub on_success_destroy_original: Option<bool>,
     pub destroy_from_if_in_state: Option<State>,
-    pub arguments: T,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct CopyResponse {
+pub struct CopyResponse<T: JmapObject> {
     #[serde(rename = "fromAccountId")]
     pub from_account_id: Id,
 
@@ -48,18 +46,18 @@ pub struct CopyResponse {
 
     #[serde(rename = "created")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub created: VecMap<Id, Object<Value>>,
+    pub created: VecMap<Id, Value<'static, T::Property, T::Element>>,
 
     #[serde(rename = "notCreated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_created: VecMap<Id, SetError>,
+    pub not_created: VecMap<Id, SetError<T::Property>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CopyBlobRequest {
     pub from_account_id: Id,
     pub account_id: Id,
-    pub blob_ids: Vec<BlobId>,
+    pub blob_ids: Vec<MaybeInvalid<BlobId>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,117 +74,97 @@ pub struct CopyBlobResponse {
 
     #[serde(rename = "notCopied")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_copied: VecMap<BlobId, SetError>,
+    pub not_copied: VecMap<MaybeInvalid<BlobId>, SetError<BlobProperty>>,
 }
 
-#[derive(Debug, Clone)]
-pub enum RequestArguments {
-    Email,
-}
-
-impl JsonObjectParser for CopyRequest<RequestArguments> {
-    fn parse(parser: &mut Parser) -> trc::Result<Self>
+impl<'de, T: JmapObject> DeserializeArguments<'de> for CopyRequest<'de, T> {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = CopyRequest {
-            arguments: match &parser.ctx {
-                MethodObject::Email => RequestArguments::Email,
-                _ => {
-                    return Err(trc::JmapEvent::UnknownMethod
-                        .into_err()
-                        .details(format_compact!("{}/copy", parser.ctx)));
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
             },
-            account_id: Id::default(),
-            if_in_state: None,
-            from_account_id: Id::default(),
-            if_from_in_state: None,
-            create: VecMap::default(),
-            on_success_destroy_original: None,
-            destroy_from_if_in_state: None,
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x6574_6165_7263 => {
-                    request.create =
-                        <VecMap<MaybeReference<Id, String>, Object<SetValue>>>::parse(parser)?;
-                }
-                0x0064_4974_6e75_6f63_6341_6d6f_7266 => {
-                    request.from_account_id =
-                        parser.next_token::<Id>()?.unwrap_string("fromAccountId")?;
-                }
-                0x0065_7461_7453_6e49_6d6f_7246_6669 => {
-                    request.if_from_in_state = parser
-                        .next_token::<State>()?
-                        .unwrap_string_or_null("ifFromInState")?;
-                }
-                0x796f_7274_7365_4473_7365_6363_7553_6e6f => {
-                    request.on_success_destroy_original = parser
-                        .next_token::<String>()?
-                        .unwrap_bool_or_null("onSuccessDestroyOriginal")?;
-                }
-                0x536e_4966_496d_6f72_4679_6f72_7473_6564 => {
-                    request.destroy_from_if_in_state = parser
-                        .next_token::<State>()?
-                        .unwrap_string_or_null("destroyFromIfInState")?;
-                }
-                0x0065_7461_7453_6e49_6669 => {
-                    request.if_in_state = parser
-                        .next_token::<State>()?
-                        .unwrap_string_or_null("ifInState")?;
-                }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
+            b"ifInState" => {
+                self.if_in_state = map.next_value()?;
+            },
+            b"fromAccountId" => {
+                self.from_account_id = map.next_value()?;
+            },
+            b"ifFromInState" => {
+                self.if_from_in_state = map.next_value()?;
+            },
+            b"create" => {
+                self.create = map.next_value()?;
+            },
+            b"onSuccessDestroyOriginal" => {
+                self.on_success_destroy_original = map.next_value()?;
+            },
+            b"destroyFromIfInState" => {
+                self.destroy_from_if_in_state = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
 
-        Ok(request)
+        Ok(())
     }
 }
 
-impl JsonObjectParser for CopyBlobRequest {
-    fn parse(parser: &mut Parser) -> trc::Result<Self>
+impl<'de> DeserializeArguments<'de> for CopyBlobRequest {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = CopyBlobRequest {
-            account_id: Id::default(),
-            from_account_id: Id::default(),
-            blob_ids: Vec::new(),
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x0064_4974_6e75_6f63_6341_6d6f_7266 => {
-                    request.from_account_id =
-                        parser.next_token::<Id>()?.unwrap_string("fromAccountId")?;
-                }
-                0x0073_6449_626f_6c62 => {
-                    request.blob_ids = <Vec<BlobId>>::parse(parser)?;
-                }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
+            },
+            b"fromAccountId" => {
+                self.from_account_id = map.next_value()?;
+            },
+            b"blobIds" => {
+                self.blob_ids = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
 
-        Ok(request)
+        Ok(())
+    }
+}
+
+impl<'de, T: JmapObject> Deserialize<'de> for CopyRequest<'de, T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CopyBlobRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<'de, T: JmapObject> Default for CopyRequest<'de, T> {
+    fn default() -> Self {
+        CopyRequest {
+            from_account_id: Id::default(),
+            if_from_in_state: None,
+            account_id: Id::default(),
+            if_in_state: None,
+            create: VecMap::new(),
+            on_success_destroy_original: None,
+            destroy_from_if_in_state: None,
+        }
     }
 }

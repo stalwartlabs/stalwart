@@ -32,13 +32,6 @@ use imap_proto::{
     },
     receiver::Request,
 };
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection, VanishedCollection},
-    id::Id,
-    keyword::Keyword,
-    property::Property,
-};
 use mail_parser::{
     ArchivedAddress, ArchivedHeaderName, ArchivedHeaderValue, core::rkyv::ArchivedGetHeader,
 };
@@ -47,6 +40,13 @@ use store::{
     query::log::{Change, Query},
     rkyv::rend::u16_le,
     write::BatchBuilder,
+};
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection, VanishedCollection},
+    field::EmailField,
+    id::Id,
+    keyword::Keyword,
 };
 
 impl<T: SessionStream> Session<T> {
@@ -156,7 +156,7 @@ impl<T: SessionStream> SessionData<T> {
                 .store()
                 .changes(
                     account_id,
-                    SyncCollection::Email,
+                    SyncCollection::Email.into(),
                     Query::from_modseq(changed_since),
                 )
                 .await
@@ -192,7 +192,7 @@ impl<T: SessionStream> SessionData<T> {
                     .store()
                     .vanished::<(u32, u32)>(
                         account_id,
-                        VanishedCollection::Email,
+                        VanishedCollection::Email.into(),
                         Query::from_modseq(changed_since),
                     )
                     .await
@@ -328,7 +328,7 @@ impl<T: SessionStream> SessionData<T> {
                         account_id,
                         Collection::Email,
                         id,
-                        Property::BodyStructure,
+                        EmailField::Metadata.into(),
                     )
                     .await
                     .imap_ctx(&arguments.tag, trc::location!())?,

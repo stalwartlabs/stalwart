@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::core::Session;
 use common::listener::SessionStream;
-
+use std::{borrow::Cow, fmt::Write};
 use trc::SmtpEvent;
 
-use crate::core::Session;
-use std::fmt::Write;
-
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_vrfy(&mut self, address: String) -> Result<(), ()> {
+    pub async fn handle_vrfy(&mut self, address: Cow<'_, str>) -> Result<(), ()> {
         match self
             .server
             .eval_if::<String, _>(
@@ -43,7 +41,7 @@ impl<T: SessionStream> Session<T> {
                         trc::event!(
                             Smtp(SmtpEvent::Vrfy),
                             SpanId = self.data.session_id,
-                            To = address,
+                            To = address.as_ref().to_string(),
                             Result = values,
                         );
 
@@ -53,7 +51,7 @@ impl<T: SessionStream> Session<T> {
                         trc::event!(
                             Smtp(SmtpEvent::VrfyNotFound),
                             SpanId = self.data.session_id,
-                            To = address,
+                            To = address.as_ref().to_string(),
                         );
 
                         self.write(b"550 5.1.2 Address not found.\r\n").await
@@ -77,7 +75,7 @@ impl<T: SessionStream> Session<T> {
                 trc::event!(
                     Smtp(SmtpEvent::VrfyDisabled),
                     SpanId = self.data.session_id,
-                    To = address,
+                    To = address.as_ref().to_string(),
                 );
 
                 self.write(b"252 2.5.1 VRFY is disabled.\r\n").await
@@ -85,7 +83,7 @@ impl<T: SessionStream> Session<T> {
         }
     }
 
-    pub async fn handle_expn(&mut self, address: String) -> Result<(), ()> {
+    pub async fn handle_expn(&mut self, address: Cow<'_, str>) -> Result<(), ()> {
         match self
             .server
             .eval_if::<String, _>(
@@ -116,7 +114,7 @@ impl<T: SessionStream> Session<T> {
                         trc::event!(
                             Smtp(SmtpEvent::Expn),
                             SpanId = self.data.session_id,
-                            To = address,
+                            To = address.as_ref().to_string(),
                             Result = values,
                         );
 
@@ -126,7 +124,7 @@ impl<T: SessionStream> Session<T> {
                         trc::event!(
                             Smtp(SmtpEvent::ExpnNotFound),
                             SpanId = self.data.session_id,
-                            To = address,
+                            To = address.as_ref().to_string(),
                         );
 
                         self.write(b"550 5.1.2 Mailing list not found.\r\n").await
@@ -150,7 +148,7 @@ impl<T: SessionStream> Session<T> {
                 trc::event!(
                     Smtp(SmtpEvent::ExpnDisabled),
                     SpanId = self.data.session_id,
-                    To = address,
+                    To = address.as_ref().to_string(),
                 );
 
                 self.write(b"252 2.5.1 EXPN is disabled.\r\n").await

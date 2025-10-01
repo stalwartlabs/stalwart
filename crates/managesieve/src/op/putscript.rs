@@ -9,7 +9,6 @@ use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
 use directory::Permission;
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
-use jmap_proto::types::{collection::Collection, property::Property};
 use sieve::compiler::ErrorType;
 use std::time::Instant;
 use store::{
@@ -18,6 +17,7 @@ use store::{
     write::{Archiver, BatchBuilder},
 };
 use trc::AddContext;
+use types::{collection::Collection, field::SieveField};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_putscript(&mut self, request: Request<Command>) -> trc::Result<Vec<u8>> {
@@ -226,7 +226,10 @@ impl<T: SessionStream> Session<T> {
                 .filter(
                     account_id,
                     Collection::SieveScript,
-                    vec![Filter::eq(Property::Name, name.to_lowercase().into_bytes())],
+                    vec![Filter::eq(
+                        SieveField::Name,
+                        name.to_lowercase().into_bytes(),
+                    )],
                 )
                 .await
                 .caused_by(trc::location!())?

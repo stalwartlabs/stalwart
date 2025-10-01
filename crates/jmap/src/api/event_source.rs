@@ -4,22 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
 use common::{LONG_1D_SLUMBER, Server, auth::AccessToken};
 use http_body_util::{StreamBody, combinators::BoxBody};
+use http_proto::*;
 use hyper::{
     StatusCode,
     body::{Bytes, Frame},
 };
-use jmap_proto::{response::status::StateChangeResponse, types::type_state::DataType};
+use jmap_proto::response::status::StateChangeResponse;
+use std::{future::Future, str::FromStr};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use types::type_state::DataType;
 use utils::map::bitmap::Bitmap;
-
-use http_proto::*;
-use std::future::Future;
 
 struct Ping {
     interval: Duration,
@@ -49,19 +48,19 @@ impl EventSourceHandler for Server {
         for (key, value) in
             http_proto::form_urlencoded::parse(req.uri().query().unwrap_or_default().as_bytes())
         {
-            match key.as_ref() {
+            hashify::fnc_map!(key.as_bytes(),
                 "types" => {
                     for type_state in value.split(',') {
                         if type_state == "*" {
                             types = Bitmap::all();
                             break;
-                        } else if let Ok(type_state) = DataType::try_from(type_state) {
+                        } else if let Ok(type_state) = DataType::from_str(type_state) {
                             types.insert(type_state);
                         } else {
                             return Err(trc::ResourceEvent::BadParameters.into_err());
                         }
                     }
-                }
+                },
                 "closeafter" => match value.as_ref() {
                     "state" => {
                         close_after_state = true;
@@ -76,7 +75,7 @@ impl EventSourceHandler for Server {
                     Err(_) => return Err(trc::ResourceEvent::BadParameters.into_err()),
                 },
                 _ => {}
-            }
+            );
         }
 
         let mut ping = if ping > 0 {

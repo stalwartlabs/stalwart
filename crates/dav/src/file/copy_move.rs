@@ -21,16 +21,16 @@ use dav_proto::{Depth, RequestHeaders};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection, VanishedCollection},
-};
 use std::sync::Arc;
 use store::{
     ahash::AHashMap,
     write::{BatchBuilder, now},
 };
 use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection, VanishedCollection},
+};
 
 pub(crate) trait FileCopyMoveRequestHandler: Sync + Send {
     fn handle_file_copy_move_request(

@@ -6,8 +6,6 @@
 
 use std::fmt::Display;
 
-use crate::parser::{JsonObjectParser, json::Parser};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MethodName {
     pub obj: MethodObject,
@@ -45,77 +43,6 @@ pub enum MethodFunction {
     Lookup,
     Upload,
     Echo,
-}
-
-impl JsonObjectParser for MethodName {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut shift = 0;
-        let mut obj_hash: u128 = 0;
-        let mut fnc_hash: u128 = 0;
-
-        loop {
-            let ch = parser
-                .next_unescaped()?
-                .ok_or_else(|| parser.error_value())?;
-            if ch != b'/' {
-                if shift < 128 {
-                    obj_hash |= (ch as u128) << shift;
-                    shift += 8;
-                } else {
-                    return Err(parser.error_value());
-                }
-            } else {
-                break;
-            }
-        }
-
-        shift = 0;
-        while let Some(ch) = parser.next_unescaped()? {
-            if shift < 128 {
-                fnc_hash |= (ch as u128) << shift;
-                shift += 8;
-            } else {
-                return Err(parser.error_value());
-            }
-        }
-
-        Ok(MethodName {
-            obj: match obj_hash {
-                0x006c_6961_6d45 => MethodObject::Email,
-                0x0078_6f62_6c69_614d => MethodObject::Mailbox,
-                0x6461_6572_6854 => MethodObject::Thread,
-                0x626f_6c42 => MethodObject::Blob,
-                0x006e_6f69_7373_696d_6275_536c_6961_6d45 => MethodObject::EmailSubmission,
-                0x0074_6570_7069_6e53_6863_7261_6553 => MethodObject::SearchSnippet,
-                0x7974_6974_6e65_6449 => MethodObject::Identity,
-                0x6573_6e6f_7073_6552_6e6f_6974_6163_6156 => MethodObject::VacationResponse,
-                0x6e6f_6974_7069_7263_7362_7553_6873_7550 => MethodObject::PushSubscription,
-                0x0074_7069_7263_5365_7665_6953 => MethodObject::SieveScript,
-                0x006c_6170_6963_6e69_7250 => MethodObject::Principal,
-                0x0061_746f_7551 => MethodObject::Quota,
-                0x6572_6f43 => MethodObject::Core,
-                _ => return Err(parser.error_value()),
-            },
-            fnc: match fnc_hash {
-                0x0074_6567 => MethodFunction::Get,
-                0x0079_7265_7571 => MethodFunction::Query,
-                0x0074_6573 => MethodFunction::Set,
-                0x0073_6567_6e61_6863 => MethodFunction::Changes,
-                0x7365_676e_6168_4379_7265_7571 => MethodFunction::QueryChanges,
-                0x7970_6f63 => MethodFunction::Copy,
-                0x7472_6f70_6d69 => MethodFunction::Import,
-                0x0065_7372_6170 => MethodFunction::Parse,
-                0x6574_6164_696c_6176 => MethodFunction::Validate,
-                0x7075_6b6f_6f6c => MethodFunction::Lookup,
-                0x6461_6f6c_7075 => MethodFunction::Upload,
-                0x6f68_6365 => MethodFunction::Echo,
-                _ => return Err(parser.error_value()),
-            },
-        })
-    }
 }
 
 impl Display for MethodName {
@@ -199,6 +126,69 @@ impl MethodName {
             _ => "error",
         }
     }
+
+    pub fn parse(s: &str) -> Option<Self> {
+       hashify::tiny_map!(s.as_bytes(), 
+            "PushSubscription/get" => (MethodObject::PushSubscription, MethodFunction::Get),
+            "PushSubscription/set" => (MethodObject::PushSubscription, MethodFunction::Set),
+
+            "Mailbox/get" => (MethodObject::Mailbox, MethodFunction::Get),
+            "Mailbox/changes" => (MethodObject::Mailbox, MethodFunction::Changes),
+            "Mailbox/query" => (MethodObject::Mailbox, MethodFunction::Query),
+            "Mailbox/queryChanges" => (MethodObject::Mailbox, MethodFunction::QueryChanges),
+            "Mailbox/set" => (MethodObject::Mailbox, MethodFunction::Set),
+
+            "Thread/get" => (MethodObject::Thread, MethodFunction::Get),
+            "Thread/changes" => (MethodObject::Thread, MethodFunction::Changes),
+
+            "Email/get" => (MethodObject::Email, MethodFunction::Get),
+            "Email/changes" => (MethodObject::Email, MethodFunction::Changes),
+            "Email/query" => (MethodObject::Email, MethodFunction::Query),
+            "Email/queryChanges" => (MethodObject::Email, MethodFunction::QueryChanges),
+            "Email/set" => (MethodObject::Email, MethodFunction::Set),
+            "Email/copy" => (MethodObject::Email, MethodFunction::Copy),
+            "Email/import" => (MethodObject::Email, MethodFunction::Import),
+            "Email/parse" => (MethodObject::Email, MethodFunction::Parse),
+
+            "SearchSnippet/get" => (MethodObject::SearchSnippet, MethodFunction::Get),
+
+            "Identity/get" => (MethodObject::Identity, MethodFunction::Get),
+            "Identity/changes" => (MethodObject::Identity, MethodFunction::Changes),
+            "Identity/set" => (MethodObject::Identity, MethodFunction::Set),
+
+            "EmailSubmission/get" => (MethodObject::EmailSubmission, MethodFunction::Get),
+            "EmailSubmission/changes" => (MethodObject::EmailSubmission, MethodFunction::Changes),
+            "EmailSubmission/query" => (MethodObject::EmailSubmission, MethodFunction::Query),
+            "EmailSubmission/queryChanges" => (MethodObject::EmailSubmission, MethodFunction::QueryChanges),
+            "EmailSubmission/set" => (MethodObject::EmailSubmission, MethodFunction::Set),
+
+            "VacationResponse/get" => (MethodObject::VacationResponse, MethodFunction::Get),
+            "VacationResponse/set" => (MethodObject::VacationResponse, MethodFunction::Set),
+
+            "SieveScript/get" => (MethodObject::SieveScript, MethodFunction::Get),
+            "SieveScript/set" => (MethodObject::SieveScript, MethodFunction::Set),
+            "SieveScript/query" => (MethodObject::SieveScript, MethodFunction::Query),
+            "SieveScript/validate" => (MethodObject::SieveScript, MethodFunction::Validate),
+
+            "Principal/get" => (MethodObject::Principal, MethodFunction::Get),
+            "Principal/set" => (MethodObject::Principal, MethodFunction::Set),
+            "Principal/query" => (MethodObject::Principal, MethodFunction::Query),
+
+            "Quota/get" => (MethodObject::Quota, MethodFunction::Get),
+            "Quota/changes" => (MethodObject::Quota, MethodFunction::Changes),
+            "Quota/query" => (MethodObject::Quota, MethodFunction::Query),
+            "Quota/queryChanges" => (MethodObject::Quota, MethodFunction::QueryChanges),
+
+            "Blob/get" => (MethodObject::Blob, MethodFunction::Get),
+            "Blob/copy" => (MethodObject::Blob, MethodFunction::Copy),
+            "Blob/lookup" => (MethodObject::Blob, MethodFunction::Lookup),
+            "Blob/upload" => (MethodObject::Blob, MethodFunction::Upload),
+
+            "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
+
+        ).map(|(obj, fnc)| MethodName { obj, fnc })
+    }
+
 }
 
 impl Display for MethodObject {
@@ -221,7 +211,20 @@ impl Display for MethodObject {
     }
 }
 
-// Method serialization
+
+impl<'de> serde::Deserialize<'de> for MethodName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <&str>::deserialize(deserializer)?;
+
+        MethodName::parse(value).ok_or_else(|| {
+            serde::de::Error::custom(format!("Invalid method name: {:?}", value))
+        })
+    }
+}
+
 impl serde::Serialize for MethodName {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

@@ -223,7 +223,7 @@ async fn send_imip(
                 // MAIL FROM
                 let _ = session
                     .handle_mail_from(MailFrom {
-                        address: from.clone(),
+                        address: from.as_str().into(),
                         ..Default::default()
                     })
                     .await;
@@ -243,7 +243,7 @@ async fn send_imip(
                 session.params.rcpt_errors_wait = Duration::from_secs(0);
                 let _ = session
                     .handle_rcpt_to(RcptTo {
-                        address: to.clone(),
+                        address: to.as_str().into(),
                         ..Default::default()
                     })
                     .await;

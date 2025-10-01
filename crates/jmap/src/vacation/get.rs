@@ -4,31 +4,32 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{JmapMethods, changes::state::StateManager};
 use common::Server;
 use email::sieve::SieveScript;
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse, RequestArguments},
-    request::reference::MaybeReference,
-    types::{
-        any_id::AnyId,
-        collection::{Collection, SyncCollection},
-        date::UTCDate,
-        id::Id,
-        property::Property,
-        value::{Object, Value},
+    method::get::{GetRequest, GetResponse},
+    object::vacation_response::{
+        VacationResponse, VacationResponseProperty, VacationResponseValue,
     },
+    request::reference::MaybeResultReference,
+    types::date::UTCDate,
 };
+use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::query::Filter;
 use trc::AddContext;
-
-use crate::{JmapMethods, changes::state::StateManager};
+use types::{
+    collection::{Collection, SyncCollection},
+    field::SieveField,
+    id::Id,
+};
 
 pub trait VacationResponseGet: Sync + Send {
     fn vacation_response_get(
         &self,
-        request: GetRequest<RequestArguments>,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+        request: GetRequest<VacationResponse>,
+    ) -> impl Future<Output = trc::Result<GetResponse<VacationResponse>>> + Send;
 
     fn get_vacation_sieve_script_id(
         &self,
@@ -39,17 +40,17 @@ pub trait VacationResponseGet: Sync + Send {
 impl VacationResponseGet for Server {
     async fn vacation_response_get(
         &self,
-        mut request: GetRequest<RequestArguments>,
-    ) -> trc::Result<GetResponse> {
+        mut request: GetRequest<VacationResponse>,
+    ) -> trc::Result<GetResponse<VacationResponse>> {
         let account_id = request.account_id.document_id();
         let properties = request.unwrap_properties(&[
-            Property::Id,
-            Property::IsEnabled,
-            Property::FromDate,
-            Property::ToDate,
-            Property::Subject,
-            Property::TextBody,
-            Property::HtmlBody,
+            VacationResponseProperty::Id,
+            VacationResponseProperty::IsEnabled,
+            VacationResponseProperty::FromDate,
+            VacationResponseProperty::ToDate,
+            VacationResponseProperty::Subject,
+            VacationResponseProperty::TextBody,
+            VacationResponseProperty::HtmlBody,
         ]);
         let mut response = GetResponse {
             account_id: request.account_id.into(),
@@ -61,11 +62,11 @@ impl VacationResponseGet for Server {
             not_found: vec![],
         };
 
-        let do_get = if let Some(MaybeReference::Value(ids)) = request.ids {
+        let do_get = if let Some(MaybeResultReference::Value(ids)) = request.ids {
             let mut do_get = false;
             for id in ids {
                 match id.try_unwrap() {
-                    Some(AnyId::Id(id)) if id.is_singleton() => {
+                    Some(id) if id.is_singleton() => {
                         do_get = true;
                     }
                     Some(id) => {
@@ -88,68 +89,71 @@ impl VacationResponseGet for Server {
                         .unarchive::<SieveScript>()
                         .caused_by(trc::location!())?;
                     let vacation = sieve.vacation_response.as_ref();
-                    let mut result = Object::with_capacity(properties.len());
+                    let mut result = Map::with_capacity(properties.len());
                     for property in &properties {
                         match property {
-                            Property::Id => {
-                                result.append(Property::Id, Value::Id(Id::singleton()));
+                            VacationResponseProperty::Id => {
+                                result.insert_unchecked(
+                                    VacationResponseProperty::Id,
+                                    Id::singleton(),
+                                );
                             }
-                            Property::IsEnabled => {
-                                result.append(Property::IsEnabled, sieve.is_active);
+                            VacationResponseProperty::IsEnabled => {
+                                result.insert_unchecked(
+                                    VacationResponseProperty::IsEnabled,
+                                    sieve.is_active,
+                                );
                             }
-                            Property::FromDate => {
-                                result.append(
-                                    Property::FromDate,
+                            VacationResponseProperty::FromDate => {
+                                result.insert_unchecked(
+                                    VacationResponseProperty::FromDate,
                                     vacation.and_then(|r| {
                                         r.from_date
                                             .as_ref()
                                             .map(u64::from)
                                             .map(UTCDate::from)
-                                            .map(Value::Date)
+                                            .map(|v| Value::Element(VacationResponseValue::Date(v)))
                                     }),
                                 );
                             }
-                            Property::ToDate => {
-                                result.append(
-                                    Property::ToDate,
+                            VacationResponseProperty::ToDate => {
+                                result.insert_unchecked(
+                                    VacationResponseProperty::ToDate,
                                     vacation.and_then(|r| {
                                         r.to_date
                                             .as_ref()
                                             .map(u64::from)
                                             .map(UTCDate::from)
-                                            .map(Value::Date)
+                                            .map(|v| Value::Element(VacationResponseValue::Date(v)))
                                     }),
                                 );
                             }
-                            Property::Subject => {
-                                result.append(
-                                    Property::Subject,
-                                    vacation.and_then(|r| r.subject.as_ref().map(Value::from)),
+                            VacationResponseProperty::Subject => {
+                                result.insert_unchecked(
+                                    VacationResponseProperty::Subject,
+                                    vacation.and_then(|r| r.subject.as_ref()),
                                 );
                             }
-                            Property::TextBody => {
-                                result.append(
-                                    Property::TextBody,
-                                    vacation.and_then(|r| r.text_body.as_ref().map(Value::from)),
+                            VacationResponseProperty::TextBody => {
+                                result.insert_unchecked(
+                                    VacationResponseProperty::TextBody,
+                                    vacation.and_then(|r| r.text_body.as_ref()),
                                 );
                             }
-                            Property::HtmlBody => {
-                                result.append(
-                                    Property::HtmlBody,
-                                    vacation.and_then(|r| r.html_body.as_ref().map(Value::from)),
+                            VacationResponseProperty::HtmlBody => {
+                                result.insert_unchecked(
+                                    VacationResponseProperty::HtmlBody,
+                                    vacation.and_then(|r| r.html_body.as_ref()),
                                 );
-                            }
-                            property => {
-                                result.append(property.clone(), Value::Null);
                             }
                         }
                     }
-                    response.list.push(result);
+                    response.list.push(result.into());
                 } else {
-                    response.not_found.push(Id::singleton().into());
+                    response.not_found.push(Id::singleton());
                 }
             } else {
-                response.not_found.push(Id::singleton().into());
+                response.not_found.push(Id::singleton());
             }
         }
 
@@ -160,7 +164,7 @@ impl VacationResponseGet for Server {
         self.filter(
             account_id,
             Collection::SieveScript,
-            vec![Filter::eq(Property::Name, "vacation".as_bytes().to_vec())],
+            vec![Filter::eq(SieveField::Name, "vacation".as_bytes().to_vec())],
         )
         .await
         .map(|r| r.results.min())

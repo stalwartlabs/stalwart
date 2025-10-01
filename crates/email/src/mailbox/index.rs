@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
-use jmap_proto::types::{collection::SyncCollection, value::AclGrant};
-
 use super::{ArchivedMailbox, Mailbox};
+use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
+use types::{acl::AclGrant, collection::SyncCollection};
 
 impl IndexableObject for Mailbox {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::LogContainer {
-                sync_collection: SyncCollection::Email.into(),
+                sync_collection: SyncCollection::Email,
             },
             IndexValue::Acl {
                 value: (&self.acls).into(),
@@ -27,7 +26,7 @@ impl IndexableObject for &ArchivedMailbox {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::LogContainer {
-                sync_collection: SyncCollection::Email.into(),
+                sync_collection: SyncCollection::Email,
             },
             IndexValue::Acl {
                 value: self

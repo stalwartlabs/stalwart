@@ -5,12 +5,11 @@
  */
 
 use crate::{JmapMethods, changes::state::MessageCacheState};
-use common::{Server, auth::AccessToken, config::jmap::settings::SpecialUse};
+use common::{Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use jmap_proto::{
-    method::query::{Comparator, Filter, QueryRequest, QueryResponse, SortProperty},
-    object::mailbox::QueryArguments,
-    types::{acl::Acl, collection::Collection},
+    method::query::{Comparator, Filter, QueryRequest, QueryResponse},
+    object::mailbox::{Mailbox, MailboxComparator, MailboxFilter},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -20,11 +19,12 @@ use store::{
     query::{self},
     roaring::RoaringBitmap,
 };
+use types::{acl::Acl, collection::Collection, special_use::SpecialUse};
 
 pub trait MailboxQuery: Sync + Send {
     fn mailbox_query(
         &self,
-        request: QueryRequest<QueryArguments>,
+        request: QueryRequest<Mailbox>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
@@ -32,7 +32,7 @@ pub trait MailboxQuery: Sync + Send {
 impl MailboxQuery for Server {
     async fn mailbox_query(
         &self,
-        mut request: QueryRequest<QueryArguments>,
+        mut request: QueryRequest<Mailbox>,
         access_token: &AccessToken,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
@@ -43,106 +43,111 @@ impl MailboxQuery for Server {
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
-                Filter::ParentId(parent_id) => {
-                    let parent_id = parent_id.map(|id| id.document_id()).unwrap_or(u32::MAX);
-                    filters.push(query::Filter::is_in_set(
-                        mailboxes
-                            .mailboxes
-                            .items
-                            .iter()
-                            .filter(|mailbox| mailbox.parent_id == parent_id)
-                            .map(|m| m.document_id)
-                            .collect::<RoaringBitmap>(),
-                    ));
-                }
-                Filter::Name(name) => {
-                    #[cfg(feature = "test_mode")]
-                    {
-                        // Used for concurrent requests tests
-                        if name == "__sleep" {
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                Filter::Property(cond) => {
+                    match cond {
+                        MailboxFilter::ParentId(parent_id) => {
+                            let parent_id =
+                                parent_id.map(|id| id.document_id()).unwrap_or(u32::MAX);
+                            filters.push(query::Filter::is_in_set(
+                                mailboxes
+                                    .mailboxes
+                                    .items
+                                    .iter()
+                                    .filter(|mailbox| mailbox.parent_id == parent_id)
+                                    .map(|m| m.document_id)
+                                    .collect::<RoaringBitmap>(),
+                            ));
+                        }
+                        MailboxFilter::Name(name) => {
+                            #[cfg(feature = "test_mode")]
+                            {
+                                // Used for concurrent requests tests
+                                if name == "__sleep" {
+                                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                }
+                            }
+                            let name = name.to_lowercase();
+                            filters.push(query::Filter::is_in_set(
+                                mailboxes
+                                    .mailboxes
+                                    .items
+                                    .iter()
+                                    .filter(|mailbox| mailbox.name.to_lowercase().contains(&name))
+                                    .map(|m| m.document_id)
+                                    .collect::<RoaringBitmap>(),
+                            ));
+                        }
+                        MailboxFilter::Role(role) => {
+                            if let Some(role) = role {
+                                filters.push(query::Filter::is_in_set(
+                                    mailboxes
+                                        .mailboxes
+                                        .items
+                                        .iter()
+                                        .filter(|mailbox| mailbox.role == role)
+                                        .map(|m| m.document_id)
+                                        .collect::<RoaringBitmap>(),
+                                ));
+                            } else {
+                                filters.push(query::Filter::Not);
+                                filters.push(query::Filter::is_in_set(
+                                    mailboxes
+                                        .mailboxes
+                                        .items
+                                        .iter()
+                                        .filter(|mailbox| matches!(mailbox.role, SpecialUse::None))
+                                        .map(|m| m.document_id)
+                                        .collect::<RoaringBitmap>(),
+                                ));
+                                filters.push(query::Filter::End);
+                            }
+                        }
+                        MailboxFilter::HasAnyRole(has_role) => {
+                            if !has_role {
+                                filters.push(query::Filter::Not);
+                            }
+                            filters.push(query::Filter::is_in_set(
+                                mailboxes
+                                    .mailboxes
+                                    .items
+                                    .iter()
+                                    .filter(|mailbox| !matches!(mailbox.role, SpecialUse::None))
+                                    .map(|m| m.document_id)
+                                    .collect::<RoaringBitmap>(),
+                            ));
+                            if !has_role {
+                                filters.push(query::Filter::End);
+                            }
+                        }
+                        MailboxFilter::IsSubscribed(is_subscribed) => {
+                            if !is_subscribed {
+                                filters.push(query::Filter::Not);
+                            }
+                            filters.push(query::Filter::is_in_set(
+                                mailboxes
+                                    .mailboxes
+                                    .items
+                                    .iter()
+                                    .filter(|mailbox| {
+                                        mailbox.subscribers.contains(&access_token.primary_id)
+                                    })
+                                    .map(|m| m.document_id)
+                                    .collect::<RoaringBitmap>(),
+                            ));
+                            if !is_subscribed {
+                                filters.push(query::Filter::End);
+                            }
+                        }
+                        MailboxFilter::_T(other) => {
+                            return Err(trc::JmapEvent::UnsupportedFilter
+                                .into_err()
+                                .details(other));
                         }
                     }
-                    let name = name.to_lowercase();
-                    filters.push(query::Filter::is_in_set(
-                        mailboxes
-                            .mailboxes
-                            .items
-                            .iter()
-                            .filter(|mailbox| mailbox.name.to_lowercase().contains(&name))
-                            .map(|m| m.document_id)
-                            .collect::<RoaringBitmap>(),
-                    ));
-                }
-                Filter::Role(role) => {
-                    if let Some(role) = role {
-                        filters.push(query::Filter::is_in_set(
-                            mailboxes
-                                .mailboxes
-                                .items
-                                .iter()
-                                .filter(|mailbox| mailbox.role.as_str().is_some_and(|r| r == role))
-                                .map(|m| m.document_id)
-                                .collect::<RoaringBitmap>(),
-                        ));
-                    } else {
-                        filters.push(query::Filter::Not);
-                        filters.push(query::Filter::is_in_set(
-                            mailboxes
-                                .mailboxes
-                                .items
-                                .iter()
-                                .filter(|mailbox| matches!(mailbox.role, SpecialUse::None))
-                                .map(|m| m.document_id)
-                                .collect::<RoaringBitmap>(),
-                        ));
-                        filters.push(query::Filter::End);
-                    }
-                }
-                Filter::HasAnyRole(has_role) => {
-                    if !has_role {
-                        filters.push(query::Filter::Not);
-                    }
-                    filters.push(query::Filter::is_in_set(
-                        mailboxes
-                            .mailboxes
-                            .items
-                            .iter()
-                            .filter(|mailbox| !matches!(mailbox.role, SpecialUse::None))
-                            .map(|m| m.document_id)
-                            .collect::<RoaringBitmap>(),
-                    ));
-                    if !has_role {
-                        filters.push(query::Filter::End);
-                    }
-                }
-                Filter::IsSubscribed(is_subscribed) => {
-                    if !is_subscribed {
-                        filters.push(query::Filter::Not);
-                    }
-                    filters.push(query::Filter::is_in_set(
-                        mailboxes
-                            .mailboxes
-                            .items
-                            .iter()
-                            .filter(|mailbox| {
-                                mailbox.subscribers.contains(&access_token.primary_id)
-                            })
-                            .map(|m| m.document_id)
-                            .collect::<RoaringBitmap>(),
-                    ));
-                    if !is_subscribed {
-                        filters.push(query::Filter::End);
-                    }
-                }
-                Filter::And | Filter::Or | Filter::Not | Filter::Close => {
-                    filters.push(cond.into());
                 }
 
-                other => {
-                    return Err(trc::JmapEvent::UnsupportedFilter
-                        .into_err()
-                        .details(other.to_string()));
+                Filter::And | Filter::Or | Filter::Not | Filter::Close => {
+                    filters.push(cond.into());
                 }
             }
         }
@@ -212,10 +217,10 @@ impl MailboxQuery for Server {
             for comparator in request
                 .sort
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| vec![Comparator::ascending(SortProperty::ParentId)])
+                .unwrap_or_else(|| vec![Comparator::ascending(MailboxComparator::ParentId)])
             {
                 comparators.push(match comparator.property {
-                    SortProperty::Name => {
+                    MailboxComparator::Name => {
                         let sorted_list = mailboxes
                             .mailboxes
                             .items
@@ -228,7 +233,7 @@ impl MailboxQuery for Server {
                             comparator.is_ascending,
                         )
                     }
-                    SortProperty::SortOrder => {
+                    MailboxComparator::SortOrder => {
                         let sorted_list = mailboxes
                             .mailboxes
                             .items
@@ -241,7 +246,7 @@ impl MailboxQuery for Server {
                             comparator.is_ascending,
                         )
                     }
-                    SortProperty::ParentId => {
+                    MailboxComparator::ParentId => {
                         let sorted_list = mailboxes
                             .mailboxes
                             .items
@@ -260,10 +265,8 @@ impl MailboxQuery for Server {
                         )
                     }
 
-                    other => {
-                        return Err(trc::JmapEvent::UnsupportedSort
-                            .into_err()
-                            .details(other.to_string()));
+                    MailboxComparator::_T(other) => {
+                        return Err(trc::JmapEvent::UnsupportedSort.into_err().details(other));
                     }
                 });
             }

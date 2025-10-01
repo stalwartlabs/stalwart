@@ -13,7 +13,6 @@ use changelog::reset_changelog;
 use common::{
     DATABASE_SCHEMA_VERSION, KV_LOCK_HOUSEKEEPER, Server, manager::boot::DEFAULT_SETTINGS,
 };
-use jmap_proto::types::{collection::Collection, property::Property};
 use principal::{migrate_principal, migrate_principals};
 use report::migrate_reports;
 use std::time::Duration;
@@ -25,6 +24,7 @@ use store::{
     write::{AnyClass, AnyKey, BatchBuilder, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;
+use types::collection::Collection;
 
 pub mod calendar;
 pub mod changelog;
@@ -411,19 +411,17 @@ async fn is_new_install(server: &Server) -> trc::Result<bool> {
     Ok(true)
 }
 
-async fn get_properties<U, I, P>(
+async fn get_properties<U, I>(
     server: &Server,
     account_id: u32,
     collection: Collection,
     iterate: &I,
-    property: P,
+    property: u8,
 ) -> trc::Result<Vec<(u32, U)>>
 where
     I: DocumentSet + Send + Sync,
-    P: AsRef<Property> + Sync + Send,
     U: Deserialize + 'static,
 {
-    let property: u8 = property.as_ref().into();
     let collection: u8 = collection.into();
     let expected_results = iterate.len();
     let mut results = Vec::with_capacity(expected_results);

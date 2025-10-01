@@ -13,7 +13,7 @@ use calcard::common::timezone::Tz;
 use config::{
     groupware::GroupwareConfig,
     imap::ImapConfig,
-    jmap::settings::{JmapConfig, SpecialUse},
+    jmap::settings::JmapConfig,
     network::Network,
     scripts::Scripting,
     smtp::{
@@ -25,7 +25,6 @@ use config::{
     telemetry::Metrics,
 };
 use ipc::{BroadcastEvent, HousekeeperEvent, QueueEvent, ReportingEvent, StateEvent};
-use jmap_proto::types::value::AclGrant;
 use listener::{asn::AsnGeoLookupData, blocked::Security, tls::AcmeProviders};
 use mail_auth::{MX, Txt};
 use manager::webadmin::{Resource, WebAdminManager};
@@ -41,6 +40,7 @@ use std::{
 use tinyvec::TinyVec;
 use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio_rustls::TlsConnector;
+use types::{acl::AclGrant, special_use::SpecialUse};
 use utils::{
     cache::{Cache, CacheItemWeight, CacheWithTtl},
     snowflake::SnowflakeIdGenerator,
@@ -122,10 +122,6 @@ pub const KV_LOCK_TASK: u8 = 23;
 pub const KV_LOCK_HOUSEKEEPER: u8 = 24;
 pub const KV_LOCK_DAV: u8 = 25;
 pub const KV_SIEVE_ID: u8 = 26;
-
-pub const IDX_UID: u8 = 0;
-pub const IDX_EMAIL: u8 = 1;
-pub const IDX_CREATED: u8 = 2;
 
 #[derive(Clone)]
 pub struct Server {

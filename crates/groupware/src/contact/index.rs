@@ -9,9 +9,8 @@ use calcard::vcard::VCardProperty;
 use common::storage::index::{
     IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
 };
-use common::{IDX_EMAIL, IDX_UID};
-use jmap_proto::types::{collection::SyncCollection, value::AclGrant};
 use std::collections::HashSet;
+use types::{acl::AclGrant, collection::SyncCollection, field::ContactField};
 use utils::sanitize_email;
 
 impl IndexableObject for AddressBook {
@@ -27,7 +26,7 @@ impl IndexableObject for AddressBook {
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {
-                sync_collection: SyncCollection::AddressBook.into(),
+                sync_collection: SyncCollection::AddressBook,
             },
         ]
         .into_iter()
@@ -52,7 +51,7 @@ impl IndexableObject for &ArchivedAddressBook {
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {
-                sync_collection: SyncCollection::AddressBook.into(),
+                sync_collection: SyncCollection::AddressBook,
             },
         ]
         .into_iter()
@@ -69,11 +68,11 @@ impl IndexableObject for ContactCard {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::Index {
-                field: IDX_UID,
+                field: ContactField::Uid.into(),
                 value: self.card.uid().into(),
             },
             IndexValue::IndexList {
-                field: IDX_EMAIL,
+                field: ContactField::Email.into(),
                 value: self
                     .emails()
                     .map(Into::into)
@@ -88,7 +87,7 @@ impl IndexableObject for ContactCard {
                     + self.size,
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::AddressBook.into(),
+                sync_collection: SyncCollection::AddressBook,
                 prefix: None,
             },
         ]
@@ -100,11 +99,11 @@ impl IndexableObject for &ArchivedContactCard {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::Index {
-                field: IDX_UID,
+                field: ContactField::Uid.into(),
                 value: self.card.uid().into(),
             },
             IndexValue::IndexList {
-                field: IDX_EMAIL,
+                field: ContactField::Email.into(),
                 value: self
                     .emails()
                     .map(Into::into)
@@ -119,7 +118,7 @@ impl IndexableObject for &ArchivedContactCard {
                     + self.size,
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::AddressBook.into(),
+                sync_collection: SyncCollection::AddressBook,
                 prefix: None,
             },
         ]

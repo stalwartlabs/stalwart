@@ -4,6 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::assert_is_unique_uid;
+use crate::{
+    DavError, DavMethod,
+    common::{
+        lock::{LockRequestHandler, ResourceState},
+        uri::DavUriResource,
+    },
+    file::DavFileResource,
+};
 use calcard::common::timezone::Tz;
 use common::{DavName, Server, auth::AccessToken};
 use dav_proto::{Depth, RequestHeaders};
@@ -14,23 +23,12 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
+use store::write::{BatchBuilder, now};
+use trc::AddContext;
+use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
 };
-use store::write::{BatchBuilder, now};
-use trc::AddContext;
-
-use crate::{
-    DavError, DavMethod,
-    common::{
-        lock::{LockRequestHandler, ResourceState},
-        uri::DavUriResource,
-    },
-    file::DavFileResource,
-};
-
-use super::assert_is_unique_uid;
 
 pub(crate) trait CalendarCopyMoveRequestHandler: Sync + Send {
     fn handle_calendar_copy_move_request(

@@ -8,8 +8,6 @@ use super::metadata::MessageData;
 use crate::{cache::MessageCacheFetch, mailbox::*, message::metadata::MessageMetadata};
 use common::{KV_LOCK_PURGE_ACCOUNT, Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
-use jmap_proto::types::collection::VanishedCollection;
-use jmap_proto::types::{collection::Collection, property::Property};
 use std::future::Future;
 use store::rand::prelude::SliceRandom;
 use store::write::key::DeserializeBigEndian;
@@ -21,7 +19,10 @@ use store::{
 };
 use store::{IndexKey, IterateParams, SerializeInfallible, U32_LEN};
 use trc::AddContext;
-use utils::BlobHash;
+#[cfg(feature = "enterprise")]
+use types::blob_hash::BlobHash;
+use types::collection::{Collection, VanishedCollection};
+use types::field::EmailField;
 
 pub trait EmailDeletion: Sync + Send {
     fn emails_tombstone(
@@ -78,7 +79,7 @@ impl EmailDeletion for Server {
                     .update_document(document_id)
                     .custom(ObjectIndexBuilder::<_, ()>::new().with_current(metadata))
                     .caused_by(trc::location!())?
-                    .tag(Property::MailboxIds, TagValue::Id(TOMBSTONE_ID))
+                    .tag(EmailField::MailboxIds, TagValue::Id(TOMBSTONE_ID))
                     .commit_point();
 
                 deleted_ids.insert(document_id);
@@ -211,14 +212,14 @@ impl EmailDeletion for Server {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: 0,
-                        field: Property::ReceivedAt.into(),
+                        field: EmailField::ReceivedAt.into(),
                         key: 0u64.serialize(),
                     },
                     IndexKey {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: u32::MAX,
-                        field: Property::ReceivedAt.into(),
+                        field: EmailField::ReceivedAt.into(),
                         key: now().saturating_sub(hold_period).serialize(),
                     },
                 )
@@ -269,7 +270,7 @@ impl EmailDeletion for Server {
                 account_id,
                 collection: Collection::Email.into(),
                 class: BitmapClass::Tag {
-                    field: Property::MailboxIds.into(),
+                    field: EmailField::MailboxIds.into(),
                     value: TagValue::Id(TOMBSTONE_ID),
                 },
                 document_id: 0,
@@ -291,7 +292,7 @@ impl EmailDeletion for Server {
         self.core
             .storage
             .fts
-            .remove(account_id, Collection::Email.into(), &tombstoned_ids)
+            .remove(account_id, Collection::Email, &tombstoned_ids)
             .await?;
 
         // Obtain tenant id
@@ -310,8 +311,8 @@ impl EmailDeletion for Server {
             batch
                 .with_collection(Collection::Email)
                 .delete_document(document_id)
-                .clear(Property::Value)
-                .untag(Property::MailboxIds, TagValue::Id(TOMBSTONE_ID));
+                .clear(EmailField::Archive)
+                .untag(EmailField::MailboxIds, TagValue::Id(TOMBSTONE_ID));
 
             // Remove message metadata
             if let Some(metadata_) = self
@@ -322,7 +323,7 @@ impl EmailDeletion for Server {
                     account_id,
                     collection: Collection::Email.into(),
                     document_id,
-                    class: ValueClass::Property(Property::BodyStructure.into()),
+                    class: ValueClass::Property(EmailField::Metadata.into()),
                 })
                 .await?
             {

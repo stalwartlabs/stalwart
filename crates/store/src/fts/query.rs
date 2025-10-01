@@ -4,24 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    fmt::Display,
-    ops::{BitAndAssign, BitOrAssign, BitXorAssign},
-};
-
-use ahash::AHashMap;
-use nlp::language::stemmer::Stemmer;
-use roaring::RoaringBitmap;
-use trc::AddContext;
-
+use super::postings::SerializedPostings;
 use crate::{
     BitmapKey, IterateParams, Store, U32_LEN, ValueKey,
     backend::MAX_TOKEN_LENGTH,
     fts::FtsFilter,
     write::{BitmapHash, ValueClass, hash::TokenType, key::DeserializeBigEndian},
 };
-
-use super::postings::SerializedPostings;
+use ahash::AHashMap;
+use nlp::language::stemmer::Stemmer;
+use roaring::RoaringBitmap;
+use std::{
+    fmt::Display,
+    ops::{BitAndAssign, BitOrAssign, BitXorAssign},
+};
+use trc::AddContext;
+use types::collection::Collection;
 
 struct State {
     pub op: FtsTokenized,
@@ -50,11 +48,9 @@ impl Store {
     pub async fn fts_query<T: Into<u8> + Display + Clone + std::fmt::Debug>(
         &self,
         account_id: u32,
-        collection: impl Into<u8>,
+        collection: Collection,
         filters: Vec<FtsFilter<T>>,
     ) -> trc::Result<RoaringBitmap> {
-        let collection = collection.into();
-
         // Tokenize text
         let mut tokenized_filters = Vec::with_capacity(filters.len());
         let mut token_count = AHashMap::new();
@@ -125,6 +121,7 @@ impl Store {
         let mut stack = Vec::new();
         let mut token_cache = AHashMap::with_capacity(token_count.len());
         let mut filters = tokenized_filters.into_iter().peekable();
+        let collection = u8::from(collection);
 
         while let Some(filter) = filters.next() {
             let mut result = match filter {

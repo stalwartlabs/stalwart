@@ -26,11 +26,11 @@ use groupware::{
     },
 };
 use hyper::StatusCode;
-use jmap_proto::types::collection::SyncCollection;
 use mail_parser::{DateTime, MessageParser};
 use services::task_manager::{Task, TaskAction, imip::build_itip_template};
 use std::str::FromStr;
 use store::write::now;
+use types::collection::SyncCollection;
 
 pub async fn test(test: &WebDavTest) {
     println!("Running calendar scheduling tests...");

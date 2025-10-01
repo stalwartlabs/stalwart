@@ -15,7 +15,6 @@ use crate::{
 };
 use ahash::{AHashMap, AHashSet};
 use compact_str::CompactString;
-use jmap_proto::types::collection::Collection;
 use nlp::tokenizers::word::WordTokenizer;
 use store::{
     Deserialize, IterateParams, Serialize, SerializeInfallible, Store, U32_LEN, ValueKey,
@@ -27,7 +26,8 @@ use store::{
     },
 };
 use trc::AddContext;
-use utils::sanitize_email;
+use types::collection::Collection;
+use utils::{DomainPart, sanitize_email};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PrincipalList<T> {
@@ -354,7 +354,7 @@ impl ManageDirectory for Store {
             principal_create.tenant = tenant_id.into();
 
             if !matches!(principal_create.typ, Type::Tenant | Type::Domain) {
-                if let Some(domain) = name.split('@').nth(1)
+                if let Some(domain) = name.try_domain_part()
                     && self
                         .get_principal_info(domain)
                         .await
@@ -523,7 +523,7 @@ impl ManageDirectory for Store {
                 if self.rcpt(&email).await.caused_by(trc::location!())? != RcptType::Invalid {
                     return Err(err_exists(PrincipalField::Emails, email.to_string()));
                 }
-                if let Some(domain) = email.split('@').nth(1)
+                if let Some(domain) = email.try_domain_part()
                     && valid_domains.insert(domain.into())
                 {
                     self.get_principal_info(domain)
@@ -1003,7 +1003,7 @@ impl ManageDirectory for Store {
                         if tenant_id.is_some()
                             && !matches!(principal_type, Type::Tenant | Type::Domain)
                         {
-                            if let Some(domain) = new_name.split('@').nth(1)
+                            if let Some(domain) = new_name.try_domain_part()
                                 && self
                                     .get_principal_info(domain)
                                     .await
@@ -2401,7 +2401,7 @@ impl ValidateDirectory for Store {
     ) -> trc::Result<()> {
         if self.rcpt(email).await.caused_by(trc::location!())? != RcptType::Invalid {
             Err(err_exists(PrincipalField::Emails, email.to_string()))
-        } else if let Some(domain) = email.split('@').nth(1) {
+        } else if let Some(domain) = email.try_domain_part() {
             match self
                 .get_principal_info(domain)
                 .await

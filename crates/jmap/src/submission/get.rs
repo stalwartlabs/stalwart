@@ -4,53 +4,53 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::changes::state::StateManager;
 use common::Server;
 use email::submission::{
-    ArchivedAddress, ArchivedEnvelope, Delivered, DeliveryStatus, EmailSubmission, UndoStatus,
+    ArchivedAddress, ArchivedEnvelope, ArchivedUndoStatus, Delivered, DeliveryStatus,
+    EmailSubmission,
 };
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse, RequestArguments},
-    types::{
-        collection::{Collection, SyncCollection},
-        date::UTCDate,
-        id::Id,
-        property::Property,
-        value::{Object, Value},
-    },
+    method::get::{GetRequest, GetResponse},
+    object::email_submission::{self, Displayed, EmailSubmissionProperty, EmailSubmissionValue},
+    types::date::UTCDate,
 };
+use jmap_tools::{Key, Map, Value};
 use smtp::queue::{ArchivedError, ArchivedErrorDetails, ArchivedStatus, Message, spool::SmtpSpool};
 use smtp_proto::ArchivedResponse;
 use std::future::Future;
 use store::rkyv::option::ArchivedOption;
 use trc::AddContext;
+use types::{
+    collection::{Collection, SyncCollection},
+    id::Id,
+};
 use utils::map::vec_map::VecMap;
-
-use crate::changes::state::StateManager;
 
 pub trait EmailSubmissionGet: Sync + Send {
     fn email_submission_get(
         &self,
-        request: GetRequest<RequestArguments>,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+        request: GetRequest<email_submission::EmailSubmission>,
+    ) -> impl Future<Output = trc::Result<GetResponse<email_submission::EmailSubmission>>> + Send;
 }
 
 impl EmailSubmissionGet for Server {
     async fn email_submission_get(
         &self,
-        mut request: GetRequest<RequestArguments>,
-    ) -> trc::Result<GetResponse> {
+        mut request: GetRequest<email_submission::EmailSubmission>,
+    ) -> trc::Result<GetResponse<email_submission::EmailSubmission>> {
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
-            Property::Id,
-            Property::EmailId,
-            Property::IdentityId,
-            Property::ThreadId,
-            Property::Envelope,
-            Property::SendAt,
-            Property::UndoStatus,
-            Property::DeliveryStatus,
-            Property::DsnBlobIds,
-            Property::MdnBlobIds,
+            EmailSubmissionProperty::Id,
+            EmailSubmissionProperty::EmailId,
+            EmailSubmissionProperty::IdentityId,
+            EmailSubmissionProperty::ThreadId,
+            EmailSubmissionProperty::Envelope,
+            EmailSubmissionProperty::SendAt,
+            EmailSubmissionProperty::UndoStatus,
+            EmailSubmissionProperty::DeliveryStatus,
+            EmailSubmissionProperty::DsnBlobIds,
+            EmailSubmissionProperty::MdnBlobIds,
         ]);
         let account_id = request.account_id.document_id();
         let email_submission_ids = self
@@ -80,7 +80,7 @@ impl EmailSubmissionGet for Server {
             // Obtain the email_submission object
             let document_id = id.document_id();
             if !email_submission_ids.contains(document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let submission_ = if let Some(submission) = self
@@ -89,7 +89,7 @@ impl EmailSubmissionGet for Server {
             {
                 submission
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
             let submission = submission_
@@ -138,82 +138,124 @@ impl EmailSubmissionGet for Server {
                 is_pending = true;
             }
 
-            let mut result = Object::with_capacity(properties.len());
+            let mut result = Map::with_capacity(properties.len());
             for property in &properties {
                 let value = match property {
-                    Property::Id => Value::Id(id),
-                    Property::DeliveryStatus => {
-                        let mut status = Object::with_capacity(delivery_status.len());
+                    EmailSubmissionProperty::Id => Value::Element(id.into()),
+                    EmailSubmissionProperty::DeliveryStatus => {
+                        let mut status = Map::with_capacity(delivery_status.len());
 
                         for (rcpt, delivery_status) in std::mem::take(&mut delivery_status) {
-                            status.set(
-                                Property::_T(rcpt),
-                                Object::with_capacity(3)
-                                    .with_property(
-                                        Property::Delivered,
-                                        delivery_status.delivered.as_str().to_string(),
+                            status.insert_unchecked(
+                                Key::Owned(rcpt),
+                                Map::with_capacity(3)
+                                    .with_key_value(
+                                        EmailSubmissionProperty::Delivered,
+                                        EmailSubmissionValue::Delivered(
+                                            match delivery_status.delivered {
+                                                Delivered::Queued => {
+                                                    email_submission::Delivered::Queued
+                                                }
+                                                Delivered::Yes => email_submission::Delivered::Yes,
+                                                Delivered::No => email_submission::Delivered::No,
+                                                Delivered::Unknown => {
+                                                    email_submission::Delivered::Unknown
+                                                }
+                                            },
+                                        ),
                                     )
-                                    .with_property(Property::SmtpReply, delivery_status.smtp_reply)
-                                    .with_property(Property::Displayed, "unknown"),
+                                    .with_key_value(
+                                        EmailSubmissionProperty::SmtpReply,
+                                        delivery_status.smtp_reply,
+                                    )
+                                    .with_key_value(
+                                        EmailSubmissionProperty::Displayed,
+                                        Value::Element(EmailSubmissionValue::Displayed(
+                                            Displayed::Unknown,
+                                        )),
+                                    ),
                             );
                         }
 
                         Value::Object(status)
                     }
-                    Property::UndoStatus => Value::Text(
-                        {
-                            if is_pending {
-                                UndoStatus::Pending.as_str()
-                            } else {
-                                submission.undo_status.as_str()
+                    EmailSubmissionProperty::UndoStatus => {
+                        Value::Element(EmailSubmissionValue::UndoStatus(if is_pending {
+                            email_submission::UndoStatus::Pending
+                        } else {
+                            match submission.undo_status {
+                                ArchivedUndoStatus::Pending => {
+                                    email_submission::UndoStatus::Pending
+                                }
+                                ArchivedUndoStatus::Final => email_submission::UndoStatus::Final,
+                                ArchivedUndoStatus::Canceled => {
+                                    email_submission::UndoStatus::Canceled
+                                }
                             }
-                        }
-                        .to_string(),
-                    ),
-                    Property::EmailId => Value::Id(Id::from_parts(
-                        u32::from(submission.thread_id),
-                        u32::from(submission.email_id),
-                    )),
-                    Property::IdentityId => Value::Id(Id::from(u32::from(submission.identity_id))),
-                    Property::ThreadId => Value::Id(Id::from(u32::from(submission.thread_id))),
-                    Property::Envelope => build_envelope(&submission.envelope),
-                    Property::SendAt => {
-                        Value::Date(UTCDate::from_timestamp(u64::from(submission.send_at) as i64))
+                        }))
                     }
-                    Property::MdnBlobIds | Property::DsnBlobIds => Value::List(vec![]),
+                    EmailSubmissionProperty::EmailId => Value::Element(
+                        Id::from_parts(
+                            u32::from(submission.thread_id),
+                            u32::from(submission.email_id),
+                        )
+                        .into(),
+                    ),
+                    EmailSubmissionProperty::IdentityId => {
+                        Value::Element(Id::from(u32::from(submission.identity_id)).into())
+                    }
+                    EmailSubmissionProperty::ThreadId => {
+                        Value::Element(Id::from(u32::from(submission.thread_id)).into())
+                    }
+                    EmailSubmissionProperty::Envelope => build_envelope(&submission.envelope),
+                    EmailSubmissionProperty::SendAt => Value::Element(EmailSubmissionValue::Date(
+                        UTCDate::from_timestamp(u64::from(submission.send_at) as i64),
+                    )),
+                    EmailSubmissionProperty::MdnBlobIds | EmailSubmissionProperty::DsnBlobIds => {
+                        Value::Array(vec![])
+                    }
                     _ => Value::Null,
                 };
 
-                result.append(property.clone(), value);
+                result.insert_unchecked(property.clone(), value);
             }
-            response.list.push(result);
+            response.list.push(result.into());
         }
 
         Ok(response)
     }
 }
 
-fn build_envelope(envelope: &ArchivedEnvelope) -> Value {
-    Object::with_capacity(2)
-        .with_property(Property::MailFrom, build_address(&envelope.mail_from))
-        .with_property(
-            Property::RcptTo,
-            Value::List(envelope.rcpt_to.iter().map(build_address).collect()),
+fn build_envelope(
+    envelope: &ArchivedEnvelope,
+) -> Value<'static, EmailSubmissionProperty, EmailSubmissionValue> {
+    Map::with_capacity(2)
+        .with_key_value(
+            EmailSubmissionProperty::MailFrom,
+            build_address(&envelope.mail_from),
+        )
+        .with_key_value(
+            EmailSubmissionProperty::RcptTo,
+            Value::Array(envelope.rcpt_to.iter().map(build_address).collect()),
         )
         .into()
 }
 
-fn build_address(envelope: &ArchivedAddress) -> Value {
-    Object::with_capacity(2)
-        .with_property(Property::Email, Value::Text(envelope.email.to_string()))
-        .with_property(
-            Property::Parameters,
+fn build_address(
+    envelope: &ArchivedAddress,
+) -> Value<'static, EmailSubmissionProperty, EmailSubmissionValue> {
+    Map::with_capacity(2)
+        .with_key_value(
+            EmailSubmissionProperty::Email,
+            Value::Str(envelope.email.to_string().into()),
+        )
+        .with_key_value(
+            EmailSubmissionProperty::Parameters,
             if let ArchivedOption::Some(params) = &envelope.parameters {
-                Value::Object(Object(
+                Value::Object(Map::from_iter(
                     params
                         .iter()
-                        .map(|(k, v)| (Property::_T(k.to_string()), v.into()))
-                        .collect(),
+                        .map(|(k, v)| (Key::Owned(k.to_string()), v.into())),
                 ))
             } else {
                 Value::Null

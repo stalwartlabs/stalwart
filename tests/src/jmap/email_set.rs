@@ -7,9 +7,8 @@
 use std::{fs, path::PathBuf};
 
 use crate::jmap::{assert_is_empty, mailbox::destroy_all_mailboxes};
-use ahash::AHashSet;
-
 use ::email::mailbox::INBOX_ID;
+use ahash::AHashSet;
 use jmap_client::{
     Error, Set,
     client::Client,
@@ -17,7 +16,7 @@ use jmap_client::{
     email::{self, Email},
     mailbox::Role,
 };
-use jmap_proto::types::id::Id;
+use types::id::Id;
 
 use super::{JMAPTest, find_values, replace_blob_ids, replace_boundaries, replace_values};
 

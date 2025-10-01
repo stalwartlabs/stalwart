@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
 use serde::Serialize;
 use serde::ser::SerializeMap;
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum MethodError {

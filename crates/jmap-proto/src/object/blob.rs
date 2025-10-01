@@ -5,82 +5,221 @@
  */
 
 use crate::{
-    parser::{Ignore, json::Parser},
-    request::{RequestProperty, RequestPropertyParser},
+    object::{AnyId, JmapObject, JmapObjectId, MaybeReference, parse_ref},
+    request::deserialize::DeserializeArguments,
 };
+use jmap_tools::{Element, Key, Property};
+use std::{borrow::Cow, str::FromStr};
+use types::{blob::BlobId, id::Id};
 
 #[derive(Debug, Clone, Default)]
-pub struct GetArguments {
+pub struct Blob;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BlobProperty {
+    Id,
+    BlobId,
+    Type,
+    Size,
+    Digest(DigestProperty),
+    Data(DataProperty),
+    IsEncodingProblem,
+    IsTruncated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DigestProperty {
+    Sha,
+    Sha256,
+    Sha512,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DataProperty {
+    AsText,
+    AsBase64,
+    Default,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BlobValue {
+    BlobId(BlobId),
+    IdReference(String),
+}
+
+impl Property for BlobProperty {
+    fn try_parse(_: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
+        BlobProperty::parse(value)
+    }
+
+    fn to_cow(&self) -> Cow<'static, str> {
+        match self {
+            BlobProperty::BlobId => "blobId",
+            BlobProperty::Id => "id",
+            BlobProperty::Size => "size",
+            BlobProperty::Type => "type",
+            BlobProperty::IsEncodingProblem => "isEncodingProblem",
+            BlobProperty::IsTruncated => "isTruncated",
+            BlobProperty::Data(data) => match data {
+                DataProperty::AsText => "data:asText",
+                DataProperty::AsBase64 => "data:asBase64",
+                DataProperty::Default => "data",
+            },
+            BlobProperty::Digest(digest) => match digest {
+                DigestProperty::Sha => "digest:sha",
+                DigestProperty::Sha256 => "digest:sha-256",
+                DigestProperty::Sha512 => "digest:sha-512",
+            },
+        }
+        .into()
+    }
+}
+
+impl Element for BlobValue {
+    type Property = BlobProperty;
+
+    fn try_parse<P>(key: &Key<'_, Self::Property>, value: &str) -> Option<Self> {
+        if let Key::Property(prop) = key {
+            match prop {
+                BlobProperty::BlobId => match parse_ref(value) {
+                    MaybeReference::Value(v) => Some(BlobValue::BlobId(v)),
+                    MaybeReference::Reference(v) => Some(BlobValue::IdReference(v)),
+                    MaybeReference::ParseError => None,
+                },
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn to_cow(&self) -> Cow<'static, str> {
+        match self {
+            BlobValue::BlobId(blob_id) => blob_id.to_string().into(),
+            BlobValue::IdReference(r) => format!("#{r}").into(),
+        }
+    }
+}
+
+impl BlobProperty {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map!(value.as_bytes(),
+            b"blobId" => BlobProperty::BlobId,
+            b"id" => BlobProperty::Id,
+            b"size" => BlobProperty::Size,
+            b"type" => BlobProperty::Type,
+            b"isEncodingProblem" => BlobProperty::IsEncodingProblem,
+            b"isTruncated" => BlobProperty::IsTruncated,
+            b"data:asText" => BlobProperty::Data(DataProperty::AsText),
+            b"data:asBase64" => BlobProperty::Data(DataProperty::AsBase64),
+            b"data" => BlobProperty::Data(DataProperty::Default),
+            b"digest:sha" => BlobProperty::Digest(DigestProperty::Sha),
+            b"digest:sha-256" => BlobProperty::Digest(DigestProperty::Sha256),
+            b"digest:sha-512" => BlobProperty::Digest(DigestProperty::Sha512),
+        )
+    }
+}
+
+impl FromStr for BlobProperty {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        BlobProperty::parse(s).ok_or(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BlobGetArguments {
     pub offset: Option<usize>,
     pub length: Option<usize>,
 }
 
-impl RequestPropertyParser for GetArguments {
-    fn parse(&mut self, parser: &mut Parser, property: RequestProperty) -> trc::Result<bool> {
-        match &property.hash[0] {
-            0x7465_7366_666f => {
-                self.offset = parser
-                    .next_token::<Ignore>()?
-                    .unwrap_usize_or_null("offset")?;
+impl<'de> DeserializeArguments<'de> for BlobGetArguments {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        hashify::fnc_map!(key.as_bytes(),
+             b"offset" => {
+                self.offset = map.next_value()?;
+            },
+            b"length" => {
+                self.length = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-            0x6874_676e_656c => {
-                self.length = parser
-                    .next_token::<Ignore>()?
-                    .unwrap_usize_or_null("length")?;
-            }
-            _ => return Ok(false),
-        }
+        );
 
-        Ok(true)
+        Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn gen_ids() {
-        for label in ["sha-256", "sha-512"] {
-            let mut iter = label.chars();
-            let mut hash = [0; 2];
-            let mut shift = 0;
+impl serde::Serialize for BlobProperty {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.to_cow().as_ref())
+    }
+}
 
-            'outer: for hash in hash.iter_mut() {
-                for ch in iter.by_ref() {
-                    *hash |= (ch as u128) << shift;
-                    shift += 8;
-                    if shift == 128 {
-                        shift = 0;
-                        continue 'outer;
-                    }
-                }
-                break;
-            }
+impl JmapObject for Blob {
+    type Property = BlobProperty;
 
-            print!(
-                "0x{}",
-                format!("{:032x}", hash[0])
-                    .chars()
-                    .collect::<Vec<_>>()
-                    .chunks_exact(4)
-                    .map(|chunk| chunk.iter().collect::<String>())
-                    .collect::<Vec<_>>()
-                    .join("_")
-                    .replace("0000_", "")
-            );
-            if hash[1] != 0 {
-                print!(
-                    ", 0x{}",
-                    format!("{:032x}", hash[1])
-                        .chars()
-                        .collect::<Vec<_>>()
-                        .chunks_exact(4)
-                        .map(|chunk| chunk.iter().collect::<String>())
-                        .collect::<Vec<_>>()
-                        .join("_")
-                        .replace("0000_", "")
-                );
-            }
-            println!(" => Property::{},", label);
+    type Element = BlobValue;
+
+    type Id = BlobId;
+
+    type Filter = ();
+
+    type Comparator = ();
+
+    type GetArguments = BlobGetArguments;
+
+    type SetArguments<'de> = ();
+
+    type QueryArguments = ();
+
+    type CopyArguments = ();
+
+    const ID_PROPERTY: Self::Property = BlobProperty::Id;
+}
+
+impl From<BlobId> for BlobValue {
+    fn from(id: BlobId) -> Self {
+        BlobValue::BlobId(id)
+    }
+}
+
+impl JmapObjectId for BlobValue {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        match self {
+            BlobValue::BlobId(id) => Some(AnyId::BlobId(id.clone())),
+            _ => None,
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        if let BlobValue::IdReference(r) = self {
+            Some(r)
+        } else {
+            None
+        }
+    }
+}
+
+impl TryFrom<AnyId> for BlobValue {
+    type Error = ();
+
+    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
+        match value {
+            AnyId::BlobId(id) => Ok(BlobValue::BlobId(id)),
+            _ => Err(()),
         }
     }
 }

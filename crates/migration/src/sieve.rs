@@ -5,10 +5,9 @@
  */
 
 use super::object::Object;
-use crate::object::TryFromLegacy;
+use crate::object::{Property, TryFromLegacy, Value};
 use common::Server;
 use email::sieve::{SieveScript, VacationResponse};
-use jmap_proto::types::{collection::Collection, property::Property, value::Value};
 use store::{
     SUBSPACE_BITMAP_TEXT, SUBSPACE_INDEXES, SUBSPACE_PROPERTY, Serialize, U64_LEN, ValueKey,
     write::{
@@ -16,6 +15,10 @@ use store::{
     },
 };
 use trc::{AddContext, StoreEvent};
+use types::{
+    collection::Collection,
+    field::{Field, SieveField},
+};
 
 pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Result<u64> {
     // Obtain email ids
@@ -62,7 +65,7 @@ pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Resu
                 account_id,
                 collection: Collection::SieveScript.into(),
                 document_id: script_id,
-                class: ValueClass::Property(Property::Value.into()),
+                class: ValueClass::Property(Field::ARCHIVE.into()),
             })
             .await
         {
@@ -74,16 +77,16 @@ pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Resu
                         .with_collection(Collection::SieveScript)
                         .update_document(script_id)
                         .index(
-                            Property::IsActive,
+                            SieveField::IsActive,
                             if script.is_active {
                                 vec![1u8]
                             } else {
                                 vec![0u8]
                             },
                         )
-                        .index(Property::Name, script.name.to_lowercase())
+                        .index(SieveField::Name, script.name.to_lowercase())
                         .set(
-                            Property::Value,
+                            Field::ARCHIVE,
                             Archiver::new(script)
                                 .serialize()
                                 .caused_by(trc::location!())?,
@@ -111,7 +114,7 @@ pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Resu
                         account_id,
                         collection: Collection::SieveScript.into(),
                         document_id: script_id,
-                        class: ValueClass::Property(Property::Value.into()),
+                        class: ValueClass::Property(Field::ARCHIVE.into()),
                     })
                     .await
                     .is_err()
@@ -134,7 +137,7 @@ pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Resu
                 key: KeySerializer::new(U64_LEN)
                     .write(account_id)
                     .write(u8::from(Collection::SieveScript))
-                    .write(u8::from(Property::EmailIds))
+                    .write(u8::from(SieveField::Ids))
                     .finalize(),
             },
             AnyKey {
@@ -142,7 +145,7 @@ pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Resu
                 key: KeySerializer::new(U64_LEN)
                     .write(account_id)
                     .write(u8::from(Collection::SieveScript))
-                    .write(u8::from(Property::EmailIds))
+                    .write(u8::from(SieveField::Ids))
                     .write(&[u8::MAX; 8][..])
                     .finalize(),
             },

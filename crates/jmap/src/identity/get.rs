@@ -4,34 +4,30 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::changes::state::StateManager;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use directory::QueryParams;
 use email::identity::{ArchivedEmailAddress, Identity};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse, RequestArguments},
-    types::{
-        collection::{Collection, SyncCollection},
-        property::Property,
-        value::{Object, Value},
-    },
+    method::get::{GetRequest, GetResponse},
+    object::identity::{self, IdentityProperty, IdentityValue},
 };
+use jmap_tools::{Map, Value};
+use std::future::Future;
 use store::{
     rkyv::{option::ArchivedOption, vec::ArchivedVec},
     roaring::RoaringBitmap,
     write::BatchBuilder,
 };
 use trc::AddContext;
+use types::collection::{Collection, SyncCollection};
 use utils::sanitize_email;
-
-use crate::changes::state::StateManager;
-
-use std::future::Future;
 
 pub trait IdentityGet: Sync + Send {
     fn identity_get(
         &self,
-        request: GetRequest<RequestArguments>,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+        request: GetRequest<identity::Identity>,
+    ) -> impl Future<Output = trc::Result<GetResponse<identity::Identity>>> + Send;
 
     fn identity_get_or_create(
         &self,
@@ -42,18 +38,18 @@ pub trait IdentityGet: Sync + Send {
 impl IdentityGet for Server {
     async fn identity_get(
         &self,
-        mut request: GetRequest<RequestArguments>,
-    ) -> trc::Result<GetResponse> {
+        mut request: GetRequest<identity::Identity>,
+    ) -> trc::Result<GetResponse<identity::Identity>> {
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
-            Property::Id,
-            Property::Name,
-            Property::Email,
-            Property::ReplyTo,
-            Property::Bcc,
-            Property::TextSignature,
-            Property::HtmlSignature,
-            Property::MayDelete,
+            IdentityProperty::Id,
+            IdentityProperty::Name,
+            IdentityProperty::Email,
+            IdentityProperty::ReplyTo,
+            IdentityProperty::Bcc,
+            IdentityProperty::TextSignature,
+            IdentityProperty::HtmlSignature,
+            IdentityProperty::MayDelete,
         ]);
         let account_id = request.account_id.document_id();
         let identity_ids = self.identity_get_or_create(account_id).await?;
@@ -80,7 +76,7 @@ impl IdentityGet for Server {
             // Obtain the identity object
             let document_id = id.document_id();
             if !identity_ids.contains(document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let _identity = if let Some(identity) = self
@@ -89,45 +85,56 @@ impl IdentityGet for Server {
             {
                 identity
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
             let identity = _identity
                 .unarchive::<Identity>()
                 .caused_by(trc::location!())?;
-            let mut result = Object::with_capacity(properties.len());
+            let mut result = Map::with_capacity(properties.len());
             for property in &properties {
                 match property {
-                    Property::Id => {
-                        result.append(Property::Id, Value::Id(id));
+                    IdentityProperty::Id => {
+                        result.insert_unchecked(IdentityProperty::Id, IdentityValue::Id(id));
                     }
-                    Property::MayDelete => {
-                        result.append(Property::MayDelete, Value::Bool(true));
+                    IdentityProperty::MayDelete => {
+                        result.insert_unchecked(IdentityProperty::MayDelete, Value::Bool(true));
                     }
-                    Property::Name => {
-                        result.append(Property::Name, identity.name.to_string());
+                    IdentityProperty::Name => {
+                        result.insert_unchecked(IdentityProperty::Name, identity.name.to_string());
                     }
-                    Property::Email => {
-                        result.append(Property::Email, identity.email.to_string());
+                    IdentityProperty::Email => {
+                        result
+                            .insert_unchecked(IdentityProperty::Email, identity.email.to_string());
                     }
-                    Property::TextSignature => {
-                        result.append(Property::TextSignature, identity.text_signature.to_string());
+                    IdentityProperty::TextSignature => {
+                        result.insert_unchecked(
+                            IdentityProperty::TextSignature,
+                            identity.text_signature.to_string(),
+                        );
                     }
-                    Property::HtmlSignature => {
-                        result.append(Property::HtmlSignature, identity.html_signature.to_string());
+                    IdentityProperty::HtmlSignature => {
+                        result.insert_unchecked(
+                            IdentityProperty::HtmlSignature,
+                            identity.html_signature.to_string(),
+                        );
                     }
-                    Property::Bcc => {
-                        result.append(Property::Bcc, email_to_value(&identity.bcc));
+                    IdentityProperty::Bcc => {
+                        result
+                            .insert_unchecked(IdentityProperty::Bcc, email_to_value(&identity.bcc));
                     }
-                    Property::ReplyTo => {
-                        result.append(Property::ReplyTo, email_to_value(&identity.reply_to));
+                    IdentityProperty::ReplyTo => {
+                        result.insert_unchecked(
+                            IdentityProperty::ReplyTo,
+                            email_to_value(&identity.reply_to),
+                        );
                     }
                     property => {
-                        result.append(property.clone(), Value::Null);
+                        result.insert_unchecked(property.clone(), Value::Null);
                     }
                 }
             }
-            response.list.push(result);
+            response.list.push(result.into());
         }
 
         Ok(response)
@@ -200,16 +207,18 @@ impl IdentityGet for Server {
     }
 }
 
-fn email_to_value(email: &ArchivedOption<ArchivedVec<ArchivedEmailAddress>>) -> Value {
+fn email_to_value(
+    email: &ArchivedOption<ArchivedVec<ArchivedEmailAddress>>,
+) -> Value<'static, IdentityProperty, IdentityValue> {
     if let ArchivedOption::Some(email) = email {
-        Value::List(
+        Value::Array(
             email
                 .iter()
                 .map(|email| {
                     Value::Object(
-                        Object::with_capacity(2)
-                            .with_property(Property::Name, &email.name)
-                            .with_property(Property::Email, &email.email),
+                        Map::with_capacity(2)
+                            .with_key_value(IdentityProperty::Name, &email.name)
+                            .with_key_value(IdentityProperty::Email, &email.email),
                     )
                 })
                 .collect(),

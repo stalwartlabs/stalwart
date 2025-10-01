@@ -4,19 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use super::metadata::MessageMetadata;
 use common::Server;
-use jmap_proto::types::{collection::Collection, property::Property};
 use mail_parser::Message;
 use spam_filter::{
     SpamFilterInput, analysis::init::SpamFilterInit, modules::bayes::BayesClassifier,
 };
+use std::future::Future;
 use store::write::{TaskQueueClass, now};
 use trc::StoreEvent;
-use utils::BlobHash;
-
-use super::metadata::MessageMetadata;
+use types::{blob_hash::BlobHash, collection::Collection, field::EmailField};
 
 pub trait EmailBayesTrain: Sync + Send {
     fn email_bayes_train(
@@ -63,7 +60,7 @@ impl EmailBayesTrain for Server {
                 account_id,
                 Collection::Email,
                 document_id,
-                Property::BodyStructure,
+                EmailField::Metadata.into(),
             )
             .await?
             .ok_or_else(|| {

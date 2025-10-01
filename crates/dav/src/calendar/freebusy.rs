@@ -24,16 +24,16 @@ use dav_proto::{
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
 use std::str::FromStr;
 use store::{
     ahash::AHashMap,
     write::{now, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+};
 
 pub(crate) trait CalendarFreebusyRequestHandler: Sync + Send {
     fn handle_calendar_freebusy_request(

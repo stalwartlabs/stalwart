@@ -23,12 +23,12 @@ use dav_proto::{
 use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
+use store::write::{BatchBuilder, now};
+use trc::AddContext;
+use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
-use store::write::{BatchBuilder, now};
-use trc::AddContext;
 
 pub(crate) trait FileMkColRequestHandler: Sync + Send {
     fn handle_file_mkcol_request(

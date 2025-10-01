@@ -11,8 +11,8 @@ use directory::backend::internal::{
     manage::{ManageDirectory, UpdatePrincipal},
 };
 use groupware::cache::GroupwareCache;
-use jmap_proto::types::collection::SyncCollection;
 use std::net::IpAddr;
+use types::collection::SyncCollection;
 
 pub async fn test(cluster: &ClusterTest) {
     println!("Running cluster broadcast tests...");

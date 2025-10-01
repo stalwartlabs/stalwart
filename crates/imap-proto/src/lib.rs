@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
-use jmap_proto::error::set::SetErrorType;
 use protocol::capability::Capability;
+use std::borrow::Cow;
 
 pub mod parser;
 pub mod protocol;
@@ -242,25 +240,6 @@ impl StatusResponse {
             code: None,
             message: message.into(),
             rtype: ResponseType::Bye,
-        }
-    }
-}
-
-impl From<SetErrorType> for ResponseCode {
-    fn from(value: SetErrorType) -> Self {
-        match value {
-            SetErrorType::Forbidden => ResponseCode::NoPerm,
-            SetErrorType::OverQuota => ResponseCode::OverQuota,
-            SetErrorType::RateLimit | SetErrorType::TooLarge => ResponseCode::Limit,
-            SetErrorType::NotFound | SetErrorType::BlobNotFound => ResponseCode::NonExistent,
-            SetErrorType::MailboxHasChild | SetErrorType::MailboxHasEmail => {
-                ResponseCode::HasChildren
-            }
-            SetErrorType::ForbiddenFrom
-            | SetErrorType::ForbiddenMailFrom
-            | SetErrorType::ForbiddenToSend => ResponseCode::AuthorizationFailed,
-            SetErrorType::AlreadyExists => ResponseCode::AlreadyExists,
-            _ => ResponseCode::Cannot,
         }
     }
 }

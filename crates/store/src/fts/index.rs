@@ -16,6 +16,7 @@ use nlp::{
     tokenizers::word::WordTokenizer,
 };
 use trc::AddContext;
+use types::collection::Collection;
 
 use crate::{
     IterateParams, SerializeInfallible, Store, U32_LEN, ValueKey,
@@ -49,7 +50,7 @@ pub struct FtsDocument<'x, T: Into<u8> + Display + std::fmt::Debug> {
     pub(crate) parts: Vec<Text<'x, T>>,
     pub(crate) default_language: Language,
     pub(crate) account_id: u32,
-    pub(crate) collection: u8,
+    pub(crate) collection: Collection,
     pub(crate) document_id: u32,
 }
 
@@ -60,7 +61,7 @@ impl<'x, T: Into<u8> + Display + std::fmt::Debug> FtsDocument<'x, T> {
             default_language,
             account_id: 0,
             document_id: 0,
-            collection: 0,
+            collection: Collection::None,
         }
     }
 
@@ -74,8 +75,8 @@ impl<'x, T: Into<u8> + Display + std::fmt::Debug> FtsDocument<'x, T> {
         self
     }
 
-    pub fn with_collection(mut self, collection: impl Into<u8>) -> Self {
-        self.collection = collection.into();
+    pub fn with_collection(mut self, collection: Collection) -> Self {
+        self.collection = collection;
         self
     }
 
@@ -238,7 +239,7 @@ impl Store {
     pub async fn fts_remove(
         &self,
         account_id: u32,
-        collection: u8,
+        collection: Collection,
         document_ids: &impl DocumentSet,
     ) -> trc::Result<()> {
         // Find keys to delete
@@ -247,7 +248,7 @@ impl Store {
             IterateParams::new(
                 ValueKey {
                     account_id,
-                    collection,
+                    collection: collection as u8,
                     document_id: 0,
                     class: ValueClass::FtsIndex(BitmapHash {
                         hash: [0; 8],
@@ -256,7 +257,7 @@ impl Store {
                 },
                 ValueKey {
                     account_id: account_id + 1,
-                    collection,
+                    collection: collection as u8,
                     document_id: 0,
                     class: ValueClass::FtsIndex(BitmapHash {
                         hash: [0; 8],

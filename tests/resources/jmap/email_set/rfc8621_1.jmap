@@ -53,7 +53,7 @@
       },
       {
         "name": "Content-Transfer-Encoding",
-        "value": " 7bit"
+        "value": " quoted-printable"
       }
     ],
     "type": "text/plain",
@@ -105,7 +105,7 @@
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": " 7bit"
+          "value": " quoted-printable"
         }
       ],
       "type": "text/plain",
@@ -151,7 +151,7 @@
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": " 7bit"
+          "value": " quoted-printable"
         }
       ],
       "type": "text/plain",

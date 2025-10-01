@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{future::Future, sync::Arc};
-
 use common::{Server, auth::AccessToken};
 use directory::backend::internal::manage;
 use email::message::crypto::{
@@ -13,15 +11,16 @@ use email::message::crypto::{
     EncryptionMethod, EncryptionParams, EncryptionType, try_parse_certs,
 };
 use http_proto::*;
-use jmap_proto::types::{collection::Collection, property::Property};
 use mail_builder::encoders::base64::base64_encode_mime;
 use mail_parser::MessageParser;
 use serde_json::json;
+use std::{future::Future, sync::Arc};
 use store::{
     Deserialize, Serialize,
     write::{AlignedBytes, Archive, Archiver, BatchBuilder},
 };
 use trc::AddContext;
+use types::{collection::Collection, field::PrincipalField};
 
 pub trait CryptoHandler: Sync + Send {
     fn handle_crypto_get(
@@ -43,7 +42,7 @@ impl CryptoHandler for Server {
                 access_token.primary_id(),
                 Collection::Principal,
                 0,
-                Property::Parameters,
+                PrincipalField::EncryptionKeys.into(),
             )
             .await?
         {
@@ -96,7 +95,7 @@ impl CryptoHandler for Server {
                     .with_account_id(access_token.primary_id())
                     .with_collection(Collection::Principal)
                     .update_document(0)
-                    .clear(Property::Parameters);
+                    .clear(PrincipalField::EncryptionKeys);
                 self.core.storage.data.write(batch.build_all()).await?;
                 return Ok(JsonResponse::new(json!({
                     "data": (),
@@ -146,7 +145,7 @@ impl CryptoHandler for Server {
             .with_account_id(access_token.primary_id())
             .with_collection(Collection::Principal)
             .update_document(0)
-            .set(Property::Parameters, params);
+            .set(PrincipalField::EncryptionKeys, params);
         self.core.storage.data.write(batch.build_all()).await?;
 
         Ok(JsonResponse::new(json!({

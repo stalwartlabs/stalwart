@@ -7,37 +7,35 @@
 use common::Server;
 use directory::QueryParams;
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse, RequestArguments},
-    types::{
-        collection::Collection,
-        property::Property,
-        state::State,
-        value::{Object, Value},
-    },
+    method::get::{GetRequest, GetResponse},
+    object::principal::{Principal, PrincipalProperty, PrincipalValue},
+    types::state::State,
 };
+use jmap_tools::{Map, Value};
 use std::future::Future;
+use types::collection::Collection;
 
 pub trait PrincipalGet: Sync + Send {
     fn principal_get(
         &self,
-        request: GetRequest<RequestArguments>,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+        request: GetRequest<Principal>,
+    ) -> impl Future<Output = trc::Result<GetResponse<Principal>>> + Send;
 }
 
 impl PrincipalGet for Server {
     async fn principal_get(
         &self,
-        mut request: GetRequest<RequestArguments>,
-    ) -> trc::Result<GetResponse> {
+        mut request: GetRequest<Principal>,
+    ) -> trc::Result<GetResponse<Principal>> {
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
-            Property::Id,
-            Property::Type,
-            Property::Name,
-            Property::Description,
-            Property::Email,
-            //Property::Timezone,
-            //Property::Capabilities,
+            PrincipalProperty::Id,
+            PrincipalProperty::Type,
+            PrincipalProperty::Name,
+            PrincipalProperty::Description,
+            PrincipalProperty::Email,
+            //PrincipalProperty::Timezone,
+            //PrincipalProperty::Capabilities,
         ]);
         let principal_ids = self
             .get_document_ids(u32::MAX, Collection::Principal)
@@ -70,31 +68,33 @@ impl PrincipalGet for Server {
             {
                 principal
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
 
-            let mut result = Object::with_capacity(properties.len());
+            let mut result = Map::with_capacity(properties.len());
             for property in &properties {
                 let value = match property {
-                    Property::Id => Value::Id(id),
-                    Property::Type => Value::Text(principal.typ().to_jmap().to_string()),
-                    Property::Name => Value::Text(principal.name().to_string()),
-                    Property::Description => principal
+                    PrincipalProperty::Id => Value::Element(PrincipalValue::Id(id)),
+                    PrincipalProperty::Type => {
+                        Value::Str(principal.typ().to_jmap().to_string().into())
+                    }
+                    PrincipalProperty::Name => Value::Str(principal.name().to_string().into()),
+                    PrincipalProperty::Description => principal
                         .description()
-                        .map(|v| Value::Text(v.to_string()))
+                        .map(|v| Value::Str(v.to_string().into()))
                         .unwrap_or(Value::Null),
-                    Property::Email => principal
+                    PrincipalProperty::Email => principal
                         .emails
                         .first()
-                        .map(|email| Value::Text(email.to_string()))
+                        .map(|email| Value::Str(email.to_string().into()))
                         .unwrap_or(Value::Null),
                     _ => Value::Null,
                 };
 
-                result.append(property.clone(), value);
+                result.insert_unchecked(property.clone(), value);
             }
-            response.list.push(result);
+            response.list.push(result.into());
         }
 
         Ok(response)

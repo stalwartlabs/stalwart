@@ -1,6 +1,6 @@
 [package]
 name = "http"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
@@ -17,9 +17,10 @@ groupware = { path = "../groupware" }
 spam-filter = { path = "../spam-filter" }
 http_proto = { path = "../http-proto" }
 jmap_proto = { path = "../jmap-proto" }
+types = { path = "../types" }
 directory = { path =  "../directory" }
 services = { path =  "../services" }
-smtp-proto = { version = "0.1" }
+smtp-proto = { version = "0.2" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = { version = "0.4" }
 mail-auth = { version = "0.7.1", features = ["generate"] }

@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken};
-use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
-use groupware::{cache::GroupwareCache, contact::ContactCard};
-use http_proto::HttpResponse;
-use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
-use trc::AddContext;
-
 use crate::{
     DavError, DavMethod,
     common::{
@@ -22,6 +11,16 @@ use crate::{
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
+};
+use common::{Server, auth::AccessToken};
+use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
+use groupware::{cache::GroupwareCache, contact::ContactCard};
+use http_proto::HttpResponse;
+use hyper::StatusCode;
+use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
 };
 
 pub(crate) trait CardGetRequestHandler: Sync + Send {

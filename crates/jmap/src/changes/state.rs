@@ -5,9 +5,10 @@
  */
 
 use common::{MessageStoreCache, Server};
-use jmap_proto::types::{collection::SyncCollection, state::State};
+use jmap_proto::types::state::State;
 use std::future::Future;
 use trc::AddContext;
+use types::collection::SyncCollection;
 
 pub trait StateManager: Sync + Send {
     fn get_state(
@@ -35,7 +36,7 @@ impl StateManager for Server {
         self.core
             .storage
             .data
-            .get_last_change_id(account_id, collection)
+            .get_last_change_id(account_id, collection.into())
             .await
             .caused_by(trc::location!())
             .map(State::from)

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::download::BlobDownload;
 use common::{Server, auth::AccessToken};
 use email::message::metadata::MessageData;
 use jmap_proto::{
@@ -11,33 +12,24 @@ use jmap_proto::{
         get::{GetRequest, GetResponse},
         lookup::{BlobInfo, BlobLookupRequest, BlobLookupResponse},
     },
-    object::blob::GetArguments,
-    types::{
-        MaybeUnparsable,
-        collection::Collection,
-        id::Id,
-        property::{DataProperty, DigestProperty, Property},
-        type_state::DataType,
-        value::{Object, Value},
-    },
+    object::blob::{Blob, BlobProperty, BlobValue, DataProperty, DigestProperty},
+    request::MaybeInvalid,
 };
+use jmap_tools::{Map, Value};
 use mail_builder::encoders::base64::base64_encode;
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
-use store::BlobClass;
-use trc::AddContext;
-use utils::map::vec_map::VecMap;
-
 use std::future::Future;
-
-use super::download::BlobDownload;
+use trc::AddContext;
+use types::{blob::BlobClass, collection::Collection, id::Id, type_state::DataType};
+use utils::map::vec_map::VecMap;
 
 pub trait BlobOperations: Sync + Send {
     fn blob_get(
         &self,
-        request: GetRequest<GetArguments>,
+        request: GetRequest<Blob>,
         access_token: &AccessToken,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+    ) -> impl Future<Output = trc::Result<GetResponse<Blob>>> + Send;
 
     fn blob_lookup(
         &self,
@@ -48,16 +40,16 @@ pub trait BlobOperations: Sync + Send {
 impl BlobOperations for Server {
     async fn blob_get(
         &self,
-        mut request: GetRequest<GetArguments>,
+        mut request: GetRequest<Blob>,
         access_token: &AccessToken,
-    ) -> trc::Result<GetResponse> {
+    ) -> trc::Result<GetResponse<Blob>> {
         let ids = request
-            .unwrap_blob_ids(self.core.jmap.get_max_objects)?
+            .unwrap_ids(self.core.jmap.get_max_objects)?
             .unwrap_or_default();
         let properties = request.unwrap_properties(&[
-            Property::Id,
-            Property::Data(DataProperty::Default),
-            Property::Size,
+            BlobProperty::Id,
+            BlobProperty::Data(DataProperty::Default),
+            BlobProperty::Size,
         ]);
         let mut response = GetResponse {
             account_id: request.account_id.into(),
@@ -75,12 +67,12 @@ impl BlobOperations for Server {
 
         for blob_id in ids {
             if let Some(bytes) = self.blob_download(&blob_id, access_token).await? {
-                let mut blob = Object::with_capacity(properties.len());
+                let mut blob = Map::with_capacity(properties.len());
                 let bytes_range = if range_from == 0 && range_to == usize::MAX {
                     &bytes[..]
                 } else {
                     let range_to = if range_to != usize::MAX && range_to > bytes.len() {
-                        blob.append(Property::IsTruncated, true);
+                        blob.insert_unchecked(BlobProperty::IsTruncated, true);
                         bytes.len()
                     } else {
                         range_to
@@ -90,10 +82,10 @@ impl BlobOperations for Server {
 
                 for property in &properties {
                     let mut property = property.clone();
-                    let value: Value = match &property {
-                        Property::Id => Value::BlobId(blob_id.clone()),
-                        Property::Size => bytes.len().into(),
-                        Property::Digest(digest) => match digest {
+                    let value: Value<'static, BlobProperty, BlobValue> = match &property {
+                        BlobProperty::Id => Value::Element(BlobValue::BlobId(blob_id.clone())),
+                        BlobProperty::Size => bytes.len().into(),
+                        BlobProperty::Digest(digest) => match digest {
                             DigestProperty::Sha => {
                                 let mut hasher = Sha1::new();
                                 hasher.update(bytes_range);
@@ -120,11 +112,11 @@ impl BlobOperations for Server {
                             }
                         }
                         .into(),
-                        Property::Data(data) => match data {
+                        BlobProperty::Data(data) => match data {
                             DataProperty::AsText => match std::str::from_utf8(bytes_range) {
                                 Ok(text) => text.to_string().into(),
                                 Err(_) => {
-                                    blob.append(Property::IsEncodingProblem, true);
+                                    blob.insert_unchecked(BlobProperty::IsEncodingProblem, true);
                                     Value::Null
                                 }
                             },
@@ -135,12 +127,12 @@ impl BlobOperations for Server {
                             }
                             DataProperty::Default => match std::str::from_utf8(bytes_range) {
                                 Ok(text) => {
-                                    property = Property::Data(DataProperty::AsText);
+                                    property = BlobProperty::Data(DataProperty::AsText);
                                     text.to_string().into()
                                 }
                                 Err(_) => {
-                                    property = Property::Data(DataProperty::AsBase64);
-                                    blob.append(Property::IsEncodingProblem, true);
+                                    property = BlobProperty::Data(DataProperty::AsBase64);
+                                    blob.insert_unchecked(BlobProperty::IsEncodingProblem, true);
                                     String::from_utf8(
                                         base64_encode(bytes_range).unwrap_or_default(),
                                     )
@@ -151,13 +143,13 @@ impl BlobOperations for Server {
                         },
                         _ => Value::Null,
                     };
-                    blob.append(property, value);
+                    blob.insert_unchecked(property, value);
                 }
 
                 // Add result to response
-                response.list.push(blob);
+                response.list.push(blob.into());
             } else {
-                response.not_found.push(blob_id.into());
+                response.not_found.push(blob_id);
             }
         }
 
@@ -173,7 +165,7 @@ impl BlobOperations for Server {
             .type_names
             .into_iter()
             .map(|tn| match tn {
-                MaybeUnparsable::Value(value) => {
+                MaybeInvalid::Value(value) => {
                     match &value {
                         DataType::Email => {
                             include_email = true;
@@ -189,7 +181,7 @@ impl BlobOperations for Server {
 
                     Ok(value)
                 }
-                MaybeUnparsable::ParseError(_) => Err(trc::JmapEvent::UnknownDataType.into_err()),
+                MaybeInvalid::Invalid(_) => Err(trc::JmapEvent::UnknownDataType.into_err()),
             })
             .collect::<Result<Vec<_>, _>>()?;
         let req_account_id = request.account_id.document_id();
@@ -201,7 +193,7 @@ impl BlobOperations for Server {
 
         for id in request.ids {
             match id {
-                MaybeUnparsable::Value(id) => {
+                MaybeInvalid::Value(id) => {
                     let mut matched_ids = VecMap::new();
 
                     match &id.class {
@@ -259,7 +251,7 @@ impl BlobOperations for Server {
                         BlobClass::Reserved { account_id, .. } if *account_id == req_account_id => {
                         }
                         _ => {
-                            response.not_found.push(MaybeUnparsable::Value(id));
+                            response.not_found.push(MaybeInvalid::Value(id));
                             continue;
                         }
                     }

@@ -10,7 +10,7 @@ use store::{
     write::{AnyClass, BatchBuilder, TaskQueueClass, ValueClass, key::DeserializeBigEndian, now},
 };
 use trc::AddContext;
-use utils::BlobHash;
+use types::blob_hash::BlobHash;
 
 pub(crate) async fn migrate_tasks_v011(server: &Server) -> trc::Result<()> {
     let from_key = ValueKey::<ValueClass> {

@@ -4,6 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::propfind::PrincipalPropFind;
+use crate::{
+    DavError,
+    common::{
+        DavQuery, DavQueryResource,
+        propfind::PropFindRequestHandler,
+        uri::{DavUriResource, UriResource},
+    },
+};
 use common::{Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders,
@@ -15,19 +24,8 @@ use dav_proto::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::collection::Collection;
 use store::roaring::RoaringBitmap;
-
-use crate::{
-    DavError,
-    common::{
-        DavQuery, DavQueryResource,
-        propfind::PropFindRequestHandler,
-        uri::{DavUriResource, UriResource},
-    },
-};
-
-use super::propfind::PrincipalPropFind;
+use types::collection::Collection;
 
 pub(crate) trait PrincipalMatching: Sync + Send {
     fn handle_principal_match(

@@ -4,30 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::store::deflate_test_resource;
+use nlp::language::Language;
 use std::{
     fmt::Display,
     io::Write,
     sync::{Arc, Mutex},
     time::Instant,
 };
-
-use jmap_proto::types::keyword::Keyword;
-use nlp::language::Language;
 use store::{
     FtsStore, SerializeInfallible,
     ahash::AHashMap,
     fts::{Field, FtsFilter, index::FtsDocument},
     query::sort::Pagination,
-    write::{TagValue, ValueClass},
+    write::{BitmapClass, Operation, TagValue, ValueClass},
 };
-
 use store::{
     Store, ValueKey,
     query::{Comparator, Filter},
     write::BatchBuilder,
 };
-
-use crate::store::deflate_test_resource;
+use types::collection::Collection;
 
 pub const FIELDS: [&str; 20] = [
     "id",
@@ -52,7 +49,7 @@ pub const FIELDS: [&str; 20] = [
     "url",
 ];
 
-const COLLECTION_ID: u8 = 0;
+const COLLECTION_ID: Collection = Collection::Email;
 
 enum FieldType {
     Keyword,
@@ -145,10 +142,16 @@ pub async fn test(db: Store, fts_store: FtsStore, do_insert: bool) {
                         match FIELDS_OPTIONS[pos] {
                             FieldType::Text => {
                                 if !field.is_empty() {
-                                    builder.index(field_id, field.to_lowercase()).set(
-                                        ValueClass::Property(field_id),
-                                        field.to_lowercase().into_bytes(),
-                                    );
+                                    builder
+                                        .any_op(Operation::Index {
+                                            field: field_id,
+                                            key: field.to_lowercase().into_bytes(),
+                                            set: true,
+                                        })
+                                        .set(
+                                            ValueClass::Property(field_id),
+                                            field.to_lowercase().into_bytes(),
+                                        );
                                 }
                             }
                             FieldType::FullText => {
@@ -159,14 +162,22 @@ pub async fn test(db: Store, fts_store: FtsStore, do_insert: bool) {
                                         Language::English,
                                     );
                                     if field_id == 7 {
-                                        builder.index(field_id, field.to_lowercase());
+                                        builder.any_op(Operation::Index {
+                                            field: field_id,
+                                            key: field.to_lowercase().into_bytes(),
+                                            set: true,
+                                        });
                                     }
                                 }
                             }
                             FieldType::Integer => {
                                 let field = field.parse::<u32>().unwrap_or(0);
                                 builder
-                                    .index(field_id, field.serialize())
+                                    .any_op(Operation::Index {
+                                        field: field_id,
+                                        key: field.serialize(),
+                                        set: true,
+                                    })
                                     .set(ValueClass::Property(field_id), field.serialize());
                             }
                             FieldType::Keyword => {
@@ -176,11 +187,20 @@ pub async fn test(db: Store, fts_store: FtsStore, do_insert: bool) {
                                             ValueClass::Property(field_id),
                                             field.to_lowercase().into_bytes(),
                                         )
-                                        .tag(
-                                            field_id,
-                                            TagValue::Text(field.to_lowercase().into_bytes()),
-                                        )
-                                        .index(field_id, field.to_lowercase());
+                                        .any_op(Operation::Bitmap {
+                                            class: BitmapClass::Tag {
+                                                field: field_id,
+                                                value: TagValue::Text(
+                                                    field.to_lowercase().into_bytes(),
+                                                ),
+                                            },
+                                            set: true,
+                                        })
+                                        .any_op(Operation::Index {
+                                            field: field_id,
+                                            key: field.to_lowercase().into_bytes(),
+                                            set: true,
+                                        });
                                 }
                             }
                         }
@@ -327,7 +347,7 @@ pub async fn test_filter(db: Store, fts: FtsStore) {
         (
             vec![
                 Filter::contains(fields_u8["artist"], "kunst, mauro"),
-                Filter::is_in_bitmap(fields_u8["artistRole"], Keyword::Other("artist".into())),
+                Filter::is_in_bitmap(fields_u8["artistRole"], TagValue::Text("artist".into())),
                 Filter::Or,
                 Filter::eq(fields_u8["year"], 1969u32.serialize()),
                 Filter::eq(fields_u8["year"], 1971u32.serialize()),
@@ -448,7 +468,7 @@ pub async fn test_filter(db: Store, fts: FtsStore) {
             results.push(
                 db.get_value::<String>(ValueKey {
                     account_id: 0,
-                    collection: COLLECTION_ID,
+                    collection: COLLECTION_ID.into(),
                     document_id: document_id as u32,
                     class: ValueClass::Property(fields_u8["accession_number"]),
                 })
@@ -538,7 +558,7 @@ pub async fn test_sort(db: Store) {
             results.push(
                 db.get_value::<String>(ValueKey {
                     account_id: 0,
-                    collection: COLLECTION_ID,
+                    collection: COLLECTION_ID.into(),
                     document_id: document_id as u32,
                     class: ValueClass::Property(fields["accession_number"]),
                 })

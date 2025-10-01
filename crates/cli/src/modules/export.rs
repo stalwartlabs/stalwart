@@ -147,7 +147,7 @@ pub async fn fetch_mailboxes(
             mailbox::Property::ParentId,
             mailbox::Property::Role,
             mailbox::Property::SortOrder,
-            mailbox::Property::ACL,
+            mailbox::Property::ShareWith,
         ]);
 
         let mut response = request

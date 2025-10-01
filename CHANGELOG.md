@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.13.4] - 2025-09-30
+
+If you are upgrading from v0.11.x or v0.12.x, this version includes **breaking changes** to the message queue and MTA configuration. Please read the [UPGRADING.md](https://github.com/stalwartlabs/stalwart/blob/main/UPGRADING.md) file for more information on how to upgrade from previous versions.
+
+## Added
+
+## Changed
+- JMAP: Protocol layer rewrite for zero-copy deserialization and architectural improvements.
+
+## Fixed
+- JMAP: References to previous method fail when there are no results (#1507).
+- JMAP: Enforce quota checks on `Blob/copy`.
+- JMAP: `Mailbox/get` fails without `accountId` argument (#1936).
+- JMAP: Do not return `invalidProperties` when email update doesn't contain changes (#1139)
+- IMAP: Unbounded memory allocation in request parser.
+- IMAP: Wrong permission checked for GETACL.
+- iTIP: Include date properties in `REPLY` (#2102).
+- OIDC: Do not set `username` field if it is the same as the `email` field.
+- Telemetry: Fix `calculateMetrics` housekeeper task (#2155).
+- Directory: Always use `rsplit` to extract the domain part from email addresses.
+
 ## [0.13.3] - 2025-09-10
 
 If you are upgrading from v0.11.x or v0.12.x, this version includes **breaking changes** to the message queue and MTA configuration. Please read the [UPGRADING.md](https://github.com/stalwartlabs/stalwart/blob/main/UPGRADING.md) file for more information on how to upgrade from previous versions.
@@ -26,9 +47,9 @@ If you are upgrading from v0.11.x or v0.12.x, this version includes **breaking c
 - IMAP: Include `administer` permission in ACL responses.
 - IMAP: Add owner rights to ACL get responses.
 - IMAP: Do not auto-train Bayes when moving messages from Junk to Trash.
-- IMAP/ManageSieve: Increase maximum quoted argument size (fixes #2039).
-- CalDAV: Limit recurrence expansions in calendar reports.
-- WebDAV: Do not fix percent encoding on WebDAV FS (closes #2036).
+- IMAP/ManageSieve: Increase maximum quoted argument size (#2039).
+- CalDAV: Limit recurrence expansions in calendar reports ([CVE-2025-59045](https://github.com/stalwartlabs/stalwart/security/advisories/GHSA-xv4r-q6gr-6pfg)).
+- WebDAV: Do not fix percent encoding on WebDAV FS (#2036).
 
 ## [0.13.2] - 2025-07-28
 

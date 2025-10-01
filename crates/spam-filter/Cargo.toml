@@ -1,6 +1,6 @@
 [package]
 name = "spam-filter"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
@@ -10,7 +10,7 @@ nlp = { path = "../nlp" }
 store = { path = "../store" }
 trc = { path = "../trc" }
 common = { path =  "../common" }
-smtp-proto = { version = "0.1", features = ["rkyv"] }
+smtp-proto = { version = "0.2", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
 mail-builder = { version = "0.4" }
 mail-auth = { version = "0.7.1" }

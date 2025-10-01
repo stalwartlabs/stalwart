@@ -5,9 +5,13 @@
  */
 
 use trc::AddContext;
+use types::collection::{SyncCollection, VanishedCollection};
 use utils::codec::leb128::Leb128Iterator;
 
-use crate::{IterateParams, LogKey, Store, U32_LEN, U64_LEN, write::key::DeserializeBigEndian};
+use crate::{
+    IterateParams, LogKey, Store, U32_LEN, U64_LEN,
+    write::{LogCollection, key::DeserializeBigEndian},
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Change {
@@ -59,10 +63,11 @@ impl Store {
     pub async fn changes(
         &self,
         account_id: u32,
-        collection: impl Into<u8> + Sync + Send,
+        collection: LogCollection,
         query: Query,
     ) -> trc::Result<Changes> {
-        let collection = collection.into();
+        let collection = u8::from(collection);
+
         let (is_inclusive, from_change_id, to_change_id) = match query {
             Query::All => (true, 0, u64::MAX),
             Query::Since(change_id) => (false, change_id, u64::MAX),
@@ -129,10 +134,10 @@ impl Store {
     pub async fn vanished<T: DeserializeVanished>(
         &self,
         account_id: u32,
-        collection: impl Into<u8> + Sync + Send,
+        collection: LogCollection,
         query: Query,
     ) -> trc::Result<Vec<T>> {
-        let collection = collection.into();
+        let collection = u8::from(collection);
         let (is_inclusive, from_change_id, to_change_id) = match query {
             Query::All => (true, 0, u64::MAX),
             Query::Since(change_id) => (false, change_id, u64::MAX),
@@ -185,10 +190,9 @@ impl Store {
     pub async fn get_last_change_id(
         &self,
         account_id: u32,
-        collection: impl Into<u8> + Sync + Send,
+        collection: LogCollection,
     ) -> trc::Result<Option<u64>> {
-        let collection = collection.into();
-
+        let collection = u8::from(collection);
         let from_key = LogKey {
             account_id,
             collection,
@@ -216,6 +220,18 @@ impl Store {
         .caused_by(trc::location!())?;
 
         Ok(last_change_id)
+    }
+}
+
+impl From<VanishedCollection> for LogCollection {
+    fn from(value: VanishedCollection) -> Self {
+        LogCollection::Vanished(value)
+    }
+}
+
+impl From<SyncCollection> for LogCollection {
+    fn from(value: SyncCollection) -> Self {
+        LogCollection::Sync(value)
     }
 }
 

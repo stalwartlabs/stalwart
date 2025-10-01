@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_proto::types::blob::BlobSection;
+use crate::Server;
 use mail_parser::{
     Encoding,
     decoders::{base64::base64_decode, quoted_printable::quoted_printable_decode},
 };
-use utils::BlobHash;
-
-use crate::Server;
+use types::{blob::BlobSection, blob_hash::BlobHash};
 
 impl Server {
     pub async fn get_blob_section(

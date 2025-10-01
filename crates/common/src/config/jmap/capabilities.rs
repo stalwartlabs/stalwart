@@ -4,18 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::AHashSet;
-use jmap_proto::{
-    request::capability::{
-        BlobCapabilities, Capabilities, Capability, CoreCapabilities, EmptyCapabilities,
-        MailCapabilities, SieveAccountCapabilities, SieveSessionCapabilities,
-        SubmissionCapabilities,
-    },
-    types::type_state::DataType,
-};
-use utils::{config::Config, map::vec_map::VecMap};
-
 use super::settings::JmapConfig;
+use ahash::AHashSet;
+use jmap_proto::request::capability::{
+    BlobCapabilities, Capabilities, Capability, CoreCapabilities, EmptyCapabilities,
+    MailCapabilities, SieveAccountCapabilities, SieveSessionCapabilities, SubmissionCapabilities,
+};
+use types::type_state::DataType;
+use utils::{config::Config, map::vec_map::VecMap};
 
 impl JmapConfig {
     pub fn add_capabilities(&mut self, config: &mut Config) {

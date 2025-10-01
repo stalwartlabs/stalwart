@@ -8,10 +8,7 @@ use super::{ArcSeal, AuthResult, DkimSign};
 use crate::{
     core::{Session, SessionAddress, State},
     inbound::milter::Modification,
-    queue::{
-        self, DomainPart, Message, MessageSource, MessageWrapper, QueueEnvelope,
-        quota::HasQueueQuota,
-    },
+    queue::{self, Message, MessageSource, MessageWrapper, QueueEnvelope, quota::HasQueueQuota},
     reporting::analysis::AnalyzeReport,
     scripts::ScriptResult,
 };
@@ -44,7 +41,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 use trc::SmtpEvent;
-use utils::config::Rate;
+use utils::{DomainPart, config::Rate};
 
 impl<T: SessionStream> Session<T> {
     pub async fn queue_message(&mut self) -> Cow<'static, [u8]> {
@@ -668,9 +665,20 @@ impl<T: SessionStream> Session<T> {
 
             // Queue message
             let source = if !self.is_authenticated() {
-                MessageSource::Unauthenticated(
-                    dmarc_result.is_some_and(|result| result == DmarcResult::Pass),
-                )
+                let is_dmarc_authenticated =
+                    dmarc_result.is_some_and(|result| result == DmarcResult::Pass);
+
+                #[cfg(feature = "test_mode")]
+                {
+                    MessageSource::Unauthenticated(
+                        is_dmarc_authenticated || message.message.return_path.starts_with("dmarc-"),
+                    )
+                }
+
+                #[cfg(not(feature = "test_mode"))]
+                {
+                    MessageSource::Unauthenticated(is_dmarc_authenticated)
+                }
             } else {
                 MessageSource::Authenticated
             };

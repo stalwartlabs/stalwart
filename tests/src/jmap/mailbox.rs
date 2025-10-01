@@ -15,9 +15,10 @@ use jmap_client::{
     },
     mailbox::{self, Mailbox, Role},
 };
-use jmap_proto::types::{id::Id, state::State};
+use jmap_proto::types::state::State;
 use serde::{Deserialize, Serialize};
 use store::ahash::AHashMap;
+use types::id::Id;
 
 use crate::jmap::assert_is_empty;
 

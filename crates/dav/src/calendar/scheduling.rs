@@ -32,9 +32,9 @@ use dav_proto::{
 use groupware::{DestroyArchive, cache::GroupwareCache, calendar::CalendarScheduling};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::collection::{Collection, SyncCollection};
 use store::{ahash::AHashMap, write::BatchBuilder};
 use trc::AddContext;
+use types::collection::{Collection, SyncCollection};
 use utils::sanitize_email;
 
 pub(crate) trait CalendarSchedulingHandler: Sync + Send {

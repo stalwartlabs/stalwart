@@ -20,15 +20,9 @@ use imap_proto::{
     },
     receiver::Request,
 };
-use jmap_proto::types::{
-    collection::{Collection, SyncCollection},
-    id::Id,
-    keyword::Keyword,
-    property::Property,
-};
 use mail_parser::HeaderName;
 use nlp::language::Language;
-use std::{sync::Arc, time::Instant};
+use std::{str::FromStr, sync::Arc, time::Instant};
 use store::{
     SerializeInfallible,
     fts::{Field, FilterGroup, FtsFilter, IntoFilterGroup},
@@ -38,6 +32,12 @@ use store::{
 };
 use tokio::sync::watch;
 use trc::AddContext;
+use types::{
+    collection::{Collection, SyncCollection},
+    field::EmailField,
+    id::Id,
+    keyword::Keyword,
+};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_search(
@@ -155,25 +155,25 @@ impl<T: SessionStream> SessionData<T> {
                         sort.into_iter()
                             .map(|item| match item.sort {
                                 search::Sort::Arrival => {
-                                    query::Comparator::field(Property::ReceivedAt, item.ascending)
+                                    query::Comparator::field(EmailField::ReceivedAt, item.ascending)
                                 }
                                 search::Sort::Cc => {
-                                    query::Comparator::field(Property::Cc, item.ascending)
+                                    query::Comparator::field(EmailField::Cc, item.ascending)
                                 }
                                 search::Sort::Date => {
-                                    query::Comparator::field(Property::SentAt, item.ascending)
+                                    query::Comparator::field(EmailField::SentAt, item.ascending)
                                 }
                                 search::Sort::From | search::Sort::DisplayFrom => {
-                                    query::Comparator::field(Property::From, item.ascending)
+                                    query::Comparator::field(EmailField::From, item.ascending)
                                 }
                                 search::Sort::Size => {
-                                    query::Comparator::field(Property::Size, item.ascending)
+                                    query::Comparator::field(EmailField::Size, item.ascending)
                                 }
                                 search::Sort::Subject => {
-                                    query::Comparator::field(Property::Subject, item.ascending)
+                                    query::Comparator::field(EmailField::Subject, item.ascending)
                                 }
                                 search::Sort::To | search::Sort::DisplayTo => {
-                                    query::Comparator::field(Property::To, item.ascending)
+                                    query::Comparator::field(EmailField::To, item.ascending)
                                 }
                             })
                             .collect::<Vec<_>>(),
@@ -464,7 +464,7 @@ impl<T: SessionStream> SessionData<T> {
                     }
                     search::Filter::Before(date) => {
                         filters.push(query::Filter::lt(
-                            Property::ReceivedAt,
+                            EmailField::ReceivedAt,
                             (date as u64).serialize(),
                         ));
                     }
@@ -491,16 +491,16 @@ impl<T: SessionStream> SessionData<T> {
                         )));
                     }
                     search::Filter::Larger(size) => {
-                        filters.push(query::Filter::gt(Property::Size, size.serialize()));
+                        filters.push(query::Filter::gt(EmailField::Size, size.serialize()));
                     }
                     search::Filter::On(date) => {
                         filters.push(query::Filter::And);
                         filters.push(query::Filter::ge(
-                            Property::ReceivedAt,
+                            EmailField::ReceivedAt,
                             (date as u64).serialize(),
                         ));
                         filters.push(query::Filter::lt(
-                            Property::ReceivedAt,
+                            EmailField::ReceivedAt,
                             ((date + 86400) as u64).serialize(),
                         ));
                         filters.push(query::Filter::End);
@@ -512,36 +512,36 @@ impl<T: SessionStream> SessionData<T> {
                     }
                     search::Filter::SentBefore(date) => {
                         filters.push(query::Filter::lt(
-                            Property::SentAt,
+                            EmailField::SentAt,
                             (date as u64).serialize(),
                         ));
                     }
                     search::Filter::SentOn(date) => {
                         filters.push(query::Filter::And);
                         filters.push(query::Filter::ge(
-                            Property::SentAt,
+                            EmailField::SentAt,
                             (date as u64).serialize(),
                         ));
                         filters.push(query::Filter::lt(
-                            Property::SentAt,
+                            EmailField::SentAt,
                             ((date + 86400) as u64).serialize(),
                         ));
                         filters.push(query::Filter::End);
                     }
                     search::Filter::SentSince(date) => {
                         filters.push(query::Filter::ge(
-                            Property::SentAt,
+                            EmailField::SentAt,
                             (date as u64).serialize(),
                         ));
                     }
                     search::Filter::Since(date) => {
                         filters.push(query::Filter::ge(
-                            Property::ReceivedAt,
+                            EmailField::ReceivedAt,
                             (date as u64).serialize(),
                         ));
                     }
                     search::Filter::Smaller(size) => {
-                        filters.push(query::Filter::lt(Property::Size, size.serialize()));
+                        filters.push(query::Filter::lt(EmailField::Size, size.serialize()));
                     }
                     search::Filter::Unanswered => {
                         filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
@@ -603,7 +603,7 @@ impl<T: SessionStream> SessionData<T> {
                         filters.push(query::Filter::is_in_set(self.get_recent(&mailbox.id)));
                         filters.push(query::Filter::Not);
                         filters.push(query::Filter::is_in_bitmap(
-                            Property::Keywords,
+                            EmailField::Keywords,
                             Keyword::Seen,
                         ));
                         filters.push(query::Filter::End);
@@ -616,13 +616,13 @@ impl<T: SessionStream> SessionData<T> {
                     }
                     search::Filter::Older(secs) => {
                         filters.push(query::Filter::le(
-                            Property::ReceivedAt,
+                            EmailField::ReceivedAt,
                             now().saturating_sub(secs as u64).serialize(),
                         ));
                     }
                     search::Filter::Younger(secs) => {
                         filters.push(query::Filter::ge(
-                            Property::ReceivedAt,
+                            EmailField::ReceivedAt,
                             now().saturating_sub(secs as u64).serialize(),
                         ));
                     }
@@ -633,7 +633,7 @@ impl<T: SessionStream> SessionData<T> {
                             .store()
                             .changes(
                                 mailbox.id.account_id,
-                                SyncCollection::Email,
+                                SyncCollection::Email.into(),
                                 Query::from_modseq(modseq),
                             )
                             .await?
@@ -650,7 +650,7 @@ impl<T: SessionStream> SessionData<T> {
                         include_highest_modseq = true;
                     }
                     search::Filter::EmailId(id) => {
-                        if let Some(id) = Id::from_bytes(id.as_bytes()) {
+                        if let Ok(id) = Id::from_str(&id) {
                             filters.push(query::Filter::is_in_set(
                                 RoaringBitmap::from_sorted_iter([id.document_id()]).unwrap(),
                             ));
@@ -661,7 +661,7 @@ impl<T: SessionStream> SessionData<T> {
                         }
                     }
                     search::Filter::ThreadId(id) => {
-                        if let Some(id) = Id::from_bytes(id.as_bytes()) {
+                        if let Ok(id) = Id::from_str(&id) {
                             filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
                                 cache.in_thread(id.document_id()).map(|m| m.document_id),
                             )));

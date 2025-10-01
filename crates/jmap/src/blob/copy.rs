@@ -4,22 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::download::BlobDownload;
 use common::{Server, auth::AccessToken};
+use directory::Permission;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::copy::{CopyBlobRequest, CopyBlobResponse},
-    types::blob::BlobId,
+    request::MaybeInvalid,
 };
-use trc::AddContext;
-
 use std::future::Future;
 use store::{
-    BlobClass, SerializeInfallible,
+    SerializeInfallible,
     write::{BatchBuilder, BlobOp, now},
 };
+use trc::AddContext;
+use types::blob::{BlobClass, BlobId};
 use utils::map::vec_map::VecMap;
-
-use super::download::BlobDownload;
 
 pub trait BlobCopy: Sync + Send {
     fn blob_copy(
@@ -44,7 +44,44 @@ impl BlobCopy for Server {
         let account_id = request.account_id.document_id();
 
         for blob_id in request.blob_ids {
+            let blob_id = match blob_id {
+                MaybeInvalid::Value(blob_id) => blob_id,
+                MaybeInvalid::Invalid(_) => {
+                    response.not_copied.append(
+                        blob_id,
+                        SetError::invalid_properties().with_description("Invalid blobId."),
+                    );
+                    continue;
+                }
+            };
+
             if self.has_access_blob(&blob_id, access_token).await? {
+                // Enforce quota
+                let used = self
+                    .core
+                    .storage
+                    .data
+                    .blob_quota(account_id)
+                    .await
+                    .caused_by(trc::location!())?;
+
+                if ((self.core.jmap.upload_tmp_quota_size > 0
+                    && used.bytes >= self.core.jmap.upload_tmp_quota_size)
+                    || (self.core.jmap.upload_tmp_quota_amount > 0
+                        && used.count + 1 > self.core.jmap.upload_tmp_quota_amount))
+                    && !access_token.has_permission(Permission::UnlimitedUploads)
+                {
+                    response.not_copied.append(
+                        MaybeInvalid::Value(blob_id),
+                        SetError::over_quota().with_description(format!(
+                            "You have exceeded the blob quota of {} files or {} bytes.",
+                            self.core.jmap.upload_tmp_quota_amount,
+                            self.core.jmap.upload_tmp_quota_size
+                        )),
+                    );
+                    continue;
+                }
+
                 let mut batch = BatchBuilder::new();
                 let until = now() + self.core.jmap.upload_tmp_ttl;
                 batch.with_account_id(account_id).set(
@@ -58,6 +95,7 @@ impl BlobCopy for Server {
                     .write(batch.build_all())
                     .await
                     .caused_by(trc::location!())?;
+
                 let dest_blob_id = BlobId {
                     hash: blob_id.hash.clone(),
                     class: BlobClass::Reserved {
@@ -70,7 +108,7 @@ impl BlobCopy for Server {
                 response.copied.append(blob_id, dest_blob_id);
             } else {
                 response.not_copied.append(
-                    blob_id,
+                    MaybeInvalid::Value(blob_id),
                     SetError::new(SetErrorType::BlobNotFound).with_description(
                         "blobId does not exist or not enough permissions to access it.",
                     ),

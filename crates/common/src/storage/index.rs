@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::auth::AsTenantId;
 use ahash::AHashSet;
-use jmap_proto::types::{property::Property, value::AclGrant};
 use rkyv::{
     option::ArchivedOption,
     primitive::{ArchivedU32, ArchivedU64},
@@ -16,22 +16,20 @@ use store::{
     Serialize, SerializeInfallible,
     write::{Archive, Archiver, BatchBuilder, BlobOp, DirectoryClass, IntoOperations, TagValue},
 };
-use utils::BlobHash;
-
-use crate::auth::AsTenantId;
+use types::{acl::AclGrant, blob_hash::BlobHash, collection::SyncCollection, field::Field};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexValue<'x> {
     Index {
-        field: u8,
+        field: Field,
         value: IndexItem<'x>,
     },
     IndexList {
-        field: u8,
+        field: Field,
         value: Vec<IndexItem<'x>>,
     },
     Tag {
-        field: u8,
+        field: Field,
         value: Vec<TagValue>,
     },
     Blob {
@@ -41,14 +39,14 @@ pub enum IndexValue<'x> {
         used: u32,
     },
     LogContainer {
-        sync_collection: u8,
+        sync_collection: SyncCollection,
     },
     LogContainerProperty {
-        sync_collection: u8,
+        sync_collection: SyncCollection,
         ids: Vec<u32>,
     },
     LogItem {
-        sync_collection: u8,
+        sync_collection: SyncCollection,
         prefix: Option<u32>,
     },
     Acl {
@@ -297,14 +295,14 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
                 }
                 if N::is_versioned() {
                     let (offset, bytes) = Archiver::new(changes).serialize_versioned()?;
-                    batch.set_versioned(Property::Value, bytes, offset);
+                    batch.set_versioned(Field::ARCHIVE, bytes, offset);
                 } else {
-                    batch.set(Property::Value, Archiver::new(changes).serialize()?);
+                    batch.set(Field::ARCHIVE, Archiver::new(changes).serialize()?);
                 }
             }
             (Some(current), Some(changes)) => {
                 // Update
-                batch.assert_value(Property::Value, &current);
+                batch.assert_value(Field::ARCHIVE, &current);
                 for (current, change) in current.inner.index_values().zip(changes.index_values()) {
                     if current != change {
                         merge_index(batch, current, change, self.tenant_id)?;
@@ -325,19 +323,19 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
                 }
                 if N::is_versioned() {
                     let (offset, bytes) = Archiver::new(changes).serialize_versioned()?;
-                    batch.set_versioned(Property::Value, bytes, offset);
+                    batch.set_versioned(Field::ARCHIVE, bytes, offset);
                 } else {
-                    batch.set(Property::Value, Archiver::new(changes).serialize()?);
+                    batch.set(Field::ARCHIVE, Archiver::new(changes).serialize()?);
                 }
             }
             (Some(current), None) => {
                 // Deletion
-                batch.assert_value(Property::Value, &current);
+                batch.assert_value(Field::ARCHIVE, &current);
                 for item in current.inner.index_values() {
                     build_index(batch, item, self.tenant_id, false);
                 }
 
-                batch.clear(Property::Value);
+                batch.clear(Field::ARCHIVE);
             }
             (None, None) => unreachable!(),
         }

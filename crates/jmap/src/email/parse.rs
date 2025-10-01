@@ -8,11 +8,10 @@ use common::{Server, auth::AccessToken};
 use email::message::index::PREVIEW_LENGTH;
 use jmap_proto::{
     method::parse::{ParseEmailRequest, ParseEmailResponse},
-    types::{
-        property::Property,
-        value::{Object, Value},
-    },
+    object::email::EmailProperty,
+    request::IntoValid,
 };
+use jmap_tools::{Key, Map, Value};
 use mail_parser::{
     MessageParser, PartType, decoders::html::html_to_text, parsers::preview::preview_text,
 };
@@ -43,44 +42,50 @@ impl EmailParse for Server {
         if request.blob_ids.len() > self.core.jmap.mail_parse_max_items {
             return Err(trc::JmapEvent::RequestTooLarge.into_err());
         }
-        let properties = request.properties.unwrap_or_else(|| {
-            vec![
-                Property::BlobId,
-                Property::Size,
-                Property::ReceivedAt,
-                Property::MessageId,
-                Property::InReplyTo,
-                Property::References,
-                Property::Sender,
-                Property::From,
-                Property::To,
-                Property::Cc,
-                Property::Bcc,
-                Property::ReplyTo,
-                Property::Subject,
-                Property::SentAt,
-                Property::HasAttachment,
-                Property::Preview,
-                Property::BodyValues,
-                Property::TextBody,
-                Property::HtmlBody,
-                Property::Attachments,
-            ]
-        });
-        let body_properties = request.body_properties.unwrap_or_else(|| {
-            vec![
-                Property::PartId,
-                Property::BlobId,
-                Property::Size,
-                Property::Name,
-                Property::Type,
-                Property::Charset,
-                Property::Disposition,
-                Property::Cid,
-                Property::Language,
-                Property::Location,
-            ]
-        });
+        let properties = request
+            .properties
+            .map(|v| v.into_valid().collect())
+            .unwrap_or_else(|| {
+                vec![
+                    EmailProperty::BlobId,
+                    EmailProperty::Size,
+                    EmailProperty::ReceivedAt,
+                    EmailProperty::MessageId,
+                    EmailProperty::InReplyTo,
+                    EmailProperty::References,
+                    EmailProperty::Sender,
+                    EmailProperty::From,
+                    EmailProperty::To,
+                    EmailProperty::Cc,
+                    EmailProperty::Bcc,
+                    EmailProperty::ReplyTo,
+                    EmailProperty::Subject,
+                    EmailProperty::SentAt,
+                    EmailProperty::HasAttachment,
+                    EmailProperty::Preview,
+                    EmailProperty::BodyValues,
+                    EmailProperty::TextBody,
+                    EmailProperty::HtmlBody,
+                    EmailProperty::Attachments,
+                ]
+            });
+        let body_properties = request
+            .body_properties
+            .map(|v| v.into_valid().collect())
+            .unwrap_or_else(|| {
+                vec![
+                    EmailProperty::PartId,
+                    EmailProperty::BlobId,
+                    EmailProperty::Size,
+                    EmailProperty::Name,
+                    EmailProperty::Type,
+                    EmailProperty::Charset,
+                    EmailProperty::Disposition,
+                    EmailProperty::Cid,
+                    EmailProperty::Language,
+                    EmailProperty::Location,
+                ]
+            });
         let fetch_text_body_values = request.fetch_text_body_values.unwrap_or(false);
         let fetch_html_body_values = request.fetch_html_body_values.unwrap_or(false);
         let fetch_all_body_values = request.fetch_all_body_values.unwrap_or(false);
@@ -93,7 +98,7 @@ impl EmailParse for Server {
             not_found: vec![],
         };
 
-        for blob_id in request.blob_ids {
+        for blob_id in request.blob_ids.into_valid() {
             // Fetch raw message to parse
             let raw_message = match self.blob_download(&blob_id, access_token).await? {
                 Some(raw_message) => raw_message,
@@ -110,19 +115,22 @@ impl EmailParse for Server {
             };
 
             // Prepare response
-            let mut email = Object::with_capacity(properties.len());
+            let mut email = Map::with_capacity(properties.len());
             for property in &properties {
                 match property {
-                    Property::BlobId => {
-                        email.append(Property::BlobId, blob_id.clone());
+                    EmailProperty::BlobId => {
+                        email.insert_unchecked(EmailProperty::BlobId, blob_id.clone());
                     }
 
-                    Property::Size => {
-                        email.append(Property::Size, Value::UnsignedInt(raw_message.len() as u64));
+                    EmailProperty::Size => {
+                        email.insert_unchecked(
+                            EmailProperty::Size,
+                            Value::Number(raw_message.len().into()),
+                        );
                     }
-                    Property::HasAttachment => {
-                        email.append(
-                            Property::HasAttachment,
+                    EmailProperty::HasAttachment => {
+                        email.insert_unchecked(
+                            EmailProperty::HasAttachment,
                             Value::Bool(message.parts.iter().enumerate().any(|(part_id, part)| {
                                 let part_id = part_id as u32;
                                 match &part.body {
@@ -136,9 +144,9 @@ impl EmailParse for Server {
                             })),
                         );
                     }
-                    Property::Preview => {
-                        email.append(
-                            Property::Preview,
+                    EmailProperty::Preview => {
+                        email.insert_unchecked(
+                            EmailProperty::Preview,
                             match message
                                 .text_body
                                 .first()
@@ -159,40 +167,42 @@ impl EmailParse for Server {
                             },
                         );
                     }
-                    Property::MessageId
-                    | Property::InReplyTo
-                    | Property::References
-                    | Property::Sender
-                    | Property::From
-                    | Property::To
-                    | Property::Cc
-                    | Property::Bcc
-                    | Property::ReplyTo
-                    | Property::Subject
-                    | Property::SentAt
-                    | Property::Header(_) => {
-                        email.append(
+                    EmailProperty::MessageId
+                    | EmailProperty::InReplyTo
+                    | EmailProperty::References
+                    | EmailProperty::Sender
+                    | EmailProperty::From
+                    | EmailProperty::To
+                    | EmailProperty::Cc
+                    | EmailProperty::Bcc
+                    | EmailProperty::ReplyTo
+                    | EmailProperty::Subject
+                    | EmailProperty::SentAt
+                    | EmailProperty::Header(_) => {
+                        email.insert_unchecked(
                             property.clone(),
                             message.parts[0]
                                 .headers
                                 .header_to_value(property, &raw_message),
                         );
                     }
-                    Property::Headers => {
-                        email.append(
-                            Property::Headers,
+                    EmailProperty::Headers => {
+                        email.insert_unchecked(
+                            EmailProperty::Headers,
                             message.parts[0].headers.headers_to_value(&raw_message),
                         );
                     }
-                    Property::TextBody | Property::HtmlBody | Property::Attachments => {
+                    EmailProperty::TextBody
+                    | EmailProperty::HtmlBody
+                    | EmailProperty::Attachments => {
                         let list = match property {
-                            Property::TextBody => &message.text_body,
-                            Property::HtmlBody => &message.html_body,
-                            Property::Attachments => &message.attachments,
+                            EmailProperty::TextBody => &message.text_body,
+                            EmailProperty::HtmlBody => &message.html_body,
+                            EmailProperty::Attachments => &message.attachments,
                             _ => unreachable!(),
                         }
                         .iter();
-                        email.append(
+                        email.insert_unchecked(
                             property.clone(),
                             list.map(|part_id| {
                                 message.parts.to_body_part(
@@ -205,16 +215,16 @@ impl EmailParse for Server {
                             .collect::<Vec<_>>(),
                         );
                     }
-                    Property::BodyStructure => {
-                        email.append(
-                            Property::BodyStructure,
+                    EmailProperty::BodyStructure => {
+                        email.insert_unchecked(
+                            EmailProperty::BodyStructure,
                             message
                                 .parts
                                 .to_body_part(0, &body_properties, &raw_message, &blob_id),
                         );
                     }
-                    Property::BodyValues => {
-                        let mut body_values = Object::with_capacity(message.parts.len());
+                    EmailProperty::BodyValues => {
+                        let mut body_values = Map::with_capacity(message.parts.len());
                         for (part_id, part) in message.parts.iter().enumerate() {
                             let part_id = part_id as u32;
                             if ((message.html_body.contains(&part_id)
@@ -225,26 +235,26 @@ impl EmailParse for Server {
                             {
                                 let (is_truncated, value) =
                                     part.body.truncate(max_body_value_bytes);
-                                body_values.append(
-                                    Property::_T(part_id.to_string()),
-                                    Object::with_capacity(3)
-                                        .with_property(
-                                            Property::IsEncodingProblem,
+                                body_values.insert_unchecked(
+                                    Key::Owned(part_id.to_string()),
+                                    Map::with_capacity(3)
+                                        .with_key_value(
+                                            EmailProperty::IsEncodingProblem,
                                             part.is_encoding_problem,
                                         )
-                                        .with_property(Property::IsTruncated, is_truncated)
-                                        .with_property(Property::Value, value),
+                                        .with_key_value(EmailProperty::IsTruncated, is_truncated)
+                                        .with_key_value(EmailProperty::Value, value),
                                 );
                             }
                         }
-                        email.append(Property::BodyValues, body_values);
+                        email.insert_unchecked(EmailProperty::BodyValues, body_values);
                     }
-                    Property::Id
-                    | Property::ThreadId
-                    | Property::Keywords
-                    | Property::MailboxIds
-                    | Property::ReceivedAt => {
-                        email.append(property.clone(), Value::Null);
+                    EmailProperty::Id
+                    | EmailProperty::ThreadId
+                    | EmailProperty::Keywords
+                    | EmailProperty::MailboxIds
+                    | EmailProperty::ReceivedAt => {
+                        email.insert_unchecked(property.clone(), Value::Null);
                     }
 
                     _ => {
@@ -254,7 +264,7 @@ impl EmailParse for Server {
                     }
                 }
             }
-            response.parsed.append(blob_id, email);
+            response.parsed.append(blob_id, email.into());
         }
 
         Ok(response)

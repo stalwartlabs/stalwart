@@ -1,6 +1,6 @@
 [package]
 name = "tests"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
@@ -27,6 +27,7 @@ jmap = { path = "../crates/jmap", features = ["test_mode", "enterprise"] }
 jmap_proto = { path = "../crates/jmap-proto" }
 imap = { path = "../crates/imap", features = ["test_mode"] }
 imap_proto = { path = "../crates/imap-proto" }
+types = { path = "../crates/types" }
 dav = { path = "../crates/dav", features = ["test_mode"] }
 dav-proto = { path = "../crates/dav-proto", features = ["test_mode"] }
 calcard = { version = "0.1.3", features = ["rkyv"] }
@@ -42,7 +43,7 @@ spam-filter = { path = "../crates/spam-filter", features = ["test_mode", "enterp
 migration = { path = "../crates/migration", features = ["test_mode", "enterprise"] }
 trc = { path = "../crates/trc", features = ["enterprise"] }
 managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterprise"] }
-smtp-proto = { version = "0.1" }
+smtp-proto = { version = "0.2" }
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
 mail-auth = { version = "0.7.1", features = ["test"] }
 sieve-rs = { version = "0.7", features = ["rkyv"] } 

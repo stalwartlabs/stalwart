@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{collections::hash_map::Entry, sync::Arc, time::Instant};
-
 use common::{CacheSwap, MessageStoreCache, Server};
 use email::{full_email_cache_build, update_email_cache};
-use jmap_proto::types::collection::SyncCollection;
 use mailbox::{full_mailbox_cache_build, update_mailbox_cache};
+use std::{collections::hash_map::Entry, sync::Arc, time::Instant};
 use store::{
     ahash::AHashMap,
     query::log::{Change, Query},
 };
 use tokio::sync::Semaphore;
 use trc::{AddContext, StoreEvent};
+use types::collection::SyncCollection;
 
 pub mod email;
 pub mod mailbox;
@@ -70,7 +69,7 @@ impl MessageCacheFetch for Server {
             .data
             .changes(
                 account_id,
-                SyncCollection::Email,
+                SyncCollection::Email.into(),
                 Query::Since(cache.last_change_id),
             )
             .await
@@ -203,7 +202,7 @@ async fn full_cache_build(
         .core
         .storage
         .data
-        .get_last_change_id(account_id, SyncCollection::Email)
+        .get_last_change_id(account_id, SyncCollection::Email.into())
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();

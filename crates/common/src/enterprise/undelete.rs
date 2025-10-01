@@ -8,6 +8,7 @@
  *
  */
 
+use crate::Core;
 use serde::{Deserialize, Serialize};
 use store::{
     IterateParams, U32_LEN, U64_LEN, ValueKey,
@@ -18,9 +19,7 @@ use store::{
     },
 };
 use trc::AddContext;
-use utils::{BLOB_HASH_LEN, BlobHash};
-
-use crate::Core;
+use types::blob_hash::{BLOB_HASH_LEN, BlobHash};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeletedBlob<H, T, C> {

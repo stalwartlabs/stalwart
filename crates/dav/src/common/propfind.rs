@@ -56,10 +56,6 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
 use std::sync::Arc;
 use store::{
     ahash::AHashMap,
@@ -68,6 +64,10 @@ use store::{
     write::{AlignedBytes, Archive},
 };
 use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+};
 
 pub(crate) trait PropFindRequestHandler: Sync + Send {
     fn handle_propfind_request(
@@ -1182,7 +1182,7 @@ async fn get(
         SyncType::From { id, seq } => {
             let changes = server
                 .store()
-                .changes(account_id, sync_collection, Query::Since(id))
+                .changes(account_id, sync_collection.into(), Query::Since(id))
                 .await
                 .caused_by(trc::location!())?;
             let mut vanished: Vec<String> = Vec::new();
@@ -1258,7 +1258,7 @@ async fn get(
             {
                 vanished = server
                     .store()
-                    .vanished(account_id, vanished_collection, Query::Since(id))
+                    .vanished(account_id, vanished_collection.into(), Query::Since(id))
                     .await
                     .caused_by(trc::location!())?;
                 total_changes += vanished.len();

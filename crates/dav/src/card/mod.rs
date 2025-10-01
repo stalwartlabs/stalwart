@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::IDX_UID;
+use crate::{DavError, DavErrorCondition};
 use common::{DavResources, Server};
 use dav_proto::schema::{
     property::{CardDavProperty, DavProperty, WebDavProperty},
     response::CardCondition,
 };
 use hyper::StatusCode;
-use jmap_proto::types::collection::Collection;
 use store::query::Filter;
 use trc::AddContext;
-
-use crate::{DavError, DavErrorCondition};
+use types::{collection::Collection, field::ContactField};
 
 pub mod copy_move;
 pub mod delete;
@@ -87,7 +85,7 @@ pub(crate) async fn assert_is_unique_uid(
             .filter(
                 account_id,
                 Collection::ContactCard,
-                vec![Filter::eq(IDX_UID, uid.as_bytes().to_vec())],
+                vec![Filter::eq(ContactField::Uid, uid.as_bytes().to_vec())],
             )
             .await
             .caused_by(trc::location!())?;

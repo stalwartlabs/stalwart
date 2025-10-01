@@ -27,10 +27,10 @@ use groupware::{
     contact::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard},
     file::{ArchivedFileNode, FileNode},
 };
-use jmap_proto::types::{collection::Collection, property::Property, value::ArchivedAclGrant};
 use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
 use store::write::{AlignedBytes, Archive, BatchBuilder, Operation, ValueClass, ValueOp};
+use types::{acl::ArchivedAclGrant, collection::Collection, field::Field};
 use uri::{OwnedUri, Urn};
 
 pub mod acl;
@@ -109,7 +109,7 @@ impl<T> ETag for Archive<T> {
 
 impl ExtractETag for BatchBuilder {
     fn etag(&self) -> Option<String> {
-        let p_value = u8::from(Property::Value);
+        let p_value = u8::from(Field::ARCHIVE);
         for op in self.ops().iter().rev() {
             match op {
                 Operation::Value {

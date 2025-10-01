@@ -8,6 +8,7 @@ use std::fmt::Display;
 
 use roaring::RoaringBitmap;
 use trc::AddContext;
+use types::collection::Collection;
 
 use crate::{
     FtsStore,
@@ -32,7 +33,7 @@ impl FtsStore {
     pub async fn query<T: Into<u8> + Display + Clone + std::fmt::Debug>(
         &self,
         account_id: u32,
-        collection: impl Into<u8>,
+        collection: Collection,
         filters: Vec<FtsFilter<T>>,
     ) -> trc::Result<RoaringBitmap> {
         match self {
@@ -48,7 +49,7 @@ impl FtsStore {
     pub async fn remove(
         &self,
         account_id: u32,
-        collection: u8,
+        collection: Collection,
         document_ids: &impl DocumentSet,
     ) -> trc::Result<()> {
         match self {

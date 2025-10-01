@@ -8,14 +8,11 @@ use crate::changes::state::StateManager;
 use common::Server;
 use email::cache::MessageCacheFetch;
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse, RequestArguments},
-    types::{
-        collection::{Collection, SyncCollection},
-        id::Id,
-        property::Property,
-        value::Object,
-    },
+    method::get::{GetRequest, GetResponse},
+    object::thread::{Thread, ThreadProperty, ThreadValue},
+    request::MaybeInvalid,
 };
+use jmap_tools::Map;
 use std::future::Future;
 use store::{
     ahash::AHashMap,
@@ -23,19 +20,24 @@ use store::{
     roaring::RoaringBitmap,
 };
 use trc::AddContext;
+use types::{
+    collection::{Collection, SyncCollection},
+    field::EmailField,
+    id::Id,
+};
 
 pub trait ThreadGet: Sync + Send {
     fn thread_get(
         &self,
-        request: GetRequest<RequestArguments>,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+        request: GetRequest<Thread>,
+    ) -> impl Future<Output = trc::Result<GetResponse<Thread>>> + Send;
 }
 
 impl ThreadGet for Server {
     async fn thread_get(
         &self,
-        mut request: GetRequest<RequestArguments>,
-    ) -> trc::Result<GetResponse> {
+        mut request: GetRequest<Thread>,
+    ) -> trc::Result<GetResponse<Thread>> {
         let account_id = request.account_id.document_id();
         let mut thread_map: AHashMap<u32, RoaringBitmap> = AHashMap::with_capacity(32);
         for item in &self
@@ -61,9 +63,10 @@ impl ThreadGet for Server {
                 .map(Into::into)
                 .collect()
         };
-        let add_email_ids = request
-            .properties
-            .is_none_or(|p| p.unwrap().contains(&Property::EmailIds));
+        let add_email_ids = request.properties.is_none_or(|p| {
+            p.unwrap()
+                .contains(&MaybeInvalid::Value(ThreadProperty::EmailIds))
+        });
         let mut response = GetResponse {
             account_id: request.account_id.into(),
             state: self
@@ -77,17 +80,18 @@ impl ThreadGet for Server {
         for id in ids {
             let thread_id = id.document_id();
             if let Some(document_ids) = thread_map.remove(&thread_id) {
-                let mut thread = Object::with_capacity(2).with_property(Property::Id, id);
+                let mut thread: Map<'_, ThreadProperty, ThreadValue> =
+                    Map::with_capacity(2).with_key_value(ThreadProperty::Id, id);
                 if add_email_ids {
                     let doc_count = document_ids.len() as usize;
-                    thread.append(
-                        Property::EmailIds,
+                    thread.insert_unchecked(
+                        ThreadProperty::EmailIds,
                         self.core
                             .storage
                             .data
                             .sort(
                                 ResultSet::new(account_id, Collection::Email, document_ids),
-                                vec![Comparator::ascending(Property::ReceivedAt)],
+                                vec![Comparator::ascending(EmailField::ReceivedAt)],
                                 Pagination::new(doc_count, 0, None, 0),
                             )
                             .await
@@ -98,9 +102,9 @@ impl ThreadGet for Server {
                             .collect::<Vec<_>>(),
                     );
                 }
-                response.list.push(thread);
+                response.list.push(thread.into());
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
             }
         }
 

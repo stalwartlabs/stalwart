@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::blob::UploadResponse;
 use http_proto::{HttpResponse, JsonResponse, ToHttpResponse};
 use hyper::StatusCode;
 use jmap_proto::{
@@ -12,8 +13,8 @@ use jmap_proto::{
     response::Response,
 };
 
-use crate::blob::UploadResponse;
-
+pub mod acl;
+pub mod auth;
 pub mod event_source;
 pub mod request;
 pub mod session;
@@ -28,7 +29,7 @@ pub trait ToJmapHttpResponse {
     fn into_http_response(self) -> HttpResponse;
 }
 
-impl ToJmapHttpResponse for Response {
+impl ToJmapHttpResponse for Response<'_> {
     fn into_http_response(self) -> HttpResponse {
         JsonResponse::new(self).into_http_response()
     }

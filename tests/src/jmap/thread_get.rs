@@ -6,7 +6,7 @@
 
 use crate::jmap::{assert_is_empty, mailbox::destroy_all_mailboxes};
 use jmap_client::mailbox::Role;
-use jmap_proto::types::id::Id;
+use types::id::Id;
 
 use super::JMAPTest;
 

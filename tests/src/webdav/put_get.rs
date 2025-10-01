@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use types::collection::Collection;
+
 use super::WebDavTest;
 use crate::webdav::*;
 

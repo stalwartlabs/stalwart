@@ -4,19 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
+use crate::{DavError, DavResourceName};
 use common::{Server, auth::AccessToken};
-
 use directory::backend::internal::manage::ManageDirectory;
-
 use groupware::cache::GroupwareCache;
 use http_proto::request::decode_path_element;
 use hyper::StatusCode;
-use jmap_proto::types::collection::Collection;
+use std::fmt::Display;
 use trc::AddContext;
-
-use crate::{DavError, DavResourceName};
+use types::collection::Collection;
 
 #[derive(Debug)]
 pub(crate) struct UriResource<A, R> {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_proto::types::type_state::DataType;
+use types::type_state::DataType;
 use utils::map::bitmap::Bitmap;
 
 #[derive(

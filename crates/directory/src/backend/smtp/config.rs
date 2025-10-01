@@ -44,6 +44,7 @@ impl SmtpDirectory {
                     .unwrap_or("[127.0.0.1]")
                     .to_string(),
                 say_ehlo: false,
+                local_ip: None,
             },
             max_rcpt: config
                 .property_or_default((&prefix, "limits.rcpt"), "10")

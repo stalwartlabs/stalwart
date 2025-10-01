@@ -4,21 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::collections::BTreeMap;
-
-use common::{config::jmap::settings::SpecialUse, listener::SessionStream};
+use crate::Session;
+use common::listener::SessionStream;
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::INBOX_ID,
 };
-use jmap_proto::types::{collection::Collection, property::Property};
+use std::collections::BTreeMap;
 use store::{
     IndexKey, IterateParams, SerializeInfallible, U32_LEN, ahash::AHashMap,
     write::key::DeserializeBigEndian,
 };
 use trc::AddContext;
-
-use crate::Session;
+use types::{collection::Collection, field::EmailField, special_use::SpecialUse};
 
 #[derive(Default)]
 pub struct Mailbox {
@@ -66,14 +64,14 @@ impl<T: SessionStream> Session<T> {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: 0,
-                        field: Property::Size.into(),
+                        field: EmailField::Size.into(),
                         key: 0u32.serialize(),
                     },
                     IndexKey {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: u32::MAX,
-                        field: Property::Size.into(),
+                        field: EmailField::Size.into(),
                         key: u32::MAX.serialize(),
                     },
                 )

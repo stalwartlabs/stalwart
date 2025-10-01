@@ -31,7 +31,6 @@ use groupware::{DavResourceName, cache::GroupwareCache};
 use http::HttpSessionManager;
 use hyper::{HeaderMap, Method, StatusCode, header::AUTHORIZATION};
 use imap::core::ImapSessionManager;
-use jmap_proto::types::{collection::Collection, property::Property};
 use pop3::Pop3SessionManager;
 use quick_xml::Reader;
 use quick_xml::events::Event;
@@ -44,6 +43,7 @@ use std::{
 };
 use store::rand::{Rng, distr::Alphanumeric, rng};
 use tokio::sync::watch;
+use types::{collection::Collection, field::EmailField};
 use utils::config::Config;
 
 pub mod acl;
@@ -1045,7 +1045,7 @@ impl WebDavTest {
                 account_id,
                 Collection::Email,
                 document_id,
-                Property::BodyStructure,
+                EmailField::Metadata.into(),
             )
             .await
             .unwrap()

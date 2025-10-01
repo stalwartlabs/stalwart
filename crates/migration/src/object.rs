@@ -4,25 +4,124 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_proto::types::{
-    blob::BlobId,
-    date::UTCDate,
-    id::Id,
-    keyword::*,
-    property::{HeaderForm, HeaderProperty, Property},
-    value::{AclGrant, Value},
-};
 use std::slice::Iter;
 use store::{Deserialize, U64_LEN};
+use types::{acl::AclGrant, blob::BlobId, id::Id, keyword::*};
 use utils::{
     codec::leb128::Leb128Iterator,
     map::{bitmap::Bitmap, vec_map::VecMap},
 };
 
-#[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Object<T> {
     pub properties: VecMap<Property, T>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Property {
+    Acl,
+    Aliases,
+    Attachments,
+    Bcc,
+    BlobId,
+    BodyStructure,
+    BodyValues,
+    Capabilities,
+    Cc,
+    Charset,
+    Cid,
+    DeliveryStatus,
+    Description,
+    DeviceClientId,
+    Disposition,
+    DsnBlobIds,
+    Email,
+    EmailId,
+    EmailIds,
+    Envelope,
+    Expires,
+    From,
+    FromDate,
+    HasAttachment,
+    Headers,
+    HtmlBody,
+    HtmlSignature,
+    Id,
+    IdentityId,
+    InReplyTo,
+    IsActive,
+    IsEnabled,
+    IsSubscribed,
+    Keys,
+    Keywords,
+    Language,
+    Location,
+    MailboxIds,
+    MayDelete,
+    MdnBlobIds,
+    Members,
+    MessageId,
+    MyRights,
+    Name,
+    ParentId,
+    PartId,
+    Picture,
+    Preview,
+    Quota,
+    ReceivedAt,
+    References,
+    ReplyTo,
+    Role,
+    Secret,
+    SendAt,
+    Sender,
+    SentAt,
+    Size,
+    SortOrder,
+    Subject,
+    SubParts,
+    TextBody,
+    TextSignature,
+    ThreadId,
+    Timezone,
+    To,
+    ToDate,
+    TotalEmails,
+    TotalThreads,
+    Type,
+    Types,
+    UndoStatus,
+    UnreadEmails,
+    UnreadThreads,
+    Url,
+    VerificationCode,
+    Addresses,
+    P256dh,
+    Auth,
+    Value,
+    SmtpReply,
+    Delivered,
+    Displayed,
+    MailFrom,
+    RcptTo,
+    Parameters,
+    IsEncodingProblem,
+    IsTruncated,
+    MayReadItems,
+    MayAddItems,
+    MayRemoveItems,
+    MaySetSeen,
+    MaySetKeywords,
+    MayCreateChild,
+    MayRename,
+    MaySubmit,
+    ResourceType,
+    Used,
+    HardLimit,
+    WarnLimit,
+    SoftLimit,
+    Scope,
+    _T(String),
 }
 
 impl Object<Value> {
@@ -52,6 +151,36 @@ impl Object<Value> {
     pub fn get(&self, property: &Property) -> &Value {
         self.properties.get(property).unwrap_or(&Value::Null)
     }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum Value {
+    Text(String),
+    UnsignedInt(u64),
+    Bool(bool),
+    Id(Id),
+    Date(UTCDate),
+    BlobId(BlobId),
+    Keyword(Keyword),
+    List(Vec<Value>),
+    Object(Object<Value>),
+    Acl(Vec<AclGrant>),
+    Blob(Vec<u8>),
+    #[default]
+    Null,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct UTCDate {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+    pub tz_before_gmt: bool,
+    pub tz_hour: u8,
+    pub tz_minute: u8,
 }
 
 const TEXT: u8 = 0;
@@ -131,9 +260,7 @@ impl DeserializeFrom for Value {
                 }
                 Some(Value::List(items))
             }
-            OBJECT => Some(Value::Object(jmap_proto::types::value::Object(
-                Object::deserialize_from(bytes)?.properties,
-            ))),
+            OBJECT => Some(Value::Object(Object::deserialize_from(bytes)?)),
             BLOB => Some(Value::Blob(Vec::deserialize_from(bytes)?)),
             ACL => {
                 let len = bytes.next_leb128()?;
@@ -304,11 +431,6 @@ impl DeserializeFrom for Property {
             87 => Some(Property::From),
             88 => Some(Property::FromDate),
             89 => Some(Property::HasAttachment),
-            90 => Some(Property::Header(HeaderProperty {
-                form: HeaderForm::Raw,
-                header: String::new(),
-                all: false,
-            })), // Never serialized
             91 => Some(Property::Headers),
             92 => Some(Property::HtmlBody),
             93 => Some(Property::HtmlSignature),
@@ -333,4 +455,195 @@ pub trait FromLegacy {
 
 pub trait TryFromLegacy: Sized {
     fn try_from_legacy(legacy: Object<Value>) -> Option<Self>;
+}
+
+impl Value {
+    pub fn try_unwrap_id(self) -> Option<Id> {
+        match self {
+            Value::Id(id) => id.into(),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_bool(self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => b.into(),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_keyword(self) -> Option<Keyword> {
+        match self {
+            Value::Keyword(k) => k.into(),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_string(self) -> Option<String> {
+        match self {
+            Value::Text(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_object(self) -> Option<Object<Value>> {
+        match self {
+            Value::Object(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_list(self) -> Option<Vec<Value>> {
+        match self {
+            Value::List(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_date(self) -> Option<UTCDate> {
+        match self {
+            Value::Date(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_blob_id(self) -> Option<BlobId> {
+        match self {
+            Value::BlobId(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn try_unwrap_uint(self) -> Option<u64> {
+        match self {
+            Value::UnsignedInt(u) => Some(u),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            Value::Text(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_id(&self) -> Option<&Id> {
+        match self {
+            Value::Id(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn as_blob_id(&self) -> Option<&BlobId> {
+        match self {
+            Value::BlobId(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&Vec<Value>> {
+        match self {
+            Value::List(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn as_acl(&self) -> Option<&Vec<AclGrant>> {
+        match self {
+            Value::Acl(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn as_uint(&self) -> Option<u64> {
+        match self {
+            Value::UnsignedInt(u) => Some(*u),
+            Value::Id(id) => Some(*id.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn as_date(&self) -> Option<&UTCDate> {
+        match self {
+            Value::Date(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_obj(&self) -> Option<&Object<Value>> {
+        match self {
+            Value::Object(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    pub fn as_obj_mut(&mut self) -> Option<&mut Object<Value>> {
+        match self {
+            Value::Object(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    pub fn try_cast_uint(&self) -> Option<u64> {
+        match self {
+            Value::UnsignedInt(u) => Some(*u),
+            Value::Id(id) => Some(id.id()),
+            Value::Bool(b) => Some(*b as u64),
+            _ => None,
+        }
+    }
+}
+
+impl UTCDate {
+    pub fn from_timestamp(timestamp: i64) -> Self {
+        // Ported from http://howardhinnant.github.io/date_algorithms.html#civil_from_days
+        let (z, seconds) = ((timestamp / 86400) + 719468, timestamp % 86400);
+        let era: i64 = (if z >= 0 { z } else { z - 146096 }) / 146097;
+        let doe: u64 = (z - era * 146097) as u64; // [0, 146096]
+        let yoe: u64 = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+        let y: i64 = (yoe as i64) + era * 400;
+        let doy: u64 = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+        let mp = (5 * doy + 2) / 153; // [0, 11]
+        let d: u64 = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+        let m: u64 = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+        let (h, mn, s) = (seconds / 3600, (seconds / 60) % 60, seconds % 60);
+
+        UTCDate {
+            year: (y + i64::from(m <= 2)) as u16,
+            month: m as u8,
+            day: d as u8,
+            hour: h as u8,
+            minute: mn as u8,
+            second: s as u8,
+            tz_before_gmt: false,
+            tz_hour: 0,
+            tz_minute: 0,
+        }
+    }
+
+    pub fn timestamp(&self) -> i64 {
+        // Ported from https://github.com/protocolbuffers/upb/blob/22182e6e/upb/json_decode.c#L982-L992
+        let month = self.month as u32;
+        let year_base = 4800; /* Before min year, multiple of 400. */
+        let m_adj = month.wrapping_sub(3); /* March-based month. */
+        let carry = i64::from(m_adj > month);
+        let adjust = if carry > 0 { 12 } else { 0 };
+        let y_adj = self.year as i64 + year_base - carry;
+        let month_days = ((m_adj.wrapping_add(adjust)) * 62719 + 769) / 2048;
+        let leap_days = y_adj / 4 - y_adj / 100 + y_adj / 400;
+        (y_adj * 365 + leap_days + month_days as i64 + (self.day as i64 - 1) - 2472632) * 86400
+            + self.hour as i64 * 3600
+            + self.minute as i64 * 60
+            + self.second as i64
+            + ((self.tz_hour as i64 * 3600 + self.tz_minute as i64 * 60)
+                * if self.tz_before_gmt { 1 } else { -1 })
+    }
 }

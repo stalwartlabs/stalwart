@@ -197,6 +197,23 @@ impl From<u8> for SyncCollection {
     }
 }
 
+impl From<u64> for SyncCollection {
+    fn from(v: u64) -> Self {
+        match v {
+            0 => SyncCollection::Email,
+            1 => SyncCollection::Thread,
+            2 => SyncCollection::Calendar,
+            3 => SyncCollection::AddressBook,
+            4 => SyncCollection::FileNode,
+            5 => SyncCollection::Identity,
+            6 => SyncCollection::EmailSubmission,
+            7 => SyncCollection::SieveScript,
+            8 => SyncCollection::CalendarScheduling,
+            _ => SyncCollection::None,
+        }
+    }
+}
+
 impl From<u64> for Collection {
     fn from(v: u64) -> Self {
         match v {
@@ -228,6 +245,12 @@ impl From<Collection> for u8 {
 impl From<SyncCollection> for u8 {
     fn from(v: SyncCollection) -> Self {
         v as u8
+    }
+}
+
+impl From<SyncCollection> for u64 {
+    fn from(v: SyncCollection) -> Self {
+        v as u64
     }
 }
 
@@ -324,6 +347,16 @@ impl BitmapItem for Collection {
 
     fn is_valid(&self) -> bool {
         !matches!(self, Collection::None)
+    }
+}
+
+impl BitmapItem for SyncCollection {
+    fn max() -> u64 {
+        SyncCollection::None as u64
+    }
+
+    fn is_valid(&self) -> bool {
+        !matches!(self, SyncCollection::None)
     }
 }
 

@@ -4,40 +4,46 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::AHashMap;
-use mail_parser::decoders::base64::base64_decode;
-use utils::map::vec_map::VecMap;
-
-use crate::{
-    error::set::SetError,
-    parser::{Ignore, JsonObjectParser, Token, json::Parser},
-    request::{RequestProperty, reference::MaybeReference},
-    response::Response,
-    types::{blob::BlobId, id::Id},
-};
+use std::borrow::Cow;
 
 use super::ahash_is_empty;
+use crate::{
+    error::set::SetError,
+    object::{AnyId, blob::BlobProperty},
+    request::{
+        deserialize::{DeserializeArguments, deserialize_request},
+        reference::MaybeIdReference,
+    },
+    response::Response,
+};
+use ahash::AHashMap;
+use mail_parser::decoders::base64::base64_decode;
+use serde::{Deserialize, Deserializer};
+use types::{blob::BlobId, id::Id};
+use utils::map::vec_map::VecMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BlobUploadRequest {
     pub account_id: Id,
     pub create: VecMap<String, UploadObject>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct UploadObject {
     pub type_: Option<String>,
     pub data: Vec<DataSourceObject>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DataSourceObject {
     Id {
-        id: MaybeReference<BlobId, String>,
+        id: MaybeIdReference<BlobId>,
         length: Option<usize>,
         offset: Option<usize>,
     },
     Value(Vec<u8>),
+    #[default]
+    Null,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -51,7 +57,7 @@ pub struct BlobUploadResponse {
 
     #[serde(rename = "notCreated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_created: VecMap<String, SetError>,
+    pub not_created: VecMap<String, SetError<BlobProperty>>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -63,144 +69,108 @@ pub struct BlobUploadResponseObject {
     pub size: usize,
 }
 
-impl JsonObjectParser for BlobUploadRequest {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
+impl<'de> DeserializeArguments<'de> for BlobUploadRequest {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = BlobUploadRequest {
-            account_id: Id::default(),
-            create: VecMap::new(),
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 if !key.is_ref => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x6574_6165_7263 if !key.is_ref => {
-                    request.create = <VecMap<String, UploadObject>>::parse(parser)?;
-                }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
+            },
+            b"create" => {
+                self.create = map.next_value()?;
             }
-        }
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+            }
+        );
 
-        Ok(request)
+        Ok(())
     }
 }
 
-impl JsonObjectParser for UploadObject {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
+impl<'de> DeserializeArguments<'de> for UploadObject {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = UploadObject {
-            type_: None,
-            data: Vec::new(),
-        };
+        hashify::fnc_map!(key.as_bytes(),
+            b"type" => {
+                self.type_ = map.next_value()?;
+            },
+            b"data" => {
+                self.data = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+            }
+        );
 
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
+        Ok(())
+    }
+}
 
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x6570_7974 if !key.is_ref => {
-                    request.type_ = parser
-                        .next_token::<String>()?
-                        .unwrap_string_or_null("type")?;
-                }
-                0x6174_6164 if !key.is_ref => {
-                    parser.next_token::<Ignore>()?.assert(Token::ArrayStart)?;
-                    loop {
-                        match parser.next_token::<Ignore>()? {
-                            Token::Comma => (),
-                            Token::ArrayEnd => break,
-                            Token::DictStart => {
-                                request.data.push(DataSourceObject::parse(parser)?);
-                            }
-                            token => return Err(token.error("", "DataSourceObject")),
-                        }
+impl<'de> DeserializeArguments<'de> for DataSourceObject {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        hashify::fnc_map!(key.as_bytes(),
+            b"data:asText" => {
+                *self = DataSourceObject::Value(map.next_value::<String>().map(|v| v.into_bytes())?);
+            },
+            b"data:asBase64" => {
+                *self = DataSourceObject::Value(base64_decode(map.next_value::<Cow<'_, str>>()?.as_bytes()).ok_or_else(|| serde::de::Error::custom("Failed to decode base64 data"))?);
+            },
+            b"blobId" => {
+                match self {
+                    DataSourceObject::Id { id, .. } => {
+                        *id = map.next_value()?;
+                    },
+                    _ => {
+                        *self = DataSourceObject::Id {
+                            id: map.next_value()?,
+                            length: None,
+                            offset: None,
+                        };
                     }
                 }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
+            },
+            b"offset" => {
+                match self {
+                    DataSourceObject::Id { offset, .. } => {
+                        *offset = map.next_value()?;
+                    },
+                    _ => {
+                        *self = DataSourceObject::Id {
+                            id: MaybeIdReference::Invalid("".into()),
+                            length: None,
+                            offset: map.next_value()?,
+                        };
+                    }
                 }
+            },
+            b"length" => {
+                match self {
+                    DataSourceObject::Id { length, .. } => {
+                        *length = map.next_value()?;
+                    },
+                    _ => {
+                        *self = DataSourceObject::Id {
+                            id: MaybeIdReference::Invalid("".into()),
+                            length: map.next_value()?,
+                            offset: None,
+                        };
+                    }
+                }
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
 
-        Ok(request)
-    }
-}
-
-impl JsonObjectParser for DataSourceObject {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut data: Option<Vec<u8>> = None;
-        let mut blob_id: Option<MaybeReference<BlobId, String>> = None;
-        let mut offset: Option<usize> = None;
-        let mut length: Option<usize> = None;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0074_7865_5473_613a_6174_6164 if !key.is_ref => {
-                    data = parser
-                        .next_token::<String>()?
-                        .unwrap_string("data:asText")?
-                        .into_bytes()
-                        .into();
-                }
-                0x0034_3665_7361_4273_613a_6174_6164 if !key.is_ref => {
-                    data = base64_decode(
-                        parser
-                            .next_token::<String>()?
-                            .unwrap_string("data:asBase64")?
-                            .as_bytes(),
-                    )
-                    .ok_or_else(|| parser.error("Failed to decode data:asBase64"))?
-                    .into();
-                }
-                0x6449_626f_6c62 if !key.is_ref => {
-                    blob_id = parser
-                        .next_token::<MaybeReference<BlobId, String>>()?
-                        .unwrap_string("blobId")?
-                        .into();
-                }
-                0x6874_676e_656c if !key.is_ref => {
-                    length = parser
-                        .next_token::<Ignore>()?
-                        .unwrap_usize_or_null("length")?;
-                }
-                0x7465_7366_666f if !key.is_ref => {
-                    offset = parser
-                        .next_token::<Ignore>()?
-                        .unwrap_usize_or_null("offset")?;
-                }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
-            }
-        }
-
-        if let Some(data) = data {
-            Ok(DataSourceObject::Value(data))
-        } else if let Some(blob_id) = blob_id {
-            Ok(DataSourceObject::Id {
-                id: blob_id,
-                length,
-                offset,
-            })
-        } else {
-            Err(parser.error("Missing data or blobId in DataSourceObject"))
-        }
+        Ok(())
     }
 }
 
@@ -209,7 +179,34 @@ impl BlobUploadResponse {
         for (user_id, obj) in &self.created {
             response
                 .created_ids
-                .insert(user_id.clone(), obj.id.clone().into());
+                .insert(user_id.clone(), AnyId::BlobId(obj.id.clone()));
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for DataSourceObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for UploadObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BlobUploadRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
     }
 }

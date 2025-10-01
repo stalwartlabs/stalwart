@@ -4,32 +4,35 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, collections::HashMap};
-
+use super::Request;
 use crate::{
     error::request::{RequestError, RequestErrorType, RequestLimitError},
-    parser::{JsonObjectParser, Token, json::Parser},
-    request::Call,
+    object::AnyId,
+    request::{Call, deserialize::DeserializeArguments},
     response::{Response, ResponseMethod, serialize::serialize_hex},
-    types::{any_id::AnyId, id::Id, state::State, type_state::DataType},
+    types::state::State,
 };
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, MapAccess, Visitor},
+};
+use std::{borrow::Cow, collections::HashMap, fmt};
+use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
 
-use super::{Request, RequestProperty};
-
 #[derive(Debug)]
-pub struct WebSocketRequest {
+pub struct WebSocketRequest<'x> {
     pub id: Option<String>,
-    pub request: Request,
+    pub request: Request<'x>,
 }
 
 #[derive(Debug, serde::Serialize)]
-pub struct WebSocketResponse {
+pub struct WebSocketResponse<'x> {
     #[serde(rename = "@type")]
     _type: WebSocketResponseType,
 
     #[serde(rename = "methodResponses")]
-    method_responses: Vec<Call<ResponseMethod>>,
+    method_responses: Vec<Call<ResponseMethod<'x>>>,
 
     #[serde(rename = "sessionState")]
     #[serde(serialize_with = "serialize_hex")]
@@ -56,8 +59,8 @@ pub struct WebSocketPushEnable {
 }
 
 #[derive(Debug)]
-pub enum WebSocketMessage {
-    Request(WebSocketRequest),
+pub enum WebSocketMessage<'x> {
+    Request(WebSocketRequest<'x>),
     PushEnable(WebSocketPushEnable),
     PushDisable,
 }
@@ -107,76 +110,102 @@ enum MessageType {
     None,
 }
 
-impl WebSocketMessage {
-    pub fn parse(json: &[u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
+impl<'x> WebSocketMessage<'x> {
+    pub fn parse(json: &'x [u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
         if json.len() <= max_size {
-            let mut message_type = MessageType::None;
-            let mut request = WebSocketRequest {
-                id: None,
-                request: Request::default(),
-            };
-            let mut push_enable = WebSocketPushEnable::default();
-
-            let mut found_request_keys = false;
-            let mut found_push_keys = false;
-
-            let mut parser = Parser::new(json);
-            parser.next_token::<String>()?.assert(Token::DictStart)?;
-            while let Some(key) = parser.next_dict_key::<u128>()? {
-                match key {
-                    0x0065_7079_7440 => {
-                        let rt = parser
-                            .next_token::<RequestProperty>()?
-                            .unwrap_string("@type")?;
-                        message_type = match (rt.hash[0], rt.hash[1]) {
-                            (0x0074_7365_7571_6552, 0) => MessageType::Request,
-                            (0x616e_4568_7375_5074_656b_636f_5362_6557, 0x656c62) => {
-                                MessageType::PushEnable
-                            }
-                            (0x7369_4468_7375_5074_656b_636f_5362_6557, 0x656c6261) => {
-                                MessageType::PushDisable
-                            }
-                            _ => MessageType::None,
-                        };
-                    }
-                    0x0073_6570_7954_6174_6164 => {
-                        push_enable.data_types =
-                            <Option<Vec<DataType>>>::parse(&mut parser)?.unwrap_or_default();
-                        found_push_keys = true;
-                    }
-                    0x0065_7461_7453_6873_7570 => {
-                        push_enable.push_state = parser
-                            .next_token::<String>()?
-                            .unwrap_string_or_null("pushState")?;
-                        found_push_keys = true;
-                    }
-                    0x6469 => {
-                        request.id = parser.next_token::<String>()?.unwrap_string_or_null("id")?;
-                    }
-                    _ => {
-                        found_request_keys |=
-                            request.request.parse_key(&mut parser, max_calls, key)?;
-                    }
+            match serde_json::from_slice::<Self>(json) {
+                Ok(WebSocketMessage::Request(req))
+                    if req.request.method_calls.len() > max_calls =>
+                {
+                    Err(trc::LimitEvent::CallsIn.into_err())
                 }
-            }
-
-            match message_type {
-                MessageType::Request if found_request_keys => {
-                    Ok(WebSocketMessage::Request(request))
-                }
-                MessageType::PushEnable if found_push_keys => {
-                    Ok(WebSocketMessage::PushEnable(push_enable))
-                }
-                MessageType::PushDisable if !found_request_keys && !found_push_keys => {
-                    Ok(WebSocketMessage::PushDisable)
-                }
-                _ => Err(trc::JmapEvent::NotRequest
+                Ok(msg) => Ok(msg),
+                Err(err) => Err(trc::JmapEvent::NotRequest
                     .into_err()
-                    .details("Invalid WebSocket JMAP request")),
+                    .details(format!("Invalid WebSocket JMAP request {err}"))),
             }
         } else {
             Err(trc::LimitEvent::SizeRequest.into_err())
         }
+    }
+}
+
+impl<'de: 'x, 'x: 'de> Deserialize<'de> for WebSocketMessage<'x> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(WebSocketMessageVisitor)
+    }
+}
+
+struct WebSocketMessageVisitor;
+
+impl<'de> Visitor<'de> for WebSocketMessageVisitor {
+    type Value = WebSocketMessage<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a WebSocketMessage as a map")
+    }
+
+    fn visit_map<V>(self, mut map: V) -> Result<WebSocketMessage<'de>, V::Error>
+    where
+        V: MapAccess<'de>,
+    {
+        let mut message_type = MessageType::None;
+        let mut request = WebSocketRequest {
+            id: None,
+            request: Request::default(),
+        };
+        let mut push_enable = WebSocketPushEnable::default();
+
+        let mut found_request_keys = false;
+        let mut found_push_keys = false;
+
+        while let Some(key) = map.next_key::<&str>()? {
+            hashify::fnc_map!(key.as_bytes(),
+                b"@type" => {
+                    message_type = MessageType::parse(map.next_value()?);
+                },
+                b"dataTypes" => {
+                    push_enable.data_types = map.next_value::<Option<Vec<DataType>>>()?.unwrap_or_default();
+                    found_push_keys = true;
+                },
+                b"pushState" => {
+                    push_enable.push_state = map.next_value()?;
+                    found_push_keys = true;
+                },
+                b"id" => {
+                    request.id = map.next_value()?;
+                },
+                _ => {
+                    request.request.deserialize_argument(key, &mut map)?;
+                    found_request_keys = true;
+                }
+            );
+        }
+
+        match message_type {
+            MessageType::Request if found_request_keys => Ok(WebSocketMessage::Request(request)),
+            MessageType::PushEnable if found_push_keys => {
+                Ok(WebSocketMessage::PushEnable(push_enable))
+            }
+            MessageType::PushDisable if !found_request_keys && !found_push_keys => {
+                Ok(WebSocketMessage::PushDisable)
+            }
+            _ => Err(de::Error::custom("Invalid WebSocket JMAP request")),
+        }
+    }
+}
+
+impl MessageType {
+    fn parse(s: &str) -> Self {
+        hashify::tiny_map!(s.as_bytes(),
+            b"Request" => MessageType::Request,
+            b"WebSocketPushEnable" => MessageType::PushEnable,
+            b"WebSocketPushDisable" => MessageType::PushDisable,
+        )
+        .unwrap_or(MessageType::None)
     }
 }
 
@@ -203,8 +232,8 @@ impl<'x> From<RequestError<'x>> for WebSocketRequestError<'x> {
     }
 }
 
-impl WebSocketResponse {
-    pub fn from_response(response: Response, request_id: Option<String>) -> Self {
+impl<'x> WebSocketResponse<'x> {
+    pub fn from_response(response: Response<'x>, request_id: Option<String>) -> Self {
         Self {
             _type: WebSocketResponseType::Response,
             method_responses: response.method_responses,

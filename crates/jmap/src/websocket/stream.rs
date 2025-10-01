@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::Instant};
-
+use crate::api::{ToRequestError, request::RequestHandler};
 use common::{Server, auth::AccessToken};
 use futures_util::{SinkExt, StreamExt};
 use http_proto::HttpSessionData;
@@ -16,15 +15,14 @@ use jmap_proto::{
     request::websocket::{
         WebSocketMessage, WebSocketRequestError, WebSocketResponse, WebSocketStateChange,
     },
-    types::type_state::DataType,
 };
+use std::future::Future;
+use std::{sync::Arc, time::Instant};
 use tokio_tungstenite::WebSocketStream;
 use trc::JmapEvent;
 use tungstenite::Message;
+use types::type_state::DataType;
 use utils::map::bitmap::Bitmap;
-
-use crate::api::{ToRequestError, request::RequestHandler};
-use std::future::Future;
 
 pub trait WebSocketHandler: Sync + Send {
     fn handle_websocket_stream(

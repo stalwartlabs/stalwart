@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::CompactString;
-use utils::map::vec_map::VecMap;
+use std::fmt;
 
-use crate::{
-    parser::{JsonObjectParser, json::Parser},
-    response::serialize::serialize_hex,
-    types::{id::Id, type_state::DataType},
-};
+use crate::response::serialize::serialize_hex;
+use serde::{Deserialize, Deserializer};
+use types::{id::Id, type_state::DataType};
+use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Session {
@@ -73,6 +71,10 @@ pub enum Capability {
     #[serde(rename(serialize = "urn:ietf:params:jmap:quota"))]
     Quota = 1 << 9,
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(transparent)]
+pub struct CapabilityIds(pub u32);
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(untagged)]
@@ -317,51 +319,55 @@ impl WebSocketCapabilities {
     }
 }
 
-impl JsonObjectParser for Capability {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
-        for ch in b"urn:ietf:params:jmap:" {
-            if parser
-                .next_unescaped()?
-                .ok_or_else(|| parser.error_capability())?
-                != *ch
-            {
-                return Err(parser.error_capability());
-            }
-        }
-
-        match u128::parse(parser) {
-            Ok(key) => match key {
-                0x6572_6f63 => Ok(Capability::Core),
-                0x6c69_616d => Ok(Capability::Mail),
-                0x6e6f_6973_7369_6d62_7573 => Ok(Capability::Submission),
-                0x6573_6e6f_7073_6572_6e6f_6974_6163_6176 => Ok(Capability::VacationResponse),
-                0x7374_6361_746e_6f63 => Ok(Capability::Contacts),
-                0x0073_7261_646e_656c_6163 => Ok(Capability::Calendars),
-                0x0074_656b_636f_7362_6577 => Ok(Capability::WebSocket),
-                0x0065_7665_6973 => Ok(Capability::Sieve),
-                0x626f_6c62 => Ok(Capability::Blob),
-                0x0061_746f_7571 => Ok(Capability::Quota),
-                _ => Err(parser.error_capability()),
-            },
-            Err(err) if err.is_jmap_method_error() => Err(parser.error_capability()),
-            Err(err) => Err(err),
-        }
+impl Capability {
+    pub fn parse(s: &str) -> Option<Self> {
+        hashify::tiny_map!(s.as_bytes(),
+            "urn:ietf:params:jmap:core" => Capability::Core,
+            "urn:ietf:params:jmap:mail" => Capability::Mail,
+            "urn:ietf:params:jmap:submission" => Capability::Submission,
+            "urn:ietf:params:jmap:vacationresponse" => Capability::VacationResponse,
+            "urn:ietf:params:jmap:contacts" => Capability::Contacts,
+            "urn:ietf:params:jmap:calendars" => Capability::Calendars,
+            "urn:ietf:params:jmap:websocket" => Capability::WebSocket,
+            "urn:ietf:params:jmap:sieve" => Capability::Sieve,
+            "urn:ietf:params:jmap:blob" => Capability::Blob,
+            "urn:ietf:params:jmap:quota" => Capability::Quota,
+        )
     }
 }
 
-impl Parser<'_> {
-    fn error_capability(&mut self) -> trc::Error {
-        if self.is_eof || self.skip_string() {
-            trc::JmapEvent::UnknownCapability
-                .into_err()
-                .details(CompactString::from_utf8_lossy(
-                    self.bytes[self.pos_marker..self.pos - 1].as_ref(),
-                ))
-        } else {
-            self.error_unterminated()
+impl<'de> Deserialize<'de> for CapabilityIds {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct CapabilityIdsVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for CapabilityIdsVisitor {
+            type Value = CapabilityIds;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of capability strings")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut capability_flags = 0u32;
+
+                while let Some(capability_str) = seq.next_element::<&str>()? {
+                    let capability = Capability::parse(capability_str).ok_or_else(|| {
+                        serde::de::Error::custom(format!("Unknown capability: {capability_str:?}"))
+                    })?;
+
+                    capability_flags |= capability as u32;
+                }
+
+                Ok(CapabilityIds(capability_flags))
+            }
         }
+
+        deserializer.deserialize_seq(CapabilityIdsVisitor)
     }
 }

@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard};
+use crate::DestroyArchive;
 use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
-use jmap_proto::types::collection::{Collection, VanishedCollection};
 use store::write::{Archive, BatchBuilder, now};
 use trc::AddContext;
-
-use crate::DestroyArchive;
-
-use super::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard};
+use types::collection::{Collection, VanishedCollection};
 
 impl ContactCard {
     pub fn update<'x>(

@@ -5,10 +5,9 @@
  */
 
 use super::object::Object;
-use crate::object::FromLegacy;
-use common::{Server, config::jmap::settings::SpecialUse};
+use crate::object::{FromLegacy, Property, Value};
+use common::Server;
 use email::mailbox::Mailbox;
-use jmap_proto::types::{collection::Collection, property::Property, value::Value};
 use store::{
     SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT, SUBSPACE_INDEXES, Serialize, U64_LEN, ValueKey,
     rand,
@@ -17,6 +16,7 @@ use store::{
     },
 };
 use trc::AddContext;
+use types::{collection::Collection, field::Field, special_use::SpecialUse};
 use utils::config::utils::ParseValue;
 
 pub(crate) async fn migrate_mailboxes(server: &Server, account_id: u32) -> trc::Result<u64> {
@@ -39,7 +39,7 @@ pub(crate) async fn migrate_mailboxes(server: &Server, account_id: u32) -> trc::
                 account_id,
                 collection: Collection::Mailbox.into(),
                 document_id: mailbox_id,
-                class: ValueClass::Property(Property::Value.into()),
+                class: ValueClass::Property(Field::ARCHIVE.into()),
             })
             .await
         {
@@ -50,7 +50,7 @@ pub(crate) async fn migrate_mailboxes(server: &Server, account_id: u32) -> trc::
                     .with_collection(Collection::Mailbox)
                     .update_document(mailbox_id)
                     .set(
-                        Property::Value,
+                        Field::ARCHIVE,
                         Archiver::new(Mailbox::from_legacy(legacy))
                             .serialize()
                             .caused_by(trc::location!())?,
@@ -71,7 +71,7 @@ pub(crate) async fn migrate_mailboxes(server: &Server, account_id: u32) -> trc::
                         account_id,
                         collection: Collection::Mailbox.into(),
                         document_id: mailbox_id,
-                        class: ValueClass::Property(Property::Value.into()),
+                        class: ValueClass::Property(Field::ARCHIVE.into()),
                     })
                     .await
                     .is_err()

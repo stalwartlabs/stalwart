@@ -16,7 +16,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 use store::write::now;
-use utils::BlobHash;
+use types::blob_hash::BlobHash;
+use utils::DomainPart;
 
 pub mod dsn;
 pub mod manager;
@@ -457,38 +458,6 @@ impl InstantFromTimestamp for u64 {
         } else {
             Instant::now()
         }
-    }
-}
-
-pub trait DomainPart {
-    fn to_lowercase_domain(&self) -> String;
-    fn domain_part(&self) -> &str;
-}
-
-impl<T: AsRef<str>> DomainPart for T {
-    fn to_lowercase_domain(&self) -> String {
-        let address = self.as_ref();
-        if let Some((local, domain)) = address.rsplit_once('@') {
-            let mut address = String::with_capacity(address.len());
-            address.push_str(local);
-            address.push('@');
-            for ch in domain.chars() {
-                for ch in ch.to_lowercase() {
-                    address.push(ch);
-                }
-            }
-            address
-        } else {
-            address.to_string()
-        }
-    }
-
-    #[inline(always)]
-    fn domain_part(&self) -> &str {
-        self.as_ref()
-            .rsplit_once('@')
-            .map(|(_, d)| d)
-            .unwrap_or_default()
     }
 }
 

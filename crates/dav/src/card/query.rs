@@ -28,9 +28,9 @@ use dav_proto::{
 use groupware::cache::GroupwareCache;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{acl::Acl, collection::SyncCollection};
 use std::fmt::Write;
 use trc::AddContext;
+use types::{acl::Acl, collection::SyncCollection};
 
 pub(crate) trait CardQueryRequestHandler: Sync + Send {
     fn handle_card_query_request(

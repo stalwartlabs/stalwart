@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::SieveScript;
 use common::{Server, auth::ResourceToken, storage::index::ObjectIndexBuilder};
-use jmap_proto::types::{collection::Collection, property::Property};
 use store::write::BatchBuilder;
 use trc::AddContext;
-
-use super::SieveScript;
+use types::{collection::Collection, field::SieveField};
 
 pub trait SieveScriptDelete: Sync + Send {
     fn sieve_script_delete(
@@ -54,7 +53,7 @@ impl SieveScriptDelete for Server {
             .with_account_id(account_id)
             .with_collection(Collection::SieveScript)
             .delete_document(document_id)
-            .clear(Property::EmailIds)
+            .clear(SieveField::Ids)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
                     .with_current(obj)

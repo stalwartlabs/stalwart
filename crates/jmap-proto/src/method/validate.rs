@@ -4,56 +4,56 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use serde::Serialize;
-
 use crate::{
     error::set::SetError,
-    parser::{JsonObjectParser, Token, json::Parser},
-    request::RequestProperty,
-    types::{blob::BlobId, id::Id},
+    object::sieve::SieveProperty,
+    request::{
+        MaybeInvalid,
+        deserialize::{DeserializeArguments, deserialize_request},
+    },
 };
+use serde::{Deserialize, Deserializer, Serialize};
+use types::{blob::BlobId, id::Id};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ValidateSieveScriptRequest {
     pub account_id: Id,
-    pub blob_id: BlobId,
+    pub blob_id: MaybeInvalid<BlobId>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ValidateSieveScriptResponse {
     #[serde(rename = "accountId")]
     pub account_id: Id,
-    pub error: Option<SetError>,
+    pub error: Option<SetError<SieveProperty>>,
 }
 
-impl JsonObjectParser for ValidateSieveScriptRequest {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
+impl<'de> DeserializeArguments<'de> for ValidateSieveScriptRequest {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = ValidateSieveScriptRequest {
-            account_id: Id::default(),
-            blob_id: BlobId::default(),
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 if !key.is_ref => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x6449_626f_6c62 if !key.is_ref => {
-                    request.blob_id = parser.next_token::<BlobId>()?.unwrap_string("blobId")?;
-                }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
+            },
+            b"blobId" => {
+                self.blob_id = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
 
-        Ok(request)
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for ValidateSieveScriptRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
     }
 }

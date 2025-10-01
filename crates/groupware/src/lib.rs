@@ -6,8 +6,8 @@
 
 use calcard::common::timezone::Tz;
 use common::DavResources;
-use jmap_proto::types::collection::{Collection, SyncCollection};
 use percent_encoding::{AsciiSet, CONTROLS};
+use types::collection::{Collection, SyncCollection};
 
 pub mod cache;
 pub mod calendar;

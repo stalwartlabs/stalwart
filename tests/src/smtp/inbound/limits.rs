@@ -40,7 +40,7 @@ async fn limits() {
     // Exceed max line length
     let mut session = Session::test_with_shutdown(TestSMTP::from_core(core).server, rx);
     session.data.remote_ip_str = "10.0.0.1".into();
-    let mut buf = vec![b'A'; 2049];
+    let mut buf = vec![b'A'; 4097];
     session.ingest(&buf).await.unwrap();
     session.ingest(b"\r\n").await.unwrap();
     session.response().assert_code("554 5.3.4");

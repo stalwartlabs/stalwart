@@ -4,22 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::query::Filter;
 use crate::{
-    parser::{Ignore, JsonObjectParser, Token, json::Parser},
+    method::query::FilterWrapper,
+    object::email::EmailFilter,
     request::{
-        RequestProperty,
-        reference::{MaybeReference, ResultReference},
+        MaybeInvalid,
+        deserialize::{DeserializeArguments, deserialize_request},
+        reference::{MaybeResultReference, ResultReference},
     },
-    types::id::Id,
 };
-
-use super::query::{Filter, parse_filter};
+use serde::{Deserialize, Deserializer};
+use types::id::Id;
 
 #[derive(Debug, Clone)]
 pub struct GetSearchSnippetRequest {
     pub account_id: Id,
-    pub filter: Vec<Filter>,
-    pub email_ids: MaybeReference<Vec<Id>, ResultReference>,
+    pub filter: Vec<Filter<EmailFilter>>,
+    pub email_ids: MaybeResultReference<Vec<MaybeInvalid<Id>>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -47,48 +49,48 @@ pub struct SearchSnippet {
     pub preview: Option<String>,
 }
 
-impl JsonObjectParser for GetSearchSnippetRequest {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
+impl<'de> DeserializeArguments<'de> for GetSearchSnippetRequest {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = GetSearchSnippetRequest {
-            account_id: Id::default(),
-            filter: vec![],
-            email_ids: MaybeReference::Value(vec![]),
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 if !key.is_ref => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x7265_746c_6966 if !key.is_ref => match parser.next_token::<Ignore>()? {
-                    Token::DictStart => {
-                        request.filter = parse_filter(parser)?;
-                    }
-                    Token::Null => (),
-                    token => {
-                        return Err(token.error("filter", "object or null"));
-                    }
-                },
-                0x7364_496c_6961_6d65 => {
-                    request.email_ids = if !key.is_ref {
-                        MaybeReference::Value(<Vec<Id>>::parse(parser)?)
-                    } else {
-                        MaybeReference::Reference(ResultReference::parse(parser)?)
-                    };
-                }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
+            },
+            b"filter" => {
+                self.filter = map.next_value::<FilterWrapper<EmailFilter>>()?.0;
+            },
+            b"emailIds" => {
+                self.email_ids = MaybeResultReference::Value(map.next_value::<Vec<MaybeInvalid<Id>>>()?);
+            },
+            b"#emailIds" => {
+                self.email_ids = MaybeResultReference::Reference(map.next_value::<ResultReference>()?);
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
 
-        Ok(request)
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for GetSearchSnippetRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl Default for GetSearchSnippetRequest {
+    fn default() -> Self {
+        Self {
+            account_id: Id::default(),
+            filter: Vec::new(),
+            email_ids: MaybeResultReference::Value(Vec::new()),
+        }
     }
 }

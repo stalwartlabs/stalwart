@@ -17,19 +17,11 @@ use crate::{
         metadata::MessageData,
     },
 };
-use common::{IDX_EMAIL, Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
+use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use directory::Permission;
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
-};
-use jmap_proto::types::{
-    blob::BlobId,
-    collection::{Collection, SyncCollection},
-    id::Id,
-    keyword::Keyword,
-    property::Property,
-    value::{Object, Value},
 };
 use mail_parser::{
     Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
@@ -45,7 +37,7 @@ use std::{
     time::{Duration, Instant},
 };
 use store::{
-    BlobClass, IndexKey, IndexKeyPrefix, IterateParams, U32_LEN,
+    IndexKey, IndexKeyPrefix, IterateParams, U32_LEN,
     ahash::AHashMap,
     query::Filter,
     roaring::RoaringBitmap,
@@ -53,11 +45,18 @@ use store::{
 };
 use store::{SerializeInfallible, rand::Rng};
 use trc::{AddContext, MessageIngestEvent};
+use types::{
+    blob::{BlobClass, BlobId},
+    collection::{Collection, SyncCollection},
+    field::{ContactField, EmailField, MailboxField, PrincipalField},
+    keyword::Keyword,
+};
 use utils::sanitize_email;
 
 #[derive(Default)]
 pub struct IngestedEmail {
-    pub id: Id,
+    pub document_id: u32,
+    pub thread_id: u32,
     pub change_id: u64,
     pub blob_id: BlobId,
     pub size: usize,
@@ -219,7 +218,7 @@ impl EmailIngest for Server {
                             .filter(
                                 account_id,
                                 Collection::ContactCard,
-                                vec![Filter::eq(IDX_EMAIL, sender.into_bytes())],
+                                vec![Filter::eq(ContactField::Email, sender.into_bytes())],
                             )
                             .await
                             .caused_by(trc::location!())?
@@ -473,7 +472,8 @@ impl EmailIngest for Server {
                     );
 
                     return Ok(IngestedEmail {
-                        id: Id::default(),
+                        document_id: 0,
+                        thread_id: 0,
                         change_id: u64::MAX,
                         blob_id: BlobId::default(),
                         imap_uids: Vec::new(),
@@ -543,7 +543,12 @@ impl EmailIngest for Server {
         if do_encrypt
             && !message.is_encrypted()
             && let Some(encrypt_params_) = self
-                .get_archive_by_property(account_id, Collection::Principal, 0, Property::Parameters)
+                .get_archive_by_property(
+                    account_id,
+                    Collection::Principal,
+                    0,
+                    PrincipalField::EncryptionKeys.into(),
+                )
                 .await
                 .caused_by(trc::location!())?
         {
@@ -682,7 +687,6 @@ impl EmailIngest for Server {
             .await
             .caused_by(trc::location!())?
             .last_change_id(account_id)?;
-        let id = Id::from_parts(thread_id, document_id);
 
         // Request FTS index
         self.notify_task_queue();
@@ -710,7 +714,8 @@ impl EmailIngest for Server {
         );
 
         Ok(IngestedEmail {
-            id,
+            document_id,
+            thread_id,
             change_id,
             blob_id: BlobId {
                 hash: blob_id.hash,
@@ -758,14 +763,14 @@ impl EmailIngest for Server {
                             account_id,
                             collection: Collection::Email.into(),
                             document_id: 0,
-                            field: Property::Subject.into(),
+                            field: EmailField::Subject.into(),
                             key: thread_name.clone(),
                         },
                         IndexKey {
                             account_id,
                             collection: Collection::Email.into(),
                             document_id: u32::MAX,
-                            field: Property::Subject.into(),
+                            field: EmailField::Subject.into(),
                             key: thread_name.clone(),
                         },
                     )
@@ -802,14 +807,14 @@ impl EmailIngest for Server {
                             account_id,
                             collection: Collection::Email.into(),
                             document_id: 0,
-                            field: Property::References.into(),
+                            field: EmailField::References.into(),
                             key: references.first().unwrap().to_vec(),
                         },
                         IndexKey {
                             account_id,
                             collection: Collection::Email.into(),
                             document_id: u32::MAX,
-                            field: Property::References.into(),
+                            field: EmailField::References.into(),
                             key: references.last().unwrap().to_vec(),
                         },
                     )
@@ -952,7 +957,7 @@ impl EmailIngest for Server {
             .with_account_id(account_id)
             .with_collection(Collection::Mailbox)
             .update_document(mailbox_id)
-            .add_and_get(Property::EmailIds, 1);
+            .add_and_get(MailboxField::UidCounter, 1);
         self.core
             .storage
             .data
@@ -971,15 +976,5 @@ impl EmailIngest for Server {
 impl IngestSource<'_> {
     pub fn is_smtp(&self) -> bool {
         matches!(self, Self::Smtp { .. })
-    }
-}
-
-impl From<IngestedEmail> for Object<Value> {
-    fn from(email: IngestedEmail) -> Self {
-        Object::with_capacity(3)
-            .with_property(Property::Id, email.id)
-            .with_property(Property::ThreadId, Id::from(email.id.prefix_id()))
-            .with_property(Property::BlobId, email.blob_id)
-            .with_property(Property::Size, email.size)
     }
 }

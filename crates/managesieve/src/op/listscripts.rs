@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use crate::core::{Session, StatusResponse};
 use common::listener::SessionStream;
 use directory::Permission;
 use email::sieve::SieveScript;
-use jmap_proto::types::collection::Collection;
+use std::time::Instant;
 use trc::AddContext;
-
-use crate::core::{Session, StatusResponse};
+use types::collection::Collection;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_listscripts(&mut self) -> trc::Result<Vec<u8>> {

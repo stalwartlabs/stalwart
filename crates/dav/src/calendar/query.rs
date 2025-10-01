@@ -34,13 +34,13 @@ use dav_proto::{
 use groupware::{cache::GroupwareCache, calendar::ArchivedCalendarEvent};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{acl::Acl, collection::SyncCollection};
 use std::{fmt::Write, slice::Iter, str::FromStr};
 use store::{
     ahash::{AHashMap, AHashSet},
     write::serialize::rkyv_deserialize,
 };
 use trc::AddContext;
+use types::{acl::Acl, collection::SyncCollection};
 
 pub(crate) trait CalendarQueryRequestHandler: Sync + Send {
     fn handle_calendar_query_request(

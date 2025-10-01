@@ -9,13 +9,13 @@ use common::{
     MessageCache, MessageStoreCache, MessageUidCache, MessagesCache, Server, auth::AccessToken,
     sharing::EffectiveAcl,
 };
-use jmap_proto::types::{
+use store::{ahash::AHashMap, roaring::RoaringBitmap, write::Archive};
+use trc::AddContext;
+use types::{
     acl::Acl,
     collection::Collection,
     keyword::{Keyword, OTHER},
 };
-use store::{ahash::AHashMap, roaring::RoaringBitmap, write::Archive};
-use trc::AddContext;
 use utils::map::bitmap::Bitmap;
 
 pub(crate) async fn update_email_cache(

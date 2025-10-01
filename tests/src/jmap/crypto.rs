@@ -4,24 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::path::PathBuf;
-
-use email::message::crypto::{
-    Algorithm, EncryptMessage, EncryptionMethod, EncryptionParams, EncryptionType, try_parse_certs,
-};
-use jmap_proto::types::id::Id;
-use mail_parser::{MessageParser, MimeHeaders};
-use store::{
-    Deserialize, Serialize,
-    write::{Archive, Archiver},
-};
-
+use super::JMAPTest;
 use crate::{
     directory::internal::TestInternalDirectory,
     jmap::{ManagementApi, delivery::SmtpConnection},
 };
-
-use super::JMAPTest;
+use email::message::crypto::{
+    Algorithm, EncryptMessage, EncryptionMethod, EncryptionParams, EncryptionType, try_parse_certs,
+};
+use mail_parser::{MessageParser, MimeHeaders};
+use std::path::PathBuf;
+use store::{
+    Deserialize, Serialize,
+    write::{Archive, Archiver},
+};
+use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Encryption-at-rest tests...");

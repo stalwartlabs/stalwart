@@ -24,7 +24,7 @@ use store::{
     },
 };
 use trc::AddContext;
-use utils::BlobHash;
+use types::blob_hash::BlobHash;
 
 pub(crate) async fn migrate_queue_v011(server: &Server) -> trc::Result<()> {
     let mut count = 0;

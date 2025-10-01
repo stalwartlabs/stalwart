@@ -188,6 +188,9 @@ METHOD:REPLY
 PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
 VERSION:2.0
 BEGIN:VEVENT
+SUMMARY:Review Internet-Draft
+DTEND;TZID=America/Montreal:20090601T160000
+DTSTART;TZID=America/Montreal:20090601T150000
 ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;ROLE=
  REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
 ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
@@ -197,6 +200,9 @@ SEQUENCE:1
 REQUEST-STATUS:2.0;Success
 END:VEVENT
 BEGIN:VEVENT
+SUMMARY:Review Internet-Draft
+DTEND;TZID=America/Montreal:20090602T160000
+DTSTART;TZID=America/Montreal:20090602T150000
 ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;PARTSTAT=DECLINED;ROLE=
  REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
 ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com

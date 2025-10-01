@@ -21,7 +21,7 @@ impl SqliteStore {
             let mut s = conn.prepare_cached(query).map_err(into_error)?;
             let params = params_
                 .iter()
-                .map(|v| v as &(dyn rusqlite::types::ToSql))
+                .map(|v| v as &dyn rusqlite::types::ToSql)
                 .collect::<Vec<_>>();
 
             match T::query_type() {

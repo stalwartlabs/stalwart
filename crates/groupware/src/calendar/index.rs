@@ -11,8 +11,7 @@ use super::{
     ArchivedTimezone, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert, Timezone,
 };
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
-use common::{IDX_CREATED, IDX_UID};
-use jmap_proto::types::{collection::SyncCollection, value::AclGrant};
+use types::{acl::AclGrant, collection::SyncCollection, field::CalendarField};
 
 impl IndexableObject for Calendar {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -27,7 +26,7 @@ impl IndexableObject for Calendar {
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {
-                sync_collection: SyncCollection::Calendar.into(),
+                sync_collection: SyncCollection::Calendar,
             },
         ]
         .into_iter()
@@ -52,7 +51,7 @@ impl IndexableObject for &ArchivedCalendar {
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {
-                sync_collection: SyncCollection::Calendar.into(),
+                sync_collection: SyncCollection::Calendar,
             },
         ]
         .into_iter()
@@ -69,7 +68,7 @@ impl IndexableObject for CalendarEvent {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::Index {
-                field: IDX_UID,
+                field: CalendarField::Uid.into(),
                 value: self.data.event.uids().next().into(),
             },
             IndexValue::Quota {
@@ -79,7 +78,7 @@ impl IndexableObject for CalendarEvent {
                     + self.size,
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::Calendar.into(),
+                sync_collection: SyncCollection::Calendar,
                 prefix: None,
             },
         ]
@@ -91,7 +90,7 @@ impl IndexableObject for &ArchivedCalendarEvent {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::Index {
-                field: IDX_UID,
+                field: CalendarField::Uid.into(),
                 value: self.data.event.uids().next().into(),
             },
             IndexValue::Quota {
@@ -101,7 +100,7 @@ impl IndexableObject for &ArchivedCalendarEvent {
                     + self.size,
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::Calendar.into(),
+                sync_collection: SyncCollection::Calendar,
                 prefix: None,
             },
         ]
@@ -120,11 +119,11 @@ impl IndexableObject for CalendarScheduling {
         [
             IndexValue::Quota { used: self.size },
             IndexValue::Index {
-                field: IDX_CREATED,
+                field: CalendarField::Created.into(),
                 value: self.created.into(),
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::CalendarScheduling.into(),
+                sync_collection: SyncCollection::CalendarScheduling,
                 prefix: None,
             },
         ]
@@ -139,11 +138,11 @@ impl IndexableObject for &ArchivedCalendarScheduling {
                 used: self.size.to_native(),
             },
             IndexValue::Index {
-                field: IDX_CREATED,
+                field: CalendarField::Created.into(),
                 value: self.created.to_native().into(),
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::CalendarScheduling.into(),
+                sync_collection: SyncCollection::CalendarScheduling,
                 prefix: None,
             },
         ]

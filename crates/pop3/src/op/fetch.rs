@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use crate::{Session, protocol::response::Response};
 use common::listener::SessionStream;
 use directory::Permission;
 use email::message::metadata::MessageMetadata;
-use jmap_proto::types::{collection::Collection, property::Property};
+use std::time::Instant;
 use trc::AddContext;
-
-use crate::{Session, protocol::response::Response};
+use types::{collection::Collection, field::EmailField};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_fetch(&mut self, msg: u32, lines: Option<u32>) -> trc::Result<()> {
@@ -30,7 +28,7 @@ impl<T: SessionStream> Session<T> {
                     mailbox.account_id,
                     Collection::Email,
                     message.id,
-                    Property::BodyStructure,
+                    EmailField::Metadata.into(),
                 )
                 .await
                 .caused_by(trc::location!())?

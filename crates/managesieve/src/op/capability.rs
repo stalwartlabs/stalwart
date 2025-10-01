@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use crate::core::{Session, StatusResponse};
 use common::listener::SessionStream;
 use jmap_proto::request::capability::Capabilities;
-
-use crate::core::{Session, StatusResponse};
+use std::time::Instant;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_capability(&self, message: &'static str) -> trc::Result<Vec<u8>> {

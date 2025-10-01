@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::Instant};
-
+use super::{ImapContext, ToModSeq};
+use crate::{
+    core::{ImapUidToId, MailboxId, SelectedMailbox, Session, SessionData},
+    spawn_op,
+};
+use common::listener::SessionStream;
 use directory::Permission;
 use email::message::ingest::{EmailIngest, IngestEmail, IngestSource};
 use imap_proto::{
@@ -13,16 +17,13 @@ use imap_proto::{
     protocol::{append::Arguments, select::HighestModSeq},
     receiver::Request,
 };
-
-use crate::{
-    core::{ImapUidToId, MailboxId, SelectedMailbox, Session, SessionData},
-    spawn_op,
-};
-use common::listener::SessionStream;
-use jmap_proto::types::{acl::Acl, keyword::Keyword, state::StateChange, type_state::DataType};
 use mail_parser::MessageParser;
-
-use super::{ImapContext, ToModSeq};
+use std::{sync::Arc, time::Instant};
+use types::{
+    acl::Acl,
+    keyword::Keyword,
+    type_state::{DataType, StateChange},
+};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_append(&mut self, request: Request<Command>) -> trc::Result<()> {
@@ -119,7 +120,7 @@ impl<T: SessionStream> SessionData<T> {
                 Ok(email) => {
                     created_ids.push(ImapUidToId {
                         uid: email.imap_uids[0],
-                        id: email.id.document_id(),
+                        id: email.document_id,
                     });
                     last_change_id = Some(email.change_id);
                 }

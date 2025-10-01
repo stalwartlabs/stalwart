@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use jmap_tools::{Key, Property};
 use std::borrow::Cow;
-
-use crate::types::{id::Id, property::Property};
+use types::id::Id;
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct SetError {
+pub struct SetError<P: Property> {
     #[serde(rename = "type")]
     pub type_: SetErrorType,
 
@@ -17,7 +17,7 @@ pub struct SetError {
     pub description: Option<Cow<'static, str>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<Vec<InvalidProperty>>,
+    pub properties: Option<Vec<InvalidProperty<P>>>,
 
     #[serde(rename = "existingId")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25,9 +25,9 @@ pub struct SetError {
 }
 
 #[derive(Debug, Clone)]
-pub enum InvalidProperty {
-    Property(Property),
-    Path(Vec<Property>),
+pub enum InvalidProperty<T: Property> {
+    Property(Key<'static, T>),
+    Path(Vec<Key<'static, T>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -116,7 +116,7 @@ impl SetErrorType {
     }
 }
 
-impl SetError {
+impl<T: Property> SetError<T> {
     pub fn new(type_: SetErrorType) -> Self {
         SetError {
             type_,
@@ -131,14 +131,14 @@ impl SetError {
         self
     }
 
-    pub fn with_property(mut self, property: impl Into<InvalidProperty>) -> Self {
+    pub fn with_property(mut self, property: impl Into<InvalidProperty<T>>) -> Self {
         self.properties = vec![property.into()].into();
         self
     }
 
     pub fn with_properties(
         mut self,
-        properties: impl IntoIterator<Item = impl Into<InvalidProperty>>,
+        properties: impl IntoIterator<Item = impl Into<InvalidProperty<T>>>,
     ) -> Self {
         self.properties = properties
             .into_iter()
@@ -186,19 +186,25 @@ impl SetError {
     }
 }
 
-impl From<Property> for InvalidProperty {
-    fn from(property: Property) -> Self {
+impl<T: Property> From<T> for InvalidProperty<T> {
+    fn from(property: T) -> Self {
+        InvalidProperty::Property(Key::Property(property))
+    }
+}
+
+impl<T: Property> From<(T, T)> for InvalidProperty<T> {
+    fn from((a, b): (T, T)) -> Self {
+        InvalidProperty::Path(vec![Key::Property(a), Key::Property(b)])
+    }
+}
+
+impl<T: Property> From<Key<'static, T>> for InvalidProperty<T> {
+    fn from(property: Key<'static, T>) -> Self {
         InvalidProperty::Property(property)
     }
 }
 
-impl From<(Property, Property)> for InvalidProperty {
-    fn from((a, b): (Property, Property)) -> Self {
-        InvalidProperty::Path(vec![a, b])
-    }
-}
-
-impl serde::Serialize for InvalidProperty {
+impl<T: Property> serde::Serialize for InvalidProperty<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -212,7 +218,7 @@ impl serde::Serialize for InvalidProperty {
                     if i > 0 {
                         path.push('/');
                     }
-                    let _ = write!(path, "{}", p);
+                    let _ = write!(path, "{}", p.to_string());
                 }
                 path.serialize(serializer)
             }

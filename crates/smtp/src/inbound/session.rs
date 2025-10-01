@@ -33,7 +33,7 @@ impl<T: SessionStream> Session<T> {
         'outer: loop {
             match &mut state {
                 State::Request(receiver) => loop {
-                    match receiver.ingest(&mut iter, bytes) {
+                    match receiver.ingest(&mut iter) {
                         Ok(request) => match request {
                             Request::Rcpt { to } => {
                                 self.handle_rcpt_to(to).await?;
@@ -301,7 +301,7 @@ impl<T: SessionStream> Session<T> {
 
                                 if !self.params.ehlo_reject_non_fqdn && syntax.starts_with("EHLO ")
                                 {
-                                    self.handle_ehlo("null".to_string(), true).await?
+                                    self.handle_ehlo("null".into(), true).await?
                                 } else {
                                     self.write(
                                         format!("501 5.5.2 Syntax error, expected: {syntax}\r\n")

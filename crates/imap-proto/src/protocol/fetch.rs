@@ -261,7 +261,7 @@ impl EmailAddress<'_> {
             &self.address
         };
 
-        if let Some((local, host)) = addr.split_once('@') {
+        if let Some((local, host)) = addr.rsplit_once('@') {
             quoted_or_literal_string(buf, local);
             buf.push(b' ');
             quoted_or_literal_string(buf, host);

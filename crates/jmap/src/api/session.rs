@@ -8,12 +8,10 @@ use std::sync::Arc;
 
 use common::{Server, auth::AccessToken};
 use directory::backend::internal::manage::ManageDirectory;
-use jmap_proto::{
-    request::capability::{Capability, Session},
-    types::{acl::Acl, collection::Collection, id::Id},
-};
+use jmap_proto::request::capability::{Capability, Session};
 use std::future::Future;
 use trc::AddContext;
+use types::{acl::Acl, collection::Collection, id::Id};
 
 pub trait SessionHandler: Sync + Send {
     fn handle_session_resource(

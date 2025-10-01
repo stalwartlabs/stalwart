@@ -92,7 +92,7 @@ impl Base32Writer {
     }
 
     pub fn finalize(mut self) -> String {
-        if self.pos % 5 != 0 {
+        if !self.pos.is_multiple_of(5) {
             self.push_byte(0, true);
         }
 
@@ -127,6 +127,15 @@ impl<'x> Base32Reader<'x> {
     pub fn new(bytes: &'x [u8]) -> Self {
         Base32Reader {
             bytes: bytes.iter(),
+            pos: 0,
+            last_byte: 0,
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_iter(bytes: Iter<'x, u8>) -> Self {
+        Base32Reader {
+            bytes,
             pos: 0,
             last_byte: 0,
         }

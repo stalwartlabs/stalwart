@@ -4,26 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, time::Instant};
-
+use super::{Action, Error, Macros, Modification};
+use crate::{
+    core::{Session, SessionAddress, SessionData},
+    inbound::{FilterResponse, milter::MilterClient},
+};
 use common::{
     DAEMON_NAME,
     config::smtp::session::{Milter, Stage},
     listener::SessionStream,
 };
-
 use mail_auth::AuthenticatedMessage;
 use smtp_proto::{IntoString, request::parser::Rfc5321Parser};
+use std::{borrow::Cow, time::Instant};
 use tokio::io::{AsyncRead, AsyncWrite};
 use trc::MilterEvent;
-
-use crate::{
-    core::{Session, SessionAddress, SessionData},
-    inbound::{FilterResponse, milter::MilterClient},
-    queue::DomainPart,
-};
-
-use super::{Action, Error, Macros, Modification};
+use utils::DomainPart;
 
 enum Rejection {
     Action(Action),
@@ -316,11 +312,11 @@ impl SessionData {
                     if !args.is_empty() {
                         args.push('\n');
                         match Rfc5321Parser::new(&mut args.as_bytes().iter())
-                            .mail_from_parameters(String::new())
+                            .mail_from_parameters(Cow::Borrowed(""))
                         {
                             Ok(addr) => {
                                 mail_from.flags = addr.flags;
-                                mail_from.dsn_info = addr.env_id;
+                                mail_from.dsn_info = addr.env_id.map(|e| e.into_owned());
                             }
                             Err(err) => {
                                 trc::event!(
@@ -352,11 +348,11 @@ impl SessionData {
                         if !args.is_empty() {
                             args.push('\n');
                             match Rfc5321Parser::new(&mut args.as_bytes().iter())
-                                .rcpt_to_parameters(String::new())
+                                .rcpt_to_parameters(Cow::Borrowed(""))
                             {
                                 Ok(addr) => {
                                     rcpt.flags = addr.flags;
-                                    rcpt.dsn_info = addr.orcpt;
+                                    rcpt.dsn_info = addr.orcpt.map(|e| e.into_owned());
                                 }
                                 Err(err) => {
                                     trc::event!(

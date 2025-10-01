@@ -4,23 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant, SystemTime};
-
-use common::{config::smtp::session::Stage, listener::SessionStream, scripts::ScriptModification};
-
-use mail_auth::{IprevOutput, IprevResult, SpfOutput, SpfResult, spf::verify::SpfParameters};
-use smtp_proto::{MAIL_BY_NOTIFY, MAIL_BY_RETURN, MAIL_REQUIRETLS, MailFrom, MtPriority};
-use trc::SmtpEvent;
-use utils::config::Rate;
-
 use crate::{
     core::{Session, SessionAddress},
-    queue::DomainPart,
     scripts::ScriptResult,
 };
+use common::{config::smtp::session::Stage, listener::SessionStream, scripts::ScriptModification};
+use mail_auth::{IprevOutput, IprevResult, SpfOutput, SpfResult, spf::verify::SpfParameters};
+use smtp_proto::{MAIL_BY_NOTIFY, MAIL_BY_RETURN, MAIL_REQUIRETLS, MailFrom, MtPriority};
+use std::{
+    borrow::Cow,
+    time::{Duration, Instant, SystemTime},
+};
+use trc::SmtpEvent;
+use utils::{DomainPart, config::Rate};
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_mail_from(&mut self, from: MailFrom<String>) -> Result<(), ()> {
+    pub async fn handle_mail_from(&mut self, from: MailFrom<Cow<'_, str>>) -> Result<(), ()> {
         if self.data.helo_domain.is_empty()
             && (self.params.ehlo_require
                 || self.params.spf_ehlo.verify()
@@ -111,7 +110,7 @@ impl<T: SessionStream> Session<T> {
         let (address, address_lcase, domain) = if !from.address.is_empty() {
             let address_lcase = from.address.to_lowercase();
             let domain = address_lcase.domain_part().into();
-            (from.address, address_lcase, domain)
+            (from.address.into_owned(), address_lcase, domain)
         } else {
             (String::new(), String::new(), String::new())
         };
@@ -122,7 +121,7 @@ impl<T: SessionStream> Session<T> {
             address_lcase,
             domain,
             flags: from.flags,
-            dsn_info: from.env_id,
+            dsn_info: from.env_id.map(|e| e.into_owned()),
         }
         .into();
 

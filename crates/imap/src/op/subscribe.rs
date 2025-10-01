@@ -4,20 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use super::ImapContext;
 use crate::{
     core::{Session, SessionData},
     spawn_op,
 };
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-
 use directory::Permission;
 use imap_proto::{Command, ResponseCode, StatusResponse, receiver::Request};
-use jmap_proto::types::collection::Collection;
+use std::time::Instant;
 use store::write::BatchBuilder;
-
-use super::ImapContext;
+use types::collection::Collection;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_subscribe(

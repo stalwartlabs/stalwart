@@ -13,6 +13,7 @@ use store::{
     write::{DirectoryClass, ValueClass},
 };
 use trc::AddContext;
+use utils::DomainPart;
 
 #[allow(async_fn_in_trait)]
 pub trait DirectoryStore: Sync + Send {
@@ -117,7 +118,7 @@ impl DirectoryStore for Store {
 
     async fn vrfy(&self, address: &str) -> trc::Result<Vec<String>> {
         let mut results = Vec::new();
-        let address = address.split('@').next().unwrap_or(address);
+        let address = address.try_local_part().unwrap_or(address);
         if address.len() > 3 {
             self.iterate(
                 IterateParams::new(
@@ -129,7 +130,7 @@ impl DirectoryStore for Store {
                 |key, value| {
                     let key =
                         std::str::from_utf8(key.get(1..).unwrap_or_default()).unwrap_or_default();
-                    if key.split('@').next().unwrap_or(key).contains(address)
+                    if key.try_local_part().unwrap_or(key).contains(address)
                         && PrincipalInfo::deserialize(value)
                             .caused_by(trc::location!())?
                             .typ

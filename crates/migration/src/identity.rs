@@ -5,15 +5,15 @@
  */
 
 use super::object::Object;
-use crate::object::FromLegacy;
+use crate::object::{FromLegacy, Property, Value};
 use common::Server;
 use email::identity::{EmailAddress, Identity};
-use jmap_proto::types::{collection::Collection, property::Property, value::Value};
 use store::{
     Serialize, ValueKey,
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, ValueClass},
 };
 use trc::AddContext;
+use types::{collection::Collection, field::Field};
 
 pub(crate) async fn migrate_identities(server: &Server, account_id: u32) -> trc::Result<u64> {
     // Obtain email ids
@@ -35,7 +35,7 @@ pub(crate) async fn migrate_identities(server: &Server, account_id: u32) -> trc:
                 account_id,
                 collection: Collection::Identity.into(),
                 document_id: identity_id,
-                class: ValueClass::Property(Property::Value.into()),
+                class: ValueClass::Property(Field::ARCHIVE.into()),
             })
             .await
         {
@@ -46,7 +46,7 @@ pub(crate) async fn migrate_identities(server: &Server, account_id: u32) -> trc:
                     .with_collection(Collection::Identity)
                     .update_document(identity_id)
                     .set(
-                        Property::Value,
+                        Field::ARCHIVE,
                         Archiver::new(Identity::from_legacy(legacy))
                             .serialize()
                             .caused_by(trc::location!())?,
@@ -68,7 +68,7 @@ pub(crate) async fn migrate_identities(server: &Server, account_id: u32) -> trc:
                         account_id,
                         collection: Collection::Identity.into(),
                         document_id: identity_id,
-                        class: ValueClass::Property(Property::Value.into()),
+                        class: ValueClass::Property(Field::ARCHIVE.into()),
                     })
                     .await
                     .is_err()
@@ -141,7 +141,7 @@ fn convert_email_addresses(value: &Value) -> Option<Vec<EmailAddress>> {
                     name: None,
                     email: String::new(),
                 };
-                for (key, value) in &obj.0 {
+                for (key, value) in &obj.properties {
                     match (key, value) {
                         (Property::Email, Value::Text(value)) => {
                             addr.email = value.to_string();

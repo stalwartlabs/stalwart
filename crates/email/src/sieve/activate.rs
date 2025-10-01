@@ -5,9 +5,9 @@
  */
 
 use common::{Server, storage::index::ObjectIndexBuilder};
-use jmap_proto::types::{collection::Collection, property::Property};
 use store::{query::Filter, write::BatchBuilder};
 use trc::AddContext;
+use types::{collection::Collection, field::SieveField};
 
 use super::SieveScript;
 
@@ -32,7 +32,7 @@ impl SieveScriptActivate for Server {
             .filter(
                 account_id,
                 Collection::SieveScript,
-                vec![Filter::eq(Property::IsActive, vec![1u8])],
+                vec![Filter::eq(SieveField::IsActive, vec![1u8])],
             )
             .await?
             .results;
@@ -65,7 +65,7 @@ impl SieveScriptActivate for Server {
                 new_sieve.is_active = false;
                 batch
                     .update_document(document_id)
-                    .clear(Property::EmailIds)
+                    .clear(SieveField::Ids)
                     .custom(
                         ObjectIndexBuilder::new()
                             .with_changes(new_sieve)

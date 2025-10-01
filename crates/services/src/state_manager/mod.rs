@@ -9,12 +9,13 @@ pub mod http;
 pub mod manager;
 pub mod push;
 
-use std::time::{Duration, Instant};
-
 use common::ipc::EncryptionKeys;
-
-use jmap_proto::types::{id::Id, state::StateChange, type_state::DataType};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use types::{
+    id::Id,
+    type_state::{DataType, StateChange},
+};
 use utils::map::bitmap::Bitmap;
 
 #[derive(Debug)]

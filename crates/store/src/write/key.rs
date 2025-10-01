@@ -5,7 +5,8 @@
  */
 
 use std::convert::TryInto;
-use utils::{BLOB_HASH_LEN, codec::leb128::Leb128_};
+use types::blob_hash::BLOB_HASH_LEN;
+use utils::codec::leb128::Leb128_;
 
 use crate::{
     BitmapKey, Deserialize, IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL,

@@ -4,6 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{
+    DavError, DavMethod, PropStatBuilder,
+    common::{
+        ETag, ExtractETag,
+        lock::{LockRequestHandler, ResourceState},
+        uri::DavUriResource,
+    },
+    file::DavFileResource,
+};
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use dav_proto::{
     RequestHeaders, Return,
@@ -16,21 +25,11 @@ use dav_proto::{
 use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
 use store::write::BatchBuilder;
 use trc::AddContext;
-
-use crate::{
-    DavError, DavMethod, PropStatBuilder,
-    common::{
-        ETag, ExtractETag,
-        lock::{LockRequestHandler, ResourceState},
-        uri::DavUriResource,
-    },
-    file::DavFileResource,
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
 };
 
 pub(crate) trait FilePropPatchRequestHandler: Sync + Send {

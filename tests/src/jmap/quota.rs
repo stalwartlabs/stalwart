@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::JMAPTest;
 use crate::{
     directory::internal::TestInternalDirectory,
     jmap::{
@@ -19,10 +20,8 @@ use jmap_client::{
     core::set::{SetErrorType, SetObject},
     email::EmailBodyPart,
 };
-use jmap_proto::types::{collection::Collection, id::Id};
 use smtp::queue::spool::SmtpSpool;
-
-use super::JMAPTest;
+use types::{collection::Collection, id::Id};
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running quota tests...");

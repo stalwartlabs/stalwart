@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_client::mailbox::Role;
-use jmap_proto::types::id::Id;
-
-use crate::jmap::{assert_is_empty, mailbox::destroy_all_mailboxes};
-
 use super::JMAPTest;
+use crate::jmap::{assert_is_empty, mailbox::destroy_all_mailboxes};
+use jmap_client::mailbox::Role;
+use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Copy tests...");

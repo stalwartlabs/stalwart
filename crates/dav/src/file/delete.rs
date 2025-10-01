@@ -16,8 +16,8 @@ use dav_proto::RequestHeaders;
 use groupware::{DestroyArchive, cache::GroupwareCache};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{acl::Acl, collection::SyncCollection};
 use trc::AddContext;
+use types::{acl::Acl, collection::SyncCollection};
 
 pub(crate) trait FileDeleteRequestHandler: Sync + Send {
     fn handle_file_delete_request(

@@ -5,10 +5,7 @@
  */
 
 use super::{QueueEnvelope, QuotaKey, Status};
-use crate::{
-    core::throttle::NewKey,
-    queue::{DomainPart, MessageWrapper},
-};
+use crate::{core::throttle::NewKey, queue::MessageWrapper};
 use ahash::AHashSet;
 use common::{Server, config::smtp::queue::QueueQuota, expr::functions::ResolveVariable};
 use std::future::Future;
@@ -17,6 +14,7 @@ use store::{
     write::{BatchBuilder, QueueClass, ValueClass},
 };
 use trc::QueueEvent;
+use utils::DomainPart;
 
 pub trait HasQueueQuota: Sync + Send {
     fn has_quota(&self, message: &mut MessageWrapper) -> impl Future<Output = bool> + Send;

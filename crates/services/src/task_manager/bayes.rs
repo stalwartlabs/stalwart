@@ -4,16 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use super::Task;
 use common::Server;
 use email::message::bayes::EmailBayesTrain;
-use jmap_proto::types::collection::Collection;
 use mail_parser::MessageParser;
+use std::time::Instant;
 use trc::{SpamEvent, TaskQueueEvent};
-use utils::BlobHash;
-
-use super::Task;
+use types::{blob_hash::BlobHash, collection::Collection};
 
 pub trait BayesTrainTask: Sync + Send {
     fn bayes_train(

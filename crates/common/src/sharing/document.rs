@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_proto::types::{acl::Acl, collection::Collection};
+use crate::{Server, auth::AccessToken};
 use store::{ValueKey, query::acl::AclQuery, roaring::RoaringBitmap, write::ValueClass};
 use trc::AddContext;
+use types::{acl::Acl, collection::Collection};
 use utils::map::bitmap::Bitmap;
-
-use crate::{Server, auth::AccessToken};
 
 impl Server {
     pub async fn shared_containers(

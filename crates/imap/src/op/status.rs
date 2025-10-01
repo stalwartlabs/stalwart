@@ -19,13 +19,13 @@ use imap_proto::{
     protocol::status::{Status, StatusItem, StatusItemType},
     receiver::Request,
 };
-use jmap_proto::types::{collection::Collection, id::Id, keyword::Keyword, property::Property};
 use std::time::Instant;
 use store::{Deserialize, U32_LEN};
 use store::{
     IndexKeyPrefix, IterateParams, roaring::RoaringBitmap, write::key::DeserializeBigEndian,
 };
 use trc::AddContext;
+use types::{collection::Collection, field::EmailField, id::Id, keyword::Keyword};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_status(&mut self, requests: Vec<Request<Command>>) -> trc::Result<()> {
@@ -302,12 +302,12 @@ impl<T: SessionStream> SessionData<T> {
                     IndexKeyPrefix {
                         account_id,
                         collection: Collection::Email.into(),
-                        field: Property::Size.into(),
+                        field: EmailField::Size.into(),
                     },
                     IndexKeyPrefix {
                         account_id,
                         collection: Collection::Email.into(),
-                        field: u8::from(Property::Size) + 1,
+                        field: u8::from(EmailField::Size) + 1,
                     },
                 )
                 .ascending()

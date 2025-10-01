@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::ImapContext;
 use crate::{
     core::{MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
@@ -14,29 +15,26 @@ use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{JUNK_ID, TRASH_ID, UidMailbox},
     message::{
-        bayes::EmailBayesTrain, copy::EmailCopy, ingest::EmailIngest, metadata::MessageData,
+        bayes::EmailBayesTrain,
+        copy::{CopyMessageError, EmailCopy},
+        ingest::EmailIngest,
+        metadata::MessageData,
     },
 };
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse, protocol::copy_move::Arguments,
     receiver::Request,
 };
-use jmap_proto::{
-    error::set::SetErrorType,
-    types::{
-        acl::Acl,
-        collection::{Collection, VanishedCollection},
-        state::StateChange,
-        type_state::DataType,
-    },
-};
 use std::{sync::Arc, time::Instant};
 use store::{
     roaring::RoaringBitmap,
     write::{AlignedBytes, Archive, BatchBuilder, ValueClass},
 };
-
-use super::ImapContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, VanishedCollection},
+    type_state::{DataType, StateChange},
+};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_copy_move(
@@ -399,12 +397,13 @@ impl<T: SessionStream> SessionData<T> {
                         }
                     }
                     Err(err) => {
-                        if err.type_ != SetErrorType::NotFound {
-                            response.rtype = ResponseType::No;
-                            response.code = Some(err.type_.into());
-                            if let Some(message) = err.description {
-                                response.message = message;
+                        match err {
+                            CopyMessageError::OverQuota => {
+                                response.rtype = ResponseType::No;
+                                response.code = Some(ResponseCode::OverQuota);
+                                response.message = "Mailbox quota exceeded".into();
                             }
+                            CopyMessageError::NotFound => (),
                         }
                         continue;
                     }

@@ -423,7 +423,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                 // Calculate expensive metrics every 5 minutes
                                 queue.schedule(
                                     Instant::now() + Duration::from_secs(5 * 60),
-                                    ActionClass::OtelMetrics,
+                                    ActionClass::CalculateMetrics,
                                 );
 
                                 let update_other_metrics = if Instant::now() >= next_metric_update {

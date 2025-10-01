@@ -10,6 +10,7 @@ use ahash::HashSet;
 use nlp::tokenizers::word::WordTokenizer;
 use roaring::RoaringBitmap;
 use trc::AddContext;
+use types::collection::Collection;
 
 use crate::{
     BitmapKey, IndexKey, IndexKeyPrefix, IterateParams, Key, Store, U32_LEN,
@@ -27,14 +28,15 @@ impl Store {
     pub async fn filter(
         &self,
         account_id: u32,
-        collection: impl Into<u8> + Sync + Send,
+        collection_: Collection,
         filters: Vec<Filter>,
     ) -> trc::Result<ResultSet> {
-        let collection = collection.into();
+        let collection = u8::from(collection_);
+
         if filters.is_empty() {
             return Ok(ResultSet {
                 account_id,
-                collection,
+                collection: collection_,
                 results: self
                     .get_bitmap(BitmapKey::document_ids(account_id, collection))
                     .await
@@ -164,7 +166,7 @@ impl Store {
 
         Ok(ResultSet {
             account_id,
-            collection,
+            collection: collection_,
             results: state.bm.unwrap_or_default(),
         })
     }

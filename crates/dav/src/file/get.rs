@@ -9,11 +9,11 @@ use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
 use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
+use trc::AddContext;
+use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
-use trc::AddContext;
 
 use crate::{
     DavError, DavMethod,

@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{BlobOp, Operation, ValueClass, ValueOp, key::DeserializeBigEndian, now};
+use crate::{
+    BlobStore, Deserialize, IterateParams, Store, U32_LEN, U64_LEN, ValueKey, write::BatchBuilder,
+};
 use ahash::AHashSet;
 use trc::AddContext;
-use utils::{BLOB_HASH_LEN, BlobHash};
-
-use crate::{
-    BlobClass, BlobStore, Deserialize, IterateParams, Store, U32_LEN, U64_LEN, ValueKey,
-    write::BatchBuilder,
+use types::{
+    blob::BlobClass,
+    blob_hash::{BLOB_HASH_LEN, BlobHash},
+    collection::Collection,
 };
-
-use super::{BlobOp, Operation, ValueClass, ValueOp, key::DeserializeBigEndian, now};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct BlobQuota {
@@ -266,7 +267,7 @@ impl Store {
 
                 if document_id != u32::MAX && key.deserialize_be_u32(BLOB_HASH_LEN)? == account_id {
                     delete_keys.push((
-                        key[BLOB_HASH_LEN + U32_LEN],
+                        Collection::from(key[BLOB_HASH_LEN + U32_LEN]),
                         document_id,
                         BlobOp::Link {
                             hash: BlobHash::try_from_hash_slice(
@@ -288,7 +289,7 @@ impl Store {
         // Unlink blobs
         let mut batch = BatchBuilder::new();
         batch.with_account_id(account_id);
-        let mut last_collection = u8::MAX;
+        let mut last_collection = Collection::None;
         for (collection, document_id, op) in delete_keys.into_iter() {
             if batch.is_large_batch() {
                 self.write(batch.build_all())
@@ -296,7 +297,7 @@ impl Store {
                     .caused_by(trc::location!())?;
                 batch = BatchBuilder::new();
                 batch.with_account_id(account_id);
-                last_collection = u8::MAX;
+                last_collection = Collection::None;
             }
             if collection != last_collection {
                 batch.with_collection(collection);

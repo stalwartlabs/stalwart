@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::core::{Session, State, StatusResponse};
 use common::listener::SessionStream;
 use directory::Permission;
-
-use crate::core::{Session, State, StatusResponse};
 
 pub mod authenticate;
 pub mod capability;

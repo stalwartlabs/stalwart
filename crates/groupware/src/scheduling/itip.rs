@@ -67,49 +67,54 @@ pub(crate) fn itip_export_component(
     comp.add_uid(uid);
 
     for (entry_id, entry) in component.entries.iter().enumerate() {
-        match &entry.name {
-            ICalendarProperty::Organizer | ICalendarProperty::Attendee => match &export_as {
-                ItipExportAs::Organizer(partstat) => {
-                    let mut new_entry = ICalendarEntry {
-                        name: entry.name.clone(),
-                        params: Vec::with_capacity(entry.params.len()),
-                        values: entry.values.clone(),
-                    };
-                    let mut has_partstat = false;
-                    let mut rsvp = true;
+        match (&entry.name, &export_as) {
+            (
+                ICalendarProperty::Organizer | ICalendarProperty::Attendee,
+                ItipExportAs::Organizer(partstat),
+            ) => {
+                let mut new_entry = ICalendarEntry {
+                    name: entry.name.clone(),
+                    params: Vec::with_capacity(entry.params.len()),
+                    values: entry.values.clone(),
+                };
+                let mut has_partstat = false;
+                let mut rsvp = true;
 
-                    for entry in &entry.params {
-                        match entry {
-                            ICalendarParameter::ScheduleStatus(_)
-                            | ICalendarParameter::ScheduleAgent(_)
-                            | ICalendarParameter::ScheduleForceSend(_) => {}
-                            _ => {
-                                match entry {
-                                    ICalendarParameter::Rsvp(false) => {
-                                        rsvp = false;
-                                    }
-                                    ICalendarParameter::Partstat(_) => {
-                                        has_partstat = true;
-                                    }
-                                    _ => {}
+                for entry in &entry.params {
+                    match entry {
+                        ICalendarParameter::ScheduleStatus(_)
+                        | ICalendarParameter::ScheduleAgent(_)
+                        | ICalendarParameter::ScheduleForceSend(_) => {}
+                        _ => {
+                            match entry {
+                                ICalendarParameter::Rsvp(false) => {
+                                    rsvp = false;
                                 }
-
-                                new_entry.params.push(entry.clone())
+                                ICalendarParameter::Partstat(_) => {
+                                    has_partstat = true;
+                                }
+                                _ => {}
                             }
+
+                            new_entry.params.push(entry.clone())
                         }
                     }
-
-                    if !has_partstat && rsvp && entry.name == ICalendarProperty::Attendee {
-                        new_entry
-                            .params
-                            .push(ICalendarParameter::Partstat((*partstat).clone()));
-                    }
-
-                    comp.entries.push(new_entry);
                 }
-                ItipExportAs::Attendee(attendee_entry_ids)
-                    if attendee_entry_ids.contains(&(entry_id as u16))
-                        || entry.name == ICalendarProperty::Organizer =>
+
+                if !has_partstat && rsvp && entry.name == ICalendarProperty::Attendee {
+                    new_entry
+                        .params
+                        .push(ICalendarParameter::Partstat((*partstat).clone()));
+                }
+
+                comp.entries.push(new_entry);
+            }
+            (
+                ICalendarProperty::Organizer | ICalendarProperty::Attendee,
+                ItipExportAs::Attendee(attendee_entry_ids),
+            ) => {
+                if attendee_entry_ids.contains(&(entry_id as u16))
+                    || entry.name == ICalendarProperty::Organizer
                 {
                     comp.entries.push(ICalendarEntry {
                         name: entry.name.clone(),
@@ -129,26 +134,36 @@ pub(crate) fn itip_export_component(
                         values: entry.values.clone(),
                     });
                 }
-                _ => {}
-            },
-            ICalendarProperty::RequestStatus
-            | ICalendarProperty::Dtstamp
-            | ICalendarProperty::Sequence
-            | ICalendarProperty::Uid => {}
-            _ => {
-                if matches!(export_as, ItipExportAs::Organizer(_))
-                    || matches!(entry.name, ICalendarProperty::RecurrenceId)
-                    || (is_todo
-                        && matches!(
-                            entry.name,
-                            ICalendarProperty::Status
-                                | ICalendarProperty::PercentComplete
-                                | ICalendarProperty::Completed
-                        ))
-                {
-                    comp.entries.push(entry.clone());
-                }
             }
+            (
+                ICalendarProperty::RequestStatus
+                | ICalendarProperty::Dtstamp
+                | ICalendarProperty::Sequence
+                | ICalendarProperty::Uid,
+                _,
+            ) => {}
+            (_, ItipExportAs::Organizer(_))
+            | (
+                ICalendarProperty::RecurrenceId
+                | ICalendarProperty::Dtstart
+                | ICalendarProperty::Dtend
+                | ICalendarProperty::Duration
+                | ICalendarProperty::Due
+                | ICalendarProperty::Description
+                | ICalendarProperty::Summary,
+                _,
+            ) => {
+                comp.entries.push(entry.clone());
+            }
+            (
+                ICalendarProperty::Status
+                | ICalendarProperty::PercentComplete
+                | ICalendarProperty::Completed,
+                _,
+            ) if is_todo => {
+                comp.entries.push(entry.clone());
+            }
+            _ => {}
         }
     }
 

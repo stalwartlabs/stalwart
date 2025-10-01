@@ -24,18 +24,21 @@ use calcard::{
     },
 };
 use common::{
-    DavName, IDX_EMAIL, IDX_UID, Server,
+    DavName, Server,
     auth::{AccessToken, ResourceToken, oauth::GrantType},
     config::groupware::CalendarTemplateVariable,
     i18n,
 };
-use jmap_proto::types::collection::Collection;
 use store::{
     query::Filter,
     rand,
     write::{BatchBuilder, now},
 };
 use trc::AddContext;
+use types::{
+    collection::Collection,
+    field::{CalendarField, ContactField},
+};
 use utils::{template::Variables, url_params::UrlParams};
 
 pub enum ItipIngestError {
@@ -142,7 +145,10 @@ impl ItipIngest for Server {
             .filter(
                 account_id,
                 Collection::CalendarEvent,
-                vec![Filter::eq(IDX_UID, itip_snapshots.uid.as_bytes().to_vec())],
+                vec![Filter::eq(
+                    CalendarField::Uid,
+                    itip_snapshots.uid.as_bytes().to_vec(),
+                )],
             )
             .await
             .caused_by(trc::location!())?
@@ -261,7 +267,7 @@ impl ItipIngest for Server {
                     .filter(
                         account_id,
                         Collection::ContactCard,
-                        vec![Filter::eq(IDX_EMAIL, sender.as_bytes().to_vec())],
+                        vec![Filter::eq(ContactField::Email, sender.as_bytes().to_vec())],
                     )
                     .await
                     .caused_by(trc::location!())?

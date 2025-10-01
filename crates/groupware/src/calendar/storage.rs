@@ -4,14 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{
+    ArchivedCalendar, ArchivedCalendarEvent, Calendar, CalendarEvent, CalendarPreferences,
+    alarm::CalendarAlarm,
+};
 use crate::{
     DavResourceName, DestroyArchive, RFC_3986,
     calendar::{ArchivedCalendarScheduling, CalendarScheduling},
     scheduling::{ItipMessages, event_cancel::itip_cancel},
 };
 use calcard::common::timezone::Tz;
-use common::{IDX_CREATED, Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
-use jmap_proto::types::collection::{Collection, VanishedCollection};
+use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use store::{
     IndexKey, IterateParams, SerializeInfallible, U16_LEN, U32_LEN, U64_LEN,
     roaring::RoaringBitmap,
@@ -22,10 +25,9 @@ use store::{
     },
 };
 use trc::AddContext;
-
-use super::{
-    ArchivedCalendar, ArchivedCalendarEvent, Calendar, CalendarEvent, CalendarPreferences,
-    alarm::CalendarAlarm,
+use types::{
+    collection::{Collection, VanishedCollection},
+    field::CalendarField,
 };
 
 pub trait ItipAutoExpunge: Sync + Send {
@@ -47,14 +49,14 @@ impl ItipAutoExpunge for Server {
                         account_id,
                         collection: Collection::CalendarScheduling.into(),
                         document_id: 0,
-                        field: IDX_CREATED,
+                        field: CalendarField::Created.into(),
                         key: 0u64.serialize(),
                     },
                     IndexKey {
                         account_id,
                         collection: Collection::CalendarScheduling.into(),
                         document_id: u32::MAX,
-                        field: IDX_CREATED,
+                        field: CalendarField::Created.into(),
                         key: now().saturating_sub(hold_period).serialize(),
                     },
                 )

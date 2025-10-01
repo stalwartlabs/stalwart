@@ -62,7 +62,7 @@ impl SqliteStore {
                     Operation::Collection {
                         collection: collection_,
                     } => {
-                        collection = *collection_;
+                        collection = u8::from(*collection_);
                     }
                     Operation::DocumentId {
                         document_id: document_id_,
@@ -230,7 +230,7 @@ impl SqliteStore {
                     Operation::Log { collection, set } => {
                         let key = LogKey {
                             account_id,
-                            collection: *collection,
+                            collection: u8::from(*collection),
                             change_id,
                         }
                         .serialize(0);

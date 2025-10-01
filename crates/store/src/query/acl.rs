@@ -6,6 +6,7 @@
 
 use ahash::AHashSet;
 use trc::AddContext;
+use types::collection::Collection;
 
 use crate::{
     Deserialize, IterateParams, Store, U32_LEN, ValueKey,
@@ -26,7 +27,7 @@ pub enum AclQuery {
 #[derive(Debug)]
 pub struct AclItem {
     pub to_account_id: u32,
-    pub to_collection: u8,
+    pub to_collection: Collection,
     pub to_document_id: u32,
     pub permissions: u64,
 }
@@ -114,7 +115,7 @@ impl Store {
         // Remove permissions
         let mut batch = BatchBuilder::new();
         batch.with_account_id(account_id);
-        let mut last_collection = u8::MAX;
+        let mut last_collection = Collection::None;
         for (revoke_account_id, acl_item) in delete_keys.into_iter() {
             if batch.is_large_batch() {
                 self.write(batch.build_all())
@@ -122,7 +123,7 @@ impl Store {
                     .caused_by(trc::location!())?;
                 batch = BatchBuilder::new();
                 batch.with_account_id(account_id);
-                last_collection = u8::MAX;
+                last_collection = Collection::None;
             }
             if acl_item.to_collection != last_collection {
                 batch.with_collection(acl_item.to_collection);
@@ -146,8 +147,9 @@ impl Deserialize for AclItem {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
         Ok(AclItem {
             to_account_id: bytes.deserialize_be_u32(U32_LEN)?,
-            to_collection: *bytes
+            to_collection: bytes
                 .get(U32_LEN * 2)
+                .map(|b| Collection::from(*b))
                 .ok_or_else(|| trc::StoreEvent::DataCorruption.caused_by(trc::location!()))?,
             to_document_id: bytes.deserialize_be_u32((U32_LEN * 2) + 1)?,
             permissions: 0,

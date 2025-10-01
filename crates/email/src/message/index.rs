@@ -12,7 +12,6 @@ use super::metadata::{
     MessageMetadata, MessageMetadataPart,
 };
 use common::storage::index::{IndexValue, IndexableObject, ObjectIndexBuilder};
-use jmap_proto::types::{collection::SyncCollection, property::Property};
 use mail_parser::{
     Addr, Address, ArchivedAddress, ArchivedHeaderName, ArchivedHeaderValue, Group, HeaderName,
     HeaderValue,
@@ -29,7 +28,7 @@ use store::{
     write::{Archiver, BatchBuilder, BlobOp, DirectoryClass},
 };
 use trc::AddContext;
-use utils::BlobHash;
+use types::{blob_hash::BlobHash, collection::SyncCollection, field::EmailField};
 
 pub const MAX_MESSAGE_PARTS: usize = 1000;
 pub const MAX_ID_LENGTH: usize = 100;
@@ -53,14 +52,14 @@ impl MessageMetadata {
         if set {
             // Serialize metadata
             batch
-                .index(Property::Size, self.size.serialize())
-                .index(Property::ReceivedAt, (self.received_at).serialize());
+                .index(EmailField::Size, self.size.serialize())
+                .index(EmailField::ReceivedAt, (self.received_at).serialize());
         } else {
             // Delete metadata
             batch
-                .clear(Property::BodyStructure)
-                .unindex(Property::Size, self.size.serialize())
-                .unindex(Property::ReceivedAt, (self.received_at).serialize());
+                .clear(EmailField::Metadata)
+                .unindex(EmailField::Size, self.size.serialize())
+                .unindex(EmailField::ReceivedAt, (self.received_at).serialize());
         }
 
         // Index properties
@@ -76,9 +75,9 @@ impl MessageMetadata {
 
         if self.has_attachments {
             if set {
-                batch.tag(Property::HasAttachment, ());
+                batch.tag(EmailField::HasAttachment, ());
             } else {
-                batch.untag(Property::HasAttachment, ());
+                batch.untag(EmailField::HasAttachment, ());
             }
         }
 
@@ -100,7 +99,7 @@ impl MessageMetadata {
         }
 
         if set {
-            batch.set(Property::BodyStructure, Archiver::new(self).serialize()?);
+            batch.set(EmailField::Metadata, Archiver::new(self).serialize()?);
         }
 
         Ok(())
@@ -119,9 +118,9 @@ impl MessageMetadata {
                         // Add ids to inverted index
                         if id.len() < MAX_ID_LENGTH {
                             if set {
-                                batch.index(Property::References, encode_message_id(id));
+                                batch.index(EmailField::References, encode_message_id(id));
                             } else {
-                                batch.unindex(Property::References, encode_message_id(id));
+                                batch.unindex(EmailField::References, encode_message_id(id));
                             }
                         }
                     });
@@ -131,16 +130,22 @@ impl MessageMetadata {
                         // Add ids to inverted index
                         if id.len() < MAX_ID_LENGTH {
                             if set {
-                                batch.index(Property::References, id.serialize());
+                                batch.index(EmailField::References, id.serialize());
                             } else {
-                                batch.unindex(Property::References, id.serialize());
+                                batch.unindex(EmailField::References, id.serialize());
                             }
                         }
                     });
                 }
                 HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc => {
                     if !seen_headers[header.name.id() as usize] {
-                        let property = property_from_header(&header.name);
+                        let property = match &header.name {
+                            HeaderName::From => EmailField::From,
+                            HeaderName::To => EmailField::To,
+                            HeaderName::Cc => EmailField::Cc,
+                            HeaderName::Bcc => EmailField::Bcc,
+                            _ => unreachable!(),
+                        };
                         let mut sort_text = SortedAddressBuilder::new();
                         let mut found_addr = false;
 
@@ -161,9 +166,9 @@ impl MessageMetadata {
 
                         // Add address to inverted index
                         if set {
-                            batch.index(u8::from(&property), sort_text.build());
+                            batch.index(property, sort_text.build());
                         } else {
-                            batch.unindex(u8::from(&property), sort_text.build());
+                            batch.unindex(property, sort_text.build());
                         }
                         seen_headers[header.name.id() as usize] = true;
                     }
@@ -173,9 +178,9 @@ impl MessageMetadata {
                         if let HeaderValue::DateTime(datetime) = &header.value {
                             let value = (datetime.to_timestamp() as u64).serialize();
                             if set {
-                                batch.index(Property::SentAt, value);
+                                batch.index(EmailField::SentAt, value);
                             } else {
-                                batch.unindex(Property::SentAt, value);
+                                batch.unindex(EmailField::SentAt, value);
                             }
                         }
                         seen_headers[header.name.id() as usize] = true;
@@ -202,9 +207,9 @@ impl MessageMetadata {
                         .serialize();
 
                         if set {
-                            batch.index(Property::Subject, thread_name);
+                            batch.index(EmailField::Subject, thread_name);
                         } else {
-                            batch.unindex(Property::Subject, thread_name);
+                            batch.unindex(EmailField::Subject, thread_name);
                         }
 
                         seen_headers[header.name.id() as usize] = true;
@@ -218,9 +223,9 @@ impl MessageMetadata {
         // Add subject to index if missing
         if !seen_headers[HeaderName::Subject.id() as usize] {
             if set {
-                batch.index(Property::Subject, "!".serialize());
+                batch.index(EmailField::Subject, "!".serialize());
             } else {
-                batch.unindex(Property::Subject, "!".serialize());
+                batch.unindex(EmailField::Subject, "!".serialize());
             }
         }
     }
@@ -249,18 +254,18 @@ impl ArchivedMessageMetadata {
         if set {
             // Serialize metadata
             batch
-                .index(Property::Size, u32::from(self.size).serialize())
+                .index(EmailField::Size, u32::from(self.size).serialize())
                 .index(
-                    Property::ReceivedAt,
+                    EmailField::ReceivedAt,
                     u64::from(self.received_at).serialize(),
                 );
         } else {
             // Delete metadata
             batch
-                .clear(Property::BodyStructure)
-                .unindex(Property::Size, u32::from(self.size).serialize())
+                .clear(EmailField::Metadata)
+                .unindex(EmailField::Size, u32::from(self.size).serialize())
                 .unindex(
-                    Property::ReceivedAt,
+                    EmailField::ReceivedAt,
                     u64::from(self.received_at).serialize(),
                 );
         }
@@ -278,9 +283,9 @@ impl ArchivedMessageMetadata {
 
         if self.has_attachments {
             if set {
-                batch.tag(Property::HasAttachment, ());
+                batch.tag(EmailField::HasAttachment, ());
             } else {
-                batch.untag(Property::HasAttachment, ());
+                batch.untag(EmailField::HasAttachment, ());
             }
         }
 
@@ -311,9 +316,9 @@ impl ArchivedMessageMetadata {
                         // Add ids to inverted index
                         if id.len() < MAX_ID_LENGTH {
                             if set {
-                                batch.index(Property::References, encode_message_id(id));
+                                batch.index(EmailField::References, encode_message_id(id));
                             } else {
-                                batch.unindex(Property::References, encode_message_id(id));
+                                batch.unindex(EmailField::References, encode_message_id(id));
                             }
                         }
                     });
@@ -325,9 +330,9 @@ impl ArchivedMessageMetadata {
                         // Add ids to inverted index
                         if id.len() < MAX_ID_LENGTH {
                             if set {
-                                batch.index(Property::References, id.serialize());
+                                batch.index(EmailField::References, id.serialize());
                             } else {
-                                batch.unindex(Property::References, id.serialize());
+                                batch.unindex(EmailField::References, id.serialize());
                             }
                         }
                     });
@@ -337,7 +342,13 @@ impl ArchivedMessageMetadata {
                 | ArchivedHeaderName::Cc
                 | ArchivedHeaderName::Bcc => {
                     if !seen_headers[header.name.id() as usize] {
-                        let property = property_from_archived_header(&header.name);
+                        let property = match &header.name {
+                            ArchivedHeaderName::From => EmailField::From,
+                            ArchivedHeaderName::To => EmailField::To,
+                            ArchivedHeaderName::Cc => EmailField::Cc,
+                            ArchivedHeaderName::Bcc => EmailField::Bcc,
+                            _ => unreachable!(),
+                        };
                         let mut sort_text = SortedAddressBuilder::new();
                         let mut found_addr = false;
 
@@ -358,9 +369,9 @@ impl ArchivedMessageMetadata {
 
                         // Add address to inverted index
                         if set {
-                            batch.index(u8::from(&property), sort_text.build());
+                            batch.index(property, sort_text.build());
                         } else {
-                            batch.unindex(u8::from(&property), sort_text.build());
+                            batch.unindex(property, sort_text.build());
                         }
                         seen_headers[header.name.id() as usize] = true;
                     }
@@ -372,9 +383,9 @@ impl ArchivedMessageMetadata {
                                 as u64)
                                 .serialize();
                             if set {
-                                batch.index(Property::SentAt, value);
+                                batch.index(EmailField::SentAt, value);
                             } else {
-                                batch.unindex(Property::SentAt, value);
+                                batch.unindex(EmailField::SentAt, value);
                             }
                         }
                         seen_headers[header.name.id() as usize] = true;
@@ -401,9 +412,9 @@ impl ArchivedMessageMetadata {
                         .serialize();
 
                         if set {
-                            batch.index(Property::Subject, thread_name);
+                            batch.index(EmailField::Subject, thread_name);
                         } else {
-                            batch.unindex(Property::Subject, thread_name);
+                            batch.unindex(EmailField::Subject, thread_name);
                         }
 
                         seen_headers[header.name.id() as usize] = true;
@@ -417,9 +428,9 @@ impl ArchivedMessageMetadata {
         // Add subject to index if missing
         if !seen_headers[HeaderName::Subject.id() as usize] {
             if set {
-                batch.index(Property::Subject, "!".serialize());
+                batch.index(EmailField::Subject, "!".serialize());
             } else {
-                batch.unindex(Property::Subject, "!".serialize());
+                batch.unindex(EmailField::Subject, "!".serialize());
             }
         }
     }
@@ -465,7 +476,7 @@ impl IndexMessage for BatchBuilder {
     ) -> trc::Result<&mut Self> {
         // Index size
         self.index(
-            Property::Size,
+            EmailField::Size,
             (message.raw_message.len() as u32).serialize(),
         )
         .add(
@@ -480,7 +491,7 @@ impl IndexMessage for BatchBuilder {
         }
 
         // Index receivedAt
-        self.index(Property::ReceivedAt, received_at.serialize());
+        self.index(EmailField::ReceivedAt, received_at.serialize());
 
         let mut has_attachments = false;
         let mut preview = None;
@@ -549,7 +560,7 @@ impl IndexMessage for BatchBuilder {
 
         // Store and index hasAttachment property
         if has_attachments {
-            self.tag(Property::HasAttachment, ());
+            self.tag(EmailField::HasAttachment, ());
         }
 
         // Link blob
@@ -566,7 +577,7 @@ impl IndexMessage for BatchBuilder {
 
         // Store message metadata
         self.set(
-            Property::BodyStructure,
+            EmailField::Metadata,
             Archiver::new(metadata)
                 .serialize()
                 .caused_by(trc::location!())?,
@@ -580,15 +591,15 @@ impl IndexableObject for MessageData {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::LogItem {
-                sync_collection: SyncCollection::Email.into(),
+                sync_collection: SyncCollection::Email,
                 prefix: self.thread_id.into(),
             },
             IndexValue::LogContainerProperty {
-                sync_collection: SyncCollection::Thread.into(),
+                sync_collection: SyncCollection::Thread,
                 ids: vec![self.thread_id],
             },
             IndexValue::LogContainerProperty {
-                sync_collection: SyncCollection::Email.into(),
+                sync_collection: SyncCollection::Email,
                 ids: self.mailboxes.iter().map(|m| m.mailbox_id).collect(),
             },
         ]
@@ -600,15 +611,15 @@ impl IndexableObject for &ArchivedMessageData {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::LogItem {
-                sync_collection: SyncCollection::Email.into(),
+                sync_collection: SyncCollection::Email,
                 prefix: self.thread_id.to_native().into(),
             },
             IndexValue::LogContainerProperty {
-                sync_collection: SyncCollection::Thread.into(),
+                sync_collection: SyncCollection::Thread,
                 ids: vec![self.thread_id.to_native()],
             },
             IndexValue::LogContainerProperty {
-                sync_collection: SyncCollection::Email.into(),
+                sync_collection: SyncCollection::Email,
                 ids: self
                     .mailboxes
                     .iter()
@@ -1034,41 +1045,5 @@ impl TrimTextValue for Cow<'_, str> {
 impl<T: TrimTextValue> TrimTextValue for Vec<T> {
     fn trim_text(self, length: usize) -> Self {
         self.into_iter().map(|v| v.trim_text(length)).collect()
-    }
-}
-
-pub fn property_from_header(header: &HeaderName) -> Property {
-    match header {
-        HeaderName::Subject => Property::Subject,
-        HeaderName::From => Property::From,
-        HeaderName::To => Property::To,
-        HeaderName::Cc => Property::Cc,
-        HeaderName::Date => Property::SentAt,
-        HeaderName::Bcc => Property::Bcc,
-        HeaderName::ReplyTo => Property::ReplyTo,
-        HeaderName::Sender => Property::Sender,
-        HeaderName::InReplyTo => Property::InReplyTo,
-        HeaderName::MessageId => Property::MessageId,
-        HeaderName::References => Property::References,
-        HeaderName::ResentMessageId => Property::EmailIds,
-        _ => unreachable!(),
-    }
-}
-
-pub fn property_from_archived_header(header: &ArchivedHeaderName) -> Property {
-    match header {
-        ArchivedHeaderName::Subject => Property::Subject,
-        ArchivedHeaderName::From => Property::From,
-        ArchivedHeaderName::To => Property::To,
-        ArchivedHeaderName::Cc => Property::Cc,
-        ArchivedHeaderName::Date => Property::SentAt,
-        ArchivedHeaderName::Bcc => Property::Bcc,
-        ArchivedHeaderName::ReplyTo => Property::ReplyTo,
-        ArchivedHeaderName::Sender => Property::Sender,
-        ArchivedHeaderName::InReplyTo => Property::InReplyTo,
-        ArchivedHeaderName::MessageId => Property::MessageId,
-        ArchivedHeaderName::References => Property::References,
-        ArchivedHeaderName::ResentMessageId => Property::EmailIds,
-        _ => unreachable!(),
     }
 }

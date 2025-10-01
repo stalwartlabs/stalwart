@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::ArchivedResource;
 use crate::{
     DavError, DavErrorCondition, DavResourceName, common::uri::DavUriResource,
     principal::propfind::PrincipalPropFind,
@@ -22,17 +23,14 @@ use groupware::RFC_3986;
 use groupware::{cache::GroupwareCache, calendar::Calendar, contact::AddressBook, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::Collection,
-    value::{AclGrant, ArchivedAclGrant},
-};
 use rkyv::vec::ArchivedVec;
 use store::{ahash::AHashSet, roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
+use types::{
+    acl::{Acl, AclGrant, ArchivedAclGrant},
+    collection::Collection,
+};
 use utils::map::bitmap::Bitmap;
-
-use super::ArchivedResource;
 
 pub(crate) trait DavAclHandler: Sync + Send {
     fn handle_acl_request(

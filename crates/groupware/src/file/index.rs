@@ -6,7 +6,7 @@
 
 use super::{ArchivedFileNode, FileNode};
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
-use jmap_proto::types::{collection::SyncCollection, value::AclGrant};
+use types::{acl::AclGrant, collection::SyncCollection};
 
 impl IndexableObject for FileNode {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -18,7 +18,7 @@ impl IndexableObject for FileNode {
             },
             IndexValue::LogItem {
                 prefix: None,
-                sync_collection: SyncCollection::FileNode.into(),
+                sync_collection: SyncCollection::FileNode,
             },
             IndexValue::Quota { used: self.size() },
         ]);
@@ -48,7 +48,7 @@ impl IndexableObject for &ArchivedFileNode {
             },
             IndexValue::LogItem {
                 prefix: None,
-                sync_collection: SyncCollection::FileNode.into(),
+                sync_collection: SyncCollection::FileNode,
             },
             IndexValue::Quota { used: self.size() },
         ]);

@@ -21,9 +21,9 @@ use dav_proto::{
 use groupware::{cache::GroupwareCache, contact::AddressBook};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::collection::{Collection, SyncCollection};
 use store::write::BatchBuilder;
 use trc::AddContext;
+use types::collection::{Collection, SyncCollection};
 
 pub(crate) trait CardMkColRequestHandler: Sync + Send {
     fn handle_card_mkcol_request(

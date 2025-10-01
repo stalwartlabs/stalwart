@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::directory::{DirectoryTest, IntoTestPrincipal, TestPrincipal};
 use ahash::AHashSet;
 use directory::{
     Permission, QueryBy, QueryParams, Type,
@@ -16,15 +17,13 @@ use directory::{
         },
     },
 };
-use jmap_proto::types::collection::Collection;
 use mail_send::Credentials;
 use store::{
     BitmapKey, Store, ValueKey,
     roaring::RoaringBitmap,
     write::{BatchBuilder, BitmapClass, ValueClass},
 };
-
-use crate::directory::{DirectoryTest, IntoTestPrincipal, TestPrincipal};
+use types::collection::Collection;
 
 #[tokio::test]
 async fn internal_directory() {

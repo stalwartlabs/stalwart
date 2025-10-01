@@ -4,83 +4,202 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
-use utils::{
-    erased_serde,
-    json::{JsonPointerItem, JsonQueryable},
-};
-
-use crate::types::{
-    id::Id,
-    property::Property,
-    value::{Object, Value},
-};
+use crate::request::deserialize::DeserializeArguments;
+use jmap_tools::{Element, Null, Property};
+use serde::Serialize;
+use std::{fmt::Debug, str::FromStr};
+use types::{acl::Acl, blob::BlobId, id::Id};
 
 pub mod blob;
 pub mod email;
 pub mod email_submission;
+pub mod identity;
 pub mod mailbox;
+pub mod principal;
+pub mod push_subscription;
+pub mod quota;
+pub mod search_snippet;
 pub mod sieve;
+pub mod thread;
+pub mod vacation_response;
 
-pub trait JsonObjectTrait: JsonQueryable + erased_serde::Serialize {
-    fn id(&self) -> Option<Id>;
+pub trait JmapObject: std::fmt::Debug {
+    type Property: Property + FromStr + Serialize + Debug + Sync + Send;
+    type Element: Element<Property = Self::Property>
+        + From<Self::Id>
+        + JmapObjectId
+        + Debug
+        + Sync
+        + Send;
+    type Id: FromStr + TryFrom<AnyId> + Serialize + Debug + Sync + Send;
+
+    type Filter: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
+    type Comparator: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
+
+    type GetArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
+    type SetArguments<'de>: Default + DeserializeArguments<'de> + Debug + Sync + Send;
+    type QueryArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
+    type CopyArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
+
+    const ID_PROPERTY: Self::Property;
 }
 
-#[derive(Clone, Debug)]
-pub struct JsonObject(Arc<dyn JsonObjectTrait>);
+pub trait JmapSharedObject: JmapObject {
+    type Right: JmapRight + Into<Self::Property> + Debug + Clone + Copy + Sync + Send;
 
-impl JsonObject {
-    pub fn new<T: JsonObjectTrait + 'static>(value: T) -> Self {
-        Self(Arc::new(value))
-    }
+    const SHARE_WITH_PROPERTY: Self::Property;
+}
 
-    #[inline]
-    pub fn id(&self) -> Option<Id> {
-        self.0.id()
+pub trait JmapRight: Clone + Copy + Sized + 'static {
+    fn from_acl(acl: Acl) -> &'static [Self];
+    fn all_rights() -> &'static [Self];
+    fn to_acl(&self) -> &'static [Acl];
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum AnyId {
+    Id(Id),
+    BlobId(BlobId),
+}
+
+pub trait JmapObjectId: TryFrom<AnyId> {
+    fn as_id(&self) -> Option<Id>;
+    fn as_any_id(&self) -> Option<AnyId>;
+    fn as_id_ref(&self) -> Option<&str>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MaybeReference<T: FromStr> {
+    Value(T),
+    Reference(String),
+    ParseError,
+}
+
+fn parse_ref<T: FromStr>(value: &str) -> MaybeReference<T> {
+    if let Some(reference) = value.strip_prefix('#') {
+        MaybeReference::Reference(reference.to_string())
+    } else {
+        T::from_str(value)
+            .map(MaybeReference::Value)
+            .unwrap_or(MaybeReference::ParseError)
     }
 }
 
-impl serde::Serialize for JsonObject {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        erased_serde::serialize(self.0.as_ref(), serializer)
+impl From<Id> for AnyId {
+    fn from(value: Id) -> Self {
+        AnyId::Id(value)
     }
 }
 
-impl JsonObjectTrait for Object<Value> {
-    fn id(&self) -> Option<Id> {
-        self.get(&Property::Id).as_id().copied()
+impl From<BlobId> for AnyId {
+    fn from(value: BlobId) -> Self {
+        AnyId::BlobId(value)
     }
 }
 
-impl JsonQueryable for Object<Value> {
-    fn eval_pointer<'x>(
-        &'x self,
-        mut pointer: std::slice::Iter<utils::json::JsonPointerItem>,
-        results: &mut Vec<&'x dyn JsonQueryable>,
-    ) {
-        match pointer.next() {
-            Some(JsonPointerItem::String(n)) => {
-                if let Some(v) = self
-                    .0
-                    .iter()
-                    .find_map(|(k, v)| if k.as_str() == n { Some(v) } else { None })
-                {
-                    v.eval_pointer(pointer, results);
-                }
-            }
-            Some(JsonPointerItem::Wildcard) => {
-                for v in self.0.values() {
-                    v.eval_pointer(pointer.clone(), results);
-                }
-            }
-            Some(JsonPointerItem::Root) | None => {
-                results.push(self);
-            }
-            _ => {}
+impl TryFrom<AnyId> for Id {
+    type Error = ();
+
+    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
+        if let AnyId::Id(id) = value {
+            Ok(id)
+        } else {
+            Err(())
         }
+    }
+}
+
+impl TryFrom<AnyId> for BlobId {
+    type Error = ();
+
+    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
+        if let AnyId::BlobId(id) = value {
+            Ok(id)
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AnyId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <&str>::deserialize(deserializer)?;
+        if let Some(blob_id) = BlobId::from_base32(value) {
+            Ok(AnyId::BlobId(blob_id))
+        } else if let Ok(id) = Id::from_str(value) {
+            Ok(AnyId::Id(id))
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "Invalid AnyId: {}",
+                value
+            )))
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+pub struct NullObject;
+
+impl JmapObject for NullObject {
+    type Property = Null;
+    type Element = Null;
+    type Id = Null;
+
+    type Filter = ();
+    type Comparator = ();
+
+    type GetArguments = ();
+    type SetArguments<'de> = ();
+    type QueryArguments = ();
+    type CopyArguments = ();
+
+    const ID_PROPERTY: Self::Property = Null;
+}
+
+impl JmapRight for Null {
+    fn from_acl(_: Acl) -> &'static [Self] {
+        unreachable!()
+    }
+
+    fn all_rights() -> &'static [Self] {
+        unreachable!()
+    }
+
+    fn to_acl(&self) -> &'static [Acl] {
+        unreachable!()
+    }
+}
+
+impl FromStr for NullObject {
+    type Err = ();
+
+    fn from_str(_: &str) -> Result<Self, Self::Err> {
+        unreachable!()
+    }
+}
+
+impl JmapObjectId for Null {
+    fn as_id(&self) -> Option<Id> {
+        unreachable!()
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        unreachable!()
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        unreachable!()
+    }
+}
+
+impl TryFrom<AnyId> for Null {
+    type Error = ();
+
+    fn try_from(_: AnyId) -> Result<Self, Self::Error> {
+        unreachable!()
     }
 }

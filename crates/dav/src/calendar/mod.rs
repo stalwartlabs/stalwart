@@ -15,16 +15,15 @@ pub mod scheduling;
 pub mod update;
 
 use crate::{DavError, DavErrorCondition};
-use common::IDX_UID;
 use common::{DavResources, Server};
 use dav_proto::schema::{
     property::{CalDavProperty, CalendarData, DavProperty, WebDavProperty},
     response::CalCondition,
 };
 use hyper::StatusCode;
-use jmap_proto::types::collection::Collection;
 use store::query::Filter;
 use trc::AddContext;
+use types::{collection::Collection, field::CalendarField};
 
 pub(crate) static CALENDAR_CONTAINER_PROPS: [DavProperty; 31] = [
     DavProperty::WebDav(WebDavProperty::CreationDate),
@@ -101,7 +100,7 @@ pub(crate) async fn assert_is_unique_uid(
             .filter(
                 account_id,
                 Collection::CalendarEvent,
-                vec![Filter::eq(IDX_UID, uid.as_bytes().to_vec())],
+                vec![Filter::eq(CalendarField::Uid, uid.as_bytes().to_vec())],
             )
             .await
             .caused_by(trc::location!())?;

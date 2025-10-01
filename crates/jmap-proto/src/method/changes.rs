@@ -4,24 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::format_compact;
-
 use crate::{
-    parser::{Ignore, JsonObjectParser, Token, json::Parser},
-    request::{RequestProperty, method::MethodObject},
-    types::{id::Id, property::Property, state::State},
+    method::PropertyWrapper,
+    object::JmapObject,
+    request::deserialize::{DeserializeArguments, deserialize_request},
+    types::state::State,
 };
+use serde::{Deserialize, Deserializer};
+use types::id::Id;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ChangesRequest {
     pub account_id: Id,
     pub since_state: State,
     pub max_changes: Option<usize>,
-    pub arguments: RequestArguments,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ChangesResponse {
+pub struct ChangesResponse<T: JmapObject> {
     #[serde(rename = "accountId")]
     pub account_id: Id,
 
@@ -42,74 +42,43 @@ pub struct ChangesResponse {
 
     #[serde(rename = "updatedProperties")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_properties: Option<Vec<Property>>,
+    pub updated_properties: Option<Vec<PropertyWrapper<T::Property>>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum RequestArguments {
-    Email,
-    Mailbox,
-    Thread,
-    Identity,
-    EmailSubmission,
-    Quota,
-}
-
-impl JsonObjectParser for ChangesRequest {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
+impl<'de> DeserializeArguments<'de> for ChangesRequest {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = ChangesRequest {
-            arguments: match &parser.ctx {
-                MethodObject::Email => RequestArguments::Email,
-                MethodObject::Mailbox => RequestArguments::Mailbox,
-                MethodObject::Thread => RequestArguments::Thread,
-                MethodObject::Identity => RequestArguments::Identity,
-                MethodObject::EmailSubmission => RequestArguments::EmailSubmission,
-                MethodObject::Quota => RequestArguments::Quota,
-                _ => {
-                    return Err(trc::JmapEvent::UnknownMethod
-                        .into_err()
-                        .details(format_compact!("{}/changes", parser.ctx)));
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
             },
-            account_id: Id::default(),
-            since_state: State::Initial,
-            max_changes: None,
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x6574_6174_5365_636e_6973 => {
-                    request.since_state = parser
-                        .next_token::<State>()?
-                        .unwrap_string("sinceQueryState")?;
-                }
-                0x7365_676e_6168_4378_616d => {
-                    request.max_changes = parser
-                        .next_token::<Ignore>()?
-                        .unwrap_usize_or_null("maxChanges")?;
-                }
-
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
+            b"sinceState" => {
+                self.since_state = map.next_value()?;
+            },
+            b"maxChanges" => {
+                self.max_changes = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
 
-        Ok(request)
+        Ok(())
     }
 }
 
-impl ChangesResponse {
+impl<'de> Deserialize<'de> for ChangesRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
+    }
+}
+
+impl<T: JmapObject> ChangesResponse<T> {
     pub fn has_changes(&self) -> bool {
         !self.created.is_empty() || !self.updated.is_empty() || !self.destroyed.is_empty()
     }

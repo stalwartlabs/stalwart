@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fs, path::PathBuf};
-
 use crate::jmap::{assert_is_empty, mailbox::destroy_all_mailboxes, wait_for_index};
-
 use email::mailbox::INBOX_ID;
 use jmap_client::{core::query, email::query::Filter};
-use jmap_proto::types::id::Id;
+use std::{fs, path::PathBuf};
 use store::ahash::AHashMap;
+use types::id::Id;
 
 use super::JMAPTest;
 

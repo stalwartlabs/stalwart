@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
 use directory::Permission;
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
-use jmap_proto::types::collection::Collection;
+use std::time::Instant;
 use store::write::BatchBuilder;
 use trc::AddContext;
-
-use crate::core::{Command, ResponseCode, Session, StatusResponse};
+use types::collection::Collection;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_renamescript(&mut self, request: Request<Command>) -> trc::Result<Vec<u8>> {

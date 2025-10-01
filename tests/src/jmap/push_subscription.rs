@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
+use super::JMAPTest;
+use crate::{
+    AssertConfig, add_test_certs,
+    directory::internal::TestInternalDirectory,
+    jmap::{assert_is_empty, mailbox::destroy_all_mailboxes, test_account_login},
 };
-
 use base64::{Engine, engine::general_purpose};
 use common::{Caches, Core, Data, Inner, config::server::Listeners, listener::SessionData};
 use ece::EcKeyComponents;
@@ -19,23 +17,19 @@ use http_proto::{HtmlResponse, ToHttpResponse, request::fetch_body};
 use hyper::{StatusCode, body, header::CONTENT_ENCODING, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use jmap_client::{mailbox::Role, push_subscription::Keys};
-use jmap_proto::{
-    response::status::StateChangeResponse,
-    types::{id::Id, type_state::DataType},
-};
+use jmap_proto::response::status::StateChangeResponse;
 use services::state_manager::ece::ece_encrypt;
-use store::ahash::AHashSet;
-
-use tokio::sync::mpsc;
-use utils::config::Config;
-
-use crate::{
-    AssertConfig, add_test_certs,
-    directory::internal::TestInternalDirectory,
-    jmap::{assert_is_empty, mailbox::destroy_all_mailboxes, test_account_login},
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
 };
-
-use super::JMAPTest;
+use store::ahash::AHashSet;
+use tokio::sync::mpsc;
+use types::{id::Id, type_state::DataType};
+use utils::config::Config;
 
 const SERVER: &str = r#"
 [server]

@@ -13,12 +13,9 @@ use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
 };
 use directory::Permission;
-use jmap_proto::{
-    error::set::{SetError, SetErrorType},
-    types::{acl::Acl, collection::Collection, property::Property},
-};
 use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
+use types::{acl::Acl, collection::Collection, field::MailboxField};
 
 pub trait MailboxDestroy: Sync + Send {
     fn mailbox_destroy(
@@ -27,7 +24,16 @@ pub trait MailboxDestroy: Sync + Send {
         document_id: u32,
         access_token: &AccessToken,
         remove_emails: bool,
-    ) -> impl Future<Output = trc::Result<Result<Option<u64>, SetError>>> + Send;
+    ) -> impl Future<Output = trc::Result<Result<Option<u64>, MailboxDestroyError>>> + Send;
+}
+
+pub enum MailboxDestroyError {
+    CannotDestroy,
+    Forbidden,
+    HasChildren,
+    HasEmails,
+    NotFound,
+    AssertionFailed,
 }
 
 impl MailboxDestroy for Server {
@@ -37,24 +43,20 @@ impl MailboxDestroy for Server {
         document_id: u32,
         access_token: &AccessToken,
         remove_emails: bool,
-    ) -> trc::Result<Result<Option<u64>, SetError>> {
+    ) -> trc::Result<Result<Option<u64>, MailboxDestroyError>> {
         // Internal folders cannot be deleted
         #[cfg(feature = "test_mode")]
         if [INBOX_ID, TRASH_ID].contains(&document_id)
             && !access_token.has_permission(Permission::DeleteSystemFolders)
         {
-            return Ok(Err(SetError::forbidden().with_description(
-                "You are not allowed to delete Inbox, Junk or Trash folders.",
-            )));
+            return Ok(Err(MailboxDestroyError::CannotDestroy));
         }
 
         #[cfg(not(feature = "test_mode"))]
         if [INBOX_ID, TRASH_ID, JUNK_ID].contains(&document_id)
             && !access_token.has_permission(Permission::DeleteSystemFolders)
         {
-            return Ok(Err(SetError::forbidden().with_description(
-                "You are not allowed to delete Inbox, Junk or Trash folders.",
-            )));
+            return Ok(Err(MailboxDestroyError::CannotDestroy));
         }
 
         // Verify that this mailbox does not have sub-mailboxes
@@ -68,8 +70,7 @@ impl MailboxDestroy for Server {
             .iter()
             .any(|item| item.parent_id == document_id)
         {
-            return Ok(Err(SetError::new(SetErrorType::MailboxHasChild)
-                .with_description("Mailbox has at least one children.")));
+            return Ok(Err(MailboxDestroyError::HasChildren));
         }
 
         // Verify that the mailbox is empty
@@ -142,8 +143,7 @@ impl MailboxDestroy for Server {
                         .await?;
                 }
             } else {
-                return Ok(Err(SetError::new(SetErrorType::MailboxHasEmail)
-                    .with_description("Mailbox is not empty.")));
+                return Ok(Err(MailboxDestroyError::HasEmails));
             }
         }
 
@@ -159,26 +159,22 @@ impl MailboxDestroy for Server {
             // Validate ACLs
             if access_token.is_shared(account_id) {
                 let acl = mailbox.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Administer) {
-                    if !acl.contains(Acl::Delete) {
-                        return Ok(Err(SetError::forbidden()
-                            .with_description("You are not allowed to delete this mailbox.")));
-                    } else if remove_emails && !acl.contains(Acl::RemoveItems) {
-                        return Ok(Err(SetError::forbidden().with_description(
-                            "You are not allowed to delete emails from this mailbox.",
-                        )));
-                    }
+                if !acl.contains(Acl::Administer)
+                    && (!acl.contains(Acl::Delete)
+                        || (remove_emails && !acl.contains(Acl::RemoveItems)))
+                {
+                    return Ok(Err(MailboxDestroyError::Forbidden));
                 }
             }
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Mailbox)
                 .delete_document(document_id)
-                .clear(Property::EmailIds)
+                .clear(MailboxField::UidCounter)
                 .custom(ObjectIndexBuilder::<_, ()>::new().with_current(mailbox))
                 .caused_by(trc::location!())?;
         } else {
-            return Ok(Err(SetError::not_found()));
+            return Ok(Err(MailboxDestroyError::NotFound));
         };
 
         if !batch.is_empty() {
@@ -188,11 +184,9 @@ impl MailboxDestroy for Server {
                 .and_then(|ids| ids.last_change_id(account_id))
             {
                 Ok(change_id) => Ok(Ok(Some(change_id))),
-                Err(err) if err.is_assertion_failure() => Ok(Err(SetError::forbidden()
-                    .with_description(concat!(
-                        "Another process modified a message in this mailbox ",
-                        "while deleting it, please try again."
-                    )))),
+                Err(err) if err.is_assertion_failure() => {
+                    Ok(Err(MailboxDestroyError::AssertionFailed))
+                }
                 Err(err) => Err(err.caused_by(trc::location!())),
             }
         } else {

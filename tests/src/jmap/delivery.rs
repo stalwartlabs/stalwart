@@ -4,22 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use email::{
-    cache::{MessageCacheFetch, email::MessageCacheAccess},
-    mailbox::{INBOX_ID, JUNK_ID},
-};
-use jmap_proto::types::{collection::Collection, id::Id};
-use std::time::Duration;
-
 use super::JMAPTest;
 use crate::{
     directory::internal::TestInternalDirectory,
     jmap::{assert_is_empty, mailbox::destroy_all_mailboxes},
+    webdav::DummyWebDavClient,
 };
+use email::{
+    cache::{MessageCacheFetch, email::MessageCacheAccess},
+    mailbox::{INBOX_ID, JUNK_ID},
+};
+use groupware::DavResourceName;
+use std::{str::FromStr, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf},
     net::TcpStream,
 };
+use types::{collection::Collection, id::Id};
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running message delivery tests...");
@@ -95,9 +96,7 @@ pub async fn test(params: &mut JMAPTest) {
     )
     .await;
 
-    let john_id = Id::from_bytes(account_id_1.as_bytes())
-        .unwrap()
-        .document_id();
+    let john_id = Id::from_str(&account_id_1).unwrap().document_id();
     let john_cache = server.get_cached_messages(john_id).await.unwrap();
 
     assert_eq!(
@@ -142,6 +141,56 @@ pub async fn test(params: &mut JMAPTest) {
     assert_eq!(john_cache.in_mailbox(INBOX_ID).count(), 1);
     assert_eq!(john_cache.in_mailbox(JUNK_ID).count(), 1);
 
+    // CardDAV spam override
+    let dav_client =
+        DummyWebDavClient::new(u32::MAX, "jdoe@example.com", "12345", "jdoe@example.com");
+    dav_client
+        .request(
+            "PUT",
+            &format!(
+                "{}/jdoe%40example.com/default/bill.vcf",
+                DavResourceName::Card.base_path()
+            ),
+            r#"BEGIN:VCARD
+VERSION:4.0
+FN:Bill Foobar
+EMAIL;TYPE=WORK:dmarc-bill@example.com
+UID:urn:uuid:e1ee798b-3d4c-41b0-b217-b9c918e4686f
+END:VCARD
+"#,
+        )
+        .await
+        .with_status(hyper::StatusCode::CREATED);
+    lmtp.ingest(
+        "dmarc-bill@example.com",
+        &["john.doe@example.com"],
+        concat!(
+            "From: dmarc-bill@example.com\r\n",
+            "To: john.doe@example.com\r\n",
+            "Subject: Fwd: TPS Report (CardDAV spam override)\r\n",
+            "X-Spam-Status: Yes, score=13.9\r\n",
+            "\r\n",
+            "--- Forwarded Message ---\r\n\r\n ",
+            "I'm going to need those TPS reports ASAP. ",
+            "So, if you could do that, that'd be great."
+        ),
+    )
+    .await;
+    let john_cache = server.get_cached_messages(john_id).await.unwrap();
+
+    assert_eq!(
+        server
+            .get_document_ids(john_id, Collection::Email)
+            .await
+            .unwrap()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(john_cache.in_mailbox(INBOX_ID).count(), 2);
+    assert_eq!(john_cache.in_mailbox(JUNK_ID).count(), 1);
+    dav_client.delete_default_containers().await;
+
     // EXPN and VRFY
     lmtp.expn("members@example.com", 2)
         .await
@@ -169,11 +218,11 @@ pub async fn test(params: &mut JMAPTest) {
     )
     .await;
 
-    for (account_id, num_messages) in [(&account_id_1, 3), (&account_id_2, 1), (&account_id_3, 1)] {
+    for (account_id, num_messages) in [(&account_id_1, 4), (&account_id_2, 1), (&account_id_3, 1)] {
         assert_eq!(
             server
                 .get_document_ids(
-                    Id::from_bytes(account_id.as_bytes()).unwrap().document_id(),
+                    Id::from_str(account_id).unwrap().document_id(),
                     Collection::Email
                 )
                 .await
@@ -209,11 +258,11 @@ pub async fn test(params: &mut JMAPTest) {
     )
     .await;
 
-    for (account_id, num_messages) in [(&account_id_1, 3), (&account_id_2, 2), (&account_id_3, 2)] {
+    for (account_id, num_messages) in [(&account_id_1, 4), (&account_id_2, 2), (&account_id_3, 2)] {
         assert_eq!(
             server
                 .get_document_ids(
-                    Id::from_bytes(account_id.as_bytes()).unwrap().document_id(),
+                    Id::from_str(account_id).unwrap().document_id(),
                     Collection::Email
                 )
                 .await
@@ -247,11 +296,11 @@ pub async fn test(params: &mut JMAPTest) {
     )
     .await;
 
-    for (account_id, num_messages) in [(&account_id_1, 4), (&account_id_2, 3), (&account_id_3, 3)] {
+    for (account_id, num_messages) in [(&account_id_1, 5), (&account_id_2, 3), (&account_id_3, 3)] {
         assert_eq!(
             server
                 .get_document_ids(
-                    Id::from_bytes(account_id.as_bytes()).unwrap().document_id(),
+                    Id::from_str(account_id).unwrap().document_id(),
                     Collection::Email
                 )
                 .await

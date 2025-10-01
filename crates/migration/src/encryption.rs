@@ -6,12 +6,12 @@
 
 use common::Server;
 use email::message::crypto::EncryptionParams;
-use jmap_proto::types::{collection::Collection, property::Property};
 use store::{
     Deserialize, Serialize, ValueKey,
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, ValueClass},
 };
 use trc::AddContext;
+use types::{collection::Collection, field::PrincipalField};
 
 pub(crate) async fn migrate_encryption_params(
     server: &Server,
@@ -23,7 +23,7 @@ pub(crate) async fn migrate_encryption_params(
             account_id,
             collection: Collection::Principal.into(),
             document_id: 0,
-            class: ValueClass::Property(Property::Parameters.into()),
+            class: ValueClass::from(PrincipalField::EncryptionKeys),
         })
         .await
     {
@@ -34,7 +34,7 @@ pub(crate) async fn migrate_encryption_params(
                 .with_collection(Collection::Principal)
                 .update_document(0)
                 .set(
-                    Property::Parameters,
+                    PrincipalField::EncryptionKeys,
                     Archiver::new(legacy.0)
                         .serialize()
                         .caused_by(trc::location!())?,
@@ -55,7 +55,7 @@ pub(crate) async fn migrate_encryption_params(
                     account_id,
                     collection: Collection::Principal.into(),
                     document_id: 0,
-                    class: ValueClass::Property(Property::Parameters.into()),
+                    class: ValueClass::from(PrincipalField::EncryptionKeys),
                 })
                 .await
                 .is_err()

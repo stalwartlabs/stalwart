@@ -4,59 +4,68 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::api::auth::JmapAuthorization;
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
-    method::changes::{ChangesRequest, ChangesResponse, RequestArguments},
-    types::{
-        collection::{Collection, SyncCollection},
-        property::Property,
-        state::State,
-    },
+    method::changes::{ChangesRequest, ChangesResponse},
+    object::{JmapObject, NullObject, mailbox::MailboxProperty},
+    request::method::MethodObject,
+    response::{ChangesResponseMethod, ResponseMethod},
+    types::state::State,
 };
 use std::future::Future;
 use store::query::log::{Change, Query};
+use types::collection::{Collection, SyncCollection};
 
 pub trait ChangesLookup: Sync + Send {
     fn changes(
         &self,
         request: ChangesRequest,
+        object: MethodObject,
         access_token: &AccessToken,
-    ) -> impl Future<Output = trc::Result<ChangesResponse>> + Send;
+    ) -> impl Future<Output = trc::Result<IntermediateChangesResponse>> + Send;
+}
+
+pub struct IntermediateChangesResponse {
+    pub response: ChangesResponse<NullObject>,
+    pub object: MethodObject,
+    pub only_container_changes: bool,
 }
 
 impl ChangesLookup for Server {
     async fn changes(
         &self,
         request: ChangesRequest,
+        object: MethodObject,
         access_token: &AccessToken,
-    ) -> trc::Result<ChangesResponse> {
+    ) -> trc::Result<IntermediateChangesResponse> {
         // Map collection and validate ACLs
-        let (collection, is_container) = match request.arguments {
-            RequestArguments::Email => {
+        let (collection, is_container) = match object {
+            MethodObject::Email => {
                 access_token.assert_has_access(request.account_id, Collection::Email)?;
                 (SyncCollection::Email, false)
             }
-            RequestArguments::Mailbox => {
+            MethodObject::Mailbox => {
                 access_token.assert_has_access(request.account_id, Collection::Mailbox)?;
 
                 (SyncCollection::Email, true)
             }
-            RequestArguments::Thread => {
+            MethodObject::Thread => {
                 access_token.assert_has_access(request.account_id, Collection::Email)?;
 
                 (SyncCollection::Thread, true)
             }
-            RequestArguments::Identity => {
+            MethodObject::Identity => {
                 access_token.assert_is_member(request.account_id)?;
 
                 (SyncCollection::Identity, false)
             }
-            RequestArguments::EmailSubmission => {
+            MethodObject::EmailSubmission => {
                 access_token.assert_is_member(request.account_id)?;
 
                 (SyncCollection::EmailSubmission, false)
             }
-            RequestArguments::Quota => {
+            _ => {
                 access_token.assert_is_member(request.account_id)?;
 
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
@@ -70,7 +79,7 @@ impl ChangesLookup for Server {
                 .unwrap_or(usize::MAX),
             self.core.jmap.changes_max_results.unwrap_or(usize::MAX),
         );
-        let mut response = ChangesResponse {
+        let mut response: ChangesResponse<NullObject> = ChangesResponse {
             account_id: request.account_id,
             old_state: request.since_state.clone(),
             new_state: State::Initial,
@@ -86,10 +95,14 @@ impl ChangesLookup for Server {
             State::Initial => {
                 let changelog = self
                     .store()
-                    .changes(account_id, collection, Query::All)
+                    .changes(account_id, collection.into(), Query::All)
                     .await?;
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
-                    return Ok(response);
+                    return Ok(IntermediateChangesResponse {
+                        response,
+                        object,
+                        only_container_changes: false,
+                    });
                 }
 
                 (0, changelog)
@@ -97,7 +110,7 @@ impl ChangesLookup for Server {
             State::Exact(change_id) => (
                 0,
                 self.store()
-                    .changes(account_id, collection, Query::Since(*change_id))
+                    .changes(account_id, collection.into(), Query::Since(*change_id))
                     .await?,
             ),
             State::Intermediate(intermediate_state) => {
@@ -105,7 +118,7 @@ impl ChangesLookup for Server {
                     .store()
                     .changes(
                         account_id,
-                        collection,
+                        collection.into(),
                         Query::RangeInclusive(intermediate_state.from_id, intermediate_state.to_id),
                     )
                     .await?;
@@ -119,7 +132,7 @@ impl ChangesLookup for Server {
                         self.store()
                             .changes(
                                 account_id,
-                                collection,
+                                collection.into(),
                                 Query::Since(intermediate_state.to_id),
                             )
                             .await?,
@@ -182,68 +195,62 @@ impl ChangesLookup for Server {
         } else {
             State::new_exact(change_id)
         };
-        if is_container
-            && !response.updated.is_empty()
-            && !items_changed
-            && collection == SyncCollection::Email
-        {
-            response.updated_properties = vec![
-                Property::TotalEmails,
-                Property::UnreadEmails,
-                Property::TotalThreads,
-                Property::UnreadThreads,
-            ]
-            .into()
-        }
 
-        Ok(response)
+        Ok(IntermediateChangesResponse {
+            only_container_changes: is_container && !response.updated.is_empty() && !items_changed,
+            response,
+            object,
+        })
     }
 }
 
-/*async fn changes(
-    server: &Server,
-    account_id: u32,
-    collection: SyncCollection,
-    query: Query,
-    response: &mut ChangesResponse,
-) -> trc::Result<Changes> {
-    let mut main_changes = server
-        .store()
-        .changes(account_id, collection, query)
-        .await?;
-    if matches!(collection, Collection::Mailbox) {
-        let child_changes = server
-            .store()
-            .changes(account_id, collection.as_child_update(), query)
-            .await?;
-
-        if !child_changes.changes.is_empty() {
-            if child_changes.from_change_id < main_changes.from_change_id {
-                main_changes.from_change_id = child_changes.from_change_id;
-            }
-            if child_changes.to_change_id > main_changes.to_change_id {
-                main_changes.to_change_id = child_changes.to_change_id;
-            }
-            let mut has_child_changes = false;
-            for change in child_changes.changes {
-                let id = change.id();
-                if !main_changes.changes.iter().any(|c| c.id() == id) {
-                    main_changes.changes.push(change);
-                    has_child_changes = true;
+impl IntermediateChangesResponse {
+    pub fn into_method_response(self) -> ResponseMethod<'static> {
+        ResponseMethod::Changes(match self.object {
+            MethodObject::Email => ChangesResponseMethod::Email(transmute_response(self.response)),
+            MethodObject::Mailbox => {
+                let mut response = transmute_response(self.response);
+                if self.only_container_changes {
+                    response.updated_properties = vec![
+                        MailboxProperty::TotalEmails.into(),
+                        MailboxProperty::UnreadEmails.into(),
+                        MailboxProperty::TotalThreads.into(),
+                        MailboxProperty::UnreadThreads.into(),
+                    ]
+                    .into();
                 }
+                ChangesResponseMethod::Mailbox(response)
             }
-
-            if has_child_changes {
-                response.updated_properties = vec![
-                    Property::TotalEmails,
-                    Property::UnreadEmails,
-                    Property::TotalThreads,
-                    Property::UnreadThreads,
-                ]
-                .into();
+            MethodObject::Thread => {
+                ChangesResponseMethod::Thread(transmute_response(self.response))
             }
-        }
+            MethodObject::Identity => {
+                ChangesResponseMethod::Identity(transmute_response(self.response))
+            }
+            MethodObject::EmailSubmission => {
+                ChangesResponseMethod::EmailSubmission(transmute_response(self.response))
+            }
+            MethodObject::Core
+            | MethodObject::Blob
+            | MethodObject::PushSubscription
+            | MethodObject::SearchSnippet
+            | MethodObject::VacationResponse
+            | MethodObject::SieveScript
+            | MethodObject::Principal
+            | MethodObject::Quota => unreachable!(),
+        })
     }
-    Ok(main_changes)
 }
-*/
+
+fn transmute_response<T: JmapObject>(response: ChangesResponse<NullObject>) -> ChangesResponse<T> {
+    ChangesResponse {
+        account_id: response.account_id,
+        old_state: response.old_state,
+        new_state: response.new_state,
+        has_more_changes: response.has_more_changes,
+        created: response.created,
+        updated: response.updated,
+        destroyed: response.destroyed,
+        updated_properties: None,
+    }
+}

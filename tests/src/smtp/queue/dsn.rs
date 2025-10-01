@@ -4,23 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::smtp::{QueueReceiver, TestSMTP, inbound::sign::SIGNATURES};
+use common::config::smtp::queue::{QueueExpiry, QueueName};
+use smtp::queue::{
+    Error, ErrorDetails, HostResponse, Message, MessageWrapper, Recipient, Schedule, Status,
+    UnexpectedResponse, dsn::SendDsn,
+};
+use smtp_proto::{RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_SUCCESS, Response};
 use std::{
     fs,
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
     time::SystemTime,
 };
-
-use common::config::smtp::queue::{QueueExpiry, QueueName};
-use smtp_proto::{RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_SUCCESS, Response};
 use store::write::now;
-use utils::BlobHash;
-
-use crate::smtp::{QueueReceiver, TestSMTP, inbound::sign::SIGNATURES};
-use smtp::queue::{
-    Error, ErrorDetails, HostResponse, Message, MessageWrapper, Recipient, Schedule, Status,
-    UnexpectedResponse, dsn::SendDsn,
-};
+use types::blob_hash::BlobHash;
 
 const CONFIG: &str = r#"
 [report]

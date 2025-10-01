@@ -10,7 +10,6 @@ use directory::{
     Type,
     backend::internal::{PrincipalField, PrincipalSet},
 };
-use jmap_proto::types::collection::Collection;
 use nlp::tokenizers::word::WordTokenizer;
 use std::{slice::Iter, time::Instant};
 use store::{
@@ -21,6 +20,7 @@ use store::{
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, DirectoryClass, ValueClass},
 };
 use trc::AddContext;
+use types::collection::Collection;
 use utils::codec::leb128::Leb128Iterator;
 
 use crate::{

@@ -6,11 +6,11 @@
 
 use super::*;
 use crate::cache::MessageCacheFetch;
-use common::{Server, config::jmap::settings::SpecialUse, storage::index::ObjectIndexBuilder};
-use jmap_proto::types::collection::Collection;
+use common::{Server, storage::index::ObjectIndexBuilder};
 use std::future::Future;
 use store::write::BatchBuilder;
 use trc::AddContext;
+use types::collection::Collection;
 
 pub trait MailboxFnc: Sync + Send {
     fn create_system_folders(

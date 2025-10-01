@@ -10,13 +10,13 @@ use dav_proto::schema::request::DeadProperty;
 use groupware::calendar::{
     AlarmDelta, CalendarEvent, CalendarEventData, ComponentTimeRange, UserProperties,
 };
-use jmap_proto::types::{collection::Collection, property::Property};
 use store::{
     Serialize,
     rand::{self, seq::SliceRandom},
     write::{Archiver, BatchBuilder, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
+use types::{collection::Collection, field::Field};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -117,7 +117,7 @@ pub(crate) async fn migrate_calendar_events(server: &Server) -> trc::Result<()> 
                         .with_collection(Collection::CalendarEvent)
                         .update_document(document_id)
                         .set(
-                            Property::Value,
+                            Field::ARCHIVE,
                             Archiver::new(new_event)
                                 .serialize()
                                 .caused_by(trc::location!())?,

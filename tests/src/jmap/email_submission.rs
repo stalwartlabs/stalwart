@@ -11,7 +11,7 @@ use jmap_client::{
     email_submission::{Address, Delivered, DeliveryStatus, Displayed, UndoStatus, query::Filter},
     mailbox::Role,
 };
-use jmap_proto::types::id::Id;
+use types::id::Id;
 use mail_parser::DateTime;
 use std::{
     sync::Arc,

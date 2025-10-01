@@ -9,6 +9,7 @@ use std::{borrow::Cow, fmt::Display};
 use elasticsearch::{DeleteByQueryParts, IndexParts};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use types::collection::Collection;
 
 use crate::{
     backend::elastic::INDEX_NAMES,
@@ -53,7 +54,7 @@ impl ElasticSearchStore {
     pub async fn fts_remove(
         &self,
         account_id: u32,
-        collection: u8,
+        collection: Collection,
         document_ids: &impl DocumentSet,
     ) -> trc::Result<()> {
         let document_ids = document_ids.iterate().collect::<Vec<_>>();

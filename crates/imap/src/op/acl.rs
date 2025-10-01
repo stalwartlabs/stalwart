@@ -28,16 +28,19 @@ use imap_proto::{
     },
     receiver::Request,
 };
-use jmap_proto::types::{acl::Acl, collection::Collection, value::AclGrant};
 use std::{sync::Arc, time::Instant};
 use store::write::{AlignedBytes, Archive, BatchBuilder};
 use trc::AddContext;
+use types::{
+    acl::{Acl, AclGrant},
+    collection::Collection,
+};
 use utils::map::bitmap::Bitmap;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_get_acl(&mut self, request: Request<Command>) -> trc::Result<()> {
         // Validate access
-        self.assert_has_permission(Permission::ImapAuthenticate)?;
+        self.assert_has_permission(Permission::ImapAclGet)?;
 
         let op_start = Instant::now();
         let arguments = request.parse_acl(self.is_utf8)?;
@@ -336,6 +339,13 @@ impl<T: SessionStream> Session<T> {
                     }
                     ModRightsOp::Remove => (),
                 }
+            }
+
+            if mailbox.acls.len() > data.server.core.groupware.max_shares_per_item {
+                return Err(trc::ImapEvent::Error
+                    .into_err()
+                    .details("Maximum shares per item exceeded")
+                    .caused_by(trc::location!()));
             }
 
             let grants = mailbox

@@ -4,43 +4,87 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Borrow;
-
-use store::BlobClass;
-use utils::{
-    BlobHash,
-    codec::{
-        base32_custom::{Base32Reader, Base32Writer},
-        leb128::{Leb128Iterator, Leb128Writer},
-    },
+use jmap_tools::{Element, Property, Value};
+use std::{borrow::Borrow, str::FromStr, time::SystemTime};
+use utils::codec::{
+    base32_custom::{Base32Reader, Base32Writer},
+    leb128::{Leb128Iterator, Leb128Writer},
 };
 
-use crate::parser::{JsonObjectParser, base32::JsonBase32Reader, json::Parser};
+use crate::blob_hash::BlobHash;
 
 const B_LINKED: u8 = 0x10;
 const B_RESERVED: u8 = 0x20;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BlobClass {
+    Reserved {
+        account_id: u32,
+        expires: u64,
+    },
+    Linked {
+        account_id: u32,
+        collection: u8,
+        document_id: u32,
+    },
+}
+
+impl Default for BlobClass {
+    fn default() -> Self {
+        BlobClass::Reserved {
+            account_id: 0,
+            expires: 0,
+        }
+    }
+}
+
+impl AsRef<BlobClass> for BlobClass {
+    fn as_ref(&self) -> &BlobClass {
+        self
+    }
+}
+
+impl BlobClass {
+    pub fn account_id(&self) -> u32 {
+        match self {
+            BlobClass::Reserved { account_id, .. } | BlobClass::Linked { account_id, .. } => {
+                *account_id
+            }
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        match self {
+            BlobClass::Reserved { expires, .. } => {
+                *expires
+                    > SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_secs())
+            }
+            BlobClass::Linked { .. } => true,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlobId {
     pub hash: BlobHash,
     pub class: BlobClass,
     pub section: Option<BlobSection>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlobSection {
     pub offset_start: usize,
     pub size: usize,
     pub encoding: u8,
 }
 
-impl JsonObjectParser for BlobId {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut it = JsonBase32Reader::new(parser);
-        BlobId::from_iter(&mut it).ok_or_else(|| it.error())
+impl FromStr for BlobId {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        BlobId::from_base32(s).ok_or(())
     }
 }
 
@@ -77,6 +121,7 @@ impl BlobId {
         self
     }
 
+    #[inline]
     pub fn from_base32(value: impl AsRef<[u8]>) -> Option<Self> {
         BlobId::from_iter(&mut Base32Reader::new(value.as_ref()))
     }
@@ -194,5 +239,11 @@ impl std::fmt::Display for BlobId {
         let mut writer = Base32Writer::with_capacity(std::mem::size_of::<BlobId>() * 2);
         self.serialize_as(&mut writer);
         f.write_str(&writer.finalize())
+    }
+}
+
+impl<'x, P: Property, E: Element + From<BlobId>> From<BlobId> for Value<'x, P, E> {
+    fn from(id: BlobId) -> Self {
+        Value::Element(E::from(id))
     }
 }

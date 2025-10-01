@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{cmp::Ordering, fmt::Display};
-
+use crate::{Command, ResponseCode, ResponseType, StatusResponse};
 use ahash::AHashSet;
 use chrono::{DateTime, Utc};
-
 use compact_str::CompactString;
-use jmap_proto::types::keyword::{ArchivedKeyword, Keyword};
-
-use crate::{Command, ResponseCode, ResponseType, StatusResponse};
+use std::{cmp::Ordering, fmt::Display};
+use types::keyword::{ArchivedKeyword, Keyword};
 
 pub mod acl;
 pub mod append;
@@ -319,7 +316,7 @@ impl From<Flag> for Keyword {
             Flag::Deleted => Keyword::Deleted,
             Flag::Forwarded => Keyword::Forwarded,
             Flag::MDNSent => Keyword::MdnSent,
-            Flag::Keyword(value) => Keyword::Other(value),
+            Flag::Keyword(value) => Keyword::from_other(value),
         }
     }
 }

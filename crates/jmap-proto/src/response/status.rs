@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::types::state::State;
+use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
-
-use crate::types::{id::Id, state::State, type_state::DataType};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum StateChangeType {

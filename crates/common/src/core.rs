@@ -17,13 +17,6 @@ use crate::{
     ipc::{BroadcastEvent, StateEvent},
 };
 use directory::{Directory, QueryParams, Type, backend::internal::manage::ManageDirectory};
-use jmap_proto::types::{
-    blob::BlobId,
-    collection::{Collection, SyncCollection},
-    property::Property,
-    state::StateChange,
-    type_state::DataType,
-};
 use mail_auth::IpLookupStrategy;
 use sieve::Sieve;
 use std::{
@@ -31,8 +24,8 @@ use std::{
     time::Duration,
 };
 use store::{
-    BitmapKey, BlobClass, BlobStore, Deserialize, FtsStore, InMemoryStore, IndexKey, IterateParams,
-    Key, LogKey, SUBSPACE_LOGS, SerializeInfallible, Store, U32_LEN, U64_LEN, ValueKey,
+    BitmapKey, BlobStore, Deserialize, FtsStore, InMemoryStore, IndexKey, IterateParams, Key,
+    LogKey, SUBSPACE_LOGS, SerializeInfallible, Store, U32_LEN, U64_LEN, ValueKey,
     dispatch::DocumentSet,
     roaring::RoaringBitmap,
     write::{
@@ -41,7 +34,13 @@ use store::{
     },
 };
 use trc::AddContext;
-use utils::BlobHash;
+use types::{
+    blob::{BlobClass, BlobId},
+    blob_hash::BlobHash,
+    collection::{Collection, SyncCollection},
+    field::{EmailField, Field},
+    type_state::{DataType, StateChange},
+};
 
 impl Server {
     #[inline(always)]
@@ -353,14 +352,14 @@ impl Server {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: 0,
-                        field: Property::Size.into(),
+                        field: EmailField::Size.into(),
                         key: 0u32.serialize(),
                     },
                     IndexKey {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: u32::MAX,
-                        field: Property::Size.into(),
+                        field: EmailField::Size.into(),
                         key: u32::MAX.serialize(),
                     },
                 )
@@ -503,7 +502,7 @@ impl Server {
                 account_id,
                 collection: collection.into(),
                 document_id,
-                class: ValueClass::Property(Property::Value.into()),
+                class: ValueClass::Property(Field::ARCHIVE.into()),
             })
             .await
             .add_context(|err| {
@@ -520,9 +519,8 @@ impl Server {
         account_id: u32,
         collection: Collection,
         document_id: u32,
-        property: impl AsRef<Property> + Sync + Send,
+        property: Field,
     ) -> trc::Result<Option<Archive<AlignedBytes>>> {
-        let property = property.as_ref();
         self.core
             .storage
             .data
@@ -563,13 +561,13 @@ impl Server {
                         account_id,
                         collection,
                         document_id: documents.min(),
-                        class: ValueClass::Property(Property::Value.into()),
+                        class: ValueClass::Property(Field::ARCHIVE.into()),
                     },
                     ValueKey {
                         account_id,
                         collection,
                         document_id: documents.max(),
-                        class: ValueClass::Property(Property::Value.into()),
+                        class: ValueClass::Property(Field::ARCHIVE.into()),
                     },
                 ),
                 |key, value| {
@@ -654,12 +652,12 @@ impl Server {
                 let mut state_change =
                     StateChange::new(account_id, assigned_ids.last_change_id(account_id)?);
                 for changed_collection in changed_collections.changed_containers {
-                    if let Some(data_type) = DataType::try_from_id(changed_collection, true) {
+                    if let Some(data_type) = DataType::try_from_sync(changed_collection, true) {
                         state_change.set_change(data_type);
                     }
                 }
                 for changed_collection in changed_collections.changed_items {
-                    if let Some(data_type) = DataType::try_from_id(changed_collection, false) {
+                    if let Some(data_type) = DataType::try_from_sync(changed_collection, false) {
                         state_change.set_change(data_type);
                     }
                 }
@@ -753,21 +751,18 @@ impl Server {
 
                 // Write truncation entry for cache
                 let mut batch = BatchBuilder::new();
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(collection)
-                    .set(
-                        ValueClass::Any(AnyClass {
-                            subspace: SUBSPACE_LOGS,
-                            key: LogKey {
-                                account_id,
-                                collection,
-                                change_id: first_change_id,
-                            }
-                            .serialize(0),
-                        }),
-                        Vec::new(),
-                    );
+                batch.with_account_id(account_id).set(
+                    ValueClass::Any(AnyClass {
+                        subspace: SUBSPACE_LOGS,
+                        key: LogKey {
+                            account_id,
+                            collection,
+                            change_id: first_change_id,
+                        }
+                        .serialize(0),
+                    }),
+                    Vec::new(),
+                );
                 self.store()
                     .write(batch.build_all())
                     .await

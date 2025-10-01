@@ -33,13 +33,11 @@
 
 */
 
-use std::fmt::Display;
-
-use jmap_proto::types::acl::Acl;
-
-use crate::utf7::utf7_encode;
+use types::acl::Acl;
 
 use super::quoted_string;
+use crate::utf7::utf7_encode;
+use std::fmt::Display;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Rights {

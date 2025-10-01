@@ -12,7 +12,7 @@ use crate::{
 };
 use std::ops::Range;
 use trc::AddContext;
-use utils::BLOB_HASH_LEN;
+use types::blob_hash::BLOB_HASH_LEN;
 
 impl FdbStore {
     pub(crate) async fn get_blob(
@@ -101,7 +101,7 @@ impl FdbStore {
         const N_CHUNKS: usize = (1 << 5) - 1;
         let last_chunk = std::cmp::max(
             (data.len() / MAX_VALUE_SIZE)
-                + if data.len() % MAX_VALUE_SIZE > 0 {
+                + if !data.len().is_multiple_of(MAX_VALUE_SIZE) {
                     1
                 } else {
                     0

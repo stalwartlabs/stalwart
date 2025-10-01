@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::Core;
+use ahash::{AHashMap, AHashSet};
 use std::{
     collections::BTreeSet,
     io::{BufWriter, Write},
@@ -11,9 +13,6 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::{self, SyncSender},
 };
-
-use ahash::{AHashMap, AHashSet};
-use jmap_proto::types::{collection::Collection, property::Property};
 use store::{
     BitmapKey, Deserialize, IndexKey, IterateParams, LogKey, SUBSPACE_BITMAP_ID,
     SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT, SerializeInfallible, U32_LEN, U64_LEN, ValueKey,
@@ -22,14 +21,16 @@ use store::{
         QueueEvent, TagValue, ValueClass, key::DeserializeBigEndian,
     },
 };
-
+use types::{
+    blob_hash::{BLOB_HASH_LEN, BlobHash},
+    collection::Collection,
+    field::{Field, MailboxField},
+};
 use utils::{
-    BLOB_HASH_LEN, BlobHash, UnwrapFailure,
+    UnwrapFailure,
     codec::leb128::{Leb128_, Leb128Reader},
     failed,
 };
-
-use crate::Core;
 
 pub(super) const MAGIC_MARKER: u8 = 123;
 pub(super) const FILE_VERSION: u8 = 2;
@@ -196,21 +197,21 @@ impl Core {
 
                     // Obtain UID counter
                     if collection == u8::from(Collection::Mailbox)
-                        && u8::from(Property::Value) == field
+                        && u8::from(Field::ARCHIVE) == field
                     {
                         let value = store
                             .get_counter(ValueKey {
                                 account_id,
                                 collection,
                                 document_id,
-                                class: ValueClass::Property(Property::EmailIds.into()),
+                                class: MailboxField::UidCounter.into(),
                             })
                             .await
                             .failed("Failed to get counter");
                         if value != 0 {
                             writer
                                 .send(Op::KeyValue((
-                                    vec![u8::from(Property::EmailIds)],
+                                    vec![u8::from(MailboxField::UidCounter)],
                                     value.serialize(),
                                 )))
                                 .failed("Failed to send key value");

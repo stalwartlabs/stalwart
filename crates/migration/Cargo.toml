@@ -1,6 +1,6 @@
 [package]
 name = "migration"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
@@ -9,7 +9,7 @@ utils = { path = "../utils" }
 nlp = { path = "../nlp" }
 store = { path = "../store" }
 trc = { path = "../trc" }
-jmap_proto = { path = "../jmap-proto" }
+types = { path = "../types" }
 common = { path =  "../common" }
 email = { path =  "../email" }
 directory = { path =  "../directory" }

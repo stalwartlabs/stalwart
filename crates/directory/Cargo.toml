@@ -1,6 +1,6 @@
 [package]
 name = "directory"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
@@ -10,8 +10,8 @@ proc_macros = { path =  "../utils/proc-macros" }
 store = { path =  "../store" }
 trc = { path = "../trc" }
 nlp = { path = "../nlp" }
-jmap_proto = { path =  "../jmap-proto" }
-smtp-proto = { version = "0.1" }
+types = { path = "../types" }
+smtp-proto = { version = "0.2" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
 mail-builder = { version = "0.4" }

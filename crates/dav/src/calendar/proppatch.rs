@@ -29,13 +29,13 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
 use std::str::FromStr;
 use store::write::BatchBuilder;
 use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+};
 
 pub(crate) trait CalendarPropPatchRequestHandler: Sync + Send {
     fn handle_calendar_proppatch_request(

@@ -1,11 +1,12 @@
 [package]
 name = "store"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
 [dependencies]
 utils = { path = "../utils" }
+types = { path = "../types" }
 nlp = { path = "../nlp" }
 trc = { path = "../trc" }
 rocksdb = { version = "0.24", optional = true, features = ["multi-threaded-cf"] }

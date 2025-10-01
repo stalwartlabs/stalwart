@@ -22,17 +22,17 @@ use imap_proto::{
     },
     receiver::Request,
 };
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-    keyword::Keyword,
-};
 use std::{sync::Arc, time::Instant};
 use store::{
     query::log::{Change, Query},
     write::{BatchBuilder, ValueClass},
 };
 use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+    keyword::Keyword,
+};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_store(
@@ -114,7 +114,7 @@ impl<T: SessionStream> SessionData<T> {
                 .store()
                 .changes(
                     account_id,
-                    SyncCollection::Email,
+                    SyncCollection::Email.into(),
                     Query::from_modseq(unchanged_since),
                 )
                 .await

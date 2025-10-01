@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/main",
+    "crates/types",
     "crates/http",
     "crates/http-proto",
     "crates/jmap",

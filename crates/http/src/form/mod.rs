@@ -30,7 +30,7 @@ use store::{
     write::{BatchBuilder, BlobOp, now},
 };
 use trc::AddContext;
-use utils::BlobHash;
+use types::blob_hash::BlobHash;
 use x509_parser::nom::AsBytes;
 
 pub trait FormHandler: Sync + Send {

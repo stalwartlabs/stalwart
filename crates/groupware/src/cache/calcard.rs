@@ -18,14 +18,14 @@ use common::{
     DavName, DavPath, DavResource, DavResourceMetadata, DavResources, Server, auth::AccessToken,
 };
 use directory::backend::internal::manage::ManageDirectory;
-use jmap_proto::types::{
-    collection::{Collection, SyncCollection},
-    value::AclGrant,
-};
 use std::sync::Arc;
 use store::ahash::{AHashMap, AHashSet};
 use tokio::sync::Semaphore;
 use trc::AddContext;
+use types::{
+    acl::AclGrant,
+    collection::{Collection, SyncCollection},
+};
 use utils::map::bitmap::Bitmap;
 
 pub(super) async fn build_calcard_resources(
@@ -41,7 +41,7 @@ pub(super) async fn build_calcard_resources(
         .core
         .storage
         .data
-        .get_last_change_id(account_id, sync_collection)
+        .get_last_change_id(account_id, sync_collection.into())
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -73,7 +73,7 @@ pub(super) async fn build_calcard_resources(
             .core
             .storage
             .data
-            .get_last_change_id(account_id, sync_collection)
+            .get_last_change_id(account_id, sync_collection.into())
             .await
             .caused_by(trc::location!())?
             .unwrap_or_default();
@@ -183,7 +183,7 @@ pub(super) async fn build_scheduling_resources(
         .core
         .storage
         .data
-        .get_last_change_id(account_id, SyncCollection::CalendarScheduling)
+        .get_last_change_id(account_id, SyncCollection::CalendarScheduling.into())
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();

@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{Event, PushServer, PushUpdate, http::http_request};
+use common::{IPC_CHANNEL_BUFFER, Inner, LONG_1Y_SLUMBER, core::BuildServer};
 use std::{
     collections::hash_map::Entry,
     sync::Arc,
     time::{Duration, Instant},
 };
-
-use common::{IPC_CHANNEL_BUFFER, Inner, LONG_1Y_SLUMBER, core::BuildServer};
-use jmap_proto::types::id::Id;
 use store::ahash::{AHashMap, AHashSet};
 use tokio::sync::mpsc;
 use trc::PushSubscriptionEvent;
-
-use super::{Event, PushServer, PushUpdate, http::http_request};
+use types::id::Id;
 
 pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
     let (push_tx_, mut push_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);

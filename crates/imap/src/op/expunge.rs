@@ -19,18 +19,18 @@ use imap_proto::{
     parser::parse_sequence_set,
     receiver::{Request, Token},
 };
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, VanishedCollection},
-    keyword::Keyword,
-    property::Property,
-};
 use std::{sync::Arc, time::Instant};
 use store::{
     roaring::RoaringBitmap,
     write::{BatchBuilder, TagValue},
 };
 use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, VanishedCollection},
+    field::EmailField,
+    keyword::Keyword,
+};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_expunge(
@@ -194,7 +194,7 @@ impl<T: SessionStream> SessionData<T> {
                             batch
                                 .custom(ObjectIndexBuilder::<_, ()>::new().with_current(metadata))
                                 .caused_by(trc::location!())?
-                                .tag(Property::MailboxIds, TagValue::Id(TOMBSTONE_ID))
+                                .tag(EmailField::MailboxIds, TagValue::Id(TOMBSTONE_ID))
                                 .commit_point();
                         } else {
                             // Untag message from this mailbox and remove Deleted flag

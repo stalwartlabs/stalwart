@@ -50,9 +50,9 @@ use dav_proto::{
 use directory::Permission;
 use http_proto::{HttpRequest, HttpResponse, HttpSessionData, request::fetch_body};
 use hyper::{StatusCode, header};
-use jmap_proto::types::collection::Collection;
 use std::{sync::Arc, time::Instant};
 use trc::{EventType, LimitEvent, StoreEvent, WebDavEvent};
+use types::collection::Collection;
 
 pub trait DavRequestHandler: Sync + Send {
     fn handle_dav_request(

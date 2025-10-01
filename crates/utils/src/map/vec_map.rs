@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Borrow, cmp::Ordering, fmt, hash::Hash};
-
 use rkyv::Archive;
-use serde::{Deserialize, Serialize, de::DeserializeOwned, ser::SerializeMap};
+use serde::{Deserialize, Serialize, ser::SerializeMap};
+use std::{borrow::Borrow, cmp::Ordering, fmt, hash::Hash};
 
 // A map implemented using vectors
 // used for small datasets of less than 20 items
@@ -305,7 +304,7 @@ struct VecMapVisitor<K, V> {
     phantom: std::marker::PhantomData<(K, V)>,
 }
 
-impl<'de, K: Eq + PartialEq + DeserializeOwned, V: DeserializeOwned> serde::de::Visitor<'de>
+impl<'de, K: Eq + PartialEq + Deserialize<'de>, V: Deserialize<'de>> serde::de::Visitor<'de>
     for VecMapVisitor<K, V>
 {
     type Value = VecMap<K, V>;
@@ -327,7 +326,7 @@ impl<'de, K: Eq + PartialEq + DeserializeOwned, V: DeserializeOwned> serde::de::
     }
 }
 
-impl<'de, K: Eq + PartialEq + DeserializeOwned, V: DeserializeOwned> Deserialize<'de>
+impl<'de, K: Eq + PartialEq + Deserialize<'de>, V: Deserialize<'de>> Deserialize<'de>
     for VecMap<K, V>
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

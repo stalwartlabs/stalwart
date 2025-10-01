@@ -6,7 +6,6 @@
 
 use crate::mailbox::{ArchivedUidMailbox, UidMailbox};
 use common::storage::index::IndexableAndSerializableObject;
-use jmap_proto::types::keyword::{ArchivedKeyword, Keyword};
 use mail_parser::{
     ArchivedContentType, ArchivedEncoding, ArchivedHeaderName, ArchivedHeaderValue, DateTime,
     Encoding, Header, HeaderName, HeaderValue, PartType,
@@ -21,7 +20,10 @@ use rkyv::{
     vec::ArchivedVec,
 };
 use std::{borrow::Cow, collections::VecDeque};
-use utils::BlobHash;
+use types::{
+    blob_hash::BlobHash,
+    keyword::{ArchivedKeyword, Keyword},
+};
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Default)]
 pub struct MessageData {

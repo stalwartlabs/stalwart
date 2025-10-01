@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_proto::types::{blob::BlobId, id::Id};
+use types::{blob::BlobId, id::Id};
 
 pub mod copy;
 pub mod download;

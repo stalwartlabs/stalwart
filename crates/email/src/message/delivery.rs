@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::ingest::{EmailIngest, IngestEmail, IngestSource};
+use crate::{mailbox::INBOX_ID, sieve::ingest::SieveScriptIngest};
 use common::Server;
-
 use directory::Permission;
-use jmap_proto::types::{state::StateChange, type_state::DataType};
 use mail_parser::MessageParser;
 use std::{borrow::Cow, future::Future};
 use store::ahash::AHashMap;
-use utils::BlobHash;
-
-use crate::{mailbox::INBOX_ID, sieve::ingest::SieveScriptIngest};
-
-use super::ingest::{EmailIngest, IngestEmail, IngestSource};
+use types::{
+    blob_hash::BlobHash,
+    type_state::{DataType, StateChange},
+};
 
 #[derive(Debug)]
 pub struct IngestMessage {

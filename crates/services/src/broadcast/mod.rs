@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Borrow;
-
 use common::ipc::BroadcastEvent;
-use jmap_proto::types::state::StateChange;
+use std::borrow::Borrow;
+use types::type_state::StateChange;
 use utils::{
     codec::leb128::{Leb128Iterator, Leb128Writer},
     map::bitmap::Bitmap,

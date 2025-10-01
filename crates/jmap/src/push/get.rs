@@ -10,29 +10,26 @@ use common::{
     ipc::{EncryptionKeys, PushSubscription, StateEvent, UpdateSubscription},
 };
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse, RequestArguments},
-    types::{
-        collection::Collection,
-        date::UTCDate,
-        property::Property,
-        value::{Object, Value},
-    },
+    method::get::{GetRequest, GetResponse},
+    object::push_subscription::{self, PushSubscriptionProperty, PushSubscriptionValue},
+    types::date::UTCDate,
 };
+use jmap_tools::{Map, Value};
+use std::future::Future;
 use store::{
     BitmapKey, ValueKey,
     write::{AlignedBytes, Archive, ValueClass, now},
 };
 use trc::{AddContext, ServerEvent};
+use types::{collection::Collection, field::Field};
 use utils::map::bitmap::Bitmap;
-
-use std::future::Future;
 
 pub trait PushSubscriptionFetch: Sync + Send {
     fn push_subscription_get(
         &self,
-        request: GetRequest<RequestArguments>,
+        request: GetRequest<push_subscription::PushSubscription>,
         access_token: &AccessToken,
-    ) -> impl Future<Output = trc::Result<GetResponse>> + Send;
+    ) -> impl Future<Output = trc::Result<GetResponse<push_subscription::PushSubscription>>> + Send;
 
     fn fetch_push_subscriptions(
         &self,
@@ -45,16 +42,16 @@ pub trait PushSubscriptionFetch: Sync + Send {
 impl PushSubscriptionFetch for Server {
     async fn push_subscription_get(
         &self,
-        mut request: GetRequest<RequestArguments>,
+        mut request: GetRequest<push_subscription::PushSubscription>,
         access_token: &AccessToken,
-    ) -> trc::Result<GetResponse> {
+    ) -> trc::Result<GetResponse<push_subscription::PushSubscription>> {
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
-            Property::Id,
-            Property::DeviceClientId,
-            Property::VerificationCode,
-            Property::Expires,
-            Property::Types,
+            PushSubscriptionProperty::Id,
+            PushSubscriptionProperty::DeviceClientId,
+            PushSubscriptionProperty::VerificationCode,
+            PushSubscriptionProperty::Expires,
+            PushSubscriptionProperty::Types,
         ]);
         let account_id = access_token.primary_id();
         let push_ids = self
@@ -81,7 +78,7 @@ impl PushSubscriptionFetch for Server {
             // Obtain the push subscription object
             let document_id = id.document_id();
             if !push_ids.contains(document_id) {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             }
             let push_ = if let Some(push) = self
@@ -90,54 +87,55 @@ impl PushSubscriptionFetch for Server {
             {
                 push
             } else {
-                response.not_found.push(id.into());
+                response.not_found.push(id);
                 continue;
             };
             let push = push_
                 .unarchive::<email::push::PushSubscription>()
                 .caused_by(trc::location!())?;
-            let mut result = Object::with_capacity(properties.len());
+            let mut result = Map::with_capacity(properties.len());
             for property in &properties {
                 match property {
-                    Property::Id => {
-                        result.append(Property::Id, Value::Id(id));
+                    PushSubscriptionProperty::Id => {
+                        result.insert_unchecked(PushSubscriptionProperty::Id, id);
                     }
-                    Property::Url | Property::Keys | Property::Value => {
+                    PushSubscriptionProperty::Url | PushSubscriptionProperty::Keys => {
                         return Err(trc::JmapEvent::Forbidden.into_err().details(
                             "The 'url' and 'keys' properties are not readable".to_string(),
                         ));
                     }
-                    Property::DeviceClientId => {
-                        result.append(
-                            Property::DeviceClientId,
-                            Value::from(&push.device_client_id),
+                    PushSubscriptionProperty::DeviceClientId => {
+                        result.insert_unchecked(
+                            PushSubscriptionProperty::DeviceClientId,
+                            &push.device_client_id,
                         );
                     }
-                    Property::Types => {
+                    PushSubscriptionProperty::Types => {
                         let mut types = Vec::new();
                         for typ in Bitmap::from(&push.types).into_iter() {
-                            types.push(Value::Text(typ.to_string()));
+                            types.push(Value::Element(PushSubscriptionValue::Types(typ)));
                         }
-                        result.append(Property::Types, Value::List(types));
+                        result
+                            .insert_unchecked(PushSubscriptionProperty::Types, Value::Array(types));
                     }
-                    Property::Expires => {
+                    PushSubscriptionProperty::Expires => {
                         if push.expires > 0 {
-                            result.append(
-                                Property::Expires,
-                                Value::Date(
+                            result.insert_unchecked(
+                                PushSubscriptionProperty::Expires,
+                                Value::Element(PushSubscriptionValue::Date(
                                     UTCDate::from_timestamp(u64::from(push.expires) as i64),
-                                ),
+                                )),
                             );
                         } else {
-                            result.append(Property::Expires, Value::Null);
+                            result.insert_unchecked(PushSubscriptionProperty::Expires, Value::Null);
                         }
                     }
                     property => {
-                        result.append(property.clone(), Value::Null);
+                        result.insert_unchecked(property.clone(), Value::Null);
                     }
                 }
             }
-            response.list.push(result);
+            response.list.push(result.into());
         }
 
         Ok(response)
@@ -167,7 +165,7 @@ impl PushSubscriptionFetch for Server {
                     account_id,
                     collection: Collection::PushSubscription.into(),
                     document_id,
-                    class: ValueClass::Property(Property::Value.into()),
+                    class: ValueClass::Property(Field::ARCHIVE.into()),
                 })
                 .await?
                 .ok_or_else(|| {

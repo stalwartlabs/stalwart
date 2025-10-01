@@ -10,11 +10,6 @@ use crate::{
 };
 use common::{DavPath, DavResource, DavResourceMetadata, DavResources, Server};
 use directory::backend::internal::manage::ManageDirectory;
-use jmap_proto::types::{
-    collection::{Collection, SyncCollection},
-    property::Property,
-    value::AclGrant,
-};
 use std::sync::Arc;
 use store::{
     Deserialize, IterateParams, U32_LEN, ValueKey,
@@ -23,6 +18,11 @@ use store::{
 };
 use tokio::sync::Semaphore;
 use trc::AddContext;
+use types::{
+    acl::AclGrant,
+    collection::{Collection, SyncCollection},
+    field::Field,
+};
 use utils::{map::bitmap::Bitmap, topological::TopologicalSort};
 
 pub(super) async fn build_file_resources(
@@ -34,7 +34,7 @@ pub(super) async fn build_file_resources(
         .core
         .storage
         .data
-        .get_last_change_id(account_id, SyncCollection::FileNode)
+        .get_last_change_id(account_id, SyncCollection::FileNode.into())
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -130,13 +130,13 @@ async fn fetch_files(server: &Server, account_id: u32) -> trc::Result<Vec<DavRes
                     account_id,
                     collection: Collection::FileNode.into(),
                     document_id: 0,
-                    class: ValueClass::Property(Property::Value.into()),
+                    class: ValueClass::from(Field::ARCHIVE),
                 },
                 ValueKey {
                     account_id,
                     collection: Collection::FileNode.into(),
                     document_id: u32::MAX,
-                    class: ValueClass::Property(Property::Value.into()),
+                    class: ValueClass::from(Field::ARCHIVE),
                 },
             ),
             |key, value| {

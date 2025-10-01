@@ -23,9 +23,9 @@ use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
 use groupware::RFC_3986;
 use groupware::cache::GroupwareCache;
 use hyper::StatusCode;
-use jmap_proto::types::collection::Collection;
 use std::borrow::Cow;
 use trc::AddContext;
+use types::collection::Collection;
 
 pub(crate) trait PrincipalPropFind: Sync + Send {
     fn prepare_principal_propfind_response(

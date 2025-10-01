@@ -4,14 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Display, sync::Arc};
-
 pub mod bimap;
 pub mod cache;
 pub mod codec;
 pub mod config;
 pub mod glob;
-pub mod json;
 pub mod map;
 pub mod snowflake;
 pub mod template;
@@ -26,84 +23,7 @@ use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
 };
 use rustls_pki_types::TrustAnchor;
-
-pub use downcast_rs;
-pub use erased_serde;
-
-pub const BLOB_HASH_LEN: usize = 32;
-
-#[derive(
-    rkyv::Archive,
-    rkyv::Deserialize,
-    rkyv::Serialize,
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[rkyv(derive(Debug))]
-#[repr(transparent)]
-pub struct BlobHash(pub [u8; BLOB_HASH_LEN]);
-
-impl BlobHash {
-    pub fn new_max() -> Self {
-        BlobHash([u8::MAX; BLOB_HASH_LEN])
-    }
-
-    pub fn generate(value: impl AsRef<[u8]>) -> Self {
-        BlobHash(blake3::hash(value.as_ref()).into())
-    }
-
-    pub fn try_from_hash_slice(value: &[u8]) -> Result<BlobHash, std::array::TryFromSliceError> {
-        value.try_into().map(BlobHash)
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-
-    pub fn to_hex(&self) -> String {
-        let mut hex = String::with_capacity(BLOB_HASH_LEN * 2);
-        for byte in self.0.iter() {
-            hex.push_str(&format!("{:02x}", byte));
-        }
-        hex
-    }
-}
-
-impl From<&ArchivedBlobHash> for BlobHash {
-    fn from(value: &ArchivedBlobHash) -> Self {
-        BlobHash(value.0)
-    }
-}
-
-impl AsRef<BlobHash> for BlobHash {
-    fn as_ref(&self) -> &BlobHash {
-        self
-    }
-}
-
-impl From<BlobHash> for Vec<u8> {
-    fn from(value: BlobHash) -> Self {
-        value.0.to_vec()
-    }
-}
-
-impl AsRef<[u8]> for BlobHash {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl AsMut<[u8]> for BlobHash {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut()
-    }
-}
+use std::sync::Arc;
 
 pub trait HttpLimitResponse: Sync + Send {
     fn bytes_with_limit(
@@ -133,79 +53,6 @@ impl HttpLimitResponse for Response {
         }
 
         Ok(Some(bytes))
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(transparent)]
-pub struct Semver(u64);
-
-impl Semver {
-    pub fn current() -> Self {
-        env!("CARGO_PKG_VERSION").try_into().unwrap()
-    }
-
-    pub fn new(major: u16, minor: u16, patch: u16) -> Self {
-        let mut version: u64 = 0;
-        version |= (major as u64) << 32;
-        version |= (minor as u64) << 16;
-        version |= patch as u64;
-        Semver(version)
-    }
-
-    pub fn unpack(&self) -> (u16, u16, u16) {
-        let version = self.0;
-        let major = ((version >> 32) & 0xFFFF) as u16;
-        let minor = ((version >> 16) & 0xFFFF) as u16;
-        let patch = (version & 0xFFFF) as u16;
-        (major, minor, patch)
-    }
-
-    pub fn major(&self) -> u16 {
-        (self.0 >> 32) as u16
-    }
-
-    pub fn minor(&self) -> u16 {
-        (self.0 >> 16) as u16
-    }
-
-    pub fn patch(&self) -> u16 {
-        self.0 as u16
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.0 > 0
-    }
-}
-
-impl AsRef<u64> for Semver {
-    fn as_ref(&self) -> &u64 {
-        &self.0
-    }
-}
-
-impl From<u64> for Semver {
-    fn from(value: u64) -> Self {
-        Semver(value)
-    }
-}
-
-impl TryFrom<&str> for Semver {
-    type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let mut parts = value.splitn(3, '.');
-        let major = parts.next().ok_or(())?.parse().map_err(|_| ())?;
-        let minor = parts.next().ok_or(())?.parse().map_err(|_| ())?;
-        let patch = parts.next().ok_or(())?.parse().map_err(|_| ())?;
-        Ok(Semver::new(major, minor, patch))
-    }
-}
-
-impl Display for Semver {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (major, minor, patch) = self.unpack();
-        write!(f, "{major}.{minor}.{patch}")
     }
 }
 
@@ -314,6 +161,50 @@ pub fn rustls_client_config(allow_invalid_certs: bool) -> ClientConfig {
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(DummyVerifier {}))
             .with_no_client_auth()
+    }
+}
+
+pub trait DomainPart {
+    fn to_lowercase_domain(&self) -> String;
+    fn domain_part(&self) -> &str;
+    fn try_domain_part(&self) -> Option<&str>;
+    fn try_local_part(&self) -> Option<&str>;
+}
+
+impl<T: AsRef<str>> DomainPart for T {
+    fn to_lowercase_domain(&self) -> String {
+        let address = self.as_ref();
+        if let Some((local, domain)) = address.rsplit_once('@') {
+            let mut address = String::with_capacity(address.len());
+            address.push_str(local);
+            address.push('@');
+            for ch in domain.chars() {
+                for ch in ch.to_lowercase() {
+                    address.push(ch);
+                }
+            }
+            address
+        } else {
+            address.to_string()
+        }
+    }
+
+    #[inline(always)]
+    fn try_domain_part(&self) -> Option<&str> {
+        self.as_ref().rsplit_once('@').map(|(_, d)| d)
+    }
+
+    #[inline(always)]
+    fn try_local_part(&self) -> Option<&str> {
+        self.as_ref().rsplit_once('@').map(|(l, _)| l)
+    }
+
+    #[inline(always)]
+    fn domain_part(&self) -> &str {
+        self.as_ref()
+            .rsplit_once('@')
+            .map(|(_, d)| d)
+            .unwrap_or_default()
     }
 }
 

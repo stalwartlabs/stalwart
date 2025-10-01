@@ -1,6 +1,6 @@
 [package]
 name = "groupware"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
@@ -8,7 +8,7 @@ resolver = "2"
 utils = { path = "../utils" }
 store = { path = "../store" }
 common = { path =  "../common" }
-jmap_proto = { path =  "../jmap-proto" }
+types = { path = "../types" }
 trc = { path = "../trc" }
 directory = { path =  "../directory" }
 dav-proto = { path =  "../dav-proto" }

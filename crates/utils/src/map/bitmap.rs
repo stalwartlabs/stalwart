@@ -69,6 +69,12 @@ impl<T: BitmapItem> Bitmap<T> {
         self.bitmap |= 1 << item.into();
     }
 
+    pub fn insert_many(&mut self, items: impl IntoIterator<Item = T>) {
+        for item in items.into_iter() {
+            self.insert(item);
+        }
+    }
+
     #[inline(always)]
     pub fn with_item(mut self, item: T) -> Self {
         self.insert(item);
@@ -258,31 +264,5 @@ impl<T: BitmapItem> Default for Bitmap<T> {
             bitmap: 0,
             _state: std::marker::PhantomData,
         }
-    }
-}
-
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ShortId(pub u8);
-
-impl BitmapItem for ShortId {
-    fn max() -> u64 {
-        u8::MAX as u64
-    }
-
-    fn is_valid(&self) -> bool {
-        true
-    }
-}
-
-impl From<u64> for ShortId {
-    fn from(value: u64) -> Self {
-        ShortId(value as u8)
-    }
-}
-
-impl From<ShortId> for u64 {
-    fn from(value: ShortId) -> Self {
-        value.0 as u64
     }
 }

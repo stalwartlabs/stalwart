@@ -10,6 +10,7 @@ pub mod log;
 pub mod sort;
 
 use roaring::RoaringBitmap;
+use types::collection::Collection;
 
 use crate::{
     BitmapKey, IterateParams, Key,
@@ -56,7 +57,7 @@ pub enum Comparator {
 #[derive(Debug)]
 pub struct ResultSet {
     pub account_id: u32,
-    pub collection: u8,
+    pub collection: Collection,
     pub results: RoaringBitmap,
 }
 
@@ -67,10 +68,10 @@ pub struct SortedResultSet {
 }
 
 impl ResultSet {
-    pub fn new(account_id: u32, collection: impl Into<u8>, results: RoaringBitmap) -> Self {
+    pub fn new(account_id: u32, collection: Collection, results: RoaringBitmap) -> Self {
         ResultSet {
             account_id,
-            collection: collection.into(),
+            collection,
             results,
         }
     }

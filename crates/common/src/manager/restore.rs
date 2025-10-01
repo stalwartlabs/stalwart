@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::Core;
+use ahash::AHashMap;
 use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
 };
-
-use crate::Core;
-use ahash::AHashMap;
-use jmap_proto::types::{collection::Collection, property::Property};
 use store::{
     BlobStore, Key, LogKey, SUBSPACE_LOGS, SerializeInfallible, Store, U32_LEN,
     roaring::RoaringBitmap,
@@ -28,7 +26,8 @@ use tokio::{
     fs::File,
     io::{AsyncReadExt, BufReader},
 };
-use utils::{BlobHash, UnwrapFailure, failed};
+use types::{blob_hash::BlobHash, collection::Collection, field::MailboxField};
+use utils::{UnwrapFailure, failed};
 
 use super::backup::{DeserializeBytes, FILE_VERSION, Family, MAGIC_MARKER, Op};
 
@@ -65,9 +64,9 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
     let mut reader = OpReader::new(path).await;
     let mut account_id = u32::MAX;
     let mut document_id = u32::MAX;
-    let mut collection = u8::MAX;
+    let mut collection = Collection::None;
+    let mut collection_raw = u8::MAX;
     let mut family = Family::None;
-    let email_collection = u8::from(Collection::Email);
     let mut due = now();
 
     let mut batch_size = 0;
@@ -83,7 +82,8 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                 batch.with_account_id(account_id);
             }
             Op::Collection(c) => {
-                collection = c;
+                collection_raw = c;
+                collection = Collection::from(c);
                 batch.with_collection(collection);
             }
             Op::DocumentId(d) => {
@@ -99,8 +99,8 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                             .as_slice()
                             .deserialize_u8(0)
                             .expect("Failed to deserialize field");
-                        if collection == u8::from(Collection::Mailbox)
-                            && u8::from(Property::EmailIds) == field
+                        if collection == Collection::Mailbox
+                            && u8::from(MailboxField::UidCounter) == field
                         {
                             batch.add(
                                 ValueClass::Property(field),
@@ -145,7 +145,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                         let hash = BlobHash::try_from_hash_slice(&key).expect("Invalid blob hash");
 
                         if account_id != u32::MAX && document_id != u32::MAX {
-                            if reader.version == 1 && collection == email_collection {
+                            if reader.version == 1 && collection == Collection::Email {
                                 batch.set(
                                     ValueClass::TaskQueue(TaskQueueClass::IndexEmail {
                                         due,
@@ -301,7 +301,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                                     ),
                                 },
                                 4 => {
-                                    if reader.version == 1 && collection == email_collection {
+                                    if reader.version == 1 && collection == Collection::Email {
                                         continue;
                                     }
 
@@ -357,7 +357,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                                 subspace: SUBSPACE_LOGS,
                                 key: LogKey {
                                     account_id,
-                                    collection,
+                                    collection: collection_raw,
                                     change_id,
                                 }
                                 .serialize(0),

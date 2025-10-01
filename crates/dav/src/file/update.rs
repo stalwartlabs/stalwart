@@ -24,13 +24,13 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use jmap_proto::types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
 use store::write::{BatchBuilder, now};
 use trc::AddContext;
-use utils::BlobHash;
+use types::{
+    acl::Acl,
+    blob_hash::BlobHash,
+    collection::{Collection, SyncCollection},
+};
 
 pub(crate) trait FileUpdateRequestHandler: Sync + Send {
     fn handle_file_update_request(

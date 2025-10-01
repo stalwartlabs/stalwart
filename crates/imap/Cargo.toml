@@ -1,12 +1,12 @@
 [package]
 name = "imap"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2024"
 resolver = "2"
 
 [dependencies]
 imap_proto = { path = "../imap-proto" }
-jmap_proto = { path = "../jmap-proto" }
+types = { path = "../types" }
 directory = { path = "../directory" }
 trc = { path = "../trc" }
 store = { path = "../store" }

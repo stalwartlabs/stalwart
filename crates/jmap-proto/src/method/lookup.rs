@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::request::{
+    MaybeInvalid,
+    deserialize::{DeserializeArguments, deserialize_request},
+};
+use serde::{Deserialize, Deserializer};
+use types::{blob::BlobId, id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
 
-use crate::{
-    parser::{JsonObjectParser, Token, json::Parser},
-    request::RequestProperty,
-    types::{MaybeUnparsable, blob::BlobId, id::Id, type_state::DataType},
-};
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BlobLookupRequest {
     pub account_id: Id,
-    pub type_names: Vec<MaybeUnparsable<DataType>>,
-    pub ids: Vec<MaybeUnparsable<BlobId>>,
+    pub type_names: Vec<MaybeInvalid<DataType>>,
+    pub ids: Vec<MaybeInvalid<BlobId>>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -28,7 +28,7 @@ pub struct BlobLookupResponse {
     pub list: Vec<BlobInfo>,
 
     #[serde(rename = "notFound")]
-    pub not_found: Vec<MaybeUnparsable<BlobId>>,
+    pub not_found: Vec<MaybeInvalid<BlobId>>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -38,38 +38,35 @@ pub struct BlobInfo {
     pub matched_ids: VecMap<DataType, Vec<Id>>,
 }
 
-impl JsonObjectParser for BlobLookupRequest {
-    fn parse(parser: &mut Parser<'_>) -> trc::Result<Self>
+impl<'de> DeserializeArguments<'de> for BlobLookupRequest {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        Self: Sized,
+        A: serde::de::MapAccess<'de>,
     {
-        let mut request = BlobLookupRequest {
-            account_id: Id::default(),
-            type_names: Vec::new(),
-            ids: Vec::new(),
-        };
-
-        parser
-            .next_token::<String>()?
-            .assert_jmap(Token::DictStart)?;
-
-        while let Some(key) = parser.next_dict_key::<RequestProperty>()? {
-            match &key.hash[0] {
-                0x0064_4974_6e75_6f63_6361 if !key.is_ref => {
-                    request.account_id = parser.next_token::<Id>()?.unwrap_string("accountId")?;
-                }
-                0x0073_656d_614e_6570_7974 if !key.is_ref => {
-                    request.type_names = <Vec<MaybeUnparsable<DataType>>>::parse(parser)?;
-                }
-                0x0073_6469 if !key.is_ref => {
-                    request.ids = <Vec<MaybeUnparsable<BlobId>>>::parse(parser)?;
-                }
-                _ => {
-                    parser.skip_token(parser.depth_array, parser.depth_dict)?;
-                }
+        hashify::fnc_map!(key.as_bytes(),
+            b"accountId" => {
+                self.account_id = map.next_value()?;
+            },
+            b"typeNames" => {
+                self.type_names = map.next_value()?;
+            },
+            b"ids" => {
+                self.ids = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
-        }
+        );
 
-        Ok(request)
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for BlobLookupRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_request(deserializer)
     }
 }

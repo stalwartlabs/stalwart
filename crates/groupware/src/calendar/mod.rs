@@ -14,7 +14,7 @@ pub mod storage;
 use calcard::icalendar::ICalendar;
 use common::DavName;
 use dav_proto::schema::request::DeadProperty;
-use jmap_proto::types::{acl::Acl, value::AclGrant};
+use types::acl::{Acl, AclGrant};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,

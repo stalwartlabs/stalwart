@@ -6,10 +6,11 @@
 
 use ahash::AHashMap;
 use store::{
-    BlobClass, BlobStore, SerializeInfallible, Stores,
+    BlobStore, SerializeInfallible, Stores,
     write::{BatchBuilder, BlobOp, blob::BlobQuota, now},
 };
-use utils::{BlobHash, config::Config};
+use types::{blob::BlobClass, blob_hash::BlobHash, collection::Collection};
+use utils::config::Config;
 
 use crate::store::{CONFIG, TempDir};
 
@@ -176,7 +177,7 @@ pub async fn blob_tests() {
                 .write(
                     BatchBuilder::new()
                         .with_account_id(if document_id > 0 { 0 } else { 1 })
-                        .with_collection(0)
+                        .with_collection(Collection::Email)
                         .update_document(document_id as u32)
                         .set(blob_op, blob_value)
                         .set(BlobOp::Commit { hash: hash.clone() }, vec![])
@@ -289,7 +290,7 @@ pub async fn blob_tests() {
             .write(
                 BatchBuilder::new()
                     .with_account_id(0)
-                    .with_collection(0)
+                    .with_collection(Collection::Email)
                     .update_document(2)
                     .clear(BlobOp::Link {
                         hash: BlobHash::generate(b"789".as_slice()),

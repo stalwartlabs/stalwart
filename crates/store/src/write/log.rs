@@ -6,14 +6,15 @@
 
 use crate::{SerializeInfallible, U64_LEN};
 use ahash::AHashSet;
+use types::collection::{SyncCollection, VanishedCollection};
 use utils::{codec::leb128::Leb128Vec, map::vec_map::VecMap};
 
 use super::key::KeySerializer;
 
 #[derive(Default, Debug)]
 pub(crate) struct ChangeLogBuilder {
-    pub changes: VecMap<u8, Changes>,
-    pub vanished: VecMap<u8, VanishedItems>,
+    pub changes: VecMap<SyncCollection, Changes>,
+    pub vanished: VecMap<VanishedCollection, VanishedItems>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -39,8 +40,8 @@ pub struct Changes {
 }
 
 impl ChangeLogBuilder {
-    pub fn log_container_insert(&mut self, collection: impl Into<u8>, document_id: u32) {
-        let changes = self.changes.get_mut_or_insert(collection.into());
+    pub fn log_container_insert(&mut self, collection: SyncCollection, document_id: u32) {
+        let changes = self.changes.get_mut_or_insert(collection);
         if changes.container_deletes.remove(&document_id) {
             changes.container_updates.insert(document_id);
         } else {
@@ -50,12 +51,12 @@ impl ChangeLogBuilder {
 
     pub fn log_item_insert(
         &mut self,
-        collection: impl Into<u8>,
+        collection: SyncCollection,
         prefix: Option<u32>,
         document_id: u32,
     ) {
         let id = build_id(prefix, document_id);
-        let changes = self.changes.get_mut_or_insert(collection.into());
+        let changes = self.changes.get_mut_or_insert(collection);
         if changes.item_deletes.remove(&id) {
             changes.item_updates.insert(id);
         } else {
@@ -63,34 +64,34 @@ impl ChangeLogBuilder {
         }
     }
 
-    pub fn log_container_update(&mut self, collection: impl Into<u8>, document_id: u32) {
+    pub fn log_container_update(&mut self, collection: SyncCollection, document_id: u32) {
         self.changes
-            .get_mut_or_insert(collection.into())
+            .get_mut_or_insert(collection)
             .container_updates
             .insert(document_id);
     }
 
-    pub fn log_container_property_update(&mut self, collection: impl Into<u8>, document_id: u32) {
+    pub fn log_container_property_update(&mut self, collection: SyncCollection, document_id: u32) {
         self.changes
-            .get_mut_or_insert(collection.into())
+            .get_mut_or_insert(collection)
             .container_property_changes
             .insert(document_id);
     }
 
     pub fn log_item_update(
         &mut self,
-        collection: impl Into<u8>,
+        collection: SyncCollection,
         prefix: Option<u32>,
         document_id: u32,
     ) {
         self.changes
-            .get_mut_or_insert(collection.into())
+            .get_mut_or_insert(collection)
             .item_updates
             .insert(build_id(prefix, document_id));
     }
 
-    pub fn log_container_delete(&mut self, collection: impl Into<u8>, document_id: u32) {
-        let changes = self.changes.get_mut_or_insert(collection.into());
+    pub fn log_container_delete(&mut self, collection: SyncCollection, document_id: u32) {
+        let changes = self.changes.get_mut_or_insert(collection);
         let id = document_id;
         changes.container_updates.remove(&id);
         changes.container_property_changes.remove(&id);
@@ -99,19 +100,23 @@ impl ChangeLogBuilder {
 
     pub fn log_item_delete(
         &mut self,
-        collection: impl Into<u8>,
+        collection: SyncCollection,
         prefix: Option<u32>,
         document_id: u32,
     ) {
-        let changes = self.changes.get_mut_or_insert(collection.into());
+        let changes = self.changes.get_mut_or_insert(collection);
         let id = build_id(prefix, document_id);
         changes.item_updates.remove(&id);
         changes.item_deletes.insert(id);
     }
 
-    pub fn log_vanished_item(&mut self, collection: impl Into<u8>, item: impl Into<VanishedItem>) {
+    pub fn log_vanished_item(
+        &mut self,
+        collection: VanishedCollection,
+        item: impl Into<VanishedItem>,
+    ) {
         self.vanished
-            .get_mut_or_insert(collection.into())
+            .get_mut_or_insert(collection)
             .0
             .push(item.into());
     }

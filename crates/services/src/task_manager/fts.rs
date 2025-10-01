@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use super::Task;
 use common::Server;
 use directory::{Type, backend::internal::manage::ManageDirectory};
 use email::message::{index::IndexMessageText, metadata::MessageMetadata};
-use jmap_proto::types::{collection::Collection, property::Property};
+use std::time::Instant;
 use store::{
     IterateParams, SerializeInfallible, U32_LEN, ValueKey,
     ahash::AHashMap,
@@ -18,9 +17,11 @@ use store::{
     write::{BatchBuilder, BlobOp, TaskQueueClass, ValueClass, key::DeserializeBigEndian, now},
 };
 use trc::{AddContext, MessageIngestEvent, TaskQueueEvent};
-use utils::{BLOB_HASH_LEN, BlobHash};
-
-use super::Task;
+use types::{
+    blob_hash::{BLOB_HASH_LEN, BlobHash},
+    collection::Collection,
+    field::EmailField,
+};
 
 pub trait FtsIndexTask: Sync + Send {
     fn fts_index(&self, task: &Task, hash: &BlobHash) -> impl Future<Output = bool> + Send;
@@ -56,7 +57,7 @@ impl FtsIndexTask for Server {
                 task.account_id,
                 Collection::Email,
                 task.document_id,
-                Property::BodyStructure,
+                EmailField::Metadata.into(),
             )
             .await
         {

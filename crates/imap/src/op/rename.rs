@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
 use crate::{
     core::{Session, SessionData},
     spawn_op,
@@ -15,9 +13,10 @@ use directory::Permission;
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::rename::Arguments, receiver::Request,
 };
-use jmap_proto::types::{acl::Acl, collection::Collection};
+use std::time::Instant;
 use store::write::BatchBuilder;
 use trc::AddContext;
+use types::{acl::Acl, collection::Collection};
 
 use super::ImapContext;
 
