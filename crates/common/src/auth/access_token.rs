@@ -402,6 +402,7 @@ impl AccessToken {
         s.finish() as u32
     }
 
+    #[inline(always)]
     pub fn primary_id(&self) -> u32 {
         self.primary_id
     }

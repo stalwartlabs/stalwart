@@ -7,7 +7,7 @@
 use crate::{
     JmapMethods,
     api::acl::{JmapAcl, JmapRights},
-    changes::state::MessageCacheState,
+    changes::state::JmapCacheState,
 };
 use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
@@ -391,7 +391,6 @@ impl MailboxSet for Server {
                         }
                     }
                 }
-
                 (Key::Property(MailboxProperty::Pointer(pointer)), value)
                     if matches!(
                         pointer.first(),

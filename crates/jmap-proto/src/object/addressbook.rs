@@ -8,7 +8,7 @@ use crate::{
     object::{
         AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference, parse_ref,
     },
-    request::deserialize::DeserializeArguments,
+    request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use std::{borrow::Cow, str::FromStr};
@@ -159,7 +159,7 @@ impl AddressBookProperty {
 #[derive(Debug, Clone, Default)]
 pub struct AddressBookSetArguments {
     pub on_destroy_remove_contents: Option<bool>,
-    pub on_success_set_is_default: Option<Id>,
+    pub on_success_set_is_default: Option<MaybeIdReference<Id>>,
 }
 
 impl<'de> DeserializeArguments<'de> for AddressBookSetArguments {

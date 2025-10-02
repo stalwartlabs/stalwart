@@ -768,7 +768,6 @@ async fn copy_container(
         name: preference.name,
         description: preference.description,
         sort_order: 0,
-        is_default: false,
     }];
 
     let is_overwrite = to_document_id.is_some();

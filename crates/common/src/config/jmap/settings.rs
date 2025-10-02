@@ -40,6 +40,8 @@ pub struct JmapConfig {
     pub mail_max_size: usize,
     pub mail_autoexpunge_after: Option<u64>,
 
+    pub contact_parse_max_items: usize,
+
     pub sieve_max_script_name: usize,
     pub sieve_max_scripts: usize,
 
@@ -337,6 +339,9 @@ impl JmapConfig {
                     .value("authentication.master.secret")
                     .map(|p| (u.to_string(), p.to_string()))
             }),
+            contact_parse_max_items: config
+                .property("jmap.contact.parse.max-items")
+                .unwrap_or(100),
             default_folders,
             shared_folder,
         };

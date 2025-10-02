@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    changes::state::MessageCacheState,
+    changes::state::JmapCacheState,
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
 use common::{Server, auth::AccessToken};

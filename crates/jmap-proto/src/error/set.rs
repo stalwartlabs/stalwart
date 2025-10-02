@@ -188,6 +188,11 @@ impl<T: Property> SetError<T> {
     pub fn will_destroy() -> Self {
         Self::new(SetErrorType::WillDestroy).with_description("ID will be destroyed.")
     }
+
+    pub fn address_book_has_contents() -> Self {
+        Self::new(SetErrorType::AddressBookHasContents)
+            .with_description("Address book is not empty.")
+    }
 }
 
 impl<T: Property> From<T> for InvalidProperty<T> {

@@ -9,7 +9,7 @@ use super::{
     headers::IntoForm,
 };
 use crate::{
-    blob::download::BlobDownload, changes::state::MessageCacheState, email::headers::HeaderToValue,
+    blob::download::BlobDownload, changes::state::JmapCacheState, email::headers::HeaderToValue,
 };
 use common::{Server, auth::AccessToken};
 use email::{

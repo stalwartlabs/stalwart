@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{JmapMethods, changes::state::MessageCacheState};
+use crate::{JmapMethods, changes::state::JmapCacheState};
 use common::{Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use jmap_proto::{

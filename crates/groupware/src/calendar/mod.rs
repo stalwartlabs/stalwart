@@ -169,17 +169,21 @@ impl Calendar {
     }
 
     pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut CalendarPreferences {
-        if self.preferences.len() == 1 {
-            &mut self.preferences[0]
+        let account_id = access_token.primary_id();
+        let idx = if let Some(idx) = self
+            .preferences
+            .iter()
+            .position(|p| p.account_id == account_id)
+        {
+            idx
         } else {
-            let account_id = access_token.primary_id();
-            let idx = self
-                .preferences
-                .iter()
-                .position(|p| p.account_id == account_id)
-                .unwrap_or(0);
-            &mut self.preferences[idx]
-        }
+            let mut preferences = self.preferences[0].clone();
+            preferences.account_id = account_id;
+            self.preferences.push(preferences);
+            self.preferences.len() - 1
+        };
+
+        &mut self.preferences[idx]
     }
 }
 

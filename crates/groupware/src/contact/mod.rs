@@ -20,6 +20,7 @@ pub struct AddressBook {
     pub name: String,
     pub preferences: Vec<AddressBookPreferences>,
     pub subscribers: Vec<u32>,
+    pub is_default: bool,
     pub dead_properties: DeadProperty,
     pub acls: Vec<AclGrant>,
     pub created: i64,
@@ -35,7 +36,6 @@ pub struct AddressBookPreferences {
     pub name: String,
     pub description: Option<String>,
     pub sort_order: u32,
-    pub is_default: bool,
 }
 
 #[derive(
@@ -66,17 +66,21 @@ impl AddressBook {
     }
 
     pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut AddressBookPreferences {
-        if self.preferences.len() == 1 {
-            &mut self.preferences[0]
+        let account_id = access_token.primary_id();
+        let idx = if let Some(idx) = self
+            .preferences
+            .iter()
+            .position(|p| p.account_id == account_id)
+        {
+            idx
         } else {
-            let account_id = access_token.primary_id();
-            let idx = self
-                .preferences
-                .iter()
-                .position(|p| p.account_id == account_id)
-                .unwrap_or(0);
-            &mut self.preferences[idx]
-        }
+            let mut preferences = self.preferences[0].clone();
+            preferences.account_id = account_id;
+            self.preferences.push(preferences);
+            self.preferences.len() - 1
+        };
+
+        &mut self.preferences[idx]
     }
 }
 
@@ -92,5 +96,38 @@ impl ArchivedAddressBook {
                 .or_else(|| self.preferences.first())
                 .unwrap()
         }
+    }
+}
+
+impl ContactCard {
+    pub fn added_addressbook_ids(
+        &self,
+        prev_data: &ArchivedContactCard,
+    ) -> impl Iterator<Item = u32> {
+        self.names
+            .iter()
+            .filter(|m| prev_data.names.iter().all(|pm| pm.parent_id != m.parent_id))
+            .map(|m| m.parent_id)
+    }
+
+    pub fn removed_addressbook_ids(
+        &self,
+        prev_data: &ArchivedContactCard,
+    ) -> impl Iterator<Item = u32> {
+        prev_data
+            .names
+            .iter()
+            .filter(|m| self.names.iter().all(|pm| pm.parent_id != m.parent_id))
+            .map(|m| m.parent_id.to_native())
+    }
+
+    pub fn unchanged_addressbook_ids(
+        &self,
+        prev_data: &ArchivedContactCard,
+    ) -> impl Iterator<Item = u32> {
+        self.names
+            .iter()
+            .filter(|m| prev_data.names.iter().any(|pm| pm.parent_id == m.parent_id))
+            .map(|m| m.parent_id)
     }
 }

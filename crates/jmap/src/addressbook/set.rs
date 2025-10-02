@@ -4,29 +4,348 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken};
+use crate::api::acl::{JmapAcl, JmapRights};
+use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use groupware::{
+    DestroyArchive,
+    cache::GroupwareCache,
+    contact::{AddressBook, AddressBookPreferences},
+};
 use http_proto::HttpSessionData;
 use jmap_proto::{
+    error::set::SetError,
     method::set::{SetRequest, SetResponse},
-    object::addressbook::AddressBook,
+    object::addressbook::{self, AddressBookProperty, AddressBookValue},
+    request::IntoValid,
+    types::state::State,
+};
+use jmap_tools::{JsonPointerItem, Key, Value};
+use rand::{Rng, distr::Alphanumeric};
+use store::write::BatchBuilder;
+use trc::AddContext;
+use types::{
+    acl::{Acl, AclGrant},
+    collection::{Collection, SyncCollection},
 };
 
 pub trait AddressBookSet: Sync + Send {
     fn address_book_set(
         &self,
-        request: SetRequest<'_, AddressBook>,
+        request: SetRequest<'_, addressbook::AddressBook>,
         access_token: &AccessToken,
         session: &HttpSessionData,
-    ) -> impl Future<Output = trc::Result<SetResponse<AddressBook>>> + Send;
+    ) -> impl Future<Output = trc::Result<SetResponse<addressbook::AddressBook>>> + Send;
 }
 
 impl AddressBookSet for Server {
     async fn address_book_set(
         &self,
-        mut request: SetRequest<'_, AddressBook>,
+        mut request: SetRequest<'_, addressbook::AddressBook>,
         access_token: &AccessToken,
-        session: &HttpSessionData,
-    ) -> trc::Result<SetResponse<AddressBook>> {
-        todo!()
+        _session: &HttpSessionData,
+    ) -> trc::Result<SetResponse<addressbook::AddressBook>> {
+        let account_id = request.account_id.document_id();
+        let cache = self
+            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .await?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let is_shared = access_token.is_shared(account_id);
+
+        // TODO: Implement onSuccessSetIsDefault
+
+        // Process creates
+        let mut batch = BatchBuilder::new();
+        'create: for (id, object) in request.unwrap_create() {
+            if is_shared {
+                response.not_created.append(
+                    id,
+                    SetError::forbidden()
+                        .with_description("Cannot create address books in a shared account."),
+                );
+                continue 'create;
+            }
+
+            let mut address_book = AddressBook {
+                name: rand::rng()
+                    .sample_iter(Alphanumeric)
+                    .take(10)
+                    .map(char::from)
+                    .collect::<String>(),
+                preferences: vec![AddressBookPreferences {
+                    account_id,
+                    name: "Address Book".to_string(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+
+            // Process changes
+            if let Err(err) = update_address_book(object, &mut address_book, access_token) {
+                response.not_created.append(id, err);
+                continue 'create;
+            }
+
+            // Validate ACLs
+            if !address_book.acls.is_empty() {
+                if let Err(err) = self.acl_validate(&address_book.acls).await {
+                    response.not_created.append(id, err.into());
+                    continue 'create;
+                }
+
+                self.refresh_acls(&address_book.acls, None).await;
+            }
+
+            // Insert record
+            let document_id = self
+                .store()
+                .assign_document_ids(account_id, Collection::AddressBook, 1)
+                .await
+                .caused_by(trc::location!())?;
+            address_book
+                .insert(access_token, account_id, document_id, &mut batch)
+                .caused_by(trc::location!())?;
+            response.created(id, document_id);
+        }
+
+        // Process updates
+        'update: for (id, object) in request.unwrap_update().into_valid() {
+            // Make sure id won't be destroyed
+            if will_destroy.contains(&id) {
+                response.not_updated.append(id, SetError::will_destroy());
+                continue 'update;
+            }
+
+            // Obtain address book
+            let document_id = id.document_id();
+            let address_book_ = if let Some(address_book_) = self
+                .get_archive(account_id, Collection::AddressBook, document_id)
+                .await?
+            {
+                address_book_
+            } else {
+                response.not_updated.append(id, SetError::not_found());
+                continue 'update;
+            };
+            let address_book = address_book_
+                .to_unarchived::<AddressBook>()
+                .caused_by(trc::location!())?;
+            let mut new_address_book = address_book
+                .deserialize::<AddressBook>()
+                .caused_by(trc::location!())?;
+
+            // Apply changes
+            let has_acl_changes =
+                match update_address_book(object, &mut new_address_book, access_token) {
+                    Ok(has_acl_changes_) => has_acl_changes_,
+                    Err(err) => {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                };
+
+            // Validate ACL
+            if is_shared {
+                let acl = address_book.inner.acls.effective_acl(access_token);
+                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Administer))
+                {
+                    response.not_updated.append(
+                        id,
+                        SetError::forbidden()
+                            .with_description("You are not allowed to modify this address book."),
+                    );
+                    continue 'update;
+                }
+            }
+            if has_acl_changes {
+                if let Err(err) = self.acl_validate(&new_address_book.acls).await {
+                    response.not_updated.append(id, err.into());
+                    continue 'update;
+                }
+                self.refresh_acls(
+                    &new_address_book.acls,
+                    Some(
+                        address_book
+                            .inner
+                            .acls
+                            .iter()
+                            .map(AclGrant::from)
+                            .collect::<Vec<_>>()
+                            .as_slice(),
+                    ),
+                )
+                .await;
+            }
+
+            // Update record
+            new_address_book
+                .update(
+                    access_token,
+                    address_book,
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
+                .caused_by(trc::location!())?;
+            response.updated.append(id, None);
+        }
+
+        // Process deletions
+        let on_destroy_remove_contents = request
+            .arguments
+            .on_destroy_remove_contents
+            .unwrap_or(false);
+        for id in will_destroy {
+            let document_id = id.document_id();
+
+            if !cache.has_container_id(&document_id) {
+                response.not_destroyed.append(id, SetError::not_found());
+                continue;
+            };
+
+            let Some(address_book_) = self
+                .get_archive(account_id, Collection::AddressBook, document_id)
+                .await
+                .caused_by(trc::location!())?
+            else {
+                response.not_destroyed.append(id, SetError::not_found());
+                continue;
+            };
+
+            let address_book = address_book_
+                .to_unarchived::<AddressBook>()
+                .caused_by(trc::location!())?;
+
+            // Validate ACLs
+            if is_shared
+                && !address_book
+                    .inner
+                    .acls
+                    .effective_acl(access_token)
+                    .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
+            {
+                response.not_destroyed.append(
+                    id,
+                    SetError::forbidden()
+                        .with_description("You are not allowed to delete this address book."),
+                );
+                continue;
+            }
+
+            // Obtain children ids
+            let children_ids = cache.children_ids(document_id).collect::<Vec<_>>();
+            if !children_ids.is_empty() && !on_destroy_remove_contents {
+                response
+                    .not_destroyed
+                    .append(id, SetError::address_book_has_contents());
+                continue;
+            }
+
+            // Delete record
+            DestroyArchive(address_book)
+                .delete_with_cards(
+                    self,
+                    access_token,
+                    account_id,
+                    document_id,
+                    children_ids,
+                    None,
+                    &mut batch,
+                )
+                .await
+                .caused_by(trc::location!())?;
+
+            response.destroyed.push(id);
+        }
+
+        // Write changes
+        if !batch.is_empty() {
+            let change_id = self
+                .commit_batch(batch)
+                .await
+                .and_then(|ids| ids.last_change_id(account_id))
+                .caused_by(trc::location!())?;
+
+            response.new_state = State::Exact(change_id).into();
+        }
+
+        Ok(response)
     }
+}
+
+fn update_address_book(
+    updates: Value<'_, AddressBookProperty, AddressBookValue>,
+    address_book: &mut AddressBook,
+    access_token: &AccessToken,
+) -> Result<bool, SetError<AddressBookProperty>> {
+    let mut has_acl_changes = false;
+
+    for (property, value) in updates.into_expanded_object() {
+        let Key::Property(property) = property else {
+            return Err(SetError::invalid_properties()
+                .with_property(property.to_owned())
+                .with_description("Invalid property."));
+        };
+
+        match (property, value) {
+            (AddressBookProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
+                address_book.preferences_mut(access_token).name = value.into_owned();
+            }
+            (AddressBookProperty::Description, Value::Str(value)) if value.len() < 255 => {
+                address_book.preferences_mut(access_token).description = value.into_owned().into();
+            }
+            (AddressBookProperty::Description, Value::Null) => {
+                address_book.preferences_mut(access_token).description = None;
+            }
+            (AddressBookProperty::SortOrder, Value::Number(value)) => {
+                address_book.preferences_mut(access_token).sort_order = value.cast_to_u64() as u32;
+            }
+            (AddressBookProperty::IsSubscribed, Value::Bool(subscribe)) => {
+                let account_id = access_token.primary_id();
+                if subscribe {
+                    if !address_book.subscribers.contains(&account_id) {
+                        address_book.subscribers.push(account_id);
+                    }
+                } else {
+                    address_book.subscribers.retain(|id| *id != account_id);
+                }
+            }
+            (AddressBookProperty::ShareWith, value) => {
+                address_book.acls = JmapRights::acl_set::<addressbook::AddressBook>(value)?;
+                has_acl_changes = true;
+            }
+            (AddressBookProperty::Pointer(pointer), value)
+                if matches!(
+                    pointer.first(),
+                    Some(JsonPointerItem::Key(Key::Property(
+                        AddressBookProperty::ShareWith
+                    )))
+                ) =>
+            {
+                let mut pointer = pointer.iter();
+                pointer.next();
+
+                address_book.acls = JmapRights::acl_patch::<addressbook::AddressBook>(
+                    std::mem::take(&mut address_book.acls),
+                    pointer,
+                    value,
+                )?;
+                has_acl_changes = true;
+            }
+            (property, _) => {
+                return Err(SetError::invalid_properties()
+                    .with_property(property.clone())
+                    .with_description("Field could not be set."));
+            }
+        }
+    }
+
+    // Validate name
+    if address_book.preferences(access_token).name.is_empty() {
+        return Err(SetError::invalid_properties()
+            .with_property(AddressBookProperty::Name)
+            .with_description("Missing name."));
+    }
+
+    Ok(has_acl_changes)
 }

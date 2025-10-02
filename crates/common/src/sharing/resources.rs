@@ -90,4 +90,16 @@ impl DavResources {
             }
         })
     }
+
+    pub fn has_container_id(&self, id: &u32) -> bool {
+        self.resources
+            .iter()
+            .any(|r| r.document_id == *id && r.is_container())
+    }
+
+    pub fn has_item_id(&self, id: &u32) -> bool {
+        self.resources
+            .iter()
+            .any(|r| r.document_id == *id && !r.is_container())
+    }
 }

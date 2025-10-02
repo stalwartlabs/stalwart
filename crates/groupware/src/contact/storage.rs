@@ -246,4 +246,26 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
 
         Ok(())
     }
+
+    pub fn delete_all(
+        self,
+        access_token: &AccessToken,
+        account_id: u32,
+        document_id: u32,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::ContactCard)
+            .delete_document(document_id)
+            .custom(
+                ObjectIndexBuilder::<_, ()>::new()
+                    .with_tenant_id(access_token)
+                    .with_current(self.0),
+            )
+            .caused_by(trc::location!())
+            .map(|b| {
+                b.commit_point();
+            })
+    }
 }

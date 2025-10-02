@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    blob::download::BlobDownload, changes::state::MessageCacheState, email::ingested_into_object,
+    blob::download::BlobDownload, changes::state::JmapCacheState, email::ingested_into_object,
 };
 use common::{Server, auth::AccessToken};
 use email::{

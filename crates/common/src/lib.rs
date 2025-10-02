@@ -37,6 +37,7 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
+use store::rand::{Rng, distr::Alphanumeric};
 use tinyvec::TinyVec;
 use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio_rustls::TlsConnector;
@@ -575,6 +576,19 @@ impl DavResources {
             .find(|res| res.document_id == id && res.is_container())
     }
 
+    pub fn container_resource_path_by_id(&self, id: u32) -> Option<DavResourcePath<'_>> {
+        self.resources
+            .iter()
+            .enumerate()
+            .find(|(_, resource)| resource.document_id == id && resource.is_container())
+            .and_then(|(idx, resource)| {
+                self.paths
+                    .iter()
+                    .find(|path| path.resource_idx == idx)
+                    .map(|path| DavResourcePath { path, resource })
+            })
+    }
+
     pub fn subtree(&self, search_path: &str) -> impl Iterator<Item = DavResourcePath<'_>> {
         let prefix = format!("{search_path}/");
         self.paths.iter().filter_map(move |path| {
@@ -633,6 +647,13 @@ impl DavResources {
                 path,
                 resource: &self.resources[path.resource_idx],
             })
+    }
+
+    pub fn children_ids(&self, parent_id: u32) -> impl Iterator<Item = u32> {
+        self.paths
+            .iter()
+            .filter(move |item| item.parent_id.is_some_and(|id| id == parent_id))
+            .map(|path| self.resources[path.resource_idx].document_id)
     }
 
     pub fn format_resource(&self, resource: DavResourcePath<'_>) -> String {
@@ -821,6 +842,17 @@ impl std::borrow::Borrow<u32> for DavResource {
 impl DavName {
     pub fn new(name: String, parent_id: u32) -> Self {
         Self { name, parent_id }
+    }
+
+    pub fn new_with_rand_name(parent_id: u32) -> Self {
+        Self {
+            name: store::rand::rng()
+                .sample_iter(Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect::<String>(),
+            parent_id,
+        }
     }
 }
 
