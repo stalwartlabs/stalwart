@@ -46,6 +46,24 @@ const LOCK_WAIT_TIME_ACCOUNT: u64 = 3 * 60;
 const LOCK_WAIT_TIME_CORE: u64 = 5 * 60;
 const LOCK_RETRY_TIME: Duration = Duration::from_secs(30);
 
+/*
+
+pub struct AddressBook {
+    pub name: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub sort_order: u32,
+    pub is_default: bool,
+    pub subscribers: Vec<u32>,
+    pub dead_properties: DeadProperty,
+    pub acls: Vec<AclGrant>,
+    pub created: i64,
+    pub modified: i64,
+}
+
+
+*/
+
 pub async fn try_migrate(server: &Server) -> trc::Result<()> {
     if let Some(version) = std::env::var("FORCE_MIGRATE_QUEUE")
         .ok()

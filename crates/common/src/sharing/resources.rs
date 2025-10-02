@@ -80,4 +80,14 @@ impl DavResources {
 
         account_acls
     }
+
+    pub fn document_ids(&self, is_container: bool) -> impl Iterator<Item = u32> {
+        self.resources.iter().filter_map(move |resource| {
+            if resource.is_container() == is_container {
+                Some(resource.document_id)
+            } else {
+                None
+            }
+        })
+    }
 }

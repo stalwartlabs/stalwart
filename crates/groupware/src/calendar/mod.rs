@@ -12,9 +12,9 @@ pub mod itip;
 pub mod storage;
 
 use calcard::icalendar::ICalendar;
-use common::DavName;
+use common::{DavName, auth::AccessToken};
 use dav_proto::schema::request::DeadProperty;
-use types::acl::{Acl, AclGrant};
+use types::acl::AclGrant;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -154,55 +154,12 @@ pub enum Timezone {
     Default,
 }
 
-pub enum CalendarRight {
-    ReadFreeBusy,
-    ReadItems,
-    WriteAll,
-    WriteOwn,
-    UpdatePrivate,
-    RSVP,
-    Share,
-    Delete,
-}
-
-impl TryFrom<Acl> for CalendarRight {
-    type Error = Acl;
-
-    fn try_from(value: Acl) -> Result<Self, Self::Error> {
-        match value {
-            Acl::SchedulingReadFreeBusy => Ok(CalendarRight::ReadFreeBusy),
-            Acl::ReadItems => Ok(CalendarRight::ReadItems),
-            Acl::Modify => Ok(CalendarRight::WriteAll),
-            Acl::ModifyItemsOwn => Ok(CalendarRight::WriteOwn),
-            Acl::ModifyPrivateProperties => Ok(CalendarRight::UpdatePrivate),
-            Acl::SchedulingReply => Ok(CalendarRight::RSVP),
-            Acl::Administer => Ok(CalendarRight::Share),
-            Acl::Delete => Ok(CalendarRight::Delete),
-            _ => Err(value),
-        }
-    }
-}
-
-impl From<CalendarRight> for Acl {
-    fn from(value: CalendarRight) -> Self {
-        match value {
-            CalendarRight::ReadFreeBusy => Acl::SchedulingReadFreeBusy,
-            CalendarRight::ReadItems => Acl::ReadItems,
-            CalendarRight::WriteAll => Acl::Modify,
-            CalendarRight::WriteOwn => Acl::ModifyItemsOwn,
-            CalendarRight::UpdatePrivate => Acl::ModifyPrivateProperties,
-            CalendarRight::RSVP => Acl::SchedulingReply,
-            CalendarRight::Share => Acl::Administer,
-            CalendarRight::Delete => Acl::Delete,
-        }
-    }
-}
-
 impl Calendar {
-    pub fn preferences(&self, account_id: u32) -> &CalendarPreferences {
+    pub fn preferences(&self, access_token: &AccessToken) -> &CalendarPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
+            let account_id = access_token.primary_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -211,10 +168,11 @@ impl Calendar {
         }
     }
 
-    pub fn preferences_mut(&mut self, account_id: u32) -> &mut CalendarPreferences {
+    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut CalendarPreferences {
         if self.preferences.len() == 1 {
             &mut self.preferences[0]
         } else {
+            let account_id = access_token.primary_id();
             let idx = self
                 .preferences
                 .iter()
@@ -226,10 +184,11 @@ impl Calendar {
 }
 
 impl ArchivedCalendar {
-    pub fn preferences(&self, account_id: u32) -> &ArchivedCalendarPreferences {
+    pub fn preferences(&self, access_token: &AccessToken) -> &ArchivedCalendarPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
+            let account_id = access_token.primary_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)

@@ -7,7 +7,7 @@
 use crate::{
     cache::calcard::{build_scheduling_resources, path_from_scheduling, resource_from_scheduling},
     calendar::{Calendar, CalendarEvent, CalendarPreferences},
-    contact::{AddressBook, ContactCard},
+    contact::{AddressBook, AddressBookPreferences, ContactCard},
     file::FileNode,
 };
 use ahash::AHashSet;
@@ -327,17 +327,19 @@ impl GroupwareCache for Server {
                 .await?;
             AddressBook {
                 name: name.clone(),
-                display_name: format!(
-                    "{} ({})",
-                    self.core
-                        .groupware
-                        .default_addressbook_display_name
-                        .as_ref()
-                        .unwrap_or(name),
-                    account_name
-                )
-                .into(),
-                is_default: true,
+                preferences: vec![AddressBookPreferences {
+                    account_id,
+                    name: format!(
+                        "{} ({})",
+                        self.core
+                            .groupware
+                            .default_addressbook_display_name
+                            .as_ref()
+                            .unwrap_or(name),
+                        account_name
+                    ),
+                    ..Default::default()
+                }],
                 ..Default::default()
             }
             .insert(access_token, account_id, document_id, &mut batch)?;

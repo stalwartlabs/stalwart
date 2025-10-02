@@ -89,7 +89,13 @@ impl CardMkColRequestHandler for Server {
         let mut return_prop_stat = None;
         if let Some(mkcol) = request {
             let mut prop_stat = PropStatBuilder::default();
-            if !self.apply_addressbook_properties(&mut book, false, mkcol.props, &mut prop_stat) {
+            if !self.apply_addressbook_properties(
+                access_token,
+                &mut book,
+                false,
+                mkcol.props,
+                &mut prop_stat,
+            ) {
                 return Ok(HttpResponse::new(StatusCode::FORBIDDEN).with_xml_body(
                     MkColResponse::new(prop_stat.build())
                         .with_namespace(Namespace::CardDav)

@@ -21,8 +21,14 @@ impl IndexableObject for AddressBook {
             },
             IndexValue::Quota {
                 used: self.dead_properties.size() as u32
-                    + self.display_name.as_ref().map_or(0, |n| n.len() as u32)
-                    + self.description.as_ref().map_or(0, |n| n.len() as u32)
+                    + self
+                        .preferences
+                        .iter()
+                        .map(|p| {
+                            p.name.len() as u32
+                                + p.description.as_ref().map_or(0, |n| n.len() as u32)
+                        })
+                        .sum::<u32>()
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {
@@ -46,8 +52,14 @@ impl IndexableObject for &ArchivedAddressBook {
             },
             IndexValue::Quota {
                 used: self.dead_properties.size() as u32
-                    + self.display_name.as_ref().map_or(0, |n| n.len() as u32)
-                    + self.description.as_ref().map_or(0, |n| n.len() as u32)
+                    + self
+                        .preferences
+                        .iter()
+                        .map(|p| {
+                            p.name.len() as u32
+                                + p.description.as_ref().map_or(0, |n| n.len() as u32)
+                        })
+                        .sum::<u32>()
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {

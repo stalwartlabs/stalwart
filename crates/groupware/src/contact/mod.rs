@@ -8,9 +8,9 @@ pub mod index;
 pub mod storage;
 
 use calcard::vcard::VCard;
-use common::DavName;
+use common::{DavName, auth::AccessToken};
 use dav_proto::schema::request::DeadProperty;
-use types::acl::{Acl, AclGrant};
+use types::acl::AclGrant;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -18,10 +18,7 @@ use types::acl::{Acl, AclGrant};
 #[rkyv(derive(Debug))]
 pub struct AddressBook {
     pub name: String,
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub sort_order: u32,
-    pub is_default: bool,
+    pub preferences: Vec<AddressBookPreferences>,
     pub subscribers: Vec<u32>,
     pub dead_properties: DeadProperty,
     pub acls: Vec<AclGrant>,
@@ -29,11 +26,16 @@ pub struct AddressBook {
     pub modified: i64,
 }
 
-pub enum AddressBookRight {
-    Read,
-    Write,
-    Share,
-    Delete,
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+#[rkyv(derive(Debug))]
+pub struct AddressBookPreferences {
+    pub account_id: u32,
+    pub name: String,
+    pub description: Option<String>,
+    pub sort_order: u32,
+    pub is_default: bool,
 }
 
 #[derive(
@@ -49,27 +51,46 @@ pub struct ContactCard {
     pub size: u32,
 }
 
-impl TryFrom<Acl> for AddressBookRight {
-    type Error = Acl;
+impl AddressBook {
+    pub fn preferences(&self, access_token: &AccessToken) -> &AddressBookPreferences {
+        if self.preferences.len() == 1 {
+            &self.preferences[0]
+        } else {
+            let account_id = access_token.primary_id();
+            self.preferences
+                .iter()
+                .find(|p| p.account_id == account_id)
+                .or_else(|| self.preferences.first())
+                .unwrap()
+        }
+    }
 
-    fn try_from(value: Acl) -> Result<Self, Self::Error> {
-        match value {
-            Acl::Read => Ok(AddressBookRight::Read),
-            Acl::Modify => Ok(AddressBookRight::Write),
-            Acl::Administer => Ok(AddressBookRight::Share),
-            Acl::Delete => Ok(AddressBookRight::Delete),
-            _ => Err(value),
+    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut AddressBookPreferences {
+        if self.preferences.len() == 1 {
+            &mut self.preferences[0]
+        } else {
+            let account_id = access_token.primary_id();
+            let idx = self
+                .preferences
+                .iter()
+                .position(|p| p.account_id == account_id)
+                .unwrap_or(0);
+            &mut self.preferences[idx]
         }
     }
 }
 
-impl From<AddressBookRight> for Acl {
-    fn from(value: AddressBookRight) -> Self {
-        match value {
-            AddressBookRight::Read => Acl::Read,
-            AddressBookRight::Write => Acl::Modify,
-            AddressBookRight::Share => Acl::Administer,
-            AddressBookRight::Delete => Acl::Delete,
+impl ArchivedAddressBook {
+    pub fn preferences(&self, access_token: &AccessToken) -> &ArchivedAddressBookPreferences {
+        if self.preferences.len() == 1 {
+            &self.preferences[0]
+        } else {
+            let account_id = access_token.primary_id();
+            self.preferences
+                .iter()
+                .find(|p| p.account_id == account_id)
+                .or_else(|| self.preferences.first())
+                .unwrap()
         }
     }
 }

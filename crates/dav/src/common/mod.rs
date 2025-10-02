@@ -8,6 +8,7 @@ use calcard::{
     icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardVersion},
 };
+use common::auth::AccessToken;
 use dav_proto::{
     Depth, RequestHeaders, Return,
     schema::{
@@ -418,13 +419,15 @@ impl<'x> ArchivedResource<'x> {
         }
     }
 
-    pub fn display_name(&self, account_id: u32) -> Option<&str> {
+    pub fn display_name(&self, access_token: &AccessToken) -> Option<&str> {
         match self {
             ArchivedResource::Calendar(archive) => {
-                Some(archive.inner.preferences(account_id).name.as_str())
+                Some(archive.inner.preferences(access_token).name.as_str())
             }
             ArchivedResource::CalendarEvent(archive) => archive.inner.display_name.as_deref(),
-            ArchivedResource::AddressBook(archive) => archive.inner.display_name.as_deref(),
+            ArchivedResource::AddressBook(archive) => {
+                Some(archive.inner.preferences(access_token).name.as_str())
+            }
             ArchivedResource::ContactCard(archive) => archive.inner.display_name.as_deref(),
             ArchivedResource::FileNode(archive) => archive.inner.display_name.as_deref(),
             ArchivedResource::CalendarScheduling(_)
