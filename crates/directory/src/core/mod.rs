@@ -263,6 +263,11 @@ impl Permission {
             Permission::JmapContactCardSet => "Create or update contact cards via JMAP",
             Permission::JmapContactCardCopy => "Copy contact cards to new locations via JMAP",
             Permission::JmapContactCardParse => "Parse contact cards via JMAP",
+            Permission::JmapFileNodeGet => "Retrieve file nodes via JMAP",
+            Permission::JmapFileNodeSet => "Create or update file nodes via JMAP",
+            Permission::JmapFileNodeChanges => "Track file node changes via JMAP",
+            Permission::JmapFileNodeQuery => "Search for file nodes matching criteria via JMAP",
+            Permission::JmapFileNodeQueryChanges => "Track file node query changes via JMAP",
         }
     }
 }

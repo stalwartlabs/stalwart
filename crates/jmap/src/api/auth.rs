@@ -69,6 +69,7 @@ impl JmapAuthorization for AccessToken {
                 GetRequestMethod::Blob(_) => Permission::JmapBlobGet,
                 GetRequestMethod::AddressBook(_) => Permission::JmapAddressBookGet,
                 GetRequestMethod::ContactCard(_) => Permission::JmapContactCardGet,
+                GetRequestMethod::FileNode(_) => Permission::JmapFileNodeGet,
             },
             RequestMethod::Set(m) => match &m {
                 SetRequestMethod::Email(_) => Permission::JmapEmailSet,
@@ -80,6 +81,7 @@ impl JmapAuthorization for AccessToken {
                 SetRequestMethod::VacationResponse(_) => Permission::JmapVacationResponseSet,
                 SetRequestMethod::AddressBook(_) => Permission::JmapAddressBookSet,
                 SetRequestMethod::ContactCard(_) => Permission::JmapContactCardSet,
+                SetRequestMethod::FileNode(_) => Permission::JmapFileNodeSet,
             },
             RequestMethod::Changes(_) => match object {
                 MethodObject::Email => Permission::JmapEmailChanges,
@@ -89,6 +91,7 @@ impl JmapAuthorization for AccessToken {
                 MethodObject::EmailSubmission => Permission::JmapEmailSubmissionChanges,
                 MethodObject::Quota => Permission::JmapQuotaChanges,
                 MethodObject::ContactCard => Permission::JmapContactCardChanges,
+                MethodObject::FileNode => Permission::JmapFileNodeChanges,
                 MethodObject::Core
                 | MethodObject::Blob
                 | MethodObject::PushSubscription
@@ -120,6 +123,7 @@ impl JmapAuthorization for AccessToken {
                 QueryChangesRequestMethod::ContactCard(_) => {
                     Permission::JmapContactCardQueryChanges
                 }
+                QueryChangesRequestMethod::FileNode(_) => Permission::JmapFileNodeQueryChanges,
             },
             RequestMethod::Query(m) => match m {
                 QueryRequestMethod::Email(_) => Permission::JmapEmailQuery,
@@ -129,6 +133,7 @@ impl JmapAuthorization for AccessToken {
                 QueryRequestMethod::Principal(_) => Permission::JmapPrincipalQuery,
                 QueryRequestMethod::Quota(_) => Permission::JmapQuotaQuery,
                 QueryRequestMethod::ContactCard(_) => Permission::JmapContactCardQuery,
+                QueryRequestMethod::FileNode(_) => Permission::JmapFileNodeQuery,
             },
             RequestMethod::SearchSnippet(_) => Permission::JmapSearchSnippet,
             RequestMethod::ValidateScript(_) => Permission::JmapSieveScriptValidate,

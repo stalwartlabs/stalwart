@@ -26,9 +26,9 @@ use crate::{
     },
     object::{
         AnyId, addressbook::AddressBook, blob::Blob, contact::ContactCard, email::Email,
-        email_submission::EmailSubmission, identity::Identity, mailbox::Mailbox,
-        principal::Principal, push_subscription::PushSubscription, quota::Quota, sieve::Sieve,
-        thread::Thread, vacation_response::VacationResponse,
+        email_submission::EmailSubmission, file_node::FileNode, identity::Identity,
+        mailbox::Mailbox, principal::Principal, push_subscription::PushSubscription, quota::Quota,
+        sieve::Sieve, thread::Thread, vacation_response::VacationResponse,
     },
     request::{Call, method::MethodName},
 };
@@ -70,6 +70,7 @@ pub enum GetResponseMethod {
     Blob(GetResponse<Blob>),
     AddressBook(GetResponse<AddressBook>),
     ContactCard(GetResponse<ContactCard>),
+    FileNode(GetResponse<FileNode>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -84,6 +85,7 @@ pub enum SetResponseMethod {
     VacationResponse(SetResponse<VacationResponse>),
     AddressBook(SetResponse<AddressBook>),
     ContactCard(SetResponse<ContactCard>),
+    FileNode(SetResponse<FileNode>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -97,6 +99,7 @@ pub enum ChangesResponseMethod {
     Quota(ChangesResponse<Quota>),
     AddressBook(ChangesResponse<AddressBook>),
     ContactCard(ChangesResponse<ContactCard>),
+    FileNode(ChangesResponse<FileNode>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -433,5 +436,23 @@ impl<'x> From<Value<'x, Null, Null>> for ResponseMethod<'x> {
 impl<'x> From<MethodErrorWrapper> for ResponseMethod<'x> {
     fn from(value: MethodErrorWrapper) -> Self {
         ResponseMethod::Error(value)
+    }
+}
+
+impl From<GetResponse<FileNode>> for ResponseMethod<'_> {
+    fn from(response: GetResponse<FileNode>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::FileNode(response))
+    }
+}
+
+impl From<SetResponse<FileNode>> for ResponseMethod<'_> {
+    fn from(response: SetResponse<FileNode>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::FileNode(response))
+    }
+}
+
+impl From<ChangesResponse<FileNode>> for ResponseMethod<'_> {
+    fn from(response: ChangesResponse<FileNode>) -> Self {
+        ResponseMethod::Changes(ChangesResponseMethod::FileNode(response))
     }
 }

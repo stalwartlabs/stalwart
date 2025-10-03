@@ -15,6 +15,7 @@ pub mod blob;
 pub mod contact;
 pub mod email;
 pub mod email_submission;
+pub mod file_node;
 pub mod identity;
 pub mod mailbox;
 pub mod principal;

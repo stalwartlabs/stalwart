@@ -108,7 +108,7 @@ impl ContactCardQuery for Server {
             let mut comparators = Vec::with_capacity(request.sort.as_ref().map_or(1, |s| s.len()));
             for comparator in request
                 .sort
-                .and_then(|s| if !s.is_empty() { s.into() } else { None })
+                .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| vec![Comparator::descending(ContactCardComparator::Updated)])
             {
                 comparators.push(match comparator.property {

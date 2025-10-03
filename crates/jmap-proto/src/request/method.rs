@@ -29,6 +29,7 @@ pub enum MethodObject {
     Quota,
     AddressBook,
     ContactCard,
+    FileNode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +137,12 @@ impl MethodName {
             (MethodFunction::Copy, MethodObject::ContactCard) => "ContactCard/copy",
             (MethodFunction::Parse, MethodObject::ContactCard) => "ContactCard/parse",
 
+            (MethodFunction::Get, MethodObject::FileNode) => "FileNode/get",
+            (MethodFunction::Changes, MethodObject::FileNode) => "FileNode/changes",
+            (MethodFunction::Query, MethodObject::FileNode) => "FileNode/query",
+            (MethodFunction::QueryChanges, MethodObject::FileNode) => "FileNode/queryChanges",
+            (MethodFunction::Set, MethodObject::FileNode) => "FileNode/set",
+
             (MethodFunction::Echo, MethodObject::Core) => "Core/echo",
             _ => "error",
         }
@@ -210,6 +217,12 @@ impl MethodName {
             "ContactCard/copy" => (MethodObject::ContactCard, MethodFunction::Copy),
             "ContactCard/parse" => (MethodObject::ContactCard, MethodFunction::Parse),
 
+            "FileNode/get" => (MethodObject::FileNode, MethodFunction::Get),
+            "FileNode/changes" => (MethodObject::FileNode, MethodFunction::Changes),
+            "FileNode/query" => (MethodObject::FileNode, MethodFunction::Query),
+            "FileNode/queryChanges" => (MethodObject::FileNode, MethodFunction::QueryChanges),
+            "FileNode/set" => (MethodObject::FileNode, MethodFunction::Set),
+
             "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
 
         ).map(|(obj, fnc)| MethodName { obj, fnc })
@@ -235,6 +248,7 @@ impl Display for MethodObject {
             MethodObject::Quota => "Quota",
             MethodObject::AddressBook => "AddressBook",
             MethodObject::ContactCard => "ContactCard",
+            MethodObject::FileNode => "FileNode",
         })
     }
 }

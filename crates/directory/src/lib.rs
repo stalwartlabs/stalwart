@@ -391,6 +391,12 @@ pub enum Permission {
     JmapContactCardSet,
     JmapContactCardCopy,
     JmapContactCardParse,
+
+    JmapFileNodeGet,
+    JmapFileNodeSet,
+    JmapFileNodeChanges,
+    JmapFileNodeQuery,
+    JmapFileNodeQueryChanges,
     // WARNING: add new ids at the end (TODO: use static ids)
 }
 

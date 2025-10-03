@@ -1475,6 +1475,11 @@ impl Permission {
                 | Permission::JmapContactCardSet
                 | Permission::JmapContactCardCopy
                 | Permission::JmapContactCardParse
+                | Permission::JmapFileNodeGet
+                | Permission::JmapFileNodeSet
+                | Permission::JmapFileNodeChanges
+                | Permission::JmapFileNodeQuery
+                | Permission::JmapFileNodeQueryChanges
         )
     }
 

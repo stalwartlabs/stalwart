@@ -150,7 +150,7 @@ impl AddressBookGet for Server {
                     }
                     AddressBookProperty::MyRights => {
                         result.insert_unchecked(
-                            AddressBookProperty::IsDefault,
+                            AddressBookProperty::MyRights,
                             if access_token.is_shared(account_id) {
                                 JmapRights::rights::<addressbook::AddressBook>(
                                     address_book.acls.effective_acl(access_token),

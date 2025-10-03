@@ -63,6 +63,9 @@ impl Response<'_> {
                         GetResponseMethod::ContactCard(response) => {
                             response.eval_jptr(path, &mut results)
                         }
+                        GetResponseMethod::FileNode(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
                     },
                     ResponseMethod::Changes(response) => match response {
                         ChangesResponseMethod::Email(response) => {
@@ -87,6 +90,9 @@ impl Response<'_> {
                             response.eval_jptr(path, &mut results)
                         }
                         ChangesResponseMethod::ContactCard(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        ChangesResponseMethod::FileNode(response) => {
                             response.eval_jptr(path, &mut results)
                         }
                     },

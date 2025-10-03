@@ -17,6 +17,7 @@ use crate::{
         copy::JmapEmailCopy, get::EmailGet, import::EmailImport, parse::EmailParse,
         query::EmailQuery, set::EmailSet, snippet::EmailSearchSnippet,
     },
+    file::{get::FileNodeGet, query::FileNodeQuery, set::FileNodeSet},
     identity::{get::IdentityGet, set::IdentitySet},
     mailbox::{get::MailboxGet, query::MailboxQuery, set::MailboxSet},
     principal::{get::PrincipalGet, query::PrincipalQuery},
@@ -133,6 +134,9 @@ impl RequestHandler for Server {
                                         set_response.update_created_ids(&mut response);
                                     }
                                     SetResponseMethod::ContactCard(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::FileNode(set_response) => {
                                         set_response.update_created_ids(&mut response);
                                     }
                                 }
@@ -269,6 +273,12 @@ impl RequestHandler for Server {
 
                     self.contact_card_get(req, access_token).await?.into()
                 }
+                GetRequestMethod::FileNode(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::FileNode)?;
+
+                    self.file_node_get(req, access_token).await?.into()
+                }
             },
             RequestMethod::Query(req) => match req {
                 QueryRequestMethod::Email(mut req) => {
@@ -310,6 +320,12 @@ impl RequestHandler for Server {
                     access_token.assert_has_access(req.account_id, Collection::ContactCard)?;
 
                     self.contact_card_query(req, access_token).await?.into()
+                }
+                QueryRequestMethod::FileNode(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::FileNode)?;
+
+                    self.file_node_query(req, access_token).await?.into()
                 }
             },
             RequestMethod::Set(req) => match req {
@@ -372,6 +388,12 @@ impl RequestHandler for Server {
                     self.contact_card_set(req, access_token, session)
                         .await?
                         .into()
+                }
+                SetRequestMethod::FileNode(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::FileNode)?;
+
+                    self.file_node_set(req, access_token, session).await?.into()
                 }
             },
             RequestMethod::Changes(mut req) => {

@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use crate::response::serialize::serialize_hex;
+use crate::{object::file_node::FileNodeComparator, response::serialize::serialize_hex};
 use serde::{Deserialize, Deserializer};
 use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
@@ -74,6 +74,8 @@ pub enum Capability {
     Principals = 1 << 10,
     #[serde(rename(serialize = "urn:ietf:params:jmap:principals:owner"))]
     PrincipalsOwner = 1 << 11,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:filenode"))]
+    FileNode = 1 << 12,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -94,6 +96,7 @@ pub enum Capabilities {
     Contacts(ContactsCapabilities),
     Principals(PrincipalsCapabilities),
     PrincipalsOwner(PrincipalsOwnerCapabilities),
+    FileNode(FileNodeCapabilities),
     Empty(EmptyCapabilities),
 }
 
@@ -206,6 +209,18 @@ pub struct PrincipalsOwnerCapabilities {
 
     #[serde(rename(serialize = "principalId"))]
     pub principal_id: Id,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FileNodeCapabilities {
+    #[serde(rename(serialize = "maxFileNodeDepth"))]
+    pub max_file_node_depth: Option<usize>,
+    #[serde(rename(serialize = "maxSizeFileNodeName"))]
+    pub max_size_file_node_name: usize,
+    #[serde(rename(serialize = "fileNodeQuerySortOptions"))]
+    pub file_node_query_sort_options: Vec<FileNodeComparator>,
+    #[serde(rename(serialize = "mayCreateTopLevelFileNode"))]
+    pub may_create_top_level_file_node: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -363,7 +378,8 @@ impl Capability {
             "urn:ietf:params:jmap:blob" => Capability::Blob,
             "urn:ietf:params:jmap:quota" => Capability::Quota,
             "urn:ietf:params:jmap:principals" => Capability::Principals,
-            "urn:ietf:params:jmap:principals:owner" => Capability::PrincipalsOwner
+            "urn:ietf:params:jmap:principals:owner" => Capability::PrincipalsOwner,
+            "urn:ietf:params:jmap:filenode" => Capability::FileNode
         )
     }
 }

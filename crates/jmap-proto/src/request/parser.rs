@@ -195,6 +195,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Get, MethodObject::FileNode) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::FileNode(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Get, MethodObject::SearchSnippet) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::SearchSnippet(value),
                 Err(err) => RequestMethod::invalid(err),
@@ -265,6 +272,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Set, MethodObject::FileNode) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::FileNode(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Query, MethodObject::Email) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Email(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -309,6 +323,13 @@ impl<'de> Visitor<'de> for CallVisitor {
             },
             (MethodFunction::Query, MethodObject::ContactCard) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::ContactCard(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::FileNode) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::FileNode(value)),
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));
@@ -373,6 +394,15 @@ impl<'de> Visitor<'de> for CallVisitor {
             (MethodFunction::QueryChanges, MethodObject::ContactCard) => match seq.next_element() {
                 Ok(Some(value)) => {
                     RequestMethod::QueryChanges(QueryChangesRequestMethod::ContactCard(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::QueryChanges, MethodObject::FileNode) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::QueryChanges(QueryChangesRequestMethod::FileNode(value))
                 }
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {

@@ -85,6 +85,8 @@ pub enum SetErrorType {
     ScriptIsActive,
     #[serde(rename = "addressBookHasContents")]
     AddressBookHasContents,
+    #[serde(rename = "nodeHasChildren")]
+    NodeHasChildren,
 }
 
 impl SetErrorType {
@@ -116,6 +118,7 @@ impl SetErrorType {
             SetErrorType::InvalidScript => "invalidScript",
             SetErrorType::ScriptIsActive => "scriptIsActive",
             SetErrorType::AddressBookHasContents => "addressBookHasContents",
+            SetErrorType::NodeHasChildren => "nodeHasChildren",
         }
     }
 }
@@ -192,6 +195,10 @@ impl<T: Property> SetError<T> {
     pub fn address_book_has_contents() -> Self {
         Self::new(SetErrorType::AddressBookHasContents)
             .with_description("Address book is not empty.")
+    }
+
+    pub fn node_has_children() -> Self {
+        Self::new(SetErrorType::NodeHasChildren).with_description("File node has children.")
     }
 }
 

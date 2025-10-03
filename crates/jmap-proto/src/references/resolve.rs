@@ -44,6 +44,7 @@ impl Response<'_> {
                 GetRequestMethod::Blob(request) => request.resolve_references(self)?,
                 GetRequestMethod::AddressBook(request) => request.resolve_references(self)?,
                 GetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
+                GetRequestMethod::FileNode(request) => request.resolve_references(self)?,
             },
             RequestMethod::Set(request) => match request {
                 SetRequestMethod::Email(request) => request.resolve_references(self)?,
@@ -55,6 +56,7 @@ impl Response<'_> {
                 SetRequestMethod::VacationResponse(request) => request.resolve_references(self)?,
                 SetRequestMethod::AddressBook(request) => request.resolve_references(self)?,
                 SetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
+                SetRequestMethod::FileNode(request) => request.resolve_references(self)?,
             },
             RequestMethod::Copy(request) => match request {
                 CopyRequestMethod::Email(request) => request.resolve_references(self)?,

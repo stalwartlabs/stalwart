@@ -49,6 +49,10 @@ impl BlobHash {
         }
         hex
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == [0; BLOB_HASH_LEN]
+    }
 }
 
 impl From<&ArchivedBlobHash> for BlobHash {

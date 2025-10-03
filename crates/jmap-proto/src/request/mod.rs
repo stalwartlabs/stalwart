@@ -29,9 +29,9 @@ use crate::{
     },
     object::{
         AnyId, addressbook::AddressBook, blob::Blob, contact::ContactCard, email::Email,
-        email_submission::EmailSubmission, identity::Identity, mailbox::Mailbox,
-        principal::Principal, push_subscription::PushSubscription, quota::Quota, sieve::Sieve,
-        thread::Thread, vacation_response::VacationResponse,
+        email_submission::EmailSubmission, file_node::FileNode, identity::Identity,
+        mailbox::Mailbox, principal::Principal, push_subscription::PushSubscription, quota::Quota,
+        sieve::Sieve, thread::Thread, vacation_response::VacationResponse,
     },
     request::{capability::CapabilityIds, reference::MaybeIdReference},
 };
@@ -86,6 +86,7 @@ pub enum GetRequestMethod {
     Blob(GetRequest<Blob>),
     AddressBook(GetRequest<AddressBook>),
     ContactCard(GetRequest<ContactCard>),
+    FileNode(GetRequest<FileNode>),
 }
 
 #[derive(Debug)]
@@ -99,6 +100,7 @@ pub enum SetRequestMethod<'x> {
     VacationResponse(SetRequest<'x, VacationResponse>),
     AddressBook(SetRequest<'x, AddressBook>),
     ContactCard(SetRequest<'x, ContactCard>),
+    FileNode(SetRequest<'x, FileNode>),
 }
 
 #[derive(Debug)]
@@ -117,6 +119,7 @@ pub enum QueryRequestMethod {
     Principal(QueryRequest<Principal>),
     Quota(QueryRequest<Quota>),
     ContactCard(QueryRequest<ContactCard>),
+    FileNode(QueryRequest<FileNode>),
 }
 
 #[derive(Debug)]
@@ -128,6 +131,7 @@ pub enum QueryChangesRequestMethod {
     Principal(QueryChangesRequest<Principal>),
     Quota(QueryChangesRequest<Quota>),
     ContactCard(QueryChangesRequest<ContactCard>),
+    FileNode(QueryChangesRequest<FileNode>),
 }
 
 #[derive(Debug)]

@@ -65,6 +65,16 @@ impl ChangesLookup for Server {
 
                 (SyncCollection::EmailSubmission, false)
             }
+            MethodObject::ContactCard => {
+                access_token.assert_has_access(request.account_id, Collection::AddressBook)?;
+
+                (SyncCollection::AddressBook, false)
+            }
+            MethodObject::FileNode => {
+                access_token.assert_has_access(request.account_id, Collection::FileNode)?;
+
+                (SyncCollection::FileNode, true)
+            }
             _ => {
                 access_token.assert_is_member(request.account_id)?;
 
@@ -232,6 +242,9 @@ impl IntermediateChangesResponse {
             }
             MethodObject::ContactCard => {
                 ChangesResponseMethod::ContactCard(transmute_response(self.response))
+            }
+            MethodObject::FileNode => {
+                ChangesResponseMethod::FileNode(transmute_response(self.response))
             }
             MethodObject::Core
             | MethodObject::Blob

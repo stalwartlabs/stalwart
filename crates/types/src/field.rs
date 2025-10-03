@@ -47,11 +47,6 @@ pub enum EmailField {
     To,
     Cc,
     Bcc,
-    //ReplyTo,
-    //Sender,
-    //InReplyTo,
-    //MessageId,
-    //EmailIds,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,11 +122,6 @@ impl From<EmailField> for u8 {
             EmailField::SentAt => 26,
             EmailField::HasAttachment => 89,
             EmailField::Archive => ARCHIVE_FIELD,
-            //EmailField::MessageId => 11,
-            //EmailField::ReplyTo => 21,
-            //EmailField::Sender => 25,
-            //EmailField::EmailIds => 84,
-            //EmailField::InReplyTo => 96,
         }
     }
 }

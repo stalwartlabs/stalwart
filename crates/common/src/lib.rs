@@ -558,7 +558,7 @@ impl DavResourcePath<'_> {
 
     #[inline(always)]
     pub fn size(&self) -> u32 {
-        self.resource.size()
+        self.resource.size().unwrap_or_default()
     }
 }
 
@@ -692,6 +692,20 @@ impl DavResource {
         }
     }
 
+    pub fn parent_id(&self) -> Option<u32> {
+        match &self.data {
+            DavResourceMetadata::File { parent_id, .. } => *parent_id,
+            DavResourceMetadata::CalendarEvent { names, .. } => {
+                names.first().map(|name| name.parent_id)
+            }
+            DavResourceMetadata::ContactCard { names } => names.first().map(|name| name.parent_id),
+            DavResourceMetadata::CalendarScheduling { names } if names.is_empty() => {
+                Some(SCHEDULE_INBOX_ID)
+            }
+            _ => None,
+        }
+    }
+
     pub fn child_names(&self) -> Option<&[DavName]> {
         match &self.data {
             DavResourceMetadata::CalendarEvent { names, .. } => Some(names.as_slice()),
@@ -782,10 +796,10 @@ impl DavResource {
         }
     }
 
-    pub fn size(&self) -> u32 {
+    pub fn size(&self) -> Option<u32> {
         match &self.data {
-            DavResourceMetadata::File { size, .. } => size.unwrap_or_default(),
-            _ => 0,
+            DavResourceMetadata::File { size, .. } => *size,
+            _ => None,
         }
     }
 

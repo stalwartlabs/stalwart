@@ -30,6 +30,7 @@ pub mod blob;
 pub mod changes;
 pub mod contact;
 pub mod email;
+pub mod file;
 pub mod identity;
 pub mod mailbox;
 pub mod principal;
