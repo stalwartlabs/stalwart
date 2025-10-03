@@ -10,6 +10,7 @@ use email::submission::UndoStatus;
 use jmap_proto::{
     method::query::{Comparator, Filter, QueryRequest, QueryResponse},
     object::email_submission::{self, EmailSubmissionComparator, EmailSubmissionFilter},
+    request::IntoValid,
 };
 use std::future::Future;
 use store::{
@@ -41,7 +42,7 @@ impl EmailSubmissionQuery for Server {
                 Filter::Property(cond) => match cond {
                     EmailSubmissionFilter::IdentityIds(ids) => {
                         filters.push(query::Filter::Or);
-                        for id in ids {
+                        for id in ids.into_valid() {
                             filters.push(query::Filter::eq(
                                 EmailSubmissionField::IdentityId,
                                 id.document_id().serialize(),
@@ -51,7 +52,7 @@ impl EmailSubmissionQuery for Server {
                     }
                     EmailSubmissionFilter::EmailIds(ids) => {
                         filters.push(query::Filter::Or);
-                        for id in ids {
+                        for id in ids.into_valid() {
                             filters.push(query::Filter::eq(
                                 EmailSubmissionField::EmailId,
                                 id.id().serialize(),
@@ -61,7 +62,7 @@ impl EmailSubmissionQuery for Server {
                     }
                     EmailSubmissionFilter::ThreadIds(ids) => {
                         filters.push(query::Filter::Or);
-                        for id in ids {
+                        for id in ids.into_valid() {
                             filters.push(query::Filter::eq(
                                 EmailSubmissionField::ThreadId,
                                 id.document_id().serialize(),

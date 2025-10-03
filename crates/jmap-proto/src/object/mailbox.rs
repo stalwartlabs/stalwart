@@ -8,7 +8,7 @@ use crate::{
     object::{
         AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference, parse_ref,
     },
-    request::deserialize::DeserializeArguments,
+    request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use std::{borrow::Cow, str::FromStr};
@@ -314,7 +314,7 @@ impl TryFrom<MailboxProperty> for MailboxRight {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MailboxFilter {
     Name(String),
-    ParentId(Option<Id>),
+    ParentId(Option<MaybeIdReference<Id>>),
     Role(Option<SpecialUse>),
     HasAnyRole(bool),
     IsSubscribed(bool),

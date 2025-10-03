@@ -46,8 +46,9 @@ impl MailboxQuery for Server {
                 Filter::Property(cond) => {
                     match cond {
                         MailboxFilter::ParentId(parent_id) => {
-                            let parent_id =
-                                parent_id.map(|id| id.document_id()).unwrap_or(u32::MAX);
+                            let parent_id = parent_id
+                                .and_then(|id| id.try_unwrap().map(|id| id.document_id()))
+                                .unwrap_or(u32::MAX);
                             filters.push(query::Filter::is_in_set(
                                 mailboxes
                                     .mailboxes

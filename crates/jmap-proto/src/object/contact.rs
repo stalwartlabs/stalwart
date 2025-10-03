@@ -6,7 +6,7 @@
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::deserialize::DeserializeArguments,
+    request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
 };
 use calcard::jscontact::{JSContactProperty, JSContactValue};
@@ -23,9 +23,9 @@ impl JmapObject for ContactCard {
 
     type Id = Id;
 
-    type Filter = ContactFilter;
+    type Filter = ContactCardFilter;
 
-    type Comparator = ContactComparator;
+    type Comparator = ContactCardComparator;
 
     type GetArguments = ();
 
@@ -74,8 +74,8 @@ impl TryFrom<AnyId> for JSContactValue<Id, BlobId> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContactFilter {
-    InAddressBook(Id),
+pub enum ContactCardFilter {
+    InAddressBook(MaybeInvalid<Id>),
     Uid(String),
     HasMember(String),
     Kind(String),
@@ -99,7 +99,7 @@ pub enum ContactFilter {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContactComparator {
+pub enum ContactCardComparator {
     Created,
     Updated,
     NameGiven,
@@ -108,74 +108,74 @@ pub enum ContactComparator {
     _T(String),
 }
 
-impl<'de> DeserializeArguments<'de> for ContactFilter {
+impl<'de> DeserializeArguments<'de> for ContactCardFilter {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
         A: serde::de::MapAccess<'de>,
     {
         hashify::fnc_map!(key.as_bytes(),
             b"inAddressBook" => {
-                *self = ContactFilter::InAddressBook(map.next_value()?);
+                *self = ContactCardFilter::InAddressBook(map.next_value()?);
             },
             b"uid" => {
-                *self = ContactFilter::Uid(map.next_value()?);
+                *self = ContactCardFilter::Uid(map.next_value()?);
             },
             b"hasMember" => {
-                *self = ContactFilter::HasMember(map.next_value()?);
+                *self = ContactCardFilter::HasMember(map.next_value()?);
             },
             b"kind" => {
-                *self = ContactFilter::Kind(map.next_value()?);
+                *self = ContactCardFilter::Kind(map.next_value()?);
             },
             b"createdBefore" => {
-                *self = ContactFilter::CreatedBefore(map.next_value()?);
+                *self = ContactCardFilter::CreatedBefore(map.next_value()?);
             },
             b"createdAfter" => {
-                *self = ContactFilter::CreatedAfter(map.next_value()?);
+                *self = ContactCardFilter::CreatedAfter(map.next_value()?);
             },
             b"updatedBefore" => {
-                *self = ContactFilter::UpdatedBefore(map.next_value()?);
+                *self = ContactCardFilter::UpdatedBefore(map.next_value()?);
             },
             b"updatedAfter" => {
-                *self = ContactFilter::UpdatedAfter(map.next_value()?);
+                *self = ContactCardFilter::UpdatedAfter(map.next_value()?);
             },
             b"text" => {
-                *self = ContactFilter::Text(map.next_value()?);
+                *self = ContactCardFilter::Text(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"name" => {
-                *self = ContactFilter::Name(map.next_value()?);
+                *self = ContactCardFilter::Name(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"name/given" => {
-                *self = ContactFilter::NameGiven(map.next_value()?);
+                *self = ContactCardFilter::NameGiven(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"name/surname" => {
-                *self = ContactFilter::NameSurname(map.next_value()?);
+                *self = ContactCardFilter::NameSurname(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"name/surname2" => {
-                *self = ContactFilter::NameSurname2(map.next_value()?);
+                *self = ContactCardFilter::NameSurname2(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"nickname" => {
-                *self = ContactFilter::Nickname(map.next_value()?);
+                *self = ContactCardFilter::Nickname(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"organization" => {
-                *self = ContactFilter::Organization(map.next_value()?);
+                *self = ContactCardFilter::Organization(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"email" => {
-                *self = ContactFilter::Email(map.next_value()?);
+                *self = ContactCardFilter::Email(map.next_value()?);
             },
             b"phone" => {
-                *self = ContactFilter::Phone(map.next_value()?);
+                *self = ContactCardFilter::Phone(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"onlineService" => {
-                *self = ContactFilter::OnlineService(map.next_value()?);
+                *self = ContactCardFilter::OnlineService(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"address" => {
-                *self = ContactFilter::Address(map.next_value()?);
+                *self = ContactCardFilter::Address(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"note" => {
-                *self = ContactFilter::Note(map.next_value()?);
+                *self = ContactCardFilter::Note(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             _ => {
-                *self = ContactFilter::_T(key.to_string());
+                *self = ContactCardFilter::_T(key.to_string());
                 let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
         );
@@ -183,7 +183,7 @@ impl<'de> DeserializeArguments<'de> for ContactFilter {
     }
 }
 
-impl<'de> DeserializeArguments<'de> for ContactComparator {
+impl<'de> DeserializeArguments<'de> for ContactCardComparator {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
         A: serde::de::MapAccess<'de>,
@@ -192,22 +192,22 @@ impl<'de> DeserializeArguments<'de> for ContactComparator {
             let value = map.next_value::<Cow<str>>()?;
             hashify::fnc_map!(value.as_bytes(),
                 b"created" => {
-                    *self = ContactComparator::Created;
+                    *self = ContactCardComparator::Created;
                 },
                 b"updated" => {
-                    *self = ContactComparator::Updated;
+                    *self = ContactCardComparator::Updated;
                 },
                 b"name/given" => {
-                    *self = ContactComparator::NameGiven;
+                    *self = ContactCardComparator::NameGiven;
                 },
                 b"name/surname" => {
-                    *self = ContactComparator::NameSurname;
+                    *self = ContactCardComparator::NameSurname;
                 },
                 b"name/surname2" => {
-                    *self = ContactComparator::NameSurname2;
+                    *self = ContactCardComparator::NameSurname2;
                 },
                 _ => {
-                    *self = ContactComparator::_T(value.to_string());
+                    *self = ContactCardComparator::_T(value.to_string());
                 }
             );
         } else {
@@ -217,14 +217,57 @@ impl<'de> DeserializeArguments<'de> for ContactComparator {
     }
 }
 
-impl Default for ContactFilter {
-    fn default() -> Self {
-        ContactFilter::_T(String::new())
+impl ContactCardFilter {
+    pub fn into_string(self) -> Cow<'static, str> {
+        match self {
+            ContactCardFilter::InAddressBook(_) => "inAddressBook",
+            ContactCardFilter::Uid(_) => "uid",
+            ContactCardFilter::HasMember(_) => "hasMember",
+            ContactCardFilter::Kind(_) => "kind",
+            ContactCardFilter::CreatedBefore(_) => "createdBefore",
+            ContactCardFilter::CreatedAfter(_) => "createdAfter",
+            ContactCardFilter::UpdatedBefore(_) => "updatedBefore",
+            ContactCardFilter::UpdatedAfter(_) => "updatedAfter",
+            ContactCardFilter::Text(_) => "text",
+            ContactCardFilter::Name(_) => "name",
+            ContactCardFilter::NameGiven(_) => "name/given",
+            ContactCardFilter::NameSurname(_) => "name/surname",
+            ContactCardFilter::NameSurname2(_) => "name/surname2",
+            ContactCardFilter::Nickname(_) => "nickname",
+            ContactCardFilter::Organization(_) => "organization",
+            ContactCardFilter::Email(_) => "email",
+            ContactCardFilter::Phone(_) => "phone",
+            ContactCardFilter::OnlineService(_) => "onlineService",
+            ContactCardFilter::Address(_) => "address",
+            ContactCardFilter::Note(_) => "note",
+            ContactCardFilter::_T(s) => return Cow::Owned(s),
+        }
+        .into()
     }
 }
 
-impl Default for ContactComparator {
+impl ContactCardComparator {
+    pub fn into_string(self) -> Cow<'static, str> {
+        match self {
+            ContactCardComparator::Created => "created",
+            ContactCardComparator::Updated => "updated",
+            ContactCardComparator::NameGiven => "name/given",
+            ContactCardComparator::NameSurname => "name/surname",
+            ContactCardComparator::NameSurname2 => "name/surname2",
+            ContactCardComparator::_T(s) => return Cow::Owned(s),
+        }
+        .into()
+    }
+}
+
+impl Default for ContactCardFilter {
     fn default() -> Self {
-        ContactComparator::_T(String::new())
+        ContactCardFilter::_T(String::new())
+    }
+}
+
+impl Default for ContactCardComparator {
+    fn default() -> Self {
+        ContactCardComparator::_T(String::new())
     }
 }

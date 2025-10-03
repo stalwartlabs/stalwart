@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::contact::assert_is_unique_uid;
 use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
-use common::{DavName, Server, auth::AccessToken};
+use common::{DavName, DavResources, Server, auth::AccessToken};
 use groupware::{DestroyArchive, cache::GroupwareCache, contact::ContactCard};
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -16,7 +17,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Value};
-use store::{ahash::AHashSet, write::BatchBuilder};
+use store::{ahash::AHashSet, roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -32,6 +33,18 @@ pub trait ContactCardSet: Sync + Send {
         access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> impl Future<Output = trc::Result<SetResponse<contact::ContactCard>>> + Send;
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_contact_card(
+        &self,
+        cache: &DavResources,
+        batch: &mut BatchBuilder,
+        access_token: &AccessToken,
+        account_id: u32,
+        can_add_address_books: &Option<RoaringBitmap>,
+        js_contact: JSContact<'_, Id, BlobId>,
+        updates: Value<'_, JSContactProperty<Id>, JSContactValue<Id, BlobId>>,
+    ) -> impl Future<Output = trc::Result<Result<u32, SetError<JSContactProperty<Id>>>>>;
 }
 
 impl ContactCardSet for Server {
@@ -69,95 +82,26 @@ impl ContactCardSet for Server {
         // Process creates
         let mut batch = BatchBuilder::new();
         'create: for (id, object) in request.unwrap_create() {
-            let mut names = Vec::new();
-            let mut js_contact = JSContact::default();
-
-            // Process changes
-            if let Err(err) = update_contact_card(object, &mut names, &mut js_contact) {
-                response.not_created.append(id, err);
-                continue 'create;
-            }
-
-            // Verify that the address book ids valid
-            for name in &names {
-                if !cache.has_container_id(&name.parent_id) {
-                    response.not_created.append(
-                        id,
-                        SetError::invalid_properties()
-                            .with_property(JSContactProperty::AddressBookIds)
-                            .with_description(format!(
-                                "addressBookId {} does not exist.",
-                                Id::from(name.parent_id)
-                            )),
-                    );
-                    continue 'create;
-                } else if can_add_address_books
-                    .as_ref()
-                    .is_some_and(|ids| !ids.contains(name.parent_id))
-                {
-                    response.not_created.append(
-                        id,
-                        SetError::forbidden().with_description(format!(
-                            "You are not allowed to add contacts to address book {}.",
-                            Id::from(name.parent_id)
-                        )),
-                    );
-                    continue 'create;
-                }
-            }
-
-            // Convert JSContact to vCard
-            let Some(card) = js_contact.into_vcard() else {
-                response.not_created.append(
-                    id,
-                    SetError::invalid_properties()
-                        .with_description("Failed to convert contact to vCard."),
-                );
-                continue 'create;
-            };
-
-            // Check size and quota
-            let size = card.size();
-            if size > self.core.groupware.max_vcard_size {
-                response.not_created.append(
-                    id,
-                    SetError::invalid_properties().with_description(format!(
-                        "Contact size {} exceeds the maximum allowed size of {} bytes.",
-                        size, self.core.groupware.max_vcard_size
-                    )),
-                );
-                continue 'create;
-            }
             match self
-                .has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    size as u64,
+                .create_contact_card(
+                    &cache,
+                    &mut batch,
+                    access_token,
+                    account_id,
+                    &can_add_address_books,
+                    JSContact::default(),
+                    object,
                 )
-                .await
+                .await?
             {
-                Ok(_) => {}
-                Err(err) if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota)) => {
-                    response.not_created.append(id, SetError::over_quota());
+                Ok(document_id) => {
+                    response.created(id, document_id);
+                }
+                Err(err) => {
+                    response.not_created.append(id, err);
                     continue 'create;
                 }
-                Err(err) => return Err(err.caused_by(trc::location!())),
             }
-
-            // Insert record
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::ContactCard, 1)
-                .await
-                .caused_by(trc::location!())?;
-            ContactCard {
-                names,
-                size: size as u32,
-                card,
-                ..Default::default()
-            }
-            .insert(access_token, account_id, document_id, &mut batch)
-            .caused_by(trc::location!())?;
-            response.created(id, document_id);
         }
 
         // Process updates
@@ -206,6 +150,21 @@ impl ContactCardSet for Server {
                         .with_description("Failed to convert contact to vCard."),
                 );
                 continue 'update;
+            }
+
+            // Validate UID
+            match (new_contact_card.card.uid(), contact_card.inner.card.uid()) {
+                (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
+                (None, None) | (None, Some(_)) => {}
+                _ => {
+                    response.not_updated.append(
+                        id,
+                        SetError::invalid_properties()
+                            .with_property(JSContactProperty::Uid)
+                            .with_description("You cannot change the UID of a contact."),
+                    );
+                    continue 'update;
+                }
             }
 
             // Validate new addressBookIds
@@ -371,6 +330,94 @@ impl ContactCardSet for Server {
         }
 
         Ok(response)
+    }
+
+    async fn create_contact_card(
+        &self,
+        cache: &DavResources,
+        batch: &mut BatchBuilder,
+        access_token: &AccessToken,
+        account_id: u32,
+        can_add_address_books: &Option<RoaringBitmap>,
+        mut js_contact: JSContact<'_, Id, BlobId>,
+        updates: Value<'_, JSContactProperty<Id>, JSContactValue<Id, BlobId>>,
+    ) -> trc::Result<Result<u32, SetError<JSContactProperty<Id>>>> {
+        // Process changes
+        let mut names = Vec::new();
+        if let Err(err) = update_contact_card(updates, &mut names, &mut js_contact) {
+            return Ok(Err(err));
+        }
+
+        // Verify that the address book ids valid
+        for name in &names {
+            if !cache.has_container_id(&name.parent_id) {
+                return Ok(Err(SetError::invalid_properties()
+                    .with_property(JSContactProperty::AddressBookIds)
+                    .with_description(format!(
+                        "addressBookId {} does not exist.",
+                        Id::from(name.parent_id)
+                    ))));
+            } else if can_add_address_books
+                .as_ref()
+                .is_some_and(|ids| !ids.contains(name.parent_id))
+            {
+                return Ok(Err(SetError::forbidden().with_description(format!(
+                    "You are not allowed to add contacts to address book {}.",
+                    Id::from(name.parent_id)
+                ))));
+            }
+        }
+
+        // Convert JSContact to vCard
+        let Some(card) = js_contact.into_vcard() else {
+            return Ok(Err(SetError::invalid_properties()
+                .with_description("Failed to convert contact to vCard.")));
+        };
+
+        // Validate UID
+        if let Err(err) = assert_is_unique_uid(self, cache, account_id, &names, card.uid()).await? {
+            return Ok(Err(err));
+        }
+
+        // Check size and quota
+        let size = card.size();
+        if size > self.core.groupware.max_vcard_size {
+            return Ok(Err(SetError::invalid_properties().with_description(
+                format!(
+                    "Contact size {} exceeds the maximum allowed size of {} bytes.",
+                    size, self.core.groupware.max_vcard_size
+                ),
+            )));
+        }
+        match self
+            .has_available_quota(
+                &self.get_resource_token(access_token, account_id).await?,
+                size as u64,
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(err) if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota)) => {
+                return Ok(Err(SetError::over_quota()));
+            }
+            Err(err) => return Err(err.caused_by(trc::location!())),
+        }
+
+        // Insert record
+        let document_id = self
+            .store()
+            .assign_document_ids(account_id, Collection::ContactCard, 1)
+            .await
+            .caused_by(trc::location!())?;
+        ContactCard {
+            names,
+            size: size as u32,
+            card,
+            ..Default::default()
+        }
+        .insert(access_token, account_id, document_id, batch)
+        .caused_by(trc::location!())
+        .map(|_| Ok(document_id))
     }
 }
 

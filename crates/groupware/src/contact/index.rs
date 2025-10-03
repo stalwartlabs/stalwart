@@ -5,7 +5,7 @@
  */
 
 use super::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard};
-use calcard::vcard::VCardProperty;
+use calcard::vcard::{ArchivedVCardProperty, VCardProperty};
 use common::storage::index::{
     IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
 };
@@ -83,6 +83,24 @@ impl IndexableObject for ContactCard {
                 field: ContactField::Uid.into(),
                 value: self.card.uid().into(),
             },
+            IndexValue::Index {
+                field: ContactField::Created.into(),
+                value: self.created.into(),
+            },
+            IndexValue::Index {
+                field: ContactField::Updated.into(),
+                value: self.modified.into(),
+            },
+            IndexValue::IndexList {
+                field: ContactField::Text.into(),
+                value: self
+                    .text()
+                    .map(str::to_lowercase)
+                    .map(Into::into)
+                    .collect::<HashSet<IndexItem>>()
+                    .into_iter()
+                    .collect(),
+            },
             IndexValue::IndexList {
                 field: ContactField::Email.into(),
                 value: self
@@ -113,6 +131,24 @@ impl IndexableObject for &ArchivedContactCard {
             IndexValue::Index {
                 field: ContactField::Uid.into(),
                 value: self.card.uid().into(),
+            },
+            IndexValue::Index {
+                field: ContactField::Created.into(),
+                value: self.created.to_native().into(),
+            },
+            IndexValue::Index {
+                field: ContactField::Updated.into(),
+                value: self.modified.to_native().into(),
+            },
+            IndexValue::IndexList {
+                field: ContactField::Text.into(),
+                value: self
+                    .text()
+                    .map(str::to_lowercase)
+                    .map(Into::into)
+                    .collect::<HashSet<IndexItem>>()
+                    .into_iter()
+                    .collect(),
             },
             IndexValue::IndexList {
                 field: ContactField::Email.into(),
@@ -145,6 +181,26 @@ impl IndexableAndSerializableObject for ContactCard {
 }
 
 impl ContactCard {
+    pub fn text(&self) -> impl Iterator<Item = &str> {
+        self.card
+            .entries
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.name,
+                    VCardProperty::Adr
+                        | VCardProperty::N
+                        | VCardProperty::Fn
+                        | VCardProperty::Title
+                        | VCardProperty::Org
+                        | VCardProperty::Note
+                        | VCardProperty::Nickname
+                )
+            })
+            .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
+            .flat_map(str::split_whitespace)
+    }
+
     pub fn emails(&self) -> impl Iterator<Item = String> {
         self.card.properties(&VCardProperty::Email).flat_map(|e| {
             e.values
@@ -155,6 +211,26 @@ impl ContactCard {
 }
 
 impl ArchivedContactCard {
+    pub fn text(&self) -> impl Iterator<Item = &str> {
+        self.card
+            .entries
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.name,
+                    ArchivedVCardProperty::Adr
+                        | ArchivedVCardProperty::N
+                        | ArchivedVCardProperty::Fn
+                        | ArchivedVCardProperty::Title
+                        | ArchivedVCardProperty::Org
+                        | ArchivedVCardProperty::Note
+                        | ArchivedVCardProperty::Nickname
+                )
+            })
+            .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
+            .flat_map(str::split_whitespace)
+    }
+
     pub fn emails(&self) -> impl Iterator<Item = String> {
         self.card.properties(&VCardProperty::Email).flat_map(|e| {
             e.values

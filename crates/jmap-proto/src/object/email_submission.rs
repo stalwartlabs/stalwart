@@ -10,7 +10,7 @@ use crate::{
         email::{EmailProperty, EmailValue},
         parse_ref,
     },
-    request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
+    request::{MaybeInvalid, deserialize::DeserializeArguments, reference::MaybeIdReference},
     types::date::UTCDate,
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property, Value};
@@ -337,9 +337,9 @@ impl JmapObject for EmailSubmission {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmailSubmissionFilter {
-    IdentityIds(Vec<Id>),
-    EmailIds(Vec<Id>),
-    ThreadIds(Vec<Id>),
+    IdentityIds(Vec<MaybeInvalid<Id>>),
+    EmailIds(Vec<MaybeInvalid<Id>>),
+    ThreadIds(Vec<MaybeInvalid<Id>>),
     Before(UTCDate),
     After(UTCDate),
     UndoStatus(UndoStatus),

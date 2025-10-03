@@ -146,14 +146,6 @@ impl Filter {
         }
     }
 
-    pub fn has_text_token(field: impl Into<u8>, text: impl Into<String>) -> Self {
-        Filter::HasText {
-            field: field.into(),
-            text: text.into(),
-            tokenize: true,
-        }
-    }
-
     pub fn is_in_bitmap(field: impl Into<u8>, value: impl Into<TagValue>) -> Self {
         Self::InBitmap(BitmapClass::Tag {
             field: field.into(),

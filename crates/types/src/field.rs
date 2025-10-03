@@ -17,6 +17,9 @@ pub struct Field(u8);
 pub enum ContactField {
     Uid,
     Email,
+    Created,
+    Updated,
+    Text,
     Archive,
 }
 
@@ -90,6 +93,9 @@ impl From<ContactField> for u8 {
         match value {
             ContactField::Uid => 0,
             ContactField::Email => 1,
+            ContactField::Created => 2,
+            ContactField::Updated => 3,
+            ContactField::Text => 4,
             ContactField::Archive => ARCHIVE_FIELD,
         }
     }

@@ -384,6 +384,7 @@ impl RequestHandler for Server {
             RequestMethod::Copy(req) => match req {
                 CopyRequestMethod::Email(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
+                    set_account_id_if_missing(&mut req.from_account_id, access_token);
 
                     access_token
                         .assert_has_access(req.account_id, Collection::Email)?
@@ -400,7 +401,9 @@ impl RequestHandler for Server {
                     self.blob_copy(req, access_token).await?.into()
                 }
                 CopyRequestMethod::ContactCard(mut req) => {
+                    set_account_id_if_missing(&mut req.from_account_id, access_token);
                     set_account_id_if_missing(&mut req.account_id, access_token);
+
                     access_token
                         .assert_has_access(req.account_id, Collection::ContactCard)?
                         .assert_has_access(req.from_account_id, Collection::ContactCard)?;
