@@ -12,29 +12,29 @@ use types::{acl::Acl, blob::BlobId, id::Id};
 
 pub mod addressbook;
 pub mod blob;
+pub mod calendar;
+pub mod calendar_event;
+pub mod calendar_event_notification;
 pub mod contact;
 pub mod email;
 pub mod email_submission;
 pub mod file_node;
 pub mod identity;
 pub mod mailbox;
+pub mod participant_identity;
 pub mod principal;
 pub mod push_subscription;
 pub mod quota;
 pub mod search_snippet;
+pub mod share_notification;
 pub mod sieve;
 pub mod thread;
 pub mod vacation_response;
 
 pub trait JmapObject: std::fmt::Debug {
-    type Property: Property + FromStr + Debug + Sync + Send;
-    type Element: Element<Property = Self::Property>
-        + From<Self::Id>
-        + JmapObjectId
-        + Debug
-        + Sync
-        + Send;
-    type Id: FromStr + TryFrom<AnyId> + Serialize + Debug + Sync + Send;
+    type Property: Property + JmapObjectId + FromStr + Debug + Sync + Send;
+    type Element: Element<Property = Self::Property> + JmapObjectId + Debug + Sync + Send;
+    type Id: FromStr + TryFrom<AnyId> + Into<Self::Element> + Serialize + Debug + Sync + Send;
 
     type Filter: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
     type Comparator: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
@@ -67,10 +67,11 @@ pub enum AnyId {
     BlobId(BlobId),
 }
 
-pub trait JmapObjectId: TryFrom<AnyId> {
+pub trait JmapObjectId {
     fn as_id(&self) -> Option<Id>;
     fn as_any_id(&self) -> Option<AnyId>;
     fn as_id_ref(&self) -> Option<&str>;
+    fn try_set_id(&mut self, new_id: AnyId) -> bool;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +198,10 @@ impl JmapObjectId for Null {
     }
 
     fn as_id_ref(&self) -> Option<&str> {
+        unreachable!()
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
         unreachable!()
     }
 }

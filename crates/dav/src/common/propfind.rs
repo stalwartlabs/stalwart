@@ -139,7 +139,7 @@ impl PropFindRequestHandler for Server {
                 {
                     true
                 }
-                Collection::CalendarScheduling if resource.account_id.is_some() => true,
+                Collection::CalendarEventNotification if resource.account_id.is_some() => true,
                 _ => {
                     return Err(DavErrorCondition::new(
                         StatusCode::FORBIDDEN,
@@ -156,13 +156,13 @@ impl PropFindRequestHandler for Server {
                 Collection::FileNode
                 | Collection::Calendar
                 | Collection::AddressBook
-                | Collection::CalendarScheduling => {
+                | Collection::CalendarEventNotification => {
                     // Validate permissions
                     access_token.assert_has_permission(match resource.collection {
                         Collection::FileNode => Permission::DavFilePropFind,
                         Collection::Calendar
                         | Collection::CalendarEvent
-                        | Collection::CalendarScheduling => Permission::DavCalPropFind,
+                        | Collection::CalendarEventNotification => Permission::DavCalPropFind,
                         Collection::AddressBook | Collection::ContactCard => {
                             Permission::DavCardPropFind
                         }
@@ -236,7 +236,7 @@ impl PropFindRequestHandler for Server {
                         Collection::FileNode => Permission::DavFilePropFind,
                         Collection::Calendar
                         | Collection::CalendarEvent
-                        | Collection::CalendarScheduling => Permission::DavCalPropFind,
+                        | Collection::CalendarEventNotification => Permission::DavCalPropFind,
                         Collection::AddressBook | Collection::ContactCard => {
                             Permission::DavCardPropFind
                         }
@@ -363,7 +363,7 @@ impl PropFindRequestHandler for Server {
                     Collection::FileNode => {
                         (FILE_CONTAINER_PROPS.as_slice(), FILE_ITEM_PROPS.as_slice())
                     }
-                    Collection::Calendar | Collection::CalendarScheduling => (
+                    Collection::Calendar | Collection::CalendarEventNotification => (
                         CALENDAR_CONTAINER_PROPS.as_slice(),
                         CALENDAR_ITEM_PROPS.as_slice(),
                     ),
@@ -408,7 +408,7 @@ impl PropFindRequestHandler for Server {
             PropFind::Prop(items) => items.clone(),
         };
 
-        let is_scheduling = collection_container == Collection::CalendarScheduling;
+        let is_scheduling = collection_container == Collection::CalendarEventNotification;
         'outer: for item in paths {
             let account_id = item.account_id;
             let document_id = item.document_id;
@@ -422,7 +422,7 @@ impl PropFindRequestHandler for Server {
             let archive_;
             let archive = if is_scheduling && item.is_container {
                 archive_ = Archive::default();
-                ArchivedResource::CalendarSchedulingCollection(
+                ArchivedResource::CalendarEventNotificationCollection(
                     item.document_id == SCHEDULE_INBOX_ID,
                 )
             } else if let Some(archive) = self
@@ -683,8 +683,8 @@ impl PropFindRequestHandler for Server {
                                     property.clone(),
                                     vec![SupportedPrivilege::all_scheduling_privileges(matches!(
                                         archive,
-                                        ArchivedResource::CalendarScheduling(_)
-                                            | ArchivedResource::CalendarSchedulingCollection(true)
+                                        ArchivedResource::CalendarEventNotification(_)
+                                            | ArchivedResource::CalendarEventNotificationCollection(true)
                                     ))],
                                 ));
                             }
@@ -694,8 +694,8 @@ impl PropFindRequestHandler for Server {
                                 Privilege::scheduling(
                                     matches!(
                                         archive,
-                                        ArchivedResource::CalendarScheduling(_)
-                                            | ArchivedResource::CalendarSchedulingCollection(true)
+                                        ArchivedResource::CalendarEventNotification(_)
+                                            | ArchivedResource::CalendarEventNotificationCollection(true)
                                     ),
                                     access_token.is_member(account_id),
                                 )
@@ -979,7 +979,7 @@ impl PropFindRequestHandler for Server {
                         }
                         (
                             CalDavProperty::CalendarData(_),
-                            ArchivedResource::CalendarScheduling(event),
+                            ArchivedResource::CalendarEventNotification(event),
                         ) => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
@@ -1008,7 +1008,7 @@ impl PropFindRequestHandler for Server {
                         }
                         (
                             CalDavProperty::ScheduleDefaultCalendarURL,
-                            ArchivedResource::CalendarSchedulingCollection(true),
+                            ArchivedResource::CalendarEventNotificationCollection(true),
                         ) => {
                             if let Some(default_cal) = &self.core.groupware.default_calendar_name {
                                 fields.push(DavPropertyValue::new(

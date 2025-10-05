@@ -52,7 +52,7 @@ impl AddressBookSet for Server {
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
         let is_shared = access_token.is_shared(account_id);
 
-        // TODO: Implement onSuccessSetIsDefault
+        let todo = " Implement onSuccessSetIsDefault + Sieve";
 
         // Process creates
         let mut batch = BatchBuilder::new();

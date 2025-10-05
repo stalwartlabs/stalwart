@@ -7,7 +7,7 @@
 use crate::{
     RFC_3986,
     cache::GroupwareCache,
-    calendar::{CalendarEvent, CalendarEventData, CalendarScheduling},
+    calendar::{CalendarEvent, CalendarEventData, CalendarEventNotification},
     scheduling::{
         ItipError, ItipMessage,
         inbound::{
@@ -224,10 +224,10 @@ impl ItipIngest for Server {
                         // Build event for schedule inbox
                         let itip_document_id = self
                             .store()
-                            .assign_document_ids(account_id, Collection::CalendarScheduling, 1)
+                            .assign_document_ids(account_id, Collection::CalendarEventNotification, 1)
                             .await
                             .caused_by(trc::location!())?;
-                        let itip_message = CalendarScheduling {
+                        let itip_message = CalendarEventNotification {
                             itip,
                             event_id: Some(document_id),
                             size: itip_message.len() as u32,
@@ -329,10 +329,10 @@ impl ItipIngest for Server {
                 .caused_by(trc::location!())?;
             let itip_document_id = self
                 .store()
-                .assign_document_ids(account_id, Collection::CalendarScheduling, 1)
+                .assign_document_ids(account_id, Collection::CalendarEventNotification, 1)
                 .await
                 .caused_by(trc::location!())?;
-            let itip_message = CalendarScheduling {
+            let itip_message = CalendarEventNotification {
                 itip,
                 event_id: Some(document_id),
                 size: itip_message.len() as u32,

@@ -38,7 +38,8 @@ pub enum Acl {
     SchedulingReply = 12,
     ModifyItemsOwn = 13,
     ModifyPrivateProperties = 14,
-    None = 15,
+    ModifyRSVP = 15,
+    None = 16,
 }
 
 #[derive(
@@ -77,6 +78,7 @@ impl Acl {
             Acl::SchedulingReadFreeBusy => "schedulingReadFreeBusy",
             Acl::SchedulingInvite => "schedulingInvite",
             Acl::SchedulingReply => "schedulingReply",
+            Acl::ModifyRSVP => "modifyRSVP",
         }
     }
 }
@@ -130,6 +132,7 @@ impl From<u64> for Acl {
             12 => Acl::SchedulingReply,
             13 => Acl::ModifyItemsOwn,
             14 => Acl::ModifyPrivateProperties,
+            15 => Acl::ModifyRSVP,
             _ => Acl::None,
         }
     }

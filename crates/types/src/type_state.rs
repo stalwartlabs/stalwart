@@ -51,7 +51,13 @@ pub enum DataType {
     ContactCard = 17,
     #[serde(rename = "FileNode")]
     FileNode = 18,
-    None = 19,
+    #[serde(rename = "Principal")]
+    Principal = 19,
+    #[serde(rename = "ShareNotification")]
+    ShareNotification = 20,
+    #[serde(rename = "ParticipantIdentity")]
+    ParticipantIdentity = 21,
+    None = 22,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,6 +122,9 @@ impl From<u64> for DataType {
             16 => DataType::AddressBook,
             17 => DataType::ContactCard,
             18 => DataType::FileNode,
+            19 => DataType::Principal,
+            20 => DataType::ShareNotification,
+            21 => DataType::ParticipantIdentity,
             _ => {
                 debug_assert!(false, "Invalid type_state value: {}", value);
                 DataType::None
@@ -171,6 +180,9 @@ impl DataType {
             b"AddressBook" => DataType::AddressBook,
             b"ContactCard" => DataType::ContactCard,
             b"FileNode" => DataType::FileNode,
+            b"Principal" => DataType::Principal,
+            b"ShareNotification" => DataType::ShareNotification,
+            b"ParticipantIdentity" => DataType::ParticipantIdentity,
         )
     }
 
@@ -195,6 +207,9 @@ impl DataType {
             DataType::AddressBook => "AddressBook",
             DataType::ContactCard => "ContactCard",
             DataType::FileNode => "FileNode",
+            DataType::Principal => "Principal",
+            DataType::ShareNotification => "ShareNotification",
+            DataType::ParticipantIdentity => "ParticipantIdentity",
             DataType::None => "",
         }
     }

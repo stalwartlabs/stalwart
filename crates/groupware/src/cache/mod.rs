@@ -77,7 +77,7 @@ impl GroupwareCache for Server {
             SyncCollection::Calendar => &self.inner.cache.events,
             SyncCollection::AddressBook => &self.inner.cache.contacts,
             SyncCollection::FileNode => &self.inner.cache.files,
-            SyncCollection::CalendarScheduling => &self.inner.cache.scheduling,
+            SyncCollection::CalendarEventNotification => &self.inner.cache.scheduling,
             _ => unreachable!(),
         };
         let cache_ = match cache_store.get_value_or_guard_async(&account_id).await {
@@ -178,7 +178,7 @@ impl GroupwareCache for Server {
         }
 
         let num_changes = changes.changes.len();
-        let cache = if !matches!(collection, SyncCollection::CalendarScheduling) {
+        let cache = if !matches!(collection, SyncCollection::CalendarEventNotification) {
             let mut updated_resources = AHashMap::with_capacity(8);
             let has_no_children = collection == SyncCollection::FileNode;
 
@@ -517,7 +517,7 @@ async fn full_cache_build(
             .await
         }
         SyncCollection::FileNode => build_file_resources(server, account_id, update_lock).await,
-        SyncCollection::CalendarScheduling => {
+        SyncCollection::CalendarEventNotification => {
             build_scheduling_resources(server, account_id, update_lock).await
         }
         _ => unreachable!(),

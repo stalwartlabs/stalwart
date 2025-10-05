@@ -11,6 +11,7 @@ use self::serialize::serialize_hex;
 use crate::{
     error::method::MethodErrorWrapper,
     method::{
+        availability::GetAvailabilityResponse,
         changes::ChangesResponse,
         copy::{CopyBlobResponse, CopyResponse},
         get::GetResponse,
@@ -25,10 +26,28 @@ use crate::{
         validate::ValidateSieveScriptResponse,
     },
     object::{
-        AnyId, addressbook::AddressBook, blob::Blob, contact::ContactCard, email::Email,
-        email_submission::EmailSubmission, file_node::FileNode, identity::Identity,
-        mailbox::Mailbox, principal::Principal, push_subscription::PushSubscription, quota::Quota,
-        sieve::Sieve, thread::Thread, vacation_response::VacationResponse,
+        AnyId,
+        addressbook::AddressBook,
+        blob::Blob,
+        calendar::Calendar,
+        calendar_event::CalendarEvent,
+        calendar_event_notification::{
+            CalendarEventNotification, CalendarEventNotificationGetResponse,
+        },
+        contact::ContactCard,
+        email::Email,
+        email_submission::EmailSubmission,
+        file_node::FileNode,
+        identity::Identity,
+        mailbox::Mailbox,
+        participant_identity::ParticipantIdentity,
+        principal::Principal,
+        push_subscription::PushSubscription,
+        quota::Quota,
+        share_notification::ShareNotification,
+        sieve::Sieve,
+        thread::Thread,
+        vacation_response::VacationResponse,
     },
     request::{Call, method::MethodName},
 };
@@ -66,11 +85,17 @@ pub enum GetResponseMethod {
     Sieve(GetResponse<Sieve>),
     VacationResponse(GetResponse<VacationResponse>),
     Principal(GetResponse<Principal>),
+    PrincipalAvailability(GetAvailabilityResponse),
     Quota(GetResponse<Quota>),
     Blob(GetResponse<Blob>),
     AddressBook(GetResponse<AddressBook>),
     ContactCard(GetResponse<ContactCard>),
     FileNode(GetResponse<FileNode>),
+    Calendar(GetResponse<Calendar>),
+    CalendarEvent(GetResponse<CalendarEvent>),
+    CalendarEventNotification(CalendarEventNotificationGetResponse),
+    ParticipantIdentity(GetResponse<ParticipantIdentity>),
+    ShareNotification(GetResponse<ShareNotification>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -86,6 +111,11 @@ pub enum SetResponseMethod {
     AddressBook(SetResponse<AddressBook>),
     ContactCard(SetResponse<ContactCard>),
     FileNode(SetResponse<FileNode>),
+    ShareNotification(SetResponse<ShareNotification>),
+    Calendar(SetResponse<Calendar>),
+    CalendarEvent(SetResponse<CalendarEvent>),
+    CalendarEventNotification(SetResponse<CalendarEventNotification>),
+    ParticipantIdentity(SetResponse<ParticipantIdentity>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -100,6 +130,9 @@ pub enum ChangesResponseMethod {
     AddressBook(ChangesResponse<AddressBook>),
     ContactCard(ChangesResponse<ContactCard>),
     FileNode(ChangesResponse<FileNode>),
+    CalendarEvent(ChangesResponse<CalendarEvent>),
+    CalendarEventNotification(ChangesResponse<CalendarEventNotification>),
+    ShareNotification(ChangesResponse<ShareNotification>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -107,6 +140,7 @@ pub enum ChangesResponseMethod {
 pub enum CopyResponseMethod {
     Email(CopyResponse<Email>),
     ContactCard(CopyResponse<ContactCard>),
+    CalendarEvent(CopyResponse<CalendarEvent>),
     Blob(CopyBlobResponse),
 }
 
@@ -115,6 +149,7 @@ pub enum CopyResponseMethod {
 pub enum ParseResponseMethod {
     Email(ParseResponse<Email>),
     ContactCard(ParseResponse<ContactCard>),
+    CalendarEvent(ParseResponse<CalendarEvent>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -454,5 +489,101 @@ impl From<SetResponse<FileNode>> for ResponseMethod<'_> {
 impl From<ChangesResponse<FileNode>> for ResponseMethod<'_> {
     fn from(response: ChangesResponse<FileNode>) -> Self {
         ResponseMethod::Changes(ChangesResponseMethod::FileNode(response))
+    }
+}
+
+impl From<GetAvailabilityResponse> for ResponseMethod<'_> {
+    fn from(response: GetAvailabilityResponse) -> Self {
+        ResponseMethod::Get(GetResponseMethod::PrincipalAvailability(response))
+    }
+}
+
+impl From<GetResponse<Calendar>> for ResponseMethod<'_> {
+    fn from(response: GetResponse<Calendar>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::Calendar(response))
+    }
+}
+
+impl From<SetResponse<Calendar>> for ResponseMethod<'_> {
+    fn from(response: SetResponse<Calendar>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::Calendar(response))
+    }
+}
+
+impl From<ChangesResponse<CalendarEvent>> for ResponseMethod<'_> {
+    fn from(response: ChangesResponse<CalendarEvent>) -> Self {
+        ResponseMethod::Changes(ChangesResponseMethod::CalendarEvent(response))
+    }
+}
+
+impl From<ChangesResponse<CalendarEventNotification>> for ResponseMethod<'_> {
+    fn from(response: ChangesResponse<CalendarEventNotification>) -> Self {
+        ResponseMethod::Changes(ChangesResponseMethod::CalendarEventNotification(response))
+    }
+}
+
+impl From<SetResponse<CalendarEvent>> for ResponseMethod<'_> {
+    fn from(response: SetResponse<CalendarEvent>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::CalendarEvent(response))
+    }
+}
+
+impl From<SetResponse<ParticipantIdentity>> for ResponseMethod<'_> {
+    fn from(response: SetResponse<ParticipantIdentity>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::ParticipantIdentity(response))
+    }
+}
+
+impl From<GetResponse<ParticipantIdentity>> for ResponseMethod<'_> {
+    fn from(response: GetResponse<ParticipantIdentity>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::ParticipantIdentity(response))
+    }
+}
+
+impl From<ChangesResponse<ShareNotification>> for ResponseMethod<'_> {
+    fn from(response: ChangesResponse<ShareNotification>) -> Self {
+        ResponseMethod::Changes(ChangesResponseMethod::ShareNotification(response))
+    }
+}
+
+impl From<SetResponse<ShareNotification>> for ResponseMethod<'_> {
+    fn from(response: SetResponse<ShareNotification>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::ShareNotification(response))
+    }
+}
+
+impl From<GetResponse<ShareNotification>> for ResponseMethod<'_> {
+    fn from(response: GetResponse<ShareNotification>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::ShareNotification(response))
+    }
+}
+
+impl From<GetResponse<CalendarEvent>> for ResponseMethod<'_> {
+    fn from(response: GetResponse<CalendarEvent>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::CalendarEvent(response))
+    }
+}
+
+impl From<ParseResponse<CalendarEvent>> for ResponseMethod<'_> {
+    fn from(value: ParseResponse<CalendarEvent>) -> Self {
+        ResponseMethod::Parse(ParseResponseMethod::CalendarEvent(value))
+    }
+}
+
+impl From<CopyResponse<CalendarEvent>> for ResponseMethod<'_> {
+    fn from(value: CopyResponse<CalendarEvent>) -> Self {
+        ResponseMethod::Copy(CopyResponseMethod::CalendarEvent(value))
+    }
+}
+
+impl From<CalendarEventNotificationGetResponse> for ResponseMethod<'_> {
+    fn from(value: CalendarEventNotificationGetResponse) -> Self {
+        ResponseMethod::Get(GetResponseMethod::CalendarEventNotification(value))
+    }
+}
+
+impl From<SetResponse<CalendarEventNotification>> for ResponseMethod<'_> {
+    fn from(value: SetResponse<CalendarEventNotification>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::CalendarEventNotification(value))
     }
 }

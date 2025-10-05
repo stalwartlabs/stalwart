@@ -28,9 +28,10 @@ pub enum Collection {
     AddressBook = 10,
     ContactCard = 11,
     FileNode = 12,
-    CalendarScheduling = 13,
+    CalendarEventNotification = 13,
+    ShareNotification = 14,
     #[default]
-    None = 14,
+    None = 15,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Default)]
@@ -44,9 +45,10 @@ pub enum SyncCollection {
     Identity = 5,
     EmailSubmission = 6,
     SieveScript = 7,
-    CalendarScheduling = 8,
+    CalendarEventNotification = 8,
+    ShareNotification = 9,
     #[default]
-    None = 9,
+    None = 10,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -74,7 +76,8 @@ impl Collection {
             Collection::CalendarEvent => Some(Collection::Calendar),
             Collection::ContactCard => Some(Collection::AddressBook),
             Collection::FileNode => Some(Collection::FileNode),
-            Collection::CalendarScheduling => Some(Collection::CalendarScheduling),
+            Collection::CalendarEventNotification => Some(Collection::CalendarEventNotification),
+            Collection::ShareNotification => Some(Collection::ShareNotification),
             _ => None,
         }
     }
@@ -85,7 +88,8 @@ impl Collection {
             Collection::Calendar => Some(Collection::CalendarEvent),
             Collection::AddressBook => Some(Collection::ContactCard),
             Collection::FileNode => Some(Collection::FileNode),
-            Collection::CalendarScheduling => Some(Collection::CalendarScheduling),
+            Collection::CalendarEventNotification => Some(Collection::CalendarEventNotification),
+            Collection::ShareNotification => Some(Collection::ShareNotification),
             _ => None,
         }
     }
@@ -120,7 +124,8 @@ impl SyncCollection {
             SyncCollection::Identity => Collection::Identity,
             SyncCollection::EmailSubmission => Collection::EmailSubmission,
             SyncCollection::SieveScript => Collection::SieveScript,
-            SyncCollection::CalendarScheduling => Collection::CalendarScheduling,
+            SyncCollection::CalendarEventNotification => Collection::CalendarEventNotification,
+            SyncCollection::ShareNotification => Collection::ShareNotification,
             SyncCollection::None => Collection::None,
         }
     }
@@ -149,10 +154,11 @@ impl From<Collection> for SyncCollection {
             Collection::Principal => SyncCollection::None,
             Collection::Calendar => SyncCollection::Calendar,
             Collection::CalendarEvent => SyncCollection::Calendar,
-            Collection::CalendarScheduling => SyncCollection::CalendarScheduling,
+            Collection::CalendarEventNotification => SyncCollection::CalendarEventNotification,
             Collection::AddressBook => SyncCollection::AddressBook,
             Collection::ContactCard => SyncCollection::AddressBook,
             Collection::FileNode => SyncCollection::FileNode,
+            Collection::ShareNotification => SyncCollection::ShareNotification,
             _ => SyncCollection::None,
         }
     }
@@ -174,7 +180,8 @@ impl From<u8> for Collection {
             10 => Collection::AddressBook,
             11 => Collection::ContactCard,
             12 => Collection::FileNode,
-            13 => Collection::CalendarScheduling,
+            13 => Collection::CalendarEventNotification,
+            14 => Collection::ShareNotification,
             _ => Collection::None,
         }
     }
@@ -191,7 +198,8 @@ impl From<u8> for SyncCollection {
             5 => SyncCollection::Identity,
             6 => SyncCollection::EmailSubmission,
             7 => SyncCollection::SieveScript,
-            8 => SyncCollection::CalendarScheduling,
+            8 => SyncCollection::CalendarEventNotification,
+            9 => SyncCollection::ShareNotification,
             _ => SyncCollection::None,
         }
     }
@@ -208,7 +216,8 @@ impl From<u64> for SyncCollection {
             5 => SyncCollection::Identity,
             6 => SyncCollection::EmailSubmission,
             7 => SyncCollection::SieveScript,
-            8 => SyncCollection::CalendarScheduling,
+            8 => SyncCollection::CalendarEventNotification,
+            9 => SyncCollection::ShareNotification,
             _ => SyncCollection::None,
         }
     }
@@ -230,7 +239,8 @@ impl From<u64> for Collection {
             10 => Collection::AddressBook,
             11 => Collection::ContactCard,
             12 => Collection::FileNode,
-            13 => Collection::CalendarScheduling,
+            13 => Collection::CalendarEventNotification,
+            14 => Collection::ShareNotification,
             _ => Collection::None,
         }
     }
@@ -278,6 +288,14 @@ impl TryFrom<Collection> for DataType {
             Collection::EmailSubmission => Ok(DataType::EmailSubmission),
             Collection::SieveScript => Ok(DataType::SieveScript),
             Collection::PushSubscription => Ok(DataType::PushSubscription),
+            Collection::Principal => Ok(DataType::Principal),
+            Collection::Calendar => Ok(DataType::Calendar),
+            Collection::CalendarEvent => Ok(DataType::CalendarEvent),
+            Collection::AddressBook => Ok(DataType::AddressBook),
+            Collection::ContactCard => Ok(DataType::ContactCard),
+            Collection::FileNode => Ok(DataType::FileNode),
+            Collection::CalendarEventNotification => Ok(DataType::CalendarEventNotification),
+            Collection::ShareNotification => Ok(DataType::ShareNotification),
             _ => Err(()),
         }
     }
@@ -305,7 +323,8 @@ impl Collection {
             Collection::AddressBook => "addressBook",
             Collection::ContactCard => "contactCard",
             Collection::FileNode => "fileNode",
-            Collection::CalendarScheduling => "calendarScheduling",
+            Collection::CalendarEventNotification => "calendarEventNotification",
+            Collection::ShareNotification => "shareNotification",
             Collection::None => "",
         }
     }
@@ -329,6 +348,8 @@ impl FromStr for Collection {
             "addressBook" => Collection::AddressBook,
             "contactCard" => Collection::ContactCard,
             "fileNode" => Collection::FileNode,
+            "calendarEventNotification" => Collection::CalendarEventNotification,
+            "shareNotification" => Collection::ShareNotification,
         )
         .ok_or(())
     }
@@ -371,7 +392,8 @@ impl SyncCollection {
             SyncCollection::Identity => "identity",
             SyncCollection::EmailSubmission => "emailSubmission",
             SyncCollection::SieveScript => "sieveScript",
-            SyncCollection::CalendarScheduling => "calendarScheduling",
+            SyncCollection::CalendarEventNotification => "calendarEventNotification",
+            SyncCollection::ShareNotification => "shareNotification",
             SyncCollection::None => "",
         }
     }

@@ -3939,8 +3939,6 @@ dependencies = [
 [[package]]
 name = "jmap-tools"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91222e1ff860c06e6a48a317b67ffe6012ae08d40a5e8c6bf75987ae7644b4b1"
 dependencies = [
  "hashify",
  "rkyv",

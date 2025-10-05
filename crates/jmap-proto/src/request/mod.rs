@@ -14,6 +14,7 @@ pub mod websocket;
 use self::method::MethodName;
 use crate::{
     method::{
+        availability::GetAvailabilityRequest,
         changes::ChangesRequest,
         copy::{CopyBlobRequest, CopyRequest},
         get::GetRequest,
@@ -28,10 +29,13 @@ use crate::{
         validate::ValidateSieveScriptRequest,
     },
     object::{
-        AnyId, addressbook::AddressBook, blob::Blob, contact::ContactCard, email::Email,
-        email_submission::EmailSubmission, file_node::FileNode, identity::Identity,
-        mailbox::Mailbox, principal::Principal, push_subscription::PushSubscription, quota::Quota,
-        sieve::Sieve, thread::Thread, vacation_response::VacationResponse,
+        AnyId, addressbook::AddressBook, blob::Blob, calendar::Calendar,
+        calendar_event::CalendarEvent, calendar_event_notification::CalendarEventNotification,
+        contact::ContactCard, email::Email, email_submission::EmailSubmission, file_node::FileNode,
+        identity::Identity, mailbox::Mailbox, participant_identity::ParticipantIdentity,
+        principal::Principal, push_subscription::PushSubscription, quota::Quota,
+        share_notification::ShareNotification, sieve::Sieve, thread::Thread,
+        vacation_response::VacationResponse,
     },
     request::{capability::CapabilityIds, reference::MaybeIdReference},
 };
@@ -82,11 +86,17 @@ pub enum GetRequestMethod {
     Sieve(GetRequest<Sieve>),
     VacationResponse(GetRequest<VacationResponse>),
     Principal(GetRequest<Principal>),
+    PrincipalAvailability(GetAvailabilityRequest),
     Quota(GetRequest<Quota>),
     Blob(GetRequest<Blob>),
     AddressBook(GetRequest<AddressBook>),
     ContactCard(GetRequest<ContactCard>),
     FileNode(GetRequest<FileNode>),
+    Calendar(GetRequest<Calendar>),
+    CalendarEvent(GetRequest<CalendarEvent>),
+    CalendarEventNotification(GetRequest<CalendarEventNotification>),
+    ParticipantIdentity(GetRequest<ParticipantIdentity>),
+    ShareNotification(GetRequest<ShareNotification>),
 }
 
 #[derive(Debug)]
@@ -101,12 +111,18 @@ pub enum SetRequestMethod<'x> {
     AddressBook(SetRequest<'x, AddressBook>),
     ContactCard(SetRequest<'x, ContactCard>),
     FileNode(SetRequest<'x, FileNode>),
+    ShareNotification(SetRequest<'x, ShareNotification>),
+    Calendar(SetRequest<'x, Calendar>),
+    CalendarEvent(SetRequest<'x, CalendarEvent>),
+    CalendarEventNotification(SetRequest<'x, CalendarEventNotification>),
+    ParticipantIdentity(SetRequest<'x, ParticipantIdentity>),
 }
 
 #[derive(Debug)]
 pub enum CopyRequestMethod<'x> {
     Email(CopyRequest<'x, Email>),
     ContactCard(CopyRequest<'x, ContactCard>),
+    CalendarEvent(CopyRequest<'x, CalendarEvent>),
     Blob(CopyBlobRequest),
 }
 
@@ -120,6 +136,9 @@ pub enum QueryRequestMethod {
     Quota(QueryRequest<Quota>),
     ContactCard(QueryRequest<ContactCard>),
     FileNode(QueryRequest<FileNode>),
+    CalendarEvent(QueryRequest<CalendarEvent>),
+    CalendarEventNotification(QueryRequest<CalendarEventNotification>),
+    ShareNotification(QueryRequest<ShareNotification>),
 }
 
 #[derive(Debug)]
@@ -132,12 +151,16 @@ pub enum QueryChangesRequestMethod {
     Quota(QueryChangesRequest<Quota>),
     ContactCard(QueryChangesRequest<ContactCard>),
     FileNode(QueryChangesRequest<FileNode>),
+    CalendarEvent(QueryChangesRequest<CalendarEvent>),
+    CalendarEventNotification(QueryChangesRequest<CalendarEventNotification>),
+    ShareNotification(QueryChangesRequest<ShareNotification>),
 }
 
 #[derive(Debug)]
 pub enum ParseRequestMethod {
     Email(ParseRequest<Email>),
     ContactCard(ParseRequest<ContactCard>),
+    CalendarEvent(ParseRequest<CalendarEvent>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,18 +180,6 @@ impl<'de, V: FromStr> serde::Deserialize<'de> for MaybeInvalid<V> {
             Ok(MaybeInvalid::Value(id))
         } else {
             Ok(MaybeInvalid::Invalid(value.to_string()))
-        }
-    }
-}
-
-impl<V: serde::Serialize + FromStr> serde::Serialize for MaybeInvalid<V> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            MaybeInvalid::Value(id) => id.serialize(serializer),
-            MaybeInvalid::Invalid(str) => serializer.serialize_str(str),
         }
     }
 }

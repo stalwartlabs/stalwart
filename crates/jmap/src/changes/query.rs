@@ -6,8 +6,10 @@
 
 use super::get::ChangesLookup;
 use crate::{
-    api::request::set_account_id_if_missing, contact::query::ContactCardQuery,
-    email::query::EmailQuery, file::query::FileNodeQuery, mailbox::query::MailboxQuery,
+    api::request::set_account_id_if_missing, calendar_event::query::CalendarEventQuery,
+    calendar_event_notification::query::CalendarEventNotificationQuery,
+    contact::query::ContactCardQuery, email::query::EmailQuery, file::query::FileNodeQuery,
+    mailbox::query::MailboxQuery, share_notification::query::ShareNotificationQuery,
     sieve::query::SieveScriptQuery, submission::query::EmailSubmissionQuery,
 };
 use common::{Server, auth::AccessToken};
@@ -182,6 +184,78 @@ impl QueryChanges for Server {
 
                 up_to_id = request.up_to_id;
                 results = self.file_node_query(request.into(), access_token).await?;
+            }
+            QueryChangesRequestMethod::CalendarEvent(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::FileNode,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self
+                    .calendar_event_query(request.into(), access_token)
+                    .await?;
+            }
+            QueryChangesRequestMethod::CalendarEventNotification(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::FileNode,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self
+                    .calendar_event_notification_query(request.into(), access_token)
+                    .await?;
+            }
+            QueryChangesRequestMethod::ShareNotification(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::FileNode,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self
+                    .share_notification_query(request.into(), access_token)
+                    .await?;
             }
             QueryChangesRequestMethod::Principal(_) => {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());

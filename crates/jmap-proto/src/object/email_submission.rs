@@ -284,15 +284,6 @@ impl<'x> DeserializeArguments<'x> for EmailSubmissionSetArguments<'x> {
     }
 }
 
-impl serde::Serialize for EmailSubmissionProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl FromStr for EmailSubmissionProperty {
     type Err = ();
 
@@ -459,15 +450,34 @@ impl JmapObjectId for EmailSubmissionValue {
             None
         }
     }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        match new_id {
+            AnyId::Id(id) => {
+                *self = EmailSubmissionValue::Id(id);
+            }
+            AnyId::BlobId(blob_id) => {
+                *self = EmailSubmissionValue::BlobId(blob_id);
+            }
+        }
+        true
+    }
 }
 
-impl TryFrom<AnyId> for EmailSubmissionValue {
-    type Error = ();
+impl JmapObjectId for EmailSubmissionProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
 
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(EmailSubmissionValue::Id(id)),
-            AnyId::BlobId(blob_id) => Ok(EmailSubmissionValue::BlobId(blob_id)),
-        }
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
     }
 }

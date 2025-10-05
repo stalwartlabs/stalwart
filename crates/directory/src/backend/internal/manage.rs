@@ -506,7 +506,7 @@ impl ManageDirectory for Store {
                 permissions
                     .into_iter()
                     .map(|(k, v)| PermissionGrant {
-                        permission: k,
+                        permission: k.id(),
                         grant: !v,
                     })
                     .collect(),
@@ -1725,7 +1725,7 @@ impl ManageDirectory for Store {
                     if !permissions.is_empty() {
                         principal.add_permissions(permissions.into_iter().map(|permission| {
                             PermissionGrant {
-                                permission,
+                                permission: permission.id(),
                                 grant: !is_disabled,
                             }
                         }));
@@ -2218,13 +2218,17 @@ impl ManageDirectory for Store {
                             if has_enabled {
                                 result.append_str(
                                     PrincipalField::EnabledPermissions,
-                                    grant.permission.name(),
+                                    Permission::from_id(grant.permission)
+                                        .map(|f| f.name())
+                                        .unwrap_or("unknown"),
                                 );
                             }
                         } else if has_disabled {
                             result.append_str(
                                 PrincipalField::DisabledPermissions,
-                                grant.permission.name(),
+                                Permission::from_id(grant.permission)
+                                    .map(|f| f.name())
+                                    .unwrap_or("unknown"),
                             );
                         }
                     }

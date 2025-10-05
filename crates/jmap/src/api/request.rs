@@ -8,6 +8,15 @@ use crate::{
     addressbook::{get::AddressBookGet, set::AddressBookSet},
     api::auth::JmapAuthorization,
     blob::{copy::BlobCopy, get::BlobOperations, upload::BlobUpload},
+    calendar::{get::CalendarGet, set::CalendarSet},
+    calendar_event::{
+        copy::JmapCalendarEventCopy, get::CalendarEventGet, parse::CalendarEventParse,
+        query::CalendarEventQuery, set::CalendarEventSet,
+    },
+    calendar_event_notification::{
+        get::CalendarEventNotificationGet, query::CalendarEventNotificationQuery,
+        set::CalendarEventNotificationSet,
+    },
     changes::{get::ChangesLookup, query::QueryChanges},
     contact::{
         copy::JmapContactCardCopy, get::ContactCardGet, parse::ContactCardParse,
@@ -20,9 +29,13 @@ use crate::{
     file::{get::FileNodeGet, query::FileNodeQuery, set::FileNodeSet},
     identity::{get::IdentityGet, set::IdentitySet},
     mailbox::{get::MailboxGet, query::MailboxQuery, set::MailboxSet},
-    principal::{get::PrincipalGet, query::PrincipalQuery},
+    participant_identity::{get::ParticipantIdentityGet, set::ParticipantIdentitySet},
+    principal::{availability::PrincipalGetAvailability, get::PrincipalGet, query::PrincipalQuery},
     push::{get::PushSubscriptionFetch, set::PushSubscriptionSet},
     quota::{get::QuotaGet, query::QuotaQuery},
+    share_notification::{
+        get::ShareNotificationGet, query::ShareNotificationQuery, set::ShareNotificationSet,
+    },
     sieve::{
         get::SieveScriptGet, query::SieveScriptQuery, set::SieveScriptSet,
         validate::SieveScriptValidate,
@@ -139,6 +152,19 @@ impl RequestHandler for Server {
                                     SetResponseMethod::FileNode(set_response) => {
                                         set_response.update_created_ids(&mut response);
                                     }
+                                    SetResponseMethod::ShareNotification(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::Calendar(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::CalendarEvent(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::ParticipantIdentity(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::CalendarEventNotification(_) => {}
                                 }
                             }
                             ResponseMethod::ImportEmail(import_response) => {
@@ -279,6 +305,47 @@ impl RequestHandler for Server {
 
                     self.file_node_get(req, access_token).await?.into()
                 }
+                GetRequestMethod::PrincipalAvailability(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+
+                    self.principal_get_availability(req, access_token)
+                        .await?
+                        .into()
+                }
+                GetRequestMethod::Calendar(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.calendar_get(req, access_token).await?.into()
+                }
+                GetRequestMethod::CalendarEvent(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::CalendarEvent)?;
+
+                    self.calendar_event_get(req, access_token).await?.into()
+                }
+                GetRequestMethod::CalendarEventNotification(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.calendar_event_notification_get(req, access_token)
+                        .await?
+                        .into()
+                }
+                GetRequestMethod::ParticipantIdentity(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.participant_identity_get(req, access_token)
+                        .await?
+                        .into()
+                }
+                GetRequestMethod::ShareNotification(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_is_member(req.account_id)?;
+
+                    self.share_notification_get(req, access_token).await?.into()
+                }
             },
             RequestMethod::Query(req) => match req {
                 QueryRequestMethod::Email(mut req) => {
@@ -326,6 +393,29 @@ impl RequestHandler for Server {
                     access_token.assert_has_access(req.account_id, Collection::FileNode)?;
 
                     self.file_node_query(req, access_token).await?.into()
+                }
+                QueryRequestMethod::CalendarEvent(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::CalendarEvent)?;
+
+                    self.calendar_event_query(req, access_token).await?.into()
+                }
+                QueryRequestMethod::CalendarEventNotification(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.calendar_event_notification_query(req, access_token)
+                        .await?
+                        .into()
+                }
+                QueryRequestMethod::ShareNotification(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token
+                        .assert_has_access(req.account_id, Collection::ShareNotification)?;
+
+                    self.share_notification_query(req, access_token)
+                        .await?
+                        .into()
                 }
             },
             RequestMethod::Set(req) => match req {
@@ -395,6 +485,45 @@ impl RequestHandler for Server {
 
                     self.file_node_set(req, access_token, session).await?.into()
                 }
+                SetRequestMethod::ShareNotification(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token
+                        .assert_has_access(req.account_id, Collection::ShareNotification)?;
+
+                    self.share_notification_set(req, access_token, session)
+                        .await?
+                        .into()
+                }
+                SetRequestMethod::Calendar(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.calendar_set(req, access_token, session).await?.into()
+                }
+                SetRequestMethod::CalendarEvent(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::CalendarEvent)?;
+
+                    self.calendar_event_set(req, access_token, session)
+                        .await?
+                        .into()
+                }
+                SetRequestMethod::CalendarEventNotification(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.calendar_event_notification_set(req, access_token, session)
+                        .await?
+                        .into()
+                }
+                SetRequestMethod::ParticipantIdentity(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.participant_identity_set(req, access_token, session)
+                        .await?
+                        .into()
+                }
             },
             RequestMethod::Changes(mut req) => {
                 set_account_id_if_missing(&mut req.account_id, access_token);
@@ -434,6 +563,18 @@ impl RequestHandler for Server {
                         .await?
                         .into()
                 }
+                CopyRequestMethod::CalendarEvent(mut req) => {
+                    set_account_id_if_missing(&mut req.from_account_id, access_token);
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+
+                    access_token
+                        .assert_has_access(req.account_id, Collection::CalendarEvent)?
+                        .assert_has_access(req.from_account_id, Collection::CalendarEvent)?;
+
+                    self.calendar_event_copy(req, access_token, next_call, session)
+                        .await?
+                        .into()
+                }
             },
             RequestMethod::ImportEmail(mut req) => {
                 set_account_id_if_missing(&mut req.account_id, access_token);
@@ -453,6 +594,12 @@ impl RequestHandler for Server {
                     access_token.assert_has_access(req.account_id, Collection::ContactCard)?;
 
                     self.contact_card_parse(req, access_token).await?.into()
+                }
+                ParseRequestMethod::CalendarEvent(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::CalendarEvent)?;
+
+                    self.calendar_event_parse(req, access_token).await?.into()
                 }
             },
             RequestMethod::QueryChanges(req) => self.query_changes(req, access_token).await?.into(),

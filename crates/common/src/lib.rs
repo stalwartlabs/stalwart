@@ -309,7 +309,7 @@ pub enum DavResourceMetadata {
         start: i64,
         duration: u32,
     },
-    CalendarScheduling {
+    CalendarEventNotification {
         names: TinyVec<[DavName; 2]>,
     },
     AddressBook {
@@ -685,7 +685,7 @@ impl DavResource {
             DavResourceMetadata::ContactCard { names } => {
                 names.iter().any(|name| name.parent_id == parent_id)
             }
-            DavResourceMetadata::CalendarScheduling { names } => {
+            DavResourceMetadata::CalendarEventNotification { names } => {
                 names.is_empty() && parent_id == SCHEDULE_INBOX_ID
             }
             _ => false,
@@ -699,7 +699,7 @@ impl DavResource {
                 names.first().map(|name| name.parent_id)
             }
             DavResourceMetadata::ContactCard { names } => names.first().map(|name| name.parent_id),
-            DavResourceMetadata::CalendarScheduling { names } if names.is_empty() => {
+            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
                 Some(SCHEDULE_INBOX_ID)
             }
             _ => None,
@@ -710,7 +710,7 @@ impl DavResource {
         match &self.data {
             DavResourceMetadata::CalendarEvent { names, .. } => Some(names.as_slice()),
             DavResourceMetadata::ContactCard { names } => Some(names.as_slice()),
-            DavResourceMetadata::CalendarScheduling { names } if !names.is_empty() => {
+            DavResourceMetadata::CalendarEventNotification { names } if !names.is_empty() => {
                 Some(names.as_slice())
             }
             _ => None,
@@ -722,7 +722,7 @@ impl DavResource {
             DavResourceMetadata::File { name, .. } => Some(name.as_str()),
             DavResourceMetadata::Calendar { name, .. } => Some(name.as_str()),
             DavResourceMetadata::AddressBook { name, .. } => Some(name.as_str()),
-            DavResourceMetadata::CalendarScheduling { names } if names.is_empty() => {
+            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
                 Some(if self.document_id == SCHEDULE_INBOX_ID {
                     "inbox"
                 } else {
@@ -764,8 +764,8 @@ impl DavResource {
                 DavResourceMetadata::ContactCard { names: b, .. },
             ) => a != b,
             (
-                DavResourceMetadata::CalendarScheduling { names: a, .. },
-                DavResourceMetadata::CalendarScheduling { names: b, .. },
+                DavResourceMetadata::CalendarEventNotification { names: a, .. },
+                DavResourceMetadata::CalendarEventNotification { names: b, .. },
             ) => a != b,
             _ => unreachable!(),
         }
@@ -791,7 +791,7 @@ impl DavResource {
         match &self.data {
             DavResourceMetadata::File { size, .. } => size.is_none(),
             DavResourceMetadata::Calendar { .. } | DavResourceMetadata::AddressBook { .. } => true,
-            DavResourceMetadata::CalendarScheduling { names } => names.is_empty(),
+            DavResourceMetadata::CalendarEventNotification { names } => names.is_empty(),
             _ => false,
         }
     }

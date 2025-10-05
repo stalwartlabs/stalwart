@@ -11,6 +11,7 @@ use groupware::{cache::GroupwareCache, contact::ContactCard};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::contact,
+    request::IntoValid,
 };
 use jmap_tools::{Map, Value};
 use store::roaring::RoaringBitmap;

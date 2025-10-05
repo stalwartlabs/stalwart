@@ -10,6 +10,7 @@ use crate::{
     types::date::UTCDate,
 };
 use calcard::jscontact::{JSContactProperty, JSContactValue};
+use jmap_tools::{JsonPointerItem, Key};
 use std::borrow::Cow;
 use types::{blob::BlobId, id::Id};
 
@@ -58,18 +59,23 @@ impl JmapObjectId for JSContactValue<Id, BlobId> {
     }
 
     fn as_id_ref(&self) -> Option<&str> {
-        None
-    }
-}
-
-impl TryFrom<AnyId> for JSContactValue<Id, BlobId> {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(JSContactValue::Id(id)),
-            AnyId::BlobId(id) => Ok(JSContactValue::BlobId(id)),
+        match self {
+            JSContactValue::IdReference(r) => Some(r),
+            _ => None,
         }
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        match new_id {
+            AnyId::Id(id) => {
+                *self = JSContactValue::Id(id);
+            }
+            AnyId::BlobId(id) => {
+                *self = JSContactValue::BlobId(id);
+            }
+        }
+
+        true
     }
 }
 
@@ -114,7 +120,7 @@ impl<'de> DeserializeArguments<'de> for ContactCardFilter {
         A: serde::de::MapAccess<'de>,
     {
         hashify::fnc_map!(key.as_bytes(),
-            b"inAddressBook" => {
+            b"inContactCard" => {
                 *self = ContactCardFilter::InAddressBook(map.next_value()?);
             },
             b"uid" => {
@@ -220,7 +226,7 @@ impl<'de> DeserializeArguments<'de> for ContactCardComparator {
 impl ContactCardFilter {
     pub fn into_string(self) -> Cow<'static, str> {
         match self {
-            ContactCardFilter::InAddressBook(_) => "inAddressBook",
+            ContactCardFilter::InAddressBook(_) => "inContactCard",
             ContactCardFilter::Uid(_) => "uid",
             ContactCardFilter::HasMember(_) => "hasMember",
             ContactCardFilter::Kind(_) => "kind",
@@ -269,5 +275,60 @@ impl Default for ContactCardFilter {
 impl Default for ContactCardComparator {
     fn default() -> Self {
         ContactCardComparator::_T(String::new())
+    }
+}
+
+impl JmapObjectId for JSContactProperty<Id> {
+    fn as_id(&self) -> Option<Id> {
+        if let JSContactProperty::IdValue(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        if let JSContactProperty::IdValue(id) = self {
+            Some(AnyId::Id(*id))
+        } else {
+            None
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        match self {
+            JSContactProperty::IdReference(r) => Some(r),
+            JSContactProperty::Pointer(value) => {
+                let value = value.as_slice();
+                match (value.first(), value.get(1)) {
+                    (
+                        Some(JsonPointerItem::Key(Key::Property(
+                            JSContactProperty::AddressBookIds,
+                        ))),
+                        Some(JsonPointerItem::Key(Key::Property(JSContactProperty::IdReference(
+                            r,
+                        )))),
+                    ) => Some(r),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            if let JSContactProperty::Pointer(value) = self {
+                let value = value.as_mut_slice();
+                if let Some(value) = value.get_mut(1) {
+                    *value = JsonPointerItem::Key(Key::Property(JSContactProperty::IdValue(id)));
+                    return true;
+                }
+            } else {
+                *self = JSContactProperty::IdValue(id);
+                return true;
+            }
+        }
+        false
     }
 }

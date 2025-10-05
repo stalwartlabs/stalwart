@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::calendar::{ArchivedCalendarScheduling, CalendarScheduling};
+use crate::calendar::{ArchivedCalendarEventNotification, CalendarEventNotification};
 
 use super::{
     ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarPreferences, ArchivedDefaultAlert,
@@ -22,7 +22,6 @@ impl IndexableObject for Calendar {
             IndexValue::Quota {
                 used: self.dead_properties.size() as u32
                     + self.preferences.iter().map(|p| p.size()).sum::<usize>() as u32
-                    + self.default_alerts.iter().map(|a| a.size()).sum::<usize>() as u32
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {
@@ -47,7 +46,6 @@ impl IndexableObject for &ArchivedCalendar {
             IndexValue::Quota {
                 used: self.dead_properties.size() as u32
                     + self.preferences.iter().map(|p| p.size()).sum::<usize>() as u32
-                    + self.default_alerts.iter().map(|a| a.size()).sum::<usize>() as u32
                     + self.name.len() as u32,
             },
             IndexValue::LogContainer {
@@ -114,7 +112,7 @@ impl IndexableAndSerializableObject for CalendarEvent {
     }
 }
 
-impl IndexableObject for CalendarScheduling {
+impl IndexableObject for CalendarEventNotification {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::Quota { used: self.size },
@@ -123,7 +121,7 @@ impl IndexableObject for CalendarScheduling {
                 value: self.created.into(),
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::CalendarScheduling,
+                sync_collection: SyncCollection::CalendarEventNotification,
                 prefix: None,
             },
         ]
@@ -131,7 +129,7 @@ impl IndexableObject for CalendarScheduling {
     }
 }
 
-impl IndexableObject for &ArchivedCalendarScheduling {
+impl IndexableObject for &ArchivedCalendarEventNotification {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::Quota {
@@ -142,7 +140,7 @@ impl IndexableObject for &ArchivedCalendarScheduling {
                 value: self.created.to_native().into(),
             },
             IndexValue::LogItem {
-                sync_collection: SyncCollection::CalendarScheduling,
+                sync_collection: SyncCollection::CalendarEventNotification,
                 prefix: None,
             },
         ]
@@ -150,7 +148,7 @@ impl IndexableObject for &ArchivedCalendarScheduling {
     }
 }
 
-impl IndexableAndSerializableObject for CalendarScheduling {
+impl IndexableAndSerializableObject for CalendarEventNotification {
     fn is_versioned() -> bool {
         false
     }
@@ -159,6 +157,7 @@ impl IndexableAndSerializableObject for CalendarScheduling {
 impl CalendarPreferences {
     pub fn size(&self) -> usize {
         self.name.len()
+            + self.default_alerts.iter().map(|a| a.size()).sum::<usize>()
             + self.description.as_ref().map_or(0, |n| n.len())
             + self.color.as_ref().map_or(0, |n| n.len())
             + self.time_zone.size()
@@ -168,6 +167,7 @@ impl CalendarPreferences {
 impl ArchivedCalendarPreferences {
     pub fn size(&self) -> usize {
         self.name.len()
+            + self.default_alerts.iter().map(|a| a.size()).sum::<usize>()
             + self.description.as_ref().map_or(0, |n| n.len())
             + self.color.as_ref().map_or(0, |n| n.len())
             + self.time_zone.size()
@@ -196,12 +196,12 @@ impl ArchivedTimezone {
 
 impl DefaultAlert {
     pub fn size(&self) -> usize {
-        self.alert.size() + self.id.len()
+        std::mem::size_of::<Self>() + self.id.len()
     }
 }
 
 impl ArchivedDefaultAlert {
     pub fn size(&self) -> usize {
-        self.alert.size() + self.id.len()
+        std::mem::size_of::<Self>() + self.id.len()
     }
 }

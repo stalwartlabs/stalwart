@@ -45,6 +45,16 @@ impl Response<'_> {
                 GetRequestMethod::AddressBook(request) => request.resolve_references(self)?,
                 GetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
                 GetRequestMethod::FileNode(request) => request.resolve_references(self)?,
+                GetRequestMethod::ShareNotification(request) => request.resolve_references(self)?,
+                GetRequestMethod::Calendar(request) => request.resolve_references(self)?,
+                GetRequestMethod::CalendarEvent(request) => request.resolve_references(self)?,
+                GetRequestMethod::CalendarEventNotification(request) => {
+                    request.resolve_references(self)?
+                }
+                GetRequestMethod::ParticipantIdentity(request) => {
+                    request.resolve_references(self)?
+                }
+                GetRequestMethod::PrincipalAvailability(_) => (),
             },
             RequestMethod::Set(request) => match request {
                 SetRequestMethod::Email(request) => request.resolve_references(self)?,
@@ -57,9 +67,19 @@ impl Response<'_> {
                 SetRequestMethod::AddressBook(request) => request.resolve_references(self)?,
                 SetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
                 SetRequestMethod::FileNode(request) => request.resolve_references(self)?,
+                SetRequestMethod::ShareNotification(request) => request.resolve_references(self)?,
+                SetRequestMethod::Calendar(request) => request.resolve_references(self)?,
+                SetRequestMethod::CalendarEvent(request) => request.resolve_references(self)?,
+                SetRequestMethod::CalendarEventNotification(request) => {
+                    request.resolve_references(self)?
+                }
+                SetRequestMethod::ParticipantIdentity(request) => {
+                    request.resolve_references(self)?
+                }
             },
             RequestMethod::Copy(request) => match request {
                 CopyRequestMethod::Email(request) => request.resolve_references(self)?,
+                CopyRequestMethod::CalendarEvent(request) => request.resolve_references(self)?,
                 CopyRequestMethod::ContactCard(request) => request.resolve_references(self)?,
                 CopyRequestMethod::Blob(_) => (),
             },
@@ -85,15 +105,9 @@ where
             Value::Element(element) => {
                 if let Some(id_ref) = element.as_id_ref() {
                     if let Some(id) = self.get_created_id(id_ref) {
-                        match E::try_from(id) {
-                            Ok(eid) => {
-                                *element = eid;
-                            }
-                            Err(_) => {
-                                return Err(SetError::invalid_properties().with_description(
-                                    format!("Id reference {id_ref:?} points to invalid type."),
-                                ));
-                            }
+                        if !element.try_set_id(id) {
+                            return Err(SetError::invalid_properties()
+                                .with_description("Id reference points to invalid type."));
                         }
                     } else {
                         return Err(SetError::not_found()
@@ -180,6 +194,7 @@ impl<'x, T: JmapObject> ResolveReference for SetRequest<'x, T> {
                         child_id: &*id,
                         graph: &mut graph,
                     },
+                    0,
                 )?;
             }
 
@@ -192,7 +207,7 @@ impl<'x, T: JmapObject> ResolveReference for SetRequest<'x, T> {
         // Resolve update references
         if let Some(update) = &mut self.update {
             for obj in update.values_mut() {
-                obj.eval_object_references(response, &mut Graph::None)?;
+                obj.eval_object_references(response, &mut Graph::None, 0)?;
             }
         }
 
@@ -215,7 +230,7 @@ impl<'x, T: JmapObject> ResolveReference for CopyRequest<'x, T> {
     fn resolve_references(&mut self, response: &Response<'_>) -> trc::Result<()> {
         // Resolve create references
         for (id, obj) in self.create.iter_mut() {
-            obj.eval_object_references(response, &mut Graph::None)?;
+            obj.eval_object_references(response, &mut Graph::None, 0)?;
 
             if let MaybeIdReference::Reference(ir) = id {
                 *id = MaybeIdReference::Id(response.eval_id_reference(ir)?);

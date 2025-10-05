@@ -75,7 +75,7 @@ pub struct MemberOf {
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct PermissionGrant {
-    pub permission: Permission,
+    pub permission: u32,
     pub grant: bool,
 }
 
@@ -109,18 +109,7 @@ pub enum Type {
 }
 
 #[derive(
-    rkyv::Archive,
-    rkyv::Deserialize,
-    rkyv::Serialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    EnumMethods,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, EnumMethods,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum Permission {
@@ -397,10 +386,41 @@ pub enum Permission {
     JmapFileNodeChanges,
     JmapFileNodeQuery,
     JmapFileNodeQueryChanges,
+
+    JmapPrincipalGetAvailability,
+    JmapPrincipalChanges,
+
+    JmapShareNotificationGet,
+    JmapShareNotificationSet,
+    JmapShareNotificationChanges,
+    JmapShareNotificationQuery,
+    JmapShareNotificationQueryChanges,
+
+    JmapCalendarGet,
+    JmapCalendarSet,
+    JmapCalendarChanges,
+
+    JmapCalendarEventGet,
+    JmapCalendarEventSet,
+    JmapCalendarEventChanges,
+    JmapCalendarEventQuery,
+    JmapCalendarEventQueryChanges,
+    JmapCalendarEventCopy,
+    JmapCalendarEventParse,
+
+    JmapCalendarEventNotificationGet,
+    JmapCalendarEventNotificationSet,
+    JmapCalendarEventNotificationChanges,
+    JmapCalendarEventNotificationQuery,
+    JmapCalendarEventNotificationQueryChanges,
+
+    JmapParticipantIdentityGet,
+    JmapParticipantIdentitySet,
+    JmapParticipantIdentityChanges,
     // WARNING: add new ids at the end (TODO: use static ids)
 }
 
-pub const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
+pub const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<u32>());
 pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
 
 pub const ROLE_ADMIN: u32 = u32::MAX;

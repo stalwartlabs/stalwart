@@ -83,7 +83,7 @@ impl PrincipalPropFind for Server {
                 response.set_namespace(Namespace::CardDav);
                 false
             }
-            Collection::Calendar | Collection::CalendarEvent | Collection::CalendarScheduling => {
+            Collection::Calendar | Collection::CalendarEvent | Collection::CalendarEventNotification => {
                 response.set_namespace(Namespace::CalDav);
                 false
             }

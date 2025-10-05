@@ -120,15 +120,6 @@ impl PrincipalType {
     }
 }
 
-impl serde::Serialize for PrincipalProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl FromStr for PrincipalProperty {
     type Err = ();
 
@@ -291,16 +282,13 @@ impl JmapObjectId for PrincipalValue {
     fn as_id_ref(&self) -> Option<&str> {
         None
     }
-}
 
-impl TryFrom<AnyId> for PrincipalValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        if let AnyId::Id(id) = value {
-            Ok(PrincipalValue::Id(id))
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = PrincipalValue::Id(id);
+            true
         } else {
-            Err(())
+            false
         }
     }
 }
@@ -316,5 +304,23 @@ impl Display for PrincipalFilter {
             PrincipalFilter::Timezone(_) => "timezone",
             PrincipalFilter::_T(other) => other,
         })
+    }
+}
+
+impl JmapObjectId for PrincipalProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
     }
 }

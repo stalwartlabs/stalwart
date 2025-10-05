@@ -16,7 +16,7 @@ pub struct ResultReference {
     pub path: JsonPointer<Null>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MaybeIdReference<V: FromStr> {
     Id(V),
     Reference(String),
@@ -86,13 +86,13 @@ impl<V: FromStr> FromStr for MaybeIdReference<V> {
     }
 }
 
-impl<V: serde::Serialize + FromStr> serde::Serialize for MaybeIdReference<V> {
+impl<V: Display + FromStr> serde::Serialize for MaybeIdReference<V> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         match self {
-            MaybeIdReference::Id(id) => id.serialize(serializer),
+            MaybeIdReference::Id(id) => serializer.serialize_str(&id.to_string()),
             MaybeIdReference::Reference(str) => serializer.serialize_str(&format!("#{}", str)),
             MaybeIdReference::Invalid(str) => serializer.serialize_str(str),
         }

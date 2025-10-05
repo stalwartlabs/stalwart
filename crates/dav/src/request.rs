@@ -10,7 +10,7 @@ use crate::{
         copy_move::CalendarCopyMoveRequestHandler, delete::CalendarDeleteRequestHandler,
         freebusy::CalendarFreebusyRequestHandler, get::CalendarGetRequestHandler,
         mkcol::CalendarMkColRequestHandler, proppatch::CalendarPropPatchRequestHandler,
-        query::CalendarQueryRequestHandler, scheduling::CalendarSchedulingHandler,
+        query::CalendarQueryRequestHandler, scheduling::CalendarEventNotificationHandler,
         update::CalendarUpdateRequestHandler,
     },
     card::{

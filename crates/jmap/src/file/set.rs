@@ -49,6 +49,8 @@ impl FileNodeSet for Server {
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
         let is_shared = access_token.is_shared(account_id);
 
+        let todo = "validate blob permissions";
+
         // Process creates
         let mut batch = BatchBuilder::new();
         'create: for (id, object) in request.unwrap_create() {

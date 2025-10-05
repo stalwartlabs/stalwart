@@ -804,12 +804,12 @@ async fn copy_container(
 
     let preference = calendar.preferences.into_iter().next().unwrap();
     calendar.name = new_name.to_string();
-    calendar.default_alerts.clear();
     calendar.acls.clear();
     calendar.preferences = vec![CalendarPreferences {
         account_id: to_account_id,
         name: preference.name,
         description: preference.description,
+        default_alerts: preference.default_alerts,
         sort_order: 0,
         color: preference.color,
         flags: 0,

@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     DavResourceName, DestroyArchive, RFC_3986,
-    calendar::{ArchivedCalendarScheduling, CalendarScheduling},
+    calendar::{ArchivedCalendarEventNotification, CalendarEventNotification},
     scheduling::{ItipMessages, event_cancel::itip_cancel},
 };
 use calcard::common::timezone::Tz;
@@ -47,14 +47,14 @@ impl ItipAutoExpunge for Server {
                 IterateParams::new(
                     IndexKey {
                         account_id,
-                        collection: Collection::CalendarScheduling.into(),
+                        collection: Collection::CalendarEventNotification.into(),
                         document_id: 0,
                         field: CalendarField::Created.into(),
                         key: 0u64.serialize(),
                     },
                     IndexKey {
                         account_id,
-                        collection: Collection::CalendarScheduling.into(),
+                        collection: Collection::CalendarEventNotification.into(),
                         document_id: u32::MAX,
                         field: CalendarField::Created.into(),
                         key: now().saturating_sub(hold_period).serialize(),
@@ -81,7 +81,7 @@ impl ItipAutoExpunge for Server {
         trc::event!(
             Purge(trc::PurgeEvent::AutoExpunge),
             AccountId = account_id,
-            Collection = Collection::CalendarScheduling.as_str(),
+            Collection = Collection::CalendarEventNotification.as_str(),
             Total = destroy_ids.len(),
         );
 
@@ -95,12 +95,16 @@ impl ItipAutoExpunge for Server {
         for document_id in destroy_ids {
             // Fetch event
             if let Some(event_) = self
-                .get_archive(account_id, Collection::CalendarScheduling, document_id)
+                .get_archive(
+                    account_id,
+                    Collection::CalendarEventNotification,
+                    document_id,
+                )
                 .await
                 .caused_by(trc::location!())?
             {
                 let event = event_
-                    .to_unarchived::<CalendarScheduling>()
+                    .to_unarchived::<CalendarEventNotification>()
                     .caused_by(trc::location!())?;
                 DestroyArchive(event)
                     .delete(&access_token, account_id, document_id, &mut batch)
@@ -238,7 +242,7 @@ impl Calendar {
     }
 }
 
-impl CalendarScheduling {
+impl CalendarEventNotification {
     pub fn insert<'x>(
         self,
         access_token: &AccessToken,
@@ -255,7 +259,7 @@ impl CalendarScheduling {
         // Prepare write batch
         batch
             .with_account_id(account_id)
-            .with_collection(Collection::CalendarScheduling)
+            .with_collection(Collection::CalendarEventNotification)
             .create_document(document_id)
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
@@ -421,7 +425,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
     }
 }
 
-impl DestroyArchive<Archive<&ArchivedCalendarScheduling>> {
+impl DestroyArchive<Archive<&ArchivedCalendarEventNotification>> {
     #[allow(clippy::too_many_arguments)]
     pub fn delete(
         self,
@@ -433,7 +437,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarScheduling>> {
         // Delete event
         batch
             .with_account_id(account_id)
-            .with_collection(Collection::CalendarScheduling)
+            .with_collection(Collection::CalendarEventNotification)
             .delete_document(document_id)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()

@@ -75,13 +75,25 @@ impl ChangesLookup for Server {
 
                 (SyncCollection::FileNode, true)
             }
-            _ => {
+            MethodObject::CalendarEvent => {
+                access_token.assert_has_access(request.account_id, Collection::Calendar)?;
+
+                (SyncCollection::Calendar, false)
+            }
+            MethodObject::CalendarEventNotification => {
                 access_token.assert_is_member(request.account_id)?;
 
+                (SyncCollection::CalendarEventNotification, false)
+            }
+            MethodObject::ShareNotification => {
+                access_token.assert_is_member(request.account_id)?;
+
+                (SyncCollection::ShareNotification, false)
+            }
+            _ => {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
             }
         };
-
         let max_changes = std::cmp::min(
             request
                 .max_changes
@@ -246,7 +258,18 @@ impl IntermediateChangesResponse {
             MethodObject::FileNode => {
                 ChangesResponseMethod::FileNode(transmute_response(self.response))
             }
-            MethodObject::Core
+            MethodObject::CalendarEvent => {
+                ChangesResponseMethod::CalendarEvent(transmute_response(self.response))
+            }
+            MethodObject::CalendarEventNotification => {
+                ChangesResponseMethod::CalendarEventNotification(transmute_response(self.response))
+            }
+            MethodObject::ShareNotification => {
+                ChangesResponseMethod::ShareNotification(transmute_response(self.response))
+            }
+            MethodObject::ParticipantIdentity
+            | MethodObject::Calendar
+            | MethodObject::Core
             | MethodObject::Blob
             | MethodObject::PushSubscription
             | MethodObject::SearchSnippet

@@ -20,7 +20,7 @@ pub fn enum_id(input: TokenStream) -> TokenStream {
 
     let variant_count = variants.len();
     let variant_names: Vec<_> = variants.iter().map(|v| &v.ident).collect();
-    let variant_ids: Vec<usize> = (0..variant_count).collect();
+    let variant_ids: Vec<u32> = (0..(variant_count as u32)).collect();
     let snake_case_names: Vec<String> = variant_names
         .iter()
         .map(|name| to_snake_case(&name.to_string()))
@@ -30,13 +30,13 @@ pub fn enum_id(input: TokenStream) -> TokenStream {
         impl #name {
             pub const COUNT: usize = #variant_count;
 
-            pub const fn id(&self) -> usize {
+            pub const fn id(&self) -> u32 {
                 match self {
                     #(#name::#variant_names => #variant_ids,)*
                 }
             }
 
-            pub fn from_id(id: usize) -> Option<Self> {
+            pub fn from_id(id: u32) -> Option<Self> {
                 match id {
                     #(#variant_ids => Some(#name::#variant_names),)*
                     _ => None,

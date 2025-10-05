@@ -281,17 +281,13 @@ impl JmapObjectId for AddressBookValue {
             None
         }
     }
-}
 
-impl TryFrom<AnyId> for AddressBookValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        if let AnyId::Id(id) = value {
-            Ok(AddressBookValue::Id(id))
-        } else {
-            Err(())
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(new_id) = new_id {
+            *self = AddressBookValue::Id(new_id);
+            return true;
         }
+        false
     }
 }
 
@@ -329,5 +325,35 @@ impl JmapRight for AddressBookRight {
 impl From<AddressBookRight> for AddressBookProperty {
     fn from(right: AddressBookRight) -> Self {
         AddressBookProperty::Rights(right)
+    }
+}
+
+impl JmapObjectId for AddressBookProperty {
+    fn as_id(&self) -> Option<Id> {
+        if let AddressBookProperty::IdValue(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        if let AddressBookProperty::IdValue(id) = self {
+            Some(AnyId::Id(*id))
+        } else {
+            None
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(new_id) = new_id {
+            *self = AddressBookProperty::IdValue(new_id);
+            return true;
+        }
+        false
     }
 }

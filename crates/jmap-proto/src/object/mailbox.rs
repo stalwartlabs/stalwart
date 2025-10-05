@@ -242,15 +242,6 @@ impl FromStr for MailboxProperty {
     }
 }
 
-impl serde::Serialize for MailboxProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl JmapObject for Mailbox {
     type Property = MailboxProperty;
 
@@ -444,16 +435,13 @@ impl JmapObjectId for MailboxValue {
             None
         }
     }
-}
 
-impl TryFrom<AnyId> for MailboxValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        if let AnyId::Id(id) = value {
-            Ok(MailboxValue::Id(id))
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = MailboxValue::Id(id);
+            true
         } else {
-            Err(())
+            false
         }
     }
 }
@@ -508,5 +496,36 @@ impl JmapRight for MailboxRight {
 impl From<MailboxRight> for MailboxProperty {
     fn from(right: MailboxRight) -> Self {
         MailboxProperty::Rights(right)
+    }
+}
+
+impl JmapObjectId for MailboxProperty {
+    fn as_id(&self) -> Option<Id> {
+        if let MailboxProperty::IdValue(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        if let MailboxProperty::IdValue(id) = self {
+            Some(AnyId::Id(*id))
+        } else {
+            None
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = MailboxProperty::IdValue(id);
+            true
+        } else {
+            false
+        }
     }
 }

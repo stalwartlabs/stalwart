@@ -77,6 +77,7 @@ pub enum EmailProperty {
     // Other
     Keyword(Keyword),
     IdValue(Id),
+    IdReference(String),
     Pointer(JsonPointer<EmailProperty>),
 }
 
@@ -112,7 +113,11 @@ impl Property for EmailProperty {
         if let Some(Key::Property(key)) = key {
             match key.patch_or_prop() {
                 EmailProperty::Keywords => EmailProperty::Keyword(Keyword::parse(value)).into(),
-                EmailProperty::MailboxIds => Id::from_str(value).ok().map(EmailProperty::IdValue),
+                EmailProperty::MailboxIds => match parse_ref(value) {
+                    MaybeReference::Value(v) => Some(EmailProperty::IdValue(v)),
+                    MaybeReference::Reference(v) => Some(EmailProperty::IdReference(v)),
+                    MaybeReference::ParseError => None,
+                },
                 _ => EmailProperty::parse(value, allow_patch),
             }
         } else {
@@ -166,6 +171,7 @@ impl Property for EmailProperty {
             EmailProperty::Keyword(keyword) => return keyword.to_string().into(),
             EmailProperty::IdValue(id) => return id.to_string().into(),
             EmailProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
+            EmailProperty::IdReference(r) => return format!("#{r}").into(),
         }
         .into()
     }
@@ -477,15 +483,6 @@ impl<'de> DeserializeArguments<'de> for EmailParseArguments {
         );
 
         Ok(())
-    }
-}
-
-impl serde::Serialize for EmailProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
     }
 }
 
@@ -885,16 +882,17 @@ impl JmapObjectId for EmailValue {
             None
         }
     }
-}
 
-impl TryFrom<AnyId> for EmailValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(EmailValue::Id(id)),
-            AnyId::BlobId(id) => Ok(EmailValue::BlobId(id)),
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        match new_id {
+            AnyId::Id(id) => {
+                *self = EmailValue::Id(id);
+            }
+            AnyId::BlobId(id) => {
+                *self = EmailValue::BlobId(id);
+            }
         }
+        true
     }
 }
 
@@ -913,5 +911,56 @@ impl From<BlobId> for EmailValue {
 impl From<UTCDate> for EmailValue {
     fn from(date: UTCDate) -> Self {
         EmailValue::Date(date)
+    }
+}
+
+impl JmapObjectId for EmailProperty {
+    fn as_id(&self) -> Option<Id> {
+        if let EmailProperty::IdValue(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        if let EmailProperty::IdValue(id) = self {
+            Some(AnyId::Id(*id))
+        } else {
+            None
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        match self {
+            EmailProperty::IdReference(r) => Some(r),
+            EmailProperty::Pointer(value) => {
+                let value = value.as_slice();
+                match (value.first(), value.get(1)) {
+                    (
+                        Some(JsonPointerItem::Key(Key::Property(EmailProperty::MailboxIds))),
+                        Some(JsonPointerItem::Key(Key::Property(EmailProperty::IdReference(r)))),
+                    ) => Some(r),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            if let EmailProperty::Pointer(value) = self {
+                let value = value.as_mut_slice();
+                if let Some(value) = value.get_mut(1) {
+                    *value = JsonPointerItem::Key(Key::Property(EmailProperty::IdValue(id)));
+                    return true;
+                }
+            } else {
+                *self = EmailProperty::IdValue(id);
+                return true;
+            }
+        }
+        false
     }
 }

@@ -14,7 +14,7 @@ use crate::{
     response::{ChangesResponseMethod, GetResponseMethod, Response, ResponseMethod},
 };
 use compact_str::format_compact;
-use jmap_tools::{Element, Property, Value};
+use jmap_tools::{Element, Key, Property, Value};
 use types::id::Id;
 
 impl Response<'_> {
@@ -66,6 +66,24 @@ impl Response<'_> {
                         GetResponseMethod::FileNode(response) => {
                             response.eval_jptr(path, &mut results)
                         }
+                        GetResponseMethod::Calendar(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        GetResponseMethod::CalendarEvent(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        GetResponseMethod::CalendarEventNotification(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        GetResponseMethod::ParticipantIdentity(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        GetResponseMethod::ShareNotification(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        GetResponseMethod::PrincipalAvailability(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
                     },
                     ResponseMethod::Changes(response) => match response {
                         ChangesResponseMethod::Email(response) => {
@@ -93,6 +111,15 @@ impl Response<'_> {
                             response.eval_jptr(path, &mut results)
                         }
                         ChangesResponseMethod::FileNode(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        ChangesResponseMethod::CalendarEvent(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        ChangesResponseMethod::CalendarEventNotification(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
+                        ChangesResponseMethod::ShareNotification(response) => {
                             response.eval_jptr(path, &mut results)
                         }
                     },
@@ -134,39 +161,52 @@ pub(crate) trait EvalObjectReferences {
         &mut self,
         response: &Response<'_>,
         graph: &mut Graph<'_>,
+        depth: usize,
     ) -> trc::Result<()>;
 }
 
 impl<'x, P, E> EvalObjectReferences for Value<'x, P, E>
 where
-    P: Property,
-    E: Element<Property = P> + JmapObjectId + TryFrom<AnyId>,
+    P: Property + JmapObjectId,
+    E: Element<Property = P> + JmapObjectId,
 {
     fn eval_object_references(
         &mut self,
         response: &Response<'_>,
         graph: &mut Graph<'_>,
+        depth: usize,
     ) -> trc::Result<()> {
         let Value::Object(obj) = self else {
             return Ok(());
         };
 
-        for (_, value) in obj.as_mut_vec() {
+        for (key, value) in obj.as_mut_vec() {
+            // Resolve patch with references (e.g. mailboxIds/#idRef)
+            if depth == 0
+                && let Key::Property(property) = key
+                && let Some(id_ref) = property.as_id_ref()
+            {
+                if let Some(id) = response.created_ids.get(id_ref) {
+                    if !property.try_set_id(id.clone()) {
+                        return Err(trc::JmapEvent::InvalidResultReference
+                            .into_err()
+                            .details("Id reference points to invalid type."));
+                    }
+                } else {
+                    return Err(trc::JmapEvent::InvalidResultReference
+                        .into_err()
+                        .details(format_compact!("Id reference {id_ref:?} not found.")));
+                }
+            }
+
             match value {
                 Value::Element(element) => {
                     if let Some(id_ref) = element.as_id_ref() {
                         if let Some(id) = response.created_ids.get(id_ref) {
-                            match E::try_from(id.clone()) {
-                                Ok(eid) => {
-                                    *element = eid;
-                                }
-                                Err(_) => {
-                                    return Err(trc::JmapEvent::InvalidResultReference
-                                        .into_err()
-                                        .details(format_compact!(
-                                            "Id reference {id_ref:?} points to invalid type."
-                                        )));
-                                }
+                            if !element.try_set_id(id.clone()) {
+                                return Err(trc::JmapEvent::InvalidResultReference
+                                    .into_err()
+                                    .details("Id reference points to invalid type."));
                             }
                         } else if let Graph::Some { child_id, graph } = graph {
                             graph
@@ -180,9 +220,32 @@ where
                         }
                     }
                 }
-                Value::Array(items) => {
+                Value::Array(items) if depth == 0 => {
+                    // Resolve references in arrays (e.g. emailIds: [#idRef1, #idRef2])
                     for item in items {
-                        item.eval_object_references(response, graph)?;
+                        item.eval_object_references(response, graph, depth + 1)?;
+                    }
+                }
+                Value::Object(items) if depth == 0 => {
+                    // Resolve references in JMAP sets (e.g. mailboxIds: { "#idRef1": true, "#idRef2": true })
+                    for (key, _) in items.as_mut_vec() {
+                        if let Key::Property(property) = key
+                            && let Some(id_ref) = property.as_id_ref()
+                        {
+                            if let Some(id) = response.created_ids.get(id_ref) {
+                                if !property.try_set_id(id.clone()) {
+                                    return Err(trc::JmapEvent::InvalidResultReference
+                                        .into_err()
+                                        .details("Id reference points to invalid type."));
+                                }
+                            } else {
+                                return Err(trc::JmapEvent::InvalidResultReference
+                                    .into_err()
+                                    .details(format_compact!(
+                                        "Id reference {id_ref:?} not found."
+                                    )));
+                            }
+                        }
                     }
                 }
                 _ => {}

@@ -110,9 +110,11 @@ impl Server {
                             // Add permissions
                             for permission in principal.permissions() {
                                 if permission.grant {
-                                    role_permissions.enabled.set(permission.permission.id());
+                                    role_permissions.enabled.set(permission.permission as usize);
                                 } else {
-                                    role_permissions.disabled.set(permission.permission.id());
+                                    role_permissions
+                                        .disabled
+                                        .set(permission.permission as usize);
                                 }
                             }
 
@@ -168,7 +170,7 @@ fn tenant_admin_permissions() -> Arc<RolePermissions> {
     let mut permissions = RolePermissions::default();
 
     for permission_id in 0..Permission::COUNT {
-        let permission = Permission::from_id(permission_id).unwrap();
+        let permission = Permission::from_id(permission_id as u32).unwrap();
         if permission.is_tenant_admin_permission() {
             permissions.enabled.set(permission_id);
         }
@@ -181,7 +183,7 @@ fn user_permissions() -> Arc<RolePermissions> {
     let mut permissions = RolePermissions::default();
 
     for permission_id in 0..Permission::COUNT {
-        let permission = Permission::from_id(permission_id).unwrap();
+        let permission = Permission::from_id(permission_id as u32).unwrap();
         if permission.is_user_permission() {
             permissions.enabled.set(permission_id);
         }

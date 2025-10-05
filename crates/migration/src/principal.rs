@@ -236,8 +236,8 @@ impl FromLegacy for Principal {
             let is_disabled = field == PrincipalField::DisabledPermissions;
             if let Some(ids) = legacy.take_int_array(field) {
                 for id in ids {
-                    if let Some(permission) = Permission::from_id(id as usize) {
-                        permissions.insert(permission, is_disabled);
+                    if Permission::from_id(id as u32).is_some() {
+                        permissions.insert(id as u32, is_disabled);
                     }
                 }
             }

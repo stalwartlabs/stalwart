@@ -7,7 +7,7 @@ resolver = "2"
 [dependencies]
 utils = { path = "../utils" }
 trc = { path = "../trc" }
-jmap-tools = { version = "0.1" }
+jmap-tools = { path = "/Users/me/code/jmap-tool" }
 hashify = "0.2"
 serde = { version = "1.0", features = ["derive"]}
 rkyv = { version = "0.8.10", features = ["little_endian"] }

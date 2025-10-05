@@ -51,9 +51,11 @@ impl Server {
         // Add principal permissions
         for permission in principal.permissions() {
             if permission.grant {
-                role_permissions.enabled.set(permission.permission.id());
+                role_permissions.enabled.set(permission.permission as usize);
             } else {
-                role_permissions.disabled.set(permission.permission.id());
+                role_permissions
+                    .disabled
+                    .set(permission.permission as usize);
             }
         }
 
@@ -390,7 +392,7 @@ impl AccessToken {
     }
 
     pub fn with_permission(mut self, permission: Permission) -> Self {
-        self.permissions.set(permission.id());
+        self.permissions.set(permission.id() as usize);
         self
     }
 
@@ -445,7 +447,7 @@ impl AccessToken {
 
     #[inline(always)]
     pub fn has_permission(&self, permission: Permission) -> bool {
-        self.permissions.get(permission.id())
+        self.permissions.get(permission.id() as usize)
     }
 
     pub fn assert_has_permission(&self, permission: Permission) -> trc::Result<bool> {
@@ -470,7 +472,7 @@ impl AccessToken {
                 let item = USIZE_MASK - bytes.leading_zeros();
                 bytes ^= 1 << item;
                 if let Some(permission) =
-                    Permission::from_id((block_num * USIZE_BITS) + item as usize)
+                    Permission::from_id(((block_num * USIZE_BITS) + item as usize) as u32)
                 {
                     permissions.push(permission);
                 }

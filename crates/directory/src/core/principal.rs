@@ -196,6 +196,7 @@ impl Principal {
     }
 
     pub fn add_permission(&mut self, permission: Permission, grant: bool) {
+        let permission = permission.id();
         if let Some(permissions) = self.data.iter_mut().find_map(|item| {
             if let PrincipalData::Permissions(permissions) = item {
                 Some(permissions)
@@ -232,6 +233,7 @@ impl Principal {
     }
 
     pub fn remove_permission(&mut self, permission: Permission, grant: bool) {
+        let permission = permission.id();
         if let Some(permissions) = self.data.iter_mut().find_map(|item| {
             if let PrincipalData::Permissions(permissions) = item {
                 Some(permissions)
@@ -1323,7 +1325,7 @@ impl<'de> serde::Deserialize<'de> for StringOrMany {
 
 impl Permission {
     pub fn all() -> impl Iterator<Item = Permission> {
-        (0..Permission::COUNT).filter_map(Permission::from_id)
+        (0..Permission::COUNT as u32).filter_map(Permission::from_id)
     }
 
     pub const fn is_user_permission(&self) -> bool {
@@ -1480,6 +1482,31 @@ impl Permission {
                 | Permission::JmapFileNodeChanges
                 | Permission::JmapFileNodeQuery
                 | Permission::JmapFileNodeQueryChanges
+                | Permission::JmapPrincipalGetAvailability
+                | Permission::JmapPrincipalChanges
+                | Permission::JmapShareNotificationGet
+                | Permission::JmapShareNotificationSet
+                | Permission::JmapShareNotificationChanges
+                | Permission::JmapShareNotificationQuery
+                | Permission::JmapShareNotificationQueryChanges
+                | Permission::JmapCalendarGet
+                | Permission::JmapCalendarSet
+                | Permission::JmapCalendarChanges
+                | Permission::JmapCalendarEventGet
+                | Permission::JmapCalendarEventSet
+                | Permission::JmapCalendarEventChanges
+                | Permission::JmapCalendarEventQuery
+                | Permission::JmapCalendarEventQueryChanges
+                | Permission::JmapCalendarEventCopy
+                | Permission::JmapCalendarEventParse
+                | Permission::JmapCalendarEventNotificationGet
+                | Permission::JmapCalendarEventNotificationSet
+                | Permission::JmapCalendarEventNotificationChanges
+                | Permission::JmapCalendarEventNotificationQuery
+                | Permission::JmapCalendarEventNotificationQueryChanges
+                | Permission::JmapParticipantIdentityGet
+                | Permission::JmapParticipantIdentitySet
+                | Permission::JmapParticipantIdentityChanges
         )
     }
 

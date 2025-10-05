@@ -6,7 +6,10 @@
 
 use std::fmt;
 
-use crate::{object::file_node::FileNodeComparator, response::serialize::serialize_hex};
+use crate::{
+    object::file_node::FileNodeComparator, response::serialize::serialize_hex, types::date::UTCDate,
+};
+use calcard::icalendar::ICalendarDuration;
 use serde::{Deserialize, Deserializer};
 use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
@@ -60,22 +63,28 @@ pub enum Capability {
     VacationResponse = 1 << 3,
     #[serde(rename(serialize = "urn:ietf:params:jmap:contacts"))]
     Contacts = 1 << 4,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:contacts:parse"))]
+    ContactsParse = 1 << 5,
     #[serde(rename(serialize = "urn:ietf:params:jmap:calendars"))]
-    Calendars = 1 << 5,
+    Calendars = 1 << 6,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:calendars:parse"))]
+    CalendarsParse = 1 << 7,
     #[serde(rename(serialize = "urn:ietf:params:jmap:websocket"))]
-    WebSocket = 1 << 6,
+    WebSocket = 1 << 8,
     #[serde(rename(serialize = "urn:ietf:params:jmap:sieve"))]
-    Sieve = 1 << 7,
+    Sieve = 1 << 9,
     #[serde(rename(serialize = "urn:ietf:params:jmap:blob"))]
-    Blob = 1 << 8,
+    Blob = 1 << 10,
     #[serde(rename(serialize = "urn:ietf:params:jmap:quota"))]
-    Quota = 1 << 9,
+    Quota = 1 << 11,
     #[serde(rename(serialize = "urn:ietf:params:jmap:principals"))]
-    Principals = 1 << 10,
+    Principals = 1 << 12,
     #[serde(rename(serialize = "urn:ietf:params:jmap:principals:owner"))]
-    PrincipalsOwner = 1 << 11,
+    PrincipalsOwner = 1 << 13,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:principals:availability"))]
+    PrincipalsAvailability = 1 << 14,
     #[serde(rename(serialize = "urn:ietf:params:jmap:filenode"))]
-    FileNode = 1 << 12,
+    FileNode = 1 << 15,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -94,8 +103,11 @@ pub enum Capabilities {
     SieveSession(SieveSessionCapabilities),
     Blob(BlobCapabilities),
     Contacts(ContactsCapabilities),
-    Principals(PrincipalsCapabilities),
-    PrincipalsOwner(PrincipalsOwnerCapabilities),
+    Principals(PrincipalCapabilities),
+    PrincipalsOwner(PrincipalOwnerCapabilities),
+    PrincipalsAvailability(PrincipalAvailabilityCapabilities),
+    PrincipalCalendar(PrincipalCalendarCapabilities),
+    Calendar(CalendarCapabilities),
     FileNode(FileNodeCapabilities),
     Empty(EmptyCapabilities),
 }
@@ -189,6 +201,22 @@ pub struct BlobCapabilities {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+pub struct CalendarCapabilities {
+    #[serde(rename(serialize = "maxCalendarsPerEvent"))]
+    pub max_calendars_per_event: Option<usize>,
+    #[serde(rename(serialize = "minDateTime"))]
+    pub min_date_time: UTCDate,
+    #[serde(rename(serialize = "maxDateTime"))]
+    pub max_date_time: UTCDate,
+    #[serde(rename(serialize = "maxExpandedQueryDuration"))]
+    pub max_expanded_query_duration: String,
+    #[serde(rename(serialize = "maxParticipantsPerEvent"))]
+    pub max_participants_per_event: Option<usize>,
+    #[serde(rename(serialize = "mayCreateCalendar"))]
+    pub may_create_calendar: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ContactsCapabilities {
     #[serde(rename(serialize = "maxAddressBooksPerCard"))]
     pub max_address_books_per_card: Option<usize>,
@@ -197,18 +225,36 @@ pub struct ContactsCapabilities {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct PrincipalsCapabilities {
+pub struct PrincipalAvailabilityCapabilities {
+    #[serde(rename(serialize = "maxAvailabilityDuration"))]
+    pub max_availability_duration: ICalendarDuration,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalCapabilities {
     #[serde(rename(serialize = "currentUserPrincipalId"))]
     pub current_user_principal_id: Option<Id>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct PrincipalsOwnerCapabilities {
+pub struct PrincipalOwnerCapabilities {
     #[serde(rename(serialize = "accountIdForPrincipal"))]
     pub account_id_for_principal: Id,
 
     #[serde(rename(serialize = "principalId"))]
     pub principal_id: Id,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalCalendarCapabilities {
+    #[serde(rename(serialize = "accountIdForPrincipal"))]
+    pub account_id_for_principal: Option<Id>,
+    #[serde(rename(serialize = "mayGetAvailability"))]
+    pub may_get_availability: bool,
+    #[serde(rename(serialize = "mayShareWith"))]
+    pub may_share_with: bool,
+    #[serde(rename(serialize = "calendarAddress"))]
+    pub calendar_address: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -379,7 +425,10 @@ impl Capability {
             "urn:ietf:params:jmap:quota" => Capability::Quota,
             "urn:ietf:params:jmap:principals" => Capability::Principals,
             "urn:ietf:params:jmap:principals:owner" => Capability::PrincipalsOwner,
-            "urn:ietf:params:jmap:filenode" => Capability::FileNode
+            "urn:ietf:params:jmap:filenode" => Capability::FileNode,
+            "urn:ietf:params:jmap:principals:availability" => Capability::PrincipalsAvailability,
+            "urn:ietf:params:jmap:contacts:parse" => Capability::ContactsParse,
+            "urn:ietf:params:jmap:calendars:parse" => Capability::CalendarsParse,
         )
     }
 }

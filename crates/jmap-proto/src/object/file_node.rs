@@ -222,15 +222,6 @@ impl<'x> DeserializeArguments<'x> for FileNodeQueryArguments {
     }
 }
 
-impl serde::Serialize for FileNodeProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl FromStr for FileNodeProperty {
     type Err = ();
 
@@ -491,15 +482,13 @@ impl JmapObjectId for FileNodeValue {
             None
         }
     }
-}
 
-impl TryFrom<AnyId> for FileNodeValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(FileNodeValue::Id(id)),
-            AnyId::BlobId(blob_id) => Ok(FileNodeValue::BlobId(blob_id)),
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = FileNodeValue::Id(id);
+            true
+        } else {
+            false
         }
     }
 }
@@ -585,6 +574,37 @@ impl TryFrom<FileNodeProperty> for FileNodeRight {
             Ok(right)
         } else {
             Err(())
+        }
+    }
+}
+
+impl JmapObjectId for FileNodeProperty {
+    fn as_id(&self) -> Option<Id> {
+        if let FileNodeProperty::IdValue(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        if let FileNodeProperty::IdValue(id) = self {
+            Some(AnyId::Id(*id))
+        } else {
+            None
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = FileNodeProperty::IdValue(id);
+            true
+        } else {
+            false
         }
     }
 }

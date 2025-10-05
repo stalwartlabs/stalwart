@@ -11,7 +11,7 @@ pub mod index;
 pub mod itip;
 pub mod storage;
 
-use calcard::icalendar::ICalendar;
+use calcard::icalendar::{ICalendar, ICalendarDuration};
 use common::{DavName, auth::AccessToken};
 use dav_proto::schema::request::DeadProperty;
 use types::acl::AclGrant;
@@ -22,7 +22,6 @@ use types::acl::AclGrant;
 pub struct Calendar {
     pub name: String,
     pub preferences: Vec<CalendarPreferences>,
-    pub default_alerts: Vec<DefaultAlert>,
     pub acls: Vec<AclGrant>,
     pub dead_properties: DeadProperty,
     pub created: i64,
@@ -46,6 +45,7 @@ pub struct CalendarPreferences {
     pub color: Option<String>,
     pub flags: u16,
     pub time_zone: Timezone,
+    pub default_alerts: Vec<DefaultAlert>,
 }
 
 #[derive(
@@ -54,9 +54,13 @@ pub struct CalendarPreferences {
 pub struct DefaultAlert {
     pub account_id: u32,
     pub id: String,
-    pub alert: ICalendar,
-    pub with_time: bool,
+    pub offset: ICalendarDuration,
+    pub flags: u16,
 }
+
+pub const ALERT_WITH_TIME: u16 = 1;
+pub const ALERT_EMAIL: u16 = 1 << 1;
+pub const ALERT_RELATIVE_TO_END: u16 = 1 << 2;
 
 pub const SCHEDULE_INBOX_ID: u32 = u32::MAX - 1;
 pub const SCHEDULE_OUTBOX_ID: u32 = u32::MAX - 2;
@@ -86,7 +90,7 @@ pub struct CalendarEvent {
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
-pub struct CalendarScheduling {
+pub struct CalendarEventNotification {
     pub itip: ICalendar,
     pub event_id: Option<u32>,
     pub flags: u16,
