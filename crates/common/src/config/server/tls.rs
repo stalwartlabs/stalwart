@@ -250,6 +250,20 @@ fn build_dns_updater(config: &mut Config, acme_id: &str) -> Option<DnsUpdater> {
             )
         })
         .ok(),
+        "linode" => DnsUpdater::new_linode(
+            config
+                .value_require(("acme", acme_id, "secret"))?
+                .trim()
+                .to_string(),
+            timeout.into(),
+        )
+        .map_err(|err| {
+            config.new_build_error(
+                ("acme", acme_id, "provider"),
+                format!("Failed to create Linode DNS updater: {err}"),
+            )
+        })
+        .ok(),
         "digitalocean" => DnsUpdater::new_digitalocean(
             config
                 .value_require(("acme", acme_id, "secret"))?
