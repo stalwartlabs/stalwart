@@ -11,6 +11,7 @@ calendar.alarm_subject_prefix:
   nl: Melding
   da: Notifikation
   ca: Notificació
+  sv: Notifikation
 
 calendar.alarm_header:
   en: You have an upcoming event
@@ -22,6 +23,7 @@ calendar.alarm_header:
   nl: U heeft een aankomende gebeurtenis
   da: Du har en kommende begivenhed
   ca: Tens un esdeveniment d'aquí poc
+  sv: Du har en kommande händelse
 
 calendar.alarm_footer:
   en: You are receiving this email because you have enabled calendar notifications. To stop receiving these emails, login to the self-service portal and disable event notifications.
@@ -33,6 +35,7 @@ calendar.alarm_footer:
   nl: U ontvangt deze e-mail omdat u kalendernotificaties heeft ingeschakeld. Om deze e-mails niet meer te ontvangen, logt u in op de selfservice-portal en schakelt u gebeurtenismeldingen uit.
   da: Du modtager denne e-mail, fordi du har aktiveret kalendernotifikationer. Du kan deaktivere notifikationer i selvbetjeningsportalen.
   ca: Estàs revent aquest correu perquè tens habilitada les notificacions del calendari. Per no rebre més aquests correus, identificat al portal d'autoservei i desactiva les notificacions d'esdeveniments.
+  sv: Du får det här mejlet för att du har slagit på kalendernotifikationer. För att sluta få dessa mejl, stäng av inställningen i självbetjäningsportalen.
 
 calendar.alarm_open:
   en: View Event
@@ -44,6 +47,7 @@ calendar.alarm_open:
   nl: Gebeurtenis Bekijken
   da: Vis begivenhed
   ca: Veure esdeveniment
+  sv: Visa händelse
 
 calendar.organizer:
   en: Organizer
@@ -55,6 +59,7 @@ calendar.organizer:
   nl: Organisator
   da: Arrangør
   ca: Organitzador
+  sv: Arrangör
 
 calendar.attendees:
   en: Guests
@@ -66,6 +71,7 @@ calendar.attendees:
   nl: Gasten
   da: Gæster
   ca: Invitats
+  sv: Gäster
 
 calendar.start:
   en: Start
@@ -77,6 +83,7 @@ calendar.start:
   nl: Begin
   da: Start
   ca: Inici
+  sv: Start
 
 calendar.end:
   en: End
@@ -88,6 +95,7 @@ calendar.end:
   nl: Einde
   da: Slut
   ca: Fi
+  sv: Slut
 
 calendar.location:
   en: Location
@@ -99,6 +107,7 @@ calendar.location:
   nl: Locatie
   da: Lokation
   ca: Lloc
+  sv: Plats
 
 calendar.date_template:
   # English: "Sun May 25, 2025 9am"
@@ -119,6 +128,8 @@ calendar.date_template:
   da: "%a %-d. %b %Y kl. %-H"
   # Catalan: "diu 25 mai 2025 9h" (day month year hour)
   ca: "%a %-d %b %Y %-Hh"
+  # Svenska: "sön 25 maj 2025 kl. 9" (weekday date month year hour)
+  sv: "%a %-d %b %Y kl. %-H"
 
 calendar.date_template_long:
   # English: "Sunday May 25, 2025 9am"
@@ -139,6 +150,8 @@ calendar.date_template_long:
   da: "%A %-d. %B %Y kl. %-H"
   # Catalan: "diumenge 25 maig 2025 9h" (day month year hour)
   ca: "%A %-d %B %Y %-Hh"
+  # Svenska: "söndag 25 maj 2025 kl. 9" (weekday date month year hour)
+  sv: "%A %-d. %B %Y kl. %-H"
 
 calendar.invitation:
   en: Invitation
@@ -150,6 +163,7 @@ calendar.invitation:
   nl: Uitnodiging
   da: Invitation
   ca: Invitació
+  sv: Inbjudan
 
 calendar.updated_invitation:
   en: Updated invitation
@@ -161,6 +175,7 @@ calendar.updated_invitation:
   nl: Bijgewerkte uitnodiging
   da: Opdateret invitation
   ca: Invitació actualitzada
+  sv: Uppdaterad inbjudan
 
 calendar.event_updated:
   en: This event has been updated
@@ -172,6 +187,7 @@ calendar.event_updated:
   nl: Dit evenement is bijgewerkt
   da: Denne begivenhed er blevet opdateret
   ca: Aquest esdeveniment s'ha actualitzat
+  sv: Den här händelsen har blivit uppdaterad
 
 calendar.cancelled:
   en: Cancelled
@@ -182,7 +198,8 @@ calendar.cancelled:
   pt: Cancelado
   nl: Geannuleerd
   da: Aflyst
-  ca: Cancel·lat 
+  ca: Cancel·lat
+  sv: Inställd
 
 calendar.event_cancelled:
   en: This event has been canceled
@@ -194,6 +211,7 @@ calendar.event_cancelled:
   nl: Dit evenement is geannuleerd
   da: Denne begivenhed er blevet aflyst
   ca: Aquest esdeveniment s'ha cancel·lat
+  sv: Den här händelsen har blivit inställd
 
 calendar.accepted:
   en: Accepted
@@ -205,6 +223,7 @@ calendar.accepted:
   nl: Geaccepteerd
   da: Accepteret
   ca: Acceptat
+  sv: Accepterat
 
 calendar.participant_accepted:
   en: Participant $name accepted the invitation
@@ -216,6 +235,7 @@ calendar.participant_accepted:
   nl: Deelnemer $name heeft de uitnodiging geaccepteerd
   da: Deltager $name accepterede invitationen
   ca: El participatn $name a acceptat la invitació
+  sv: Deltagaren $name har tackat ja till inbjudan
 
 calendar.declined:
   en: Declined
@@ -227,6 +247,7 @@ calendar.declined:
   nl: Afgewezen
   da: Afvist
   ca: Rebutjat
+  sv: Avböjt
 
 calendar.participant_declined:
   en: Participant $name declined the invitation
@@ -238,6 +259,7 @@ calendar.participant_declined:
   nl: Deelnemer $name heeft de uitnodiging afgewezen
   da: Deltager $name afslog invitationen
   ca: El participatn $name ha rebutjat la invitació
+  sv: Deltagaren $name har tackat nej till inbjudan
 
 calendar.tentative:
   en: Tentative
@@ -249,6 +271,7 @@ calendar.tentative:
   nl: Voorlopig
   da: Foreløbig
   ca: Provisional
+  sv: Möjligen
 
 calendar.participant_tentative:
   en: Participant $name tentatively accepted the invitation
@@ -260,6 +283,7 @@ calendar.participant_tentative:
   nl: Deelnemer $name heeft de uitnodiging voorlopig geaccepteerd
   da: Deltager $name accepterede foreløbigt invitationen
   ca: El participan $name accepta provisionalment la invitació a l'esdeveniment
+  sv: Deltagaren $name har preliminärt tackat ja till inbjudan
 
 calendar.delegated:
   en: Delegated
@@ -271,6 +295,7 @@ calendar.delegated:
   nl: Gedelegeerd
   da: Delegeret
   ca: Delegat
+  sv: Delegerat
 
 calendar.participant_delegated:
   en: Participant $name delegated the invitation
@@ -282,6 +307,7 @@ calendar.participant_delegated:
   nl: Deelnemer $name heeft de uitnodiging gedelegeerd
   da: Deltager $name delegerede invitationen
   ca: El participant $name ha delegat la invitació
+  sv: Deltagaren $name delegerade inbjudan
 
 calendar.reply:
   en: Reply
@@ -293,6 +319,7 @@ calendar.reply:
   nl: Antwoord
   da: Svar
   ca: Resposta
+  sv: Svar
 
 calendar.participant_reply:
   en: Participant $name replied to the invitation
@@ -304,6 +331,7 @@ calendar.participant_reply:
   nl: Deelnemer $name heeft gereageerd op de uitnodiging
   da: Deltager $name svarede på invitationen
   ca: El participant $name ha respost a la invitació
+  sv: Deltagaren $name har svarat på inbjudan
 
 calendar.summary:
   en: Summary
@@ -315,6 +343,7 @@ calendar.summary:
   nl: Samenvatting
   da: Resumé
   ca: Resum
+  sv: Sammanfattning
 
 calendar.description:
   en: Description
@@ -326,6 +355,7 @@ calendar.description:
   nl: Beschrijving
   da: Beskrivelse
   ca: Descripció
+  sv: Beskrivning
 
 calendar.when:
   en: When
@@ -337,6 +367,7 @@ calendar.when:
   nl: Wanneer
   da: Hvornår
   ca: Quan
+  sv: När
 
 calendar.changed:
   en: Changed
@@ -348,6 +379,7 @@ calendar.changed:
   nl: Gewijzigd
   da: Ændret
   ca: Canviat
+  sv: Ändrat
 
 calendar.reply_as:
   en: Reply as $name for this event series
@@ -359,6 +391,7 @@ calendar.reply_as:
   nl: Antwoord als $name voor deze evenementenreeks
   da: Svar som $name for denne begivenhedsserie
   ca: Respondre com a $name per aquesta serie d'esdeveniments
+  sv: Svara som $name på den här inbjudan
 
 calendar.yes:
   en: Yes
@@ -370,6 +403,7 @@ calendar.yes:
   nl: Ja
   da: Ja
   ca: Sí
+  sv: Ja
 
 calendar.no:
   en: No
@@ -381,6 +415,7 @@ calendar.no:
   nl: Nee
   da: Nej
   ca: No
+  sv: Nej
 
 calendar.maybe:
   en: Maybe
@@ -392,6 +427,7 @@ calendar.maybe:
   nl: Misschien
   da: Måske
   ca: Potser
+  sv: Kanske
 
 calendar.imip_footer_1:
   en: You're receiving this e-mail as you're listed as a participant for this event.
@@ -403,6 +439,7 @@ calendar.imip_footer_1:
   nl: U ontvangt deze e-mail omdat u staat vermeld als deelnemer aan dit evenement.
   da: Du modtager denne e-mail, fordi du er opført som deltager i denne begivenhed.
   ca: Reps aquest correu electrònic perquè ets registrat com a participant d'aquest esdeveniment.
+  sv: Du får det här mejlet för att du är uppskriven som deltagare i den här händelsen
 
 calendar.imip_footer_2:
   en: Forwarding this e-mail could allow any recipient to reply to the organizer, join the guest list, extend the invitation to others, or alter your RSVP.
@@ -414,6 +451,7 @@ calendar.imip_footer_2:
   nl: Het doorsturen van deze e-mail kan elke ontvanger in staat stellen om te reageren op de organisator, deel te nemen aan de gastenlijst, de uitnodiging uit te breiden naar anderen, of uw RSVP te wijzigen.
   da: Videresendelse af denne e-mail kan give andre mulighed for at svare arrangøren, tilslutte sig gæstelisten, videreformidle invitationen eller ændre din tilmelding.
   ca: Reenviar aquest correu electrònic podria fer que qualsevol destinatari respongues a l'organitzador, afegir-se a la llista de convidats, estengui la invitació a d'altres o modificar la teva confirmació d'assistència.
+  sv: Att vidarebefordra det här mejlet kan göra det möjligt för vilken mottagare som helst att skicka svar till arrangören, lägga till sig själv på gästlistan, skicka inbjudan vidare till andra, samt ändra ditt svar.
 
 calendar.rsvp_recorded:
   en: Your RSVP has been recorded.
@@ -425,6 +463,7 @@ calendar.rsvp_recorded:
   nl: Uw RSVP is geregistreerd.
   da: Din tilmelding er blevet registreret.
   ca: La teva confirmació d'assistència ha sigut registrada.
+  sv: Ditt svar har registrerats.
 
 calendar.rsvp_failed:
   en: Failed to record your RSVP.
@@ -436,6 +475,7 @@ calendar.rsvp_failed:
   nl: Kan uw RSVP niet registreren.
   da: Kunne ikke registrere din tilmelding.
   ca: No s'ha pogut registrar la teva confirmació d'assistència.
+  sv: Det gick inte att registrera ditt svar.
 
 calendar.event_not_found:
   en: The event you are trying to RSVP to was not found.
@@ -447,6 +487,7 @@ calendar.event_not_found:
   nl: Het evenement waarvoor u probeert te reageren is niet gevonden.
   da: Begivenheden du forsøger at tilmelde dig blev ikke fundet.
   ca: L'esdeveniment al que intentes confirmar l'assistència no es troba.
+  sv: Händelsen du försöker OSA till kunde inte hittas.
 
 calendar.invalid_rsvp:
   en: The RSVP request was invalid or malformed.
@@ -458,6 +499,7 @@ calendar.invalid_rsvp:
   nl: Het RSVP-verzoek was ongeldig of onjuist gevormd.
   da: Tilmeldingsanmodningen var ugyldig eller forkert udformet.
   ca: La sol·licitud de confirmació d'assistència no era vàlida o estava mal formada.
+  sv: Svaret på inbjudan var ogiltigt eller i fel format.
 
 calendar.not_participant:
   en: You are no longer a participant in this event.
@@ -469,3 +511,4 @@ calendar.not_participant:
   nl: U bent geen deelnemer meer aan dit evenement.
   da: Du deltager ikke længere i denne begivenhed.
   ca: Ja no ets un participant d'aquest esdeveniment.
+  sv: Du är inte längre en deltagare i den här händelse.
