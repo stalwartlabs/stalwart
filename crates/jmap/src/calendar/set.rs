@@ -5,13 +5,22 @@
  */
 
 use crate::api::acl::{JmapAcl, JmapRights};
+use calcard::jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType};
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
-use groupware::{DestroyArchive, cache::GroupwareCache};
+use groupware::{
+    DestroyArchive,
+    cache::GroupwareCache,
+    calendar::{
+        ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, CALENDAR_AVAILABILITY_ATTENDING,
+        CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE, CALENDAR_SUBSCRIBED, Calendar,
+        CalendarPreferences, DefaultAlert, Timezone,
+    },
+};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
-    object::calendar::{self, CalendarProperty, CalendarValue},
+    object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
     request::IntoValid,
     types::state::State,
 };
@@ -40,8 +49,7 @@ impl CalendarSet for Server {
         access_token: &AccessToken,
         _session: &HttpSessionData,
     ) -> trc::Result<SetResponse<calendar::Calendar>> {
-        todo!()
-        /*let account_id = request.account_id.document_id();
+        let account_id = request.account_id.document_id();
         let cache = self
             .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
             .await?;
@@ -71,7 +79,7 @@ impl CalendarSet for Server {
                     .collect::<String>(),
                 preferences: vec![CalendarPreferences {
                     account_id,
-                    name: "Address Book".to_string(),
+                    name: "".to_string(),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -181,10 +189,7 @@ impl CalendarSet for Server {
         }
 
         // Process deletions
-        let on_destroy_remove_contents = request
-            .arguments
-            .on_destroy_remove_contents
-            .unwrap_or(false);
+        let on_destroy_remove_events = request.arguments.on_destroy_remove_events.unwrap_or(false);
         for id in will_destroy {
             let document_id = id.document_id();
 
@@ -224,22 +229,23 @@ impl CalendarSet for Server {
 
             // Obtain children ids
             let children_ids = cache.children_ids(document_id).collect::<Vec<_>>();
-            if !children_ids.is_empty() && !on_destroy_remove_contents {
+            if !children_ids.is_empty() && !on_destroy_remove_events {
                 response
                     .not_destroyed
-                    .append(id, SetError::calendar_has_contents());
+                    .append(id, SetError::calendar_has_event());
                 continue;
             }
 
             // Delete record
             DestroyArchive(calendar)
-                .delete_with_cards(
+                .delete_with_events(
                     self,
                     access_token,
                     account_id,
                     document_id,
                     children_ids,
                     None,
+                    false,
                     &mut batch,
                 )
                 .await
@@ -259,11 +265,11 @@ impl CalendarSet for Server {
             response.new_state = State::Exact(change_id).into();
         }
 
-        Ok(response)*/
+        Ok(response)
     }
 }
 
-/*fn update_calendar(
+fn update_calendar(
     updates: Value<'_, CalendarProperty, CalendarValue>,
     calendar: &mut Calendar,
     access_token: &AccessToken,
@@ -287,44 +293,117 @@ impl CalendarSet for Server {
             (CalendarProperty::Description, Value::Null) => {
                 calendar.preferences_mut(access_token).description = None;
             }
+            (CalendarProperty::Color, Value::Str(value)) if value.len() < 16 => {
+                calendar.preferences_mut(access_token).color = value.into_owned().into();
+            }
+            (CalendarProperty::Color, Value::Null) => {
+                calendar.preferences_mut(access_token).color = None;
+            }
+            (CalendarProperty::TimeZone, Value::Element(CalendarValue::Timezone(tz))) => {
+                calendar.preferences_mut(access_token).time_zone = Timezone::IANA(tz.as_id());
+            }
+            (CalendarProperty::TimeZone, Value::Null) => {
+                calendar.preferences_mut(access_token).time_zone = Timezone::Default;
+            }
             (CalendarProperty::SortOrder, Value::Number(value)) => {
                 calendar.preferences_mut(access_token).sort_order = value.cast_to_u64() as u32;
             }
             (CalendarProperty::IsSubscribed, Value::Bool(subscribe)) => {
-                let account_id = access_token.primary_id();
                 if subscribe {
-                    if !calendar.subscribers.contains(&account_id) {
-                        calendar.subscribers.push(account_id);
-                    }
+                    calendar.preferences_mut(access_token).flags |= CALENDAR_SUBSCRIBED;
                 } else {
-                    calendar.subscribers.retain(|id| *id != account_id);
+                    calendar.preferences_mut(access_token).flags &= !CALENDAR_SUBSCRIBED;
+                }
+            }
+            (CalendarProperty::IsVisible, Value::Bool(visible)) => {
+                if visible {
+                    calendar.preferences_mut(access_token).flags &= !CALENDAR_INVISIBLE;
+                } else {
+                    calendar.preferences_mut(access_token).flags |= CALENDAR_INVISIBLE;
+                }
+            }
+            (
+                CalendarProperty::IncludeInAvailability,
+                Value::Element(CalendarValue::IncludeInAvailability(availability)),
+            ) => {
+                let flags = &mut calendar.preferences_mut(access_token).flags;
+
+                match availability {
+                    IncludeInAvailability::All => {
+                        *flags &= !(CALENDAR_AVAILABILITY_NONE | CALENDAR_AVAILABILITY_ATTENDING);
+                    }
+                    IncludeInAvailability::Attending => {
+                        *flags &= !CALENDAR_AVAILABILITY_NONE;
+                        *flags |= CALENDAR_AVAILABILITY_ATTENDING;
+                    }
+                    IncludeInAvailability::None => {
+                        *flags &= !CALENDAR_AVAILABILITY_ATTENDING;
+                        *flags |= CALENDAR_AVAILABILITY_NONE;
+                    }
+                }
+            }
+            (
+                property @ (CalendarProperty::DefaultAlertsWithTime
+                | CalendarProperty::DefaultAlertsWithoutTime),
+                Value::Object(value),
+            ) => {
+                let with_time = matches!(property, CalendarProperty::DefaultAlertsWithTime);
+                let alerts = &mut calendar.preferences_mut(access_token).default_alerts;
+
+                alerts.retain(|alert| (alert.flags & ALERT_WITH_TIME != 0) != with_time);
+
+                for (key, value) in value.into_vec() {
+                    alerts.push(value_to_default_alert(key.to_string().into_owned(), value)?);
                 }
             }
             (CalendarProperty::ShareWith, value) => {
                 calendar.acls = JmapRights::acl_set::<calendar::Calendar>(value)?;
                 has_acl_changes = true;
             }
-            (CalendarProperty::Pointer(pointer), value)
-                if matches!(
-                    pointer.first(),
-                    Some(JsonPointerItem::Key(Key::Property(
-                        CalendarProperty::ShareWith
-                    )))
-                ) =>
-            {
-                let mut pointer = pointer.iter();
-                pointer.next();
+            (CalendarProperty::Pointer(pointer), value) => {
+                let mut ptr_iter = pointer.iter();
+                ptr_iter.next();
 
-                calendar.acls = JmapRights::acl_patch::<calendar::Calendar>(
-                    std::mem::take(&mut calendar.acls),
-                    pointer,
-                    value,
-                )?;
-                has_acl_changes = true;
+                match ptr_iter.next() {
+                    Some(JsonPointerItem::Key(Key::Property(CalendarProperty::ShareWith))) => {
+                        calendar.acls = JmapRights::acl_patch::<calendar::Calendar>(
+                            std::mem::take(&mut calendar.acls),
+                            ptr_iter,
+                            value,
+                        )?;
+                        has_acl_changes = true;
+                    }
+                    Some(JsonPointerItem::Key(Key::Property(
+                        property @ (CalendarProperty::DefaultAlertsWithTime
+                        | CalendarProperty::DefaultAlertsWithoutTime),
+                    ))) => match (ptr_iter.next(), value) {
+                        (Some(JsonPointerItem::Key(key)), value) if ptr_iter.next().is_none() => {
+                            let id = key.to_string().into_owned();
+                            let with_time =
+                                matches!(property, CalendarProperty::DefaultAlertsWithTime);
+                            let alerts = &mut calendar.preferences_mut(access_token).default_alerts;
+                            alerts.retain(|alert| {
+                                (alert.flags & ALERT_WITH_TIME != 0) != with_time || alert.id != id
+                            });
+
+                            alerts.push(value_to_default_alert(id, value)?);
+                        }
+                        _ => {
+                            return Err(SetError::invalid_properties()
+                                .with_property(CalendarProperty::Pointer(pointer))
+                                .with_description("Field could not be patched."));
+                        }
+                    },
+                    _ => {
+                        return Err(SetError::invalid_properties()
+                            .with_property(CalendarProperty::Pointer(pointer))
+                            .with_description("Field could not be patched."));
+                    }
+                }
             }
             (property, _) => {
                 return Err(SetError::invalid_properties()
-                    .with_property(property.clone())
+                    .with_property(property)
                     .with_description("Field could not be set."));
             }
         }
@@ -339,4 +418,76 @@ impl CalendarSet for Server {
 
     Ok(has_acl_changes)
 }
-*/
+
+fn value_to_default_alert(
+    id: String,
+    value: Value<'_, CalendarProperty, CalendarValue>,
+) -> Result<DefaultAlert, SetError<CalendarProperty>> {
+    let mut alert = DefaultAlert {
+        id,
+        ..Default::default()
+    };
+    let mut has_offset = false;
+
+    for (key, value) in value.into_expanded_object() {
+        let Key::Property(key) = key else {
+            continue;
+        };
+
+        match (key, value) {
+            (CalendarProperty::Type, Value::Element(CalendarValue::Type(value))) => {
+                if value != JSCalendarType::Alert {
+                    return Err(SetError::invalid_properties()
+                        .with_property(CalendarProperty::Trigger)
+                        .with_description("Invalid alert object type."));
+                }
+            }
+            (
+                CalendarProperty::Action,
+                Value::Element(CalendarValue::Action(JSCalendarAlertAction::Email)),
+            ) => {
+                alert.flags |= ALERT_EMAIL;
+            }
+            (CalendarProperty::Trigger, Value::Object(value)) => {
+                for (key, value) in value.into_vec() {
+                    let Key::Property(key) = key else {
+                        continue;
+                    };
+
+                    match (key, value) {
+                        (
+                            CalendarProperty::RelativeTo,
+                            Value::Element(CalendarValue::RelativeTo(JSCalendarRelativeTo::End)),
+                        ) => {
+                            alert.flags |= ALERT_RELATIVE_TO_END;
+                        }
+                        (
+                            CalendarProperty::Offset,
+                            Value::Element(CalendarValue::Duration(value)),
+                        ) => {
+                            alert.offset = value;
+                            has_offset = true;
+                        }
+                        (CalendarProperty::Offset, Value::Element(CalendarValue::Type(value))) => {
+                            if value != JSCalendarType::OffsetTrigger {
+                                return Err(SetError::invalid_properties()
+                                    .with_property(CalendarProperty::Trigger)
+                                    .with_description("Invalid alert trigger type."));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if has_offset {
+        Ok(alert)
+    } else {
+        Err(SetError::invalid_properties()
+            .with_property(CalendarProperty::Trigger)
+            .with_description("Missing alert offset."))
+    }
+}

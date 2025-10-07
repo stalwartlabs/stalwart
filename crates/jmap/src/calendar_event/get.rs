@@ -4,17 +4,34 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::changes::state::JmapCacheState;
-use calcard::jscalendar::{JSCalendarProperty, JSCalendarValue};
+use crate::{calendar_event::CalendarSyntheticId, changes::state::JmapCacheState};
+use calcard::{
+    common::{PartialDateTime, timezone::Tz},
+    icalendar::{
+        ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry,
+        ICalendarParameterName, ICalendarParameterValue, ICalendarParticipationRole,
+        ICalendarProperty, ICalendarValue,
+    },
+    jscalendar::{
+        JSCalendarDateTime, JSCalendarProperty, JSCalendarValue, import::ConversionOptions,
+    },
+};
 use common::{Server, auth::AccessToken};
-use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{
+        CalendarEvent, EVENT_DRAFT, EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS, EVENT_INVITE_SELF,
+        PREF_USE_DEFAULT_ALERTS, expand::CalendarEventExpansion,
+    },
+};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::calendar_event,
-    request::IntoValid,
+    request::reference::MaybeResultReference,
 };
 use jmap_tools::{Map, Value};
-use store::roaring::RoaringBitmap;
+use std::sync::Arc;
+use store::{ahash::AHashSet, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -37,12 +54,17 @@ impl CalendarEventGet for Server {
         mut request: GetRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<calendar_event::CalendarEvent>> {
-        todo!()
-
-        /*let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let return_all_properties = request.properties.is_none();
-        let properties =
-            request.unwrap_properties(&[JSCalendarProperty::Id, JSCalendarProperty::CalendarIds]);
+        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let return_all_properties = request
+            .properties
+            .as_ref()
+            .is_none_or(|v| matches!(v, MaybeResultReference::Value(v) if v.is_empty()));
+        let properties = request.unwrap_properties(&[
+            JSCalendarProperty::Id,
+            JSCalendarProperty::CalendarIds,
+            JSCalendarProperty::IsDraft,
+            JSCalendarProperty::IsOrigin,
+        ]);
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
@@ -52,7 +74,7 @@ impl CalendarEventGet for Server {
         } else {
             cache.shared_containers(access_token, [Acl::ReadItems], true)
         };
-        let ids = if let Some(ids) = ids {
+        let mut ids = if let Some(ids) = ids {
             ids
         } else {
             calendar_event_ids
@@ -67,11 +89,86 @@ impl CalendarEventGet for Server {
             list: Vec::with_capacity(ids.len()),
             not_found: vec![],
         };
-        let return_id = return_all_properties || properties.contains(&JSCalendarProperty::Id);
-        let return_address_book_ids =
-            return_all_properties || properties.contains(&JSCalendarProperty::CalendarIds);
+        let mut return_converted_props = !return_all_properties;
+        let mut return_is_orgin = OriginAddresses::None;
+        let mut return_utc_dates = false;
 
-        for id in ids {
+        let (jmap_properties, jscal_properties) = if !return_all_properties {
+            let mut jmap_properties = Vec::with_capacity(4);
+            let mut jscal_properties = Vec::with_capacity(properties.len());
+
+            for property in properties {
+                match property {
+                    JSCalendarProperty::Id
+                    | JSCalendarProperty::BaseEventId
+                    | JSCalendarProperty::CalendarIds
+                    | JSCalendarProperty::IsDraft
+                    | JSCalendarProperty::UseDefaultAlerts
+                    | JSCalendarProperty::MayInviteSelf
+                    | JSCalendarProperty::MayInviteOthers
+                    | JSCalendarProperty::HideAttendees => {
+                        jmap_properties.push(property);
+                    }
+                    JSCalendarProperty::UtcStart | JSCalendarProperty::UtcEnd => {
+                        return_utc_dates = true;
+                        jmap_properties.push(property);
+                    }
+                    JSCalendarProperty::IsOrigin => {
+                        if return_is_orgin.is_none() {
+                            if access_token.primary_id() == account_id {
+                                return_is_orgin = OriginAddresses::Ref(access_token);
+                            } else {
+                                return_is_orgin = OriginAddresses::Owned(
+                                    self.get_access_token(account_id).await?,
+                                );
+                            }
+                            jmap_properties.push(JSCalendarProperty::IsOrigin);
+                        }
+                    }
+                    _ => {
+                        if matches!(property, JSCalendarProperty::ICalComponent) {
+                            return_converted_props = true;
+                        }
+
+                        jscal_properties.push(property);
+                    }
+                }
+            }
+            (jmap_properties, jscal_properties)
+        } else {
+            (properties, vec![])
+        };
+
+        // Sort by baseId
+        ids.sort_unstable_by_key(|id| id.document_id());
+        let mut ids = ids.into_iter().peekable();
+
+        // Process arguments
+        let override_range = if request.arguments.recurrence_overrides_after.is_some()
+            || request.arguments.recurrence_overrides_before.is_some()
+        {
+            let after = request
+                .arguments
+                .recurrence_overrides_after
+                .map(|v| v.timestamp())
+                .unwrap_or(i64::MIN);
+            let before = request
+                .arguments
+                .recurrence_overrides_before
+                .map(|v| v.timestamp())
+                .unwrap_or(i64::MAX);
+            if after < before {
+                Some(after..before)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let default_tz = request.arguments.time_zone.unwrap_or(Tz::UTC);
+        let reduce_participants = request.arguments.reduce_participants.unwrap_or(false);
+
+        'outer: while let Some(id) = ids.next() {
             // Obtain the calendar_event object
             let document_id = id.document_id();
             if !calendar_event_ids.contains(document_id) {
@@ -79,56 +176,373 @@ impl CalendarEventGet for Server {
                 continue;
             }
 
-            let _calendar_event = if let Some(calendar_event) = self
+            let Some(_calendar_event) = self
                 .get_archive(account_id, Collection::CalendarEvent, document_id)
                 .await?
-            {
-                calendar_event
-            } else {
+            else {
                 response.not_found.push(id);
                 continue;
             };
-
-            let calendar_event = _calendar_event
+            let mut calendar_event = _calendar_event
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
 
-            let mut result = if return_all_properties {
-                calendar_event
-                    .card
-                    .into_jscalendar::<Id>()
-                    .into_inner()
-                    .into_object()
-                    .unwrap()
+            // Extract expansion ids from synthetic ids
+            let mut expansion_ids = AHashSet::new();
+            let mut include_base_event = false;
+            if let Some(expansion_id) = id.expansion_id() {
+                expansion_ids.insert(expansion_id);
             } else {
-                Map::from_iter(
-                    calendar_event
-                        .card
-                        .into_jscalendar::<Id>()
-                        .into_inner()
-                        .into_expanded_object()
-                        .filter(|(k, _)| k.as_property().is_some_and(|p| properties.contains(p))),
-                )
-            };
-
-            if return_id {
-                result.insert_unchecked(
-                    JSCalendarProperty::Id,
-                    Value::Element(JSCalendarValue::Id(id)),
-                );
+                include_base_event = true;
             }
-
-            if return_address_book_ids {
-                let mut obj = Map::with_capacity(calendar_event.names.len());
-                for id in calendar_event.names.iter() {
-                    obj.insert_unchecked(JSCalendarProperty::IdValue(Id::from(id.parent_id)), true);
+            while let Some(next_id) = ids.peek() {
+                if next_id.document_id() == document_id {
+                    if let Some(expansion_id) = next_id.expansion_id() {
+                        expansion_ids.insert(expansion_id);
+                    } else {
+                        include_base_event = true;
+                    }
+                    ids.next();
+                } else {
+                    break;
                 }
-                result.insert_unchecked(JSCalendarProperty::CalendarIds, Value::Object(obj));
             }
 
-            response.list.push(result.into());
+            // Reduce participants
+            if reduce_participants {
+                for component in &mut calendar_event.data.event.components {
+                    if component.component_type.is_scheduling_object() {
+                        component.entries.retain(|entry| match &entry.name {
+                            ICalendarProperty::Attendee => {
+                                entry.parameters(&ICalendarParameterName::Role).any(|role| {
+                                    matches!(
+                                        role,
+                                        ICalendarParameterValue::Role(
+                                            ICalendarParticipationRole::Owner,
+                                        ),
+                                    )
+                                }) || entry.calendar_address().is_some_and(|addr| {
+                                    access_token
+                                        .emails
+                                        .iter()
+                                        .any(|a| a.eq_ignore_ascii_case(addr))
+                                })
+                            }
+                            _ => true,
+                        });
+                    }
+                }
+            }
+
+            // Expand synthetic ids
+            let mut results = Vec::with_capacity(expansion_ids.len() + 1);
+            if !expansion_ids.is_empty() {
+                let ical = &calendar_event.data.event;
+                if let Some(expansions) = calendar_event
+                    .data
+                    .expand_from_ids(&mut expansion_ids, default_tz)
+                {
+                    for expansion in expansions {
+                        if !expansion.is_valid() {
+                            response.not_found.push(<Id as CalendarSyntheticId>::new(
+                                expansion.expansion_id,
+                                document_id,
+                            ));
+                            continue 'outer;
+                        }
+                        let component = &ical.components[expansion.comp_id as usize];
+                        let is_recurrent = component.is_recurrent();
+                        let is_recurrent_or_override =
+                            is_recurrent || component.is_recurrence_override();
+                        let mut has_duration = false;
+                        let component_ids = &component.component_ids;
+                        let mut component = ICalendarComponent {
+                            component_type: component.component_type.clone(),
+                            component_ids: Vec::new(),
+                            entries: component
+                                .entries
+                                .iter()
+                                .filter(|entry| match &entry.name {
+                                    ICalendarProperty::Dtstart
+                                    | ICalendarProperty::Dtend
+                                    | ICalendarProperty::Exdate
+                                    | ICalendarProperty::Exrule
+                                    | ICalendarProperty::Rdate
+                                    | ICalendarProperty::Rrule
+                                    | ICalendarProperty::RecurrenceId => false,
+                                    ICalendarProperty::Due
+                                    | ICalendarProperty::Completed
+                                    | ICalendarProperty::Created => is_recurrent,
+                                    ICalendarProperty::Duration => {
+                                        has_duration = true;
+                                        true
+                                    }
+                                    _ => true,
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                        };
+                        component.entries.push(ICalendarEntry {
+                            name: ICalendarProperty::Dtstart,
+                            params: vec![],
+                            values: vec![ICalendarValue::PartialDateTime(Box::new(
+                                PartialDateTime::from_utc_timestamp(expansion.start),
+                            ))],
+                        });
+                        if is_recurrent_or_override {
+                            component.entries.push(ICalendarEntry {
+                                name: ICalendarProperty::RecurrenceId,
+                                params: vec![],
+                                values: vec![ICalendarValue::PartialDateTime(Box::new(
+                                    PartialDateTime::from_utc_timestamp(expansion.start),
+                                ))],
+                            });
+                        }
+                        if !has_duration {
+                            component.entries.push(ICalendarEntry {
+                                name: ICalendarProperty::Dtend,
+                                params: vec![],
+                                values: vec![ICalendarValue::PartialDateTime(Box::new(
+                                    PartialDateTime::from_utc_timestamp(expansion.end),
+                                ))],
+                            });
+                        }
+
+                        let mut expanded_ical = ICalendar {
+                            components: vec![
+                                ICalendarComponent {
+                                    component_type: ICalendarComponentType::VCalendar,
+                                    entries: vec![],
+                                    component_ids: vec![1],
+                                },
+                                component,
+                            ],
+                        };
+
+                        if !component_ids.is_empty() {
+                            for component_id in component_ids {
+                                let mut sub_component =
+                                    ical.components[*component_id as usize].clone();
+                                sub_component.component_ids.clear();
+                                let component_id = expanded_ical.components.len() as u32;
+                                expanded_ical.components.push(sub_component);
+                                expanded_ical.components[1].component_ids.push(component_id);
+                            }
+                        }
+
+                        results.push((
+                            <Id as CalendarSyntheticId>::new(expansion.expansion_id, document_id),
+                            expanded_ical,
+                            expansion,
+                        ));
+                    }
+                } else {
+                    response
+                        .not_found
+                        .extend(expansion_ids.into_iter().map(|expansion_id| {
+                            <Id as CalendarSyntheticId>::new(expansion_id, document_id)
+                        }));
+                    continue;
+                }
+            }
+
+            if include_base_event {
+                let mut event = std::mem::take(&mut calendar_event.data.event);
+
+                // Obtain UTC start/end if requested
+                let expansion = if return_utc_dates
+                    && let Some(expansion) = event
+                        .components
+                        .iter()
+                        .position(|c| {
+                            c.component_type.is_scheduling_object() && !c.is_recurrence_override()
+                        })
+                        .and_then(|comp_id| {
+                            calendar_event
+                                .data
+                                .expand_single(comp_id as u32, default_tz)
+                        }) {
+                    expansion
+                } else {
+                    CalendarEventExpansion::default()
+                };
+
+                // Remove recurrence ids
+                if let Some(range) = &override_range {
+                    let remove_ids = event
+                        .components
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(comp_id, c)| {
+                            if c.is_recurrence_override()
+                                && let Some(timestamp) = c
+                                    .property(&ICalendarProperty::RecurrenceId)
+                                    .and_then(|p| p.values.first())
+                                    .and_then(|v| v.as_partial_date_time())
+                                    .and_then(|v| v.to_date_time())
+                                    .and_then(|v| v.to_date_time_with_tz(default_tz))
+                                    .map(|v| v.timestamp())
+                                && !range.contains(&timestamp)
+                            {
+                                Some(comp_id as u32)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<AHashSet<_>>();
+                    if !remove_ids.is_empty() {
+                        for component in &mut event.components {
+                            component
+                                .component_ids
+                                .retain(|id| !remove_ids.contains(id));
+                        }
+                    }
+                }
+
+                results.push((Id::from(document_id), event, expansion));
+            }
+
+            for (id, ical, expansion) in results {
+                let is_origin = return_is_orgin.addresses().is_some_and(|addresses| {
+                    ical.components
+                        .iter()
+                        .find(|c| c.component_type.is_scheduling_object())
+                        .and_then(|c| c.property(&ICalendarProperty::Organizer))
+                        .and_then(|v| v.calendar_address())
+                        .is_none_or(|v| addresses.iter().any(|a| a.eq_ignore_ascii_case(v)))
+                });
+
+                let jscal = ical
+                    .into_jscalendar_with_opt::<Id, BlobId>(
+                        ConversionOptions::default()
+                            .include_ical_components(return_converted_props)
+                            .return_first(true),
+                    )
+                    .into_inner();
+                let mut result = if return_all_properties {
+                    jscal.into_object().unwrap()
+                } else {
+                    Map::from_iter(jscal.into_expanded_object().filter(|(k, _)| {
+                        k.as_property()
+                            .is_some_and(|p| jscal_properties.contains(p))
+                    }))
+                };
+
+                for property in &jmap_properties {
+                    match property {
+                        JSCalendarProperty::Id => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::Id,
+                                Value::Element(JSCalendarValue::Id(id)),
+                            );
+                        }
+                        JSCalendarProperty::BaseEventId => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::Id,
+                                Value::Element(JSCalendarValue::Id(id.document_id().into())),
+                            );
+                        }
+                        JSCalendarProperty::CalendarIds => {
+                            let mut obj = Map::with_capacity(calendar_event.names.len());
+                            for id in calendar_event.names.iter() {
+                                obj.insert_unchecked(
+                                    JSCalendarProperty::IdValue(Id::from(id.parent_id)),
+                                    true,
+                                );
+                            }
+                            result.insert_unchecked(
+                                JSCalendarProperty::CalendarIds,
+                                Value::Object(obj),
+                            );
+                        }
+                        JSCalendarProperty::IsDraft => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::IsDraft,
+                                Value::Bool(calendar_event.flags & EVENT_DRAFT != 0),
+                            );
+                        }
+                        JSCalendarProperty::IsOrigin => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::IsOrigin,
+                                Value::Bool(is_origin),
+                            );
+                        }
+                        JSCalendarProperty::MayInviteSelf => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::MayInviteSelf,
+                                Value::Bool(calendar_event.flags & EVENT_INVITE_SELF != 0),
+                            );
+                        }
+                        JSCalendarProperty::MayInviteOthers => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::MayInviteOthers,
+                                Value::Bool(calendar_event.flags & EVENT_INVITE_OTHERS != 0),
+                            );
+                        }
+                        JSCalendarProperty::HideAttendees => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::HideAttendees,
+                                Value::Bool(calendar_event.flags & EVENT_HIDE_ATTENDEES != 0),
+                            );
+                        }
+
+                        JSCalendarProperty::UtcStart => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::UtcStart,
+                                Value::Element(JSCalendarValue::DateTime(JSCalendarDateTime::new(
+                                    expansion.start,
+                                    false,
+                                ))),
+                            );
+                        }
+                        JSCalendarProperty::UtcEnd => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::UtcEnd,
+                                Value::Element(JSCalendarValue::DateTime(JSCalendarDateTime::new(
+                                    expansion.end,
+                                    false,
+                                ))),
+                            );
+                        }
+                        JSCalendarProperty::UseDefaultAlerts => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::UseDefaultAlerts,
+                                Value::Bool(
+                                    calendar_event
+                                        .preferences(access_token)
+                                        .is_none_or(|v| v.flags & PREF_USE_DEFAULT_ALERTS != 0),
+                                ),
+                            );
+                        }
+
+                        _ => {}
+                    }
+                }
+
+                response.list.push(result.into());
+            }
         }
 
-        Ok(response)*/
+        Ok(response)
+    }
+}
+
+enum OriginAddresses<'x> {
+    Owned(Arc<AccessToken>),
+    Ref(&'x AccessToken),
+    None,
+}
+
+impl<'x> OriginAddresses<'x> {
+    fn addresses(&self) -> Option<&[String]> {
+        match self {
+            OriginAddresses::Owned(t) if !t.emails.is_empty() => Some(&t.emails),
+            OriginAddresses::Ref(t) if !t.emails.is_empty() => Some(&t.emails),
+            _ => None,
+        }
+    }
+
+    fn is_none(&self) -> bool {
+        matches!(self, OriginAddresses::None)
     }
 }

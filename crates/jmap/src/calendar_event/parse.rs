@@ -5,14 +5,18 @@
  */
 
 use crate::blob::download::BlobDownload;
-use calcard::icalendar::ICalendar;
+use calcard::{
+    icalendar::ICalendar,
+    jscalendar::{JSCalendarProperty, import::ConversionOptions},
+};
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
     method::parse::{ParseRequest, ParseResponse},
     object::calendar_event::CalendarEvent,
     request::IntoValid,
 };
-use types::id::Id;
+use jmap_tools::{Key, Value};
+use types::{blob::BlobId, id::Id};
 use utils::map::vec_map::VecMap;
 
 pub trait CalendarEventParse: Sync + Send {
@@ -60,20 +64,29 @@ impl CalendarEventParse for Server {
                 response.not_parsable.push(blob_id);
                 continue;
             };
-            let mut js_calendar_event = vcard.into_jscalendar::<Id>();
+            let mut js_calendar_entries = vcard
+                .into_jscalendar_with_opt::<Id, BlobId>(ConversionOptions::default())
+                .into_inner()
+                .into_object()
+                .unwrap()
+                .remove(&Key::Property(JSCalendarProperty::Entries))
+                .unwrap()
+                .into_array()
+                .unwrap();
 
             if !return_all_properties {
-                js_calendar_event
-                    .0
-                    .as_object_mut()
-                    .unwrap()
-                    .as_mut_vec()
-                    .retain(|(k, _)| k.as_property().is_some_and(|k| properties.contains(k)));
+                for entry in &mut js_calendar_entries {
+                    entry
+                        .as_object_mut()
+                        .unwrap()
+                        .as_mut_vec()
+                        .retain(|(k, _)| k.as_property().is_some_and(|k| properties.contains(k)));
+                }
             }
 
             response
                 .parsed
-                .append(blob_id, js_calendar_event.into_inner());
+                .append(blob_id, Value::Array(js_calendar_entries));
         }
 
         Ok(response)

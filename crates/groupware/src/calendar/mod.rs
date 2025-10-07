@@ -11,7 +11,7 @@ pub mod index;
 pub mod itip;
 pub mod storage;
 
-use calcard::icalendar::{ICalendar, ICalendarDuration};
+use calcard::icalendar::{ICalendar, ICalendarComponent, ICalendarDuration, ICalendarEntry};
 use common::{DavName, auth::AccessToken};
 use dav_proto::schema::request::DeadProperty;
 use types::acl::AclGrant;
@@ -29,10 +29,9 @@ pub struct Calendar {
 }
 
 pub const CALENDAR_SUBSCRIBED: u16 = 1;
-pub const CALENDAR_DEFAULT: u16 = 1 << 1;
-pub const CALENDAR_VISIBLE: u16 = 1 << 2;
-pub const CALENDAR_AVAILABILITY_ALL: u16 = 1 << 3;
-pub const CALENDAR_AVAILABILITY_ATTENDING: u16 = 1 << 4;
+pub const CALENDAR_INVISIBLE: u16 = 1 << 1;
+pub const CALENDAR_AVAILABILITY_NONE: u16 = 1 << 2;
+pub const CALENDAR_AVAILABILITY_ATTENDING: u16 = 1 << 3;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -52,7 +51,6 @@ pub struct CalendarPreferences {
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
 pub struct DefaultAlert {
-    pub account_id: u32,
     pub id: String,
     pub offset: ICalendarDuration,
     pub flags: u16,
@@ -71,6 +69,8 @@ pub const EVENT_HIDE_ATTENDEES: u16 = 1 << 2;
 pub const EVENT_DRAFT: u16 = 1 << 3;
 pub const EVENT_ORIGIN: u16 = 1 << 4;
 
+pub const PREF_USE_DEFAULT_ALERTS: u16 = 1;
+
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
@@ -78,7 +78,7 @@ pub struct CalendarEvent {
     pub names: Vec<DavName>,
     pub display_name: Option<String>,
     pub data: CalendarEventData,
-    pub user_properties: Vec<UserProperties>,
+    pub preferences: Vec<EventPreferences>,
     pub flags: u16,
     pub dead_properties: DeadProperty,
     pub size: u32,
@@ -143,9 +143,11 @@ pub struct ComponentTimeRange {
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
-pub struct UserProperties {
+pub struct EventPreferences {
     pub account_id: u32,
-    pub properties: ICalendar,
+    pub flags: u16,
+    pub properties: Vec<ICalendarEntry>,
+    pub alerts: Vec<ICalendarComponent>,
 }
 
 #[derive(
@@ -192,6 +194,17 @@ impl Calendar {
 }
 
 impl ArchivedCalendar {
+    pub fn default_alerts(
+        &self,
+        access_token: &AccessToken,
+        with_time: bool,
+    ) -> impl Iterator<Item = &ArchivedDefaultAlert> {
+        self.preferences(access_token)
+            .default_alerts
+            .iter()
+            .filter(move |a| (a.flags & ALERT_WITH_TIME != 0) == with_time)
+    }
+
     pub fn preferences(&self, access_token: &AccessToken) -> &ArchivedCalendarPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
@@ -203,5 +216,73 @@ impl ArchivedCalendar {
                 .or_else(|| self.preferences.first())
                 .unwrap()
         }
+    }
+}
+
+impl CalendarEvent {
+    pub fn preferences(&self, access_token: &AccessToken) -> Option<&EventPreferences> {
+        self.preferences
+            .iter()
+            .find(|p| p.account_id == access_token.primary_id())
+    }
+
+    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut EventPreferences {
+        let account_id = access_token.primary_id();
+        let idx = if let Some(idx) = self
+            .preferences
+            .iter()
+            .position(|p| p.account_id == account_id)
+        {
+            idx
+        } else {
+            self.preferences.push(EventPreferences {
+                account_id,
+                flags: PREF_USE_DEFAULT_ALERTS,
+                properties: Vec::new(),
+                alerts: Vec::new(),
+            });
+            self.preferences.len() - 1
+        };
+
+        &mut self.preferences[idx]
+    }
+
+    pub fn added_calendar_ids(
+        &self,
+        prev_data: &ArchivedCalendarEvent,
+    ) -> impl Iterator<Item = u32> {
+        self.names
+            .iter()
+            .filter(|m| prev_data.names.iter().all(|pm| pm.parent_id != m.parent_id))
+            .map(|m| m.parent_id)
+    }
+
+    pub fn removed_calendar_ids(
+        &self,
+        prev_data: &ArchivedCalendarEvent,
+    ) -> impl Iterator<Item = u32> {
+        prev_data
+            .names
+            .iter()
+            .filter(|m| self.names.iter().all(|pm| pm.parent_id != m.parent_id))
+            .map(|m| m.parent_id.to_native())
+    }
+
+    pub fn unchanged_calendar_ids(
+        &self,
+        prev_data: &ArchivedCalendarEvent,
+    ) -> impl Iterator<Item = u32> {
+        self.names
+            .iter()
+            .filter(|m| prev_data.names.iter().any(|pm| pm.parent_id == m.parent_id))
+            .map(|m| m.parent_id)
+    }
+}
+
+impl ArchivedCalendarEvent {
+    pub fn preferences(&self, access_token: &AccessToken) -> Option<&ArchivedEventPreferences> {
+        self.preferences
+            .iter()
+            .find(|p| p.account_id == access_token.primary_id())
     }
 }

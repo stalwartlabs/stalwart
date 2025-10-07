@@ -87,6 +87,8 @@ pub enum SetErrorType {
     AddressBookHasContents,
     #[serde(rename = "nodeHasChildren")]
     NodeHasChildren,
+    #[serde(rename = "calendarHasEvent")]
+    CalendarHasEvent,
 }
 
 impl SetErrorType {
@@ -119,6 +121,7 @@ impl SetErrorType {
             SetErrorType::ScriptIsActive => "scriptIsActive",
             SetErrorType::AddressBookHasContents => "addressBookHasContents",
             SetErrorType::NodeHasChildren => "nodeHasChildren",
+            SetErrorType::CalendarHasEvent => "calendarHasEvent",
         }
     }
 }
@@ -199,6 +202,10 @@ impl<T: Property> SetError<T> {
 
     pub fn node_has_children() -> Self {
         Self::new(SetErrorType::NodeHasChildren).with_description("File node has children.")
+    }
+
+    pub fn calendar_has_event() -> Self {
+        Self::new(SetErrorType::CalendarHasEvent).with_description("Calendar is not empty.")
     }
 }
 

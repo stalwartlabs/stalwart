@@ -5,13 +5,20 @@
  */
 
 use crate::{api::acl::JmapRights, changes::state::JmapCacheState};
+use calcard::jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType};
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
-use groupware::{cache::GroupwareCache, calendar::Calendar};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{
+        ALERT_EMAIL, ALERT_RELATIVE_TO_END, ArchivedDefaultAlert, CALENDAR_AVAILABILITY_ATTENDING,
+        CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE, CALENDAR_SUBSCRIBED, Calendar,
+    },
+};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::calendar::{self, CalendarProperty, CalendarValue},
+    object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
 };
-use jmap_tools::{Map, Value};
+use jmap_tools::{Key, Map, Value};
 use store::roaring::RoaringBitmap;
 use trc::AddContext;
 use types::{
@@ -38,6 +45,8 @@ impl CalendarGet for Server {
             CalendarProperty::Id,
             CalendarProperty::Name,
             CalendarProperty::Description,
+            CalendarProperty::Color,
+            CalendarProperty::TimeZone,
             CalendarProperty::SortOrder,
             CalendarProperty::IsDefault,
             CalendarProperty::IsSubscribed,
@@ -116,18 +125,83 @@ impl CalendarGet for Server {
                             calendar.preferences(access_token).sort_order.to_native(),
                         );
                     }
-                    /*CalendarProperty::IsDefault => {
-                        result.insert_unchecked(CalendarProperty::IsDefault, calendar.is_default);
+                    CalendarProperty::IsDefault => {
+                        let todo = "implement me";
+                        //result.insert_unchecked(CalendarProperty::IsDefault, calendar.is_default);
                     }
                     CalendarProperty::IsSubscribed => {
                         result.insert_unchecked(
                             CalendarProperty::IsSubscribed,
-                            calendar
-                                .subscribers
-                                .iter()
-                                .any(|account_id| *account_id == access_token.primary_id()),
+                            Value::Bool(
+                                calendar.preferences(access_token).flags & CALENDAR_SUBSCRIBED != 0,
+                            ),
                         );
-                    }*/
+                    }
+                    CalendarProperty::Color => {
+                        result.insert_unchecked(
+                            CalendarProperty::Color,
+                            calendar
+                                .preferences(access_token)
+                                .color
+                                .as_ref()
+                                .map(|c| c.to_string()),
+                        );
+                    }
+                    CalendarProperty::IsVisible => {
+                        result.insert_unchecked(
+                            CalendarProperty::IsVisible,
+                            Value::Bool(
+                                calendar.preferences(access_token).flags & CALENDAR_INVISIBLE == 0,
+                            ),
+                        );
+                    }
+                    CalendarProperty::IncludeInAvailability => {
+                        let flags = calendar.preferences(access_token).flags;
+
+                        result.insert_unchecked(
+                            CalendarProperty::IncludeInAvailability,
+                            Value::Element(CalendarValue::IncludeInAvailability(
+                                if flags & CALENDAR_AVAILABILITY_ATTENDING != 0 {
+                                    IncludeInAvailability::Attending
+                                } else if flags & CALENDAR_AVAILABILITY_NONE != 0 {
+                                    IncludeInAvailability::None
+                                } else {
+                                    IncludeInAvailability::All
+                                },
+                            )),
+                        );
+                    }
+                    CalendarProperty::DefaultAlertsWithTime => {
+                        result.insert_unchecked(
+                            CalendarProperty::DefaultAlertsWithTime,
+                            Value::Object(Map::from_iter(
+                                calendar
+                                    .default_alerts(access_token, true)
+                                    .map(default_alarm_to_value),
+                            )),
+                        );
+                    }
+                    CalendarProperty::DefaultAlertsWithoutTime => {
+                        result.insert_unchecked(
+                            CalendarProperty::DefaultAlertsWithoutTime,
+                            Value::Object(Map::from_iter(
+                                calendar
+                                    .default_alerts(access_token, false)
+                                    .map(default_alarm_to_value),
+                            )),
+                        );
+                    }
+                    CalendarProperty::TimeZone => {
+                        result.insert_unchecked(
+                            CalendarProperty::TimeZone,
+                            calendar
+                                .preferences(access_token)
+                                .time_zone
+                                .tz()
+                                .map(|tz| Value::Element(CalendarValue::Timezone(tz)))
+                                .unwrap_or(Value::Null),
+                        );
+                    }
                     CalendarProperty::ShareWith => {
                         result.insert_unchecked(
                             CalendarProperty::ShareWith,
@@ -160,4 +234,52 @@ impl CalendarGet for Server {
 
         Ok(response)
     }
+}
+
+fn default_alarm_to_value(
+    alarm: &ArchivedDefaultAlert,
+) -> (
+    Key<'static, CalendarProperty>,
+    Value<'static, CalendarProperty, CalendarValue>,
+) {
+    (
+        Key::Owned(alarm.id.to_string()),
+        Value::Object(Map::from(vec![
+            (
+                Key::Property(CalendarProperty::Type),
+                Value::Element(CalendarValue::Type(JSCalendarType::Alert)),
+            ),
+            (
+                Key::Property(CalendarProperty::Action),
+                Value::Element(CalendarValue::Action(if alarm.flags & ALERT_EMAIL != 0 {
+                    JSCalendarAlertAction::Email
+                } else {
+                    JSCalendarAlertAction::Display
+                })),
+            ),
+            (
+                Key::Property(CalendarProperty::Trigger),
+                Value::Object(Map::from(vec![
+                    (
+                        Key::Property(CalendarProperty::Type),
+                        Value::Element(CalendarValue::Type(JSCalendarType::OffsetTrigger)),
+                    ),
+                    (
+                        Key::Property(CalendarProperty::Offset),
+                        Value::Element(CalendarValue::Duration(alarm.offset.to_native())),
+                    ),
+                    (
+                        Key::Property(CalendarProperty::RelativeTo),
+                        Value::Element(CalendarValue::RelativeTo(
+                            if alarm.flags & ALERT_RELATIVE_TO_END != 0 {
+                                JSCalendarRelativeTo::End
+                            } else {
+                                JSCalendarRelativeTo::Start
+                            },
+                        )),
+                    ),
+                ])),
+            ),
+        ])),
+    )
 }

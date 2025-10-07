@@ -19,7 +19,7 @@ use calcard::{
         ArchivedICalendar, ArchivedICalendarComponent, ArchivedICalendarEntry,
         ArchivedICalendarParameter, ArchivedICalendarProperty, ArchivedICalendarValue,
         ICalendarComponentType, ICalendarEntry, ICalendarParameterName, ICalendarProperty,
-        ICalendarValue, dates::CalendarEvent,
+        ICalendarValue,
     },
 };
 use common::{DavResource, Server, auth::AccessToken};
@@ -31,7 +31,10 @@ use dav_proto::{
         response::MultiStatus,
     },
 };
-use groupware::{cache::GroupwareCache, calendar::ArchivedCalendarEvent};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{ArchivedCalendarEvent, expand::CalendarEventExpansion},
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::{fmt::Write, slice::Iter, str::FromStr};
@@ -219,7 +222,7 @@ pub fn try_parse_tz(tz: &Timezone) -> Option<Tz> {
 
 pub(crate) struct CalendarQueryHandler {
     default_tz: Tz,
-    expanded_times: Vec<CalendarEvent<i64, i64>>,
+    expanded_times: Vec<CalendarEventExpansion>,
 }
 
 impl CalendarQueryHandler {
@@ -620,7 +623,7 @@ impl CalendarQueryHandler {
         Some(out)
     }
 
-    pub fn into_expanded_times(self) -> Vec<CalendarEvent<i64, i64>> {
+    pub fn into_expanded_times(self) -> Vec<CalendarEventExpansion> {
         self.expanded_times
     }
 }

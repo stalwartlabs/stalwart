@@ -38,6 +38,7 @@ impl PrincipalQuery for Server {
             results: RoaringBitmap::new(),
         };
         let mut is_set = true;
+        let todo = "implement other search criteria";
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {

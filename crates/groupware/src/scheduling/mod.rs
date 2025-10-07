@@ -362,6 +362,28 @@ impl ItipError {
             _ => None,
         }
     }
+
+    pub fn is_jmap_error(&self) -> bool {
+        matches!(
+            self,
+            ItipError::MultipleOrganizer
+                | ItipError::OrganizerIsLocalAddress
+                | ItipError::SenderIsNotParticipant(_)
+                | ItipError::OrganizerMismatch
+                | ItipError::CannotModifyProperty(_)
+                | ItipError::CannotModifyInstance
+                | ItipError::CannotModifyAddress
+                //| ItipError::MissingUid
+                | ItipError::MultipleUid
+                | ItipError::MultipleObjectTypes
+                | ItipError::MultipleObjectInstances
+                | ItipError::MissingMethod
+                | ItipError::InvalidComponentType
+                | ItipError::OutOfSequence
+                | ItipError::UnknownParticipant(_)
+                | ItipError::UnsupportedMethod(_)
+        )
+    }
 }
 
 impl Display for ItipError {

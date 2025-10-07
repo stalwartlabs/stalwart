@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{calendar_event::set::CalendarEventSet, changes::state::JmapCacheState};
+use crate::{
+    calendar_event::{CalendarSyntheticId, set::CalendarEventSet},
+    changes::state::JmapCacheState,
+};
+use calcard::jscalendar::JSCalendarProperty;
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
 use http_proto::HttpSessionData;
@@ -48,9 +52,7 @@ impl JmapCalendarEventCopy for Server {
         next_call: &mut Option<Call<RequestMethod<'x>>>,
         _session: &HttpSessionData,
     ) -> trc::Result<CopyResponse<calendar_event::CalendarEvent>> {
-        todo!()
-
-        /*let account_id = request.account_id.document_id();
+        let account_id = request.account_id.document_id();
         let from_account_id = request.from_account_id.document_id();
 
         if account_id == from_account_id {
@@ -82,7 +84,7 @@ impl JmapCalendarEventCopy for Server {
             from_cache.shared_items(access_token, [Acl::ReadItems], true)
         };
 
-        let can_add_address_books = if access_token.is_shared(account_id) {
+        let can_add_calendars = if access_token.is_shared(account_id) {
             cache
                 .shared_containers(access_token, [Acl::AddItems], true)
                 .into()
@@ -94,6 +96,7 @@ impl JmapCalendarEventCopy for Server {
 
         // Obtain quota
         let mut batch = BatchBuilder::new();
+        let mut nudge_queue = false;
 
         'create: for (id, create) in request.create.into_valid() {
             let from_calendar_event_id = id.document_id();
@@ -104,6 +107,18 @@ impl JmapCalendarEventCopy for Server {
                         "Item {} not found not found in account {}.",
                         id, response.from_account_id
                     )),
+                );
+                continue;
+            }
+            if id.is_synthetic() {
+                response.not_created.append(
+                    id,
+                    SetError::invalid_properties()
+                        .with_property(JSCalendarProperty::Id)
+                        .with_description(format!(
+                            "Item {} is a synthetic id and cannot be copied.",
+                            id
+                        )),
                 );
                 continue;
             }
@@ -136,14 +151,16 @@ impl JmapCalendarEventCopy for Server {
                     &mut batch,
                     access_token,
                     account_id,
-                    &can_add_address_books,
-                    calendar_event.card.into_jscalendar(),
+                    false,
+                    &can_add_calendars,
+                    calendar_event.data.event.into_jscalendar(),
                     create,
                 )
                 .await?
             {
-                Ok(document_id) => {
-                    response.created(id, document_id);
+                Ok(result) => {
+                    response.created(id, result.document_id);
+                    nudge_queue |= result.nudge_queue;
 
                     // Add to destroy list
                     if on_success_delete {
@@ -165,6 +182,10 @@ impl JmapCalendarEventCopy for Server {
                 .and_then(|ids| ids.last_change_id(account_id))
                 .caused_by(trc::location!())?;
 
+            if nudge_queue {
+                self.notify_task_queue();
+            }
+
             response.new_state = State::Exact(change_id);
         }
 
@@ -185,6 +206,6 @@ impl JmapCalendarEventCopy for Server {
             .into();
         }
 
-        Ok(response)*/
+        Ok(response)
     }
 }

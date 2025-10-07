@@ -426,6 +426,8 @@ fn update_contact_card<'x>(
     addressbooks: &mut Vec<DavName>,
     js_contact: &mut JSContact<'x, Id, BlobId>,
 ) -> Result<(), SetError<JSContactProperty<Id>>> {
+    let mut entries = js_contact.0.as_object_mut().unwrap();
+
     for (property, value) in updates.into_expanded_object() {
         let Key::Property(property) = property else {
             return Err(SetError::invalid_properties()
@@ -452,13 +454,10 @@ fn update_contact_card<'x>(
                         .with_property(JSContactProperty::Pointer(pointer))
                         .with_description("Patch operation failed."));
                 }
+                entries = js_contact.0.as_object_mut().unwrap();
             }
             (property, value) => {
-                js_contact
-                    .0
-                    .as_object_mut()
-                    .unwrap()
-                    .insert(property, value);
+                entries.insert(property, value);
             }
         }
     }

@@ -13,7 +13,7 @@ use calcard::jscalendar::JSCalendar;
 use jmap_tools::{Element, Key, Property};
 use serde::Serialize;
 use std::{borrow::Cow, str::FromStr};
-use types::id::Id;
+use types::{blob::BlobId, id::Id};
 
 #[derive(Debug, Clone, Default)]
 pub struct CalendarEventNotification;
@@ -43,10 +43,10 @@ pub struct CalendarEventNotificationObject {
     pub is_draft: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub event: Option<JSCalendar<'static, Id>>,
+    pub event: Option<JSCalendar<'static, Id, BlobId>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub event_patch: Option<JSCalendar<'static, Id>>,
+    pub event_patch: Option<JSCalendar<'static, Id, BlobId>>,
 }
 
 #[derive(Debug, Serialize, Clone)]

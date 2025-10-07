@@ -15,7 +15,7 @@ use calcard::{
 };
 use jmap_tools::{JsonPointerItem, Key};
 use std::{borrow::Cow, str::FromStr};
-use types::id::Id;
+use types::{blob::BlobId, id::Id};
 
 #[derive(Debug, Clone, Default)]
 pub struct CalendarEvent;
@@ -23,7 +23,7 @@ pub struct CalendarEvent;
 impl JmapObject for CalendarEvent {
     type Property = JSCalendarProperty<Id>;
 
-    type Element = JSCalendarValue<Id>;
+    type Element = JSCalendarValue<Id, BlobId>;
 
     type Id = Id;
 
@@ -44,7 +44,7 @@ impl JmapObject for CalendarEvent {
     const ID_PROPERTY: Self::Property = JSCalendarProperty::Id;
 }
 
-impl JmapObjectId for JSCalendarValue<Id> {
+impl JmapObjectId for JSCalendarValue<Id, BlobId> {
     fn as_id(&self) -> Option<Id> {
         if let JSCalendarValue::Id(id) = self {
             Some(*id)
@@ -54,10 +54,10 @@ impl JmapObjectId for JSCalendarValue<Id> {
     }
 
     fn as_any_id(&self) -> Option<AnyId> {
-        if let JSCalendarValue::Id(id) = self {
-            Some(AnyId::Id(*id))
-        } else {
-            None
+        match self {
+            JSCalendarValue::Id(id) => Some(AnyId::Id(*id)),
+            JSCalendarValue::BlobId(blob_id) => Some(AnyId::BlobId(blob_id.clone())),
+            _ => None,
         }
     }
 

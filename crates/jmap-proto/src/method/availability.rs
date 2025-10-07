@@ -13,7 +13,7 @@ use crate::{
 };
 use calcard::jscalendar::{JSCalendar, JSCalendarProperty};
 use serde::{Deserialize, Deserializer, Serialize};
-use types::id::Id;
+use types::{blob::BlobId, id::Id};
 
 #[derive(Debug, Clone, Default)]
 pub struct GetAvailabilityRequest {
@@ -37,7 +37,7 @@ pub struct BusyPeriod {
     pub utc_start: UTCDate,
     pub utc_end: UTCDate,
     pub busy_status: Option<BusyStatus>,
-    pub event: Option<JSCalendar<'static, Id>>,
+    pub event: Option<JSCalendar<'static, Id, BlobId>>,
 }
 
 #[derive(Debug, Serialize, Clone)]

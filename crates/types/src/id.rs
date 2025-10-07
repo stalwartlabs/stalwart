@@ -100,26 +100,32 @@ impl Id {
         }
     }
 
+    #[inline(always)]
     pub fn from_parts(prefix_id: DocumentId, doc_id: DocumentId) -> Id {
         Id(((prefix_id as u64) << 32) | doc_id as u64)
     }
 
+    #[inline(always)]
     pub fn id(&self) -> u64 {
         self.0
     }
 
+    #[inline(always)]
     pub fn document_id(&self) -> DocumentId {
         (self.0 & 0xFFFFFFFF) as DocumentId
     }
 
+    #[inline(always)]
     pub fn prefix_id(&self) -> DocumentId {
         (self.0 >> 32) as DocumentId
     }
 
+    #[inline(always)]
     pub fn is_singleton(&self) -> bool {
         self.0 == 20080258862541
     }
 
+    #[inline(always)]
     pub fn is_valid(&self) -> bool {
         self.0 != u64::MAX
     }

@@ -224,7 +224,11 @@ impl ItipIngest for Server {
                         // Build event for schedule inbox
                         let itip_document_id = self
                             .store()
-                            .assign_document_ids(account_id, Collection::CalendarEventNotification, 1)
+                            .assign_document_ids(
+                                account_id,
+                                Collection::CalendarEventNotification,
+                                1,
+                            )
                             .await
                             .caused_by(trc::location!())?;
                         let itip_message = CalendarEventNotification {
@@ -412,14 +416,8 @@ impl ItipIngest for Server {
                         'outer: for entry in &mut component.entries {
                             if entry.name == ICalendarProperty::Attendee
                                 && entry
-                                    .values
-                                    .first()
-                                    .and_then(|v| v.as_text())
-                                    .is_some_and(|v| {
-                                        v.strip_prefix("mailto:")
-                                            .unwrap_or(v)
-                                            .eq_ignore_ascii_case(&rsvp.attendee)
-                                    })
+                                    .calendar_address()
+                                    .is_some_and(|v| v.eq_ignore_ascii_case(&rsvp.attendee))
                             {
                                 let mut add_partstat = true;
                                 for param in &mut entry.params {

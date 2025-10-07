@@ -5,13 +5,13 @@
  */
 
 use crate::changes::state::JmapCacheState;
-use calcard::jscontact::{JSContactProperty, JSContactValue};
+use calcard::jscontact::{JSContactProperty, JSContactValue, import::ConversionOptions};
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, contact::ContactCard};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::contact,
-    request::IntoValid,
+    request::reference::MaybeResultReference,
 };
 use jmap_tools::{Map, Value};
 use store::roaring::RoaringBitmap;
@@ -38,7 +38,10 @@ impl ContactCardGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<contact::ContactCard>> {
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let return_all_properties = request.properties.is_none();
+        let return_all_properties = request
+            .properties
+            .as_ref()
+            .is_none_or(|v| matches!(v, MaybeResultReference::Value(v) if v.is_empty()));
         let properties =
             request.unwrap_properties(&[JSContactProperty::Id, JSContactProperty::AddressBookIds]);
         let account_id = request.account_id.document_id();
@@ -65,9 +68,26 @@ impl ContactCardGet for Server {
             list: Vec::with_capacity(ids.len()),
             not_found: vec![],
         };
-        let return_id = return_all_properties || properties.contains(&JSContactProperty::Id);
-        let return_address_book_ids =
-            return_all_properties || properties.contains(&JSContactProperty::AddressBookIds);
+        let mut return_id = return_all_properties;
+        let mut return_address_book_ids = return_all_properties;
+        let mut return_converted_props = !return_all_properties;
+
+        if !return_all_properties {
+            for property in &properties {
+                match property {
+                    JSContactProperty::Id => {
+                        return_id = true;
+                    }
+                    JSContactProperty::AddressBookIds => {
+                        return_address_book_ids = true;
+                    }
+                    JSContactProperty::VCard => {
+                        return_converted_props = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         for id in ids {
             // Obtain the contact object
@@ -91,19 +111,17 @@ impl ContactCardGet for Server {
                 .deserialize::<ContactCard>()
                 .caused_by(trc::location!())?;
 
+            let jscontact = contact
+                .card
+                .into_jscontact_with_options::<Id, BlobId>(
+                    ConversionOptions::default().include_vcard_parameters(return_converted_props),
+                )
+                .into_inner();
             let mut result = if return_all_properties {
-                contact
-                    .card
-                    .into_jscontact::<Id, BlobId>()
-                    .into_inner()
-                    .into_object()
-                    .unwrap()
+                jscontact.into_object().unwrap()
             } else {
                 Map::from_iter(
-                    contact
-                        .card
-                        .into_jscontact::<Id, BlobId>()
-                        .into_inner()
+                    jscontact
                         .into_expanded_object()
                         .filter(|(k, _)| k.as_property().is_some_and(|p| properties.contains(p))),
                 )
