@@ -1,7 +1,7 @@
 # Stalwart Dockerfile
 # Credits: https://github.com/33KK 
 
-FROM --platform=$BUILDPLATFORM docker.io/lukemathwalker/cargo-chef:latest-rust-slim-bookworm AS chef
+FROM --platform=$BUILDPLATFORM docker.io/lukemathwalker/cargo-chef:latest-rust-slim-trixie AS chef
 WORKDIR /build
 
 FROM --platform=$BUILDPLATFORM chef AS planner
@@ -28,7 +28,7 @@ RUN RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --re
 RUN RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --release -p stalwart-cli
 RUN mv "/build/target/$(cat /target.txt)/release" "/output"
 
-FROM docker.io/debian:bookworm-slim
+FROM docker.io/debian:trixie-slim
 WORKDIR /opt/stalwart
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
