@@ -35,6 +35,7 @@ use common::{
 use dav_proto::{
     Depth, RequestHeaders,
     parser::header::dav_base_uri,
+    requests::NsDeadProperty,
     schema::{
         Collation, Namespace,
         property::{
@@ -42,7 +43,7 @@ use dav_proto::{
             Privilege, ReportSet, ResourceType, Rfc1123DateTime, SupportedCollation, SupportedLock,
             WebDavProperty,
         },
-        request::{DavPropertyValue, DeadProperty, PropFind},
+        request::{DavDeadProperty, DavPropertyValue, PropFind},
         response::{
             AclRestrictions, BaseCondition, Href, List, MultiStatus, PropStat, Response,
             SupportedPrivilege,
@@ -67,6 +68,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    dead_property::DeadProperty,
 };
 
 pub(crate) trait PropFindRequestHandler: Sync + Send {
@@ -684,7 +686,9 @@ impl PropFindRequestHandler for Server {
                                     vec![SupportedPrivilege::all_scheduling_privileges(matches!(
                                         archive,
                                         ArchivedResource::CalendarEventNotification(_)
-                                            | ArchivedResource::CalendarEventNotificationCollection(true)
+                                            | ArchivedResource::CalendarEventNotificationCollection(
+                                                true
+                                            )
                                     ))],
                                 ));
                             }
@@ -695,7 +699,9 @@ impl PropFindRequestHandler for Server {
                                     matches!(
                                         archive,
                                         ArchivedResource::CalendarEventNotification(_)
-                                            | ArchivedResource::CalendarEventNotificationCollection(true)
+                                            | ArchivedResource::CalendarEventNotificationCollection(
+                                                true
+                                            )
                                     ),
                                     access_token.is_member(account_id),
                                 )

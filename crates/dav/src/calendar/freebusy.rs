@@ -17,10 +17,7 @@ use calcard::{
     },
 };
 use common::{DavResourcePath, DavResources, PROD_ID, Server, auth::AccessToken};
-use dav_proto::{
-    RequestHeaders,
-    schema::{property::TimeRange, request::FreeBusyQuery},
-};
+use dav_proto::{RequestHeaders, schema::request::FreeBusyQuery};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -31,6 +28,7 @@ use store::{
 };
 use trc::AddContext;
 use types::{
+    TimeRange,
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
@@ -152,13 +150,11 @@ impl CalendarFreebusyRequestHandler for Server {
                 AHashMap::with_capacity(document_ids.len());
 
             for document_id in document_ids {
-                let archive = if let Some(archive) = self
+                let Some(archive) = self
                     .get_archive(account_id, Collection::CalendarEvent, document_id)
                     .await
                     .caused_by(trc::location!())?
-                {
-                    archive
-                } else {
+                else {
                     continue;
                 };
                 let event = archive
@@ -299,7 +295,7 @@ impl CalendarFreebusyRequestHandler for Server {
 
 fn merge_intervals(mut intervals: Vec<(i64, i64)>) -> Vec<ICalendarValue> {
     if intervals.len() > 1 {
-        intervals.sort_by(|a, b| a.0.cmp(&b.0));
+        intervals.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let mut unique_intervals = Vec::new();
         let mut start_time = intervals[0].0;

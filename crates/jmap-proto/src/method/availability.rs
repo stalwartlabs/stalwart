@@ -40,7 +40,7 @@ pub struct BusyPeriod {
     pub event: Option<JSCalendar<'static, Id, BlobId>>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BusyStatus {
     Confirmed,

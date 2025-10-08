@@ -7,6 +7,7 @@
 use super::assert_is_unique_uid;
 use crate::{
     DavError, DavErrorCondition, DavMethod,
+    calendar::ItipPrecondition,
     common::{
         ETag, ExtractETag,
         lock::{LockRequestHandler, ResourceState},

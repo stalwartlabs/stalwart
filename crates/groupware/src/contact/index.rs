@@ -10,6 +10,7 @@ use common::storage::index::{
     IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
 };
 use std::collections::HashSet;
+use store::backend::MAX_TOKEN_LENGTH;
 use types::{acl::AclGrant, collection::SyncCollection, field::ContactField};
 use utils::sanitize_email;
 
@@ -199,6 +200,7 @@ impl ContactCard {
             })
             .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
             .flat_map(str::split_whitespace)
+            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
     }
 
     pub fn emails(&self) -> impl Iterator<Item = String> {
@@ -229,6 +231,7 @@ impl ArchivedContactCard {
             })
             .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
             .flat_map(str::split_whitespace)
+            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
     }
 
     pub fn emails(&self) -> impl Iterator<Item = String> {

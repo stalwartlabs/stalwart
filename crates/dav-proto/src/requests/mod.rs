@@ -6,14 +6,9 @@
 
 use crate::{
     parser::{tokenizer::Tokenizer, DavParser, RawElement, Token},
-    schema::{
-        request::{
-            ArchivedDeadElementTag, ArchivedDeadProperty, ArchivedDeadPropertyTag, DeadElementTag,
-            DeadProperty, DeadPropertyTag,
-        },
-        Namespace,
-    },
+    schema::Namespace,
 };
+use types::dead_property::{DeadElementTag, DeadProperty, DeadPropertyTag};
 
 pub mod acl;
 pub mod lockinfo;
@@ -58,8 +53,12 @@ impl DavParser for DeadProperty {
     }
 }
 
-impl DeadProperty {
-    pub fn single_with_ns(namespace: Namespace, name: &str) -> Self {
+pub trait NsDeadProperty {
+    fn single_with_ns(namespace: Namespace, name: &str) -> Self;
+}
+
+impl NsDeadProperty for DeadProperty {
+    fn single_with_ns(namespace: Namespace, name: &str) -> Self {
         DeadProperty(vec![
             DeadPropertyTag::ElementStart(DeadElementTag {
                 name: format!("{}:{name}", namespace.prefix()),
@@ -67,91 +66,6 @@ impl DeadProperty {
             }),
             DeadPropertyTag::ElementEnd,
         ])
-    }
-
-    pub fn remove_element(&mut self, element: &DeadElementTag) {
-        let mut depth = 0;
-        let mut remove = false;
-        self.0.retain(|item| match item {
-            DeadPropertyTag::ElementStart(tag) => {
-                if depth == 0 && !remove && tag.name == element.name {
-                    remove = true;
-                }
-                depth += 1;
-
-                !remove
-            }
-            DeadPropertyTag::ElementEnd => {
-                depth -= 1;
-                if remove && depth == 0 {
-                    remove = false;
-                    false
-                } else {
-                    !remove
-                }
-            }
-            _ => !remove,
-        });
-    }
-
-    pub fn add_element(&mut self, element: DeadElementTag, values: Vec<DeadPropertyTag>) {
-        self.0.push(DeadPropertyTag::ElementStart(element));
-        self.0.extend(values);
-        self.0.push(DeadPropertyTag::ElementEnd);
-    }
-
-    pub fn size(&self) -> usize {
-        let mut size = 0;
-        for item in &self.0 {
-            match item {
-                DeadPropertyTag::ElementStart(tag) => {
-                    size += tag.size();
-                }
-                DeadPropertyTag::ElementEnd => {
-                    size += 1;
-                }
-                DeadPropertyTag::Text(text) => {
-                    size += text.len();
-                }
-            }
-        }
-        size
-    }
-}
-
-impl ArchivedDeadProperty {
-    pub fn size(&self) -> usize {
-        let mut size = 0;
-        for item in self.0.iter() {
-            match item {
-                ArchivedDeadPropertyTag::ElementStart(tag) => {
-                    size += tag.size();
-                }
-                ArchivedDeadPropertyTag::ElementEnd => {
-                    size += 1;
-                }
-                ArchivedDeadPropertyTag::Text(text) => {
-                    size += text.len();
-                }
-            }
-        }
-        size
-    }
-}
-
-impl DeadElementTag {
-    pub fn new(name: String, attrs: Option<String>) -> Self {
-        DeadElementTag { name, attrs }
-    }
-
-    pub fn size(&self) -> usize {
-        self.name.len() + self.attrs.as_ref().map_or(0, |attrs| attrs.len())
-    }
-}
-
-impl ArchivedDeadElementTag {
-    pub fn size(&self) -> usize {
-        self.name.len() + self.attrs.as_ref().map_or(0, |attrs| attrs.len())
     }
 }
 
@@ -192,12 +106,6 @@ impl From<&RawElement<'_>> for DeadElementTag {
             name,
             attrs: (!attrs.is_empty()).then_some(attrs),
         }
-    }
-}
-
-impl Default for DeadProperty {
-    fn default() -> Self {
-        DeadProperty(Vec::with_capacity(4))
     }
 }
 

@@ -519,6 +519,8 @@ impl CalendarEventSet for Server {
             return Ok(Err(err));
         }
 
+        let todo = "add default alarms + other calendar properties";
+
         // Verify that the calendar ids valid
         for name in &event.names {
             if !cache.has_container_id(&name.parent_id) {

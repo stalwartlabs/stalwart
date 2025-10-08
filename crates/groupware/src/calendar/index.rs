@@ -4,14 +4,26 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::calendar::{ArchivedCalendarEventNotification, CalendarEventNotification};
+use std::collections::HashSet;
 
 use super::{
     ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarPreferences, ArchivedDefaultAlert,
     ArchivedTimezone, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert, Timezone,
 };
-use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
+use crate::calendar::{
+    ArchivedCalendarEventNotification, ArchivedEventPreferences, CalendarEventNotification,
+    EventPreferences,
+};
+use calcard::icalendar::{
+    ArchivedICalendarParameterValue, ArchivedICalendarProperty, ArchivedICalendarValue,
+    ICalendarParameterValue, ICalendarProperty, ICalendarValue,
+};
+use common::storage::index::{
+    IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
+};
+use store::backend::MAX_TOKEN_LENGTH;
 use types::{acl::AclGrant, collection::SyncCollection, field::CalendarField};
+use utils::sanitize_email;
 
 impl IndexableObject for Calendar {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -69,10 +81,39 @@ impl IndexableObject for CalendarEvent {
                 field: CalendarField::Uid.into(),
                 value: self.data.event.uids().next().into(),
             },
+            IndexValue::Index {
+                field: CalendarField::Start.into(),
+                value: self.data.event_range_start().into(),
+            },
+            IndexValue::Index {
+                field: CalendarField::Created.into(),
+                value: self.created.into(),
+            },
+            IndexValue::Index {
+                field: CalendarField::Updated.into(),
+                value: self.modified.into(),
+            },
+            IndexValue::IndexList {
+                field: CalendarField::Text.into(),
+                value: self
+                    .text()
+                    .filter_map(|v| {
+                        if let Some(email) = v.strip_prefix("mailto:") {
+                            sanitize_email(email)
+                        } else {
+                            Some(v.to_lowercase())
+                        }
+                    })
+                    .map(Into::into)
+                    .collect::<HashSet<IndexItem>>()
+                    .into_iter()
+                    .collect(),
+            },
             IndexValue::Quota {
                 used: self.dead_properties.size() as u32
                     + self.display_name.as_ref().map_or(0, |n| n.len() as u32)
                     + self.names.iter().map(|n| n.name.len() as u32).sum::<u32>()
+                    + self.preferences.iter().map(|p| p.size()).sum::<usize>() as u32
                     + self.size,
             },
             IndexValue::LogItem {
@@ -91,10 +132,39 @@ impl IndexableObject for &ArchivedCalendarEvent {
                 field: CalendarField::Uid.into(),
                 value: self.data.event.uids().next().into(),
             },
+            IndexValue::Index {
+                field: CalendarField::Start.into(),
+                value: self.data.event_range_start().into(),
+            },
+            IndexValue::Index {
+                field: CalendarField::Created.into(),
+                value: self.created.to_native().into(),
+            },
+            IndexValue::Index {
+                field: CalendarField::Updated.into(),
+                value: self.modified.to_native().into(),
+            },
+            IndexValue::IndexList {
+                field: CalendarField::Text.into(),
+                value: self
+                    .text()
+                    .filter_map(|v| {
+                        if let Some(email) = v.strip_prefix("mailto:") {
+                            sanitize_email(email)
+                        } else {
+                            Some(v.to_lowercase())
+                        }
+                    })
+                    .map(Into::into)
+                    .collect::<HashSet<IndexItem>>()
+                    .into_iter()
+                    .collect(),
+            },
             IndexValue::Quota {
                 used: self.dead_properties.size() as u32
                     + self.display_name.as_ref().map_or(0, |n| n.len() as u32)
                     + self.names.iter().map(|n| n.name.len() as u32).sum::<u32>()
+                    + self.preferences.iter().map(|p| p.size()).sum::<usize>() as u32
                     + self.size,
             },
             IndexValue::LogItem {
@@ -161,6 +231,7 @@ impl CalendarPreferences {
             + self.description.as_ref().map_or(0, |n| n.len())
             + self.color.as_ref().map_or(0, |n| n.len())
             + self.time_zone.size()
+            + std::mem::size_of::<CalendarPreferences>()
     }
 }
 
@@ -171,6 +242,23 @@ impl ArchivedCalendarPreferences {
             + self.description.as_ref().map_or(0, |n| n.len())
             + self.color.as_ref().map_or(0, |n| n.len())
             + self.time_zone.size()
+            + std::mem::size_of::<CalendarPreferences>()
+    }
+}
+
+impl EventPreferences {
+    pub fn size(&self) -> usize {
+        self.alerts.iter().map(|a| a.size()).sum::<usize>()
+            + self.properties.iter().map(|p| p.size()).sum::<usize>()
+            + std::mem::size_of::<EventPreferences>()
+    }
+}
+
+impl ArchivedEventPreferences {
+    pub fn size(&self) -> usize {
+        self.alerts.iter().map(|a| a.size()).sum::<usize>()
+            + self.properties.iter().map(|p| p.size()).sum::<usize>()
+            + std::mem::size_of::<EventPreferences>()
     }
 }
 
@@ -203,5 +291,85 @@ impl DefaultAlert {
 impl ArchivedDefaultAlert {
     pub fn size(&self) -> usize {
         std::mem::size_of::<Self>() + self.id.len()
+    }
+}
+
+impl CalendarEvent {
+    pub fn text(&self) -> impl Iterator<Item = &str> {
+        self.data
+            .event
+            .components
+            .iter()
+            .filter(|e| e.component_type.is_scheduling_object())
+            .flat_map(|e| {
+                e.entries.iter().filter(|e| {
+                    matches!(
+                        e.name,
+                        ICalendarProperty::Summary
+                            | ICalendarProperty::Location
+                            | ICalendarProperty::Description
+                            | ICalendarProperty::Categories
+                            | ICalendarProperty::Comment
+                            | ICalendarProperty::Attendee
+                            | ICalendarProperty::Organizer
+                    )
+                })
+            })
+            .flat_map(|e| {
+                e.values
+                    .iter()
+                    .filter_map(|v| match v {
+                        ICalendarValue::Text(v) => Some(v.as_str()),
+                        ICalendarValue::Uri(uri) => uri.as_str(),
+                        _ => None,
+                    })
+                    .chain(e.params.iter().filter_map(|p| match &p.value {
+                        ICalendarParameterValue::Text(v) => Some(v.as_str()),
+                        ICalendarParameterValue::Uri(uri) => uri.as_str(),
+                        _ => None,
+                    }))
+            })
+            .flat_map(str::split_whitespace)
+            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
+    }
+}
+
+impl ArchivedCalendarEvent {
+    pub fn text(&self) -> impl Iterator<Item = &str> {
+        self.data
+            .event
+            .components
+            .iter()
+            .filter(|e| e.component_type.is_scheduling_object())
+            .flat_map(|e| {
+                e.entries.iter().filter(|e| {
+                    matches!(
+                        e.name,
+                        ArchivedICalendarProperty::Summary
+                            | ArchivedICalendarProperty::Location
+                            | ArchivedICalendarProperty::Description
+                            | ArchivedICalendarProperty::Categories
+                            | ArchivedICalendarProperty::Comment
+                            | ArchivedICalendarProperty::Attendee
+                            | ArchivedICalendarProperty::Organizer
+                    )
+                })
+            })
+            .flat_map(|e| {
+                e.values
+                    .iter()
+                    .filter_map(|v| match v {
+                        ArchivedICalendarValue::Text(v) => Some(v.as_str()),
+                        ArchivedICalendarValue::Uri(uri) => uri.as_str(),
+                        _ => None,
+                    })
+                    .chain(e.params.iter().filter_map(|p| match &p.value {
+                        ArchivedICalendarParameterValue::Text(v) => Some(v.as_str()),
+                        ArchivedICalendarParameterValue::Uri(uri) => uri.as_str(),
+                        _ => None,
+                    }))
+            })
+            .flat_map(str::split_whitespace)
+            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
     }
 }

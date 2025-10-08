@@ -183,7 +183,7 @@ impl<T: SessionStream> SessionData<T> {
                     .caused_by(trc::location!())?
                     .ids
                     .into_iter()
-                    .map(|id| id as u32),
+                    .map(|id| id.document_id()),
                 is_uid,
                 arguments.result_options.contains(&ResultOption::Min),
                 arguments.result_options.contains(&ResultOption::Max),

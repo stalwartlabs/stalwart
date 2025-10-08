@@ -14,7 +14,6 @@ use calcard::{
         ICalendarStatus, ICalendarUserTypes, ICalendarValue, Uri,
     },
 };
-use dav_proto::schema::response::CalCondition;
 use std::{fmt::Display, hash::Hash};
 
 pub mod attendee;
@@ -341,28 +340,6 @@ impl ItipDateTime<'_> {
 }
 
 impl ItipError {
-    pub fn failed_precondition(&self) -> Option<CalCondition> {
-        match self {
-            ItipError::MultipleOrganizer => Some(CalCondition::SameOrganizerInAllComponents),
-            ItipError::OrganizerIsLocalAddress
-            | ItipError::SenderIsNotParticipant(_)
-            | ItipError::OrganizerMismatch => Some(CalCondition::ValidOrganizer),
-            ItipError::CannotModifyProperty(_)
-            | ItipError::CannotModifyInstance
-            | ItipError::CannotModifyAddress => Some(CalCondition::AllowedAttendeeObjectChange),
-            ItipError::MissingUid
-            | ItipError::MultipleUid
-            | ItipError::MultipleObjectTypes
-            | ItipError::MultipleObjectInstances
-            | ItipError::MissingMethod
-            | ItipError::InvalidComponentType
-            | ItipError::OutOfSequence
-            | ItipError::UnknownParticipant(_)
-            | ItipError::UnsupportedMethod(_) => Some(CalCondition::ValidSchedulingMessage),
-            _ => None,
-        }
-    }
-
     pub fn is_jmap_error(&self) -> bool {
         matches!(
             self,

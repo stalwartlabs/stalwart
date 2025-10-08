@@ -20,6 +20,7 @@ use dav_proto::schema::{
     property::{CalDavProperty, CalendarData, DavProperty, WebDavProperty},
     response::CalCondition,
 };
+use groupware::scheduling::ItipError;
 use hyper::StatusCode;
 use store::query::Filter;
 use trc::AddContext;
@@ -118,4 +119,32 @@ pub(crate) async fn assert_is_unique_uid(
     }
 
     Ok(())
+}
+
+pub(crate) trait ItipPrecondition {
+    fn failed_precondition(&self) -> Option<CalCondition>;
+}
+
+impl ItipPrecondition for ItipError {
+    fn failed_precondition(&self) -> Option<CalCondition> {
+        match self {
+            ItipError::MultipleOrganizer => Some(CalCondition::SameOrganizerInAllComponents),
+            ItipError::OrganizerIsLocalAddress
+            | ItipError::SenderIsNotParticipant(_)
+            | ItipError::OrganizerMismatch => Some(CalCondition::ValidOrganizer),
+            ItipError::CannotModifyProperty(_)
+            | ItipError::CannotModifyInstance
+            | ItipError::CannotModifyAddress => Some(CalCondition::AllowedAttendeeObjectChange),
+            ItipError::MissingUid
+            | ItipError::MultipleUid
+            | ItipError::MultipleObjectTypes
+            | ItipError::MultipleObjectInstances
+            | ItipError::MissingMethod
+            | ItipError::InvalidComponentType
+            | ItipError::OutOfSequence
+            | ItipError::UnknownParticipant(_)
+            | ItipError::UnsupportedMethod(_) => Some(CalCondition::ValidSchedulingMessage),
+            _ => None,
+        }
+    }
 }

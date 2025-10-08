@@ -10,7 +10,7 @@ pub mod log;
 pub mod sort;
 
 use roaring::RoaringBitmap;
-use types::collection::Collection;
+use types::{collection::Collection, id::Id};
 
 use crate::{
     BitmapKey, IterateParams, Key,
@@ -63,7 +63,7 @@ pub struct ResultSet {
 
 pub struct SortedResultSet {
     pub position: i32,
-    pub ids: Vec<u64>,
+    pub ids: Vec<Id>,
     pub found_anchor: bool,
 }
 

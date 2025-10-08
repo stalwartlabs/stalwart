@@ -13,10 +13,10 @@ use dav_proto::{
     Depth, RequestHeaders, Return,
     schema::{
         Namespace,
-        property::{DavProperty, ReportSet, ResourceType, TimeRange},
+        property::{DavProperty, ReportSet, ResourceType},
         request::{
-            AddressbookQuery, ArchivedDeadProperty, CalendarQuery, ExpandProperty, Filter,
-            MultiGet, PropFind, SyncCollection, Timezone, VCardPropertyWithGroup,
+            AddressbookQuery, CalendarQuery, ExpandProperty, Filter, MultiGet, PropFind,
+            SyncCollection, Timezone, VCardPropertyWithGroup,
         },
     },
 };
@@ -31,7 +31,10 @@ use groupware::{
 use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
 use store::write::{AlignedBytes, Archive, BatchBuilder, Operation, ValueClass, ValueOp};
-use types::{acl::ArchivedAclGrant, collection::Collection, field::Field};
+use types::{
+    TimeRange, acl::ArchivedAclGrant, collection::Collection, dead_property::ArchivedDeadProperty,
+    field::Field,
+};
 use uri::{OwnedUri, Urn};
 
 pub mod acl;
@@ -135,9 +138,9 @@ pub(crate) trait DavCollection {
 impl DavCollection for Collection {
     fn namespace(&self) -> Namespace {
         match self {
-            Collection::Calendar | Collection::CalendarEvent | Collection::CalendarEventNotification => {
-                Namespace::CalDav
-            }
+            Collection::Calendar
+            | Collection::CalendarEvent
+            | Collection::CalendarEventNotification => Namespace::CalDav,
             Collection::AddressBook | Collection::ContactCard => Namespace::CardDav,
             _ => Namespace::Dav,
         }
@@ -359,7 +362,9 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::AddressBook(archive) => archive.inner.created.to_native(),
             ArchivedResource::ContactCard(archive) => archive.inner.created.to_native(),
             ArchivedResource::FileNode(archive) => archive.inner.created.to_native(),
-            ArchivedResource::CalendarEventNotification(archive) => archive.inner.created.to_native(),
+            ArchivedResource::CalendarEventNotification(archive) => {
+                archive.inner.created.to_native()
+            }
             ArchivedResource::CalendarEventNotificationCollection(_) => 1634515200,
         }
     }
@@ -371,7 +376,9 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::AddressBook(archive) => archive.inner.modified.to_native(),
             ArchivedResource::ContactCard(archive) => archive.inner.modified.to_native(),
             ArchivedResource::FileNode(archive) => archive.inner.modified.to_native(),
-            ArchivedResource::CalendarEventNotification(archive) => archive.inner.modified.to_native(),
+            ArchivedResource::CalendarEventNotification(archive) => {
+                archive.inner.modified.to_native()
+            }
             ArchivedResource::CalendarEventNotificationCollection(_) => 1634515200,
         }
     }
@@ -394,7 +401,9 @@ impl<'x> ArchivedResource<'x> {
                 archive.inner.file.as_ref().map(|f| f.size.to_native())
             }
             ArchivedResource::CalendarEvent(archive) => archive.inner.size.to_native().into(),
-            ArchivedResource::CalendarEventNotification(archive) => archive.inner.size.to_native().into(),
+            ArchivedResource::CalendarEventNotification(archive) => {
+                archive.inner.size.to_native().into()
+            }
             ArchivedResource::ContactCard(archive) => archive.inner.size.to_native().into(),
             ArchivedResource::AddressBook(_)
             | ArchivedResource::Calendar(_)

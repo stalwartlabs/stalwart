@@ -1797,6 +1797,7 @@ dependencies = [
  "serde",
  "serde_json",
  "trc",
+ "types",
 ]
 
 [[package]]
@@ -2852,7 +2853,6 @@ dependencies = [
  "chrono",
  "common",
  "compact_str",
- "dav-proto",
  "directory",
  "hashify",
  "percent-encoding",

@@ -11,7 +11,6 @@ common = { path =  "../common" }
 types = { path = "../types" }
 trc = { path = "../trc" }
 directory = { path =  "../directory" }
-dav-proto = { path =  "../dav-proto" }
 calcard = { path = "/Users/me/code/calcard", features = ["rkyv"] }
 hashify = "0.2"
 tokio = { version = "1.47", features = ["net", "macros"] }

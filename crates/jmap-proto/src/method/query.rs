@@ -18,7 +18,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 use store::fts::{FilterItem, FilterType, FtsFilter};
-use types::{id::Id};
+use types::id::Id;
 
 #[derive(Debug, Clone)]
 pub struct QueryRequest<T: JmapObject> {
@@ -200,8 +200,8 @@ where
             where
                 V: MapAccess<'de>,
             {
-                let mut filter = T::default();
-                let mut has_filter = false;
+                let mut filter = None;
+                let mut has_multiple_filters = false;
                 let mut has_conditions = None;
                 let mut op = None;
 
@@ -231,13 +231,21 @@ where
                             self.0.push(Filter::Close);
                         }
                         _ => {
-                            filter.deserialize_argument(&key, &mut map)?;
-                            has_filter = true;
+                            if let Some(filter) = filter {
+                                if !has_multiple_filters {
+                                    self.0.push(Filter::And);
+                                    has_multiple_filters = true;
+                                }
+                                self.0.push(Filter::Property(filter));
+                            }
+                            let mut new_filter = T::default();
+                            new_filter.deserialize_argument(&key, &mut map)?;
+                            filter = Some(new_filter);
                         }
                     }
                 }
 
-                if has_filter {
+                if let Some(filter) = filter {
                     if has_conditions.is_some() {
                         return Err(de::Error::custom(
                             "Cannot mix conditions with property filters",
@@ -245,6 +253,9 @@ where
                     }
 
                     self.0.push(Filter::Property(filter));
+                    if has_multiple_filters {
+                        self.0.push(Filter::Close);
+                    }
                 }
 
                 Ok(())

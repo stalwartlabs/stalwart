@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{
+    property::{DavProperty, DavValue, LockScope, LockType},
+    response::Ace,
+    Collation, MatchType,
+};
+use crate::Depth;
 use calcard::{
     icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardProperty},
 };
-
-use crate::Depth;
-
-use super::{
-    property::{DavProperty, DavValue, LockScope, LockType, TimeRange},
-    response::Ace,
-    Collation, MatchType,
+use types::{
+    dead_property::{ArchivedDeadProperty, ArchivedDeadPropertyTag, DeadElementTag, DeadProperty},
+    TimeRange,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -185,31 +187,6 @@ pub struct TextMatch {
     pub negate: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(test, serde(tag = "type", content = "data"))]
-#[rkyv(derive(Debug))]
-pub enum DeadPropertyTag {
-    ElementStart(DeadElementTag),
-    ElementEnd,
-    Text(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-#[rkyv(derive(Debug))]
-pub struct DeadElementTag {
-    pub name: String,
-    pub attrs: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(test, serde(transparent))]
-#[rkyv(derive(Debug))]
-#[repr(transparent)]
-pub struct DeadProperty(pub Vec<DeadPropertyTag>);
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub struct Acl {
@@ -251,74 +228,26 @@ pub struct PropertySearch {
     pub match_: String,
 }
 
-impl From<&ArchivedDeadProperty> for DeadProperty {
-    fn from(value: &ArchivedDeadProperty) -> Self {
-        DeadProperty(value.0.iter().map(|tag| tag.into()).collect::<Vec<_>>())
+impl PropertyUpdate {
+    pub fn has_changes(&self) -> bool {
+        !self.set.is_empty() || !self.remove.is_empty()
     }
 }
 
-impl From<&ArchivedDeadPropertyTag> for DeadPropertyTag {
-    fn from(tag: &ArchivedDeadPropertyTag) -> Self {
-        match tag {
-            ArchivedDeadPropertyTag::ElementStart(tag) => DeadPropertyTag::ElementStart(tag.into()),
-            ArchivedDeadPropertyTag::ElementEnd => DeadPropertyTag::ElementEnd,
-            ArchivedDeadPropertyTag::Text(tag) => DeadPropertyTag::Text(tag.to_string()),
-        }
-    }
-}
-
-impl From<&ArchivedDeadElementTag> for DeadElementTag {
-    fn from(tag: &ArchivedDeadElementTag) -> Self {
-        DeadElementTag {
-            name: tag.name.to_string(),
-            attrs: tag.attrs.as_ref().map(|s| s.to_string()),
+impl FreeBusyQuery {
+    pub fn new(start: i64, end: i64) -> Self {
+        FreeBusyQuery {
+            range: Some(TimeRange { start, end }),
         }
     }
 }
 
-impl ArchivedDeadProperty {
-    pub fn find_tag(&self, needle: &str) -> Option<DeadProperty> {
-        let mut depth: u32 = 0;
-        let mut tags = Vec::new();
-        let mut found_tag = false;
+pub trait DavDeadProperty {
+    fn to_dav_values(&self, output: &mut Vec<DavPropertyValue>);
+}
 
-        for tag in self.0.iter() {
-            match tag {
-                ArchivedDeadPropertyTag::ElementStart(start) => {
-                    if depth == 0 && start.name == needle {
-                        found_tag = true;
-                    } else if found_tag {
-                        tags.push(tag.into());
-                    }
-
-                    depth += 1;
-                }
-                ArchivedDeadPropertyTag::ElementEnd => {
-                    if found_tag {
-                        if depth == 1 {
-                            break;
-                        } else {
-                            tags.push(tag.into());
-                        }
-                    }
-                    depth = depth.saturating_sub(1);
-                }
-                ArchivedDeadPropertyTag::Text(_) => {
-                    if found_tag {
-                        tags.push(tag.into());
-                    }
-                }
-            }
-        }
-
-        if found_tag {
-            Some(DeadProperty(tags))
-        } else {
-            None
-        }
-    }
-
-    pub fn to_dav_values(&self, output: &mut Vec<DavPropertyValue>) {
+impl DavDeadProperty for ArchivedDeadProperty {
+    fn to_dav_values(&self, output: &mut Vec<DavPropertyValue>) {
         let mut depth: u32 = 0;
         let mut tags = Vec::new();
         let mut tag_start = None;
@@ -352,20 +281,6 @@ impl ArchivedDeadProperty {
                     }
                 }
             }
-        }
-    }
-}
-
-impl PropertyUpdate {
-    pub fn has_changes(&self) -> bool {
-        !self.set.is_empty() || !self.remove.is_empty()
-    }
-}
-
-impl FreeBusyQuery {
-    pub fn new(start: i64, end: i64) -> Self {
-        FreeBusyQuery {
-            range: Some(TimeRange { start, end }),
         }
     }
 }

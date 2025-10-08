@@ -7,13 +7,13 @@
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
     request::{MaybeInvalid, deserialize::DeserializeArguments},
-    types::date::UTCDate,
 };
 use calcard::{
     common::timezone::Tz,
-    jscalendar::{JSCalendarProperty, JSCalendarValue},
+    jscalendar::{JSCalendarDateTime, JSCalendarProperty, JSCalendarValue},
 };
 use jmap_tools::{JsonPointerItem, Key};
+use mail_parser::DateTime;
 use std::{borrow::Cow, str::FromStr};
 use types::{blob::BlobId, id::Id};
 
@@ -81,14 +81,14 @@ impl JmapObjectId for JSCalendarValue<Id, BlobId> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CalendarEventFilter {
     InCalendar(MaybeInvalid<Id>),
-    After(UTCDate),
-    Before(UTCDate),
+    After(JSCalendarDateTime),
+    Before(JSCalendarDateTime),
     Text(String),
-    Title(Option<String>),
-    Description(Option<String>),
-    Location(Option<String>),
-    Owner(Option<String>),
-    Attendee(Option<String>),
+    Title(String),
+    Description(String),
+    Location(String),
+    Owner(String),
+    Attendee(String),
     Uid(String),
     _T(String),
 }
@@ -105,8 +105,8 @@ pub enum CalendarEventComparator {
 
 #[derive(Debug, Clone, Default)]
 pub struct CalendarEventGetArguments {
-    pub recurrence_overrides_before: Option<UTCDate>,
-    pub recurrence_overrides_after: Option<UTCDate>,
+    pub recurrence_overrides_before: Option<JSCalendarDateTime>,
+    pub recurrence_overrides_after: Option<JSCalendarDateTime>,
     pub reduce_participants: Option<bool>,
     pub time_zone: Option<Tz>,
 }
@@ -132,28 +132,28 @@ impl<'de> DeserializeArguments<'de> for CalendarEventFilter {
                 *self = CalendarEventFilter::InCalendar(map.next_value()?);
             },
             b"after" => {
-                *self = CalendarEventFilter::After(map.next_value()?);
+                *self = CalendarEventFilter::After(map.next_value::<LocalTime>()?.0);
             },
             b"before" => {
-                *self = CalendarEventFilter::Before(map.next_value()?);
+                *self = CalendarEventFilter::Before(map.next_value::<LocalTime>()?.0);
             },
             b"text" => {
                 *self = CalendarEventFilter::Text(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"title" => {
-                *self = CalendarEventFilter::Title(map.next_value::<Option<Cow<str>>>()?.map(|s| s.to_lowercase()));
+                *self = CalendarEventFilter::Title(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"description" => {
-                *self = CalendarEventFilter::Description(map.next_value::<Option<Cow<str>>>()?.map(|s| s.to_lowercase()));
+                *self = CalendarEventFilter::Description(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"location" => {
-                *self = CalendarEventFilter::Location(map.next_value::<Option<Cow<str>>>()?.map(|s| s.to_lowercase()));
+                *self = CalendarEventFilter::Location(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"owner" => {
-                *self = CalendarEventFilter::Owner(map.next_value::<Option<Cow<str>>>()?.map(|s| s.to_lowercase()));
+                *self = CalendarEventFilter::Owner(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"attendee" => {
-                *self = CalendarEventFilter::Attendee(map.next_value::<Option<Cow<str>>>()?.map(|s| s.to_lowercase()));
+                *self = CalendarEventFilter::Attendee(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             b"uid" => {
                 *self = CalendarEventFilter::Uid(map.next_value()?);
@@ -208,10 +208,10 @@ impl<'de> DeserializeArguments<'de> for CalendarEventGetArguments {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"recurrenceOverridesBefore" => {
-                self.recurrence_overrides_before = map.next_value()?;
+                self.recurrence_overrides_before = map.next_value::<Option<LocalTime>>()?.map(|lt| lt.0)
             },
             b"recurrenceOverridesAfter" => {
-                self.recurrence_overrides_after = map.next_value()?;
+                self.recurrence_overrides_after = map.next_value::<Option<LocalTime>>()?.map(|lt| lt.0);
             },
             b"reduceParticipants" => {
                 self.reduce_participants = map.next_value()?;
@@ -306,6 +306,29 @@ impl Default for CalendarEventFilter {
 impl Default for CalendarEventComparator {
     fn default() -> Self {
         CalendarEventComparator::_T(String::new())
+    }
+}
+
+struct LocalTime(JSCalendarDateTime);
+
+impl<'de> serde::Deserialize<'de> for LocalTime {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <&str>::deserialize(deserializer)?;
+
+        if let Some(dt) = DateTime::parse_rfc3339(value) {
+            Ok(LocalTime(JSCalendarDateTime {
+                timestamp: dt.to_timestamp_local(),
+                is_local: true,
+            }))
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "Invalid datetime: {}",
+                value
+            )))
+        }
     }
 }
 

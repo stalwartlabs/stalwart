@@ -216,11 +216,7 @@ impl UpdateResults for QueryResponse {
         // Prepare response
         if sorted_results.found_anchor {
             self.position = sorted_results.position;
-            self.ids = sorted_results
-                .ids
-                .into_iter()
-                .map(|id| id.into())
-                .collect::<Vec<_>>();
+            self.ids = sorted_results.ids;
             Ok(())
         } else {
             Err(trc::JmapEvent::AnchorNotFound.into_err())

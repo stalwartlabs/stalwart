@@ -5,21 +5,25 @@
  */
 
 use super::{XmlCdataEscape, XmlEscape};
-use crate::schema::{
-    property::{
-        ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue, LockDiscovery,
-        LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType, Rfc1123DateTime,
-        SupportedCollation, SupportedLock, WebDavProperty,
+use crate::{
+    responses::DeadPropertyFormat,
+    schema::{
+        property::{
+            ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue,
+            LockDiscovery, LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType,
+            Rfc1123DateTime, SupportedCollation, SupportedLock, WebDavProperty,
+        },
+        request::DavPropertyValue,
+        response::{Ace, AclRestrictions, Href, List, PropResponse, SupportedPrivilege},
+        Namespace, Namespaces,
     },
-    request::{DavPropertyValue, DeadProperty},
-    response::{Ace, AclRestrictions, Href, List, PropResponse, SupportedPrivilege},
-    Namespace, Namespaces,
 };
 use mail_parser::{
     parsers::fields::date::{DOW, MONTH},
     DateTime,
 };
 use std::fmt::Display;
+use types::dead_property::DeadProperty;
 
 impl Display for PropResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

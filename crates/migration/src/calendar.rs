@@ -6,17 +6,14 @@
 
 use calcard::{common::timezone::Tz, icalendar::ICalendar};
 use common::{DavName, Server};
-use dav_proto::schema::request::DeadProperty;
-use groupware::calendar::{
-    AlarmDelta, CalendarEvent, CalendarEventData, ComponentTimeRange, UserProperties,
-};
+use groupware::calendar::{AlarmDelta, CalendarEvent, CalendarEventData, ComponentTimeRange};
 use store::{
     Serialize,
     rand::{self, seq::SliceRandom},
     write::{Archiver, BatchBuilder, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
-use types::{collection::Collection, field::Field};
+use types::{collection::Collection, dead_property::DeadProperty, field::Field};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -31,6 +28,14 @@ pub struct CalendarEventV1 {
     pub size: u32,
     pub created: i64,
     pub modified: i64,
+}
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+pub struct UserProperties {
+    pub account_id: u32,
+    pub properties: ICalendar,
 }
 
 #[derive(
@@ -103,7 +108,7 @@ pub(crate) async fn migrate_calendar_events(server: &Server) -> trc::Result<()> 
                             server.core.groupware.max_ical_instances,
                             &mut next_email_alarm,
                         ),
-                        user_properties: event.user_properties,
+                        preferences: Default::default(),
                         flags: event.flags,
                         dead_properties: event.dead_properties,
                         size: event.size,

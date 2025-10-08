@@ -307,6 +307,7 @@ impl RequestHandler for Server {
                 }
                 GetRequestMethod::PrincipalAvailability(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_has_access(req.account_id, Collection::CalendarEvent)?;
 
                     self.principal_get_availability(req, access_token)
                         .await?

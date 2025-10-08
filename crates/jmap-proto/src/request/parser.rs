@@ -561,7 +561,7 @@ mod tests {
         "Email/query",
         {
             "accountId": "0",
-            "filter": { "conditions": [ { "hasKeyword": "music" }, { "hasKeyword": "video" }, { "operator": "AND", "conditions": [ { "subject": "test" }, { "minSize": 100 } ] } ], "operator": "OR" },
+            "filter": { "conditions": [ { "hasKeyword": "music", "maxSize": 455 }, { "hasKeyword": "video" }, { "operator": "AND", "conditions": [ { "subject": "test" }, { "minSize": 100 } ] } ], "operator": "OR" },
             "sort": [
             {
                 "property": "subject",

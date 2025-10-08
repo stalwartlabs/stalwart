@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use types::dead_property::DeadProperty;
+
 use crate::{
     parser::{tokenizer::Tokenizer, DavParser, Token},
     schema::{
         property::{LockScope, LockType},
-        request::{DeadProperty, LockInfo},
+        request::LockInfo,
         Element, NamedElement, Namespace,
     },
 };

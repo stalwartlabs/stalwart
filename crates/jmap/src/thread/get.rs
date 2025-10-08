@@ -98,7 +98,7 @@ impl ThreadGet for Server {
                             .caused_by(trc::location!())?
                             .ids
                             .into_iter()
-                            .map(|id| Id::from_parts(thread_id, id as u32))
+                            .map(|id| Id::from_parts(thread_id, id.document_id()))
                             .collect::<Vec<_>>(),
                     );
                 }

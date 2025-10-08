@@ -9,8 +9,8 @@ use crate::calendar::CalendarEventData;
 use ahash::AHashSet;
 use calcard::common::timezone::Tz;
 use chrono::{DateTime, TimeZone};
-use dav_proto::schema::property::TimeRange;
 use store::write::bitpack::BitpackIterator;
+use types::TimeRange;
 use utils::codec::leb128::Leb128Reader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +35,9 @@ impl ArchivedCalendarEventData {
             let duration = range.duration.to_native() as i64;
             let mut start_tz = Tz::from_id(range.start_tz.to_native())?;
             let mut end_tz = Tz::from_id(range.end_tz.to_native())?;
+            let is_todo = self.event.components[comp_id as usize]
+                .component_type
+                .is_todo();
 
             if start_tz.is_floating() && !default_tz.is_floating() {
                 start_tz = default_tz;
@@ -65,9 +68,7 @@ impl ArchivedCalendarEventData {
                         .single()?
                         .timestamp();
 
-                    if ((start < limit.end) || (start <= limit.start))
-                        && (end > limit.start || end >= limit.end)
-                    {
+                    if limit.is_in_range(is_todo, start, end) {
                         expansion.push(CalendarEventExpansion {
                             comp_id,
                             expansion_id,
@@ -97,9 +98,7 @@ impl ArchivedCalendarEventData {
                     .single()?
                     .timestamp();
 
-                if ((start < limit.end) || (start <= limit.start))
-                    && (end > limit.start || end >= limit.end)
-                {
+                if limit.is_in_range(is_todo, start, end) {
                     expansion.push(CalendarEventExpansion {
                         comp_id,
                         expansion_id: base_expansion_id,

@@ -28,6 +28,9 @@ pub enum ContactField {
 pub enum CalendarField {
     Uid,
     Created,
+    Updated,
+    Start,
+    Text,
     Archive,
 }
 
@@ -100,7 +103,10 @@ impl From<CalendarField> for u8 {
     fn from(value: CalendarField) -> Self {
         match value {
             CalendarField::Uid => 0,
+            CalendarField::Text => 1,
             CalendarField::Created => 2,
+            CalendarField::Updated => 3,
+            CalendarField::Start => 4,
             CalendarField::Archive => ARCHIVE_FIELD,
         }
     }

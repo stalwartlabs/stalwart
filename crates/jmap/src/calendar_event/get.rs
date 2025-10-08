@@ -150,12 +150,12 @@ impl CalendarEventGet for Server {
             let after = request
                 .arguments
                 .recurrence_overrides_after
-                .map(|v| v.timestamp())
+                .map(|v| v.timestamp)
                 .unwrap_or(i64::MIN);
             let before = request
                 .arguments
                 .recurrence_overrides_before
-                .map(|v| v.timestamp())
+                .map(|v| v.timestamp)
                 .unwrap_or(i64::MAX);
             if after < before {
                 Some(after..before)

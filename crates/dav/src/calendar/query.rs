@@ -26,7 +26,7 @@ use common::{DavResource, Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders,
     schema::{
-        property::{CalDavProperty, CalendarData, DavProperty, TimeRange},
+        property::{CalDavProperty, CalendarData, DavProperty},
         request::{CalendarQuery, Filter, FilterOp, PropFind, Timezone},
         response::MultiStatus,
     },
@@ -43,7 +43,7 @@ use store::{
     write::serialize::rkyv_deserialize,
 };
 use trc::AddContext;
-use types::{acl::Acl, collection::SyncCollection};
+use types::{TimeRange, acl::Acl, collection::SyncCollection};
 
 pub(crate) trait CalendarQueryRequestHandler: Sync + Send {
     fn handle_calendar_query_request(
@@ -125,20 +125,8 @@ impl CalendarQueryRequestHandler for Server {
 }
 
 pub(crate) fn is_resource_in_time_range(resource: &DavResource, filter: &TimeRange) -> bool {
+    // Check whether the resource has a time range and if it overlaps with the filter
     if let Some((start, end)) = resource.event_time_range() {
-        /*let range_from = DateTime::from_timestamp(filter.start, 0).unwrap();
-        let range_end = DateTime::from_timestamp(filter.end, 0).unwrap();
-        let result = ((filter.start < end) || (filter.start <= start))
-            && (filter.end > start || filter.end >= end);
-
-        let c = println!(
-            "filter from {range_from} to {range_end}, resource is {} from {} to {}, result: {}",
-            resource.path(),
-            DateTime::from_timestamp(start, 0).unwrap(),
-            DateTime::from_timestamp(end, 0).unwrap(),
-            result
-        );*/
-
         ((filter.start < end) || (filter.start <= start))
             && (filter.end > start || filter.end >= end)
     } else {

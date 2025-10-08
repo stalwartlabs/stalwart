@@ -13,8 +13,7 @@ pub mod storage;
 
 use calcard::icalendar::{ICalendar, ICalendarComponent, ICalendarDuration, ICalendarEntry};
 use common::{DavName, auth::AccessToken};
-use dav_proto::schema::request::DeadProperty;
-use types::acl::AclGrant;
+use types::{acl::AclGrant, dead_property::DeadProperty};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
