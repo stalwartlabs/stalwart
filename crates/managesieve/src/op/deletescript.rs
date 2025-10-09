@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::listener::SessionStream;
 use directory::Permission;
 use email::sieve::delete::SieveScriptDelete;
 use imap_proto::receiver::Request;
+use std::time::Instant;
 use store::write::BatchBuilder;
 use trc::AddContext;
-
-use crate::core::{Command, ResponseCode, Session, StatusResponse};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_deletescript(&mut self, request: Request<Command>) -> trc::Result<Vec<u8>> {
@@ -40,12 +38,7 @@ impl<T: SessionStream> Session<T> {
 
         match self
             .server
-            .sieve_script_delete(
-                &access_token.as_resource_token(),
-                document_id,
-                true,
-                &mut batch,
-            )
+            .sieve_script_delete(access_token, document_id, true, &mut batch)
             .await
             .caused_by(trc::location!())?
         {

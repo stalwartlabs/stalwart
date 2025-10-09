@@ -62,7 +62,6 @@ impl VacationResponseSet for Server {
             )
             .await?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
-        let resource_token = self.get_resource_token(access_token, account_id).await?;
 
         // Process set or update requests
         let mut create_id = None;
@@ -260,7 +259,7 @@ impl VacationResponseSet for Server {
             let mut obj = ObjectIndexBuilder::new()
                 .with_current_opt(prev_sieve)
                 .with_changes(sieve)
-                .with_tenant_id(&resource_token);
+                .with_access_token(access_token);
 
             // Update id
             let document_id = if let Some(document_id) = document_id {
@@ -327,7 +326,7 @@ impl VacationResponseSet for Server {
                 if id.is_singleton()
                     && let Some(document_id) = self.get_vacation_sieve_script_id(account_id).await?
                 {
-                    self.sieve_script_delete(&resource_token, document_id, false, &mut batch)
+                    self.sieve_script_delete(access_token, document_id, false, &mut batch)
                         .await?;
                     response.destroyed.push(id);
                     continue;

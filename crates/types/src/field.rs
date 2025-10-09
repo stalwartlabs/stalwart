@@ -31,6 +31,7 @@ pub enum CalendarField {
     Updated,
     Start,
     Text,
+    EventId,
     Archive,
 }
 
@@ -84,6 +85,7 @@ pub enum EmailSubmissionField {
 pub enum PrincipalField {
     Archive,
     EncryptionKeys,
+    ParticipantIdentities,
 }
 
 impl From<ContactField> for u8 {
@@ -107,6 +109,7 @@ impl From<CalendarField> for u8 {
             CalendarField::Created => 2,
             CalendarField::Updated => 3,
             CalendarField::Start => 4,
+            CalendarField::EventId => 5,
             CalendarField::Archive => ARCHIVE_FIELD,
         }
     }
@@ -168,6 +171,7 @@ impl From<EmailSubmissionField> for u8 {
 impl From<PrincipalField> for u8 {
     fn from(value: PrincipalField) -> Self {
         match value {
+            PrincipalField::ParticipantIdentities => 45,
             PrincipalField::EncryptionKeys => 46,
             PrincipalField::Archive => ARCHIVE_FIELD,
         }

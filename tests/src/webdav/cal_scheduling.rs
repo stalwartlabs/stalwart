@@ -199,7 +199,7 @@ pub async fn test(test: &WebDavTest) {
             .fetch_dav_resources(
                 &access_token,
                 client.account_id,
-                SyncCollection::CalendarScheduling,
+                SyncCollection::CalendarEventNotification,
             )
             .await
             .unwrap();

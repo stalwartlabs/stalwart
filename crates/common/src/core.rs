@@ -41,6 +41,7 @@ use types::{
     field::{EmailField, Field},
     type_state::{DataType, StateChange},
 };
+use utils::snowflake::SnowflakeIdGenerator;
 
 impl Server {
     #[inline(always)]
@@ -670,106 +671,131 @@ impl Server {
         Ok(assigned_ids)
     }
 
-    pub async fn delete_changes(&self, account_id: u32, max_entries: usize) -> trc::Result<()> {
-        for sync_collection in [
-            SyncCollection::Email,
-            SyncCollection::Thread,
-            SyncCollection::Identity,
-            SyncCollection::EmailSubmission,
-            SyncCollection::SieveScript,
-            SyncCollection::FileNode,
-            SyncCollection::AddressBook,
-            SyncCollection::Calendar,
-        ] {
-            let collection = sync_collection.into();
-            let from_key = LogKey {
-                account_id,
-                collection,
-                change_id: 0,
-            };
-            let to_key = LogKey {
-                account_id,
-                collection,
-                change_id: u64::MAX,
-            };
+    pub async fn delete_changes(
+        &self,
+        account_id: u32,
+        max_entries: Option<usize>,
+        max_duration: Option<Duration>,
+    ) -> trc::Result<()> {
+        if let Some(max_entries) = max_entries {
+            for sync_collection in [
+                SyncCollection::Email,
+                SyncCollection::Thread,
+                SyncCollection::Identity,
+                SyncCollection::EmailSubmission,
+                SyncCollection::SieveScript,
+                SyncCollection::FileNode,
+                SyncCollection::AddressBook,
+                SyncCollection::Calendar,
+            ] {
+                let collection = sync_collection.into();
+                let from_key = LogKey {
+                    account_id,
+                    collection,
+                    change_id: 0,
+                };
+                let to_key = LogKey {
+                    account_id,
+                    collection,
+                    change_id: u64::MAX,
+                };
 
-            let mut first_change_id = 0;
-            let mut num_changes = 0;
+                let mut first_change_id = 0;
+                let mut num_changes = 0;
 
-            self.store()
-                .iterate(
-                    IterateParams::new(from_key, to_key)
-                        .descending()
-                        .no_values(),
-                    |key, _| {
-                        first_change_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
-                        num_changes += 1;
-
-                        Ok(num_changes <= max_entries)
-                    },
-                )
-                .await
-                .caused_by(trc::location!())?;
-
-            if num_changes > max_entries {
                 self.store()
-                    .delete_range(
-                        LogKey {
-                            account_id,
-                            collection,
-                            change_id: 0,
-                        },
-                        LogKey {
-                            account_id,
-                            collection,
-                            change_id: first_change_id,
+                    .iterate(
+                        IterateParams::new(from_key, to_key)
+                            .descending()
+                            .no_values(),
+                        |key, _| {
+                            first_change_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
+                            num_changes += 1;
+
+                            Ok(num_changes <= max_entries)
                         },
                     )
                     .await
                     .caused_by(trc::location!())?;
 
-                // Delete vanished items
-                if let Some(vanished_collection) =
-                    sync_collection.vanished_collection().map(u8::from)
-                {
+                if num_changes > max_entries {
                     self.store()
                         .delete_range(
                             LogKey {
                                 account_id,
-                                collection: vanished_collection,
+                                collection,
                                 change_id: 0,
                             },
                             LogKey {
                                 account_id,
-                                collection: vanished_collection,
+                                collection,
                                 change_id: first_change_id,
                             },
                         )
                         .await
                         .caused_by(trc::location!())?;
-                }
 
-                // Write truncation entry for cache
-                let mut batch = BatchBuilder::new();
-                batch.with_account_id(account_id).set(
-                    ValueClass::Any(AnyClass {
-                        subspace: SUBSPACE_LOGS,
-                        key: LogKey {
-                            account_id,
-                            collection,
-                            change_id: first_change_id,
-                        }
-                        .serialize(0),
-                    }),
-                    Vec::new(),
-                );
-                self.store()
-                    .write(batch.build_all())
-                    .await
-                    .caused_by(trc::location!())?;
+                    // Delete vanished items
+                    if let Some(vanished_collection) =
+                        sync_collection.vanished_collection().map(u8::from)
+                    {
+                        self.store()
+                            .delete_range(
+                                LogKey {
+                                    account_id,
+                                    collection: vanished_collection,
+                                    change_id: 0,
+                                },
+                                LogKey {
+                                    account_id,
+                                    collection: vanished_collection,
+                                    change_id: first_change_id,
+                                },
+                            )
+                            .await
+                            .caused_by(trc::location!())?;
+                    }
+
+                    // Write truncation entry for cache
+                    let mut batch = BatchBuilder::new();
+                    batch.with_account_id(account_id).set(
+                        ValueClass::Any(AnyClass {
+                            subspace: SUBSPACE_LOGS,
+                            key: LogKey {
+                                account_id,
+                                collection,
+                                change_id: first_change_id,
+                            }
+                            .serialize(0),
+                        }),
+                        Vec::new(),
+                    );
+                    self.store()
+                        .write(batch.build_all())
+                        .await
+                        .caused_by(trc::location!())?;
+                }
             }
         }
 
+        if let Some(max_duration) = max_duration {
+            self.store()
+                .delete_range(
+                    LogKey {
+                        account_id,
+                        collection: SyncCollection::ShareNotification.into(),
+                        change_id: 0,
+                    },
+                    LogKey {
+                        account_id,
+                        collection: SyncCollection::ShareNotification.into(),
+                        change_id: SnowflakeIdGenerator::from_duration(max_duration)
+                            .unwrap_or_default(),
+                    },
+                )
+                .await
+                .caused_by(trc::location!())?;
+        }
         Ok(())
     }
 

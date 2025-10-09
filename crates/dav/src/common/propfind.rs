@@ -28,10 +28,7 @@ use crate::{
     },
 };
 use calcard::common::timezone::Tz;
-use common::{
-    DavResourcePath, DavResources, Server,
-    auth::{AccessToken, AsTenantId},
-};
+use common::{DavResourcePath, DavResources, Server, auth::AccessToken};
 use dav_proto::{
     Depth, RequestHeaders,
     parser::header::dav_base_uri,
@@ -989,7 +986,7 @@ impl PropFindRequestHandler for Server {
                         ) => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::CData(event.inner.itip.to_string()),
+                                DavValue::CData(event.inner.event.to_string()),
                             ));
                         }
                         (CalDavProperty::ScheduleTag, ArchivedResource::CalendarEvent(event))

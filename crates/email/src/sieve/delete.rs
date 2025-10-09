@@ -5,7 +5,7 @@
  */
 
 use super::SieveScript;
-use common::{Server, auth::ResourceToken, storage::index::ObjectIndexBuilder};
+use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use store::write::BatchBuilder;
 use trc::AddContext;
 use types::{collection::Collection, field::SieveField};
@@ -13,7 +13,7 @@ use types::{collection::Collection, field::SieveField};
 pub trait SieveScriptDelete: Sync + Send {
     fn sieve_script_delete(
         &self,
-        resource_token: &ResourceToken,
+        access_token: &AccessToken,
         document_id: u32,
         fail_if_active: bool,
         batch: &mut BatchBuilder,
@@ -23,13 +23,13 @@ pub trait SieveScriptDelete: Sync + Send {
 impl SieveScriptDelete for Server {
     async fn sieve_script_delete(
         &self,
-        resource_token: &ResourceToken,
+        access_token: &AccessToken,
         document_id: u32,
         fail_if_active: bool,
         batch: &mut BatchBuilder,
     ) -> trc::Result<Option<bool>> {
         // Fetch record
-        let account_id = resource_token.account_id;
+        let account_id = access_token.primary_id();
         let obj_ = if let Some(obj) = self
             .get_archive(account_id, Collection::SieveScript, document_id)
             .await?
@@ -57,7 +57,7 @@ impl SieveScriptDelete for Server {
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
                     .with_current(obj)
-                    .with_tenant_id(resource_token),
+                    .with_access_token(access_token),
             )
             .caused_by(trc::location!())?
             .commit_point();

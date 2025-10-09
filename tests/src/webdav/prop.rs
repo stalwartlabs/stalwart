@@ -7,12 +7,12 @@
 use super::{DavResponse, DummyWebDavClient, WebDavTest};
 use crate::webdav::{GenerateTestDavResource, TEST_ICAL_2, TEST_VTIMEZONE_1};
 use ahash::{AHashMap, AHashSet};
-use dav_proto::schema::{
-    property::{CalDavProperty, CardDavProperty, DavProperty, PrincipalProperty, WebDavProperty},
-    request::DeadElementTag,
+use dav_proto::schema::property::{
+    CalDavProperty, CardDavProperty, DavProperty, PrincipalProperty, WebDavProperty,
 };
 use groupware::DavResourceName;
 use hyper::StatusCode;
+use types::dead_property::DeadElementTag;
 
 pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
     let client = test.client("jane");

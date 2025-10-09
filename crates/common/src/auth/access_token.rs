@@ -409,6 +409,11 @@ impl AccessToken {
         self.primary_id
     }
 
+    #[inline(always)]
+    pub fn tenant_id(&self) -> Option<u32> {
+        self.tenant.as_ref().map(|t| t.id)
+    }
+
     pub fn secondary_ids(&self) -> impl Iterator<Item = &u32> {
         self.member_of
             .iter()

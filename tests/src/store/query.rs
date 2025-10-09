@@ -469,7 +469,7 @@ pub async fn test_filter(db: Store, fts: FtsStore) {
                 db.get_value::<String>(ValueKey {
                     account_id: 0,
                     collection: COLLECTION_ID.into(),
-                    document_id: document_id as u32,
+                    document_id: document_id.document_id(),
                     class: ValueClass::Property(fields_u8["accession_number"]),
                 })
                 .await
@@ -559,7 +559,7 @@ pub async fn test_sort(db: Store) {
                 db.get_value::<String>(ValueKey {
                     account_id: 0,
                     collection: COLLECTION_ID.into(),
-                    document_id: document_id as u32,
+                    document_id: document_id.document_id(),
                     class: ValueClass::Property(fields["accession_number"]),
                 })
                 .await

@@ -4,21 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Server;
-use directory::QueryParams;
+use common::{Server, auth::AccessToken};
+use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::principal::{Principal, PrincipalProperty, PrincipalValue},
+    object::principal::{Principal, PrincipalProperty, PrincipalType, PrincipalValue},
+    request::capability::Capability,
     types::state::State,
 };
-use jmap_tools::{Map, Value};
+use jmap_tools::{Key, Map, Value};
 use std::future::Future;
-use types::collection::Collection;
+use store::roaring::RoaringBitmap;
+use types::{collection::Collection, id::Id};
 
 pub trait PrincipalGet: Sync + Send {
     fn principal_get(
         &self,
         request: GetRequest<Principal>,
+        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<GetResponse<Principal>>> + Send;
 }
 
@@ -26,6 +29,7 @@ impl PrincipalGet for Server {
     async fn principal_get(
         &self,
         mut request: GetRequest<Principal>,
+        access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Principal>> {
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
@@ -34,13 +38,20 @@ impl PrincipalGet for Server {
             PrincipalProperty::Name,
             PrincipalProperty::Description,
             PrincipalProperty::Email,
-            //PrincipalProperty::Timezone,
-            //PrincipalProperty::Capabilities,
         ]);
-        let principal_ids = self
-            .get_document_ids(u32::MAX, Collection::Principal)
-            .await?
-            .unwrap_or_default();
+        let principal_ids = if access_token.tenant.is_some() {
+            self.store()
+                .list_principals(None, access_token.tenant.map(|t| t.id), &[], false, 0, 0)
+                .await?
+                .items
+                .into_iter()
+                .map(|p| p.id())
+                .collect::<RoaringBitmap>()
+        } else {
+            self.get_document_ids(u32::MAX, Collection::Principal)
+                .await?
+                .unwrap_or_default()
+        };
         let ids = if let Some(ids) = ids {
             ids
         } else {
@@ -59,12 +70,14 @@ impl PrincipalGet for Server {
 
         for id in ids {
             // Obtain the principal
-            let principal = if let Some(principal) = self
-                .core
-                .storage
-                .directory
-                .query(QueryParams::id(id.document_id()).with_return_member_of(false))
-                .await?
+            let document_id = id.document_id();
+            let principal = if principal_ids.contains(document_id)
+                && let Some(principal) = self
+                    .core
+                    .storage
+                    .directory
+                    .query(QueryParams::id(document_id).with_return_member_of(false))
+                    .await?
             {
                 principal
             } else {
@@ -77,7 +90,13 @@ impl PrincipalGet for Server {
                 let value = match property {
                     PrincipalProperty::Id => Value::Element(PrincipalValue::Id(id)),
                     PrincipalProperty::Type => {
-                        Value::Str(principal.typ().to_jmap().to_string().into())
+                        Value::Element(PrincipalValue::Type(match principal.typ() {
+                            Type::Individual => PrincipalType::Individual,
+                            Type::Group => PrincipalType::Group,
+                            Type::Resource => PrincipalType::Resource,
+                            Type::Location => PrincipalType::Location,
+                            _ => PrincipalType::Other,
+                        }))
                     }
                     PrincipalProperty::Name => Value::Str(principal.name().to_string().into()),
                     PrincipalProperty::Description => principal
@@ -89,6 +108,11 @@ impl PrincipalGet for Server {
                         .first()
                         .map(|email| Value::Str(email.to_string().into()))
                         .unwrap_or(Value::Null),
+                    PrincipalProperty::Accounts => Value::Object(Map::from(vec![(
+                        Key::Property(PrincipalProperty::IdValue(id)),
+                        build_account(id, principal.name().to_string(), true, false),
+                    )])),
+                    PrincipalProperty::Capabilities => all_capabilities(None),
                     _ => Value::Null,
                 };
 
@@ -99,4 +123,52 @@ impl PrincipalGet for Server {
 
         Ok(response)
     }
+}
+
+fn build_account(
+    id: Id,
+    name: String,
+    is_personal: bool,
+    is_readonly: bool,
+) -> Value<'static, PrincipalProperty, PrincipalValue> {
+    let mut account = Map::with_capacity(4);
+    account.insert_unchecked(
+        Key::Property(PrincipalProperty::Name),
+        Value::Str(name.into()),
+    );
+    account.insert_unchecked(Key::Borrowed("isPersonal"), Value::Bool(is_personal));
+    account.insert_unchecked(Key::Borrowed("isReadOnly"), Value::Bool(is_readonly));
+    account.insert_unchecked(
+        Key::Borrowed("accountCapabilities"),
+        all_capabilities(id.into()),
+    );
+    Value::Object(account)
+}
+
+fn all_capabilities(id: Option<Id>) -> Value<'static, PrincipalProperty, PrincipalValue> {
+    Value::Object(Map::from_iter(
+        Capability::all_principal_capabilities()
+            .iter()
+            .map(|cap| {
+                (
+                    Key::Property(PrincipalProperty::Capability(*cap)),
+                    Value::Object(Map::new()),
+                )
+            })
+            .chain(id.map(|id| {
+                (
+                    Key::Property(PrincipalProperty::Capability(Capability::PrincipalsOwner)),
+                    Value::Object(Map::from(vec![
+                        (
+                            Key::Borrowed("accountIdForPrincipal"),
+                            Value::Element(PrincipalValue::Id(id)),
+                        ),
+                        (
+                            Key::Borrowed("principalId"),
+                            Value::Element(PrincipalValue::Id(id)),
+                        ),
+                    ])),
+                )
+            })),
+    ))
 }

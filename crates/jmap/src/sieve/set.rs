@@ -131,7 +131,7 @@ impl SieveScriptSet for Server {
                             .with_account_id(account_id)
                             .with_collection(Collection::SieveScript)
                             .create_document(document_id)
-                            .custom(builder.with_tenant_id(&ctx.resource_token))
+                            .custom(builder.with_access_token(ctx.access_token))
                             .caused_by(trc::location!())?
                             .commit_point();
 
@@ -239,7 +239,7 @@ impl SieveScriptSet for Server {
 
                         // Write record
                         batch
-                            .custom(builder.with_tenant_id(&ctx.resource_token))
+                            .custom(builder.with_access_token(ctx.access_token))
                             .caused_by(trc::location!())?
                             .commit_point();
 
@@ -269,7 +269,7 @@ impl SieveScriptSet for Server {
             let document_id = id.document_id();
             if sieve_ids.contains(document_id) {
                 match self
-                    .sieve_script_delete(&ctx.resource_token, document_id, true, &mut batch)
+                    .sieve_script_delete(ctx.access_token, document_id, true, &mut batch)
                     .await?
                 {
                     Some(true) => {

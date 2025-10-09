@@ -109,7 +109,7 @@ impl PrincipalGetAvailability for Server {
         } else {
             PrincipalAddresses::Shared(access_token)
         };
-
+        let max_instances = self.core.groupware.max_ical_instances;
         let filter = TimeRange {
             start: request.utc_start.timestamp(),
             end: request.utc_end.timestamp(),
@@ -250,13 +250,19 @@ impl PrincipalGetAvailability for Server {
                 let Some(busy_status) = matching_component_ids.get(&expansion.comp_id) else {
                     continue;
                 };
-                periods.push(FreeBusyResult {
-                    utc_start: expansion.start,
-                    utc_end: expansion.end,
-                    busy_status: *busy_status,
-                    expansion_id: expansion.comp_id,
-                    document_id,
-                });
+                if periods.len() < max_instances {
+                    periods.push(FreeBusyResult {
+                        utc_start: expansion.start,
+                        utc_end: expansion.end,
+                        busy_status: *busy_status,
+                        expansion_id: expansion.comp_id,
+                        document_id,
+                    });
+                } else {
+                    return Err(trc::JmapEvent::RequestTooLarge
+                        .into_err()
+                        .details("The number of expanded instances exceeds the server limit"));
+                }
             }
         }
 

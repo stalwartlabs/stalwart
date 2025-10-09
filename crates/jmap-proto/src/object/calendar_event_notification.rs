@@ -18,7 +18,7 @@ use types::{blob::BlobId, id::Id};
 #[derive(Debug, Clone, Default)]
 pub struct CalendarEventNotification;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEventNotificationObject {
     pub id: Id,
@@ -49,12 +49,15 @@ pub struct CalendarEventNotificationObject {
     pub event_patch: Option<JSCalendar<'static, Id, BlobId>>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonObject {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub principal_id: Option<Id>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub calendar_address: Option<String>,
 }
 

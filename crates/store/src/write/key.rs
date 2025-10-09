@@ -5,7 +5,7 @@
  */
 
 use std::convert::TryInto;
-use types::blob_hash::BLOB_HASH_LEN;
+use types::{blob_hash::BLOB_HASH_LEN, collection::SyncCollection};
 use utils::codec::leb128::Leb128_;
 
 use crate::{
@@ -435,6 +435,13 @@ impl ValueClass {
             },
             ValueClass::DocumentId => serializer.write(account_id).write(collection),
             ValueClass::ChangeId => serializer.write(account_id),
+            ValueClass::ShareNotification {
+                notification_id,
+                notify_account_id,
+            } => serializer
+                .write(*notify_account_id)
+                .write(u8::from(SyncCollection::ShareNotification))
+                .write(*notification_id),
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
         }
         .finalize()
@@ -626,6 +633,7 @@ impl ValueClass {
             },
             ValueClass::DocumentId => U32_LEN + 1,
             ValueClass::ChangeId => U32_LEN,
+            ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
             ValueClass::Any(v) => v.key.len(),
         }
     }
@@ -673,6 +681,7 @@ impl ValueClass {
                 TelemetryClass::Metric { .. } => SUBSPACE_TELEMETRY_METRIC,
             },
             ValueClass::DocumentId | ValueClass::ChangeId => SUBSPACE_COUNTER,
+            ValueClass::ShareNotification { .. } => SUBSPACE_LOGS,
             ValueClass::Any(any) => any.subspace,
         }
     }

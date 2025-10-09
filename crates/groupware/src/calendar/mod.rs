@@ -55,6 +55,24 @@ pub struct DefaultAlert {
     pub flags: u16,
 }
 
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+pub struct ParticipantIdentities {
+    pub identities: Vec<ParticipantIdentity>,
+    pub default_name: String,
+    pub default: u32,
+}
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+pub struct ParticipantIdentity {
+    pub id: u32,
+    pub name: Option<String>,
+    pub calendar_address: String,
+}
+
 pub const ALERT_WITH_TIME: u16 = 1;
 pub const ALERT_EMAIL: u16 = 1 << 1;
 pub const ALERT_RELATIVE_TO_END: u16 = 1 << 2;
@@ -67,6 +85,9 @@ pub const EVENT_INVITE_OTHERS: u16 = 1 << 1;
 pub const EVENT_HIDE_ATTENDEES: u16 = 1 << 2;
 pub const EVENT_DRAFT: u16 = 1 << 3;
 pub const EVENT_ORIGIN: u16 = 1 << 4;
+
+pub const EVENT_NOTIFICATION_IS_DRAFT: u16 = 1;
+pub const EVENT_NOTIFICATION_IS_CHANGE: u16 = 1 << 1;
 
 pub const PREF_USE_DEFAULT_ALERTS: u16 = 1;
 
@@ -90,12 +111,19 @@ pub struct CalendarEvent {
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
 pub struct CalendarEventNotification {
-    pub itip: ICalendar,
+    pub event: ICalendar,
     pub event_id: Option<u32>,
+    pub changed_by: ChangedBy,
     pub flags: u16,
     pub size: u32,
     pub created: i64,
     pub modified: i64,
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
+pub enum ChangedBy {
+    PrincipalId(u32),
+    CalendarAddress(String),
 }
 
 #[derive(
@@ -283,5 +311,11 @@ impl ArchivedCalendarEvent {
         self.preferences
             .iter()
             .find(|p| p.account_id == access_token.primary_id())
+    }
+}
+
+impl Default for ChangedBy {
+    fn default() -> Self {
+        ChangedBy::CalendarAddress("".into())
     }
 }

@@ -911,7 +911,7 @@ pub(crate) fn build_search_index(
 }
 
 impl Type {
-    pub fn to_jmap(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Individual => "individual",
             Self::Group => "group",
@@ -927,7 +927,7 @@ impl Type {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub fn description(&self) -> &'static str {
         match self {
             Self::Individual => "Individual",
             Self::Group => "Group",
@@ -997,7 +997,7 @@ impl serde::Serialize for PrincipalSet {
         let mut map = serializer.serialize_map(None)?;
 
         map.serialize_entry("id", &self.id)?;
-        map.serialize_entry("type", &self.typ.to_jmap())?;
+        map.serialize_entry("type", &self.typ.as_str())?;
 
         for (key, value) in &self.fields {
             match value {

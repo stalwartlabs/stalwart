@@ -4,26 +4,187 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken};
+use common::Server;
+use directory::QueryParams;
+use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::participant_identity::ParticipantIdentity,
+    object::participant_identity::{self, ParticipantIdentityProperty, ParticipantIdentityValue},
 };
+use jmap_tools::{Map, Value};
+use store::{
+    Serialize,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder},
+};
+use trc::AddContext;
+use types::{collection::Collection, field::PrincipalField};
 
 pub trait ParticipantIdentityGet: Sync + Send {
     fn participant_identity_get(
         &self,
-        request: GetRequest<ParticipantIdentity>,
-        access_token: &AccessToken,
-    ) -> impl Future<Output = trc::Result<GetResponse<ParticipantIdentity>>> + Send;
+        request: GetRequest<participant_identity::ParticipantIdentity>,
+    ) -> impl Future<Output = trc::Result<GetResponse<participant_identity::ParticipantIdentity>>> + Send;
+
+    fn participant_identity_get_or_create(
+        &self,
+        account_id: u32,
+    ) -> impl Future<Output = trc::Result<Option<Archive<AlignedBytes>>>> + Send;
 }
 
 impl ParticipantIdentityGet for Server {
     async fn participant_identity_get(
         &self,
-        mut request: GetRequest<ParticipantIdentity>,
-        access_token: &AccessToken,
-    ) -> trc::Result<GetResponse<ParticipantIdentity>> {
-        todo!()
+        mut request: GetRequest<participant_identity::ParticipantIdentity>,
+    ) -> trc::Result<GetResponse<participant_identity::ParticipantIdentity>> {
+        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let properties = request.unwrap_properties(&[
+            ParticipantIdentityProperty::Id,
+            ParticipantIdentityProperty::Name,
+            ParticipantIdentityProperty::CalendarAddress,
+            ParticipantIdentityProperty::IsDefault,
+        ]);
+        let account_id = request.account_id.document_id();
+        let identities = self.participant_identity_get_or_create(account_id).await?;
+
+        let mut response = GetResponse {
+            account_id: request.account_id.into(),
+            state: None,
+            list: Vec::new(),
+            not_found: vec![],
+        };
+
+        let Some(identities) = identities else {
+            response.not_found = ids.unwrap_or_default();
+            return Ok(response);
+        };
+
+        let identities = identities
+            .unarchive::<ParticipantIdentities>()
+            .caused_by(trc::location!())?;
+
+        let ids = if let Some(ids) = ids {
+            ids
+        } else {
+            (0..identities.identities.len() as u32)
+                .take(self.core.jmap.get_max_objects)
+                .map(Into::into)
+                .collect::<Vec<_>>()
+        };
+
+        for id in ids {
+            // Obtain the identity object
+            let document_id = id.document_id();
+            let Some(identity) = identities.identities.iter().find(|i| i.id == document_id) else {
+                response.not_found.push(id);
+                continue;
+            };
+            let _identity = if let Some(identity) = self
+                .get_archive(account_id, Collection::Identity, document_id)
+                .await?
+            {
+                identity
+            } else {
+                response.not_found.push(id);
+                continue;
+            };
+
+            let mut result = Map::with_capacity(properties.len());
+            for property in &properties {
+                let value = match &property {
+                    ParticipantIdentityProperty::Id => {
+                        Value::Element(ParticipantIdentityValue::Id(id))
+                    }
+                    ParticipantIdentityProperty::Name => Value::Str(
+                        identity
+                            .name
+                            .as_ref()
+                            .map(|n| n.as_str())
+                            .unwrap_or(identities.default_name.as_str())
+                            .to_string()
+                            .into(),
+                    ),
+                    ParticipantIdentityProperty::CalendarAddress => {
+                        Value::Str(identity.calendar_address.to_string().into())
+                    }
+                    ParticipantIdentityProperty::IsDefault => {
+                        Value::Bool(identities.default == document_id)
+                    }
+                };
+                result.insert_unchecked(property.clone(), value);
+            }
+            response.list.push(result.into());
+        }
+
+        Ok(response)
+    }
+
+    async fn participant_identity_get_or_create(
+        &self,
+        account_id: u32,
+    ) -> trc::Result<Option<Archive<AlignedBytes>>> {
+        if let Some(identities) = self
+            .get_archive_by_property(
+                account_id,
+                Collection::Principal,
+                0,
+                PrincipalField::ParticipantIdentities.into(),
+            )
+            .await?
+        {
+            return Ok(Some(identities));
+        }
+
+        // Obtain principal
+        let principal = if let Some(principal) = self
+            .core
+            .storage
+            .directory
+            .query(QueryParams::id(account_id).with_return_member_of(false))
+            .await
+            .caused_by(trc::location!())?
+        {
+            principal
+        } else {
+            return Ok(None);
+        };
+        let num_emails = principal.emails.len();
+        if num_emails == 0 {
+            return Ok(None);
+        }
+
+        // Build identities
+        let identities = Archiver::new(ParticipantIdentities {
+            identities: principal
+                .emails
+                .iter()
+                .enumerate()
+                .map(|(id, email)| ParticipantIdentity {
+                    id: id as u32,
+                    name: None,
+                    calendar_address: format!("mailto:{email}"),
+                })
+                .collect(),
+            default: 0,
+            default_name: principal.description.unwrap_or(principal.name),
+        })
+        .serialize()
+        .caused_by(trc::location!())?;
+
+        let mut batch = BatchBuilder::new();
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::Principal)
+            .update_document(0)
+            .set(PrincipalField::ParticipantIdentities, identities);
+
+        self.commit_batch(batch).await.caused_by(trc::location!())?;
+
+        self.get_archive_by_property(
+            account_id,
+            Collection::Principal,
+            0,
+            PrincipalField::ParticipantIdentities.into(),
+        )
+        .await
     }
 }

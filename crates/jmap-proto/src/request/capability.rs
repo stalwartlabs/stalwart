@@ -51,7 +51,7 @@ struct Account {
     account_capabilities: VecMap<Capability, Capabilities>,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, serde::Serialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Capability {
     #[serde(rename(serialize = "urn:ietf:params:jmap:core"))]
     Core = 1 << 0,
@@ -276,6 +276,63 @@ pub struct EmptyCapabilities {}
 pub struct BaseCapabilities {
     pub session: VecMap<Capability, Capabilities>,
     pub account: VecMap<Capability, Capabilities>,
+}
+
+impl Capability {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Capability::Core => "urn:ietf:params:jmap:core",
+            Capability::Mail => "urn:ietf:params:jmap:mail",
+            Capability::Submission => "urn:ietf:params:jmap:submission",
+            Capability::VacationResponse => "urn:ietf:params:jmap:vacationresponse",
+            Capability::Contacts => "urn:ietf:params:jmap:contacts",
+            Capability::ContactsParse => "urn:ietf:params:jmap:contacts:parse",
+            Capability::Calendars => "urn:ietf:params:jmap:calendars",
+            Capability::CalendarsParse => "urn:ietf:params:jmap:calendars:parse",
+            Capability::WebSocket => "urn:ietf:params:jmap:websocket",
+            Capability::Sieve => "urn:ietf:params:jmap:sieve",
+            Capability::Blob => "urn:ietf:params:jmap:blob",
+            Capability::Quota => "urn:ietf:params:jmap:quota",
+            Capability::Principals => "urn:ietf:params:jmap:principals",
+            Capability::PrincipalsOwner => "urn:ietf:params:jmap:principals:owner",
+            Capability::PrincipalsAvailability => "urn:ietf:params:jmap:principals:availability",
+            Capability::FileNode => "urn:ietf:params:jmap:filenode",
+        }
+    }
+
+    pub fn all_capabilities() -> &'static [Capability] {
+        &[
+            Capability::Core,
+            Capability::Mail,
+            Capability::Submission,
+            Capability::VacationResponse,
+            Capability::Contacts,
+            Capability::ContactsParse,
+            Capability::Calendars,
+            Capability::CalendarsParse,
+            Capability::WebSocket,
+            Capability::Sieve,
+            Capability::Blob,
+            Capability::Quota,
+            Capability::Principals,
+            Capability::PrincipalsOwner,
+            Capability::PrincipalsAvailability,
+            Capability::FileNode,
+        ]
+    }
+
+    pub fn all_principal_capabilities() -> &'static [Capability] {
+        &[
+            Capability::Mail,
+            Capability::Contacts,
+            Capability::ContactsParse,
+            Capability::Calendars,
+            Capability::CalendarsParse,
+            Capability::Sieve,
+            Capability::FileNode,
+            Capability::Principals,
+        ]
+    }
 }
 
 impl Session {

@@ -194,6 +194,10 @@ pub enum ValueClass {
     Report(ReportClass),
     Telemetry(TelemetryClass),
     Any(AnyClass),
+    ShareNotification {
+        notification_id: u64,
+        notify_account_id: u32,
+    },
     DocumentId,
     ChangeId,
 }

@@ -6,17 +6,14 @@
 
 use super::WebDavTest;
 use ahash::AHashSet;
-use calcard::{
-    common::timezone::Tz,
-    icalendar::{ICalendar, dates::CalendarEvent},
-};
-use dav_proto::schema::property::TimeRange;
+use calcard::{common::timezone::Tz, icalendar::ICalendar};
 use groupware::{
     DavResourceName,
-    calendar::{CalendarEventData, alarm::ExpandAlarm},
+    calendar::{CalendarEventData, alarm::ExpandAlarm, expand::CalendarEventExpansion},
 };
 use hyper::StatusCode;
 use store::write::serialize::rkyv_unarchive;
+use types::TimeRange;
 
 pub async fn test(test: &WebDavTest) {
     println!("Running REPORT calendar-query & free-busy-query tests...");
@@ -219,7 +216,8 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
     let mut events = expanded
         .events
         .into_iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
             let e = e.try_into_date_time().unwrap();
             let start = e.start.timestamp();
             let end = e.end.timestamp();
@@ -247,8 +245,9 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             if max > max_utc {
                 max_utc = max;
             }
-            CalendarEvent {
+            CalendarEventExpansion {
                 comp_id: e.comp_id,
+                expansion_id: i as u32,
                 start,
                 end,
             }

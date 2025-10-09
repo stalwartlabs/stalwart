@@ -141,7 +141,7 @@ impl CalendarEvent {
                 ObjectIndexBuilder::new()
                     .with_current(event)
                     .with_changes(new_event)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|b| b.commit_point())
     }
@@ -168,7 +168,7 @@ impl CalendarEvent {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|batch| {
                 if let Some(next_alarm) = next_alarm {
@@ -210,7 +210,7 @@ impl Calendar {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(calendar)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|b| b.commit_point())
     }
@@ -236,7 +236,7 @@ impl Calendar {
                 ObjectIndexBuilder::new()
                     .with_current(calendar)
                     .with_changes(new_calendar)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|b| b.commit_point())
     }
@@ -264,7 +264,7 @@ impl CalendarEventNotification {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|batch| batch.commit_point())
     }
@@ -326,7 +326,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
             .delete_document(document_id)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_tenant_id(access_token)
+                    .with_access_token(access_token)
                     .with_current(calendar),
             )
             .caused_by(trc::location!())?;
@@ -371,7 +371,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                     .update_document(document_id)
                     .custom(
                         ObjectIndexBuilder::new()
-                            .with_tenant_id(access_token)
+                            .with_access_token(access_token)
                             .with_current(event)
                             .with_changes(new_event),
                     )
@@ -433,7 +433,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         batch
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_tenant_id(access_token)
+                    .with_access_token(access_token)
                     .with_current(event),
             )
             .caused_by(trc::location!())?;
@@ -458,7 +458,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEventNotification>> {
             .delete_document(document_id)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_tenant_id(access_token)
+                    .with_access_token(access_token)
                     .with_current(self.0),
             )
             .caused_by(trc::location!())?

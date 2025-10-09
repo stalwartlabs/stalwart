@@ -447,6 +447,14 @@ impl BatchBuilder {
         self.current_account_id
     }
 
+    pub fn last_collection(&self) -> Option<Collection> {
+        self.current_collection
+    }
+
+    pub fn last_document_id(&self) -> Option<u32> {
+        self.current_document_id
+    }
+
     pub fn commit_points(&mut self) -> CommitPointIterator {
         self.serialize_changes();
         CommitPointIterator {

@@ -18,6 +18,7 @@ pub struct JmapConfig {
 
     pub changes_max_results: Option<usize>,
     pub changes_max_history: Option<usize>,
+    pub share_notification_max_history: Option<Duration>,
 
     pub request_max_size: usize,
     pub request_max_calls: usize,
@@ -222,6 +223,9 @@ impl JmapConfig {
                 .unwrap_or_default(),
             changes_max_history: config
                 .property_or_default::<Option<usize>>("changes.max-history", "10000")
+                .unwrap_or_default(),
+            share_notification_max_history: config
+                .property_or_default::<Option<Duration>>("sharing.max-history", "30d")
                 .unwrap_or_default(),
             snippet_max_results: config
                 .property("jmap.protocol.search-snippet.max-results")

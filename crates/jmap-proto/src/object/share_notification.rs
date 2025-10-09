@@ -148,7 +148,7 @@ impl JmapObject for ShareNotification {
 pub enum ShareNotificationFilter {
     After(UTCDate),
     Before(UTCDate),
-    ObjectType(String),
+    ObjectType(DataType),
     ObjectAccountId(Id),
     _T(String),
 }

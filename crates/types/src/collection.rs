@@ -29,9 +29,8 @@ pub enum Collection {
     ContactCard = 11,
     FileNode = 12,
     CalendarEventNotification = 13,
-    ShareNotification = 14,
     #[default]
-    None = 15,
+    None = 14,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Default)]
@@ -77,7 +76,6 @@ impl Collection {
             Collection::ContactCard => Some(Collection::AddressBook),
             Collection::FileNode => Some(Collection::FileNode),
             Collection::CalendarEventNotification => Some(Collection::CalendarEventNotification),
-            Collection::ShareNotification => Some(Collection::ShareNotification),
             _ => None,
         }
     }
@@ -89,7 +87,6 @@ impl Collection {
             Collection::AddressBook => Some(Collection::ContactCard),
             Collection::FileNode => Some(Collection::FileNode),
             Collection::CalendarEventNotification => Some(Collection::CalendarEventNotification),
-            Collection::ShareNotification => Some(Collection::ShareNotification),
             _ => None,
         }
     }
@@ -125,8 +122,7 @@ impl SyncCollection {
             SyncCollection::EmailSubmission => Collection::EmailSubmission,
             SyncCollection::SieveScript => Collection::SieveScript,
             SyncCollection::CalendarEventNotification => Collection::CalendarEventNotification,
-            SyncCollection::ShareNotification => Collection::ShareNotification,
-            SyncCollection::None => Collection::None,
+            SyncCollection::ShareNotification | SyncCollection::None => Collection::None,
         }
     }
 
@@ -158,7 +154,6 @@ impl From<Collection> for SyncCollection {
             Collection::AddressBook => SyncCollection::AddressBook,
             Collection::ContactCard => SyncCollection::AddressBook,
             Collection::FileNode => SyncCollection::FileNode,
-            Collection::ShareNotification => SyncCollection::ShareNotification,
             _ => SyncCollection::None,
         }
     }
@@ -181,7 +176,6 @@ impl From<u8> for Collection {
             11 => Collection::ContactCard,
             12 => Collection::FileNode,
             13 => Collection::CalendarEventNotification,
-            14 => Collection::ShareNotification,
             _ => Collection::None,
         }
     }
@@ -240,7 +234,6 @@ impl From<u64> for Collection {
             11 => Collection::ContactCard,
             12 => Collection::FileNode,
             13 => Collection::CalendarEventNotification,
-            14 => Collection::ShareNotification,
             _ => Collection::None,
         }
     }
@@ -295,7 +288,30 @@ impl TryFrom<Collection> for DataType {
             Collection::ContactCard => Ok(DataType::ContactCard),
             Collection::FileNode => Ok(DataType::FileNode),
             Collection::CalendarEventNotification => Ok(DataType::CalendarEventNotification),
-            Collection::ShareNotification => Ok(DataType::ShareNotification),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<DataType> for Collection {
+    type Error = ();
+
+    fn try_from(value: DataType) -> Result<Self, Self::Error> {
+        match value {
+            DataType::Email => Ok(Collection::Email),
+            DataType::Mailbox => Ok(Collection::Mailbox),
+            DataType::Thread => Ok(Collection::Thread),
+            DataType::Identity => Ok(Collection::Identity),
+            DataType::EmailSubmission => Ok(Collection::EmailSubmission),
+            DataType::SieveScript => Ok(Collection::SieveScript),
+            DataType::PushSubscription => Ok(Collection::PushSubscription),
+            DataType::Principal => Ok(Collection::Principal),
+            DataType::Calendar => Ok(Collection::Calendar),
+            DataType::CalendarEvent => Ok(Collection::CalendarEvent),
+            DataType::AddressBook => Ok(Collection::AddressBook),
+            DataType::ContactCard => Ok(Collection::ContactCard),
+            DataType::FileNode => Ok(Collection::FileNode),
+            DataType::CalendarEventNotification => Ok(Collection::CalendarEventNotification),
             _ => Err(()),
         }
     }
@@ -324,7 +340,6 @@ impl Collection {
             Collection::ContactCard => "contactCard",
             Collection::FileNode => "fileNode",
             Collection::CalendarEventNotification => "calendarEventNotification",
-            Collection::ShareNotification => "shareNotification",
             Collection::None => "",
         }
     }
@@ -349,7 +364,6 @@ impl FromStr for Collection {
             "contactCard" => Collection::ContactCard,
             "fileNode" => Collection::FileNode,
             "calendarEventNotification" => Collection::CalendarEventNotification,
-            "shareNotification" => Collection::ShareNotification,
         )
         .ok_or(())
     }

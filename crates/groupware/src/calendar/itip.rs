@@ -7,7 +7,10 @@
 use crate::{
     RFC_3986,
     cache::GroupwareCache,
-    calendar::{CalendarEvent, CalendarEventData, CalendarEventNotification},
+    calendar::{
+        CalendarEvent, CalendarEventData, CalendarEventNotification, ChangedBy,
+        EVENT_NOTIFICATION_IS_CHANGE,
+    },
     scheduling::{
         ItipError, ItipMessage,
         inbound::{
@@ -139,6 +142,13 @@ impl ItipIngest for Server {
             ));
         }
 
+        // Obtain changedBy
+        let changed_by = if let Some(id) = self.email_to_id(self.directory(), sender, 0).await? {
+            ChangedBy::PrincipalId(id)
+        } else {
+            ChangedBy::CalendarAddress(sender.into())
+        };
+
         // Find event by UID
         let account_id = access_token.primary_id;
         let document_id = self
@@ -232,8 +242,10 @@ impl ItipIngest for Server {
                             .await
                             .caused_by(trc::location!())?;
                         let itip_message = CalendarEventNotification {
-                            itip,
+                            event: itip,
+                            changed_by,
                             event_id: Some(document_id),
+                            flags: EVENT_NOTIFICATION_IS_CHANGE,
                             size: itip_message.len() as u32,
                             ..Default::default()
                         };
@@ -267,6 +279,7 @@ impl ItipIngest for Server {
         } else {
             // Verify that auto-adding invitations is allowed
             if !self.core.groupware.itip_auto_add
+                && !matches!(changed_by, ChangedBy::PrincipalId(_))
                 && self
                     .store()
                     .filter(
@@ -337,8 +350,9 @@ impl ItipIngest for Server {
                 .await
                 .caused_by(trc::location!())?;
             let itip_message = CalendarEventNotification {
-                itip,
+                event: itip,
                 event_id: Some(document_id),
+                changed_by,
                 size: itip_message.len() as u32,
                 ..Default::default()
             };

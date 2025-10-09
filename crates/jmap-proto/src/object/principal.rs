@@ -10,7 +10,7 @@ use types::id::Id;
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::deserialize::DeserializeArguments,
+    request::{capability::Capability, deserialize::DeserializeArguments},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -25,6 +25,9 @@ pub enum PrincipalProperty {
     Email,
     Timezone,
     Capabilities,
+    Accounts,
+    IdValue(Id),
+    Capability(Capability),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -56,6 +59,9 @@ impl Property for PrincipalProperty {
             PrincipalProperty::Name => "name",
             PrincipalProperty::Timezone => "timezone",
             PrincipalProperty::Type => "type",
+            PrincipalProperty::Accounts => "accounts",
+            PrincipalProperty::Capability(cap) => cap.as_str(),
+            PrincipalProperty::IdValue(id) => return id.to_string().into(),
         }
         .into()
     }
@@ -92,8 +98,9 @@ impl PrincipalProperty {
             b"name" => PrincipalProperty::Name,
             b"description" => PrincipalProperty::Description,
             b"email" => PrincipalProperty::Email,
-            b"timezone" => PrincipalProperty::Timezone,
+            b"timeZone" => PrincipalProperty::Timezone,
             b"capabilities" => PrincipalProperty::Capabilities,
+            b"accounts" => PrincipalProperty::Accounts,
         )
     }
 }
@@ -192,7 +199,7 @@ impl<'de> DeserializeArguments<'de> for PrincipalFilter {
             b"type" => {
                 *self = PrincipalFilter::Type(map.next_value()?);
             },
-            b"timezone" => {
+            b"timeZone" => {
                 *self = PrincipalFilter::Timezone(map.next_value()?);
             },
             _ => {

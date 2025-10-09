@@ -33,7 +33,7 @@ impl FileNode {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|b| b.commit_point())
     }
@@ -56,7 +56,7 @@ impl FileNode {
                 ObjectIndexBuilder::new()
                     .with_current(node)
                     .with_changes(new_node)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|b| b.commit_point())
     }
@@ -79,7 +79,7 @@ impl DestroyArchive<Archive<&ArchivedFileNode>> {
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
                     .with_current(self.0)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )?
             .log_vanished_item(VanishedCollection::FileNode, path)
             .commit_point();
@@ -132,7 +132,7 @@ impl DestroyArchive<Vec<u32>> {
                     .delete_document(document_id)
                     .custom(
                         ObjectIndexBuilder::<_, ()>::new()
-                            .with_tenant_id(access_token)
+                            .with_access_token(access_token)
                             .with_current(
                                 node.to_unarchived::<FileNode>()
                                     .caused_by(trc::location!())?,

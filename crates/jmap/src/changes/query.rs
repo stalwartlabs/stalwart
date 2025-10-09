@@ -191,7 +191,7 @@ impl QueryChanges for Server {
                 changes = self
                     .changes(
                         build_changes_request(&request),
-                        MethodObject::FileNode,
+                        MethodObject::CalendarEvent,
                         access_token,
                     )
                     .await?
@@ -215,7 +215,7 @@ impl QueryChanges for Server {
                 changes = self
                     .changes(
                         build_changes_request(&request),
-                        MethodObject::FileNode,
+                        MethodObject::CalendarEventNotification,
                         access_token,
                     )
                     .await?
@@ -239,7 +239,7 @@ impl QueryChanges for Server {
                 changes = self
                     .changes(
                         build_changes_request(&request),
-                        MethodObject::FileNode,
+                        MethodObject::ShareNotification,
                         access_token,
                     )
                     .await?
@@ -253,9 +253,7 @@ impl QueryChanges for Server {
                 }
 
                 up_to_id = request.up_to_id;
-                results = self
-                    .share_notification_query(request.into(), access_token)
-                    .await?;
+                results = self.share_notification_query(request.into()).await?;
             }
             QueryChangesRequestMethod::Principal(_) => {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());

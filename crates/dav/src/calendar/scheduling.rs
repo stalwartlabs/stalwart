@@ -73,7 +73,11 @@ impl CalendarEventNotificationHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::CalendarEventNotification)
+            .fetch_dav_resources(
+                access_token,
+                account_id,
+                SyncCollection::CalendarEventNotification,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource = resources
@@ -129,7 +133,7 @@ impl CalendarEventNotificationHandler for Server {
             .with_etag(etag)
             .with_last_modified(Rfc1123DateTime::new(i64::from(event.modified)).to_string());
 
-        let ical = event.itip.to_string();
+        let ical = event.event.to_string();
 
         if !is_head {
             Ok(response.with_binary_body(ical))
@@ -154,7 +158,11 @@ impl CalendarEventNotificationHandler for Server {
             .filter(|r| !r.is_empty())
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::CalendarEventNotification)
+            .fetch_dav_resources(
+                access_token,
+                account_id,
+                SyncCollection::CalendarEventNotification,
+            )
             .await
             .caused_by(trc::location!())?;
 
@@ -173,7 +181,11 @@ impl CalendarEventNotificationHandler for Server {
 
         let document_id = resource.document_id();
         let event_ = self
-            .get_archive(account_id, Collection::CalendarEventNotification, document_id)
+            .get_archive(
+                account_id,
+                Collection::CalendarEventNotification,
+                document_id,
+            )
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;

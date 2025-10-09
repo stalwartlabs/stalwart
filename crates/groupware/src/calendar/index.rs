@@ -190,6 +190,10 @@ impl IndexableObject for CalendarEventNotification {
                 field: CalendarField::Created.into(),
                 value: self.created.into(),
             },
+            IndexValue::Index {
+                field: CalendarField::EventId.into(),
+                value: self.event_id.unwrap_or(u32::MAX).into(),
+            },
             IndexValue::LogItem {
                 sync_collection: SyncCollection::CalendarEventNotification,
                 prefix: None,
@@ -208,6 +212,15 @@ impl IndexableObject for &ArchivedCalendarEventNotification {
             IndexValue::Index {
                 field: CalendarField::Created.into(),
                 value: self.created.to_native().into(),
+            },
+            IndexValue::Index {
+                field: CalendarField::EventId.into(),
+                value: self
+                    .event_id
+                    .as_ref()
+                    .map(|v| v.to_native())
+                    .unwrap_or(u32::MAX)
+                    .into(),
             },
             IndexValue::LogItem {
                 sync_collection: SyncCollection::CalendarEventNotification,

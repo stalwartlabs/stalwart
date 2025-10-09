@@ -274,7 +274,9 @@ impl RequestHandler for Server {
 
                     self.vacation_response_get(req).await?.into()
                 }
-                GetRequestMethod::Principal(req) => self.principal_get(req).await?.into(),
+                GetRequestMethod::Principal(req) => {
+                    self.principal_get(req, access_token).await?.into()
+                }
                 GetRequestMethod::Quota(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
@@ -327,7 +329,7 @@ impl RequestHandler for Server {
                 }
                 GetRequestMethod::CalendarEventNotification(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+                    access_token.assert_is_member(req.account_id)?;
 
                     self.calendar_event_notification_get(req, access_token)
                         .await?
@@ -335,17 +337,15 @@ impl RequestHandler for Server {
                 }
                 GetRequestMethod::ParticipantIdentity(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+                    access_token.assert_is_member(req.account_id)?;
 
-                    self.participant_identity_get(req, access_token)
-                        .await?
-                        .into()
+                    self.participant_identity_get(req).await?.into()
                 }
                 GetRequestMethod::ShareNotification(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
-                    self.share_notification_get(req, access_token).await?.into()
+                    self.share_notification_get(req).await?.into()
                 }
             },
             RequestMethod::Query(req) => match req {
@@ -375,7 +375,9 @@ impl RequestHandler for Server {
                 }
                 QueryRequestMethod::Principal(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    self.principal_query(req, session).await?.into()
+                    self.principal_query(req, access_token, session)
+                        .await?
+                        .into()
                 }
                 QueryRequestMethod::Quota(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
@@ -403,7 +405,7 @@ impl RequestHandler for Server {
                 }
                 QueryRequestMethod::CalendarEventNotification(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+                    access_token.assert_is_member(req.account_id)?;
 
                     self.calendar_event_notification_query(req, access_token)
                         .await?
@@ -411,12 +413,9 @@ impl RequestHandler for Server {
                 }
                 QueryRequestMethod::ShareNotification(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token
-                        .assert_has_access(req.account_id, Collection::ShareNotification)?;
+                    access_token.assert_is_member(req.account_id)?;
 
-                    self.share_notification_query(req, access_token)
-                        .await?
-                        .into()
+                    self.share_notification_query(req).await?.into()
                 }
             },
             RequestMethod::Set(req) => match req {
@@ -488,12 +487,9 @@ impl RequestHandler for Server {
                 }
                 SetRequestMethod::ShareNotification(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token
-                        .assert_has_access(req.account_id, Collection::ShareNotification)?;
+                    access_token.assert_is_member(req.account_id)?;
 
-                    self.share_notification_set(req, access_token, session)
-                        .await?
-                        .into()
+                    self.share_notification_set(req).await?.into()
                 }
                 SetRequestMethod::Calendar(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
@@ -511,7 +507,7 @@ impl RequestHandler for Server {
                 }
                 SetRequestMethod::CalendarEventNotification(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+                    access_token.assert_is_member(req.account_id)?;
 
                     self.calendar_event_notification_set(req, access_token, session)
                         .await?
@@ -519,11 +515,9 @@ impl RequestHandler for Server {
                 }
                 SetRequestMethod::ParticipantIdentity(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+                    access_token.assert_is_member(req.account_id)?;
 
-                    self.participant_identity_set(req, access_token, session)
-                        .await?
-                        .into()
+                    self.participant_identity_set(req).await?.into()
                 }
             },
             RequestMethod::Changes(mut req) => {

@@ -495,7 +495,7 @@ async fn copy_container(
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .caused_by(trc::location!())?
             .commit_point();
@@ -512,7 +512,7 @@ async fn copy_container(
                 .delete_document(document_id)
                 .custom(
                     ObjectIndexBuilder::<_, ()>::new()
-                        .with_tenant_id(access_token)
+                        .with_access_token(access_token)
                         .with_current(node),
                 )
                 .caused_by(trc::location!())?

@@ -321,8 +321,13 @@ impl<'x> Pagination<'x> {
         self
     }
 
+    #[inline(always)]
     pub fn add(&mut self, prefix_id: u32, document_id: u32) -> bool {
-        let id = Id::from_parts(prefix_id, document_id);
+        self.add_id(Id::from_parts(prefix_id, document_id))
+    }
+
+    pub fn add_id(&mut self, id: Id) -> bool {
+        let document_id = id.document_id();
 
         // Pagination
         if !self.has_anchor {

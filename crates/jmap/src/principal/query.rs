@@ -5,12 +5,12 @@
  */
 
 use crate::JmapMethods;
-use common::Server;
-use directory::QueryParams;
+use common::{Server, auth::AccessToken};
+use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
-    object::principal::{Principal, PrincipalFilter},
+    object::principal::{Principal, PrincipalFilter, PrincipalType},
     types::state::State,
 };
 use std::future::Future;
@@ -21,6 +21,7 @@ pub trait PrincipalQuery: Sync + Send {
     fn principal_query(
         &self,
         request: QueryRequest<Principal>,
+        access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
@@ -29,6 +30,7 @@ impl PrincipalQuery for Server {
     async fn principal_query(
         &self,
         mut request: QueryRequest<Principal>,
+        access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
@@ -38,7 +40,19 @@ impl PrincipalQuery for Server {
             results: RoaringBitmap::new(),
         };
         let mut is_set = true;
-        let todo = "implement other search criteria";
+        let all_ids = if access_token.tenant.is_some() {
+            self.store()
+                .list_principals(None, access_token.tenant.map(|t| t.id), &[], false, 0, 0)
+                .await?
+                .items
+                .into_iter()
+                .map(|p| p.id())
+                .collect::<RoaringBitmap>()
+        } else {
+            self.get_document_ids(u32::MAX, Collection::Principal)
+                .await?
+                .unwrap_or_default()
+        };
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -65,7 +79,7 @@ impl PrincipalQuery for Server {
                     PrincipalFilter::Email(email) => {
                         let mut ids = RoaringBitmap::new();
                         if let Some(id) = self
-                            .email_to_id(&self.core.storage.directory, &email, session.session_id)
+                            .email_to_id(self.directory(), &email, session.session_id)
                             .await?
                         {
                             ids.insert(id);
@@ -77,8 +91,76 @@ impl PrincipalQuery for Server {
                             result_set.results &= ids;
                         }
                     }
-                    PrincipalFilter::_T(other) => {
-                        return Err(trc::JmapEvent::UnsupportedFilter.into_err().details(other));
+                    PrincipalFilter::AccountIds(ids) => {
+                        let ids = ids
+                            .into_iter()
+                            .filter_map(|id| {
+                                let id = id.document_id();
+                                if all_ids.contains(id) { Some(id) } else { None }
+                            })
+                            .collect::<RoaringBitmap>();
+                        if is_set {
+                            result_set.results = ids;
+                            is_set = false;
+                        } else {
+                            result_set.results &= ids;
+                        }
+                    }
+                    PrincipalFilter::Text(text) => {
+                        let ids = self
+                            .store()
+                            .list_principals(
+                                Some(text.as_str()),
+                                access_token.tenant.map(|t| t.id),
+                                &[],
+                                false,
+                                0,
+                                0,
+                            )
+                            .await?
+                            .items
+                            .into_iter()
+                            .map(|p| p.id())
+                            .collect::<RoaringBitmap>();
+
+                        if is_set {
+                            result_set.results = ids;
+                            is_set = false;
+                        } else {
+                            result_set.results &= ids;
+                        }
+                    }
+                    PrincipalFilter::Type(principal_type) => {
+                        let typ = match principal_type {
+                            PrincipalType::Individual => Type::Individual,
+                            PrincipalType::Group => Type::Group,
+                            PrincipalType::Resource => Type::Resource,
+                            PrincipalType::Location => Type::Location,
+                            PrincipalType::Other => Type::Other,
+                        };
+
+                        let ids = self
+                            .store()
+                            .list_principals(
+                                None,
+                                access_token.tenant.map(|t| t.id),
+                                &[typ],
+                                false,
+                                0,
+                                0,
+                            )
+                            .await?
+                            .items
+                            .into_iter()
+                            .map(|p| p.id())
+                            .collect::<RoaringBitmap>();
+
+                        if is_set {
+                            result_set.results = ids;
+                            is_set = false;
+                        } else {
+                            result_set.results &= ids;
+                        }
                     }
                     other => {
                         return Err(trc::JmapEvent::UnsupportedFilter
@@ -95,10 +177,9 @@ impl PrincipalQuery for Server {
         }
 
         if is_set {
-            result_set.results = self
-                .get_document_ids(u32::MAX, Collection::Principal)
-                .await?
-                .unwrap_or_default();
+            result_set.results = all_ids;
+        } else {
+            result_set.results &= all_ids;
         }
 
         let (response, paginate) = self

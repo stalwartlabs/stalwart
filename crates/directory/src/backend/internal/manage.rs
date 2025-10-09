@@ -300,7 +300,7 @@ impl ManageDirectory for Store {
                         trc::LimitEvent::TenantQuota
                             .into_err()
                             .details("Tenant principal quota exceeded")
-                            .ctx(trc::Key::Details, principal_set.typ().as_str())
+                            .ctx(trc::Key::Details, principal_set.typ().description())
                             .ctx(trc::Key::Limit, limit)
                             .ctx(trc::Key::Total, total)
                     );
@@ -1533,7 +1533,7 @@ impl ManageDirectory for Store {
                                     "Principal {member:?} is not one of {}.",
                                     allowed_member_types
                                         .iter()
-                                        .map(|v| v.as_str())
+                                        .map(|v| v.description())
                                         .collect::<Vec<_>>()
                                         .join(", ")
                                 )
@@ -1619,7 +1619,7 @@ impl ManageDirectory for Store {
                                     "Principal {member:?} is not one of {}.",
                                     allowed_member_types
                                         .iter()
-                                        .map(|v| v.as_str())
+                                        .map(|v| v.description())
                                         .collect::<Vec<_>>()
                                         .join(", ")
                                 )
@@ -2511,7 +2511,7 @@ fn validate_member_of(
                     "Principal {member_name:?} is not a {}.",
                     expected_types
                         .iter()
-                        .map(|t| t.as_str().to_string())
+                        .map(|t| t.description().to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
                 )

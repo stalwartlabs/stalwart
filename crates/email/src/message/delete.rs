@@ -165,8 +165,13 @@ impl EmailDeletion for Server {
         }
 
         // Purge changelogs
-        if let Some(history) = self.core.jmap.changes_max_history
-            && let Err(err) = self.delete_changes(account_id, history).await
+        if let Err(err) = self
+            .delete_changes(
+                account_id,
+                self.core.jmap.changes_max_history,
+                self.core.jmap.share_notification_max_history,
+            )
+            .await
         {
             trc::error!(
                 err.details("Failed to purge changes.")

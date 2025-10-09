@@ -5,10 +5,7 @@
  */
 
 use super::propfind::PrincipalPropFind;
-use common::{
-    Server,
-    auth::{AccessToken, AsTenantId},
-};
+use common::{Server, auth::AccessToken};
 use dav_proto::schema::{
     property::{DavProperty, WebDavProperty},
     request::{PrincipalPropertySearch, PropFind},
