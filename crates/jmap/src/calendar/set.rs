@@ -11,9 +11,9 @@ use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
     calendar::{
-        ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, CALENDAR_AVAILABILITY_ATTENDING,
-        CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE, CALENDAR_SUBSCRIBED, Calendar,
-        CalendarPreferences, DefaultAlert, Timezone,
+        ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, CALENDAR_AVAILABILITY_ALL,
+        CALENDAR_AVAILABILITY_ATTENDING, CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE,
+        CALENDAR_SUBSCRIBED, Calendar, CalendarPreferences, DefaultAlert, Timezone,
     },
 };
 use http_proto::HttpSessionData;
@@ -21,16 +21,17 @@ use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
     object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
-    request::IntoValid,
+    request::{IntoValid, reference::MaybeIdReference},
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Value};
 use rand::{Rng, distr::Alphanumeric};
-use store::write::BatchBuilder;
+use store::{SerializeInfallible, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
     collection::{Collection, SyncCollection},
+    field::PrincipalField,
 };
 
 pub trait CalendarSet: Sync + Send {
@@ -56,8 +57,7 @@ impl CalendarSet for Server {
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
         let is_shared = access_token.is_shared(account_id);
-
-        let todo = " Implement onSuccessSetIsDefault + Sieve";
+        let mut set_default = None;
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -110,6 +110,14 @@ impl CalendarSet for Server {
             calendar
                 .insert(access_token, account_id, document_id, &mut batch)
                 .caused_by(trc::location!())?;
+
+            if let Some(MaybeIdReference::Reference(id_ref)) =
+                &request.arguments.on_success_set_is_default
+                && id_ref == &id
+            {
+                set_default = Some(document_id);
+            }
+
             response.created(id, document_id);
         }
 
@@ -254,6 +262,21 @@ impl CalendarSet for Server {
             response.destroyed.push(id);
         }
 
+        // Set default calendar
+        if let Some(MaybeIdReference::Id(id)) = &request.arguments.on_success_set_is_default {
+            set_default = Some(id.document_id());
+        }
+        if let Some(default_calendar_id) = set_default {
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .update_document(0)
+                .set(
+                    PrincipalField::DefaultCalendarId,
+                    default_calendar_id.serialize(),
+                );
+        }
+
         // Write changes
         if !batch.is_empty() {
             let change_id = self
@@ -331,13 +354,14 @@ fn update_calendar(
                 match availability {
                     IncludeInAvailability::All => {
                         *flags &= !(CALENDAR_AVAILABILITY_NONE | CALENDAR_AVAILABILITY_ATTENDING);
+                        *flags |= CALENDAR_AVAILABILITY_ALL;
                     }
                     IncludeInAvailability::Attending => {
-                        *flags &= !CALENDAR_AVAILABILITY_NONE;
+                        *flags &= !(CALENDAR_AVAILABILITY_NONE | CALENDAR_AVAILABILITY_ALL);
                         *flags |= CALENDAR_AVAILABILITY_ATTENDING;
                     }
                     IncludeInAvailability::None => {
-                        *flags &= !CALENDAR_AVAILABILITY_ATTENDING;
+                        *flags &= !(CALENDAR_AVAILABILITY_ATTENDING | CALENDAR_AVAILABILITY_ALL);
                         *flags |= CALENDAR_AVAILABILITY_NONE;
                     }
                 }

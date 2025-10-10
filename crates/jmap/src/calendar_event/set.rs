@@ -4,21 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
+use std::{borrow::Cow, str::FromStr};
 
 use crate::calendar_event::{CalendarSyntheticId, assert_is_unique_uid};
 use calcard::{
     common::timezone::Tz,
-    icalendar::ICalendarDuration,
+    icalendar::{
+        ICalendarAction, ICalendarComponent, ICalendarComponentType, ICalendarDuration,
+        ICalendarEntry, ICalendarParameter, ICalendarParameterValue, ICalendarProperty,
+        ICalendarRelated, ICalendarValue,
+    },
     jscalendar::{JSCalendar, JSCalendarDateTime, JSCalendarProperty, JSCalendarValue},
 };
+use chrono::DateTime;
 use common::{DavName, DavResources, Server, auth::AccessToken};
 use directory::Permission;
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
     calendar::{
-        CalendarEvent, CalendarEventData, EVENT_DRAFT, EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS,
+        ALERT_EMAIL, ALERT_RELATIVE_TO_END, ArchivedDefaultAlert, Calendar, CalendarEvent,
+        CalendarEventData, EVENT_DRAFT, EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS,
         EVENT_INVITE_SELF,
     },
     scheduling::{ItipMessages, event_create::itip_create, event_update::itip_update},
@@ -513,15 +519,27 @@ impl CalendarEventSet for Server {
     ) -> trc::Result<Result<CalendarCreateResult, SetError<JSCalendarProperty<Id>>>> {
         // Process changes
         let mut event = CalendarEvent::default();
-        if let Err(err) =
-            update_calendar_event(access_token, updates, &mut event, &mut js_calendar_group)
-        {
-            return Ok(Err(err));
-        }
+        let use_default_alerts = match update_calendar_event(
+            access_token,
+            updates,
+            &mut event,
+            &mut js_calendar_group,
+        ) {
+            Ok(use_default_alerts) => use_default_alerts,
+            Err(err) => {
+                return Ok(Err(err));
+            }
+        };
 
-        let todo = "add default alarms + other calendar properties";
+        // Convert JSCalendar to iCalendar
+        let Some(mut ical) = js_calendar_group.into_icalendar() else {
+            return Ok(Err(SetError::invalid_properties().with_description(
+                "Failed to convert calendar event to iCalendar.",
+            )));
+        };
 
         // Verify that the calendar ids valid
+        let default_alert_comp_id = ical.components.len();
         for name in &event.names {
             if !cache.has_container_id(&name.parent_id) {
                 return Ok(Err(SetError::invalid_properties()
@@ -538,15 +556,32 @@ impl CalendarEventSet for Server {
                     "You are not allowed to add calendar events to calendar {}.",
                     Id::from(name.parent_id)
                 ))));
+            } else if let Some(show_with_time) = use_default_alerts
+                && let Some(_calendar) = self
+                    .get_archive(account_id, Collection::Calendar, name.parent_id)
+                    .await?
+            {
+                ical.components.extend(
+                    _calendar
+                        .unarchive::<Calendar>()
+                        .caused_by(trc::location!())?
+                        .default_alerts(access_token, show_with_time)
+                        .map(default_alert_to_ical),
+                );
             }
         }
 
-        // Convert JSCalendar to iCalendar
-        let Some(ical) = js_calendar_group.into_icalendar() else {
-            return Ok(Err(SetError::invalid_properties().with_description(
-                "Failed to convert calendar event to iCalendar.",
-            )));
-        };
+        // Add default alarms
+        if ical.components.len() > default_alert_comp_id {
+            let component_ids = default_alert_comp_id as u32..ical.components.len() as u32;
+            for component in &mut ical.components {
+                if component.component_type.is_event_or_todo()
+                    && !component.is_recurrence_override()
+                {
+                    component.component_ids.extend(component_ids.clone());
+                }
+            }
+        }
 
         // Validate UID
         if let Err(err) =
@@ -658,7 +693,7 @@ fn update_calendar_event<'x>(
     updates: Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
     event: &mut CalendarEvent,
     js_calendar_group: &mut JSCalendar<'x, Id, BlobId>,
-) -> Result<(), SetError<JSCalendarProperty<Id>>> {
+) -> Result<Option<bool>, SetError<JSCalendarProperty<Id>>> {
     // Extract event
     let js_calendar_events = js_calendar_group
         .0
@@ -678,6 +713,8 @@ fn update_calendar_event<'x>(
 
     let mut utc_start = None;
     let mut utc_end = None;
+    let mut use_default_alerts = false;
+    let mut show_without_time = false;
     let mut entries = js_calendar_event.as_object_mut().unwrap();
 
     for (property, value) in updates.into_expanded_object() {
@@ -716,8 +753,8 @@ fn update_calendar_event<'x>(
                     event.flags &= !EVENT_HIDE_ATTENDEES;
                 }
             }
-            (JSCalendarProperty::UseDefaultAlerts, Value::Bool(_)) => {
-                // TODO not yet implemented
+            (JSCalendarProperty::UseDefaultAlerts, Value::Bool(set)) => {
+                use_default_alerts = set;
             }
             (JSCalendarProperty::UtcStart, Value::Element(JSCalendarValue::DateTime(start))) => {
                 utc_start = Some(start.timestamp);
@@ -771,18 +808,46 @@ fn update_calendar_event<'x>(
                     .with_description("Invalid value."));
             }
             (property, value) => {
+                if let (JSCalendarProperty::ShowWithoutTime, Value::Bool(set)) = (&property, &value)
+                {
+                    show_without_time = *set;
+                }
+
                 entries.insert(property, value);
             }
         }
     }
 
     // Validate UTC start/end
-    if let (Some(start), Some(end)) = (utc_start, utc_end) {
+    if let (Some(mut start), Some(mut end)) = (utc_start, utc_end) {
         if start >= end {
             return Err(SetError::invalid_properties()
                 .with_properties([JSCalendarProperty::UtcStart, JSCalendarProperty::UtcEnd])
                 .with_description("utcStart must be before utcEnd."));
         }
+
+        if let Some(timezone) = entries
+            .get(&Key::Property(JSCalendarProperty::TimeZone))
+            .and_then(|v| v.as_str())
+            .and_then(|tz| Tz::from_str(tz.as_ref()).ok())
+        {
+            if let Some(dt_start) =
+                DateTime::from_timestamp(start, 0).map(|dt| dt.with_timezone(&timezone))
+            {
+                start = dt_start.naive_local().and_utc().timestamp();
+            }
+            if let Some(dt_end) =
+                DateTime::from_timestamp(end, 0).map(|dt| dt.with_timezone(&timezone))
+            {
+                end = dt_end.naive_local().and_utc().timestamp();
+            }
+        } else {
+            entries.insert(
+                Key::Property(JSCalendarProperty::TimeZone),
+                Value::Str(Cow::Borrowed("Etc/UTC")),
+            );
+        }
+
         entries.insert(
             Key::Property(JSCalendarProperty::Start),
             Value::Element(JSCalendarValue::DateTime(JSCalendarDateTime::new(
@@ -794,10 +859,6 @@ fn update_calendar_event<'x>(
             Value::Element(JSCalendarValue::Duration(ICalendarDuration::from_seconds(
                 end - start,
             ))),
-        );
-        entries.insert(
-            Key::Property(JSCalendarProperty::TimeZone),
-            Value::Str(Cow::Borrowed("Etc/UTC")),
         );
     } else if utc_start.is_some() || utc_end.is_some() {
         return Err(SetError::invalid_properties()
@@ -812,7 +873,7 @@ fn update_calendar_event<'x>(
             .with_description("Event has to belong to at least one calendar."));
     }
 
-    Ok(())
+    Ok(use_default_alerts.then_some(show_without_time))
 }
 
 fn patch_parent_ids(
@@ -862,5 +923,29 @@ fn patch_parent_ids(
         _ => Err(SetError::invalid_properties()
             .with_property(JSCalendarProperty::CalendarIds)
             .with_description("Invalid patch operation for calendarIds.")),
+    }
+}
+
+fn default_alert_to_ical(alert: &ArchivedDefaultAlert) -> ICalendarComponent {
+    let flags = alert.flags.to_native();
+    ICalendarComponent {
+        component_type: ICalendarComponentType::VAlarm,
+        entries: vec![
+            ICalendarEntry::new(ICalendarProperty::Action).with_value(
+                if flags & ALERT_EMAIL != 0 {
+                    ICalendarValue::Action(ICalendarAction::Email)
+                } else {
+                    ICalendarValue::Action(ICalendarAction::Display)
+                },
+            ),
+            ICalendarEntry::new(ICalendarProperty::Trigger)
+                .with_param_opt((flags & ALERT_RELATIVE_TO_END != 0).then_some(
+                    ICalendarParameter::related(ICalendarParameterValue::Related(
+                        ICalendarRelated::End,
+                    )),
+                ))
+                .with_value(ICalendarValue::Duration(alert.offset.to_native())),
+        ],
+        component_ids: vec![],
     }
 }

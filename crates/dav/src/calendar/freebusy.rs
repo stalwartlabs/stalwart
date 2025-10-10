@@ -110,7 +110,11 @@ impl CalendarFreebusyRequestHandler for Server {
         };
 
         // Build FreeBusy component
-        let default_tz = resource.resource.timezone().unwrap_or(Tz::UTC);
+        let default_tz = resource
+            .resource
+            .calendar_preferences(account_id)
+            .map(|p| p.tz)
+            .unwrap_or(Tz::UTC);
         let mut entries = Vec::with_capacity(6);
         if let Some(range) = request.range {
             entries.push(ICalendarEntry {

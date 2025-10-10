@@ -33,8 +33,7 @@ impl CalendarEventParse for Server {
         request: ParseRequest<CalendarEvent>,
         access_token: &AccessToken,
     ) -> trc::Result<ParseResponse<CalendarEvent>> {
-        let todo = "user calendar parse specific limit, same for addressbooks";
-        if request.blob_ids.len() > self.core.jmap.mail_parse_max_items {
+        if request.blob_ids.len() > self.core.jmap.calendar_parse_max_items {
             return Err(trc::JmapEvent::RequestTooLarge.into_err());
         }
         let return_all_properties = request.properties.is_none();

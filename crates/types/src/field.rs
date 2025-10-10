@@ -64,7 +64,6 @@ pub enum MailboxField {
 #[repr(u8)]
 pub enum SieveField {
     Name,
-    IsActive,
     Ids,
     Archive,
 }
@@ -86,6 +85,9 @@ pub enum PrincipalField {
     Archive,
     EncryptionKeys,
     ParticipantIdentities,
+    DefaultCalendarId,
+    DefaultAddressBookId,
+    ActiveScriptId,
 }
 
 impl From<ContactField> for u8 {
@@ -148,7 +150,6 @@ impl From<SieveField> for u8 {
     fn from(value: SieveField) -> Self {
         match value {
             SieveField::Name => 13,
-            SieveField::IsActive => 0,
             SieveField::Ids => 84,
             SieveField::Archive => ARCHIVE_FIELD,
         }
@@ -173,6 +174,9 @@ impl From<PrincipalField> for u8 {
         match value {
             PrincipalField::ParticipantIdentities => 45,
             PrincipalField::EncryptionKeys => 46,
+            PrincipalField::DefaultCalendarId => 47,
+            PrincipalField::DefaultAddressBookId => 48,
+            PrincipalField::ActiveScriptId => 49,
             PrincipalField::Archive => ARCHIVE_FIELD,
         }
     }

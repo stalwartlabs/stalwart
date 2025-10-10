@@ -459,7 +459,7 @@ impl PropFindRequestHandler for Server {
                             data.resources(self, access_token, account_id, SyncCollection::Calendar)
                                 .await
                                 .caused_by(trc::location!())?
-                                .calendar_default_tz(calendar_id)
+                                .calendar_default_tz(calendar_id, account_id)
                                 .unwrap_or(Tz::UTC)
                         } else {
                             Tz::UTC

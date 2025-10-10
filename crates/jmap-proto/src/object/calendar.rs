@@ -79,8 +79,9 @@ pub enum CalendarValue {
     Duration(ICalendarDuration),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IncludeInAvailability {
+    #[default]
     All,
     Attending,
     None,

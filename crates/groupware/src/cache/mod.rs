@@ -327,7 +327,6 @@ impl GroupwareCache for Server {
                 .await?;
             AddressBook {
                 name: name.clone(),
-                is_default: true,
                 preferences: vec![AddressBookPreferences {
                     account_id,
                     name: format!(

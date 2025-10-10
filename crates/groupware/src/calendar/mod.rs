@@ -31,6 +31,7 @@ pub const CALENDAR_SUBSCRIBED: u16 = 1;
 pub const CALENDAR_INVISIBLE: u16 = 1 << 1;
 pub const CALENDAR_AVAILABILITY_NONE: u16 = 1 << 2;
 pub const CALENDAR_AVAILABILITY_ATTENDING: u16 = 1 << 3;
+pub const CALENDAR_AVAILABILITY_ALL: u16 = 1 << 4;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -84,7 +85,6 @@ pub const EVENT_INVITE_SELF: u16 = 1;
 pub const EVENT_INVITE_OTHERS: u16 = 1 << 1;
 pub const EVENT_HIDE_ATTENDEES: u16 = 1 << 2;
 pub const EVENT_DRAFT: u16 = 1 << 3;
-pub const EVENT_ORIGIN: u16 = 1 << 4;
 
 pub const EVENT_NOTIFICATION_IS_DRAFT: u16 = 1;
 pub const EVENT_NOTIFICATION_IS_CHANGE: u16 = 1 << 1;

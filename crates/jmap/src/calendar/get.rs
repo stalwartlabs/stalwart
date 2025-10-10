@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{api::acl::JmapRights, changes::state::JmapCacheState};
+use crate::{api::acl::JmapRights, calendar::Availability, changes::state::JmapCacheState};
 use calcard::jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType};
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{
     cache::GroupwareCache,
     calendar::{
-        ALERT_EMAIL, ALERT_RELATIVE_TO_END, ArchivedDefaultAlert, CALENDAR_AVAILABILITY_ATTENDING,
-        CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE, CALENDAR_SUBSCRIBED, Calendar,
+        ALERT_EMAIL, ALERT_RELATIVE_TO_END, ArchivedDefaultAlert, CALENDAR_INVISIBLE,
+        CALENDAR_SUBSCRIBED, Calendar,
     },
 };
 use jmap_proto::{
@@ -19,11 +19,12 @@ use jmap_proto::{
     object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
 };
 use jmap_tools::{Key, Map, Value};
-use store::roaring::RoaringBitmap;
+use store::{ValueKey, roaring::RoaringBitmap, write::ValueClass};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
     collection::{Collection, SyncCollection},
+    field::PrincipalField,
 };
 
 pub trait CalendarGet: Sync + Send {
@@ -61,6 +62,23 @@ impl CalendarGet for Server {
         } else {
             cache.shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
         };
+        let default_calendar_id = self
+            .store()
+            .get_value::<u32>(ValueKey {
+                account_id,
+                collection: Collection::Principal.into(),
+                document_id: 0,
+                class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+            })
+            .await
+            .caused_by(trc::location!())?
+            .or_else(|| {
+                if calendar_ids.len() == 1 {
+                    calendar_ids.iter().next()
+                } else {
+                    None
+                }
+            });
 
         let ids = if let Some(ids) = ids {
             ids
@@ -126,8 +144,10 @@ impl CalendarGet for Server {
                         );
                     }
                     CalendarProperty::IsDefault => {
-                        let todo = "implement me";
-                        //result.insert_unchecked(CalendarProperty::IsDefault, calendar.is_default);
+                        result.insert_unchecked(
+                            CalendarProperty::IsDefault,
+                            default_calendar_id == Some(document_id),
+                        );
                     }
                     CalendarProperty::IsSubscribed => {
                         result.insert_unchecked(
@@ -156,18 +176,13 @@ impl CalendarGet for Server {
                         );
                     }
                     CalendarProperty::IncludeInAvailability => {
-                        let flags = calendar.preferences(access_token).flags;
-
                         result.insert_unchecked(
                             CalendarProperty::IncludeInAvailability,
                             Value::Element(CalendarValue::IncludeInAvailability(
-                                if flags & CALENDAR_AVAILABILITY_ATTENDING != 0 {
-                                    IncludeInAvailability::Attending
-                                } else if flags & CALENDAR_AVAILABILITY_NONE != 0 {
-                                    IncludeInAvailability::None
-                                } else {
-                                    IncludeInAvailability::All
-                                },
+                                IncludeInAvailability::from_flags(
+                                    calendar.preferences(access_token).flags.to_native(),
+                                )
+                                .unwrap_or_default(),
                             )),
                         );
                     }

@@ -19,7 +19,6 @@ pub struct AddressBook {
     pub name: String,
     pub preferences: Vec<AddressBookPreferences>,
     pub subscribers: Vec<u32>,
-    pub is_default: bool,
     pub dead_properties: DeadProperty,
     pub acls: Vec<AclGrant>,
     pub created: i64,

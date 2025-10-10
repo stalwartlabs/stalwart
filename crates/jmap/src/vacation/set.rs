@@ -8,7 +8,7 @@ use super::get::VacationResponseGet;
 use crate::{JmapMethods, changes::state::StateManager};
 use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use email::sieve::{
-    SieveScript, VacationResponse, activate::SieveScriptActivate, delete::SieveScriptDelete,
+    SieveScript, VacationResponse, delete::SieveScriptDelete, ingest::SieveScriptIngest,
 };
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
@@ -24,12 +24,13 @@ use mail_parser::decoders::html::html_to_text;
 use std::borrow::Cow;
 use std::future::Future;
 use store::{
-    Serialize,
+    Serialize, SerializeInfallible,
     write::{Archiver, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
+    field::PrincipalField,
     id::Id,
 };
 
@@ -129,7 +130,6 @@ impl VacationResponseSet for Server {
         if let Some(changes) = changes {
             // Obtain current script
             let document_id = self.get_vacation_sieve_script_id(account_id).await?;
-            let mut was_active = false;
 
             let (mut sieve, prev_sieve) = if let Some(document_id) = document_id {
                 let prev_sieve = self
@@ -142,7 +142,6 @@ impl VacationResponseSet for Server {
                     })?
                     .into_deserialized::<SieveScript>()
                     .caused_by(trc::location!())?;
-                was_active = prev_sieve.inner.is_active;
                 let mut sieve = prev_sieve.inner.clone();
                 if sieve.vacation_response.is_none() {
                     sieve.vacation_response = VacationResponse::default().into();
@@ -153,7 +152,6 @@ impl VacationResponseSet for Server {
                 (
                     SieveScript {
                         name: "vacation".into(),
-                        is_active: false,
                         blob_hash: Default::default(),
                         size: 0,
                         vacation_response: VacationResponse::default().into(),
@@ -254,7 +252,6 @@ impl VacationResponseSet for Server {
                     }
                 }
             }
-            sieve.is_active = is_active;
 
             let mut obj = ObjectIndexBuilder::new()
                 .with_current_opt(prev_sieve)
@@ -288,6 +285,23 @@ impl VacationResponseSet for Server {
                     .hash;
             };
 
+            // Deactivate other sieve scripts
+            let was_active =
+                self.sieve_script_get_active_id(account_id).await? == Some(document_id);
+            if is_active {
+                if !was_active {
+                    batch
+                        .with_collection(Collection::Principal)
+                        .update_document(0)
+                        .set(PrincipalField::ActiveScriptId, document_id.serialize());
+                }
+            } else if was_active {
+                batch
+                    .with_collection(Collection::Principal)
+                    .update_document(0)
+                    .clear(PrincipalField::ActiveScriptId);
+            }
+
             // Write changes
             batch.custom(obj).caused_by(trc::location!())?;
             if !batch.is_empty() {
@@ -298,16 +312,6 @@ impl VacationResponseSet for Server {
                         .caused_by(trc::location!())?
                         .into(),
                 );
-            }
-
-            // Deactivate other sieve scripts
-            if !was_active && is_active {
-                let (change_id, _) = self
-                    .sieve_activate_script(account_id, document_id.into())
-                    .await?;
-                if change_id > 0 {
-                    response.new_state = Some(change_id.into());
-                }
             }
 
             // Add result
@@ -326,7 +330,7 @@ impl VacationResponseSet for Server {
                 if id.is_singleton()
                     && let Some(document_id) = self.get_vacation_sieve_script_id(account_id).await?
                 {
-                    self.sieve_script_delete(access_token, document_id, false, &mut batch)
+                    self.sieve_script_delete(access_token, document_id, &mut batch)
                         .await?;
                     response.destroyed.push(id);
                     continue;

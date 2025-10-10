@@ -7,7 +7,7 @@
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::listener::SessionStream;
 use directory::Permission;
-use email::sieve::delete::SieveScriptDelete;
+use email::sieve::{delete::SieveScriptDelete, ingest::SieveScriptIngest};
 use imap_proto::receiver::Request;
 use std::time::Instant;
 use store::write::BatchBuilder;
@@ -36,13 +36,14 @@ impl<T: SessionStream> Session<T> {
         let document_id = self.get_script_id(account_id, &name).await?;
         let mut batch = BatchBuilder::new();
 
-        match self
-            .server
-            .sieve_script_delete(access_token, document_id, true, &mut batch)
-            .await
-            .caused_by(trc::location!())?
-        {
-            Some(true) => {
+        let active_script_id = self.server.sieve_script_get_active_id(account_id).await?;
+        if active_script_id != Some(document_id) {
+            if self
+                .server
+                .sieve_script_delete(access_token, document_id, &mut batch)
+                .await
+                .caused_by(trc::location!())?
+            {
                 if !batch.is_empty() {
                     self.server
                         .commit_batch(batch)
@@ -59,14 +60,16 @@ impl<T: SessionStream> Session<T> {
                 );
 
                 Ok(StatusResponse::ok("Deleted.").into_bytes())
+            } else {
+                Err(trc::ManageSieveEvent::Error
+                    .into_err()
+                    .details("Script not found"))
             }
-            Some(false) => Err(trc::ManageSieveEvent::Error
+        } else {
+            Err(trc::ManageSieveEvent::Error
                 .into_err()
                 .details("You may not delete an active script")
-                .code(ResponseCode::Active)),
-            None => Err(trc::ManageSieveEvent::Error
-                .into_err()
-                .details("Script not found")),
+                .code(ResponseCode::Active))
         }
     }
 }

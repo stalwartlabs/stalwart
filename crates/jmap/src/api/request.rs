@@ -307,14 +307,10 @@ impl RequestHandler for Server {
 
                     self.file_node_get(req, access_token).await?.into()
                 }
-                GetRequestMethod::PrincipalAvailability(mut req) => {
-                    set_account_id_if_missing(&mut req.account_id, access_token);
-                    access_token.assert_has_access(req.account_id, Collection::CalendarEvent)?;
-
-                    self.principal_get_availability(req, access_token)
-                        .await?
-                        .into()
-                }
+                GetRequestMethod::PrincipalAvailability(req) => self
+                    .principal_get_availability(req, access_token)
+                    .await?
+                    .into(),
                 GetRequestMethod::Calendar(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_has_access(req.account_id, Collection::Calendar)?;
@@ -373,12 +369,10 @@ impl RequestHandler for Server {
 
                     self.sieve_script_query(req).await?.into()
                 }
-                QueryRequestMethod::Principal(mut req) => {
-                    set_account_id_if_missing(&mut req.account_id, access_token);
-                    self.principal_query(req, access_token, session)
-                        .await?
-                        .into()
-                }
+                QueryRequestMethod::Principal(req) => self
+                    .principal_query(req, access_token, session)
+                    .await?
+                    .into(),
                 QueryRequestMethod::Quota(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;

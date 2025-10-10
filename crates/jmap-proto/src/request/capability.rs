@@ -7,8 +7,11 @@
 use std::fmt;
 
 use crate::{
-    object::file_node::FileNodeComparator, response::serialize::serialize_hex, types::date::UTCDate,
+    object::{email::EmailComparator, file_node::FileNodeComparator},
+    response::serialize::serialize_hex,
+    types::date::UTCDate,
 };
+use ahash::AHashMap;
 use calcard::icalendar::ICalendarDuration;
 use serde::{Deserialize, Deserializer};
 use types::{id::Id, type_state::DataType};
@@ -17,38 +20,38 @@ use utils::map::vec_map::VecMap;
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Session {
     #[serde(rename(serialize = "capabilities"))]
-    capabilities: VecMap<Capability, Capabilities>,
+    pub capabilities: VecMap<Capability, Capabilities>,
     #[serde(rename(serialize = "accounts"))]
-    accounts: VecMap<Id, Account>,
+    pub accounts: VecMap<Id, Account>,
     #[serde(rename(serialize = "primaryAccounts"))]
-    primary_accounts: VecMap<Capability, Id>,
+    pub primary_accounts: VecMap<Capability, Id>,
     #[serde(rename(serialize = "username"))]
-    username: String,
+    pub username: String,
     #[serde(rename(serialize = "apiUrl"))]
-    api_url: String,
+    pub api_url: String,
     #[serde(rename(serialize = "downloadUrl"))]
-    download_url: String,
+    pub download_url: String,
     #[serde(rename(serialize = "uploadUrl"))]
-    upload_url: String,
+    pub upload_url: String,
     #[serde(rename(serialize = "eventSourceUrl"))]
-    event_source_url: String,
+    pub event_source_url: String,
     #[serde(rename(serialize = "state"))]
     #[serde(serialize_with = "serialize_hex")]
-    state: u32,
+    pub state: u32,
     #[serde(skip)]
-    base_url: String,
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-struct Account {
+pub struct Account {
     #[serde(rename(serialize = "name"))]
-    name: String,
+    pub name: String,
     #[serde(rename(serialize = "isPersonal"))]
-    is_personal: bool,
+    pub is_personal: bool,
     #[serde(rename(serialize = "isReadOnly"))]
-    is_read_only: bool,
+    pub is_read_only: bool,
     #[serde(rename(serialize = "accountCapabilities"))]
-    account_capabilities: VecMap<Capability, Capabilities>,
+    pub account_capabilities: VecMap<Capability, Capabilities>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -104,9 +107,7 @@ pub enum Capabilities {
     Blob(BlobCapabilities),
     Contacts(ContactsCapabilities),
     Principals(PrincipalCapabilities),
-    PrincipalsOwner(PrincipalOwnerCapabilities),
     PrincipalsAvailability(PrincipalAvailabilityCapabilities),
-    PrincipalCalendar(PrincipalCalendarCapabilities),
     Calendar(CalendarCapabilities),
     FileNode(FileNodeCapabilities),
     Empty(EmptyCapabilities),
@@ -175,7 +176,7 @@ pub struct MailCapabilities {
     #[serde(rename(serialize = "maxSizeAttachmentsPerEmail"))]
     pub max_size_attachments_per_email: usize,
     #[serde(rename(serialize = "emailQuerySortOptions"))]
-    pub email_query_sort_options: Vec<String>,
+    pub email_query_sort_options: Vec<EmailComparator>,
     #[serde(rename(serialize = "mayCreateTopLevelMailbox"))]
     pub may_create_top_level_mailbox: bool,
 }
@@ -209,7 +210,7 @@ pub struct CalendarCapabilities {
     #[serde(rename(serialize = "maxDateTime"))]
     pub max_date_time: UTCDate,
     #[serde(rename(serialize = "maxExpandedQueryDuration"))]
-    pub max_expanded_query_duration: String,
+    pub max_expanded_query_duration: ICalendarDuration,
     #[serde(rename(serialize = "maxParticipantsPerEvent"))]
     pub max_participants_per_event: Option<usize>,
     #[serde(rename(serialize = "mayCreateCalendar"))]
@@ -236,7 +237,7 @@ pub struct PrincipalCapabilities {
     pub current_user_principal_id: Option<Id>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+/*#[derive(Debug, Clone, serde::Serialize)]
 pub struct PrincipalOwnerCapabilities {
     #[serde(rename(serialize = "accountIdForPrincipal"))]
     pub account_id_for_principal: Id,
@@ -255,7 +256,7 @@ pub struct PrincipalCalendarCapabilities {
     pub may_share_with: bool,
     #[serde(rename(serialize = "calendarAddress"))]
     pub calendar_address: String,
-}
+}*/
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileNodeCapabilities {
@@ -275,7 +276,7 @@ pub struct EmptyCapabilities {}
 #[derive(Default, Clone)]
 pub struct BaseCapabilities {
     pub session: VecMap<Capability, Capabilities>,
-    pub account: VecMap<Capability, Capabilities>,
+    pub account: AHashMap<Capability, Capabilities>,
 }
 
 impl Capability {
@@ -315,22 +316,8 @@ impl Capability {
             Capability::Blob,
             Capability::Quota,
             Capability::Principals,
-            Capability::PrincipalsOwner,
             Capability::PrincipalsAvailability,
             Capability::FileNode,
-        ]
-    }
-
-    pub fn all_principal_capabilities() -> &'static [Capability] {
-        &[
-            Capability::Mail,
-            Capability::Contacts,
-            Capability::ContactsParse,
-            Capability::Calendars,
-            Capability::CalendarsParse,
-            Capability::Sieve,
-            Capability::FileNode,
-            Capability::Principals,
         ]
     }
 }
@@ -364,48 +351,6 @@ impl Session {
         }
     }
 
-    pub fn set_primary_account(
-        &mut self,
-        account_id: Id,
-        username: String,
-        name: String,
-        capabilities: Option<&[Capability]>,
-        account_capabilities: &VecMap<Capability, Capabilities>,
-    ) {
-        self.username = username;
-
-        if let Some(capabilities) = capabilities {
-            for capability in capabilities {
-                self.primary_accounts.append(*capability, account_id);
-            }
-        } else {
-            for capability in self.capabilities.keys() {
-                self.primary_accounts.append(*capability, account_id);
-            }
-        }
-
-        self.accounts.set(
-            account_id,
-            Account::new(name, true, false).add_capabilities(capabilities, account_capabilities),
-        );
-    }
-
-    pub fn add_account(
-        &mut self,
-        account_id: Id,
-        name: String,
-        is_personal: bool,
-        is_read_only: bool,
-        capabilities: Option<&[Capability]>,
-        account_capabilities: &VecMap<Capability, Capabilities>,
-    ) {
-        self.accounts.set(
-            account_id,
-            Account::new(name, is_personal, is_read_only)
-                .add_capabilities(capabilities, account_capabilities),
-        );
-    }
-
     pub fn set_state(&mut self, state: u32) {
         self.state = state;
     }
@@ -416,34 +361,6 @@ impl Session {
 
     pub fn base_url(&self) -> &str {
         &self.base_url
-    }
-}
-
-impl Account {
-    pub fn new(name: String, is_personal: bool, is_read_only: bool) -> Account {
-        Account {
-            name,
-            is_personal,
-            is_read_only,
-            account_capabilities: VecMap::new(),
-        }
-    }
-
-    pub fn add_capabilities(
-        mut self,
-        capabilities: Option<&[Capability]>,
-        account_capabilities: &VecMap<Capability, Capabilities>,
-    ) -> Account {
-        if let Some(capabilities) = capabilities {
-            for capability in capabilities {
-                if let Some(value) = account_capabilities.get(capability) {
-                    self.account_capabilities.append(*capability, value.clone());
-                }
-            }
-        } else {
-            self.account_capabilities = account_capabilities.clone();
-        }
-        self
     }
 }
 
@@ -463,6 +380,39 @@ impl WebSocketCapabilities {
                 base_url.strip_prefix("http").unwrap_or_default()
             ),
             supports_push: true,
+        }
+    }
+}
+
+impl Capabilities {
+    pub fn to_account_capabilities(
+        &self,
+        current_user_principal_id: Option<Id>,
+        may_create: bool,
+    ) -> Capabilities {
+        match self {
+            Capabilities::Contacts(contacts_capabilities) => {
+                Capabilities::Contacts(ContactsCapabilities {
+                    may_create_address_book: may_create,
+                    ..contacts_capabilities.clone()
+                })
+            }
+            Capabilities::Principals(_) => Capabilities::Principals(PrincipalCapabilities {
+                current_user_principal_id,
+            }),
+            Capabilities::Calendar(calendar_capabilities) => {
+                Capabilities::Calendar(CalendarCapabilities {
+                    may_create_calendar: may_create,
+                    ..calendar_capabilities.clone()
+                })
+            }
+            Capabilities::FileNode(file_node_capabilities) => {
+                Capabilities::FileNode(FileNodeCapabilities {
+                    may_create_top_level_file_node: may_create,
+                    ..file_node_capabilities.clone()
+                })
+            }
+            _ => self.clone(),
         }
     }
 }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::config::groupware::GroupwareConfig;
 use jmap_proto::request::capability::BaseCapabilities;
 use nlp::language::Language;
 use std::{str::FromStr, time::Duration};
@@ -42,6 +43,7 @@ pub struct JmapConfig {
     pub mail_autoexpunge_after: Option<u64>,
 
     pub contact_parse_max_items: usize,
+    pub calendar_parse_max_items: usize,
 
     pub sieve_max_script_name: usize,
     pub sieve_max_scripts: usize,
@@ -88,7 +90,7 @@ pub struct DefaultFolder {
 }
 
 impl JmapConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(config: &mut Config, groupware_config: &GroupwareConfig) -> Self {
         // Parse HTTP headers
         let mut http_headers = config
             .values("http.headers")
@@ -346,12 +348,15 @@ impl JmapConfig {
             contact_parse_max_items: config
                 .property("jmap.contact.parse.max-items")
                 .unwrap_or(100),
+            calendar_parse_max_items: config
+                .property("jmap.calendar.parse.max-items")
+                .unwrap_or(100),
             default_folders,
             shared_folder,
         };
 
         // Add capabilities
-        jmap.add_capabilities(config);
+        jmap.add_capabilities(config, groupware_config);
         jmap
     }
 }

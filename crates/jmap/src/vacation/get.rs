@@ -6,7 +6,7 @@
 
 use crate::{JmapMethods, changes::state::StateManager};
 use common::Server;
-use email::sieve::SieveScript;
+use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::vacation_response::{
@@ -85,6 +85,7 @@ impl VacationResponseGet for Server {
                     .get_archive(account_id, Collection::SieveScript, document_id)
                     .await?
                 {
+                    let active_script_id = self.sieve_script_get_active_id(account_id).await?;
                     let sieve = sieve_
                         .unarchive::<SieveScript>()
                         .caused_by(trc::location!())?;
@@ -101,7 +102,7 @@ impl VacationResponseGet for Server {
                             VacationResponseProperty::IsEnabled => {
                                 result.insert_unchecked(
                                     VacationResponseProperty::IsEnabled,
-                                    sieve.is_active,
+                                    active_script_id == Some(document_id),
                                 );
                             }
                             VacationResponseProperty::FromDate => {

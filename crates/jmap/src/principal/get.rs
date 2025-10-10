@@ -15,7 +15,7 @@ use jmap_proto::{
 use jmap_tools::{Key, Map, Value};
 use std::future::Future;
 use store::roaring::RoaringBitmap;
-use types::{collection::Collection, id::Id};
+use types::collection::Collection;
 
 pub trait PrincipalGet: Sync + Send {
     fn principal_get(
@@ -110,9 +110,80 @@ impl PrincipalGet for Server {
                         .unwrap_or(Value::Null),
                     PrincipalProperty::Accounts => Value::Object(Map::from(vec![(
                         Key::Property(PrincipalProperty::IdValue(id)),
-                        build_account(id, principal.name().to_string(), true, false),
+                        Value::Object(Map::from_iter(
+                            [
+                                Capability::Mail,
+                                Capability::Contacts,
+                                Capability::Calendars,
+                                Capability::FileNode,
+                                Capability::Principals,
+                            ]
+                            .iter()
+                            .map(|cap| {
+                                (
+                                    Key::Property(PrincipalProperty::Capability(*cap)),
+                                    Value::Object(Map::new()),
+                                )
+                            })
+                            .chain([
+                                (
+                                    Key::Property(PrincipalProperty::Capability(
+                                        Capability::PrincipalsOwner,
+                                    )),
+                                    Value::Object(Map::from(vec![
+                                        (
+                                            Key::Borrowed("accountIdForPrincipal"),
+                                            Value::Element(PrincipalValue::Id(id)),
+                                        ),
+                                        (
+                                            Key::Borrowed("principalId"),
+                                            Value::Element(PrincipalValue::Id(id)),
+                                        ),
+                                    ])),
+                                ),
+                                (
+                                    Key::Property(PrincipalProperty::Capability(
+                                        Capability::Calendars,
+                                    )),
+                                    Value::Object(Map::from(vec![
+                                        (
+                                            Key::Borrowed("accountId"),
+                                            Value::Element(PrincipalValue::Id(id)),
+                                        ),
+                                        (Key::Borrowed("mayGetAvailability"), Value::Bool(true)),
+                                        (Key::Borrowed("mayShareWith"), Value::Bool(true)),
+                                        (
+                                            Key::Borrowed("calendarAddress"),
+                                            Value::Str(
+                                                principal
+                                                    .emails
+                                                    .first()
+                                                    .map(|email| format!("mailto:{}", email))
+                                                    .unwrap_or_default()
+                                                    .into(),
+                                            ),
+                                        ),
+                                    ])),
+                                ),
+                            ]),
+                        )),
                     )])),
-                    PrincipalProperty::Capabilities => all_capabilities(None),
+                    PrincipalProperty::Capabilities => Value::Object(Map::from_iter(
+                        [
+                            Capability::Mail,
+                            Capability::Contacts,
+                            Capability::Calendars,
+                            Capability::FileNode,
+                            Capability::Principals,
+                        ]
+                        .iter()
+                        .map(|cap| {
+                            (
+                                Key::Property(PrincipalProperty::Capability(*cap)),
+                                Value::Object(Map::new()),
+                            )
+                        }),
+                    )),
                     _ => Value::Null,
                 };
 
@@ -123,52 +194,4 @@ impl PrincipalGet for Server {
 
         Ok(response)
     }
-}
-
-fn build_account(
-    id: Id,
-    name: String,
-    is_personal: bool,
-    is_readonly: bool,
-) -> Value<'static, PrincipalProperty, PrincipalValue> {
-    let mut account = Map::with_capacity(4);
-    account.insert_unchecked(
-        Key::Property(PrincipalProperty::Name),
-        Value::Str(name.into()),
-    );
-    account.insert_unchecked(Key::Borrowed("isPersonal"), Value::Bool(is_personal));
-    account.insert_unchecked(Key::Borrowed("isReadOnly"), Value::Bool(is_readonly));
-    account.insert_unchecked(
-        Key::Borrowed("accountCapabilities"),
-        all_capabilities(id.into()),
-    );
-    Value::Object(account)
-}
-
-fn all_capabilities(id: Option<Id>) -> Value<'static, PrincipalProperty, PrincipalValue> {
-    Value::Object(Map::from_iter(
-        Capability::all_principal_capabilities()
-            .iter()
-            .map(|cap| {
-                (
-                    Key::Property(PrincipalProperty::Capability(*cap)),
-                    Value::Object(Map::new()),
-                )
-            })
-            .chain(id.map(|id| {
-                (
-                    Key::Property(PrincipalProperty::Capability(Capability::PrincipalsOwner)),
-                    Value::Object(Map::from(vec![
-                        (
-                            Key::Borrowed("accountIdForPrincipal"),
-                            Value::Element(PrincipalValue::Id(id)),
-                        ),
-                        (
-                            Key::Borrowed("principalId"),
-                            Value::Element(PrincipalValue::Id(id)),
-                        ),
-                    ])),
-                )
-            })),
-    ))
 }

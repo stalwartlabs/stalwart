@@ -6,12 +6,16 @@
 
 use crate::{JmapMethods, changes::state::StateManager};
 use common::Server;
+use email::sieve::ingest::SieveScriptIngest;
 use jmap_proto::{
     method::query::{Comparator, Filter, QueryRequest, QueryResponse},
     object::sieve::{Sieve, SieveComparator, SieveFilter},
 };
 use std::future::Future;
-use store::query::{self};
+use store::{
+    query::{self},
+    roaring::RoaringBitmap,
+};
 use types::{
     collection::{Collection, SyncCollection},
     field::SieveField,
@@ -31,6 +35,18 @@ impl SieveScriptQuery for Server {
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
+        let active_script_id = if request
+            .filter
+            .iter()
+            .any(|f| matches!(f, Filter::Property(SieveFilter::IsActive(_))))
+            || request.sort.as_ref().is_some_and(|s| {
+                s.iter()
+                    .any(|c| matches!(c.property, SieveComparator::IsActive))
+            }) {
+            self.sieve_script_get_active_id(account_id).await?
+        } else {
+            None
+        };
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -38,10 +54,17 @@ impl SieveScriptQuery for Server {
                     SieveFilter::Name(name) => {
                         filters.push(query::Filter::contains(SieveField::Name, &name))
                     }
-                    SieveFilter::IsActive(is_active) => filters.push(query::Filter::eq(
-                        SieveField::IsActive,
-                        vec![is_active as u8],
-                    )),
+                    SieveFilter::IsActive(is_active) => {
+                        if !is_active {
+                            filters.push(query::Filter::Not);
+                        }
+                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                            active_script_id,
+                        )));
+                        if !is_active {
+                            filters.push(query::Filter::End);
+                        }
+                    }
                     SieveFilter::_T(other) => {
                         return Err(trc::JmapEvent::UnsupportedFilter.into_err().details(other));
                     }
@@ -78,9 +101,10 @@ impl SieveScriptQuery for Server {
                     SieveComparator::Name => {
                         query::Comparator::field(SieveField::Name, comparator.is_ascending)
                     }
-                    SieveComparator::IsActive => {
-                        query::Comparator::field(SieveField::IsActive, comparator.is_ascending)
-                    }
+                    SieveComparator::IsActive => query::Comparator::set(
+                        RoaringBitmap::from_iter(active_script_id),
+                        comparator.is_ascending,
+                    ),
                     SieveComparator::_T(other) => {
                         return Err(trc::JmapEvent::UnsupportedSort.into_err().details(other));
                     }

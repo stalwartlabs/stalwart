@@ -9,16 +9,30 @@ use crate::object::{Property, TryFromLegacy, Value};
 use common::Server;
 use email::sieve::{SieveScript, VacationResponse};
 use store::{
-    SUBSPACE_BITMAP_TEXT, SUBSPACE_INDEXES, SUBSPACE_PROPERTY, Serialize, U64_LEN, ValueKey,
+    SUBSPACE_BITMAP_TEXT, SUBSPACE_INDEXES, SUBSPACE_PROPERTY, Serialize, SerializeInfallible,
+    U64_LEN, ValueKey,
     write::{
         AlignedBytes, AnyKey, Archive, Archiver, BatchBuilder, ValueClass, key::KeySerializer,
     },
 };
 use trc::{AddContext, StoreEvent};
 use types::{
+    blob_hash::BlobHash,
     collection::Collection,
-    field::{Field, SieveField},
+    field::{Field, PrincipalField, SieveField},
 };
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+#[rkyv(derive(Debug))]
+pub struct LegacySieveScript {
+    pub name: String,
+    pub is_active: bool,
+    pub blob_hash: BlobHash,
+    pub size: u32,
+    pub vacation_response: Option<VacationResponse>,
+}
 
 pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Result<u64> {
     // Obtain email ids
@@ -70,20 +84,17 @@ pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Resu
             .await
         {
             Ok(Some(legacy)) => {
+                let is_active = legacy
+                    .get(&Property::IsActive)
+                    .as_bool()
+                    .unwrap_or_default();
+
                 if let Some(script) = SieveScript::try_from_legacy(legacy) {
                     let mut batch = BatchBuilder::new();
                     batch
                         .with_account_id(account_id)
                         .with_collection(Collection::SieveScript)
                         .update_document(script_id)
-                        .index(
-                            SieveField::IsActive,
-                            if script.is_active {
-                                vec![1u8]
-                            } else {
-                                vec![0u8]
-                            },
-                        )
                         .index(SieveField::Name, script.name.to_lowercase())
                         .set(
                             Field::ARCHIVE,
@@ -91,6 +102,14 @@ pub(crate) async fn migrate_sieve(server: &Server, account_id: u32) -> trc::Resu
                                 .serialize()
                                 .caused_by(trc::location!())?,
                         );
+
+                    if is_active {
+                        batch
+                            .with_collection(Collection::Principal)
+                            .update_document(0)
+                            .set(PrincipalField::ActiveScriptId, script_id.serialize());
+                    }
+
                     did_migrate = true;
 
                     server
@@ -179,10 +198,6 @@ impl TryFromLegacy for SieveScript {
                 .as_string()
                 .unwrap_or_default()
                 .to_string(),
-            is_active: legacy
-                .get(&Property::IsActive)
-                .as_bool()
-                .unwrap_or_default(),
             blob_hash: blob_id.hash.clone(),
             size: blob_id.section.as_ref()?.size as u32,
             vacation_response: VacationResponse::try_from_legacy(legacy),

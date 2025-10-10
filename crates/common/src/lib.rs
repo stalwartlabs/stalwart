@@ -302,7 +302,7 @@ pub enum DavResourceMetadata {
     Calendar {
         name: String,
         acls: TinyVec<[AclGrant; 2]>,
-        tz: Tz,
+        preferences: TinyVec<[TinyCalendarPreferences; 2]>,
     },
     CalendarEvent {
         names: TinyVec<[DavName; 2]>,
@@ -319,6 +319,13 @@ pub enum DavResourceMetadata {
     ContactCard {
         names: TinyVec<[DavName; 2]>,
     },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TinyCalendarPreferences {
+    pub account_id: u32,
+    pub tz: Tz,
+    pub flags: u16,
 }
 
 #[derive(
@@ -780,9 +787,12 @@ impl DavResource {
         }
     }
 
-    pub fn timezone(&self) -> Option<Tz> {
+    pub fn calendar_preferences(&self, account_id: u32) -> Option<&TinyCalendarPreferences> {
         match &self.data {
-            DavResourceMetadata::Calendar { tz, .. } => Some(*tz),
+            DavResourceMetadata::Calendar { preferences, .. } => preferences
+                .iter()
+                .find(|pref| pref.account_id == account_id)
+                .or_else(|| preferences.first()),
             _ => None,
         }
     }

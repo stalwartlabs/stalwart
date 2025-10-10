@@ -29,7 +29,7 @@ impl ContactCardParse for Server {
         request: ParseRequest<ContactCard>,
         access_token: &AccessToken,
     ) -> trc::Result<ParseResponse<ContactCard>> {
-        if request.blob_ids.len() > self.core.jmap.mail_parse_max_items {
+        if request.blob_ids.len() > self.core.jmap.contact_parse_max_items {
             return Err(trc::JmapEvent::RequestTooLarge.into_err());
         }
         let return_all_properties = request.properties.is_none();

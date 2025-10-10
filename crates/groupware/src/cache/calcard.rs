@@ -15,7 +15,8 @@ use crate::{
 };
 use calcard::common::timezone::Tz;
 use common::{
-    DavName, DavPath, DavResource, DavResourceMetadata, DavResources, Server, auth::AccessToken,
+    DavName, DavPath, DavResource, DavResourceMetadata, DavResources, Server,
+    TinyCalendarPreferences, auth::AccessToken,
 };
 use directory::backend::internal::manage::ManageDirectory;
 use std::sync::Arc;
@@ -295,11 +296,15 @@ pub(super) fn resource_from_calendar(calendar: &ArchivedCalendar, document_id: u
                     grants: Bitmap::from(&acl.grants),
                 })
                 .collect(),
-            tz: calendar
+            preferences: calendar
                 .preferences
-                .first()
-                .and_then(|pref| pref.time_zone.tz())
-                .unwrap_or(Tz::UTC),
+                .iter()
+                .map(|pref| TinyCalendarPreferences {
+                    account_id: pref.account_id.to_native(),
+                    flags: pref.flags.to_native(),
+                    tz: pref.time_zone.tz().unwrap_or(Tz::UTC),
+                })
+                .collect(),
         },
     }
 }

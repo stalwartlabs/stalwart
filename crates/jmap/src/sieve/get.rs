@@ -6,7 +6,7 @@
 
 use crate::changes::state::StateManager;
 use common::Server;
-use email::sieve::SieveScript;
+use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::sieve::{Sieve, SieveProperty, SieveValue},
@@ -61,6 +61,7 @@ impl SieveScriptGet for Server {
             list: Vec::with_capacity(ids.len()),
             not_found: vec![],
         };
+        let active_script_id = self.sieve_script_get_active_id(account_id).await?;
 
         for id in ids {
             // Obtain the sieve script object
@@ -91,7 +92,10 @@ impl SieveScriptGet for Server {
                         result.insert_unchecked(SieveProperty::Name, &sieve.name);
                     }
                     SieveProperty::IsActive => {
-                        result.insert_unchecked(SieveProperty::IsActive, sieve.is_active);
+                        result.insert_unchecked(
+                            SieveProperty::IsActive,
+                            active_script_id == Some(document_id),
+                        );
                     }
                     SieveProperty::BlobId => {
                         let blob_id = BlobId {

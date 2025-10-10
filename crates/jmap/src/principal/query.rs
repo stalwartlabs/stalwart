@@ -33,9 +33,8 @@ impl PrincipalQuery for Server {
         access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> trc::Result<QueryResponse> {
-        let account_id = request.account_id.document_id();
         let mut result_set = ResultSet {
-            account_id,
+            account_id: request.account_id.document_id(),
             collection: Collection::Principal,
             results: RoaringBitmap::new(),
         };

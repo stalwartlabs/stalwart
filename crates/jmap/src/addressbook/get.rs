@@ -12,11 +12,12 @@ use jmap_proto::{
     object::addressbook::{self, AddressBookProperty, AddressBookValue},
 };
 use jmap_tools::{Map, Value};
-use store::roaring::RoaringBitmap;
+use store::{ValueKey, roaring::RoaringBitmap, write::ValueClass};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
     collection::{Collection, SyncCollection},
+    field::PrincipalField,
 };
 
 pub trait AddressBookGet: Sync + Send {
@@ -52,6 +53,23 @@ impl AddressBookGet for Server {
         } else {
             cache.shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
         };
+        let default_address_book_id = self
+            .store()
+            .get_value::<u32>(ValueKey {
+                account_id,
+                collection: Collection::Principal.into(),
+                document_id: 0,
+                class: ValueClass::Property(PrincipalField::DefaultAddressBookId.into()),
+            })
+            .await
+            .caused_by(trc::location!())?
+            .or_else(|| {
+                if address_book_ids.len() == 1 {
+                    address_book_ids.iter().next()
+                } else {
+                    None
+                }
+            });
 
         let ids = if let Some(ids) = ids {
             ids
@@ -122,7 +140,7 @@ impl AddressBookGet for Server {
                     AddressBookProperty::IsDefault => {
                         result.insert_unchecked(
                             AddressBookProperty::IsDefault,
-                            address_book.is_default,
+                            default_address_book_id == Some(document_id),
                         );
                     }
                     AddressBookProperty::IsSubscribed => {

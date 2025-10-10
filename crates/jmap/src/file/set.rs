@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::api::acl::{JmapAcl, JmapRights};
+use crate::{
+    api::acl::{JmapAcl, JmapRights},
+    blob::download::BlobDownload,
+};
 use common::{DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpSessionData;
@@ -21,6 +24,7 @@ use store::{ahash::AHashSet, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
+    blob::BlobId,
     collection::{Collection, SyncCollection},
     id::Id,
 };
@@ -49,8 +53,6 @@ impl FileNodeSet for Server {
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
         let is_shared = access_token.is_shared(account_id);
 
-        let todo = "validate blob permissions";
-
         // Process creates
         let mut batch = BatchBuilder::new();
         'create: for (id, object) in request.unwrap_create() {
@@ -66,9 +68,42 @@ impl FileNodeSet for Server {
             let mut file_node = FileNode::default();
 
             // Process changes
-            if let Err(err) = update_file_node(object, &mut file_node, &mut response) {
-                response.not_created.append(id, err);
-                continue 'create;
+
+            match update_file_node(object, &mut file_node, &mut response) {
+                Ok(result) => {
+                    if let Some(blob_id) = result.blob_id {
+                        if !self.has_access_blob(&blob_id, access_token).await? {
+                            response.not_created.append(
+                                id,
+                                SetError::forbidden().with_description(format!(
+                                    "You do not have access to blobId {blob_id}."
+                                )),
+                            );
+                            continue;
+                        }
+
+                        file_node.file.get_or_insert_default().blob_hash = blob_id.hash;
+                    }
+
+                    // Validate blob hash
+                    if file_node
+                        .file
+                        .as_ref()
+                        .is_some_and(|f| f.blob_hash.is_empty())
+                    {
+                        response.not_created.append(
+                            id,
+                            SetError::invalid_properties()
+                                .with_property(FileNodeProperty::BlobId)
+                                .with_description("Missing blob id."),
+                        );
+                        continue 'create;
+                    }
+                }
+                Err(err) => {
+                    response.not_created.append(id, err);
+                    continue 'create;
+                }
             }
 
             // Validate hierarchy
@@ -130,7 +165,23 @@ impl FileNodeSet for Server {
             // Apply changes
             let has_acl_changes = match update_file_node(object, &mut new_file_node, &mut response)
             {
-                Ok(has_acl_changes_) => has_acl_changes_,
+                Ok(result) => {
+                    if let Some(blob_id) = result.blob_id {
+                        if !self.has_access_blob(&blob_id, access_token).await? {
+                            response.not_updated.append(
+                                id,
+                                SetError::forbidden().with_description(format!(
+                                    "You do not have access to blobId {blob_id}."
+                                )),
+                            );
+                            continue;
+                        }
+
+                        new_file_node.file.get_or_insert_default().blob_hash = blob_id.hash;
+                    }
+
+                    result.has_acl_changes
+                }
                 Err(err) => {
                     response.not_updated.append(id, err);
                     continue 'update;
@@ -283,12 +334,18 @@ impl FileNodeSet for Server {
     }
 }
 
+struct UpdateResult {
+    has_acl_changes: bool,
+    blob_id: Option<BlobId>,
+}
+
 fn update_file_node(
     updates: Value<'_, FileNodeProperty, FileNodeValue>,
     file_node: &mut FileNode,
     response: &mut SetResponse<file_node::FileNode>,
-) -> Result<bool, SetError<FileNodeProperty>> {
+) -> Result<UpdateResult, SetError<FileNodeProperty>> {
     let mut has_acl_changes = false;
+    let mut blob_id = None;
 
     for (property, mut value) in updates.into_expanded_object() {
         let Key::Property(property) = property else {
@@ -314,7 +371,13 @@ fn update_file_node(
                 file_node.parent_id = 0;
             }
             (FileNodeProperty::BlobId, Value::Element(FileNodeValue::BlobId(value))) => {
-                file_node.file.get_or_insert_default().blob_hash = value.hash;
+                if file_node
+                    .file
+                    .as_ref()
+                    .is_none_or(|f| f.blob_hash != value.hash)
+                {
+                    blob_id = Some(value);
+                }
             }
             (FileNodeProperty::BlobId, Value::Null) => {}
             (FileNodeProperty::Size, Value::Number(value)) => {
@@ -375,18 +438,10 @@ fn update_file_node(
             .with_description("Missing name."));
     }
 
-    // Validate blob hash
-    if file_node
-        .file
-        .as_ref()
-        .is_some_and(|f| f.blob_hash.is_empty())
-    {
-        return Err(SetError::invalid_properties()
-            .with_property(FileNodeProperty::BlobId)
-            .with_description("Missing blob id."));
-    }
-
-    Ok(has_acl_changes)
+    Ok(UpdateResult {
+        has_acl_changes,
+        blob_id,
+    })
 }
 
 fn validate_file_node_hierarchy(

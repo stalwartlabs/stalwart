@@ -133,7 +133,7 @@ impl ShareNotificationQuery for Server {
                 }
             }
 
-            response.update_results(paginate.build());
+            response.update_results(paginate.build())?;
         }
 
         Ok(response)

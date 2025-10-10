@@ -182,7 +182,6 @@ impl<T: SessionStream> Session<T> {
                     ObjectIndexBuilder::<(), _>::new()
                         .with_changes(
                             SieveScript::new(name.clone(), blob_hash.clone())
-                                .with_is_active(false)
                                 .with_size(script_size as u32),
                         )
                         .with_access_token(access_token),

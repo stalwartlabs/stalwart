@@ -15,12 +15,6 @@ impl IndexableObject for SieveScript {
                 field: SieveField::Name.into(),
                 value: self.name.as_str().to_lowercase().into(),
             },
-            IndexValue::Index {
-                field: SieveField::IsActive.into(),
-                value: if self.is_active { &[1u8] } else { &[0u8] }
-                    .as_slice()
-                    .into(),
-            },
             IndexValue::Blob {
                 value: self.blob_hash.clone(),
             },
@@ -46,12 +40,6 @@ impl IndexableObject for &ArchivedSieveScript {
             IndexValue::Index {
                 field: SieveField::Name.into(),
                 value: self.name.to_lowercase().into(),
-            },
-            IndexValue::Index {
-                field: SieveField::IsActive.into(),
-                value: if self.is_active { &[1u8] } else { &[0u8] }
-                    .as_slice()
-                    .into(),
             },
             IndexValue::Blob {
                 value: (&self.blob_hash).into(),

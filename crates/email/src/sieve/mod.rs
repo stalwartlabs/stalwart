@@ -10,7 +10,6 @@ use std::sync::Arc;
 use store::{blake3, write::ArchiveVersion};
 use types::blob_hash::BlobHash;
 
-pub mod activate;
 pub mod delete;
 pub mod index;
 pub mod ingest;
@@ -29,7 +28,6 @@ pub struct ActiveScript {
 #[rkyv(derive(Debug))]
 pub struct SieveScript {
     pub name: String,
-    pub is_active: bool,
     pub blob_hash: BlobHash,
     pub size: u32,
     pub vacation_response: Option<VacationResponse>,
@@ -51,7 +49,6 @@ impl SieveScript {
     pub fn new(name: impl Into<String>, blob_hash: BlobHash) -> Self {
         SieveScript {
             name: name.into(),
-            is_active: false,
             blob_hash,
             vacation_response: None,
             size: 0,
@@ -68,18 +65,9 @@ impl SieveScript {
         self
     }
 
-    pub fn with_is_active(mut self, is_active: bool) -> Self {
-        self.is_active = is_active;
-        self
-    }
-
     pub fn with_size(mut self, size: u32) -> Self {
         self.size = size;
         self
-    }
-
-    pub fn set_is_active(&mut self, is_active: bool) {
-        self.is_active = is_active;
     }
 
     pub fn with_vacation_response(mut self, vacation_response: VacationResponse) -> Self {

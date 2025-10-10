@@ -16,16 +16,17 @@ use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
     object::addressbook::{self, AddressBookProperty, AddressBookValue},
-    request::IntoValid,
+    request::{IntoValid, reference::MaybeIdReference},
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Value};
 use rand::{Rng, distr::Alphanumeric};
-use store::write::BatchBuilder;
+use store::{SerializeInfallible, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
     collection::{Collection, SyncCollection},
+    field::PrincipalField,
 };
 
 pub trait AddressBookSet: Sync + Send {
@@ -51,8 +52,7 @@ impl AddressBookSet for Server {
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
         let is_shared = access_token.is_shared(account_id);
-
-        let todo = " Implement onSuccessSetIsDefault + Sieve";
+        let mut set_default = None;
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -105,6 +105,14 @@ impl AddressBookSet for Server {
             address_book
                 .insert(access_token, account_id, document_id, &mut batch)
                 .caused_by(trc::location!())?;
+
+            if let Some(MaybeIdReference::Reference(id_ref)) =
+                &request.arguments.on_success_set_is_default
+                && id_ref == &id
+            {
+                set_default = Some(document_id);
+            }
+
             response.created(id, document_id);
         }
 
@@ -256,6 +264,21 @@ impl AddressBookSet for Server {
                 .caused_by(trc::location!())?;
 
             response.destroyed.push(id);
+        }
+
+        // Set default address book
+        if let Some(MaybeIdReference::Id(id)) = &request.arguments.on_success_set_is_default {
+            set_default = Some(id.document_id());
+        }
+        if let Some(default_address_book_id) = set_default {
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .update_document(0)
+                .set(
+                    PrincipalField::DefaultAddressBookId,
+                    default_address_book_id.serialize(),
+                );
         }
 
         // Write changes

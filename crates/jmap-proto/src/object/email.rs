@@ -12,6 +12,7 @@ use crate::{
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use mail_parser::HeaderName;
+use serde::Serialize;
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 use store::fts::{FilterItem, FilterType};
 use types::{blob::BlobId, id::Id, keyword::Keyword};
@@ -771,7 +772,13 @@ impl Display for EmailFilter {
 
 impl Display for EmailComparator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
+        f.write_str(self.as_str())
+    }
+}
+
+impl EmailComparator {
+    pub fn as_str(&self) -> &str {
+        match self {
             EmailComparator::ReceivedAt => "receivedAt",
             EmailComparator::Size => "size",
             EmailComparator::From => "from",
@@ -784,7 +791,16 @@ impl Display for EmailComparator {
             EmailComparator::AllInThreadHaveKeyword(_) => "allInThreadHaveKeyword",
             EmailComparator::SomeInThreadHaveKeyword(_) => "someInThreadHaveKeyword",
             EmailComparator::_T(v) => v.as_str(),
-        })
+        }
+    }
+}
+
+impl Serialize for EmailComparator {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }
 
