@@ -127,6 +127,7 @@ impl VacationResponseSet for Server {
             .with_collection(Collection::SieveScript);
 
         // Process changes
+        let active_script_id = self.sieve_script_get_active_id(account_id).await?;
         if let Some(changes) = changes {
             // Obtain current script
             let document_id = self.get_vacation_sieve_script_id(account_id).await?;
@@ -284,10 +285,10 @@ impl VacationResponseSet for Server {
                     .await?
                     .hash;
             };
+            batch.custom(obj).caused_by(trc::location!())?;
 
             // Deactivate other sieve scripts
-            let was_active =
-                self.sieve_script_get_active_id(account_id).await? == Some(document_id);
+            let was_active = active_script_id == Some(document_id);
             if is_active {
                 if !was_active {
                     batch
@@ -303,7 +304,6 @@ impl VacationResponseSet for Server {
             }
 
             // Write changes
-            batch.custom(obj).caused_by(trc::location!())?;
             if !batch.is_empty() {
                 response.new_state = Some(
                     self.commit_batch(batch)
@@ -330,10 +330,17 @@ impl VacationResponseSet for Server {
                 if id.is_singleton()
                     && let Some(document_id) = self.get_vacation_sieve_script_id(account_id).await?
                 {
-                    self.sieve_script_delete(access_token, document_id, &mut batch)
+                    self.sieve_script_delete(account_id, document_id, access_token, &mut batch)
                         .await?;
+                    if active_script_id == Some(document_id) {
+                        batch
+                            .with_collection(Collection::Principal)
+                            .update_document(0)
+                            .clear(PrincipalField::ActiveScriptId);
+                    }
+
                     response.destroyed.push(id);
-                    continue;
+                    break;
                 }
 
                 response.not_destroyed.append(id, SetError::not_found());

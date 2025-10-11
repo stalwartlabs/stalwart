@@ -442,10 +442,10 @@ fn remove_addressbook_properties(
                 book.preferences_mut(access_token).description = None;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
-            /*DavProperty::WebDav(WebDavProperty::DisplayName) => {
-                book.display_name = None;
+            DavProperty::WebDav(WebDavProperty::DisplayName) => {
+                book.preferences_mut(access_token).name.clear();
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
-            }*/
+            }
             DavProperty::DeadProperty(dead) => {
                 book.dead_properties.remove_element(dead);
                 items.insert_with_status(property, StatusCode::NO_CONTENT);

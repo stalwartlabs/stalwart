@@ -77,7 +77,7 @@ pub trait SieveScriptIngest: Sync + Send {
         &self,
         account_id: u32,
         document_id: u32,
-    ) -> impl Future<Output = trc::Result<CompiledScript>> + Send;
+    ) -> impl Future<Output = trc::Result<Option<CompiledScript>>> + Send;
 }
 
 impl SieveScriptIngest for Server {
@@ -586,14 +586,16 @@ impl SieveScriptIngest for Server {
             .await
             .caused_by(trc::location!())?
         {
-            let script = self.sieve_script_compile(account_id, document_id).await?;
-
-            Ok(Some(ActiveScript {
-                document_id,
-                script: Arc::new(script.script),
-                script_name: script.name,
-                version: script.version,
-            }))
+            if let Some(script) = self.sieve_script_compile(account_id, document_id).await? {
+                Ok(Some(ActiveScript {
+                    document_id,
+                    script: Arc::new(script.script),
+                    script_name: script.name,
+                    version: script.version,
+                }))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
@@ -619,7 +621,7 @@ impl SieveScriptIngest for Server {
         {
             self.sieve_script_compile(account_id, document_id)
                 .await
-                .map(|script| Some(script.script))
+                .map(|script| script.map(|s| s.script))
         } else {
             Ok(None)
         }
@@ -630,17 +632,14 @@ impl SieveScriptIngest for Server {
         &self,
         account_id: u32,
         document_id: u32,
-    ) -> trc::Result<CompiledScript> {
+    ) -> trc::Result<Option<CompiledScript>> {
         // Obtain script object
-        let script_object = self
+        let Some(script_object) = self
             .get_archive(account_id, Collection::SieveScript, document_id)
             .await?
-            .ok_or_else(|| {
-                trc::StoreEvent::NotFound
-                    .into_err()
-                    .caused_by(trc::location!())
-                    .document_id(document_id)
-            })?;
+        else {
+            return Ok(None);
+        };
 
         // Obtain the sieve script length
         let version = script_object.version;
@@ -671,11 +670,11 @@ impl SieveScriptIngest for Server {
                 .deserialize::<Sieve>()
                 .ok()
         }) {
-            Ok(CompiledScript {
+            Ok(Some(CompiledScript {
                 script,
                 name: unarchived_script.name.as_str().into(),
                 version,
-            })
+            }))
         } else {
             // Deserialization failed, probably because the script compiler version changed
             match self.core.sieve.untrusted_compiler.compile(
@@ -729,11 +728,11 @@ impl SieveScriptIngest for Server {
                         .await
                         .caused_by(trc::location!())?;
 
-                    Ok(CompiledScript {
+                    Ok(Some(CompiledScript {
                         script: sieve.into_inner(),
                         name: new_archive.into_inner().name,
                         version,
-                    })
+                    }))
                 }
                 Err(error) => Err(trc::StoreEvent::UnexpectedError
                     .caused_by(trc::location!())

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{jmap::mail::delivery::SmtpConnection, smtp::session::VerifyResponse};
 use mail_send::smtp::tls::build_tls_connector;
 use rustls_pki_types::ServerName;
 use std::time::Duration;
@@ -12,8 +13,6 @@ use tokio::{
     net::TcpStream,
 };
 use tokio_rustls::client::TlsStream;
-
-use crate::{jmap::delivery::SmtpConnection, smtp::session::VerifyResponse};
 
 pub async fn test() {
     println!("Running POP3 tests...");

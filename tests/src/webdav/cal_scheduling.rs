@@ -6,7 +6,7 @@
 
 use super::WebDavTest;
 use crate::{
-    jmap::mailbox::destroy_all_mailboxes_for_account,
+    jmap::mail::mailbox::destroy_all_mailboxes_for_account,
     webdav::{DummyWebDavClient, prop::ALL_DAV_PROPERTIES},
 };
 use calcard::{

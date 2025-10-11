@@ -5,7 +5,13 @@
  */
 
 use crate::{
-    AssertConfig, add_test_certs, directory::internal::TestInternalDirectory, store::TempDir,
+    AssertConfig, add_test_certs,
+    directory::internal::TestInternalDirectory,
+    jmap::server::{
+        enterprise::{EnterpriseCore, insert_test_metrics},
+        webhooks::{MockWebhookEndpoint, spawn_mock_webhook_endpoint},
+    },
+    store::TempDir,
 };
 use base64::{
     Engine,
@@ -25,7 +31,6 @@ use common::{
     },
 };
 use email::message::delete::EmailDeletion;
-use enterprise::{EnterpriseCore, insert_test_metrics};
 use http::HttpSessionManager;
 use hyper::{Method, header::AUTHORIZATION};
 use imap::core::ImapSessionManager;
@@ -46,36 +51,14 @@ use store::{
 use tokio::sync::watch;
 use types::{blob_hash::BlobHash, id::Id};
 use utils::config::Config;
-use webhooks::{MockWebhookEndpoint, spawn_mock_webhook_endpoint};
 
-pub mod auth_acl;
-pub mod auth_limits;
-pub mod auth_oauth;
-pub mod blob;
-pub mod crypto;
-pub mod delivery;
-pub mod email_changes;
-pub mod email_copy;
-pub mod email_get;
-pub mod email_parse;
-pub mod email_query;
-pub mod email_query_changes;
-pub mod email_search_snippet;
-pub mod email_set;
-pub mod email_submission;
-pub mod enterprise;
-pub mod event_source;
-pub mod mailbox;
-pub mod permissions;
-pub mod purge;
-pub mod push_subscription;
-pub mod quota;
-pub mod sieve_script;
-pub mod thread_get;
-pub mod thread_merge;
-pub mod vacation_response;
-pub mod webhooks;
-pub mod websocket;
+pub mod auth;
+pub mod calendar;
+pub mod contacts;
+pub mod core;
+pub mod files;
+pub mod mail;
+pub mod server;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn jmap_tests() {
@@ -87,34 +70,34 @@ async fn jmap_tests() {
     )
     .await;
 
-    webhooks::test(&mut params).await;
-    /*email_query::test(&mut params, delete).await;
-    email_get::test(&mut params).await;
-    email_set::test(&mut params).await;
-    email_parse::test(&mut params).await;
-    email_search_snippet::test(&mut params).await;
-    email_changes::test(&mut params).await;
-    email_query_changes::test(&mut params).await;
-    email_copy::test(&mut params).await;
-    thread_get::test(&mut params).await;
-    thread_merge::test(&mut params).await;
-    mailbox::test(&mut params).await;*/
-    delivery::test(&mut params).await;
-    auth_acl::test(&mut params).await;
-    auth_limits::test(&mut params).await;
-    auth_oauth::test(&mut params).await;
-    event_source::test(&mut params).await;
-    push_subscription::test(&mut params).await;
-    sieve_script::test(&mut params).await;
-    vacation_response::test(&mut params).await;
-    email_submission::test(&mut params).await;
-    websocket::test(&mut params).await;
-    quota::test(&mut params).await;
-    crypto::test(&mut params).await;
-    blob::test(&mut params).await;
-    permissions::test(&params).await;
-    purge::test(&mut params).await;
-    enterprise::test(&mut params).await;
+    server::webhooks::test(&mut params).await;
+    /*mail::query::test(&mut params, delete).await;
+    mail::get::test(&mut params).await;
+    mail::set::test(&mut params).await;
+    mail::parse::test(&mut params).await;
+    mail::search_snippet::test(&mut params).await;
+    mail::changes::test(&mut params).await;
+    mail::query_changes::test(&mut params).await;
+    mail::copy::test(&mut params).await;
+    mail::thread_get::test(&mut params).await;
+    mail::thread_merge::test(&mut params).await;
+    mail::mailbox::test(&mut params).await;
+    mail::delivery::test(&mut params).await;
+    mail::acl::test(&mut params).await;*/
+    auth::limits::test(&mut params).await;
+    auth::oauth::test(&mut params).await;
+    core::event_source::test(&mut params).await;
+    core::push_subscription::test(&mut params).await;
+    mail::sieve_script::test(&mut params).await;
+    mail::vacation_response::test(&mut params).await;
+    mail::submission::test(&mut params).await;
+    core::websocket::test(&mut params).await;
+    auth::quota::test(&mut params).await;
+    mail::crypto::test(&mut params).await;
+    core::blob::test(&mut params).await;
+    auth::permissions::test(&params).await;
+    server::purge::test(&mut params).await;
+    server::enterprise::test(&mut params).await;
 
     if delete {
         params.temp_dir.delete();

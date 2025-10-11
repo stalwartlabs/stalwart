@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
-
+use crate::{
+    AssertConfig, TEST_USERS, add_test_certs,
+    directory::internal::TestInternalDirectory,
+    imap::{ImapConnection, Type},
+    jmap::server::enterprise::EnterpriseCore,
+};
 use ahash::AHashMap;
 use common::{
     Caches, Core, Data, Inner, Server,
@@ -27,16 +31,10 @@ use managesieve::core::ManageSieveSessionManager;
 use pop3::Pop3SessionManager;
 use services::{SpawnServices, broadcast::subscriber::spawn_broadcast_subscriber};
 use smtp::{SpawnQueueManager, core::SmtpSessionManager};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use store::Stores;
 use tokio::sync::watch;
 use utils::config::Config;
-
-use crate::{
-    AssertConfig, TEST_USERS, add_test_certs,
-    directory::internal::TestInternalDirectory,
-    imap::{ImapConnection, Type},
-    jmap::enterprise::EnterpriseCore,
-};
 
 pub mod broadcast;
 pub mod stress;

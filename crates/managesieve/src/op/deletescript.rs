@@ -40,7 +40,7 @@ impl<T: SessionStream> Session<T> {
         if active_script_id != Some(document_id) {
             if self
                 .server
-                .sieve_script_delete(access_token, document_id, &mut batch)
+                .sieve_script_delete(account_id, document_id, access_token, &mut batch)
                 .await
                 .caused_by(trc::location!())?
             {

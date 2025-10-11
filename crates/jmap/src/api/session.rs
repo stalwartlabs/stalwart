@@ -6,7 +6,9 @@
 
 use common::{Server, auth::AccessToken};
 use directory::Permission;
-use jmap_proto::request::capability::{Account, Capability, Session};
+use jmap_proto::request::capability::{
+    Account, Capabilities, Capability, EmptyCapabilities, Session,
+};
 use std::future::Future;
 use std::sync::Arc;
 use trc::AddContext;
@@ -35,23 +37,19 @@ impl SessionHandler for Server {
         session.username = access_token.name.to_string();
         let account_id = Id::from(access_token.primary_id());
         let mut account = Account {
-            name: access_token
-                .description
-                .as_ref()
-                .unwrap_or(&access_token.name)
-                .to_string(),
+            name: access_token.name.to_string(),
             is_personal: true,
             is_read_only: false,
             account_capabilities: VecMap::with_capacity(account_capabilities.len()),
         };
-        for capability in access_token.capabilities() {
+        for capability in access_token.account_capabilities() {
             session.primary_accounts.append(capability, account_id);
             account.account_capabilities.append(
                 capability,
                 account_capabilities
                     .get(&capability)
-                    .unwrap()
-                    .to_account_capabilities(account_id.into(), true),
+                    .map(|v| v.to_account_capabilities(account_id.into(), true))
+                    .unwrap_or_else(|| Capabilities::Empty(EmptyCapabilities::default())),
             );
         }
         session.accounts.append(account_id, account);
@@ -66,23 +64,18 @@ impl SessionHandler for Server {
 
             let account_id = Id::from(account_id);
             let mut account = Account {
-                name: access_token
-                    .description
-                    .as_ref()
-                    .unwrap_or(&access_token.name)
-                    .to_string(),
+                name: access_token.name.to_string(),
                 is_personal: false,
                 is_read_only: false,
                 account_capabilities: VecMap::with_capacity(account_capabilities.len()),
             };
-            for capability in access_token.capabilities() {
-                session.primary_accounts.append(capability, account_id);
+            for capability in access_token.account_capabilities() {
                 account.account_capabilities.append(
                     capability,
                     account_capabilities
                         .get(&capability)
-                        .unwrap()
-                        .to_account_capabilities(account_id.into(), is_owner),
+                        .map(|v| v.to_account_capabilities(account_id.into(), is_owner))
+                        .unwrap_or_else(|| Capabilities::Empty(EmptyCapabilities::default())),
                 );
             }
             session.accounts.append(account_id, account);
@@ -93,11 +86,11 @@ impl SessionHandler for Server {
 }
 
 trait AccountCapabilities {
-    fn capabilities(&self) -> impl Iterator<Item = Capability>;
+    fn account_capabilities(&self) -> impl Iterator<Item = Capability>;
 }
 
 impl AccountCapabilities for AccessToken {
-    fn capabilities(&self) -> impl Iterator<Item = Capability> {
+    fn account_capabilities(&self) -> impl Iterator<Item = Capability> {
         Capability::all_capabilities()
             .iter()
             .filter(move |capability| {
@@ -113,11 +106,10 @@ impl AccountCapabilities for AccessToken {
                     Capability::Blob => Permission::JmapBlobGet,
                     Capability::Quota => Permission::JmapQuotaGet,
                     Capability::FileNode => Permission::JmapFileNodeGet,
-                    Capability::Core
-                    | Capability::WebSocket
+                    Capability::WebSocket
                     | Capability::Principals
                     | Capability::PrincipalsAvailability => return true,
-                    Capability::PrincipalsOwner => return false,
+                    Capability::Core | Capability::PrincipalsOwner => return false,
                 };
                 self.has_permission(permission)
             })

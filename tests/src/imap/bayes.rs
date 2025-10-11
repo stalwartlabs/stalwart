@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{IMAPTest, ImapConnection};
+use crate::{
+    imap::Type,
+    jmap::{mail::delivery::SmtpConnection, wait_for_index},
+    smtp::session::VerifyResponse,
+};
 use common::KV_BAYES_MODEL_USER;
 use directory::backend::internal::manage::ManageDirectory;
 use imap_proto::ResponseType;
 use nlp::bayes::{TokenHash, Weights};
-
-use crate::{
-    imap::Type,
-    jmap::{delivery::SmtpConnection, wait_for_index},
-    smtp::session::VerifyResponse,
-};
-
-use super::{IMAPTest, ImapConnection};
 
 pub async fn test(handle: &IMAPTest) {
     println!("Running Bayes tests...");

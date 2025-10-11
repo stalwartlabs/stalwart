@@ -1,10 +1,14 @@
-use std::{
-    fs,
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+/*
+ * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
+ */
 
+use crate::{
+    http_server::{HttpMessage, spawn_mock_http_server},
+    jmap::server::enterprise::EnterpriseCore,
+    smtp::{DnsCache, TempDir, TestSMTP, session::TestSession},
+};
 use ahash::{AHashMap, AHashSet};
 use common::{
     Core,
@@ -18,7 +22,6 @@ use common::{
         },
     },
 };
-
 use compact_str::{CompactString, ToCompactString};
 use http_proto::{JsonResponse, ToHttpResponse};
 use hyper::Method;
@@ -44,14 +47,14 @@ use spam_filter::{
     },
     modules::html::{HtmlToken, html_to_tokens},
 };
+use std::{
+    fs,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use store::Stores;
 use utils::config::Config;
-
-use crate::{
-    http_server::{HttpMessage, spawn_mock_http_server},
-    jmap::enterprise::EnterpriseCore,
-    smtp::{DnsCache, TempDir, TestSMTP, session::TestSession},
-};
 
 const CONFIG: &str = r#"
 [spam-filter.bayes.classify]

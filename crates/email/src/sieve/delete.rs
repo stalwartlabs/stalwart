@@ -13,8 +13,9 @@ use types::{collection::Collection, field::SieveField};
 pub trait SieveScriptDelete: Sync + Send {
     fn sieve_script_delete(
         &self,
-        access_token: &AccessToken,
+        account_id: u32,
         document_id: u32,
+        access_token: &AccessToken,
         batch: &mut BatchBuilder,
     ) -> impl Future<Output = trc::Result<bool>> + Send;
 }
@@ -22,12 +23,12 @@ pub trait SieveScriptDelete: Sync + Send {
 impl SieveScriptDelete for Server {
     async fn sieve_script_delete(
         &self,
-        access_token: &AccessToken,
+        account_id: u32,
         document_id: u32,
+        access_token: &AccessToken,
         batch: &mut BatchBuilder,
     ) -> trc::Result<bool> {
         // Fetch record
-        let account_id = access_token.primary_id();
         if let Some(obj_) = self
             .get_archive(account_id, Collection::SieveScript, document_id)
             .await?

@@ -296,7 +296,7 @@ impl SieveScriptSet for Server {
             if sieve_ids.contains(document_id) {
                 if active_script_id != Some(document_id) {
                     if self
-                        .sieve_script_delete(ctx.access_token, document_id, &mut batch)
+                        .sieve_script_delete(account_id, document_id, ctx.access_token, &mut batch)
                         .await?
                     {
                         ctx.response.destroyed.push(id);

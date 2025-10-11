@@ -288,6 +288,19 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             },
         )
         .unwrap();
+
+    assert_eq!(
+        events_archive,
+        event_data
+            .expand_from_ids(
+                &mut events
+                    .iter()
+                    .map(|e| e.expansion_id)
+                    .collect::<AHashSet<_>>(),
+                Tz::UTC
+            )
+            .unwrap()
+    );
     events.sort_by(|a, b| {
         if a.comp_id == b.comp_id {
             a.start.cmp(&b.start)
@@ -302,6 +315,9 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             a.comp_id.cmp(&b.comp_id)
         }
     });
+    for event in events.iter_mut().chain(events_archive.iter_mut()) {
+        event.expansion_id = 0;
+    }
 
     assert_eq!(events, events_archive);
 }

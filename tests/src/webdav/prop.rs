@@ -533,8 +533,8 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
                 ),
                 (DavProperty::WebDav(WebDavProperty::DisplayName), ""),
             ];
-            if !is_file && resource_type == DavResourceName::Cal {
-                // DisplayName can be removed from calendar collections
+            if !is_file {
+                // DisplayName can't be removed from calendar/contact collections
                 props.pop();
             }
             client.patch_and_check(path, props).await;

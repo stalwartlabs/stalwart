@@ -18,7 +18,10 @@ use dav_proto::{
     RequestHeaders, Return,
     schema::{Namespace, request::MkCol, response::MkColResponse},
 };
-use groupware::{cache::GroupwareCache, contact::AddressBook};
+use groupware::{
+    cache::GroupwareCache,
+    contact::{AddressBook, AddressBookPreferences},
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::BatchBuilder;
@@ -82,6 +85,11 @@ impl CardMkColRequestHandler for Server {
         // Build file container
         let mut book = AddressBook {
             name: name.to_string(),
+            preferences: vec![AddressBookPreferences {
+                account_id,
+                name: "Address Book".to_string(),
+                ..Default::default()
+            }],
             ..Default::default()
         };
 

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::mailbox::destroy_all_mailboxes_for_account;
+use crate::jmap::mail::mailbox::destroy_all_mailboxes_for_account;
 
 use super::WebDavTest;
 use email::cache::MessageCacheFetch;
