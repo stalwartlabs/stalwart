@@ -5,12 +5,10 @@
  */
 
 use crate::{
-    directory::internal::TestInternalDirectory,
     jmap::{
         JMAPTest, assert_is_empty,
         mail::{
             delivery::SmtpConnection,
-            mailbox::destroy_all_mailboxes,
             submission::{
                 MockMessage, assert_message_delivery, expect_nothing, spawn_mock_smtp_server,
             },
@@ -20,29 +18,14 @@ use crate::{
 };
 use chrono::{TimeDelta, Utc};
 use std::time::Instant;
-use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Vacation Response tests...");
 
     // Create test account
     let server = params.server.clone();
-    let client = &mut params.client;
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com"],
-            )
-            .await,
-    )
-    .to_string();
-    client.set_default_account_id(&account_id);
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     // Start mock SMTP server
     let (mut smtp_rx, smtp_settings) = spawn_mock_smtp_server();
@@ -54,7 +37,6 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Let people know that we'll be down in Kokomo
     client
-        .set_default_account_id(&account_id)
         .vacation_response_create(
             "Off the Florida Keys there's a place called Kokomo",
             "That's where you wanna go to get away from it all".into(),
@@ -179,6 +161,6 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Remove test data
     client.vacation_response_destroy().await.unwrap();
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }

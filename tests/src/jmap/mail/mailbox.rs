@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty, wait_for_index};
+use crate::jmap::{Account, JMAPTest, assert_is_empty, wait_for_index};
 use jmap_client::{
     Error, Set,
     client::{Client, Credentials},
@@ -23,11 +23,12 @@ use types::id::Id;
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Mailbox tests...");
     let server = params.server.clone();
-    let client = &mut params.client;
+    let account = params.account("admin");
+    let mut client = account.client_owned().await;
 
     // Create test mailboxes
     client.set_default_account_id(Id::from(0u64));
-    let id_map = create_test_mailboxes(client).await;
+    let id_map = create_test_mailboxes(&client).await;
 
     // Sort by name
     assert_eq!(
@@ -607,12 +608,11 @@ pub async fn test(params: &mut JMAPTest) {
         ["inbox", "sent", "spam"]
     );
 
-    destroy_all_mailboxes(params).await;
-    params.client.set_default_account_id(Id::from(1u64));
+    destroy_all_mailboxes_no_wait(&client).await;
     assert_is_empty(server).await;
 }
 
-async fn create_test_mailboxes(client: &mut Client) -> AHashMap<String, String> {
+async fn create_test_mailboxes(client: &Client) -> AHashMap<String, String> {
     let mut mailbox_map = AHashMap::default();
     let mut request = client.build();
     build_create_query(
@@ -657,6 +657,13 @@ fn build_create_query(
     }
 }
 
+impl JMAPTest {
+    pub async fn destroy_all_mailboxes(&self, account: &Account) {
+        wait_for_index(&self.server).await;
+        destroy_all_mailboxes_no_wait(account.client()).await;
+    }
+}
+
 pub async fn destroy_all_mailboxes_for_account(account_id: u32) {
     let mut client = Client::new()
         .credentials(Credentials::basic("admin", "secret"))
@@ -668,11 +675,6 @@ pub async fn destroy_all_mailboxes_for_account(account_id: u32) {
         .unwrap();
     client.set_default_account_id(Id::from(account_id));
     destroy_all_mailboxes_no_wait(&client).await;
-}
-
-pub async fn destroy_all_mailboxes(test: &JMAPTest) {
-    wait_for_index(&test.server).await;
-    destroy_all_mailboxes_no_wait(&test.client).await;
 }
 
 pub async fn destroy_all_mailboxes_no_wait(client: &Client) {

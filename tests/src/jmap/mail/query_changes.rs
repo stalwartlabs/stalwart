@@ -6,10 +6,7 @@
 
 use crate::jmap::{
     JMAPTest, assert_is_empty,
-    mail::{
-        changes::{LogAction, ParseState},
-        mailbox::destroy_all_mailboxes,
-    },
+    mail::changes::{LogAction, ParseState},
 };
 use ::email::message::metadata::MessageData;
 use common::storage::index::ObjectIndexBuilder;
@@ -32,15 +29,15 @@ use types::{
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email QueryChanges tests...");
     let server = params.server.clone();
-    let mailbox1_id = params
-        .client
-        .set_default_account_id(Id::new(1).to_string())
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
+
+    let mailbox1_id = client
         .mailbox_create("JMAP Changes 1", None::<String>, Role::None)
         .await
         .unwrap()
         .take_id();
-    let mailbox2_id = params
-        .client
+    let mailbox2_id = client
         .mailbox_create("JMAP Changes 2", None::<String>, Role::None)
         .await
         .unwrap()
@@ -91,8 +88,7 @@ pub async fn test(params: &mut JMAPTest) {
         match &change {
             LogAction::Insert(id) => {
                 let jmap_id = Id::from_str(
-                    params
-                        .client
+                    client
                         .email_import(
                             format!(
                                 "From: test_{}\nSubject: test_{}\n\ntest",
@@ -131,7 +127,7 @@ pub async fn test(params: &mut JMAPTest) {
             }
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
-                params.client.email_destroy(&id.to_string()).await.unwrap();
+                client.email_destroy(&id.to_string()).await.unwrap();
                 removed_ids.insert(id);
             }
             LogAction::Move(from, to) => {
@@ -141,7 +137,11 @@ pub async fn test(params: &mut JMAPTest) {
                 //let new_thread_id = store::rand::random::<u32>();
 
                 let old_message_ = server
-                    .get_archive(1, Collection::Email, id.document_id())
+                    .get_archive(
+                        account.id().document_id(),
+                        Collection::Email,
+                        id.document_id(),
+                    )
                     .await
                     .unwrap()
                     .unwrap();
@@ -155,7 +155,7 @@ pub async fn test(params: &mut JMAPTest) {
                     .data
                     .write(
                         BatchBuilder::new()
-                            .with_account_id(1)
+                            .with_account_id(account.id().document_id())
                             .with_collection(Collection::Email)
                             .update_document(id.document_id())
                             .custom(
@@ -220,7 +220,7 @@ pub async fn test(params: &mut JMAPTest) {
                 if test_num == 3 && query.up_to_id.is_none() {
                     continue;
                 }
-                let mut request = params.client.build();
+                let mut request = client.build();
                 let query_request = request
                     .query_email_changes(query.since_query_state.to_string())
                     .sort(query.sort);
@@ -276,7 +276,7 @@ pub async fn test(params: &mut JMAPTest) {
         states.push(new_state);
     }
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

@@ -4,38 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, assert_is_empty, jmap_json_request, mail::mailbox::destroy_all_mailboxes},
-};
+use crate::jmap::{JMAPTest, assert_is_empty};
 use email::mailbox::INBOX_ID;
-use serde_json::Value;
+use serde_json::{Value, json};
 use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running blob tests...");
     let server = params.server.clone();
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com"],
-            )
-            .await,
-    );
+    let account = params.account("jdoe@example.com");
     server.core.storage.data.blob_expire_all().await;
 
     // Blob/set simple test
-    let response = jmap_json_request(
-        r#"[[
-            "Blob/upload",
-            {
-             "accountId": "$$",
+    let response = account.jmap_method_call("Blob/upload", json!({
              "create": {
               "abc": {
                "data" : [
@@ -46,14 +27,8 @@ pub async fn test(params: &mut JMAPTest) {
               "type": "image/png"
               }
              }
-            },
-            "R1"
-           ]]"#
-            .replace("$$", &account_id.to_string()),
-        "jdoe@example.com",
-        "12345",
-    )
-    .await;
+            })).await;
+
     assert_eq!(
         response
             .pointer("/methodResponses/0/1/created/abc/type")
@@ -74,11 +49,10 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Blob/get simple test
-    let blob_id = jmap_json_request(
-        r#"[[
+    let blob_id = account
+        .jmap_method_call(
             "Blob/upload",
-            {
-             "accountId": "$$",
+            json!({
              "create": {
               "abc": {
                "data" : [
@@ -88,61 +62,48 @@ pub async fn test(params: &mut JMAPTest) {
               ]
               }
              }
+            }),
+        )
+        .await
+        .pointer("/methodResponses/0/1/created/abc/id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
+
+    let response = account
+        .jmap_method_calls(json!([[
+            "Blob/get",
+            {
+              "ids" : [
+                blob_id
+              ],
+              "properties" : [
+                "data:asText",
+                "digest:sha",
+                "size"
+              ]
             },
             "R1"
-           ]]"#
-        .replace("$$", &account_id.to_string()),
-        "jdoe@example.com",
-        "12345",
-    )
-    .await
-    .pointer("/methodResponses/0/1/created/abc/id")
-    .and_then(|v| v.as_str())
-    .unwrap()
-    .to_string();
-
-    let response = jmap_json_request(
-        r#"[
-            [
-              "Blob/get",
-              {
-                "accountId" : "$$",
-                "ids" : [
-                  "%%"
-                ],
-                "properties" : [
-                  "data:asText",
-                  "digest:sha",
-                  "size"
-                ]
-              },
-              "R1"
-            ],
-            [
-              "Blob/get",
-              {
-                "accountId" : "$$",
-                "ids" : [
-                  "%%"
-                ],
-                "properties" : [
-                  "data:asText",
-                  "digest:sha",
-                  "digest:sha-256",
-                  "size"
-                ],
-                "offset" : 4,
-                "length" : 9
-              },
-              "R2"
-            ]
-          ]"#
-        .replace("$$", &account_id.to_string())
-        .replace("%%", &blob_id),
-        "jdoe@example.com",
-        "12345",
-    )
-    .await;
+          ],
+          [
+            "Blob/get",
+            {
+              "ids" : [
+                blob_id
+              ],
+              "properties" : [
+                "data:asText",
+                "digest:sha",
+                "digest:sha-256",
+                "size"
+              ],
+              "offset" : 4,
+              "length" : 9
+            },
+            "R2"
+          ]
+        ]))
+        .await;
 
     for (pointer, expected) in [
         (
@@ -174,84 +135,76 @@ pub async fn test(params: &mut JMAPTest) {
                 })
                 .unwrap_or_default(),
             expected,
-            "Pointer {pointer:?} Response: {}",
-            serde_json::to_string_pretty(&response).unwrap()
+            "Pointer {pointer:?} Response: {response:?}",
         );
     }
 
     server.core.storage.data.blob_expire_all().await;
 
     // Blob/upload Complex Example
-    let response = jmap_json_request(
-        r##"[
-            [
-             "Blob/upload",
-             {
-              "accountId" : "$$",
-              "create": {
-               "b4": {
-                "data": [
+    let response = account
+        .jmap_method_calls(json!([
+         [
+          "Blob/upload",
+          {
+           "create": {
+            "b4": {
+             "data": [
+              {
+               "data:asText": "The quick brown fox jumped over the lazy dog."
+              }
+            ]
+           }
+          }
+         },
+         "S4"
+        ],
+        [
+          "Blob/upload",
+          {
+           "create": {
+             "cat": {
+               "data": [
                  {
-                  "data:asText": "The quick brown fox jumped over the lazy dog."
+                   "data:asText": "How"
+                 },
+                 {
+                   "blobId": "#b4",
+                   "length": 7,
+                   "offset": 3
+                 },
+                 {
+                   "data:asText": "was t"
+                 },
+                 {
+                   "blobId": "#b4",
+                   "length": 1,
+                   "offset": 1
+                 },
+                 {
+                   "data:asBase64": "YXQ/"
                  }
                ]
-              }
              }
-            },
-            "S4"
+           }
+          },
+          "CAT"
+        ],
+        [
+          "Blob/get",
+          {
+           "properties": [
+             "data:asText",
+             "size"
            ],
-           [
-             "Blob/upload",
-             {
-              "accountId" : "$$",
-              "create": {
-                "cat": {
-                  "data": [
-                    {
-                      "data:asText": "How"
-                    },
-                    {
-                      "blobId": "#b4",
-                      "length": 7,
-                      "offset": 3
-                    },
-                    {
-                      "data:asText": "was t"
-                    },
-                    {
-                      "blobId": "#b4",
-                      "length": 1,
-                      "offset": 1
-                    },
-                    {
-                      "data:asBase64": "YXQ/"
-                    }
-                  ]
-                }
-              }
-             },
-             "CAT"
-           ],
-           [
-             "Blob/get",
-             {
-              "accountId" : "$$",
-              "properties": [
-                "data:asText",
-                "size"
-              ],
-              "ids": [
-                "#cat"
-              ]
-             },
-             "G4"
-            ]
-           ]"##
-        .replace("$$", &account_id.to_string()),
-        "jdoe@example.com",
-        "12345",
-    )
-    .await;
+           "ids": [
+             "#cat"
+           ]
+          },
+          "G4"
+         ]
+        ]))
+        .await;
 
     for (pointer, expected) in [
         (
@@ -276,12 +229,10 @@ pub async fn test(params: &mut JMAPTest) {
     server.core.storage.data.blob_expire_all().await;
 
     // Blob/get Example with Range and Encoding Errors
-    let response = jmap_json_request(
-        r##"[
+    let response = account.jmap_method_calls(json!([
             [
               "Blob/upload",
               {
-                "accountId" : "$$",
                 "create": {
                   "b1": {
                     "data": [
@@ -305,7 +256,6 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
-                "accountId" : "$$",
                 "ids": [
                   "#b1",
                   "#b2"
@@ -316,7 +266,6 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
-                "accountId" : "$$",
                 "ids": [
                   "#b1",
                   "#b2"
@@ -331,7 +280,6 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
-                "accountId" : "$$",
                 "ids": [
                   "#b1",
                   "#b2"
@@ -346,7 +294,6 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
-                "accountId" : "$$",
                 "offset": 0,
                 "length": 5,
                 "ids": [
@@ -359,7 +306,6 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
-                "accountId" : "$$",
                 "offset": 20,
                 "length": 100,
                 "ids": [
@@ -369,12 +315,7 @@ pub async fn test(params: &mut JMAPTest) {
               },
               "G5"
             ]
-          ]"##
-        .replace("$$", &account_id.to_string()),
-        "jdoe@example.com",
-        "12345",
-    )
-    .await;
+          ])).await;
 
     for (pointer, expected) in [
         (
@@ -415,9 +356,8 @@ pub async fn test(params: &mut JMAPTest) {
     server.core.storage.data.blob_expire_all().await;
 
     // Blob/lookup
-    params.client.set_default_account_id(account_id.to_string());
-    let blob_id = params
-        .client
+    let client = account.client();
+    let blob_id = client
         .email_import(
             concat!(
                 "From: bill@example.com\r\n",
@@ -437,29 +377,22 @@ pub async fn test(params: &mut JMAPTest) {
         .unwrap()
         .take_blob_id();
 
-    let response = jmap_json_request(
-        r#"[[
-                "Blob/lookup",
-                {
-                  "accountId" : "$$",
-                  "typeNames": [
-                    "Mailbox",
-                    "Thread",
-                    "Email"
-                  ],
-                  "ids": [
-                    "%%",
-                    "not-a-blob"
-                  ]
-                },
-                "R1"
-              ]]"#
-        .replace("$$", &account_id.to_string())
-        .replace("%%", &blob_id),
-        "jdoe@example.com",
-        "12345",
-    )
-    .await;
+    let response = account
+        .jmap_method_call(
+            "Blob/lookup",
+            json!({
+              "typeNames": [
+                "Mailbox",
+                "Thread",
+                "Email"
+              ],
+              "ids": [
+                blob_id,
+                "not-a-blob"
+              ]
+            }),
+        )
+        .await;
 
     for pointer in [
         "/methodResponses/0/1/list/0/matchedIds/Email",
@@ -478,7 +411,6 @@ pub async fn test(params: &mut JMAPTest) {
     }
 
     // Remove test data
-    params.client.set_default_account_id(account_id.to_string());
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }

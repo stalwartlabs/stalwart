@@ -4,17 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes};
+use crate::jmap::{JMAPTest, assert_is_empty};
 use jmap_client::mailbox::Role;
-use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Thread tests...");
     let server = params.server.clone();
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
-    let mailbox_id = params
-        .client
-        .set_default_account_id(Id::new(1).to_string())
+    let mailbox_id = client
         .mailbox_create("JMAP Get", None::<String>, Role::None)
         .await
         .unwrap()
@@ -24,8 +23,7 @@ pub async fn test(params: &mut JMAPTest) {
     let mut thread_id = "".to_string();
 
     for num in [5, 3, 1, 2, 4] {
-        let mut email = params
-            .client
+        let mut email = client
             .email_import(
                 format!("Subject: test\nReferences: <1234>\n\n{}", num).into_bytes(),
                 [&mailbox_id],
@@ -39,8 +37,7 @@ pub async fn test(params: &mut JMAPTest) {
     }
 
     assert_eq!(
-        params
-            .client
+        client
             .thread_get(&thread_id)
             .await
             .unwrap()
@@ -49,6 +46,6 @@ pub async fn test(params: &mut JMAPTest) {
         expected_result
     );
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }

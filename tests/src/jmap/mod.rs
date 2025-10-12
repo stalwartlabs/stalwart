@@ -13,6 +13,7 @@ use crate::{
     },
     store::TempDir,
 };
+use ahash::AHashMap;
 use base64::{
     Engine,
     engine::general_purpose::{self, STANDARD},
@@ -40,9 +41,15 @@ use managesieve::core::ManageSieveSessionManager;
 use pop3::Pop3SessionManager;
 use reqwest::header;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::{Value, json};
 use services::SpawnServices;
 use smtp::{SpawnQueueManager, core::SmtpSessionManager};
-use std::{fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    fmt::{Debug, Display},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use store::{
     IterateParams, SUBSPACE_PROPERTY, Stores, ValueKey,
     roaring::RoaringBitmap,
@@ -83,7 +90,7 @@ async fn jmap_tests() {
     mail::thread_merge::test(&mut params).await;
     mail::mailbox::test(&mut params).await;
     mail::delivery::test(&mut params).await;
-    mail::acl::test(&mut params).await;*/
+    mail::acl::test(&mut params).await;
     auth::limits::test(&mut params).await;
     auth::oauth::test(&mut params).await;
     core::event_source::test(&mut params).await;
@@ -93,7 +100,7 @@ async fn jmap_tests() {
     mail::submission::test(&mut params).await;
     core::websocket::test(&mut params).await;
     auth::quota::test(&mut params).await;
-    mail::crypto::test(&mut params).await;
+    mail::crypto::test(&mut params).await;*/
     core::blob::test(&mut params).await;
     auth::permissions::test(&params).await;
     server::purge::test(&mut params).await;
@@ -120,10 +127,61 @@ pub async fn jmap_metric_tests() {
 #[allow(dead_code)]
 pub struct JMAPTest {
     server: Server,
-    client: Client,
+    accounts: AHashMap<&'static str, Account>,
     temp_dir: TempDir,
     webhook: Arc<MockWebhookEndpoint>,
     shutdown_tx: watch::Sender<bool>,
+}
+
+pub struct Account {
+    name: &'static str,
+    secret: &'static str,
+    emails: &'static [&'static str],
+    id: Id,
+    id_string: String,
+    client: Client,
+}
+
+impl JMAPTest {
+    pub fn account(&self, name: &str) -> &Account {
+        self.accounts.get(name).unwrap()
+    }
+}
+
+impl Account {
+    pub fn id(&self) -> &Id {
+        &self.id
+    }
+
+    pub fn id_string(&self) -> &str {
+        &self.id_string
+    }
+
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
+    pub fn name(&self) -> &str {
+        self.name
+    }
+    pub fn secret(&self) -> &str {
+        self.secret
+    }
+
+    pub fn emails(&self) -> &[&str] {
+        self.emails
+    }
+
+    pub async fn client_owned(&self) -> Client {
+        Client::new()
+            .credentials(Credentials::basic(self.name(), self.secret()))
+            .timeout(Duration::from_secs(3600))
+            .accept_invalid_certs(true)
+            .follow_redirects(["127.0.0.1"])
+            .connect("https://127.0.0.1:8899")
+            .await
+            .unwrap()
+    }
 }
 
 pub async fn wait_for_index(server: &Server) {
@@ -344,77 +402,177 @@ async fn init_jmap_tests(store_id: &str, delete_if_exists: bool) -> JMAPTest {
     }
 
     // Create tables
-    inner
-        .shared_core
-        .load()
-        .storage
-        .data
-        .create_test_user("admin", "secret", "Superuser", &[])
-        .await;
+    let server = inner.build_server();
+    let mut accounts = AHashMap::new();
 
-    // Create client
-    let mut client = Client::new()
-        .credentials(Credentials::basic("admin", "secret"))
-        .timeout(Duration::from_secs(3600))
-        .accept_invalid_certs(true)
-        .follow_redirects(["127.0.0.1"])
-        .connect("https://127.0.0.1:8899")
-        .await
-        .unwrap();
-    client.set_default_account_id(Id::new(1));
+    for (name, secret, description, emails) in [
+        ("admin", "secret", "Superuser", &[][..]),
+        (
+            "jdoe@example.com",
+            "12345",
+            "John Doe",
+            &["jdoe@example.com", "john.doe@example.com"][..],
+        ),
+        (
+            "jane.smith@example.com",
+            "abcde",
+            "Jane Smith",
+            &["jane.smith@example.com"],
+        ),
+        (
+            "bill@example.com",
+            "098765",
+            "Bill Foobar",
+            &["bill@example.com"],
+        ),
+        (
+            "robert@example.com",
+            "aabbcc",
+            "Robert Foobar",
+            &["robert@example.com"][..],
+        ),
+    ] {
+        let id: Id = server
+            .store()
+            .create_test_user(name, secret, description, emails)
+            .await
+            .into();
+        let id_string = id.to_string();
+
+        let mut client = Client::new()
+            .credentials(Credentials::basic(name, secret))
+            .timeout(Duration::from_secs(3600))
+            .accept_invalid_certs(true)
+            .follow_redirects(["127.0.0.1"])
+            .connect("https://127.0.0.1:8899")
+            .await
+            .unwrap();
+        client.set_default_account_id(id_string.clone());
+
+        accounts.insert(
+            name,
+            Account {
+                name,
+                secret,
+                emails,
+                id,
+                id_string,
+                client,
+            },
+        );
+    }
+
+    for (name, description, emails) in
+        [("sales@example.com", "Sales Group", &["sales@example.com"])]
+    {
+        let id: Id = server
+            .store()
+            .create_test_group(name, description, emails)
+            .await
+            .into();
+        let id_string = id.to_string();
+
+        let mut client = Client::new()
+            .credentials(Credentials::basic("admin", "secret"))
+            .timeout(Duration::from_secs(3600))
+            .accept_invalid_certs(true)
+            .follow_redirects(["127.0.0.1"])
+            .connect("https://127.0.0.1:8899")
+            .await
+            .unwrap();
+        client.set_default_account_id(id_string.clone());
+
+        accounts.insert(
+            name,
+            Account {
+                name,
+                secret: "",
+                emails,
+                id,
+                id_string,
+                client,
+            },
+        );
+    }
 
     JMAPTest {
-        server: inner.build_server(),
+        server,
         temp_dir,
-        client,
+        accounts,
         shutdown_tx,
         webhook: spawn_mock_webhook_endpoint(),
     }
 }
 
-pub async fn jmap_raw_request(body: impl AsRef<str>, username: &str, secret: &str) -> String {
-    let mut headers = header::HeaderMap::new();
+pub struct JmapResponse(pub Value);
 
-    headers.insert(
-        header::AUTHORIZATION,
-        header::HeaderValue::from_str(&format!(
-            "Basic {}",
-            general_purpose::STANDARD.encode(format!("{}:{}", username, secret))
-        ))
-        .unwrap(),
-    );
-
-    const BODY_TEMPLATE: &str = r#"{
-        "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:quota" ],
-        "methodCalls": $$
-      }"#;
-
-    String::from_utf8(
-        reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .timeout(Duration::from_millis(1000))
-            .default_headers(headers)
-            .build()
-            .unwrap()
-            .post("https://127.0.0.1:8899/jmap")
-            .body(BODY_TEMPLATE.replace("$$", body.as_ref()))
-            .send()
+impl Account {
+    pub async fn jmap_method_call(&self, method_name: &str, body: Value) -> JmapResponse {
+        self.jmap_method_calls(json!([[method_name, body, "0"]]))
             .await
-            .unwrap()
-            .bytes()
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap()
+    }
+
+    pub async fn jmap_method_calls(&self, calls: Value) -> JmapResponse {
+        let mut headers = header::HeaderMap::new();
+
+        headers.insert(
+            header::AUTHORIZATION,
+            header::HeaderValue::from_str(&format!(
+                "Basic {}",
+                general_purpose::STANDARD.encode(format!("{}:{}", self.name(), self.secret()))
+            ))
+            .unwrap(),
+        );
+
+        let body = json!({
+          "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:quota" ],
+          "methodCalls": calls
+        });
+
+        JmapResponse(
+            serde_json::from_slice(
+                &reqwest::Client::builder()
+                    .danger_accept_invalid_certs(true)
+                    .timeout(Duration::from_millis(1000))
+                    .default_headers(headers)
+                    .build()
+                    .unwrap()
+                    .post("https://127.0.0.1:8899/jmap")
+                    .body(body.to_string())
+                    .send()
+                    .await
+                    .unwrap()
+                    .bytes()
+                    .await
+                    .unwrap(),
+            )
+            .unwrap(),
+        )
+    }
 }
 
-pub async fn jmap_json_request(
-    body: impl AsRef<str>,
-    username: &str,
-    secret: &str,
-) -> serde_json::Value {
-    serde_json::from_str(&jmap_raw_request(body, username, secret).await).unwrap()
+impl JmapResponse {
+    pub fn pointer(&self, pointer: &str) -> Option<&Value> {
+        self.0.pointer(pointer)
+    }
+
+    pub fn into_inner(self) -> Value {
+        self.0
+    }
+}
+
+impl Display for JmapResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl Debug for JmapResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        serde_json::to_string_pretty(&self.0)
+            .map_err(|_| std::fmt::Error)
+            .and_then(|s| std::fmt::Display::fmt(&s, f))
+    }
 }
 
 pub fn find_values(string: &str, name: &str) -> Vec<String> {
@@ -471,17 +629,6 @@ pub fn replace_blob_ids(string: String) -> String {
     } else {
         string
     }
-}
-
-pub async fn test_account_login(login: &str, secret: &str) -> Client {
-    Client::new()
-        .credentials(Credentials::basic(login, secret))
-        .timeout(Duration::from_secs(5))
-        .accept_invalid_certs(true)
-        .follow_redirects(["127.0.0.1"])
-        .connect("https://127.0.0.1:8899")
-        .await
-        .unwrap()
 }
 
 #[derive(Deserialize)]

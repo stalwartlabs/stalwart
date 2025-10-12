@@ -6,7 +6,7 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes},
+    jmap::{JMAPTest, assert_is_empty},
     webdav::DummyWebDavClient,
 };
 use email::{
@@ -14,55 +14,21 @@ use email::{
     mailbox::{INBOX_ID, JUNK_ID},
 };
 use groupware::DavResourceName;
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf},
     net::TcpStream,
 };
-use types::{collection::Collection, id::Id};
+use types::collection::Collection;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running message delivery tests...");
 
     // Create a domain name and a test account
     let server = params.server.clone();
-    let mut account_id_1 = String::new();
-    let mut account_id_2 = String::new();
-    let mut account_id_3 = String::new();
-
-    for (id, email, password, name, aliases) in [
-        (
-            &mut account_id_1,
-            "jdoe@example.com",
-            "12345",
-            "John Doe",
-            Some(&["jdoe@example.com", "john.doe@example.com"][..]),
-        ),
-        (
-            &mut account_id_2,
-            "jane@example.com",
-            "abcdef",
-            "Jane Smith",
-            None,
-        ),
-        (
-            &mut account_id_3,
-            "bill@example.com",
-            "098765",
-            "Bill Foobar",
-            None,
-        ),
-    ] {
-        *id = Id::from(
-            server
-                .core
-                .storage
-                .data
-                .create_test_user(email, password, name, aliases.unwrap_or(&[email][..]))
-                .await,
-        )
-        .to_string();
-    }
+    let john = params.account("jdoe@example.com");
+    let jane = params.account("jane.smith@example.com");
+    let bill = params.account("bill@example.com");
 
     // Create a mailing list
     server
@@ -72,7 +38,11 @@ pub async fn test(params: &mut JMAPTest) {
         .create_test_list(
             "members@example.com",
             "Mailing List",
-            &["jdoe@example.com", "jane@example.com", "bill@example.com"],
+            &[
+                "jdoe@example.com",
+                "jane.smith@example.com",
+                "bill@example.com",
+            ],
         )
         .await;
 
@@ -95,12 +65,14 @@ pub async fn test(params: &mut JMAPTest) {
     )
     .await;
 
-    let john_id = Id::from_str(&account_id_1).unwrap().document_id();
-    let john_cache = server.get_cached_messages(john_id).await.unwrap();
+    let john_cache = server
+        .get_cached_messages(john.id().document_id())
+        .await
+        .unwrap();
 
     assert_eq!(
         server
-            .get_document_ids(john_id, Collection::Email)
+            .get_document_ids(john.id().document_id(), Collection::Email)
             .await
             .unwrap()
             .unwrap()
@@ -126,11 +98,14 @@ pub async fn test(params: &mut JMAPTest) {
         ),
     )
     .await;
-    let john_cache = server.get_cached_messages(john_id).await.unwrap();
+    let john_cache = server
+        .get_cached_messages(john.id().document_id())
+        .await
+        .unwrap();
 
     assert_eq!(
         server
-            .get_document_ids(john_id, Collection::Email)
+            .get_document_ids(john.id().document_id(), Collection::Email)
             .await
             .unwrap()
             .unwrap()
@@ -175,11 +150,14 @@ END:VCARD
         ),
     )
     .await;
-    let john_cache = server.get_cached_messages(john_id).await.unwrap();
+    let john_cache = server
+        .get_cached_messages(john.id().document_id())
+        .await
+        .unwrap();
 
     assert_eq!(
         server
-            .get_document_ids(john_id, Collection::Email)
+            .get_document_ids(john.id().document_id(), Collection::Email)
             .await
             .unwrap()
             .unwrap()
@@ -194,7 +172,7 @@ END:VCARD
     lmtp.expn("members@example.com", 2)
         .await
         .assert_contains("jdoe@example.com")
-        .assert_contains("jane@example.com")
+        .assert_contains("jane.smith@example.com")
         .assert_contains("bill@example.com");
     lmtp.expn("non_existant@example.com", 5).await;
     lmtp.expn("jdoe@example.com", 5).await;
@@ -217,20 +195,17 @@ END:VCARD
     )
     .await;
 
-    for (account_id, num_messages) in [(&account_id_1, 4), (&account_id_2, 1), (&account_id_3, 1)] {
+    for (account, num_messages) in [(john, 4), (jane, 1), (bill, 1)] {
         assert_eq!(
             server
-                .get_document_ids(
-                    Id::from_str(account_id).unwrap().document_id(),
-                    Collection::Email
-                )
+                .get_document_ids(account.id().document_id(), Collection::Email)
                 .await
                 .unwrap()
                 .unwrap()
                 .len(),
             num_messages,
             "for {}",
-            account_id
+            account.id_string()
         );
     }
 
@@ -257,20 +232,17 @@ END:VCARD
     )
     .await;
 
-    for (account_id, num_messages) in [(&account_id_1, 4), (&account_id_2, 2), (&account_id_3, 2)] {
+    for (account, num_messages) in [(john, 4), (jane, 2), (bill, 2)] {
         assert_eq!(
             server
-                .get_document_ids(
-                    Id::from_str(account_id).unwrap().document_id(),
-                    Collection::Email
-                )
+                .get_document_ids(account.id().document_id(), Collection::Email)
                 .await
                 .unwrap()
                 .unwrap()
                 .len(),
             num_messages,
             "for {}",
-            account_id
+            account.id_string()
         );
     }
 
@@ -281,7 +253,7 @@ END:VCARD
             "members@example.com",
             "jdoe@example.com",
             "john.doe@example.com",
-            "jane@example.com",
+            "jane.smith@example.com",
             "bill@example.com",
         ],
         concat!(
@@ -295,27 +267,23 @@ END:VCARD
     )
     .await;
 
-    for (account_id, num_messages) in [(&account_id_1, 5), (&account_id_2, 3), (&account_id_3, 3)] {
+    for (account, num_messages) in [(john, 5), (jane, 3), (bill, 3)] {
         assert_eq!(
             server
-                .get_document_ids(
-                    Id::from_str(account_id).unwrap().document_id(),
-                    Collection::Email
-                )
+                .get_document_ids(account.id().document_id(), Collection::Email)
                 .await
                 .unwrap()
                 .unwrap()
                 .len(),
             num_messages,
             "for {}",
-            account_id
+            account.id_string()
         );
     }
 
     // Remove test data
-    for account_id in [&account_id_1, &account_id_2, &account_id_3] {
-        params.client.set_default_account_id(account_id);
-        destroy_all_mailboxes(params).await;
+    for account in [john, jane, bill] {
+        params.destroy_all_mailboxes(account).await;
     }
     assert_is_empty(server).await;
 

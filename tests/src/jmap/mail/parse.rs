@@ -4,30 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{
-    JMAPTest, assert_is_empty,
-    mail::{get::all_headers, mailbox::destroy_all_mailboxes},
-    replace_blob_ids,
-};
+use crate::jmap::{JMAPTest, assert_is_empty, mail::get::all_headers, replace_blob_ids};
 use jmap_client::{
     email::{self, Header, HeaderForm},
     mailbox::Role,
 };
 use std::{fs, path::PathBuf};
-use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Parse tests...");
     let server = params.server.clone();
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
     test_dir.push("jmap");
     test_dir.push("email_parse");
 
-    let mailbox_id = params
-        .client
-        .set_default_account_id(Id::new(1).to_string())
+    let mailbox_id = client
         .mailbox_create("JMAP Parse", None::<String>, Role::None)
         .await
         .unwrap()
@@ -38,8 +33,7 @@ pub async fn test(params: &mut JMAPTest) {
         let mut test_file = test_dir.clone();
         test_file.push(test_name);
 
-        let email = params
-            .client
+        let email = client
             .email_import(
                 fs::read(&test_file).unwrap(),
                 [mailbox_id.clone()],
@@ -49,8 +43,7 @@ pub async fn test(params: &mut JMAPTest) {
             .await
             .unwrap();
 
-        let blob_id = params
-            .client
+        let blob_id = client
             .email_get(email.id().unwrap(), Some([email::Property::Attachments]))
             .await
             .unwrap()
@@ -63,8 +56,7 @@ pub async fn test(params: &mut JMAPTest) {
             .unwrap()
             .to_string();
 
-        let email = params
-            .client
+        let email = client
             .email_parse(
                 &blob_id,
                 [
@@ -123,7 +115,7 @@ pub async fn test(params: &mut JMAPTest) {
                 for part in parts {
                     let blob_id = part.blob_id().unwrap();
 
-                    let inner_blob = params.client.download(blob_id).await.unwrap();
+                    let inner_blob = client.download(blob_id).await.unwrap();
 
                     test_file.set_extension(format!("part{}", part.part_id().unwrap()));
 
@@ -154,15 +146,13 @@ pub async fn test(params: &mut JMAPTest) {
     // Test header parsing on a temporary blob
     let mut test_file = test_dir;
     test_file.push("headers.eml");
-    let blob_id = params
-        .client
+    let blob_id = client
         .upload(None, fs::read(&test_file).unwrap(), None)
         .await
         .unwrap()
         .take_blob_id();
 
-    let mut email = params
-        .client
+    let mut email = client
         .email_parse(
             &blob_id,
             [
@@ -213,8 +203,7 @@ pub async fn test(params: &mut JMAPTest) {
 
     for property in all_headers() {
         email.headers.extend(
-            params
-                .client
+            client
                 .email_parse(&blob_id, [property].into(), [].into(), None)
                 .await
                 .unwrap()
@@ -233,6 +222,6 @@ pub async fn test(params: &mut JMAPTest) {
         panic!("Test failed, output saved to {}", test_file.display());
     }
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }

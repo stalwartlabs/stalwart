@@ -5,10 +5,13 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes},
+    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes_no_wait},
     store::deflate_test_resource,
 };
-use ::email::message::ingest::{EmailIngest, IngestEmail, IngestSource};
+use ::email::{
+    mailbox::INBOX_ID,
+    message::ingest::{EmailIngest, IngestEmail, IngestSource},
+};
 use common::auth::AccessToken;
 use jmap_client::{email, mailbox::Role};
 use mail_parser::{MessageParser, mailbox::mbox::MessageIterator};
@@ -27,7 +30,8 @@ pub async fn test(params: &mut JMAPTest) {
 async fn test_single_thread(params: &mut JMAPTest) {
     println!("Running Email Merge Threads tests...");
     let server = params.server.clone();
-    let client = &mut params.client;
+    let account = params.account("admin");
+    let mut client = account.client_owned().await;
     let mut all_mailboxes = AHashMap::default();
 
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
@@ -195,10 +199,8 @@ async fn test_single_thread(params: &mut JMAPTest) {
     // Delete all messages and make sure no keys are left in the store.
     for (base_test_num, mailbox_ids) in all_mailboxes {
         for (test_num, _) in mailbox_ids.into_iter().enumerate() {
-            params
-                .client
-                .set_default_account_id(Id::new((base_test_num + test_num) as u64).to_string());
-            destroy_all_mailboxes(params).await;
+            client.set_default_account_id(Id::new((base_test_num + test_num) as u64).to_string());
+            destroy_all_mailboxes_no_wait(&client).await;
         }
     }
 
@@ -208,38 +210,25 @@ async fn test_single_thread(params: &mut JMAPTest) {
 #[allow(dead_code)]
 async fn test_multi_thread(params: &mut JMAPTest) {
     println!("Running Email Merge Threads tests (multi-threaded)...");
-    //let semaphore = sync::Arc::Arc::new(tokio::sync::Semaphore::new(100));
     let mut handles = vec![];
-
-    let mailbox_id = Id::from_str(
-        params
-            .client
-            .set_default_account_id(Id::new(0u64).to_string())
-            .mailbox_create("Inbox", None::<String>, Role::None)
-            .await
-            .unwrap()
-            .id()
-            .unwrap(),
-    )
-    .unwrap()
-    .document_id();
+    let account = params.account("jdoe@example.com");
+    let account_id = account.id().document_id();
+    let mailbox_id = INBOX_ID;
 
     for message in MessageIterator::new(Cursor::new(deflate_test_resource("mailbox.gz")))
         .collect::<Vec<_>>()
         .into_iter()
     {
-        //let permit = Arc::clone(&semaphore);
         let message = message.unwrap();
         let server = params.server.clone();
         handles.push(tokio::task::spawn(async move {
-            //let _permit = permit.acquire().await.expect("Failed to acquire permit");
             let mut retry_count = 0;
             loop {
                 match server
                     .email_ingest(IngestEmail {
                         raw_message: message.contents(),
                         message: MessageParser::new().parse(message.contents()),
-                        access_token: &AccessToken::from_id(0),
+                        access_token: &AccessToken::from_id(account_id),
                         mailbox_ids: vec![mailbox_id],
                         keywords: vec![],
                         received_at: None,
@@ -278,14 +267,14 @@ async fn test_multi_thread(params: &mut JMAPTest) {
         messages as u64,
         params
             .server
-            .get_document_ids(0, Collection::Email)
+            .get_document_ids(account_id, Collection::Email)
             .await
             .unwrap()
             .unwrap()
             .len()
     );
     println!("Deleting all messages...");
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(params.server.clone()).await;
 }
 

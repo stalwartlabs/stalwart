@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::jmap::{JMAPTest, assert_is_empty};
 use ahash::AHashSet;
 use futures::StreamExt;
 use jmap_client::{
@@ -15,35 +16,15 @@ use jmap_client::{
     },
 };
 use std::time::Duration;
-use types::id::Id;
-
 use tokio::sync::mpsc;
-
-use crate::{
-    directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes, test_account_login},
-};
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running WebSockets tests...");
     let server = params.server.clone();
 
     // Authenticate all accounts
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com"],
-            )
-            .await,
-    )
-    .to_string();
-    let client = test_account_login("jdoe@example.com", "12345").await;
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     let mut ws_stream = client.connect_ws().await.unwrap();
 
@@ -86,7 +67,7 @@ pub async fn test(params: &mut JMAPTest) {
         .mailbox_update_sort_order(&mailbox_id, 1)
         .await
         .unwrap();
-    assert_state(&mut stream_rx, &account_id, &[TypeState::Mailbox]).await;
+    assert_state(&mut stream_rx, account.id_string(), &[TypeState::Mailbox]).await;
 
     // Multiple changes should be grouped and delivered in intervals
     for num in 0..5 {
@@ -96,7 +77,7 @@ pub async fn test(params: &mut JMAPTest) {
             .unwrap();
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_state(&mut stream_rx, &account_id, &[TypeState::Mailbox]).await;
+    assert_state(&mut stream_rx, account.id_string(), &[TypeState::Mailbox]).await;
     expect_nothing(&mut stream_rx).await;
 
     // Disable push notifications
@@ -116,8 +97,7 @@ pub async fn test(params: &mut JMAPTest) {
         .unwrap();
     expect_nothing(&mut stream_rx).await;
 
-    params.client.set_default_account_id(account_id);
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

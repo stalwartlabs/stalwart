@@ -5,11 +5,7 @@
  */
 
 use crate::{
-    directory::internal::TestInternalDirectory,
-    jmap::{
-        JMAPTest, assert_is_empty,
-        mail::{mailbox::destroy_all_mailboxes, set::assert_email_properties},
-    },
+    jmap::{JMAPTest, assert_is_empty, mail::set::assert_email_properties},
     smtp::DnsCache,
 };
 use ahash::AHashMap;
@@ -66,7 +62,8 @@ pub async fn test(params: &mut JMAPTest) {
     println!("Running E-mail submissions tests...");
     // Start mock SMTP server
     let server = params.server.clone();
-    let client = &mut params.client;
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
     let (mut smtp_rx, smtp_settings) = spawn_mock_smtp_server();
     server.ipv4_add(
         "localhost",
@@ -74,25 +71,7 @@ pub async fn test(params: &mut JMAPTest) {
         Instant::now() + std::time::Duration::from_secs(10),
     );
 
-    // Create a test account
-    let server = params.server.clone();
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com", "john.doe@example.com"],
-            )
-            .await,
-    )
-    .to_string();
-
     // Test automatic identity creation
-    client.set_default_account_id(&account_id);
     for (identity_id, email) in [(2u64, "jdoe@example.com"), (1u64, "john.doe@example.com")] {
         let identity = client
             .identity_get(&Id::from(identity_id).to_string(), None)
@@ -497,7 +476,7 @@ pub async fn test(params: &mut JMAPTest) {
             .await;
         client.email_submission_destroy(&id).await.unwrap();
     }
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

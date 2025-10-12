@@ -5,8 +5,7 @@
  */
 
 use crate::jmap::{
-    JMAPTest, assert_is_empty, find_values, mail::mailbox::destroy_all_mailboxes, replace_blob_ids,
-    replace_boundaries, replace_values,
+    JMAPTest, assert_is_empty, find_values, replace_blob_ids, replace_boundaries, replace_values,
 };
 use ::email::mailbox::INBOX_ID;
 use ahash::AHashSet;
@@ -23,18 +22,18 @@ use types::id::Id;
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Set tests...");
     let server = params.server.clone();
-
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
     let mailbox_id = Id::from(INBOX_ID).to_string();
-    params.client.set_default_account_id(Id::from(1u64));
 
-    create(&mut params.client, &mailbox_id).await;
-    update(&mut params.client, &mailbox_id).await;
+    create(client, &mailbox_id).await;
+    update(client, &mailbox_id).await;
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 
-async fn create(client: &mut Client, mailbox_id: &str) {
+async fn create(client: &Client, mailbox_id: &str) {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
     test_dir.push("jmap");
@@ -162,7 +161,7 @@ async fn create(client: &mut Client, mailbox_id: &str) {
     }
 }
 
-async fn update(client: &mut Client, root_mailbox_id: &str) {
+async fn update(client: &Client, root_mailbox_id: &str) {
     // Obtain all messageIds previously created
     let mailbox = client
         .email_query(
@@ -174,13 +173,11 @@ async fn update(client: &mut Client, root_mailbox_id: &str) {
 
     // Create two test mailboxes
     let test_mailbox1_id = client
-        .set_default_account_id(Id::new(1).to_string())
         .mailbox_create("Test 1", None::<String>, Role::None)
         .await
         .unwrap()
         .take_id();
     let test_mailbox2_id = client
-        .set_default_account_id(Id::new(1).to_string())
         .mailbox_create("Test 2", None::<String>, Role::None)
         .await
         .unwrap()
@@ -296,7 +293,7 @@ async fn update(client: &mut Client, root_mailbox_id: &str) {
 }
 
 pub async fn assert_email_properties(
-    client: &mut Client,
+    client: &Client,
     message_id: &str,
     mailbox_ids: &[&str],
     keywords: &[&str],

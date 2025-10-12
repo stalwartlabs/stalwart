@@ -127,22 +127,18 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Create test account
-    params
-        .server
-        .inner
-        .shared_core
-        .load()
-        .storage
-        .data
+    let server = params.server.inner.build_server();
+    server
+        .store()
         .create_test_user(
             "jdoe@example.com",
-            "secret",
+            "12345",
             "John Doe",
             &["jdoe@example.com"],
         )
         .await;
 
-    alerts(&params.server.inner.build_server()).await;
+    alerts(&server).await;
     undelete(params).await;
     tracing(params).await;
     metrics(params).await;
@@ -351,9 +347,7 @@ async fn metrics(params: &mut JMAPTest) {
 async fn undelete(_params: &mut JMAPTest) {
     // Authenticate
     let mut imap = ImapConnection::connect(b"_x ").await;
-    imap.send("AUTHENTICATE PLAIN {32+}\r\nAGpkb2VAZXhhbXBsZS5jb20Ac2VjcmV0")
-        .await;
-    imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+    imap.authenticate("jdoe@example.com", "12345").await;
 
     // Insert test message
     imap.send("STATUS INBOX (MESSAGES)").await;
@@ -390,9 +384,7 @@ async fn undelete(_params: &mut JMAPTest) {
     imap.send("LOGOUT").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
     let mut imap = ImapConnection::connect(b"_x ").await;
-    imap.send("AUTHENTICATE PLAIN {32+}\r\nAGpkb2VAZXhhbXBsZS5jb20Ac2VjcmV0")
-        .await;
-    imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+    imap.authenticate("jdoe@example.com", "12345").await;
 
     // Make sure the message is gone
     imap.send("STATUS INBOX (MESSAGES)").await;

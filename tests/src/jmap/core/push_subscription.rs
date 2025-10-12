@@ -6,8 +6,7 @@
 
 use crate::{
     AssertConfig, add_test_certs,
-    directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes, test_account_login},
+    jmap::{JMAPTest, assert_is_empty},
 };
 use base64::{Engine, engine::general_purpose};
 use common::{Caches, Core, Data, Inner, config::server::Listeners, listener::SessionData};
@@ -56,22 +55,8 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Create test account
     let server = params.server.clone();
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com"],
-            )
-            .await,
-    );
-
-    params.client.set_default_account_id(account_id);
-    let client = test_account_login("jdoe@example.com", "12345").await;
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     // Create channels
     let (event_tx, mut event_rx) = mpsc::channel::<PushMessage>(100);
@@ -140,7 +125,7 @@ pub async fn test(params: &mut JMAPTest) {
         .unwrap()
         .take_id();
 
-    assert_state(&mut event_rx, &account_id, &[DataType::Mailbox]).await;
+    assert_state(&mut event_rx, account.id(), &[DataType::Mailbox]).await;
 
     // Receive states just for the requested types
     client
@@ -194,14 +179,14 @@ pub async fn test(params: &mut JMAPTest) {
         .unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     push_server.fail_requests.store(false, Ordering::Relaxed);
-    assert_state(&mut event_rx, &account_id, &[DataType::Mailbox]).await;
+    assert_state(&mut event_rx, account.id(), &[DataType::Mailbox]).await;
 
     // Make a mailbox change and expect state change
     client
         .mailbox_rename(&mailbox_id, "My Mailbox")
         .await
         .unwrap();
-    assert_state(&mut event_rx, &account_id, &[DataType::Mailbox]).await;
+    assert_state(&mut event_rx, account.id(), &[DataType::Mailbox]).await;
     //expect_nothing(&mut event_rx).await;
 
     // Multiple change updates should be grouped and pushed in intervals
@@ -211,7 +196,7 @@ pub async fn test(params: &mut JMAPTest) {
             .await
             .unwrap();
     }
-    assert_state(&mut event_rx, &account_id, &[DataType::Mailbox]).await;
+    assert_state(&mut event_rx, account.id(), &[DataType::Mailbox]).await;
     expect_nothing(&mut event_rx).await;
 
     // Destroy mailbox
@@ -219,7 +204,7 @@ pub async fn test(params: &mut JMAPTest) {
     client.mailbox_destroy(&mailbox_id, true).await.unwrap();
     expect_nothing(&mut event_rx).await;
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

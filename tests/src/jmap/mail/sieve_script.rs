@@ -5,12 +5,10 @@
  */
 
 use crate::{
-    directory::internal::TestInternalDirectory,
     jmap::{
         JMAPTest, assert_is_empty,
         mail::{
             delivery::SmtpConnection,
-            mailbox::destroy_all_mailboxes,
             submission::{MockMessage, assert_message_delivery, spawn_mock_smtp_server},
         },
     },
@@ -27,29 +25,12 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Sieve tests...");
     let server = params.server.clone();
-    let client = &mut params.client;
-
-    // Create test account
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com"],
-            )
-            .await,
-    )
-    .to_string();
-    client.set_default_account_id(&account_id);
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     // Validate scripts
     client
@@ -515,7 +496,7 @@ pub async fn test(params: &mut JMAPTest) {
     for id in request.send_query_sieve_script().await.unwrap().take_ids() {
         client.sieve_script_destroy(&id).await.unwrap();
     }
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

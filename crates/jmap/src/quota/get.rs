@@ -11,7 +11,8 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Map, Value};
-use std::future::Future;
+use std::{future::Future, sync::Arc};
+use trc::AddContext;
 use types::{id::Id, type_state::DataType};
 
 pub trait QuotaGet: Sync + Send {
@@ -59,6 +60,16 @@ impl QuotaGet for Server {
             not_found: vec![],
         };
 
+        let access_token = if account_id == access_token.primary_id() {
+            AccessTokenRef::Borrowed(access_token)
+        } else {
+            AccessTokenRef::Owned(
+                self.get_access_token(account_id)
+                    .await
+                    .caused_by(trc::location!())?,
+            )
+        };
+
         for id in ids {
             // Obtain the sieve script object
             let document_id = id.document_id();
@@ -73,10 +84,11 @@ impl QuotaGet for Server {
                     QuotaProperty::Id => Value::Element(id.into()),
                     QuotaProperty::ResourceType => "octets".to_string().into(),
                     QuotaProperty::Used => (self.get_used_quota(account_id).await? as u64).into(),
-                    QuotaProperty::HardLimit => access_token.quota.into(),
+                    QuotaProperty::HardLimit => access_token.as_ref().quota.into(),
                     QuotaProperty::Scope => "account".to_string().into(),
-                    QuotaProperty::Name => access_token.name.to_string().into(),
+                    QuotaProperty::Name => access_token.as_ref().name.to_string().into(),
                     QuotaProperty::Description => access_token
+                        .as_ref()
                         .description
                         .as_ref()
                         .map(|s| s.to_string())
@@ -84,6 +96,9 @@ impl QuotaGet for Server {
                     QuotaProperty::Types => vec![
                         Value::Element(QuotaValue::Types(DataType::Email)),
                         Value::Element(QuotaValue::Types(DataType::SieveScript)),
+                        Value::Element(QuotaValue::Types(DataType::FileNode)),
+                        Value::Element(QuotaValue::Types(DataType::CalendarEvent)),
+                        Value::Element(QuotaValue::Types(DataType::ContactCard)),
                     ]
                     .into(),
 
@@ -95,5 +110,19 @@ impl QuotaGet for Server {
         }
 
         Ok(response)
+    }
+}
+
+enum AccessTokenRef<'x> {
+    Owned(Arc<AccessToken>),
+    Borrowed(&'x AccessToken),
+}
+
+impl AccessTokenRef<'_> {
+    fn as_ref(&self) -> &AccessToken {
+        match self {
+            AccessTokenRef::Owned(token) => token,
+            AccessTokenRef::Borrowed(token) => token,
+        }
     }
 }

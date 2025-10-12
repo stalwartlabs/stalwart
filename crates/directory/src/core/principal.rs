@@ -16,6 +16,7 @@ use serde::{
     de::{self, IgnoredAny, Visitor},
     ser::SerializeMap,
 };
+use serde_json::Value;
 use std::{collections::hash_map::Entry, fmt, str::FromStr};
 use store::{
     U32_LEN, U64_LEN,
@@ -1126,18 +1127,15 @@ impl<'de> serde::Deserialize<'de> for PrincipalSet {
                 let mut principal = PrincipalSet::default();
 
                 while let Some(key) = map.next_key::<&str>()? {
-                    let key = PrincipalField::try_parse(key)
-                        .or_else(|| {
-                            if key == "id" {
-                                // Ignored
-                                Some(PrincipalField::UsedQuota)
-                            } else {
-                                None
-                            }
-                        })
-                        .ok_or_else(|| {
-                            serde::de::Error::custom(format!("invalid principal field: {}", key))
-                        })?;
+                    if key == "id" {
+                        // Ignored
+                        map.next_value::<IgnoredAny>()?;
+                        continue;
+                    }
+
+                    let key = PrincipalField::try_parse(key).ok_or_else(|| {
+                        serde::de::Error::custom(format!("invalid principal field: {}", key))
+                    })?;
 
                     let value = match key {
                         PrincipalField::Name => {
@@ -1179,18 +1177,37 @@ impl<'de> serde::Deserialize<'de> for PrincipalSet {
                         | PrincipalField::EnabledPermissions
                         | PrincipalField::DisabledPermissions
                         | PrincipalField::Urls
-                        | PrincipalField::ExternalMembers => {
-                            match map.next_value::<StringOrMany>()? {
-                                StringOrMany::One(v) => PrincipalValue::StringList(vec![v]),
-                                StringOrMany::Many(v) => {
-                                    if !v.is_empty() {
-                                        PrincipalValue::StringList(v)
-                                    } else {
-                                        continue;
-                                    }
+                        | PrincipalField::ExternalMembers => match map.next_value::<Value>()? {
+                            Value::String(v) => {
+                                if v.len() <= MAX_STRING_LEN {
+                                    PrincipalValue::StringList(vec![v])
+                                } else {
+                                    return Err(serde::de::Error::custom("string too long"));
                                 }
                             }
-                        }
+                            Value::Array(v) => {
+                                if !v.is_empty() {
+                                    PrincipalValue::StringList(
+                                        v.into_iter()
+                                            .filter_map(|item| {
+                                                if let Value::String(s) = item {
+                                                    if s.len() <= MAX_STRING_LEN {
+                                                        Some(s)
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect(),
+                                    )
+                                } else {
+                                    continue;
+                                }
+                            }
+                            _ => continue,
+                        },
                         PrincipalField::UsedQuota => {
                             // consume and ignore
                             map.next_value::<IgnoredAny>()?;
@@ -1260,66 +1277,6 @@ impl<'de> serde::Deserialize<'de> for StringOrU64 {
         }
 
         deserializer.deserialize_any(StringOrU64Visitor)
-    }
-}
-
-#[derive(Debug)]
-enum StringOrMany {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl<'de> serde::Deserialize<'de> for StringOrMany {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct StringOrManyVisitor;
-
-        impl<'de> Visitor<'de> for StringOrManyVisitor {
-            type Value = StringOrMany;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a string or a sequence of strings")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if value.len() <= MAX_STRING_LEN {
-                    Ok(StringOrMany::One(value.into()))
-                } else {
-                    Err(serde::de::Error::custom("string too long"))
-                }
-            }
-
-            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if v.len() <= MAX_STRING_LEN {
-                    Ok(StringOrMany::One(v))
-                } else {
-                    Err(serde::de::Error::custom("string too long"))
-                }
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: de::SeqAccess<'de>,
-            {
-                let mut vec = Vec::new();
-
-                while let Some(value) = seq.next_element::<String>()? {
-                    vec.push(value);
-                }
-
-                Ok(StringOrMany::Many(vec))
-            }
-        }
-
-        deserializer.deserialize_any(StringOrManyVisitor)
     }
 }
 

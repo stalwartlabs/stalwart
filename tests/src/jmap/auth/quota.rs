@@ -6,11 +6,7 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{
-        JMAPTest, assert_is_empty, emails_purge_tombstoned, jmap_raw_request,
-        mail::{delivery::SmtpConnection, mailbox::destroy_all_mailboxes},
-        test_account_login,
-    },
+    jmap::{JMAPTest, assert_is_empty, emails_purge_tombstoned, mail::delivery::SmtpConnection},
     smtp::queue::QueuedEvents,
 };
 use common::config::smtp::queue::QueueName;
@@ -20,38 +16,16 @@ use jmap_client::{
     core::set::{SetErrorType, SetObject},
     email::EmailBodyPart,
 };
+use serde_json::json;
 use smtp::queue::spool::SmtpSpool;
 use types::{collection::Collection, id::Id};
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running quota tests...");
     let server = params.server.clone();
-    let mut account_id = Id::from(0u64);
-    let mut other_account_id = Id::from(0u64);
 
-    for (id, email, password, name) in [
-        (
-            &mut other_account_id,
-            "jdoe@example.com",
-            "12345",
-            "John Doe",
-        ),
-        (
-            &mut account_id,
-            "robert@example.com",
-            "aabbcc",
-            "Robert Foobar",
-        ),
-    ] {
-        *id = Id::from(
-            server
-                .core
-                .storage
-                .data
-                .create_test_user(email, password, name, &[email][..])
-                .await,
-        );
-    }
+    let account = params.account("robert@example.com");
+    let other_account = params.account("jdoe@example.com");
 
     server
         .core
@@ -65,13 +39,14 @@ pub async fn test(params: &mut JMAPTest) {
         .data
         .add_to_group("robert@example.com", "jdoe@example.com")
         .await;
+    server.inner.cache.access_tokens.clear();
 
     // Delete temporary blobs from previous tests
     server.core.storage.data.blob_expire_all().await;
 
     // Test temporary blob quota (3 files)
     DISABLE_UPLOAD_QUOTA.store(false, std::sync::atomic::Ordering::Relaxed);
-    let client = test_account_login("robert@example.com", "aabbcc").await;
+    let client = account.client();
     for i in 0..3 {
         assert_eq!(
             client
@@ -114,16 +89,15 @@ pub async fn test(params: &mut JMAPTest) {
     server.core.storage.data.blob_expire_all().await;
 
     // Test JMAP Quotas extension
-    let response = jmap_raw_request(
-        r#"[[ "Quota/get", {
-            "accountId": "$$",
-            "ids": null
-          }, "0" ]]"#
-            .replace("$$", &account_id.to_string()),
-        "robert@example.com",
-        "aabbcc",
-    )
-    .await;
+    let response = account
+        .jmap_method_call(
+            "Quota/get",
+            json!({
+                "ids": null
+            }),
+        )
+        .await
+        .to_string();
     assert!(response.contains("\"used\":0"), "{}", response);
     assert!(response.contains("\"hardLimit\":1024"), "{}", response);
     assert!(response.contains("\"scope\":\"account\""), "{}", response);
@@ -168,16 +142,15 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Test JMAP Quotas extension
-    let response = jmap_raw_request(
-        r#"[[ "Quota/get", {
-            "accountId": "$$",
-            "ids": null
-          }, "0" ]]"#
-            .replace("$$", &account_id.to_string()),
-        "robert@example.com",
-        "aabbcc",
-    )
-    .await;
+    let response = account
+        .jmap_method_call(
+            "Quota/get",
+            json!({
+                "ids": null
+            }),
+        )
+        .await
+        .to_string();
     assert!(response.contains("\"used\":1024"), "{}", response);
     assert!(response.contains("\"hardLimit\":1024"), "{}", response);
 
@@ -188,7 +161,7 @@ pub async fn test(params: &mut JMAPTest) {
     emails_purge_tombstoned(&server).await;
     assert_eq!(
         server
-            .get_used_quota(account_id.document_id())
+            .get_used_quota(account.id().document_id())
             .await
             .unwrap(),
         0
@@ -231,16 +204,16 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Recalculate quota
     let prev_quota = server
-        .get_used_quota(account_id.document_id())
+        .get_used_quota(account.id().document_id())
         .await
         .unwrap();
     server
-        .recalculate_quota(account_id.document_id())
+        .recalculate_quota(account.id().document_id())
         .await
         .unwrap();
     assert_eq!(
         server
-            .get_used_quota(account_id.document_id())
+            .get_used_quota(account.id().document_id())
             .await
             .unwrap(),
         prev_quota
@@ -253,14 +226,14 @@ pub async fn test(params: &mut JMAPTest) {
     emails_purge_tombstoned(&server).await;
     assert_eq!(
         server
-            .get_used_quota(account_id.document_id())
+            .get_used_quota(account.id().document_id())
             .await
             .unwrap(),
         0
     );
 
     // Test Email/copy quota
-    let other_client = test_account_login("jdoe@example.com", "12345").await;
+    let other_client = other_account.client();
     let mut other_message_ids = Vec::new();
     let mut message_ids = Vec::new();
     for i in 0..3 {
@@ -286,7 +259,7 @@ pub async fn test(params: &mut JMAPTest) {
         message_ids.push(
             client
                 .email_copy(
-                    other_account_id.to_string(),
+                    other_account.id_string(),
                     id,
                     vec![&inbox_id],
                     None::<Vec<String>>,
@@ -300,7 +273,7 @@ pub async fn test(params: &mut JMAPTest) {
     assert_over_quota(
         client
             .email_copy(
-                other_account_id.to_string(),
+                other_account.id_string(),
                 &other_message_ids[2],
                 vec![&inbox_id],
                 None::<Vec<String>>,
@@ -316,7 +289,7 @@ pub async fn test(params: &mut JMAPTest) {
     emails_purge_tombstoned(&server).await;
     assert_eq!(
         server
-            .get_used_quota(account_id.document_id())
+            .get_used_quota(account.id().document_id())
             .await
             .unwrap(),
         0
@@ -339,13 +312,13 @@ pub async fn test(params: &mut JMAPTest) {
         .await;
     }
     let quota = server
-        .get_used_quota(account_id.document_id())
+        .get_used_quota(account.id().document_id())
         .await
         .unwrap();
     assert!(quota > 0 && quota <= 1024, "Quota is {}", quota);
     assert_eq!(
         server
-            .get_document_ids(account_id.document_id(), Collection::Email)
+            .get_document_ids(account.id().document_id(), Collection::Email)
             .await
             .unwrap()
             .unwrap()
@@ -356,10 +329,9 @@ pub async fn test(params: &mut JMAPTest) {
     DISABLE_UPLOAD_QUOTA.store(true, std::sync::atomic::Ordering::Relaxed);
 
     // Remove test data
-    for account_id in [&account_id, &other_account_id] {
-        params.client.set_default_account_id(account_id.to_string());
-        destroy_all_mailboxes(params).await;
-    }
+    params.destroy_all_mailboxes(account).await;
+    params.destroy_all_mailboxes(other_account).await;
+
     for event in server.all_queued_messages().await.messages {
         server
             .read_message(event.queue_id, QueueName::default())

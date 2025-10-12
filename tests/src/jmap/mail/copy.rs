@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes};
+use crate::jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes_for_account};
 use jmap_client::mailbox::Role;
 use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Copy tests...");
     let server = params.server.clone();
+    let account = params.account("admin");
+    let mut client = account.client_owned().await;
 
     // Create a mailbox on account 1
-    let ac1_mailbox_id = params
-        .client
+    let ac1_mailbox_id = client
         .set_default_account_id(Id::new(1).to_string())
         .mailbox_create("Copy Test Ac# 1", None::<String>, Role::None)
         .await
@@ -22,8 +23,7 @@ pub async fn test(params: &mut JMAPTest) {
         .take_id();
 
     // Insert a message on account 1
-    let ac1_email_id = params
-        .client
+    let ac1_email_id = client
         .email_import(
             concat!(
                 "From: bill@example.com\r\n",
@@ -44,8 +44,7 @@ pub async fn test(params: &mut JMAPTest) {
         .take_id();
 
     // Create a mailbox on account 2
-    let ac2_mailbox_id = params
-        .client
+    let ac2_mailbox_id = client
         .set_default_account_id(Id::new(2).to_string())
         .mailbox_create("Copy Test Ac# 2", None::<String>, Role::None)
         .await
@@ -53,7 +52,7 @@ pub async fn test(params: &mut JMAPTest) {
         .take_id();
 
     // Copy the email and delete it from the first account
-    let mut request = params.client.build();
+    let mut request = client.build();
     request
         .copy_email(Id::new(1).to_string())
         .on_success_destroy_original(true)
@@ -73,8 +72,7 @@ pub async fn test(params: &mut JMAPTest) {
         .take_id();
 
     // Check that the email was copied
-    let email = params
-        .client
+    let email = client
         .email_get(&ac2_email_id, None::<Vec<_>>)
         .await
         .unwrap()
@@ -90,8 +88,7 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Check that the email was deleted
     assert!(
-        params
-            .client
+        client
             .set_default_account_id(Id::new(1).to_string())
             .email_get(&ac1_email_id, None::<Vec<_>>)
             .await
@@ -100,8 +97,7 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Empty store
-    destroy_all_mailboxes(params).await;
-    params.client.set_default_account_id(Id::new(2).to_string());
-    destroy_all_mailboxes(params).await;
+    destroy_all_mailboxes_for_account(1).await;
+    destroy_all_mailboxes_for_account(2).await;
     assert_is_empty(server).await;
 }

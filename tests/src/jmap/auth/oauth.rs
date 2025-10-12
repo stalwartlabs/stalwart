@@ -5,15 +5,11 @@
  */
 
 use crate::{
-    directory::internal::TestInternalDirectory,
     imap::{
         ImapConnection, Type,
         pop::{self, Pop3Connection},
     },
-    jmap::{
-        JMAPTest, ManagementApi, assert_is_empty,
-        mail::{delivery::SmtpConnection, mailbox::destroy_all_mailboxes},
-    },
+    jmap::{JMAPTest, ManagementApi, assert_is_empty, mail::delivery::SmtpConnection},
 };
 use base64::{Engine, engine::general_purpose};
 use biscuit::{JWT, SingleOrMultiple, jwk::JWKSet};
@@ -35,7 +31,6 @@ use jmap_client::{
 use serde::{Serialize, de::DeserializeOwned};
 use std::time::{Duration, Instant};
 use store::ahash::AHashMap;
-use types::id::Id;
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
@@ -50,18 +45,7 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Create test account
     let server = params.server.clone();
-    let john_int_id = server
-        .core
-        .storage
-        .data
-        .create_test_user(
-            "jdoe@example.com",
-            "12345",
-            "John Doe",
-            &["jdoe@example.com"],
-        )
-        .await;
-    let john_id = Id::from(john_int_id).to_string();
+    let account = params.account("jdoe@example.com");
 
     // Build API
     let api = ManagementApi::new(8899, "jdoe@example.com", "12345");
@@ -145,7 +129,7 @@ pub async fn test(params: &mut JMAPTest) {
         .connect("https://127.0.0.1:8899")
         .await
         .unwrap();
-    assert_eq!(john_client.default_account_id(), john_id);
+    assert_eq!(john_client.default_account_id(), account.id_string());
     assert!(
         !john_client
             .mailbox_query(None::<Filter>, None::<Vec<_>>)
@@ -163,7 +147,10 @@ pub async fn test(params: &mut JMAPTest) {
     let registered_claims = &claims.registered;
     let private_claims = &claims.private;
     assert_eq!(registered_claims.issuer, Some(oidc_metadata.issuer));
-    assert_eq!(registered_claims.subject, Some(john_int_id.to_string()));
+    assert_eq!(
+        registered_claims.subject,
+        Some(account.id().document_id().to_string())
+    );
     assert_eq!(
         registered_claims.audience,
         Some(SingleOrMultiple::Single(client_id.to_string()))
@@ -324,7 +311,7 @@ pub async fn test(params: &mut JMAPTest) {
         .connect("https://127.0.0.1:8899")
         .await
         .unwrap();
-    assert_eq!(john_client.default_account_id(), john_id);
+    assert_eq!(john_client.default_account_id(), account.id_string());
     assert!(
         !john_client
             .mailbox_query(None::<Filter>, None::<Vec<_>>)
@@ -399,8 +386,7 @@ pub async fn test(params: &mut JMAPTest) {
         .purge_in_memory_store()
         .await
         .unwrap();
-    params.client.set_default_account_id(john_id);
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

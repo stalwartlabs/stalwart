@@ -4,46 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use crate::{
-    directory::internal::TestInternalDirectory,
-    jmap::{
-        JMAPTest, assert_is_empty,
-        mail::{delivery::SmtpConnection, mailbox::destroy_all_mailboxes},
-        test_account_login,
-    },
-};
+use crate::jmap::{JMAPTest, assert_is_empty, mail::delivery::SmtpConnection};
 use email::mailbox::INBOX_ID;
 use futures::StreamExt;
-
 use jmap_client::{TypeState, event_source::Changes, mailbox::Role};
+use std::time::Duration;
 use store::ahash::AHashSet;
-use types::id::Id;
-
 use tokio::sync::mpsc;
+use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running EventSource tests...");
 
     // Create test account
     let server = params.server.clone();
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com"],
-            )
-            .await,
-    )
-    .to_string();
-
-    let client = test_account_login("jdoe@example.com", "12345").await;
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     let mut changes = client
         .event_source(None::<Vec<_>>, false, 1.into(), None)
@@ -69,7 +45,7 @@ pub async fn test(params: &mut JMAPTest) {
         .await
         .unwrap()
         .take_id();
-    assert_state(&mut event_rx, &account_id, &[TypeState::Mailbox]).await;
+    assert_state(&mut event_rx, account.id_string(), &[TypeState::Mailbox]).await;
 
     // Multiple changes should be grouped and delivered in intervals
     for num in 0..5 {
@@ -78,7 +54,7 @@ pub async fn test(params: &mut JMAPTest) {
             .await
             .unwrap();
     }
-    assert_state(&mut event_rx, &account_id, &[TypeState::Mailbox]).await;
+    assert_state(&mut event_rx, account.id_string(), &[TypeState::Mailbox]).await;
     assert_ping(&mut event_rx).await; // Pings are only received in cfg(test)
 
     // Ingest email and expect state change
@@ -100,7 +76,7 @@ pub async fn test(params: &mut JMAPTest) {
 
     assert_state(
         &mut event_rx,
-        &account_id,
+        account.id_string(),
         &[
             TypeState::EmailDelivery,
             TypeState::Email,
@@ -113,25 +89,23 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Destroy mailbox
     client.mailbox_destroy(&mailbox_id, true).await.unwrap();
-    assert_state(&mut event_rx, &account_id, &[TypeState::Mailbox]).await;
+    assert_state(&mut event_rx, account.id_string(), &[TypeState::Mailbox]).await;
 
     // Destroy Inbox
-    params.client.set_default_account_id(account_id.to_string());
-    params
-        .client
+    client
         .mailbox_destroy(&Id::from(INBOX_ID).to_string(), true)
         .await
         .unwrap();
     assert_state(
         &mut event_rx,
-        &account_id,
+        account.id_string(),
         &[TypeState::Email, TypeState::Thread, TypeState::Mailbox],
     )
     .await;
     assert_ping(&mut event_rx).await;
     assert_ping(&mut event_rx).await;
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

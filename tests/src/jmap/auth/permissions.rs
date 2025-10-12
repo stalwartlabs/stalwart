@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, ManagementApi, assert_is_empty, server::List};
+use crate::{
+    directory::internal::TestInternalDirectory,
+    jmap::{JMAPTest, ManagementApi, assert_is_empty, server::List},
+};
 use ahash::AHashSet;
 use common::auth::{AccessToken, TenantInfo};
 use directory::{
@@ -18,6 +21,15 @@ use types::blob_hash::BlobHash;
 pub async fn test(params: &JMAPTest) {
     println!("Running permissions tests...");
     let server = params.server.clone();
+
+    // Remove unlimited requests permission
+    for &account in params.accounts.keys() {
+        params
+            .server
+            .store()
+            .remove_permissions(account, [Permission::UnlimitedRequests])
+            .await;
+    }
 
     // Prepare management API
     let api = ManagementApi::new(8899, "admin", "secret");
@@ -144,7 +156,7 @@ pub async fn test(params: &JMAPTest) {
         .await
         .unwrap()
         .unwrap_data()
-        .assert_count(6)
+        .assert_count(12)
         .assert_exists(
             "admin",
             Type::Individual,

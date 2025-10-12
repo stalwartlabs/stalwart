@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, ManagementApi, mail::delivery::SmtpConnection},
-};
+use crate::jmap::{JMAPTest, ManagementApi, mail::delivery::SmtpConnection};
 use email::message::crypto::{
     Algorithm, EncryptMessage, EncryptionMethod, EncryptionParams, EncryptionType, try_parse_certs,
 };
@@ -17,28 +14,13 @@ use store::{
     Deserialize, Serialize,
     write::{Archive, Archiver},
 };
-use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Encryption-at-rest tests...");
 
     // Create test account
-    let server = params.server.clone();
-    let client = &mut params.client;
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com"],
-            )
-            .await,
-    )
-    .to_string();
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     // Build API
     let api = ManagementApi::new(8899, "jdoe@example.com", "12345");
@@ -143,7 +125,6 @@ pub async fn test(params: &mut JMAPTest) {
     .await;
 
     // Check messages
-    client.set_default_account_id(&account_id);
     let mut request = client.build();
     request.get_email();
     let emails = request.send_get_email().await.unwrap().take_list();

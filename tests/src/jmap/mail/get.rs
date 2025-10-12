@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{
-    JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes, replace_blob_ids,
-};
+use crate::jmap::{JMAPTest, assert_is_empty, replace_blob_ids};
 use ::email::mailbox::INBOX_ID;
 use jmap_client::email::{self, Header, HeaderForm, import::EmailImportResponse};
 use mail_parser::HeaderName;
@@ -23,7 +21,8 @@ pub async fn test(params: &mut JMAPTest) {
     test_dir.push("email_get");
 
     let mailbox_id = Id::from(INBOX_ID).to_string();
-    params.client.set_default_account_id(Id::from(1u64));
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     for file_name in fs::read_dir(&test_dir).unwrap() {
         let mut file_name = file_name.as_ref().unwrap().path();
@@ -36,13 +35,11 @@ pub async fn test(params: &mut JMAPTest) {
         let blob_len = blob.len();
 
         // Import email
-        let mut request = params.client.build();
+        let mut request = client.build();
         let import_request = request
             .import_email()
-            .account_id(Id::from(1u64).to_string())
             .email(
-                params
-                    .client
+                client
                     .upload(None, blob, None)
                     .await
                     .unwrap()
@@ -56,7 +53,7 @@ pub async fn test(params: &mut JMAPTest) {
         assert_ne!(response.old_state(), Some(response.new_state()));
         let email = response.created(&id).unwrap();
 
-        let mut request = params.client.build();
+        let mut request = client.build();
         request
             .get_email()
             .ids([email.id().unwrap()])
@@ -139,7 +136,7 @@ pub async fn test(params: &mut JMAPTest) {
 
         if is_headers_test {
             for property in all_headers() {
-                let mut request = params.client.build();
+                let mut request = client.build();
                 request
                     .get_email()
                     .ids([email.id().unwrap()])
@@ -169,7 +166,7 @@ pub async fn test(params: &mut JMAPTest) {
         }
     }
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 

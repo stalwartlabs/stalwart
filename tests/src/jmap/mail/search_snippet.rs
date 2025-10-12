@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{
-    JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes, wait_for_index,
-};
+use crate::jmap::{JMAPTest, assert_is_empty, wait_for_index};
 use email::mailbox::INBOX_ID;
 use jmap_client::{core::query, email::query::Filter};
 use std::{fs, path::PathBuf};
@@ -16,9 +14,9 @@ use types::id::Id;
 pub async fn test(params: &mut JMAPTest) {
     println!("Running SearchSnippet tests...");
     let server = params.server.clone();
-
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
     let mailbox_id = Id::from(INBOX_ID).to_string();
-    params.client.set_default_account_id(Id::from(1u64));
 
     let mut email_ids = AHashMap::default();
 
@@ -37,8 +35,7 @@ pub async fn test(params: &mut JMAPTest) {
     ] {
         let mut file_name = test_dir.clone();
         file_name.push(format!("{}.eml", email_name));
-        let email_id = params
-            .client
+        let email_id = client
             .email_import(
                 fs::read(&file_name).unwrap(),
                 [&mailbox_id],
@@ -135,7 +132,7 @@ pub async fn test(params: &mut JMAPTest) {
             )),
         ),
     ] {
-        let mut request = params.client.build();
+        let mut request = client.build();
         let result_ref = request
             .query_email()
             .filter(filter.clone())
@@ -166,6 +163,6 @@ pub async fn test(params: &mut JMAPTest) {
     }
 
     // Destroy test data
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }

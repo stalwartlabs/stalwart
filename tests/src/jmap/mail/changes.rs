@@ -17,7 +17,8 @@ pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Changes tests...");
 
     let server = params.server.clone();
-    params.client.set_default_account_id(Id::new(1));
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
     let mut states = vec![State::Initial];
 
     for (changes, expected_changelog) in [
@@ -133,7 +134,9 @@ pub async fn test(params: &mut JMAPTest) {
     .into_iter()
     {
         let mut batch = BatchBuilder::new();
-        batch.with_account_id(1).with_collection(Collection::Email);
+        batch
+            .with_account_id(account.id().document_id())
+            .with_collection(Collection::Email);
 
         for change in changes {
             match change {
@@ -175,11 +178,7 @@ pub async fn test(params: &mut JMAPTest) {
 
         let mut new_state = State::Initial;
         for (test_num, state) in (states).iter().enumerate() {
-            let changes = params
-                .client
-                .email_changes(state.to_string(), None)
-                .await
-                .unwrap();
+            let changes = client.email_changes(state.to_string(), None).await.unwrap();
 
             assert_eq!(
                 expected_changelog[test_num],
@@ -220,8 +219,7 @@ pub async fn test(params: &mut JMAPTest) {
                 let mut int_state = state.clone();
 
                 for _ in 0..100 {
-                    let changes = params
-                        .client
+                    let changes = client
                         .email_changes(int_state.to_string(), max_changes.into())
                         .await
                         .unwrap();
@@ -300,8 +298,7 @@ pub async fn test(params: &mut JMAPTest) {
         states.push(new_state);
     }
 
-    let changes = params
-        .client
+    let changes = client
         .email_changes(State::Initial.to_string(), None)
         .await
         .unwrap();

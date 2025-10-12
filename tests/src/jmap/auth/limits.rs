@@ -7,9 +7,10 @@
 use crate::{
     directory::internal::TestInternalDirectory,
     imap::{ImapConnection, Type},
-    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes},
+    jmap::{JMAPTest, assert_is_empty},
 };
 use common::listener::blocked::BLOCKED_IP_KEY;
+use directory::Permission;
 use imap_proto::ResponseType;
 use jmap_client::{
     client::{Client, Credentials},
@@ -22,27 +23,21 @@ use std::{
     time::Duration,
 };
 use store::write::now;
-use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Authorization tests...");
 
     // Create test account
     let server = params.server.clone();
-    let account_id = Id::from(
-        server
-            .core
-            .storage
-            .data
-            .create_test_user(
-                "jdoe@example.com",
-                "12345",
-                "John Doe",
-                &["jdoe@example.com", "john.doe@example.com"],
-            )
-            .await,
-    )
-    .to_string();
+    let account = params.account("jdoe@example.com");
+
+    // Remove unlimited requests permission
+    params
+        .server
+        .store()
+        .remove_permissions(account.name(), [Permission::UnlimitedRequests])
+        .await;
+    params.server.inner.cache.access_tokens.clear();
 
     // Reset rate limiters
     params.webhook.clear();
@@ -140,7 +135,7 @@ pub async fn test(params: &mut JMAPTest) {
     // Valid authentication requests should not be rate limited
     for _ in 0..110 {
         Client::new()
-            .credentials(Credentials::basic("jdoe@example.com", "12345"))
+            .credentials(Credentials::basic(account.name(), account.secret()))
             .accept_invalid_certs(true)
             .follow_redirects(["127.0.0.1"])
             .connect("https://127.0.0.1:8899")
@@ -150,18 +145,28 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Login with the correct credentials
     let client = Client::new()
-        .credentials(Credentials::basic("jdoe@example.com", "12345"))
+        .credentials(Credentials::basic(account.name(), account.secret()))
         .accept_invalid_certs(true)
         .follow_redirects(["127.0.0.1"])
         .connect("https://127.0.0.1:8899")
         .await
         .unwrap();
-    assert_eq!(client.session().username(), "jdoe@example.com");
+    assert_eq!(client.session().username(), account.name());
     assert_eq!(
-        client.session().account(&account_id).unwrap().name(),
-        "jdoe@example.com"
+        client
+            .session()
+            .account(account.id_string())
+            .unwrap()
+            .name(),
+        account.name()
     );
-    assert!(client.session().account(&account_id).unwrap().is_personal());
+    assert!(
+        client
+            .session()
+            .account(account.id_string())
+            .unwrap()
+            .is_personal()
+    );
 
     // Uploads up to 5000000 bytes should be allowed
     assert_eq!(
@@ -241,9 +246,16 @@ pub async fn test(params: &mut JMAPTest) {
         client.upload(None, b"sleep".to_vec(), None).await,
         Err(jmap_client::Error::Problem(err)) if err.status() == Some(400)));
 
+    // Add unlimited requests permission
+    params
+        .server
+        .store()
+        .add_permissions(account.name(), [Permission::UnlimitedRequests])
+        .await;
+    params.server.inner.cache.access_tokens.clear();
+
     // Destroy test accounts
-    params.client.set_default_account_id(&account_id);
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 
     // Check webhook events

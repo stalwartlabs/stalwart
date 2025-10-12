@@ -417,6 +417,7 @@ pub enum Permission {
     JmapParticipantIdentityGet,
     JmapParticipantIdentitySet,
     JmapParticipantIdentityChanges,
+    // TODO: Reuse DeleteSystemFolders position for new permission
     // WARNING: add new ids at the end (TODO: use static ids)
 }
 

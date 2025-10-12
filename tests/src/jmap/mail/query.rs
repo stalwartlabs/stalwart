@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes, wait_for_index},
+    jmap::{JMAPTest, assert_is_empty, wait_for_index},
     store::{deflate_test_resource, query::FIELDS},
 };
 use ::email::{cache::MessageCacheFetch, mailbox::Mailbox};
@@ -31,8 +31,9 @@ const MAX_MESSAGES_PER_THREAD: usize = 100;
 pub async fn test(params: &mut JMAPTest, insert: bool) {
     println!("Running Email Query tests...");
     let server = params.server.clone();
-    let client = &mut params.client;
-    client.set_default_account_id(Id::new(1));
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
+
     if insert {
         // Add some "virtual" mailbox ids so create doesn't fail
         let mut batch = BatchBuilder::new();
@@ -105,11 +106,11 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
         .unwrap_set_email()
         .unwrap();
 
-    destroy_all_mailboxes(params).await;
+    params.destroy_all_mailboxes(account).await;
     assert_is_empty(server).await;
 }
 
-pub async fn query(client: &mut Client) {
+pub async fn query(client: &Client) {
     for (filter, sort, expected_results) in [
         (
             Filter::and(vec![
@@ -403,7 +404,7 @@ pub async fn query(client: &mut Client) {
     }
 }
 
-pub async fn query_options(client: &mut Client) {
+pub async fn query_options(client: &Client) {
     for (query, expected_results, expected_results_collapsed) in [
         (
             EmailQuery {
@@ -698,7 +699,7 @@ pub async fn query_options(client: &mut Client) {
     }
 }
 
-pub async fn create(client: &mut Client) {
+pub async fn create(client: &Client) {
     let sent_at = now();
     let now = Instant::now();
     let mut fields = AHashMap::default();
@@ -838,7 +839,7 @@ pub async fn create(client: &mut Client) {
     );
 }
 
-async fn get_anchor(client: &mut Client, anchor: &str) -> Option<String> {
+async fn get_anchor(client: &Client, anchor: &str) -> Option<String> {
     client
         .email_query(
             email::query::Filter::header("Message-Id", anchor.into()).into(),

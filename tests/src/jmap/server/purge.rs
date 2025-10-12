@@ -5,7 +5,6 @@
  */
 
 use crate::{
-    directory::internal::TestInternalDirectory,
     imap::{AssertResult, ImapConnection, Type},
     jmap::{JMAPTest, assert_is_empty},
 };
@@ -24,23 +23,11 @@ use types::{collection::Collection, id::Id};
 pub async fn test(params: &mut JMAPTest) {
     println!("Running purge tests...");
     let server = params.server.clone();
-    let client = &mut params.client;
     let inbox_id = Id::from(INBOX_ID).to_string();
     let trash_id = Id::from(TRASH_ID).to_string();
     let junk_id = Id::from(JUNK_ID).to_string();
-
-    // Connect to IMAP
-    let account_id = server
-        .core
-        .storage
-        .data
-        .create_test_user(
-            "jdoe@example.com",
-            "12345",
-            "John Doe",
-            &["jdoe@example.com"],
-        )
-        .await;
+    let account = params.account("jdoe@example.com");
+    let client = account.client();
 
     let mut imap = ImapConnection::connect(b"_x ").await;
     imap.assert_read(Type::Untagged, ResponseType::Ok).await;
@@ -52,7 +39,6 @@ pub async fn test(params: &mut JMAPTest) {
         .assert_contains("MESSAGES 0");
 
     // Create test messages
-    client.set_default_account_id(Id::from(account_id));
     let mut message_ids = Vec::new();
     let mut pass = 0;
     let mut changes = AHashSet::new();
@@ -107,7 +93,7 @@ pub async fn test(params: &mut JMAPTest) {
     // Make sure both messages and changes are present
     assert_eq!(
         server
-            .get_document_ids(account_id, Collection::Email)
+            .get_document_ids(account.id().document_id(), Collection::Email)
             .await
             .unwrap()
             .unwrap()
@@ -116,13 +102,16 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Purge junk/trash messages and old changes
-    server.purge_account(account_id).await;
-    let cache = server.get_cached_messages(account_id).await.unwrap();
+    server.purge_account(account.id().document_id()).await;
+    let cache = server
+        .get_cached_messages(account.id().document_id())
+        .await
+        .unwrap();
 
     // Only 4 messages should remain
     assert_eq!(
         server
-            .get_document_ids(account_id, Collection::Email)
+            .get_document_ids(account.id().document_id(), Collection::Email)
             .await
             .unwrap()
             .unwrap()
@@ -161,7 +150,7 @@ pub async fn test(params: &mut JMAPTest) {
         .core
         .storage
         .data
-        .delete_principal(QueryBy::Id(account_id))
+        .delete_principal(QueryBy::Id(account.id().document_id()))
         .await
         .unwrap();
     assert_is_empty(server).await;

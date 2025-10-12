@@ -777,6 +777,11 @@ pub trait TestInternalDirectory {
     async fn create_test_list(&self, login: &str, name: &str, emails: &[&str]) -> u32;
     async fn set_test_quota(&self, login: &str, quota: u32);
     async fn add_permissions(&self, login: &str, permissions: impl IntoIterator<Item = Permission>);
+    async fn remove_permissions(
+        &self,
+        login: &str,
+        permissions: impl IntoIterator<Item = Permission>,
+    );
     async fn add_to_group(&self, login: &str, group: &str) -> ChangedPrincipals;
     async fn remove_from_group(&self, login: &str, group: &str) -> ChangedPrincipals;
     async fn remove_test_alias(&self, login: &str, alias: &str);
@@ -815,6 +820,10 @@ impl TestInternalDirectory for Store {
                     PrincipalField::Roles,
                     PrincipalValue::String(role.into()),
                 ),
+                PrincipalUpdate::add_item(
+                    PrincipalField::EnabledPermissions,
+                    PrincipalValue::String(Permission::UnlimitedRequests.name().into()),
+                ),
             ]))
             .await
             .unwrap();
@@ -835,6 +844,12 @@ impl TestInternalDirectory for Store {
                     .with_field(
                         PrincipalField::Roles,
                         PrincipalValue::StringList(vec![role.into()]),
+                    )
+                    .with_field(
+                        PrincipalField::EnabledPermissions,
+                        PrincipalValue::StringList(vec![
+                            Permission::UnlimitedRequests.name().into(),
+                        ]),
                     ),
                 None,
                 None,
@@ -924,6 +939,28 @@ impl TestInternalDirectory for Store {
                     .into_iter()
                     .map(|p| {
                         PrincipalUpdate::add_item(
+                            PrincipalField::EnabledPermissions,
+                            PrincipalValue::String(p.name().to_string()),
+                        )
+                    })
+                    .collect(),
+            ),
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn remove_permissions(
+        &self,
+        login: &str,
+        permissions: impl IntoIterator<Item = Permission>,
+    ) {
+        self.update_principal(
+            UpdatePrincipal::by_name(login).with_updates(
+                permissions
+                    .into_iter()
+                    .map(|p| {
+                        PrincipalUpdate::remove_item(
                             PrincipalField::EnabledPermissions,
                             PrincipalValue::String(p.name().to_string()),
                         )
