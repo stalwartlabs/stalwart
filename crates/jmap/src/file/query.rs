@@ -38,7 +38,7 @@ impl FileNodeQuery for Server {
             .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
             .await?;
         let filter_mask = (access_token.is_shared(account_id))
-            .then(|| cache.shared_items(access_token, [Acl::ReadItems], true));
+            .then(|| cache.shared_containers(access_token, [Acl::ReadItems], true));
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {

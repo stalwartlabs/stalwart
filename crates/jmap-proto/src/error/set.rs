@@ -201,7 +201,7 @@ impl<T: Property> SetError<T> {
     }
 
     pub fn node_has_children() -> Self {
-        Self::new(SetErrorType::NodeHasChildren).with_description("File node has children.")
+        Self::new(SetErrorType::NodeHasChildren).with_description("Cannot delete non-empty folder.")
     }
 
     pub fn calendar_has_event() -> Self {

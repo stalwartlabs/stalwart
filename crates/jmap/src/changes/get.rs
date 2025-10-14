@@ -78,7 +78,7 @@ impl ChangesLookup for Server {
             MethodObject::FileNode => {
                 access_token.assert_has_access(request.account_id, Collection::FileNode)?;
 
-                (SyncCollection::FileNode, true)
+                (SyncCollection::FileNode, false)
             }
             MethodObject::Calendar => {
                 access_token.assert_has_access(request.account_id, Collection::Calendar)?;

@@ -388,6 +388,21 @@ pub async fn test(params: &mut JMAPTest) {
           "name": null
         }));
 
+    // Creating a root folder should fail
+    assert_eq!(
+        jane.jmap_create_account(
+            john,
+            MethodObject::AddressBook,
+            [json!({
+                "name": "A new shared address book",
+            })],
+        )
+        .await
+        .not_created(0)
+        .description(),
+        "Cannot create address books in a shared account."
+    );
+
     // Copy Jane's contact into John's address book
     let john_copied_contact_id = jane
         .jmap_copy(
@@ -473,6 +488,57 @@ pub async fn test(params: &mut JMAPTest) {
         "name": {
                 "full": "John's Updated Contact"
             },
+        }));
+
+    // Update John's address book name
+    jane.jmap_update_account(
+        john,
+        MethodObject::AddressBook,
+        [(
+            &john_book_id,
+            json!({
+                "name": "Jane's version of John's Address Book",
+                "description": "This is John's address book, but Jane can edit it now"
+            }),
+        )],
+        Vec::<(&str, &str)>::new(),
+    )
+    .await
+    .updated(&john_book_id);
+    jane.jmap_get_account(
+        john,
+        MethodObject::AddressBook,
+        [
+            AddressBookProperty::Id,
+            AddressBookProperty::Name,
+            AddressBookProperty::Description,
+        ],
+        [john_book_id.as_str()],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({
+        "id": john_book_id,
+        "name": "Jane's version of John's Address Book",
+        "description": "This is John's address book, but Jane can edit it now"
+        }));
+
+    // John should still see the old name
+    john.jmap_get(
+        MethodObject::AddressBook,
+        [
+            AddressBookProperty::Id,
+            AddressBookProperty::Name,
+            AddressBookProperty::Description,
+        ],
+        [john_book_id.as_str()],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({
+        "id": john_book_id,
+        "name": "Test #1",
+        "description": null
         }));
 
     // Revoke Jane's access

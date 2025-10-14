@@ -116,7 +116,9 @@ impl BlobUpload for Server {
                                     }
                                 })
                         } else {
-                            self.get_blob(&id.hash, offset..length).await?
+                            self.blob_store()
+                                .get_blob(id.hash.as_slice(), offset..length)
+                                .await?
                         };
                         if let Some(bytes) = bytes {
                             bytes

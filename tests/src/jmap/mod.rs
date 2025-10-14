@@ -110,6 +110,9 @@ async fn jmap_tests() {
     //contacts::contact::test(&mut params).await;
     contacts::acl::test(&mut params).await;
 
+    //files::node::test(&mut params).await;
+    files::acl::test(&mut params).await;
+
     if delete {
         params.temp_dir.delete();
     }
@@ -917,13 +920,21 @@ pub trait JmapUtils {
     fn id(&self) -> &str {
         self.text_field("id")
     }
+
+    fn blob_id(&self) -> &str {
+        self.text_field("blobId")
+    }
+
     fn typ(&self) -> &str {
         self.text_field("type")
     }
+
     fn description(&self) -> &str {
         self.text_field("description")
     }
+
     fn text_field(&self, field: &str) -> &str;
+
     fn assert_is_equal(&self, other: Value);
 }
 

@@ -48,7 +48,11 @@ impl FileNodeGet for Server {
             .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
             .await?;
         let file_node_ids = if access_token.is_member(account_id) {
-            cache.document_ids(true).collect::<RoaringBitmap>()
+            cache
+                .resources
+                .iter()
+                .map(|r| r.document_id)
+                .collect::<RoaringBitmap>()
         } else {
             cache.shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
         };

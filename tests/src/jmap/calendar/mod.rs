@@ -5,6 +5,7 @@
  */
 
 pub mod acl;
+pub mod availability;
 pub mod calendars;
 pub mod event;
 pub mod identity;

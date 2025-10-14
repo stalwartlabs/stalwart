@@ -8,7 +8,7 @@ use crate::{
     api::acl::{JmapAcl, JmapRights},
     blob::download::BlobDownload,
 };
-use common::{DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{DavResourceMetadata, DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -20,7 +20,10 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Value};
-use store::{ahash::AHashSet, write::BatchBuilder};
+use store::{
+    ahash::{AHashMap, AHashSet},
+    write::BatchBuilder,
+};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
@@ -55,23 +58,15 @@ impl FileNodeSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
+        let mut created_folders = AHashMap::new();
         'create: for (id, object) in request.unwrap_create() {
-            if is_shared {
-                response.not_created.append(
-                    id,
-                    SetError::forbidden()
-                        .with_description("Cannot create file nodes in a shared account."),
-                );
-                continue 'create;
-            }
-
             let mut file_node = FileNode::default();
 
             // Process changes
-
-            match update_file_node(object, &mut file_node, &mut response) {
+            let has_acl_changes = match update_file_node(object, &mut file_node, &mut response) {
                 Ok(result) => {
                     if let Some(blob_id) = result.blob_id {
+                        let file_details = file_node.file.get_or_insert_default();
                         if !self.has_access_blob(&blob_id, access_token).await? {
                             response.not_created.append(
                                 id,
@@ -80,9 +75,23 @@ impl FileNodeSet for Server {
                                 )),
                             );
                             continue;
+                        } else if let Some(blob_contents) = self
+                            .blob_store()
+                            .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
+                            .await?
+                        {
+                            file_details.size = blob_contents.len() as u32;
+                        } else {
+                            response.not_created.append(
+                                id,
+                                SetError::invalid_properties()
+                                    .with_property(FileNodeProperty::BlobId)
+                                    .with_description("Blob could not be found."),
+                            );
+                            continue 'create;
                         }
 
-                        file_node.file.get_or_insert_default().blob_hash = blob_id.hash;
+                        file_details.blob_hash = blob_id.hash;
                     }
 
                     // Validate blob hash
@@ -99,19 +108,47 @@ impl FileNodeSet for Server {
                         );
                         continue 'create;
                     }
+
+                    result.has_acl_changes
                 }
                 Err(err) => {
                     response.not_created.append(id, err);
                     continue 'create;
                 }
-            }
+            };
 
             // Validate hierarchy
             if let Err(err) =
-                validate_file_node_hierarchy(None, file_node.parent_id, is_shared, &cache)
+                validate_file_node_hierarchy(None, &file_node, is_shared, &cache, &created_folders)
             {
                 response.not_created.append(id, err);
                 continue 'create;
+            }
+
+            // Inherit ACLs from parent
+            if file_node.parent_id > 0 {
+                let parent_id = file_node.parent_id - 1;
+                let parent_acls = created_folders.get(&parent_id).cloned().or_else(|| {
+                    cache
+                        .container_resource_by_id(parent_id)
+                        .and_then(|r| r.acls())
+                        .map(|a| a.to_vec())
+                });
+                if !has_acl_changes {
+                    if let Some(parent_acls) = parent_acls {
+                        file_node.acls = parent_acls;
+                    }
+                } else if is_shared
+                    && parent_acls
+                        .is_none_or(|acls| !acls.effective_acl(access_token).contains(Acl::Share))
+                {
+                    response.not_created.append(
+                        id,
+                        SetError::forbidden()
+                            .with_description("You are not allowed to share this file node."),
+                    );
+                    continue 'create;
+                }
             }
 
             // Validate ACLs
@@ -130,6 +167,9 @@ impl FileNodeSet for Server {
                 .assign_document_ids(account_id, Collection::FileNode, 1)
                 .await
                 .caused_by(trc::location!())?;
+            if file_node.file.is_none() {
+                created_folders.insert(document_id, file_node.acls.clone());
+            }
             file_node
                 .insert(access_token, account_id, document_id, &mut batch)
                 .caused_by(trc::location!())?;
@@ -167,6 +207,7 @@ impl FileNodeSet for Server {
             {
                 Ok(result) => {
                     if let Some(blob_id) = result.blob_id {
+                        let file_details = new_file_node.file.get_or_insert_default();
                         if !self.has_access_blob(&blob_id, access_token).await? {
                             response.not_updated.append(
                                 id,
@@ -175,9 +216,23 @@ impl FileNodeSet for Server {
                                 )),
                             );
                             continue;
+                        } else if let Some(blob_contents) = self
+                            .blob_store()
+                            .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
+                            .await?
+                        {
+                            file_details.size = blob_contents.len() as u32;
+                        } else {
+                            response.not_updated.append(
+                                id,
+                                SetError::invalid_properties()
+                                    .with_property(FileNodeProperty::BlobId)
+                                    .with_description("Blob could not be found."),
+                            );
+                            continue 'update;
                         }
 
-                        new_file_node.file.get_or_insert_default().blob_hash = blob_id.hash;
+                        file_details.blob_hash = blob_id.hash;
                     }
 
                     result.has_acl_changes
@@ -189,14 +244,13 @@ impl FileNodeSet for Server {
             };
 
             // Validate hierarchy
-            if new_file_node.parent_id != file_node.inner.parent_id
-                && let Err(err) = validate_file_node_hierarchy(
-                    Some(document_id),
-                    new_file_node.parent_id,
-                    is_shared,
-                    &cache,
-                )
-            {
+            if let Err(err) = validate_file_node_hierarchy(
+                Some(document_id),
+                &new_file_node,
+                is_shared,
+                &cache,
+                &created_folders,
+            ) {
                 response.not_updated.append(id, err);
                 continue 'update;
             }
@@ -246,19 +300,19 @@ impl FileNodeSet for Server {
             .on_destroy_remove_children
             .unwrap_or(false);
         let mut destroy_ids = AHashSet::with_capacity(will_destroy.len());
-        for id in will_destroy {
+        'destroy: for id in will_destroy {
             let document_id = id.document_id();
 
             let Some(file_node) = cache.container_resource_path_by_id(document_id) else {
                 response.not_destroyed.append(id, SetError::not_found());
-                continue;
+                continue 'destroy;
             };
 
             // Find ids to delete
             let mut ids = cache.subtree(file_node.path()).collect::<Vec<_>>();
             if ids.is_empty() {
                 debug_assert!(false, "Resource found in cache but not in subtree");
-                continue;
+                continue 'destroy;
             }
 
             // Sort ids descending from the deepest to the root
@@ -275,7 +329,7 @@ impl FileNodeSet for Server {
                             "File node or one of its children is already marked for deletion.",
                         ),
                     );
-                    continue;
+                    continue 'destroy;
                 }
             }
 
@@ -290,7 +344,7 @@ impl FileNodeSet for Server {
                         SetError::forbidden()
                             .with_description("You are not allowed to delete this file node."),
                     );
-                    continue;
+                    continue 'destroy;
                 }
             }
 
@@ -299,7 +353,7 @@ impl FileNodeSet for Server {
                 response
                     .not_destroyed
                     .append(id, SetError::node_has_children());
-                continue;
+                continue 'destroy;
             }
 
             // Delete record
@@ -445,18 +499,20 @@ fn update_file_node(
 
 fn validate_file_node_hierarchy(
     document_id: Option<u32>,
-    parent_id: u32,
+    node: &FileNode,
     is_shared: bool,
     cache: &DavResources,
+    created_folders: &AHashMap<u32, Vec<AclGrant>>,
 ) -> Result<(), SetError<FileNodeProperty>> {
-    if parent_id == 0 {
-        if is_shared {
+    let node_parent_id = if node.parent_id == 0 {
+        if is_shared && document_id.is_none() {
             return Err(SetError::invalid_properties()
                 .with_property(FileNodeProperty::ParentId)
                 .with_description("Cannot create top-level folder in a shared account."));
         }
+        None
     } else {
-        let parent_id = parent_id - 1;
+        let parent_id = node.parent_id - 1;
 
         if let Some(document_id) = document_id {
             if document_id == parent_id {
@@ -465,6 +521,7 @@ fn validate_file_node_hierarchy(
                     .with_description("A file node cannot be its own parent."));
             }
 
+            // Validate circular references
             if let Some(file) = cache.container_resource_path_by_id(document_id)
                 && cache
                     .subtree(file.path())
@@ -474,6 +531,32 @@ fn validate_file_node_hierarchy(
                     .with_property(FileNodeProperty::ParentId)
                     .with_description("Circular reference in parent ids."));
             }
+        }
+
+        // Make sure the parent is a container
+        if !created_folders.contains_key(&parent_id)
+            && cache.container_resource_by_id(parent_id).is_none()
+        {
+            return Err(SetError::invalid_properties()
+                .with_property(FileNodeProperty::ParentId)
+                .with_description("Parent ID does not exist or is not a folder."));
+        }
+
+        Some(parent_id)
+    };
+
+    // Validate name uniqueness
+    for resource in &cache.resources {
+        if let DavResourceMetadata::File {
+            name, parent_id, ..
+        } = &resource.data
+            && document_id.is_none_or(|id| id != resource.document_id)
+            && node_parent_id == *parent_id
+            && node.name == *name
+        {
+            return Err(SetError::invalid_properties()
+                .with_property(FileNodeProperty::Name)
+                .with_description("A node with the same name already exists in this folder."));
         }
     }
 

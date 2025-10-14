@@ -12,7 +12,7 @@ use crate::{
     types::date::UTCDate,
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 use types::{acl::Acl, blob::BlobId, id::Id};
 use utils::glob::GlobPattern;
 
@@ -473,12 +473,15 @@ impl JmapObjectId for FileNodeValue {
     }
 
     fn try_set_id(&mut self, new_id: AnyId) -> bool {
-        if let AnyId::Id(id) = new_id {
-            *self = FileNodeValue::Id(id);
-            true
-        } else {
-            false
+        match new_id {
+            AnyId::Id(id) => {
+                *self = FileNodeValue::Id(id);
+            }
+            AnyId::BlobId(blob_id) => {
+                *self = FileNodeValue::BlobId(blob_id);
+            }
         }
+        true
     }
 }
 
@@ -595,5 +598,11 @@ impl JmapObjectId for FileNodeProperty {
         } else {
             false
         }
+    }
+}
+
+impl Display for FileNodeProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_cow())
     }
 }
