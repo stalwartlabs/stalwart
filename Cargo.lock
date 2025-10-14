@@ -2855,6 +2855,7 @@ dependencies = [
  "compact_str",
  "directory",
  "hashify",
+ "nlp",
  "percent-encoding",
  "rkyv",
  "store",

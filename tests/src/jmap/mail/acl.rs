@@ -6,7 +6,7 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, assert_is_empty},
+    jmap::{JMAPTest},
 };
 use ::email::mailbox::{INBOX_ID, TRASH_ID};
 use jmap_client::{
@@ -721,7 +721,7 @@ pub async fn test(params: &mut JMAPTest) {
     for id in [john, bill, jane, sales] {
         params.destroy_all_mailboxes(id).await;
     }
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 pub fn assert_forbidden<T: Debug>(result: Result<T, jmap_client::Error>) {

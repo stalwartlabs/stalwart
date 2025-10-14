@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty, replace_blob_ids};
+use crate::jmap::{JMAPTest, replace_blob_ids};
 use ::email::mailbox::INBOX_ID;
 use jmap_client::email::{self, Header, HeaderForm, import::EmailImportResponse};
 use mail_parser::HeaderName;
@@ -13,7 +13,6 @@ use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Get tests...");
-    let server = params.server.clone();
 
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
@@ -167,7 +166,7 @@ pub async fn test(params: &mut JMAPTest) {
     }
 
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 pub fn all_headers() -> Vec<email::Property> {

@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty};
+use crate::jmap::JMAPTest;
 use jmap_client::mailbox::Role;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Thread tests...");
-    let server = params.server.clone();
     let account = params.account("jdoe@example.com");
     let client = account.client();
 
@@ -47,5 +46,5 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }

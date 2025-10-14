@@ -130,6 +130,7 @@ pub enum ChangesResponseMethod {
     AddressBook(ChangesResponse<AddressBook>),
     ContactCard(ChangesResponse<ContactCard>),
     FileNode(ChangesResponse<FileNode>),
+    Calendar(ChangesResponse<Calendar>),
     CalendarEvent(ChangesResponse<CalendarEvent>),
     CalendarEventNotification(ChangesResponse<CalendarEventNotification>),
     ShareNotification(ChangesResponse<ShareNotification>),

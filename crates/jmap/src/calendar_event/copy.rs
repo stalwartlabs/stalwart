@@ -104,7 +104,7 @@ impl JmapCalendarEventCopy for Server {
                 response.not_created.append(
                     id,
                     SetError::not_found().with_description(format!(
-                        "Item {} not found not found in account {}.",
+                        "Item {} not found in account {}.",
                         id, response.from_account_id
                     )),
                 );
@@ -125,7 +125,7 @@ impl JmapCalendarEventCopy for Server {
 
             let Some(_calendar_event) = self
                 .get_archive(
-                    account_id,
+                    from_account_id,
                     Collection::CalendarEvent,
                     from_calendar_event_id,
                 )
@@ -134,7 +134,7 @@ impl JmapCalendarEventCopy for Server {
                 response.not_created.append(
                     id,
                     SetError::not_found().with_description(format!(
-                        "Item {} not found not found in account {}.",
+                        "Item {} not found in account {}.",
                         id, response.from_account_id
                     )),
                 );

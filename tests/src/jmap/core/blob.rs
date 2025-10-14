@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty};
+use crate::jmap::JMAPTest;
 use email::mailbox::INBOX_ID;
 use serde_json::{Value, json};
 use types::id::Id;
@@ -412,5 +412,5 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Remove test data
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }

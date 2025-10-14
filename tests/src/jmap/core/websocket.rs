@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty};
+use crate::jmap::JMAPTest;
 use ahash::AHashSet;
 use futures::StreamExt;
 use jmap_client::{
@@ -20,7 +20,6 @@ use tokio::sync::mpsc;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running WebSockets tests...");
-    let server = params.server.clone();
 
     // Authenticate all accounts
     let account = params.account("jdoe@example.com");
@@ -98,7 +97,7 @@ pub async fn test(params: &mut JMAPTest) {
     expect_nothing(&mut stream_rx).await;
 
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 async fn expect_response(

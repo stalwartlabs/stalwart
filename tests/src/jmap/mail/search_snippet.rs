@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty, wait_for_index};
+use crate::jmap::{JMAPTest, wait_for_index};
 use email::mailbox::INBOX_ID;
 use jmap_client::{core::query, email::query::Filter};
 use std::{fs, path::PathBuf};
@@ -164,5 +164,5 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Destroy test data
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }

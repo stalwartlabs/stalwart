@@ -400,22 +400,6 @@ impl JmapObjectId for CalendarValue {
 }
 
 impl JmapRight for CalendarRight {
-    fn from_acl(acl: Acl) -> &'static [Self] {
-        match acl {
-            Acl::ReadItems => &[CalendarRight::MayReadItems],
-            Acl::RemoveItems => &[CalendarRight::MayWriteAll],
-            Acl::ModifyItems => &[CalendarRight::MayWriteAll],
-            Acl::AddItems => &[CalendarRight::MayWriteAll],
-            Acl::Delete => &[CalendarRight::MayDelete],
-            Acl::Administer => &[CalendarRight::MayShare],
-            Acl::SchedulingReadFreeBusy => &[CalendarRight::MayReadFreeBusy],
-            Acl::ModifyItemsOwn => &[CalendarRight::MayWriteOwn],
-            Acl::ModifyPrivateProperties => &[CalendarRight::MayUpdatePrivate],
-            Acl::ModifyRSVP => &[CalendarRight::MayRSVP],
-            _ => &[],
-        }
-    }
-
     fn to_acl(&self) -> &'static [Acl] {
         match self {
             CalendarRight::MayReadFreeBusy => &[Acl::SchedulingReadFreeBusy],
@@ -429,7 +413,7 @@ impl JmapRight for CalendarRight {
             CalendarRight::MayWriteOwn => &[Acl::ModifyItemsOwn],
             CalendarRight::MayUpdatePrivate => &[Acl::ModifyPrivateProperties],
             CalendarRight::MayRSVP => &[Acl::ModifyRSVP],
-            CalendarRight::MayShare => &[Acl::Administer],
+            CalendarRight::MayShare => &[Acl::Share],
             CalendarRight::MayDelete => &[Acl::Delete],
         }
     }

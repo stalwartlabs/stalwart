@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, assert_is_empty, mail::mailbox::destroy_all_mailboxes_no_wait},
+    jmap::{JMAPTest, mail::mailbox::destroy_all_mailboxes_no_wait},
     store::deflate_test_resource,
 };
 use ::email::{
@@ -29,7 +29,6 @@ pub async fn test(params: &mut JMAPTest) {
 
 async fn test_single_thread(params: &mut JMAPTest) {
     println!("Running Email Merge Threads tests...");
-    let server = params.server.clone();
     let account = params.account("admin");
     let mut client = account.client_owned().await;
     let mut all_mailboxes = AHashMap::default();
@@ -204,7 +203,7 @@ async fn test_single_thread(params: &mut JMAPTest) {
         }
     }
 
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 #[allow(dead_code)]
@@ -275,7 +274,7 @@ async fn test_multi_thread(params: &mut JMAPTest) {
     );
     println!("Deleting all messages...");
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(params.server.clone()).await;
+    params.assert_is_empty().await;
 }
 
 fn build_message(message: usize, in_reply_to: Option<usize>, thread_num: usize) -> String {

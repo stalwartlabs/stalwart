@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, assert_is_empty, mail::set::assert_email_properties},
+    jmap::{JMAPTest, mail::set::assert_email_properties},
     smtp::DnsCache,
 };
 use ahash::AHashMap;
@@ -477,7 +477,7 @@ pub async fn test(params: &mut JMAPTest) {
         client.email_submission_destroy(&id).await.unwrap();
     }
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 pub fn spawn_mock_smtp_server() -> (mpsc::Receiver<MockMessage>, Arc<Mutex<MockSMTPSettings>>) {

@@ -172,13 +172,13 @@ impl Server {
                     }
 
                     let mut collections: Bitmap<Collection> = Bitmap::new();
-                    if acl.contains(Acl::Read) || acl.contains(Acl::Administer) {
+                    if acl.contains(Acl::Read) {
                         collections.insert(collection);
                     }
-                    if collection == Collection::Mailbox
-                        && (acl.contains(Acl::ReadItems) || acl.contains(Acl::Administer))
+                    if acl.contains(Acl::ReadItems)
+                        && let Some(child_col) = collection.child_collection()
                     {
-                        collections.insert(Collection::Email);
+                        collections.insert(child_col);
                     }
 
                     if !collections.is_empty() {

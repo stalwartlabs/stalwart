@@ -447,21 +447,6 @@ impl JmapObjectId for MailboxValue {
 }
 
 impl JmapRight for MailboxRight {
-    fn from_acl(acl: Acl) -> &'static [Self] {
-        match acl {
-            Acl::ReadItems => &[MailboxRight::MayReadItems],
-            Acl::AddItems => &[MailboxRight::MayAddItems],
-            Acl::RemoveItems => &[MailboxRight::MayRemoveItems],
-            Acl::ModifyItems => &[MailboxRight::MaySetSeen, MailboxRight::MaySetKeywords],
-            Acl::CreateChild => &[MailboxRight::MayCreateChild],
-            Acl::Modify => &[MailboxRight::MayRename],
-            Acl::Submit => &[MailboxRight::MaySubmit],
-            Acl::Delete => &[MailboxRight::MayDelete],
-            Acl::Administer => &[MailboxRight::MayShare],
-            _ => &[],
-        }
-    }
-
     fn to_acl(&self) -> &'static [Acl] {
         match self {
             MailboxRight::MayReadItems => &[Acl::Read, Acl::ReadItems],
@@ -473,7 +458,7 @@ impl JmapRight for MailboxRight {
             MailboxRight::MayRename => &[Acl::Modify],
             MailboxRight::MaySubmit => &[Acl::Submit],
             MailboxRight::MayDelete => &[Acl::Delete],
-            MailboxRight::MayShare => &[Acl::Administer],
+            MailboxRight::MayShare => &[Acl::Share],
         }
     }
 

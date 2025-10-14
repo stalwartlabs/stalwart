@@ -11,7 +11,8 @@ use jmap_proto::{
     object::contact::{ContactCard, ContactCardComparator, ContactCardFilter},
     request::MaybeInvalid,
 };
-use store::{SerializeInfallible, query, roaring::RoaringBitmap};
+use nlp::tokenizers::word::WordTokenizer;
+use store::{SerializeInfallible, backend::MAX_TOKEN_LENGTH, query, roaring::RoaringBitmap};
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
@@ -58,10 +59,14 @@ impl ContactCardQuery for Server {
                         ContactField::Email,
                         sanitize_email(&email).unwrap_or(email).into_bytes(),
                     )),
-                    ContactCardFilter::Text(value) => filters.push(query::Filter::has_text(
-                        ContactField::Text,
-                        value.to_lowercase(),
-                    )),
+                    ContactCardFilter::Text(value) => {
+                        for token in WordTokenizer::new(&value, MAX_TOKEN_LENGTH) {
+                            filters.push(query::Filter::eq(
+                                ContactField::Text,
+                                token.word.into_owned().into_bytes(),
+                            ));
+                        }
+                    }
                     ContactCardFilter::CreatedBefore(before) => filters.push(query::Filter::lt(
                         ContactField::Created,
                         (before.timestamp() as u64).serialize(),

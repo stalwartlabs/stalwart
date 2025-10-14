@@ -119,7 +119,7 @@ impl DavAclHandler for Server {
         // Validate ACL
         let acls = container.acls().unwrap();
         if !access_token.is_member(account_id)
-            && !acls.effective_acl(access_token).contains(Acl::Administer)
+            && !acls.effective_acl(access_token).contains(Acl::Share)
         {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
@@ -337,7 +337,7 @@ impl DavAclHandler for Server {
                     }
                     Privilege::ReadAcl => {}
                     Privilege::WriteAcl => {
-                        acls.insert(Acl::Administer);
+                        acls.insert(Acl::Share);
                     }
                     Privilege::ReadFreeBusy
                     | Privilege::ScheduleQueryFreeBusy
@@ -444,7 +444,7 @@ impl DavAclHandler for Server {
     ) -> crate::Result<Vec<Ace>> {
         let mut aces = Vec::with_capacity(grants.len());
         if access_token.is_member(account_id)
-            || grants.effective_acl(access_token).contains(Acl::Administer)
+            || grants.effective_acl(access_token).contains(Acl::Share)
         {
             for grant in grants.iter() {
                 let grant_account_id = u32::from(grant.account_id);
@@ -554,7 +554,7 @@ pub(crate) fn current_user_privilege_set(acl_bitmap: Bitmap<Acl>) -> Vec<Privile
             Acl::Delete | Acl::RemoveItems => {
                 acls.insert(Privilege::Write);
             }
-            Acl::Administer => {
+            Acl::Share => {
                 acls.insert(Privilege::ReadAcl);
                 acls.insert(Privilege::WriteAcl);
             }

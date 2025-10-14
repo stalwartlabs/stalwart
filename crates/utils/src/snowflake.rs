@@ -71,7 +71,7 @@ impl SnowflakeIdGenerator {
     }
 
     pub fn to_timestamp(id: u64) -> u64 {
-        (id >> (SEQUENCE_LEN + NODE_ID_LEN)) + DEFAULT_EPOCH
+        (id >> (SEQUENCE_LEN + NODE_ID_LEN)) / 1000 + DEFAULT_EPOCH
     }
 
     pub fn with_node_id(node_id: u64) -> Self {

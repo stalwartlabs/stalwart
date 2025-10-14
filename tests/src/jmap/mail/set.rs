@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{
-    JMAPTest, assert_is_empty, find_values, replace_blob_ids, replace_boundaries, replace_values,
-};
+use crate::jmap::{JMAPTest, find_values, replace_blob_ids, replace_boundaries, replace_values};
 use ::email::mailbox::INBOX_ID;
 use ahash::AHashSet;
 use jmap_client::{
@@ -21,7 +19,6 @@ use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Email Set tests...");
-    let server = params.server.clone();
     let account = params.account("jdoe@example.com");
     let client = account.client();
     let mailbox_id = Id::from(INBOX_ID).to_string();
@@ -30,7 +27,7 @@ pub async fn test(params: &mut JMAPTest) {
     update(client, &mailbox_id).await;
 
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 async fn create(client: &Client, mailbox_id: &str) {

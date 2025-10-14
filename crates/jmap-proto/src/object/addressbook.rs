@@ -292,21 +292,10 @@ impl JmapObjectId for AddressBookValue {
 }
 
 impl JmapRight for AddressBookRight {
-    fn from_acl(acl: Acl) -> &'static [Self] {
-        match acl {
-            Acl::ReadItems => &[AddressBookRight::MayRead],
-            Acl::RemoveItems => &[AddressBookRight::MayDelete],
-            Acl::ModifyItems => &[AddressBookRight::MayWrite],
-            Acl::Delete => &[AddressBookRight::MayDelete],
-            Acl::Administer => &[AddressBookRight::MayShare],
-            _ => &[],
-        }
-    }
-
     fn to_acl(&self) -> &'static [Acl] {
         match self {
             AddressBookRight::MayDelete => &[Acl::Delete, Acl::RemoveItems],
-            AddressBookRight::MayShare => &[Acl::Administer],
+            AddressBookRight::MayShare => &[Acl::Share],
             AddressBookRight::MayRead => &[Acl::Read, Acl::ReadItems],
             AddressBookRight::MayWrite => &[Acl::Modify, Acl::AddItems, Acl::ModifyItems],
         }
@@ -355,5 +344,11 @@ impl JmapObjectId for AddressBookProperty {
             return true;
         }
         false
+    }
+}
+
+impl std::fmt::Display for AddressBookProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_cow())
     }
 }

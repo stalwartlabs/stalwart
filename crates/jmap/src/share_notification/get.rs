@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, sharing::notification::ShareNotification};
+use common::{Server, auth::AccessToken, sharing::notification::ShareNotification};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::{
@@ -19,9 +19,11 @@ use jmap_proto::{
     types::{date::UTCDate, state::State},
 };
 use jmap_tools::{Key, Map, Value};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use store::{
-    Deserialize, IterateParams, LogKey, U64_LEN, ahash::AHashSet, write::key::DeserializeBigEndian,
+    Deserialize, IterateParams, LogKey, U64_LEN,
+    ahash::{AHashMap, AHashSet},
+    write::key::DeserializeBigEndian,
 };
 use trc::AddContext;
 use types::{
@@ -60,6 +62,8 @@ impl ShareNotificationGet for Server {
         let account_id = request.account_id.document_id();
         let mut min_id = u64::MAX;
         let mut max_id = 0u64;
+
+        let mut token_cache: AHashMap<u32, Arc<AccessToken>> = AHashMap::new();
 
         let mut ids = if let Some(ids) = request.ids.take() {
             let ids = ids.unwrap();
@@ -104,6 +108,7 @@ impl ShareNotificationGet for Server {
             list: Vec::with_capacity(ids.len()),
             not_found: vec![],
         };
+        let mut notifications = Vec::new();
 
         self.store()
             .iterate(
@@ -116,7 +121,7 @@ impl ShareNotificationGet for Server {
                     LogKey {
                         account_id,
                         collection: SyncCollection::ShareNotification.into(),
-                        change_id: max_id + 1,
+                        change_id: max_id.saturating_add(1),
                     },
                 )
                 .descending(),
@@ -127,21 +132,45 @@ impl ShareNotificationGet for Server {
                     }
 
                     if !has_ids || ids.remove(&change_id) {
-                        let notification =
-                            ShareNotification::deserialize(value).caused_by(trc::location!())?;
-                        response.list.push(build_share_notification(
+                        notifications.push((
                             change_id,
-                            notification,
-                            &properties,
+                            ShareNotification::deserialize(value).caused_by(trc::location!())?,
                         ));
                     }
 
                     Ok((!has_ids || !ids.is_empty())
-                        && response.list.len() < self.core.jmap.get_max_objects)
+                        && notifications.len() < self.core.jmap.get_max_objects)
                 },
             )
             .await
             .caused_by(trc::location!())?;
+
+        for (change_id, notification) in notifications {
+            let changed_by_token = if let Some(token) = token_cache.get(&notification.changed_by) {
+                token.clone()
+            } else {
+                let token = if let Ok(token) = self.get_access_token(notification.changed_by).await
+                {
+                    token
+                } else {
+                    Arc::new(AccessToken::from_id(notification.changed_by))
+                };
+
+                token_cache.insert(notification.changed_by, token.clone());
+                token
+            };
+
+            response.list.push(build_share_notification(
+                change_id,
+                notification,
+                &changed_by_token,
+                &properties,
+            ));
+        }
+
+        if response.state.is_none() {
+            response.state = Some(State::Initial);
+        }
 
         response
             .not_found
@@ -154,6 +183,7 @@ impl ShareNotificationGet for Server {
 fn build_share_notification(
     id: u64,
     mut notification: ShareNotification,
+    changed_by: &AccessToken,
     properties: &[ShareNotificationProperty],
 ) -> Value<'static, ShareNotificationProperty, ShareNotificationValue> {
     let mut result = Map::with_capacity(properties.len());
@@ -170,7 +200,21 @@ fn build_share_notification(
                 ),
                 (
                     Key::Property(ShareNotificationProperty::ChangedByName),
-                    Value::Str("".into()),
+                    Value::Str(
+                        changed_by
+                            .description
+                            .as_deref()
+                            .unwrap_or(changed_by.name.as_str())
+                            .to_string()
+                            .into(),
+                    ),
+                ),
+                (
+                    Key::Property(ShareNotificationProperty::ChangedByEmail),
+                    changed_by
+                        .emails
+                        .first()
+                        .map_or(Value::Null, |email| Value::Str(email.to_string().into())),
                 ),
             ])),
             ShareNotificationProperty::ObjectType => DataType::try_from(notification.object_type)
@@ -209,31 +253,35 @@ fn map_rights(
 
     match object_type {
         Collection::Calendar | Collection::CalendarEvent => {
-            for acl in rights.into_iter() {
-                for right in CalendarRight::from_acl(acl) {
-                    obj.insert_unchecked(Key::Borrowed(right.as_str()), Value::Bool(true));
-                }
+            for right in CalendarRight::all_rights() {
+                obj.insert_unchecked(
+                    Key::Borrowed(right.as_str()),
+                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                );
             }
         }
         Collection::AddressBook | Collection::ContactCard => {
-            for acl in rights.into_iter() {
-                for right in AddressBookRight::from_acl(acl) {
-                    obj.insert_unchecked(Key::Borrowed(right.as_str()), Value::Bool(true));
-                }
+            for right in AddressBookRight::all_rights() {
+                obj.insert_unchecked(
+                    Key::Borrowed(right.as_str()),
+                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                );
             }
         }
         Collection::FileNode => {
-            for acl in rights.into_iter() {
-                for right in FileNodeRight::from_acl(acl) {
-                    obj.insert_unchecked(Key::Borrowed(right.as_str()), Value::Bool(true));
-                }
+            for right in FileNodeRight::all_rights() {
+                obj.insert_unchecked(
+                    Key::Borrowed(right.as_str()),
+                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                );
             }
         }
         Collection::Mailbox | Collection::Email => {
-            for acl in rights.into_iter() {
-                for right in MailboxRight::from_acl(acl) {
-                    obj.insert_unchecked(Key::Borrowed(right.as_str()), Value::Bool(true));
-                }
+            for right in MailboxRight::all_rights() {
+                obj.insert_unchecked(
+                    Key::Borrowed(right.as_str()),
+                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                );
             }
         }
         _ => {}

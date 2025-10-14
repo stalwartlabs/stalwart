@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    AssertConfig, add_test_certs,
-    jmap::{JMAPTest, assert_is_empty},
-};
+use crate::{AssertConfig, add_test_certs, jmap::JMAPTest};
 use base64::{Engine, engine::general_purpose};
 use common::{Caches, Core, Data, Inner, config::server::Listeners, listener::SessionData};
 use ece::EcKeyComponents;
@@ -54,7 +51,6 @@ pub async fn test(params: &mut JMAPTest) {
     println!("Running Push Subscription tests...");
 
     // Create test account
-    let server = params.server.clone();
     let account = params.account("jdoe@example.com");
     let client = account.client();
 
@@ -205,7 +201,7 @@ pub async fn test(params: &mut JMAPTest) {
     expect_nothing(&mut event_rx).await;
 
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 #[derive(Clone)]

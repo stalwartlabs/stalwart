@@ -160,37 +160,6 @@ impl MyRightsResponse {
 }
 
 impl Rights {
-    /*pub fn from_acl(value: ACL) -> (Self, Option<Self>) {
-        match value {
-            ACL::Read => (Rights::Lookup, None),
-            ACL::Modify => (Rights::CreateMailbox, None),
-            ACL::Delete => (Rights::DeleteMailbox, None),
-            ACL::ReadItems => (Rights::Read, None),
-            ACL::AddItems => (Rights::Insert, None),
-            ACL::ModifyItems => (Rights::Write, Rights::Seen.into()),
-            ACL::RemoveItems => (Rights::DeleteMessages, Rights::Expunge.into()),
-            ACL::CreateChild => (Rights::CreateMailbox, None),
-            ACL::Administer => (Rights::Administer, None),
-            ACL::Submit => (Rights::Post, None),
-        }
-    }
-
-    pub fn into_acl(self) -> ACL {
-        match self {
-            Rights::Lookup => ACL::Read,
-            Rights::Read => ACL::ReadItems,
-            Rights::Seen => ACL::ModifyItems,
-            Rights::Write => ACL::ModifyItems,
-            Rights::Insert => ACL::AddItems,
-            Rights::Post => ACL::Submit,
-            Rights::CreateMailbox => ACL::CreateChild,
-            Rights::DeleteMailbox => ACL::Delete,
-            Rights::DeleteMessages => ACL::RemoveItems,
-            Rights::Expunge => ACL::RemoveItems,
-            Rights::Administer => ACL::Administer,
-        }
-    }*/
-
     pub fn to_char(&self) -> u8 {
         match self {
             Rights::Lookup => b'l',
@@ -239,7 +208,7 @@ impl From<Rights> for Acl {
             Rights::DeleteMailbox => Acl::Delete,
             Rights::DeleteMessages => Acl::RemoveItems,
             Rights::Expunge => Acl::RemoveItems,
-            Rights::Administer => Acl::Administer,
+            Rights::Administer => Acl::Share,
         }
     }
 }

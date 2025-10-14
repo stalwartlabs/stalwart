@@ -7,7 +7,7 @@
 use crate::{
     directory::internal::TestInternalDirectory,
     imap::{ImapConnection, Type},
-    jmap::{JMAPTest, assert_is_empty},
+    jmap::{JMAPTest},
 };
 use common::listener::blocked::BLOCKED_IP_KEY;
 use directory::Permission;
@@ -256,7 +256,7 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Destroy test accounts
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 
     // Check webhook events
     params

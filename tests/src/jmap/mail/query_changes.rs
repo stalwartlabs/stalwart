@@ -5,7 +5,7 @@
  */
 
 use crate::jmap::{
-    JMAPTest, assert_is_empty,
+    JMAPTest,
     mail::changes::{LogAction, ParseState},
 };
 use ::email::message::metadata::MessageData;
@@ -277,7 +277,7 @@ pub async fn test(params: &mut JMAPTest) {
     }
 
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 #[derive(Debug, Clone)]

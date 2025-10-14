@@ -14,8 +14,9 @@ use jmap_proto::{
     object::calendar_event::{self, CalendarEventComparator, CalendarEventFilter},
     request::MaybeInvalid,
 };
+use nlp::tokenizers::word::WordTokenizer;
 use std::{cmp::Ordering, sync::Arc};
-use store::{query, roaring::RoaringBitmap};
+use store::{backend::MAX_TOKEN_LENGTH, query, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::{
     TimeRange,
@@ -75,7 +76,12 @@ impl CalendarEventQuery for Server {
                         filters.push(query::Filter::eq(CalendarField::Uid, uid.into_bytes()))
                     }
                     CalendarEventFilter::Text(value) => {
-                        filters.push(query::Filter::has_text(CalendarField::Text, value))
+                        for token in WordTokenizer::new(&value, MAX_TOKEN_LENGTH) {
+                            filters.push(query::Filter::eq(
+                                CalendarField::Text,
+                                token.word.into_owned().into_bytes(),
+                            ));
+                        }
                     }
                     CalendarEventFilter::After(_) => {
                         /*

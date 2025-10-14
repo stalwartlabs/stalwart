@@ -99,7 +99,7 @@ impl JmapContactCardCopy for Server {
                 response.not_created.append(
                     id,
                     SetError::not_found().with_description(format!(
-                        "Item {} not found not found in account {}.",
+                        "Item {} not found in account {}.",
                         id, response.from_account_id
                     )),
                 );
@@ -107,13 +107,13 @@ impl JmapContactCardCopy for Server {
             }
 
             let Some(_contact) = self
-                .get_archive(account_id, Collection::ContactCard, from_contact_id)
+                .get_archive(from_account_id, Collection::ContactCard, from_contact_id)
                 .await?
             else {
                 response.not_created.append(
                     id,
                     SetError::not_found().with_description(format!(
-                        "Item {} not found not found in account {}.",
+                        "Item {} not found in account {}.",
                         id, response.from_account_id
                     )),
                 );

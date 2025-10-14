@@ -10,6 +10,7 @@ use crate::{
         copy::CopyRequest,
         get::GetRequest,
         import::ImportEmailRequest,
+        parse::ParseRequest,
         search_snippet::GetSearchSnippetRequest,
         set::{SetRequest, SetResponse},
         upload::{BlobUploadRequest, DataSourceObject},
@@ -17,7 +18,8 @@ use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
     references::{Graph, eval::EvalObjectReferences, topological_sort},
     request::{
-        CopyRequestMethod, GetRequestMethod, MaybeInvalid, RequestMethod, SetRequestMethod,
+        CopyRequestMethod, GetRequestMethod, MaybeInvalid, ParseRequestMethod, RequestMethod,
+        SetRequestMethod,
         reference::{MaybeIdReference, MaybeResultReference},
     },
     response::Response,
@@ -86,6 +88,11 @@ impl Response<'_> {
             RequestMethod::ImportEmail(request) => request.resolve_references(self)?,
             RequestMethod::SearchSnippet(request) => request.resolve_references(self)?,
             RequestMethod::UploadBlob(request) => request.resolve_references(self)?,
+            RequestMethod::Parse(request) => match request {
+                ParseRequestMethod::Email(request) => request.resolve_references(self)?,
+                ParseRequestMethod::ContactCard(request) => request.resolve_references(self)?,
+                ParseRequestMethod::CalendarEvent(request) => request.resolve_references(self)?,
+            },
             _ => {}
         }
 
@@ -234,6 +241,19 @@ impl<'x, T: JmapObject> ResolveReference for CopyRequest<'x, T> {
 
             if let MaybeIdReference::Reference(ir) = id {
                 *id = MaybeIdReference::Id(response.eval_id_reference(ir)?);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<T: JmapObject> ResolveReference for ParseRequest<T> {
+    fn resolve_references(&mut self, response: &Response<'_>) -> trc::Result<()> {
+        // Resolve blobId references
+        for id in self.blob_ids.iter_mut() {
+            if let MaybeIdReference::Reference(ir) = id {
+                *id = MaybeIdReference::Id(response.eval_blob_id_reference(ir)?);
             }
         }
 

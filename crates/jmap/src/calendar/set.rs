@@ -13,7 +13,7 @@ use groupware::{
     calendar::{
         ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, CALENDAR_AVAILABILITY_ALL,
         CALENDAR_AVAILABILITY_ATTENDING, CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE,
-        CALENDAR_SUBSCRIBED, Calendar, CalendarPreferences, DefaultAlert, Timezone,
+        CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert, Timezone,
     },
 };
 use http_proto::HttpSessionData;
@@ -26,10 +26,14 @@ use jmap_proto::{
 };
 use jmap_tools::{JsonPointerItem, Key, Value};
 use rand::{Rng, distr::Alphanumeric};
-use store::{SerializeInfallible, write::BatchBuilder};
+use store::{
+    SerializeInfallible, ValueKey,
+    ahash::AHashSet,
+    write::{BatchBuilder, ValueClass},
+};
 use trc::AddContext;
 use types::{
-    acl::{Acl, AclGrant},
+    acl::Acl,
     collection::{Collection, SyncCollection},
     field::PrincipalField,
 };
@@ -159,8 +163,7 @@ impl CalendarSet for Server {
             // Validate ACL
             if is_shared {
                 let acl = calendar.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Administer))
-                {
+                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Share)) {
                     response.not_updated.append(
                         id,
                         SetError::forbidden()
@@ -174,19 +177,8 @@ impl CalendarSet for Server {
                     response.not_updated.append(id, err.into());
                     continue 'update;
                 }
-                self.refresh_acls(
-                    &new_calendar.acls,
-                    Some(
-                        calendar
-                            .inner
-                            .acls
-                            .iter()
-                            .map(AclGrant::from)
-                            .collect::<Vec<_>>()
-                            .as_slice(),
-                    ),
-                )
-                .await;
+                self.refresh_archived_acls(&new_calendar.acls, calendar.inner.acls.as_slice())
+                    .await;
             }
 
             // Update record
@@ -197,69 +189,126 @@ impl CalendarSet for Server {
         }
 
         // Process deletions
-        let on_destroy_remove_events = request.arguments.on_destroy_remove_events.unwrap_or(false);
-        for id in will_destroy {
-            let document_id = id.document_id();
-
-            if !cache.has_container_id(&document_id) {
-                response.not_destroyed.append(id, SetError::not_found());
-                continue;
-            };
-
-            let Some(calendar_) = self
-                .get_archive(account_id, Collection::Calendar, document_id)
-                .await
-                .caused_by(trc::location!())?
-            else {
-                response.not_destroyed.append(id, SetError::not_found());
-                continue;
-            };
-
-            let calendar = calendar_
-                .to_unarchived::<Calendar>()
-                .caused_by(trc::location!())?;
-
-            // Validate ACLs
-            if is_shared
-                && !calendar
-                    .inner
-                    .acls
-                    .effective_acl(access_token)
-                    .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
-            {
-                response.not_destroyed.append(
-                    id,
-                    SetError::forbidden()
-                        .with_description("You are not allowed to delete this calendar."),
-                );
-                continue;
-            }
-
-            // Obtain children ids
-            let children_ids = cache.children_ids(document_id).collect::<Vec<_>>();
-            if !children_ids.is_empty() && !on_destroy_remove_events {
-                response
-                    .not_destroyed
-                    .append(id, SetError::calendar_has_event());
-                continue;
-            }
-
-            // Delete record
-            DestroyArchive(calendar)
-                .delete_with_events(
-                    self,
-                    access_token,
+        let mut reset_default_calendar = false;
+        if !will_destroy.is_empty() {
+            let mut destroy_children = AHashSet::new();
+            let mut destroy_parents = AHashSet::new();
+            let default_calendar_id = self
+                .store()
+                .get_value::<u32>(ValueKey {
                     account_id,
-                    document_id,
-                    children_ids,
-                    None,
-                    false,
-                    &mut batch,
-                )
+                    collection: Collection::Principal.into(),
+                    document_id: 0,
+                    class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+                })
                 .await
                 .caused_by(trc::location!())?;
+            let on_destroy_remove_events =
+                request.arguments.on_destroy_remove_events.unwrap_or(false);
+            for id in will_destroy {
+                let document_id = id.document_id();
 
-            response.destroyed.push(id);
+                if !cache.has_container_id(&document_id) {
+                    response.not_destroyed.append(id, SetError::not_found());
+                    continue;
+                };
+
+                let Some(calendar_) = self
+                    .get_archive(account_id, Collection::Calendar, document_id)
+                    .await
+                    .caused_by(trc::location!())?
+                else {
+                    response.not_destroyed.append(id, SetError::not_found());
+                    continue;
+                };
+
+                let calendar = calendar_
+                    .to_unarchived::<Calendar>()
+                    .caused_by(trc::location!())?;
+
+                // Validate ACLs
+                if is_shared
+                    && !calendar
+                        .inner
+                        .acls
+                        .effective_acl(access_token)
+                        .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
+                {
+                    response.not_destroyed.append(
+                        id,
+                        SetError::forbidden()
+                            .with_description("You are not allowed to delete this calendar."),
+                    );
+                    continue;
+                }
+
+                // Obtain children ids
+                let children_ids = cache.children_ids(document_id).collect::<Vec<_>>();
+                if !children_ids.is_empty() && !on_destroy_remove_events {
+                    response
+                        .not_destroyed
+                        .append(id, SetError::calendar_has_event());
+                    continue;
+                }
+                destroy_children.extend(children_ids.iter().copied());
+                destroy_parents.insert(document_id);
+
+                // Delete record
+                DestroyArchive(calendar)
+                    .delete(access_token, account_id, document_id, None, &mut batch)
+                    .caused_by(trc::location!())?;
+
+                if default_calendar_id == Some(document_id) {
+                    reset_default_calendar = true;
+                }
+
+                response.destroyed.push(id);
+            }
+
+            // Delete children
+            if !destroy_children.is_empty() {
+                for document_id in destroy_children {
+                    if let Some(event_) = self
+                        .get_archive(account_id, Collection::CalendarEvent, document_id)
+                        .await?
+                    {
+                        let event = event_
+                            .to_unarchived::<CalendarEvent>()
+                            .caused_by(trc::location!())?;
+
+                        if event
+                            .inner
+                            .names
+                            .iter()
+                            .all(|n| destroy_parents.contains(&n.parent_id.to_native()))
+                        {
+                            // Event only belongs to calendars being deleted, delete it
+                            DestroyArchive(event).delete_all(
+                                access_token,
+                                account_id,
+                                document_id,
+                                false,
+                                &mut batch,
+                            )?;
+                        } else {
+                            // Unlink calendar id from event
+                            let mut new_event = event
+                                .deserialize::<CalendarEvent>()
+                                .caused_by(trc::location!())?;
+                            new_event
+                                .names
+                                .retain(|n| !destroy_parents.contains(&n.parent_id));
+                            new_event.update(
+                                access_token,
+                                event,
+                                account_id,
+                                document_id,
+                                &mut batch,
+                            )?;
+                        }
+                    }
+                }
+            }
         }
 
         // Set default calendar
@@ -275,6 +324,12 @@ impl CalendarSet for Server {
                     PrincipalField::DefaultCalendarId,
                     default_calendar_id.serialize(),
                 );
+        } else if reset_default_calendar {
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .update_document(0)
+                .clear(PrincipalField::DefaultCalendarId);
         }
 
         // Write changes

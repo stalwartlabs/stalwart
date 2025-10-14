@@ -55,7 +55,6 @@ pub trait JmapSharedObject: JmapObject {
 }
 
 pub trait JmapRight: Clone + Copy + Sized + 'static {
-    fn from_acl(acl: Acl) -> &'static [Self];
     fn all_rights() -> &'static [Self];
     fn to_acl(&self) -> &'static [Acl];
 }
@@ -167,10 +166,6 @@ impl JmapObject for NullObject {
 }
 
 impl JmapRight for Null {
-    fn from_acl(_: Acl) -> &'static [Self] {
-        unreachable!()
-    }
-
     fn all_rights() -> &'static [Self] {
         unreachable!()
     }

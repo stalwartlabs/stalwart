@@ -272,7 +272,7 @@ impl ContactCardSet for Server {
         }
 
         // Process deletions
-        for id in will_destroy {
+        'destroy: for id in will_destroy {
             let document_id = id.document_id();
 
             if !cache.has_container_id(&document_id) {
@@ -305,7 +305,7 @@ impl ContactCardSet for Server {
                                 Id::from(parent_id)
                             )),
                         );
-                        continue;
+                        continue 'destroy;
                     }
                 }
             }
@@ -508,7 +508,7 @@ fn patch_parent_ids(
                 })
                 .collect::<AHashSet<_>>();
 
-            current.retain(|name| !new_ids.remove(&name.parent_id));
+            current.retain(|name| new_ids.remove(&name.parent_id));
 
             for id in new_ids {
                 current.push(DavName::new_with_rand_name(id));

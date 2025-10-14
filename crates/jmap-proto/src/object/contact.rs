@@ -120,7 +120,7 @@ impl<'de> DeserializeArguments<'de> for ContactCardFilter {
         A: serde::de::MapAccess<'de>,
     {
         hashify::fnc_map!(key.as_bytes(),
-            b"inContactCard" => {
+            b"inAddressBook" => {
                 *self = ContactCardFilter::InAddressBook(map.next_value()?);
             },
             b"uid" => {
@@ -226,7 +226,7 @@ impl<'de> DeserializeArguments<'de> for ContactCardComparator {
 impl ContactCardFilter {
     pub fn into_string(self) -> Cow<'static, str> {
         match self {
-            ContactCardFilter::InAddressBook(_) => "inContactCard",
+            ContactCardFilter::InAddressBook(_) => "inAddressBook",
             ContactCardFilter::Uid(_) => "uid",
             ContactCardFilter::HasMember(_) => "hasMember",
             ContactCardFilter::Kind(_) => "kind",

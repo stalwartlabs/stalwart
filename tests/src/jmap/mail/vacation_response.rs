@@ -6,7 +6,7 @@
 
 use crate::{
     jmap::{
-        JMAPTest, assert_is_empty,
+        JMAPTest,
         mail::{
             delivery::SmtpConnection,
             submission::{
@@ -162,5 +162,5 @@ pub async fn test(params: &mut JMAPTest) {
     // Remove test data
     client.vacation_response_destroy().await.unwrap();
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }

@@ -72,7 +72,7 @@ impl CalendarEventGet for Server {
         let calendar_event_ids = if access_token.is_member(account_id) {
             cache.document_ids(false).collect::<RoaringBitmap>()
         } else {
-            cache.shared_containers(access_token, [Acl::ReadItems], true)
+            cache.shared_items(access_token, [Acl::ReadItems], true)
         };
         let mut ids = if let Some(ids) = ids {
             ids

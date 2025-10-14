@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, str::FromStr};
-
 use crate::calendar_event::{CalendarSyntheticId, assert_is_unique_uid};
 use calcard::{
     common::timezone::Tz,
@@ -38,6 +36,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Map, Value};
+use std::{borrow::Cow, str::FromStr};
 use store::{
     ahash::AHashSet,
     roaring::RoaringBitmap,
@@ -428,7 +427,7 @@ impl CalendarEventSet for Server {
         }
 
         // Process deletions
-        for id in will_destroy {
+        'destroy: for id in will_destroy {
             let document_id = id.document_id();
 
             if !cache.has_container_id(&document_id) {
@@ -469,7 +468,7 @@ impl CalendarEventSet for Server {
                                 Id::from(parent_id)
                             )),
                         );
-                        continue;
+                        continue 'destroy;
                     }
                 }
             }
@@ -912,7 +911,7 @@ fn patch_parent_ids(
                 })
                 .collect::<AHashSet<_>>();
 
-            current.retain(|name| !new_ids.remove(&name.parent_id));
+            current.retain(|name| new_ids.remove(&name.parent_id));
 
             for id in new_ids {
                 current.push(DavName::new_with_rand_name(id));

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken};
+use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use jmap_proto::{
     error::set::SetError,
     object::{JmapRight, JmapSharedObject},
@@ -183,10 +183,11 @@ impl JmapRights {
     ) -> Value<'static, T::Property, T::Element> {
         let mut obj = Map::with_capacity(3);
 
-        for acl in acls.into_iter() {
-            for right in T::Right::from_acl(acl) {
-                obj.insert_unchecked(Key::Property((*right).into()), Value::Bool(true));
-            }
+        for right in T::Right::all_rights() {
+            obj.insert_unchecked(
+                Key::Property((*right).into()),
+                Value::Bool(right.to_acl().iter().all(|acl| acls.contains(*acl))),
+            );
         }
 
         Value::Object(obj)
@@ -201,9 +202,7 @@ impl JmapRights {
         T::Property: From<Id>,
     {
         if access_token.is_member(account_id)
-            || grants.iter().any(|item| {
-                item.grants.contains(Acl::Administer) && access_token.is_member(item.account_id)
-            })
+            || grants.effective_acl(access_token).contains(Acl::Share)
         {
             let mut share_with = Map::with_capacity(grants.len());
             for grant in grants {

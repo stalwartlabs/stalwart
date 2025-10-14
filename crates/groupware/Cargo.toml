@@ -10,6 +10,7 @@ store = { path = "../store" }
 common = { path =  "../common" }
 types = { path = "../types" }
 trc = { path = "../trc" }
+nlp = { path = "../nlp" }
 directory = { path =  "../directory" }
 calcard = { path = "/Users/me/code/calcard", features = ["rkyv"] }
 hashify = "0.2"

@@ -6,7 +6,7 @@
 
 use crate::{
     imap::{AssertResult, ImapConnection, Type},
-    jmap::{JMAPTest, assert_is_empty},
+    jmap::{JMAPTest},
 };
 use ahash::AHashSet;
 use common::Server;
@@ -153,7 +153,7 @@ pub async fn test(params: &mut JMAPTest) {
         .delete_principal(QueryBy::Id(account.id().document_id()))
         .await
         .unwrap();
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 async fn get_changes(server: &Server) -> (AHashSet<(u64, u8)>, bool) {

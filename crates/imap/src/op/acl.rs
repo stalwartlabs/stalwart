@@ -120,7 +120,7 @@ impl<T: SessionStream> Session<T> {
                             Acl::CreateChild => {
                                 rights.push(Rights::CreateMailbox);
                             }
-                            Acl::Administer => {
+                            Acl::Share => {
                                 rights.push(Rights::Administer);
                             }
                             Acl::Submit => {
@@ -472,7 +472,7 @@ impl<T: SessionStream> SessionData<T> {
                         .caused_by(trc::location!())?
                         .acls
                         .effective_acl(&access_token)
-                        .contains(Acl::Administer)
+                        .contains(Acl::Share)
                 {
                     Ok((mailbox, values, access_token))
                 } else {

@@ -267,21 +267,10 @@ impl From<Id> for FileNodeProperty {
 }
 
 impl JmapRight for FileNodeRight {
-    fn from_acl(acl: Acl) -> &'static [Self] {
-        match acl {
-            Acl::ReadItems => &[FileNodeRight::MayRead],
-            Acl::RemoveItems => &[FileNodeRight::MayDelete],
-            Acl::ModifyItems => &[FileNodeRight::MayWrite],
-            Acl::Delete => &[FileNodeRight::MayDelete],
-            Acl::Administer => &[FileNodeRight::MayShare],
-            _ => &[],
-        }
-    }
-
     fn to_acl(&self) -> &'static [Acl] {
         match self {
             FileNodeRight::MayDelete => &[Acl::Delete, Acl::RemoveItems],
-            FileNodeRight::MayShare => &[Acl::Administer],
+            FileNodeRight::MayShare => &[Acl::Share],
             FileNodeRight::MayRead => &[Acl::Read, Acl::ReadItems],
             FileNodeRight::MayWrite => &[Acl::Modify, Acl::AddItems, Acl::ModifyItems],
         }

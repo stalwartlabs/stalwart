@@ -6,7 +6,7 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, assert_is_empty, emails_purge_tombstoned, mail::delivery::SmtpConnection},
+    jmap::{JMAPTest, emails_purge_tombstoned, mail::delivery::SmtpConnection},
     smtp::queue::QueuedEvents,
 };
 use common::config::smtp::queue::QueueName;
@@ -340,7 +340,7 @@ pub async fn test(params: &mut JMAPTest) {
             .remove(&server, event.due.into())
             .await;
     }
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 fn assert_over_quota<T: std::fmt::Debug>(result: Result<T, jmap_client::Error>) {

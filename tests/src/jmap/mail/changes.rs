@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, assert_is_empty};
+use crate::jmap::{JMAPTest};
 use jmap_proto::types::state::State;
 use std::str::FromStr;
 use store::{ahash::AHashSet, write::BatchBuilder};
@@ -312,7 +312,7 @@ pub async fn test(params: &mut JMAPTest) {
     assert_eq!(created, vec![2, 3, 11, 12]);
     assert_eq!(changes.updated(), Vec::<String>::new());
     assert_eq!(changes.destroyed(), Vec::<String>::new());
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 #[derive(Debug, Clone, Copy)]

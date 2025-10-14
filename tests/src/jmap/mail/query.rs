@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, assert_is_empty, wait_for_index},
+    jmap::{JMAPTest, wait_for_index},
     store::{deflate_test_resource, query::FIELDS},
 };
 use ::email::{cache::MessageCacheFetch, mailbox::Mailbox};
@@ -107,7 +107,7 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
         .unwrap();
 
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 pub async fn query(client: &Client) {

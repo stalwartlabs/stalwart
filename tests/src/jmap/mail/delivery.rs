@@ -6,7 +6,7 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, assert_is_empty},
+    jmap::{JMAPTest},
     webdav::DummyWebDavClient,
 };
 use email::{
@@ -32,9 +32,7 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Create a mailing list
     server
-        .core
-        .storage
-        .data
+        .store()
         .create_test_list(
             "members@example.com",
             "Mailing List",
@@ -116,8 +114,7 @@ pub async fn test(params: &mut JMAPTest) {
     assert_eq!(john_cache.in_mailbox(JUNK_ID).count(), 1);
 
     // CardDAV spam override
-    let dav_client =
-        DummyWebDavClient::new(u32::MAX, "jdoe@example.com", "12345", "jdoe@example.com");
+    let dav_client = DummyWebDavClient::new(u32::MAX, john.name(), john.secret(), john.emails()[0]);
     dav_client
         .request(
             "PUT",
@@ -285,7 +282,7 @@ END:VCARD
     for account in [john, jane, bill] {
         params.destroy_all_mailboxes(account).await;
     }
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 
     // Check webhook events
     params.webhook.assert_contains(&[

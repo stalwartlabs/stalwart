@@ -9,7 +9,7 @@ use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
-    contact::{AddressBook, AddressBookPreferences},
+    contact::{AddressBook, AddressBookPreferences, ContactCard},
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -21,10 +21,14 @@ use jmap_proto::{
 };
 use jmap_tools::{JsonPointerItem, Key, Value};
 use rand::{Rng, distr::Alphanumeric};
-use store::{SerializeInfallible, write::BatchBuilder};
+use store::{
+    SerializeInfallible, ValueKey,
+    ahash::AHashSet,
+    write::{BatchBuilder, ValueClass},
+};
 use trc::AddContext;
 use types::{
-    acl::{Acl, AclGrant},
+    acl::Acl,
     collection::{Collection, SyncCollection},
     field::PrincipalField,
 };
@@ -155,8 +159,7 @@ impl AddressBookSet for Server {
             // Validate ACL
             if is_shared {
                 let acl = address_book.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Administer))
-                {
+                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Share)) {
                     response.not_updated.append(
                         id,
                         SetError::forbidden()
@@ -170,17 +173,9 @@ impl AddressBookSet for Server {
                     response.not_updated.append(id, err.into());
                     continue 'update;
                 }
-                self.refresh_acls(
+                self.refresh_archived_acls(
                     &new_address_book.acls,
-                    Some(
-                        address_book
-                            .inner
-                            .acls
-                            .iter()
-                            .map(AclGrant::from)
-                            .collect::<Vec<_>>()
-                            .as_slice(),
-                    ),
+                    address_book.inner.acls.as_slice(),
                 )
                 .await;
             }
@@ -199,71 +194,129 @@ impl AddressBookSet for Server {
         }
 
         // Process deletions
-        let on_destroy_remove_contents = request
-            .arguments
-            .on_destroy_remove_contents
-            .unwrap_or(false);
-        for id in will_destroy {
-            let document_id = id.document_id();
-
-            if !cache.has_container_id(&document_id) {
-                response.not_destroyed.append(id, SetError::not_found());
-                continue;
-            };
-
-            let Some(address_book_) = self
-                .get_archive(account_id, Collection::AddressBook, document_id)
-                .await
-                .caused_by(trc::location!())?
-            else {
-                response.not_destroyed.append(id, SetError::not_found());
-                continue;
-            };
-
-            let address_book = address_book_
-                .to_unarchived::<AddressBook>()
-                .caused_by(trc::location!())?;
-
-            // Validate ACLs
-            if is_shared
-                && !address_book
-                    .inner
-                    .acls
-                    .effective_acl(access_token)
-                    .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
-            {
-                response.not_destroyed.append(
-                    id,
-                    SetError::forbidden()
-                        .with_description("You are not allowed to delete this address book."),
-                );
-                continue;
-            }
-
-            // Obtain children ids
-            let children_ids = cache.children_ids(document_id).collect::<Vec<_>>();
-            if !children_ids.is_empty() && !on_destroy_remove_contents {
-                response
-                    .not_destroyed
-                    .append(id, SetError::address_book_has_contents());
-                continue;
-            }
-
-            // Delete record
-            DestroyArchive(address_book)
-                .delete_with_cards(
-                    self,
-                    access_token,
+        let mut reset_default_address_book = false;
+        if !will_destroy.is_empty() {
+            let mut destroy_children = AHashSet::new();
+            let mut destroy_parents = AHashSet::new();
+            let default_address_book_id = self
+                .store()
+                .get_value::<u32>(ValueKey {
                     account_id,
-                    document_id,
-                    children_ids,
-                    None,
-                    &mut batch,
-                )
+                    collection: Collection::Principal.into(),
+                    document_id: 0,
+                    class: ValueClass::Property(PrincipalField::DefaultAddressBookId.into()),
+                })
                 .await
                 .caused_by(trc::location!())?;
 
-            response.destroyed.push(id);
+            let on_destroy_remove_contents = request
+                .arguments
+                .on_destroy_remove_contents
+                .unwrap_or(false);
+
+            for id in will_destroy {
+                let document_id = id.document_id();
+
+                if !cache.has_container_id(&document_id) {
+                    response.not_destroyed.append(id, SetError::not_found());
+                    continue;
+                };
+
+                let Some(address_book_) = self
+                    .get_archive(account_id, Collection::AddressBook, document_id)
+                    .await
+                    .caused_by(trc::location!())?
+                else {
+                    response.not_destroyed.append(id, SetError::not_found());
+                    continue;
+                };
+
+                let address_book = address_book_
+                    .to_unarchived::<AddressBook>()
+                    .caused_by(trc::location!())?;
+
+                // Validate ACLs
+                if is_shared
+                    && !address_book
+                        .inner
+                        .acls
+                        .effective_acl(access_token)
+                        .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
+                {
+                    response.not_destroyed.append(
+                        id,
+                        SetError::forbidden()
+                            .with_description("You are not allowed to delete this address book."),
+                    );
+                    continue;
+                }
+
+                // Obtain children ids
+                let children_ids = cache.children_ids(document_id).collect::<Vec<_>>();
+                if !children_ids.is_empty() && !on_destroy_remove_contents {
+                    response
+                        .not_destroyed
+                        .append(id, SetError::address_book_has_contents());
+                    continue;
+                }
+                destroy_children.extend(children_ids.iter().copied());
+                destroy_parents.insert(document_id);
+
+                // Delete record
+                DestroyArchive(address_book)
+                    .delete(access_token, account_id, document_id, None, &mut batch)
+                    .caused_by(trc::location!())?;
+
+                if default_address_book_id == Some(document_id) {
+                    reset_default_address_book = true;
+                }
+
+                response.destroyed.push(id);
+            }
+
+            // Delete children
+            if !destroy_children.is_empty() {
+                for document_id in destroy_children {
+                    if let Some(card_) = self
+                        .get_archive(account_id, Collection::ContactCard, document_id)
+                        .await?
+                    {
+                        let card = card_
+                            .to_unarchived::<ContactCard>()
+                            .caused_by(trc::location!())?;
+
+                        if card
+                            .inner
+                            .names
+                            .iter()
+                            .all(|n| destroy_parents.contains(&n.parent_id.to_native()))
+                        {
+                            // Card only belongs to address books being deleted, delete it
+                            DestroyArchive(card).delete_all(
+                                access_token,
+                                account_id,
+                                document_id,
+                                &mut batch,
+                            )?;
+                        } else {
+                            // Unlink addressbook id from card
+                            let mut new_card = card
+                                .deserialize::<ContactCard>()
+                                .caused_by(trc::location!())?;
+                            new_card
+                                .names
+                                .retain(|n| !destroy_parents.contains(&n.parent_id));
+                            new_card.update(
+                                access_token,
+                                card,
+                                account_id,
+                                document_id,
+                                &mut batch,
+                            )?;
+                        }
+                    }
+                }
+            }
         }
 
         // Set default address book
@@ -279,6 +332,12 @@ impl AddressBookSet for Server {
                     PrincipalField::DefaultAddressBookId,
                     default_address_book_id.serialize(),
                 );
+        } else if reset_default_address_book {
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .update_document(0)
+                .clear(PrincipalField::DefaultAddressBookId);
         }
 
         // Write changes

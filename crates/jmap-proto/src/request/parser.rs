@@ -202,6 +202,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Get, MethodObject::ShareNotification) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::ShareNotification(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Get, MethodObject::SearchSnippet) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::SearchSnippet(value),
                 Err(err) => RequestMethod::invalid(err),
@@ -279,6 +286,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Set, MethodObject::ShareNotification) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::ShareNotification(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Query, MethodObject::Email) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Email(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -330,6 +344,15 @@ impl<'de> Visitor<'de> for CallVisitor {
             },
             (MethodFunction::Query, MethodObject::FileNode) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::FileNode(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::ShareNotification) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::Query(QueryRequestMethod::ShareNotification(value))
+                }
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));
@@ -409,6 +432,17 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::QueryChanges, MethodObject::ShareNotification) => {
+                match seq.next_element() {
+                    Ok(Some(value)) => RequestMethod::QueryChanges(
+                        QueryChangesRequestMethod::ShareNotification(value),
+                    ),
+                    Err(err) => RequestMethod::invalid(err),
+                    Ok(None) => {
+                        return Err(de::Error::invalid_length(1, &self));
+                    }
+                }
+            }
             (MethodFunction::Changes, _) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Changes(value),
                 Err(err) => RequestMethod::invalid(err),
@@ -486,7 +520,12 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
-            _ => unreachable!(),
+            _ => {
+                return Err(de::Error::custom(format!(
+                    "Invalid method function/object combination: {}",
+                    method_name
+                )));
+            }
         };
 
         let id = seq

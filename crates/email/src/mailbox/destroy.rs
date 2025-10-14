@@ -149,9 +149,7 @@ impl MailboxDestroy for Server {
             // Validate ACLs
             if access_token.is_shared(account_id) {
                 let acl = mailbox.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Administer)
-                    && (!acl.contains(Acl::Delete)
-                        || (remove_emails && !acl.contains(Acl::RemoveItems)))
+                if !acl.contains(Acl::Delete) || (remove_emails && !acl.contains(Acl::RemoveItems))
                 {
                     return Ok(Err(MailboxDestroyError::Forbidden));
                 }

@@ -10,7 +10,7 @@ use crate::{
     types::date::UTCDate,
 };
 use jmap_tools::{Element, Key, Property};
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 use types::{id::Id, type_state::DataType};
 
 #[derive(Debug, Clone, Default)]
@@ -298,5 +298,11 @@ impl JmapObjectId for ShareNotificationProperty {
 
     fn try_set_id(&mut self, _: AnyId) -> bool {
         false
+    }
+}
+
+impl Display for ShareNotificationProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_cow())
     }
 }

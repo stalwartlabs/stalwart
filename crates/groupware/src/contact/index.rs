@@ -9,6 +9,7 @@ use calcard::vcard::{ArchivedVCardProperty, VCardProperty};
 use common::storage::index::{
     IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
 };
+use nlp::tokenizers::word::WordTokenizer;
 use std::collections::HashSet;
 use store::backend::MAX_TOKEN_LENGTH;
 use types::{acl::AclGrant, collection::SyncCollection, field::ContactField};
@@ -96,7 +97,6 @@ impl IndexableObject for ContactCard {
                 field: ContactField::Text.into(),
                 value: self
                     .text()
-                    .map(str::to_lowercase)
                     .map(Into::into)
                     .collect::<HashSet<IndexItem>>()
                     .into_iter()
@@ -145,7 +145,6 @@ impl IndexableObject for &ArchivedContactCard {
                 field: ContactField::Text.into(),
                 value: self
                     .text()
-                    .map(str::to_lowercase)
                     .map(Into::into)
                     .collect::<HashSet<IndexItem>>()
                     .into_iter()
@@ -182,7 +181,7 @@ impl IndexableAndSerializableObject for ContactCard {
 }
 
 impl ContactCard {
-    pub fn text(&self) -> impl Iterator<Item = &str> {
+    pub fn text(&self) -> impl Iterator<Item = String> {
         self.card
             .entries
             .iter()
@@ -199,8 +198,8 @@ impl ContactCard {
                 )
             })
             .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
-            .flat_map(str::split_whitespace)
-            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
+            .flat_map(|v| WordTokenizer::new(v, MAX_TOKEN_LENGTH))
+            .map(|t| t.word.into_owned())
     }
 
     pub fn emails(&self) -> impl Iterator<Item = String> {
@@ -213,7 +212,7 @@ impl ContactCard {
 }
 
 impl ArchivedContactCard {
-    pub fn text(&self) -> impl Iterator<Item = &str> {
+    pub fn text(&self) -> impl Iterator<Item = String> {
         self.card
             .entries
             .iter()
@@ -230,8 +229,8 @@ impl ArchivedContactCard {
                 )
             })
             .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
-            .flat_map(str::split_whitespace)
-            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
+            .flat_map(|v| WordTokenizer::new(v, MAX_TOKEN_LENGTH))
+            .map(|t| t.word.into_owned())
     }
 
     pub fn emails(&self) -> impl Iterator<Item = String> {

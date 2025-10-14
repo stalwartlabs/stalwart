@@ -177,7 +177,7 @@ impl MailboxSet for Server {
                         );
                         continue 'update;
                     } else if object.contains_key(&Key::Property(MailboxProperty::ShareWith))
-                        && !acl.contains(Acl::Administer)
+                        && !acl.contains(Acl::Share)
                     {
                         ctx.response.not_updated.append(
                             id,
@@ -459,7 +459,7 @@ impl MailboxSet for Server {
                         && !mailbox
                             .acls
                             .effective_acl(ctx.access_token)
-                            .contains_any([Acl::CreateChild, Acl::Administer].into_iter())
+                            .contains(Acl::CreateChild)
                     {
                         return Ok(Err(SetError::forbidden().with_description(
                             "You are not allowed to create sub mailboxes under this mailbox.",

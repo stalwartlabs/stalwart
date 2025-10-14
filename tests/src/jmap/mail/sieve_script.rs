@@ -6,7 +6,7 @@
 
 use crate::{
     jmap::{
-        JMAPTest, assert_is_empty,
+        JMAPTest,
         mail::{
             delivery::SmtpConnection,
             submission::{MockMessage, assert_message_delivery, spawn_mock_smtp_server},
@@ -497,7 +497,7 @@ pub async fn test(params: &mut JMAPTest) {
         client.sieve_script_destroy(&id).await.unwrap();
     }
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 fn get_script(name: &str) -> Vec<u8> {

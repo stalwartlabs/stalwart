@@ -263,7 +263,7 @@ async fn email_tests(server: Server, client: Arc<Client>) {
 
         wait_for_index(&server).await;
         destroy_all_mailboxes_no_wait(&client).await;
-        assert_is_empty(server.clone()).await;
+        assert_is_empty(&server).await;
     }
 }
 
@@ -358,7 +358,7 @@ async fn mailbox_tests(server: Server, client: Arc<Client>) {
     {
         let _ = client.mailbox_destroy(&mailbox_id, true).await;
     }
-    assert_is_empty(server).await;
+    assert_is_empty(&server).await;
 }
 
 async fn create_mailbox(client: &Client, mailbox: &str) -> Vec<String> {

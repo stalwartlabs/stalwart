@@ -6,7 +6,7 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, ManagementApi, assert_is_empty, server::List},
+    jmap::{JMAPTest, ManagementApi, server::List},
 };
 use ahash::AHashSet;
 use common::auth::{AccessToken, TenantInfo};
@@ -762,7 +762,7 @@ pub async fn test(params: &JMAPTest) {
         .await
         .unwrap();
 
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 const TENANT_QUOTA: u64 = TEST_MESSAGE.len() as u64;

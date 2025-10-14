@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{Account, JMAPTest, assert_is_empty, wait_for_index};
+use crate::jmap::{Account, JMAPTest, wait_for_index};
 use jmap_client::{
     Error, Set,
     client::{Client, Credentials},
@@ -22,7 +22,6 @@ use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Mailbox tests...");
-    let server = params.server.clone();
     let account = params.account("admin");
     let mut client = account.client_owned().await;
 
@@ -609,7 +608,7 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     destroy_all_mailboxes_no_wait(&client).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 async fn create_test_mailboxes(client: &Client) -> AHashMap<String, String> {

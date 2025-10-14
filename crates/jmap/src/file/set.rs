@@ -204,8 +204,7 @@ impl FileNodeSet for Server {
             // Validate ACL
             if is_shared {
                 let acl = file_node.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Administer))
-                {
+                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Share)) {
                     response.not_updated.append(
                         id,
                         SetError::forbidden()

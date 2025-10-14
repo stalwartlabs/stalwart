@@ -9,7 +9,7 @@ use crate::{
         ImapConnection, Type,
         pop::{self, Pop3Connection},
     },
-    jmap::{JMAPTest, ManagementApi, assert_is_empty, mail::delivery::SmtpConnection},
+    jmap::{JMAPTest, ManagementApi, mail::delivery::SmtpConnection},
 };
 use base64::{Engine, engine::general_purpose};
 use biscuit::{JWT, SingleOrMultiple, jwk::JWKSet};
@@ -387,7 +387,7 @@ pub async fn test(params: &mut JMAPTest) {
         .await
         .unwrap();
     params.destroy_all_mailboxes(account).await;
-    assert_is_empty(server).await;
+    params.assert_is_empty().await;
 }
 
 async fn post_bytes(

@@ -15,7 +15,7 @@ use crate::{
 };
 use compact_str::format_compact;
 use jmap_tools::{Element, Key, Property, Value};
-use types::id::Id;
+use types::{blob::BlobId, id::Id};
 
 impl Response<'_> {
     pub(crate) fn eval_result_references(&self, rr: &ResultReference) -> trc::Result<EvalResults> {
@@ -113,6 +113,9 @@ impl Response<'_> {
                         ChangesResponseMethod::FileNode(response) => {
                             response.eval_jptr(path, &mut results)
                         }
+                        ChangesResponseMethod::Calendar(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
                         ChangesResponseMethod::CalendarEvent(response) => {
                             response.eval_jptr(path, &mut results)
                         }
@@ -152,6 +155,16 @@ impl Response<'_> {
             Err(trc::JmapEvent::InvalidResultReference
                 .into_err()
                 .details(format_compact!("Id reference {ir:?} not found.")))
+        }
+    }
+
+    pub(crate) fn eval_blob_id_reference(&self, ir: &str) -> trc::Result<BlobId> {
+        if let Some(AnyId::BlobId(id)) = self.created_ids.get(ir) {
+            Ok(id.clone())
+        } else {
+            Err(trc::JmapEvent::InvalidResultReference
+                .into_err()
+                .details(format_compact!("blobId reference {ir:?} not found.")))
         }
     }
 }

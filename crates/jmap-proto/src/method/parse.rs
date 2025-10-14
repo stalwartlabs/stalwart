@@ -9,6 +9,7 @@ use crate::{
     request::{
         MaybeInvalid,
         deserialize::{DeserializeArguments, deserialize_request},
+        reference::MaybeIdReference,
     },
 };
 use jmap_tools::Value;
@@ -19,7 +20,7 @@ use utils::map::vec_map::VecMap;
 #[derive(Debug, Clone)]
 pub struct ParseRequest<T: JmapObject> {
     pub account_id: Id,
-    pub blob_ids: Vec<MaybeInvalid<BlobId>>,
+    pub blob_ids: Vec<MaybeIdReference<BlobId>>,
     pub properties: Option<Vec<MaybeInvalid<T::Property>>>,
     pub arguments: T::ParseArguments,
 }

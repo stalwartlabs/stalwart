@@ -65,8 +65,13 @@ impl ChangesLookup for Server {
 
                 (SyncCollection::EmailSubmission, false)
             }
-            MethodObject::ContactCard => {
+            MethodObject::AddressBook => {
                 access_token.assert_has_access(request.account_id, Collection::AddressBook)?;
+
+                (SyncCollection::AddressBook, true)
+            }
+            MethodObject::ContactCard => {
+                access_token.assert_has_access(request.account_id, Collection::ContactCard)?;
 
                 (SyncCollection::AddressBook, false)
             }
@@ -75,8 +80,13 @@ impl ChangesLookup for Server {
 
                 (SyncCollection::FileNode, true)
             }
-            MethodObject::CalendarEvent => {
+            MethodObject::Calendar => {
                 access_token.assert_has_access(request.account_id, Collection::Calendar)?;
+
+                (SyncCollection::Calendar, true)
+            }
+            MethodObject::CalendarEvent => {
+                access_token.assert_has_access(request.account_id, Collection::CalendarEvent)?;
 
                 (SyncCollection::Calendar, false)
             }
@@ -252,11 +262,17 @@ impl IntermediateChangesResponse {
             MethodObject::EmailSubmission => {
                 ChangesResponseMethod::EmailSubmission(transmute_response(self.response))
             }
+            MethodObject::AddressBook => {
+                ChangesResponseMethod::AddressBook(transmute_response(self.response))
+            }
             MethodObject::ContactCard => {
                 ChangesResponseMethod::ContactCard(transmute_response(self.response))
             }
             MethodObject::FileNode => {
                 ChangesResponseMethod::FileNode(transmute_response(self.response))
+            }
+            MethodObject::Calendar => {
+                ChangesResponseMethod::Calendar(transmute_response(self.response))
             }
             MethodObject::CalendarEvent => {
                 ChangesResponseMethod::CalendarEvent(transmute_response(self.response))
@@ -268,7 +284,6 @@ impl IntermediateChangesResponse {
                 ChangesResponseMethod::ShareNotification(transmute_response(self.response))
             }
             MethodObject::ParticipantIdentity
-            | MethodObject::Calendar
             | MethodObject::Core
             | MethodObject::Blob
             | MethodObject::PushSubscription
@@ -276,8 +291,7 @@ impl IntermediateChangesResponse {
             | MethodObject::VacationResponse
             | MethodObject::SieveScript
             | MethodObject::Principal
-            | MethodObject::Quota
-            | MethodObject::AddressBook => unreachable!(),
+            | MethodObject::Quota => unreachable!(),
         })
     }
 }

@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::collections::HashSet;
-
 use super::{
     ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarPreferences, ArchivedDefaultAlert,
     ArchivedTimezone, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert, Timezone,
@@ -21,9 +19,10 @@ use calcard::icalendar::{
 use common::storage::index::{
     IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
 };
+use nlp::tokenizers::word::WordTokenizer;
+use std::collections::HashSet;
 use store::backend::MAX_TOKEN_LENGTH;
 use types::{acl::AclGrant, collection::SyncCollection, field::CalendarField};
-use utils::sanitize_email;
 
 impl IndexableObject for Calendar {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -97,13 +96,6 @@ impl IndexableObject for CalendarEvent {
                 field: CalendarField::Text.into(),
                 value: self
                     .text()
-                    .filter_map(|v| {
-                        if let Some(email) = v.strip_prefix("mailto:") {
-                            sanitize_email(email)
-                        } else {
-                            Some(v.to_lowercase())
-                        }
-                    })
                     .map(Into::into)
                     .collect::<HashSet<IndexItem>>()
                     .into_iter()
@@ -148,13 +140,6 @@ impl IndexableObject for &ArchivedCalendarEvent {
                 field: CalendarField::Text.into(),
                 value: self
                     .text()
-                    .filter_map(|v| {
-                        if let Some(email) = v.strip_prefix("mailto:") {
-                            sanitize_email(email)
-                        } else {
-                            Some(v.to_lowercase())
-                        }
-                    })
                     .map(Into::into)
                     .collect::<HashSet<IndexItem>>()
                     .into_iter()
@@ -308,7 +293,7 @@ impl ArchivedDefaultAlert {
 }
 
 impl CalendarEvent {
-    pub fn text(&self) -> impl Iterator<Item = &str> {
+    pub fn text(&self) -> impl Iterator<Item = String> {
         self.data
             .event
             .components
@@ -342,13 +327,15 @@ impl CalendarEvent {
                         _ => None,
                     }))
             })
-            .flat_map(str::split_whitespace)
-            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
+            .flat_map(|v| {
+                WordTokenizer::new(v.strip_prefix("mailto:").unwrap_or(v), MAX_TOKEN_LENGTH)
+            })
+            .map(|t| t.word.into_owned())
     }
 }
 
 impl ArchivedCalendarEvent {
-    pub fn text(&self) -> impl Iterator<Item = &str> {
+    pub fn text(&self) -> impl Iterator<Item = String> {
         self.data
             .event
             .components
@@ -382,7 +369,9 @@ impl ArchivedCalendarEvent {
                         _ => None,
                     }))
             })
-            .flat_map(str::split_whitespace)
-            .filter(|s| s.len() < MAX_TOKEN_LENGTH)
+            .flat_map(|v| {
+                WordTokenizer::new(v.strip_prefix("mailto:").unwrap_or(v), MAX_TOKEN_LENGTH)
+            })
+            .map(|t| t.word.into_owned())
     }
 }
