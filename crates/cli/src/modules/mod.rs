@@ -239,13 +239,11 @@ pub async fn name_to_id(client: &Client, name: &str) -> String {
 pub fn host(url: &str) -> Option<&str> {
     url.split_once("://")
         .map(|(_, url)| url.split_once('/').map_or(url, |(host, _)| host))
+        .map(|host| host.rsplit_once(':').map_or(host, |(host, _)| host))
 }
 
 pub fn is_localhost(url: &str) -> bool {
-    host(url).is_some_and(|host| {
-        let host = host.rsplit_once(':').map_or(host, |(host, _)| host);
-        host == "localhost" || host == "127.0.0.1" || host == "[::1]"
-    })
+    host(url).is_some_and(|host| host == "localhost" || host == "127.0.0.1" || host == "[::1]")
 }
 
 pub trait OAuthResponse {
