@@ -160,7 +160,11 @@ impl MailboxQuery for Server {
             result_set.apply_mask(mailboxes.shared_mailboxes(access_token, Acl::Read));
         }
         let (mut response, mut paginate) = self
-            .build_query_response(&result_set, mailboxes.get_state(true), &request)
+            .build_query_response(
+                result_set.results.len() as usize,
+                mailboxes.get_state(true),
+                &request,
+            )
             .await?;
 
         // Filter as tree

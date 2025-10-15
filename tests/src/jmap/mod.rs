@@ -65,6 +65,7 @@ pub mod contacts;
 pub mod core;
 pub mod files;
 pub mod mail;
+pub mod principal;
 pub mod server;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -106,12 +107,15 @@ async fn jmap_tests() {
     server::purge::test(&mut params).await;
     server::enterprise::test(&mut params).await;*/
 
-    //contacts::addressbook::test(&mut params).await;
-    //contacts::contact::test(&mut params).await;
+    /*contacts::addressbook::test(&mut params).await;
+    contacts::contact::test(&mut params).await;
     contacts::acl::test(&mut params).await;
 
-    //files::node::test(&mut params).await;
-    files::acl::test(&mut params).await;
+    files::node::test(&mut params).await;
+    files::acl::test(&mut params).await;*/
+
+    //calendar::calendars::test(&mut params).await;
+    calendar::event::test(&mut params).await;
 
     if delete {
         params.temp_dir.delete();
@@ -564,6 +568,7 @@ impl Account {
         object: impl Display,
         filter: impl IntoIterator<Item = (impl Display, impl Into<Value>)>,
         sort_by: impl IntoIterator<Item = impl Display>,
+        arguments: impl IntoIterator<Item = (impl Display, impl Into<Value>)>,
     ) -> JmapResponse {
         let filter = filter
             .into_iter()
@@ -577,15 +582,20 @@ impl Account {
                 })
             })
             .collect::<Vec<Value>>();
-        self.jmap_method_calls(json!([[
-            format!("{object}/query"),
-            {
-                "filter": filter,
-                "sort": sort_by
-            },
-            "0"
-        ]]))
-        .await
+        let arguments = [
+            ("filter".to_string(), Value::Object(filter)),
+            ("sort".to_string(), Value::Array(sort_by)),
+        ]
+        .into_iter()
+        .chain(
+            arguments
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.into())),
+        )
+        .collect::<serde_json::Map<_, _>>();
+
+        self.jmap_method_calls(json!([[format!("{object}/query"), arguments, "0"]]))
+            .await
     }
 
     pub async fn jmap_create(
@@ -798,6 +808,33 @@ impl Account {
         ]))
         .await;
     }
+
+    pub async fn destroy_all_calendars(&self) {
+        self.jmap_method_calls(json!([[
+            "Calendar/get",
+            {
+              "ids" : (),
+              "properties" : [
+                "id"
+              ]
+            },
+            "R1"
+          ],
+          [
+            "Calendar/set",
+            {
+              "#destroy" : {
+                    "resultOf": "R1",
+                    "name": "Calendar/get",
+                    "path": "/list/*/id"
+                },
+              "onDestroyRemoveEvents" : true
+            },
+            "R2"
+          ]
+        ]))
+        .await;
+    }
 }
 
 impl JmapResponse {
@@ -835,6 +872,12 @@ impl JmapResponse {
         self.0
             .pointer("/methodResponses/0/1")
             .unwrap_or_else(|| panic!("Missing method response in response: {self:?}"))
+    }
+
+    pub fn list_array(&self) -> &Value {
+        self.0
+            .pointer("/methodResponses/0/1/list")
+            .unwrap_or_else(|| panic!("Missing list in response: {self:?}"))
     }
 
     pub fn list(&self) -> &[Value] {
@@ -933,6 +976,8 @@ pub trait JmapUtils {
         self.text_field("description")
     }
 
+    fn with_property(self, field: impl Display, value: impl Into<Value>) -> Self;
+
     fn text_field(&self, field: &str) -> &str;
 
     fn assert_is_equal(&self, other: Value);
@@ -952,6 +997,14 @@ impl JmapUtils for Value {
                 serde_json::to_string_pretty(&expected).unwrap()
             );
         }
+    }
+    fn with_property(mut self, field: impl Display, value: impl Into<Value>) -> Self {
+        if let Value::Object(map) = &mut self {
+            map.insert(field.to_string(), value.into());
+        } else {
+            panic!("Not an object: {self:?}");
+        }
+        self
     }
 }
 

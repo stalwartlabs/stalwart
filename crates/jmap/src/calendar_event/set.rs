@@ -555,7 +555,7 @@ impl CalendarEventSet for Server {
                     "You are not allowed to add calendar events to calendar {}.",
                     Id::from(name.parent_id)
                 ))));
-            } else if let Some(show_with_time) = use_default_alerts
+            } else if let Some(show_without_time) = use_default_alerts
                 && let Some(_calendar) = self
                     .get_archive(account_id, Collection::Calendar, name.parent_id)
                     .await?
@@ -564,7 +564,7 @@ impl CalendarEventSet for Server {
                     _calendar
                         .unarchive::<Calendar>()
                         .caused_by(trc::location!())?
-                        .default_alerts(access_token, show_with_time)
+                        .default_alerts(access_token, !show_without_time)
                         .map(default_alert_to_ical),
                 );
             }
@@ -583,9 +583,7 @@ impl CalendarEventSet for Server {
         }
 
         // Validate UID
-        if let Err(err) =
-            assert_is_unique_uid(self, cache, account_id, &event.names, ical.uids().next()).await?
-        {
+        if let Err(err) = assert_is_unique_uid(self, account_id, ical.uids().next()).await? {
             return Ok(Err(err));
         }
 

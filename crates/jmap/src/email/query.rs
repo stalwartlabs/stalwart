@@ -325,7 +325,11 @@ impl EmailQuery for Server {
             result_set.apply_mask(cached_messages.shared_messages(access_token, Acl::ReadItems));
         }
         let (response, paginate) = self
-            .build_query_response(&result_set, cached_messages.get_state(false), &request)
+            .build_query_response(
+                result_set.results.len() as usize,
+                cached_messages.get_state(false),
+                &request,
+            )
             .await?;
 
         if let Some(paginate) = paginate {

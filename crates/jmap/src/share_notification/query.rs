@@ -123,7 +123,7 @@ impl ShareNotificationQuery for Server {
             .caused_by(trc::location!())?;
 
         let (mut response, paginate) = self
-            .build_query_response(&result_set, State::Initial, &request)
+            .build_query_response(result_set.results.len() as usize, State::Initial, &request)
             .await?;
 
         if let Some(mut paginate) = paginate {

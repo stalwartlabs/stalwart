@@ -324,14 +324,19 @@ impl AddressBookSet for Server {
             set_default = Some(id.document_id());
         }
         if let Some(default_address_book_id) = set_default {
-            batch
-                .with_account_id(account_id)
-                .with_collection(Collection::Principal)
-                .update_document(0)
-                .set(
-                    PrincipalField::DefaultAddressBookId,
-                    default_address_book_id.serialize(),
-                );
+            if response.not_created.is_empty()
+                && response.not_updated.is_empty()
+                && response.not_destroyed.is_empty()
+            {
+                batch
+                    .with_account_id(account_id)
+                    .with_collection(Collection::Principal)
+                    .update_document(0)
+                    .set(
+                        PrincipalField::DefaultAddressBookId,
+                        default_address_book_id.serialize(),
+                    );
+            }
         } else if reset_default_address_book {
             batch
                 .with_account_id(account_id)
@@ -341,13 +346,13 @@ impl AddressBookSet for Server {
         }
 
         // Write changes
-        if !batch.is_empty() {
-            let change_id = self
+        if !batch.is_empty()
+            && let Ok(change_id) = self
                 .commit_batch(batch)
                 .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
-
+                .caused_by(trc::location!())?
+                .last_change_id(account_id)
+        {
             response.new_state = State::Exact(change_id).into();
         }
 

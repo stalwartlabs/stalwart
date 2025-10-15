@@ -24,7 +24,7 @@ use jmap_proto::{
     request::{IntoValid, reference::MaybeIdReference},
     types::state::State,
 };
-use jmap_tools::{JsonPointerItem, Key, Value};
+use jmap_tools::{JsonPointerItem, Key, Map, Value};
 use rand::{Rng, distr::Alphanumeric};
 use store::{
     SerializeInfallible, ValueKey,
@@ -316,14 +316,19 @@ impl CalendarSet for Server {
             set_default = Some(id.document_id());
         }
         if let Some(default_calendar_id) = set_default {
-            batch
-                .with_account_id(account_id)
-                .with_collection(Collection::Principal)
-                .update_document(0)
-                .set(
-                    PrincipalField::DefaultCalendarId,
-                    default_calendar_id.serialize(),
-                );
+            if response.not_created.is_empty()
+                && response.not_updated.is_empty()
+                && response.not_destroyed.is_empty()
+            {
+                batch
+                    .with_account_id(account_id)
+                    .with_collection(Collection::Principal)
+                    .update_document(0)
+                    .set(
+                        PrincipalField::DefaultCalendarId,
+                        default_calendar_id.serialize(),
+                    );
+            }
         } else if reset_default_calendar {
             batch
                 .with_account_id(account_id)
@@ -333,13 +338,13 @@ impl CalendarSet for Server {
         }
 
         // Write changes
-        if !batch.is_empty() {
-            let change_id = self
+        if !batch.is_empty()
+            && let Ok(change_id) = self
                 .commit_batch(batch)
                 .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
-
+                .caused_by(trc::location!())?
+                .last_change_id(account_id)
+        {
             response.new_state = State::Exact(change_id).into();
         }
 
@@ -432,7 +437,13 @@ fn update_calendar(
                 alerts.retain(|alert| (alert.flags & ALERT_WITH_TIME != 0) != with_time);
 
                 for (key, value) in value.into_vec() {
-                    alerts.push(value_to_default_alert(key.to_string().into_owned(), value)?);
+                    if let Value::Object(value) = value {
+                        alerts.push(value_to_default_alert(
+                            key.to_string().into_owned(),
+                            value,
+                            with_time,
+                        )?);
+                    }
                 }
             }
             (CalendarProperty::ShareWith, value) => {
@@ -441,7 +452,6 @@ fn update_calendar(
             }
             (CalendarProperty::Pointer(pointer), value) => {
                 let mut ptr_iter = pointer.iter();
-                ptr_iter.next();
 
                 match ptr_iter.next() {
                     Some(JsonPointerItem::Key(Key::Property(CalendarProperty::ShareWith))) => {
@@ -455,9 +465,16 @@ fn update_calendar(
                     Some(JsonPointerItem::Key(Key::Property(
                         property @ (CalendarProperty::DefaultAlertsWithTime
                         | CalendarProperty::DefaultAlertsWithoutTime),
-                    ))) => match (ptr_iter.next(), value) {
-                        (Some(JsonPointerItem::Key(key)), value) if ptr_iter.next().is_none() => {
-                            let id = key.to_string().into_owned();
+                    ))) => match (ptr_iter.next(), ptr_iter.next()) {
+                        (
+                            Some(key @ (JsonPointerItem::Key(_) | JsonPointerItem::Number(_))),
+                            None,
+                        ) => {
+                            let id = match key {
+                                JsonPointerItem::Key(key) => key.to_string().into_owned(),
+                                JsonPointerItem::Number(n) => n.to_string(),
+                                _ => unreachable!(),
+                            };
                             let with_time =
                                 matches!(property, CalendarProperty::DefaultAlertsWithTime);
                             let alerts = &mut calendar.preferences_mut(access_token).default_alerts;
@@ -465,7 +482,9 @@ fn update_calendar(
                                 (alert.flags & ALERT_WITH_TIME != 0) != with_time || alert.id != id
                             });
 
-                            alerts.push(value_to_default_alert(id, value)?);
+                            if let Value::Object(value) = value {
+                                alerts.push(value_to_default_alert(id, value, with_time)?);
+                            }
                         }
                         _ => {
                             return Err(SetError::invalid_properties()
@@ -500,7 +519,8 @@ fn update_calendar(
 
 fn value_to_default_alert(
     id: String,
-    value: Value<'_, CalendarProperty, CalendarValue>,
+    value: Map<'_, CalendarProperty, CalendarValue>,
+    with_time: bool,
 ) -> Result<DefaultAlert, SetError<CalendarProperty>> {
     let mut alert = DefaultAlert {
         id,
@@ -508,7 +528,7 @@ fn value_to_default_alert(
     };
     let mut has_offset = false;
 
-    for (key, value) in value.into_expanded_object() {
+    for (key, value) in value.into_vec() {
         let Key::Property(key) = key else {
             continue;
         };
@@ -563,6 +583,10 @@ fn value_to_default_alert(
     }
 
     if has_offset {
+        if with_time {
+            alert.flags |= ALERT_WITH_TIME;
+        }
+
         Ok(alert)
     } else {
         Err(SetError::invalid_properties()

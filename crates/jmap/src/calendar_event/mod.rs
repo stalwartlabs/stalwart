@@ -5,7 +5,7 @@
  */
 
 use calcard::jscalendar::JSCalendarProperty;
-use common::{DavName, DavResources, Server};
+use common::Server;
 use jmap_proto::error::set::SetError;
 use store::query::Filter;
 use trc::AddContext;
@@ -56,13 +56,11 @@ impl CalendarSyntheticId for Id {
 
 pub(super) async fn assert_is_unique_uid(
     server: &Server,
-    resources: &DavResources,
     account_id: u32,
-    calendar_ids: &[DavName],
     uid: Option<&str>,
 ) -> trc::Result<Result<(), SetError<JSCalendarProperty<Id>>>> {
-    if let Some(uid) = uid {
-        let hits = server
+    if let Some(uid) = uid
+        && !server
             .store()
             .filter(
                 account_id,
@@ -70,28 +68,16 @@ pub(super) async fn assert_is_unique_uid(
                 vec![Filter::eq(CalendarField::Uid, uid.as_bytes().to_vec())],
             )
             .await
-            .caused_by(trc::location!())?;
-        if !hits.results.is_empty() {
-            for document_id in resources
-                .paths
-                .iter()
-                .filter(move |item| {
-                    item.parent_id
-                        .is_some_and(|id| calendar_ids.iter().any(|ab| ab.parent_id == id))
-                })
-                .map(|path| resources.resources[path.resource_idx].document_id)
-            {
-                if hits.results.contains(document_id) {
-                    return Ok(Err(SetError::invalid_properties()
-                        .with_property(JSCalendarProperty::Uid)
-                        .with_description(format!(
-                            "Contact with UID {uid} already exists with id {}.",
-                            Id::from(document_id)
-                        ))));
-                }
-            }
-        }
+            .caused_by(trc::location!())?
+            .results
+            .is_empty()
+    {
+        Ok(Err(SetError::invalid_properties()
+            .with_property(JSCalendarProperty::Uid)
+            .with_description(format!(
+                "An event with UID {uid} already exists.",
+            ))))
+    } else {
+        Ok(Ok(()))
     }
-
-    Ok(Ok(()))
 }

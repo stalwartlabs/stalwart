@@ -138,7 +138,7 @@ impl FileNodeQuery for Server {
         }
 
         let (response, paginate) = self
-            .build_query_response(&result_set, cache.get_state(false), &request)
+            .build_query_response(result_set.results.len() as usize, cache.get_state(false), &request)
             .await?;
 
         if let Some(paginate) = paginate {

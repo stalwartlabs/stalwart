@@ -48,19 +48,19 @@ impl CalendarEventQuery for Server {
             .then(|| cache.shared_items(access_token, [Acl::ReadItems], true));
         let default_tz = request.arguments.time_zone.unwrap_or(Tz::UTC);
         let expand_recurrences = request.arguments.expand_recurrences.unwrap_or(false);
-        let mut filter_start = None;
-        let mut filter_end = None;
+        let mut filter: Option<TimeRange> = None;
+        let mut did_filter_by_time = false;
 
         // Extract from/to arguments
         for cond in &request.filter {
             if let Filter::Property(CalendarEventFilter::After(date)) = cond {
                 if let Some(after) = local_timestamp(date, default_tz) {
-                    filter_start = Some(after);
+                    filter.get_or_insert_default().start = after;
                 }
             } else if let Filter::Property(CalendarEventFilter::Before(date)) = cond
                 && let Some(before) = local_timestamp(date, default_tz)
             {
-                filter_end = Some(before);
+                filter.get_or_insert_default().end = before;
             }
         }
 
@@ -83,52 +83,20 @@ impl CalendarEventQuery for Server {
                             ));
                         }
                     }
-                    CalendarEventFilter::After(_) => {
-                        /*
-                           The end of the event, or any recurrence of the event,
-                           in the time zone given as the "timeZone" argument,
-                           must be after this date to match the condition.
-                        */
-
-                        if let Some(filter_start) = filter_start {
-                            if let Some(filter_end) = filter_end {
-                                filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
-                                    cache.resources.iter().filter_map(|r| {
-                                        r.event_time_range().and_then(|(start, end)| {
-                                            (((filter_start < end) || (filter_start <= start))
-                                                && (filter_end > start || filter_end >= end))
-                                                .then_some(r.document_id)
-                                        })
-                                    }),
-                                )));
-                            } else {
-                                filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
-                                    cache.resources.iter().filter_map(|r| {
-                                        r.event_time_range().and_then(|(_, end)| {
-                                            (end >= filter_start).then_some(r.document_id)
-                                        })
-                                    }),
-                                )));
-                            }
-                        }
-                    }
-                    CalendarEventFilter::Before(_) => {
-                        /*
-                           The start of the event, or any recurrence of the event,
-                           in the time zone given as the "timeZone" argument,
-                           must be before this date to match the condition.
-                        */
-
-                        if filter_start.is_none()
-                            && let Some(filter_end) = filter_end
+                    CalendarEventFilter::After(_) | CalendarEventFilter::Before(_) => {
+                        if let Some(filter) = &filter
+                            && !did_filter_by_time
                         {
                             filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
                                 cache.resources.iter().filter_map(|r| {
-                                    r.event_time_range().and_then(|(start, _)| {
-                                        (start < filter_end).then_some(r.document_id)
+                                    r.event_time_range().and_then(|(start, end)| {
+                                        filter
+                                            .is_in_range(false, start, end)
+                                            .then_some(r.document_id)
                                     })
                                 }),
                             )));
+                            did_filter_by_time = true;
                         }
                     }
                     unsupported => {
@@ -152,20 +120,21 @@ impl CalendarEventQuery for Server {
             result_set.apply_mask(filter_mask);
         }
 
-        let (mut response, paginate) = self
-            .build_query_response(&result_set, cache.get_state(false), &request)
-            .await?;
-
-        if let Some(mut paginate) = paginate {
+        let num_results = result_set.results.len() as usize;
+        if num_results > 0 {
             // Extract comparators
-            let comparators = request.sort.filter(|s| !s.is_empty()).unwrap_or_default();
+            let comparators = request
+                .sort
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_default();
             if expand_recurrences {
-                let (Some(start), Some(end)) = (filter_start, filter_end) else {
+                let Some(time_range) = filter.filter(|f| f.start != i64::MIN && f.end != i64::MAX)
+                else {
                     return Err(trc::JmapEvent::InvalidArguments.into_err().details(
                         "Both 'after' and 'before' filters are required when expanding recurrences",
                     ));
                 };
-                let time_range = TimeRange { start, end };
                 let max_instances = self.core.groupware.max_ical_instances;
                 let mut results = Vec::with_capacity(result_set.results.len() as usize);
                 let has_uid_comparator = comparators
@@ -222,15 +191,15 @@ impl CalendarEventQuery for Server {
                 // Sort results
                 if !results.is_empty() {
                     results.sort_by(|a, b| {
-                        for comparator in &comparators {
+                        for comparator in comparators {
                             let ordering = a
                                 .get_property(&comparator.property)
                                 .cmp(b.get_property(&comparator.property));
 
                             let ordering = if comparator.is_ascending {
-                                ordering
-                            } else {
                                 ordering.reverse()
+                            } else {
+                                ordering
                             };
 
                             if ordering != Ordering::Equal {
@@ -242,19 +211,24 @@ impl CalendarEventQuery for Server {
                 }
 
                 // Add results
-                for result in results {
-                    if !paginate.add(result.expansion_id + 1, result.document_id) {
-                        break;
+                let (mut response, paginate) = self
+                    .build_query_response(results.len(), cache.get_state(false), &request)
+                    .await?;
+                if let Some(mut paginate) = paginate {
+                    for result in results {
+                        if !paginate.add(result.expansion_id + 1, result.document_id) {
+                            break;
+                        }
                     }
+                    response.update_results(paginate.build())?;
                 }
-                response.update_results(paginate.build())?;
 
                 Ok(response)
             } else {
                 let mut comparators_ = Vec::with_capacity(comparators.len());
 
                 for comparator in comparators {
-                    comparators_.push(match comparator.property {
+                    comparators_.push(match &comparator.property {
                         CalendarEventComparator::Uid => {
                             query::Comparator::field(CalendarField::Uid, comparator.is_ascending)
                         }
@@ -272,16 +246,31 @@ impl CalendarEventQuery for Server {
                         unsupported => {
                             return Err(trc::JmapEvent::UnsupportedSort
                                 .into_err()
-                                .details(unsupported.into_string()));
+                                .details(unsupported.clone().into_string()));
                         }
                     });
                 }
 
                 // Sort results
-                self.sort(result_set, comparators_, paginate, response)
-                    .await
+                let (response, paginate) = self
+                    .build_query_response(num_results, cache.get_state(false), &request)
+                    .await?;
+                if let Some(paginate) = paginate {
+                    self.sort(result_set, comparators_, paginate, response)
+                        .await
+                } else {
+                    Ok(response)
+                }
             }
         } else {
+            let (response, _) = self
+                .build_query_response(
+                    result_set.results.len() as usize,
+                    cache.get_state(false),
+                    &request,
+                )
+                .await?;
+
             Ok(response)
         }
     }
@@ -293,6 +282,7 @@ fn local_timestamp(dt: &JSCalendarDateTime, tz: Tz) -> Option<i64> {
         .map(|dt| dt.timestamp())
 }
 
+#[derive(Debug)]
 struct SearchResult {
     expansion_id: u32,
     document_id: u32,

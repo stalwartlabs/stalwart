@@ -345,6 +345,7 @@ impl Server {
 
     pub async fn recalculate_quota(&self, account_id: u32) -> trc::Result<()> {
         let mut quota = 0i64;
+        let todo = "include sieve scripts and calendars, contacts, files in quota";
 
         self.store()
             .iterate(

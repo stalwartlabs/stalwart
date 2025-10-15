@@ -97,11 +97,10 @@ impl JmapMethods for Server {
 
     async fn build_query_response<T: JmapObject + Sync + Send>(
         &'_ self,
-        result_set: &ResultSet,
+        total: usize,
         query_state: State,
         request: &QueryRequest<T>,
     ) -> trc::Result<(QueryResponse, Option<Pagination<'_>>)> {
-        let total = result_set.results.len() as usize;
         let (limit_total, limit) = if let Some(limit) = request.limit {
             if limit > 0 {
                 let limit = std::cmp::min(limit, self.core.jmap.query_max_results);
@@ -193,7 +192,7 @@ pub trait JmapMethods: Sync + Send {
 
     fn build_query_response<T: JmapObject + Sync + Send>(
         &'_ self,
-        result_set: &ResultSet,
+        total: usize,
         query_state: State,
         request: &QueryRequest<T>,
     ) -> impl Future<Output = trc::Result<(QueryResponse, Option<Pagination<'_>>)>> + Send;

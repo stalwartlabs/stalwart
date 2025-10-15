@@ -57,7 +57,8 @@ impl CalendarGet for Server {
         let cache = self
             .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
             .await?;
-        let calendar_ids = if access_token.is_member(account_id) {
+        let is_owner = access_token.is_member(account_id);
+        let calendar_ids = if is_owner {
             cache.document_ids(true).collect::<RoaringBitmap>()
         } else {
             cache.shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
@@ -182,7 +183,11 @@ impl CalendarGet for Server {
                                 IncludeInAvailability::from_flags(
                                     calendar.preferences(access_token).flags.to_native(),
                                 )
-                                .unwrap_or_default(),
+                                .unwrap_or(if is_owner {
+                                    IncludeInAvailability::All
+                                } else {
+                                    IncludeInAvailability::None
+                                }),
                             )),
                         );
                     }

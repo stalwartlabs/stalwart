@@ -108,7 +108,7 @@ impl EmailSubmissionQuery for Server {
 
         let (response, paginate) = self
             .build_query_response(
-                &result_set,
+                result_set.results.len() as usize,
                 self.get_state(account_id, SyncCollection::EmailSubmission)
                     .await?,
                 &request,

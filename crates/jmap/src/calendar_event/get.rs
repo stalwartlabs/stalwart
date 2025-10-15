@@ -26,12 +26,15 @@ use groupware::{
 };
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::calendar_event,
-    request::reference::MaybeResultReference,
+    object::{JmapObjectId, calendar_event},
+    request::{IntoValid, reference::MaybeResultReference},
 };
-use jmap_tools::{Map, Value};
+use jmap_tools::{Key, Map, Value};
 use std::sync::Arc;
-use store::{ahash::AHashSet, roaring::RoaringBitmap};
+use store::{
+    ahash::{AHashMap, AHashSet},
+    roaring::RoaringBitmap,
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -54,17 +57,11 @@ impl CalendarEventGet for Server {
         mut request: GetRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<calendar_event::CalendarEvent>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let return_all_properties = request
             .properties
             .as_ref()
             .is_none_or(|v| matches!(v, MaybeResultReference::Value(v) if v.is_empty()));
-        let properties = request.unwrap_properties(&[
-            JSCalendarProperty::Id,
-            JSCalendarProperty::CalendarIds,
-            JSCalendarProperty::IsDraft,
-            JSCalendarProperty::IsOrigin,
-        ]);
+        let properties = request.unwrap_properties(&[]);
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
@@ -74,14 +71,29 @@ impl CalendarEventGet for Server {
         } else {
             cache.shared_items(access_token, [Acl::ReadItems], true)
         };
-        let mut ids = if let Some(ids) = ids {
-            ids
+        let (mut ids, has_synthetic_ids) = if let Some(rr) = request.ids.take() {
+            let rr = rr.unwrap();
+            if rr.len() > self.core.jmap.get_max_objects {
+                return Err(trc::JmapEvent::RequestTooLarge.into_err());
+            }
+            let mut ids = Vec::with_capacity(rr.len());
+            let mut has_synthetic_ids = false;
+
+            for id in rr.into_valid() {
+                has_synthetic_ids |= id.is_synthetic();
+                ids.push(id);
+            }
+
+            (ids, has_synthetic_ids)
         } else {
-            calendar_event_ids
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>()
+            (
+                calendar_event_ids
+                    .iter()
+                    .take(self.core.jmap.get_max_objects)
+                    .map(Into::into)
+                    .collect::<Vec<_>>(),
+                false,
+            )
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
@@ -90,7 +102,7 @@ impl CalendarEventGet for Server {
             not_found: vec![],
         };
         let mut return_converted_props = !return_all_properties;
-        let mut return_is_orgin = OriginAddresses::None;
+        let mut return_is_origin = false;
         let mut return_utc_dates = false;
 
         let (jmap_properties, jscal_properties) = if !return_all_properties {
@@ -114,16 +126,7 @@ impl CalendarEventGet for Server {
                         jmap_properties.push(property);
                     }
                     JSCalendarProperty::IsOrigin => {
-                        if return_is_orgin.is_none() {
-                            if access_token.primary_id() == account_id {
-                                return_is_orgin = OriginAddresses::Ref(access_token);
-                            } else {
-                                return_is_orgin = OriginAddresses::Owned(
-                                    self.get_access_token(account_id).await?,
-                                );
-                            }
-                            jmap_properties.push(JSCalendarProperty::IsOrigin);
-                        }
+                        return_is_origin = true;
                     }
                     _ => {
                         if matches!(property, JSCalendarProperty::ICalComponent) {
@@ -136,11 +139,33 @@ impl CalendarEventGet for Server {
             }
             (jmap_properties, jscal_properties)
         } else {
-            (properties, vec![])
+            return_is_origin = true;
+            (
+                vec![
+                    JSCalendarProperty::Id,
+                    JSCalendarProperty::CalendarIds,
+                    JSCalendarProperty::IsDraft,
+                    JSCalendarProperty::IsOrigin,
+                ],
+                vec![],
+            )
+        };
+        let return_is_origin = if return_is_origin {
+            if access_token.primary_id() == account_id {
+                OriginAddresses::Ref(access_token)
+            } else {
+                OriginAddresses::Owned(self.get_access_token(account_id).await?)
+            }
+        } else {
+            OriginAddresses::None
         };
 
         // Sort by baseId
-        ids.sort_unstable_by_key(|id| id.document_id());
+        let mut original_order: Option<AHashMap<Id, usize>> = None;
+        if has_synthetic_ids {
+            original_order = Some(ids.iter().enumerate().map(|(i, id)| (*id, i)).collect());
+            ids.sort_unstable_by_key(|id| id.document_id());
+        }
         let mut ids = ids.into_iter().peekable();
 
         // Process arguments
@@ -403,7 +428,7 @@ impl CalendarEventGet for Server {
             }
 
             for (id, ical, expansion) in results {
-                let is_origin = return_is_orgin.addresses().is_some_and(|addresses| {
+                let is_origin = return_is_origin.addresses().is_some_and(|addresses| {
                     ical.components
                         .iter()
                         .find(|c| c.component_type.is_scheduling_object())
@@ -438,7 +463,7 @@ impl CalendarEventGet for Server {
                         }
                         JSCalendarProperty::BaseEventId => {
                             result.insert_unchecked(
-                                JSCalendarProperty::Id,
+                                JSCalendarProperty::BaseEventId,
                                 Value::Element(JSCalendarValue::Id(id.document_id().into())),
                             );
                         }
@@ -523,6 +548,20 @@ impl CalendarEventGet for Server {
             }
         }
 
+        // Restore original order
+        if let Some(original_order) = original_order {
+            response.list.sort_by_key(|obj| {
+                obj.as_object()
+                    .unwrap()
+                    .get(&Key::Property(JSCalendarProperty::<Id>::Id))
+                    .and_then(|v| v.as_element())
+                    .and_then(|v: &JSCalendarValue<Id, BlobId>| v.as_id())
+                    .and_then(|id| original_order.get(&id))
+                    .cloned()
+                    .unwrap_or(usize::MAX)
+            });
+        }
+
         Ok(response)
     }
 }
@@ -540,9 +579,5 @@ impl<'x> OriginAddresses<'x> {
             OriginAddresses::Ref(t) if !t.emails.is_empty() => Some(&t.emails),
             _ => None,
         }
-    }
-
-    fn is_none(&self) -> bool {
-        matches!(self, OriginAddresses::None)
     }
 }

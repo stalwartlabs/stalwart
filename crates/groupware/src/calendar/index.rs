@@ -282,13 +282,13 @@ impl ArchivedTimezone {
 
 impl DefaultAlert {
     pub fn size(&self) -> usize {
-        std::mem::size_of::<Self>() + self.id.len()
+        std::mem::size_of::<DefaultAlert>() + self.id.len()
     }
 }
 
 impl ArchivedDefaultAlert {
     pub fn size(&self) -> usize {
-        std::mem::size_of::<Self>() + self.id.len()
+        std::mem::size_of::<DefaultAlert>() + self.id.len()
     }
 }
 

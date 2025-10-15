@@ -49,13 +49,25 @@ pub async fn test(params: &mut JMAPTest) {
         .to_string();
 
     // Create test contacts
+    let sarah_contact = test_jscontact_1().with_property(
+        JSContactProperty::<Id>::AddressBookIds,
+        [book1_id.as_str()].into_jmap_set(),
+    );
+    let carlos_contact = test_jscontact_2().with_property(
+        JSContactProperty::<Id>::AddressBookIds,
+        [book2_id.as_str()].into_jmap_set(),
+    );
+    let acme_contact = test_jscontact_3().with_property(
+        JSContactProperty::<Id>::AddressBookIds,
+        [book1_id.as_str(), book2_id.as_str()].into_jmap_set(),
+    );
     let response = account
         .jmap_create(
             MethodObject::ContactCard,
             [
-                test_jscontact_1([book1_id.as_str()]),
-                test_jscontact_2([book2_id.as_str()]),
-                test_jscontact_3([book1_id.as_str(), book2_id.as_str()]),
+                sarah_contact.clone(),
+                carlos_contact.clone(),
+                acme_contact.clone(),
             ],
         )
         .await;
@@ -83,97 +95,18 @@ pub async fn test(params: &mut JMAPTest) {
     let response = account
         .jmap_get(
             MethodObject::ContactCard,
-            [
-                JSContactProperty::<Id>::Id,
-                JSContactProperty::AddressBookIds,
-                JSContactProperty::Name,
-            ],
+            Vec::<&str>::new(),
             [&sarah_contact_id, &carlos_contact_id, &acme_contact_id],
         )
         .await;
-
-    assert_eq!(
-        response.list()[0],
-        json!({
-          "id": &sarah_contact_id,
-          "name": {
-            "full": "Sarah Johnson",
-            "components": [
-              {
-                "kind": "surname",
-                "value": "Johnson"
-              },
-              {
-                "kind": "given",
-                "value": "Sarah"
-              },
-              {
-                "kind": "given2",
-                "value": "Marie"
-              },
-              {
-                "kind": "title",
-                "value": "Dr."
-              },
-              {
-                "kind": "credential",
-                "value": "Ph.D."
-              }
-            ],
-            "isOrdered": true
-          },
-          "addressBookIds":  {
-            &book1_id: true
-          },
-        })
+    response.list()[0].assert_is_equal(
+        sarah_contact.with_property(JSContactProperty::<Id>::Id, sarah_contact_id.as_str()),
     );
-    assert_eq!(
-        response.list()[1],
-        json!({
-          "id": &carlos_contact_id,
-          "name": {
-            "components": [
-              {
-                "kind": "surname",
-                "value": "Rodriguez-Martinez"
-              },
-              {
-                "kind": "given",
-                "value": "Carlos"
-              },
-              {
-                "kind": "given2",
-                "value": "Alberto"
-              },
-              {
-                "kind": "title",
-                "value": "Mr."
-              },
-              {
-                "kind": "credential",
-                "value": "Jr."
-              }
-            ],
-            "isOrdered": true,
-            "full": "Carlos Rodriguez-Martinez"
-          },
-          "addressBookIds": {
-            &book2_id: true
-          },
-        })
+    response.list()[1].assert_is_equal(
+        carlos_contact.with_property(JSContactProperty::<Id>::Id, carlos_contact_id.as_str()),
     );
-    assert_eq!(
-        response.list()[2],
-        json!({
-            "id": acme_contact_id,
-            "addressBookIds": {
-                &book1_id: true,
-                &book2_id: true
-            },
-            "name": {
-                "full": "Acme Business Solutions Ltd."
-            },
-        })
+    response.list()[2].assert_is_equal(
+        acme_contact.with_property(JSContactProperty::<Id>::Id, acme_contact_id.as_str()),
     );
 
     // Creating a contact without address book should fail
@@ -390,6 +323,7 @@ pub async fn test(params: &mut JMAPTest) {
                     ("email", "sarah.johnson@example.com"),
                 ],
                 ["created"],
+                Vec::<(&str, &str)>::new(),
             )
             .await
             .ids()
@@ -535,11 +469,10 @@ END:VCARD"#
     params.assert_is_empty().await;
 }
 
-fn test_jscontact_1(ids: impl IntoJmapSet) -> Value {
+fn test_jscontact_1() -> Value {
     json!({
       "uid": "urn:uuid:f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
       "@type": "Card",
-      "addressBookIds": ids.into_jmap_set(),
       "preferredLanguages": {
         "k1": {
           "language": "en",
@@ -579,7 +512,8 @@ fn test_jscontact_1(ids: impl IntoJmapSet) -> Value {
             "kind": "credential",
             "value": "Ph.D."
           }
-        ]
+        ],
+        "isOrdered": true
       },
       "cryptoKeys": {
         "k1": {
@@ -713,7 +647,8 @@ fn test_jscontact_1(ids: impl IntoJmapSet) -> Value {
             }
           ],
           "timeZone": "Etc/GMT+5",
-          "coordinates": "40.7128;-74.0060"
+          "coordinates": "40.7128;-74.0060",
+          "isOrdered": true
         },
         "k2": {
           "contexts": {
@@ -742,7 +677,8 @@ fn test_jscontact_1(ids: impl IntoJmapSet) -> Value {
               "kind": "country",
               "value": "USA"
             }
-          ]
+          ],
+          "isOrdered": true
         }
       },
       "titles": {
@@ -770,9 +706,8 @@ fn test_jscontact_1(ids: impl IntoJmapSet) -> Value {
     })
 }
 
-fn test_jscontact_2(ids: impl IntoJmapSet) -> Value {
+fn test_jscontact_2() -> Value {
     json!({
-      "addressBookIds": ids.into_jmap_set(),
       "phones": {
         "k1": {
           "number": "+34-611-234-567",
@@ -861,7 +796,8 @@ fn test_jscontact_2(ids: impl IntoJmapSet) -> Value {
             "value": "Jr."
           }
         ],
-        "full": "Carlos Rodriguez-Martinez"
+        "full": "Carlos Rodriguez-Martinez",
+        "isOrdered": true
       },
       "nicknames": {
         "k1": {
@@ -991,7 +927,8 @@ fn test_jscontact_2(ids: impl IntoJmapSet) -> Value {
             }
           ],
           "timeZone": "Etc/GMT-1",
-          "coordinates": "40.4168;-3.7038"
+          "coordinates": "40.4168;-3.7038",
+          "isOrdered": true
         },
         "k2": {
           "contexts": {
@@ -1016,7 +953,8 @@ fn test_jscontact_2(ids: impl IntoJmapSet) -> Value {
               "kind": "country",
               "value": "Spain"
             }
-          ]
+          ],
+          "isOrdered": true
         }
       },
       "organizations": {
@@ -1032,9 +970,8 @@ fn test_jscontact_2(ids: impl IntoJmapSet) -> Value {
     })
 }
 
-fn test_jscontact_3(ids: impl IntoJmapSet) -> Value {
+fn test_jscontact_3() -> Value {
     json!({
-      "addressBookIds": ids.into_jmap_set(),
       "kind": "org",
       "organizations": {
         "k1": {
@@ -1098,8 +1035,7 @@ fn test_jscontact_3(ids: impl IntoJmapSet) -> Value {
         }
       },
       "name": {
-        "full": "Acme Business Solutions Ltd.",
-        "components": []
+        "full": "Acme Business Solutions Ltd."
       },
       "notes": {
         "k1": {
@@ -1180,7 +1116,8 @@ fn test_jscontact_3(ids: impl IntoJmapSet) -> Value {
             }
           ],
           "timeZone": "Etc/UTC",
-          "coordinates": "51.5074;-0.1278"
+          "coordinates": "51.5074;-0.1278",
+          "isOrdered": true
         },
         "k2": {
           "contexts": {
@@ -1204,7 +1141,8 @@ fn test_jscontact_3(ids: impl IntoJmapSet) -> Value {
               "kind": "country",
               "value": "United Kingdom"
             }
-          ]
+          ],
+          "isOrdered": true
         }
       },
       "updated": "2023-04-15T15:30:00Z",

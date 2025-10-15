@@ -182,7 +182,7 @@ impl PrincipalQuery for Server {
         }
 
         let (response, paginate) = self
-            .build_query_response(&result_set, State::Initial, &request)
+            .build_query_response(result_set.results.len() as usize, State::Initial, &request)
             .await?;
 
         if let Some(paginate) = paginate {

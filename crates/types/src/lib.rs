@@ -37,3 +37,12 @@ impl TimeRange {
         }
     }
 }
+
+impl Default for TimeRange {
+    fn default() -> Self {
+        Self {
+            start: i64::MIN,
+            end: i64::MAX,
+        }
+    }
+}

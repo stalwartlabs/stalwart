@@ -17,7 +17,7 @@ use calcard::{
     jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType},
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 use types::{acl::Acl, id::Id};
 
 #[derive(Debug, Clone, Default)]
@@ -465,5 +465,11 @@ impl JmapObjectId for CalendarProperty {
             return true;
         }
         false
+    }
+}
+
+impl Display for CalendarProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_cow())
     }
 }
