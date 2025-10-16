@@ -1384,6 +1384,8 @@ impl Permission {
                 | Permission::DavSyncCollection
                 | Permission::DavExpandProperty
                 | Permission::DavPrincipalAcl
+                | Permission::DavPrincipalList
+                | Permission::DavPrincipalSearch
                 | Permission::DavPrincipalMatch
                 | Permission::DavPrincipalSearchPropSet
                 | Permission::DavFilePropFind
@@ -1441,6 +1443,9 @@ impl Permission {
                 | Permission::JmapFileNodeQueryChanges
                 | Permission::JmapPrincipalGetAvailability
                 | Permission::JmapPrincipalChanges
+                | Permission::JmapPrincipalQuery
+                | Permission::JmapPrincipalGet
+                | Permission::JmapPrincipalQueryChanges
                 | Permission::JmapShareNotificationGet
                 | Permission::JmapShareNotificationSet
                 | Permission::JmapShareNotificationChanges
@@ -1523,9 +1528,6 @@ impl Permission {
                 | Permission::Undelete
                 | Permission::DkimSignatureCreate
                 | Permission::DkimSignatureGet
-                | Permission::JmapPrincipalGet
-                | Permission::JmapPrincipalQueryChanges
-                | Permission::JmapPrincipalQuery
                 | Permission::ApiKeyList
                 | Permission::ApiKeyGet
                 | Permission::ApiKeyCreate

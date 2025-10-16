@@ -484,6 +484,8 @@ impl CalendarEventSet for Server {
                 )
                 .caused_by(trc::location!())?;
 
+            nudge_queue |= send_scheduling_messages;
+
             response.destroyed.push(id);
         }
 

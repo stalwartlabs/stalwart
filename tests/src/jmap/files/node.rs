@@ -10,7 +10,7 @@ use jmap_proto::{object::file_node::FileNodeProperty, request::method::MethodObj
 use serde_json::json;
 
 pub async fn test(params: &mut JMAPTest) {
-    println!("Running file storage tests...");
+    println!("Running File Storage tests...");
     let account = params.account("jdoe@example.com");
 
     // Obtain change id
@@ -42,6 +42,7 @@ pub async fn test(params: &mut JMAPTest) {
                     "parentId": "#i1",
                 }),
             ],
+            Vec::<(&str, &str)>::new(),
         )
         .await;
     let root_folder_id = response.created(0).id().to_string();
@@ -190,6 +191,7 @@ pub async fn test(params: &mut JMAPTest) {
                     "name": "..",
                 }),
             ],
+            Vec::<(&str, &str)>::new(),
         )
         .await;
     assert_eq!(

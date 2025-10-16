@@ -12,7 +12,6 @@ use crate::{
     types::date::UTCDate,
 };
 use ahash::AHashMap;
-use calcard::icalendar::ICalendarDuration;
 use serde::{Deserialize, Deserializer};
 use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
@@ -210,7 +209,7 @@ pub struct CalendarCapabilities {
     #[serde(rename(serialize = "maxDateTime"))]
     pub max_date_time: UTCDate,
     #[serde(rename(serialize = "maxExpandedQueryDuration"))]
-    pub max_expanded_query_duration: ICalendarDuration,
+    pub max_expanded_query_duration: String,
     #[serde(rename(serialize = "maxParticipantsPerEvent"))]
     pub max_participants_per_event: Option<usize>,
     #[serde(rename(serialize = "mayCreateCalendar"))]
@@ -228,7 +227,7 @@ pub struct ContactsCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PrincipalAvailabilityCapabilities {
     #[serde(rename(serialize = "maxAvailabilityDuration"))]
-    pub max_availability_duration: ICalendarDuration,
+    pub max_availability_duration: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

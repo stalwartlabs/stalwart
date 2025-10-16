@@ -107,15 +107,21 @@ async fn jmap_tests() {
     server::purge::test(&mut params).await;
     server::enterprise::test(&mut params).await;*/
 
-    /*contacts::addressbook::test(&mut params).await;
+    contacts::addressbook::test(&mut params).await;
     contacts::contact::test(&mut params).await;
     contacts::acl::test(&mut params).await;
 
     files::node::test(&mut params).await;
-    files::acl::test(&mut params).await;*/
+    files::acl::test(&mut params).await;
 
-    //calendar::calendars::test(&mut params).await;
+    calendar::calendars::test(&mut params).await;
     calendar::event::test(&mut params).await;
+    calendar::notification::test(&mut params).await;
+    calendar::identity::test(&mut params).await;
+    calendar::acl::test(&mut params).await;
+
+    principal::get::test(&mut params).await;
+    principal::availability::test(&mut params).await;
 
     if delete {
         params.temp_dir.delete();
@@ -602,8 +608,10 @@ impl Account {
         &self,
         object: impl Display,
         items: impl IntoIterator<Item = Value>,
+        arguments: impl IntoIterator<Item = (impl Display, impl Into<Value>)>,
     ) -> JmapResponse {
-        self.jmap_create_account(self, object, items).await
+        self.jmap_create_account(self, object, items, arguments)
+            .await
     }
 
     pub async fn jmap_create_account(
@@ -611,18 +619,30 @@ impl Account {
         account: &Account,
         object: impl Display,
         items: impl IntoIterator<Item = Value>,
+        arguments: impl IntoIterator<Item = (impl Display, impl Into<Value>)>,
     ) -> JmapResponse {
-        self.jmap_method_calls(json!([[
-            format!("{object}/set"),
-            {
-                "accountId": account.id_string(),
-                "create": items.into_iter().enumerate().map(|(i, item)| {
-                    (format!("i{i}"), item)
-                }).collect::<serde_json::Map<_, _>>()
-            },
-            "0"
-        ]]))
-        .await
+        let create = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| (format!("i{i}"), item))
+            .collect::<serde_json::Map<_, _>>();
+        let arguments = [
+            (
+                "accountId".to_string(),
+                Value::String(account.id_string().to_string()),
+            ),
+            ("create".to_string(), Value::Object(create)),
+        ]
+        .into_iter()
+        .chain(
+            arguments
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.into())),
+        )
+        .collect::<serde_json::Map<_, _>>();
+
+        self.jmap_method_calls(json!([[format!("{object}/set"), arguments, "0"]]))
+            .await
     }
 
     pub async fn jmap_update(
@@ -782,6 +802,38 @@ impl Account {
         )
     }
 
+    pub async fn jmap_session_object(&self) -> JmapResponse {
+        let mut headers = header::HeaderMap::new();
+
+        headers.insert(
+            header::AUTHORIZATION,
+            header::HeaderValue::from_str(&format!(
+                "Basic {}",
+                general_purpose::STANDARD.encode(format!("{}:{}", self.name(), self.secret()))
+            ))
+            .unwrap(),
+        );
+
+        JmapResponse(
+            serde_json::from_slice(
+                &reqwest::Client::builder()
+                    .danger_accept_invalid_certs(true)
+                    .timeout(Duration::from_millis(1000))
+                    .default_headers(headers)
+                    .build()
+                    .unwrap()
+                    .get("https://127.0.0.1:8899/jmap/session")
+                    .send()
+                    .await
+                    .unwrap()
+                    .bytes()
+                    .await
+                    .unwrap(),
+            )
+            .unwrap(),
+        )
+    }
+
     pub async fn destroy_all_addressbooks(&self) {
         self.jmap_method_calls(json!([[
             "AddressBook/get",
@@ -829,6 +881,32 @@ impl Account {
                     "path": "/list/*/id"
                 },
               "onDestroyRemoveEvents" : true
+            },
+            "R2"
+          ]
+        ]))
+        .await;
+    }
+
+    pub async fn destroy_all_event_notifications(&self) {
+        self.jmap_method_calls(json!([[
+            "CalendarEventNotification/get",
+            {
+              "ids" : (),
+              "properties" : [
+                "id"
+              ]
+            },
+            "R1"
+          ],
+          [
+            "CalendarEventNotification/set",
+            {
+              "#destroy" : {
+                    "resultOf": "R1",
+                    "name": "CalendarEventNotification/get",
+                    "path": "/list/*/id"
+                }
             },
             "R2"
           ]
@@ -992,7 +1070,7 @@ impl JmapUtils for Value {
     fn assert_is_equal(&self, expected: Value) {
         if self != &expected {
             panic!(
-                "Values are not equal:\nself: {}\nexpected: {}",
+                "Values are not equal:\ngot: {}\nexpected: {}",
                 serde_json::to_string_pretty(self).unwrap(),
                 serde_json::to_string_pretty(&expected).unwrap()
             );
@@ -1609,6 +1687,9 @@ vrfy = true
 
 [spam-filter]
 enable = true
+
+[sharing]
+allow-directory-query = true
 
 [tracer.console]
 type = "console"

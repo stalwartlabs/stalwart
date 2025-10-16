@@ -91,7 +91,7 @@ impl Element for PrincipalValue {
 }
 
 impl PrincipalProperty {
-    fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         hashify::tiny_map!(value.as_bytes(),
             b"id" => PrincipalProperty::Id,
             b"type" => PrincipalProperty::Type,
@@ -102,6 +102,21 @@ impl PrincipalProperty {
             b"capabilities" => PrincipalProperty::Capabilities,
             b"accounts" => PrincipalProperty::Accounts,
         )
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PrincipalProperty::Id => "id",
+            PrincipalProperty::Type => "type",
+            PrincipalProperty::Name => "name",
+            PrincipalProperty::Description => "description",
+            PrincipalProperty::Email => "email",
+            PrincipalProperty::Timezone => "timeZone",
+            PrincipalProperty::Capabilities => "capabilities",
+            PrincipalProperty::Accounts => "accounts",
+            PrincipalProperty::Capability(cap) => cap.as_str(),
+            PrincipalProperty::IdValue(_) => "",
+        }
     }
 }
 
@@ -329,5 +344,11 @@ impl JmapObjectId for PrincipalProperty {
 
     fn try_set_id(&mut self, _: AnyId) -> bool {
         false
+    }
+}
+
+impl Display for PrincipalProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }

@@ -414,7 +414,7 @@ impl JmapRight for CalendarRight {
             CalendarRight::MayUpdatePrivate => &[Acl::ModifyPrivateProperties],
             CalendarRight::MayRSVP => &[Acl::ModifyRSVP],
             CalendarRight::MayShare => &[Acl::Share],
-            CalendarRight::MayDelete => &[Acl::Delete],
+            CalendarRight::MayDelete => &[Acl::Delete, Acl::RemoveItems],
         }
     }
 

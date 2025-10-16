@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use types::{collection::SyncCollection, id::Id};
 
 pub async fn test(params: &mut JMAPTest) {
-    println!("Running tests...");
+    println!("Running Calendar Event tests...");
     let account = params.account("jdoe@example.com");
 
     // Create test calendars
@@ -42,6 +42,7 @@ pub async fn test(params: &mut JMAPTest) {
                     },
                 }),
             ],
+            Vec::<(&str, &str)>::new(),
         )
         .await;
     let calendar1_id = response.created(0).id().to_string();
@@ -86,6 +87,7 @@ pub async fn test(params: &mut JMAPTest) {
                     .with_property(JSCalendarProperty::<Id>::UseDefaultAlerts, true),
                 event_3.clone(),
             ],
+            Vec::<(&str, &str)>::new(),
         )
         .await;
     let event_1_id = response.created(0).id().to_string();
@@ -240,6 +242,7 @@ pub async fn test(params: &mut JMAPTest) {
                     "timeZone": "US/Eastern",
                     "calendarIds": {},
                 }),],
+                Vec::<(&str, &str)>::new()
             )
             .await
             .not_created(0)
@@ -262,6 +265,7 @@ pub async fn test(params: &mut JMAPTest) {
                         &calendar1_id: true
                     },
                 })],
+                Vec::<(&str, &str)>::new()
             )
             .await
             .not_created(0)
@@ -480,6 +484,7 @@ pub async fn test(params: &mut JMAPTest) {
                 JSCalendarProperty::BaseEventId,
                 JSCalendarProperty::Start,
                 JSCalendarProperty::Duration,
+                JSCalendarProperty::TimeZone,
                 JSCalendarProperty::Title,
                 JSCalendarProperty::RecurrenceId,
             ],
@@ -491,54 +496,61 @@ pub async fn test(params: &mut JMAPTest) {
           {
             "duration": "PT1H",
             "title": "Event one",
-            "start": "2006-01-02T15:00:00",
+            "start": "2006-01-02T10:00:00",
+            "timeZone": "US/Eastern",
             "id": &ids[0],
             "baseEventId": &event_1_id
           },
           {
-            "recurrenceId": "2006-01-02T17:00:00",
+            "recurrenceId": "2006-01-02T12:00:00",
             "title": "Event two",
             "duration": "PT1H",
-            "start": "2006-01-02T17:00:00",
+            "start": "2006-01-02T12:00:00",
+            "timeZone": "US/Eastern",
             "id": &ids[1],
             "baseEventId": &event_2_id
           },
           {
             "duration": "PT1H",
-            "start": "2006-01-03T17:00:00",
+            "start": "2006-01-03T12:00:00",
+            "timeZone": "US/Eastern",
             "title": "Event two",
-            "recurrenceId": "2006-01-03T17:00:00",
+            "recurrenceId": "2006-01-03T12:00:00",
             "id": &ids[2],
             "baseEventId": &event_2_id
           },
           {
-            "start": "2006-01-04T14:00:00",
+            "start": "2006-01-04T09:00:00",
+            "timeZone": "US/Eastern",
             "duration": "PT2H",
             "title": "Event three",
             "id": &ids[3],
             "baseEventId": &event_3_id
           },
           {
-            "recurrenceId": "2006-01-04T19:00:00",
+            "recurrenceId": "2006-01-04T14:00:00",
             "title": "Event two overridden",
-            "start": "2006-01-04T19:00:00",
+            "start": "2006-01-04T14:00:00",
+            "timeZone": "US/Eastern",
             "duration": "PT1H",
             "id": &ids[4],
             "baseEventId": &event_2_id
           },
           {
-            "recurrenceId": "2006-01-05T17:00:00",
+            "recurrenceId": "2006-01-05T12:00:00",
             "duration": "PT1H",
-            "start": "2006-01-05T17:00:00",
+            "timeZone": "US/Eastern",
+            "start": "2006-01-05T12:00:00",
             "title": "Event two",
             "id": &ids[5],
             "baseEventId": &event_2_id
           },
           {
-            "recurrenceId": "2006-01-06T19:00:00",
+            "recurrenceId": "2006-01-06T14:00:00",
             "duration": "PT1H",
             "title": "Event two overridden twice",
-            "start": "2006-01-06T19:00:00",
+            "timeZone": "US/Eastern",
+            "start": "2006-01-06T14:00:00",
             "id": &ids[6],
             "baseEventId": &event_2_id
           }

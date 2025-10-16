@@ -101,6 +101,7 @@ pub async fn test(params: &mut JMAPTest) {
                     }
                 }
             })],
+            Vec::<(&str, &str)>::new(),
         )
         .await
         .created(0)
@@ -333,6 +334,7 @@ pub async fn test(params: &mut JMAPTest) {
                 "timeZone": "America/New_York",
                 "duration": "PT1H"
             })],
+            Vec::<(&str, &str)>::new(),
         )
         .await
         .created(0)

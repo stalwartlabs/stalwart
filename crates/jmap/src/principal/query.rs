@@ -6,7 +6,7 @@
 
 use crate::JmapMethods;
 use common::{Server, auth::AccessToken};
-use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
+use directory::{Permission, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -15,6 +15,7 @@ use jmap_proto::{
 };
 use std::future::Future;
 use store::{query::ResultSet, roaring::RoaringBitmap};
+use trc::AddContext;
 use types::collection::Collection;
 
 pub trait PrincipalQuery: Sync + Send {
@@ -33,25 +34,41 @@ impl PrincipalQuery for Server {
         access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> trc::Result<QueryResponse> {
+        if !self.core.groupware.allow_directory_query
+            && !access_token.has_permission(Permission::IndividualList)
+        {
+            return Err(trc::JmapEvent::Forbidden
+                .into_err()
+                .details("The administrator has disabled directory queries.".to_string()));
+        }
+
         let mut result_set = ResultSet {
             account_id: request.account_id.document_id(),
             collection: Collection::Principal,
             results: RoaringBitmap::new(),
         };
         let mut is_set = true;
-        let all_ids = if access_token.tenant.is_some() {
-            self.store()
-                .list_principals(None, access_token.tenant.map(|t| t.id), &[], false, 0, 0)
-                .await?
-                .items
-                .into_iter()
-                .map(|p| p.id())
-                .collect::<RoaringBitmap>()
-        } else {
-            self.get_document_ids(u32::MAX, Collection::Principal)
-                .await?
-                .unwrap_or_default()
-        };
+        let principal_ids = self
+            .store()
+            .list_principals(
+                None,
+                access_token.tenant_id(),
+                &[
+                    Type::Individual,
+                    Type::Group,
+                    Type::Resource,
+                    Type::Location,
+                ],
+                false,
+                0,
+                0,
+            )
+            .await
+            .caused_by(trc::location!())?
+            .items
+            .into_iter()
+            .map(|p| p.id())
+            .collect::<RoaringBitmap>();
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -95,7 +112,11 @@ impl PrincipalQuery for Server {
                             .into_iter()
                             .filter_map(|id| {
                                 let id = id.document_id();
-                                if all_ids.contains(id) { Some(id) } else { None }
+                                if principal_ids.contains(id) {
+                                    Some(id)
+                                } else {
+                                    None
+                                }
                             })
                             .collect::<RoaringBitmap>();
                         if is_set {
@@ -176,9 +197,9 @@ impl PrincipalQuery for Server {
         }
 
         if is_set {
-            result_set.results = all_ids;
+            result_set.results = principal_ids;
         } else {
-            result_set.results &= all_ids;
+            result_set.results &= principal_ids;
         }
 
         let (response, paginate) = self

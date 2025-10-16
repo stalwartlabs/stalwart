@@ -1208,6 +1208,9 @@ auto-add = true
 [dav.collection]
 assisted-discovery = {ASSISTED_DISCOVERY}
 
+[sharing]
+allow-directory-query = true
+
 [store."auth"]
 type = "sqlite"
 path = "{TMP}/auth.db"

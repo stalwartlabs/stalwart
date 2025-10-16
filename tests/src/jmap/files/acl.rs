@@ -12,7 +12,7 @@ use jmap_proto::{
 use serde_json::json;
 
 pub async fn test(params: &mut JMAPTest) {
-    println!("Running file storage ACL tests...");
+    println!("Running File Storage ACL tests...");
     let john = params.account("jdoe@example.com");
     let jane = params.account("jane.smith@example.com");
     let john_id = john.id_string().to_string();
@@ -25,6 +25,7 @@ pub async fn test(params: &mut JMAPTest) {
             [json!({
                 "name": "Test #1",
             })],
+            Vec::<(&str, &str)>::new(),
         )
         .await;
     let john_folder_id = response.created(0).id().to_string();
@@ -313,6 +314,7 @@ pub async fn test(params: &mut JMAPTest) {
             [json!({
                 "name": "A new shared folder",
             })],
+            Vec::<(&str, &str)>::new()
         )
         .await
         .not_created(0)

@@ -12,7 +12,7 @@ use crate::{
 use calcard::jscalendar::JSCalendar;
 use jmap_tools::{Element, Key, Property};
 use serde::Serialize;
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 use types::{blob::BlobId, id::Id};
 
 #[derive(Debug, Clone, Default)]
@@ -396,5 +396,11 @@ impl serde::Serialize for CalendarEventNotificationType {
         S: serde::Serializer,
     {
         serializer.serialize_str(self.as_str())
+    }
+}
+
+impl Display for CalendarEventNotificationProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_cow())
     }
 }

@@ -5,7 +5,7 @@
  */
 
 use common::{Server, auth::AccessToken};
-use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
+use directory::{Permission, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::principal::{Principal, PrincipalProperty, PrincipalType, PrincipalValue},
@@ -15,7 +15,7 @@ use jmap_proto::{
 use jmap_tools::{Key, Map, Value};
 use std::future::Future;
 use store::roaring::RoaringBitmap;
-use types::collection::Collection;
+use trc::AddContext;
 
 pub trait PrincipalGet: Sync + Send {
     fn principal_get(
@@ -31,6 +31,14 @@ impl PrincipalGet for Server {
         mut request: GetRequest<Principal>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Principal>> {
+        if !self.core.groupware.allow_directory_query
+            && !access_token.has_permission(Permission::IndividualList)
+        {
+            return Err(trc::JmapEvent::Forbidden
+                .into_err()
+                .details("The administrator has disabled directory queries.".to_string()));
+        }
+
         let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             PrincipalProperty::Id,
@@ -39,19 +47,30 @@ impl PrincipalGet for Server {
             PrincipalProperty::Description,
             PrincipalProperty::Email,
         ]);
-        let principal_ids = if access_token.tenant.is_some() {
-            self.store()
-                .list_principals(None, access_token.tenant.map(|t| t.id), &[], false, 0, 0)
-                .await?
-                .items
-                .into_iter()
-                .map(|p| p.id())
-                .collect::<RoaringBitmap>()
-        } else {
-            self.get_document_ids(u32::MAX, Collection::Principal)
-                .await?
-                .unwrap_or_default()
-        };
+
+        // Return all principals
+        let principal_ids = self
+            .store()
+            .list_principals(
+                None,
+                access_token.tenant_id(),
+                &[
+                    Type::Individual,
+                    Type::Group,
+                    Type::Resource,
+                    Type::Location,
+                ],
+                false,
+                0,
+                0,
+            )
+            .await
+            .caused_by(trc::location!())?
+            .items
+            .into_iter()
+            .map(|p| p.id())
+            .collect::<RoaringBitmap>();
+
         let ids = if let Some(ids) = ids {
             ids
         } else {

@@ -28,6 +28,10 @@ TODO: Not yet implemented:
 - CalendarEvent/set
    - synthetic id update and removal
 
+- Principal/getAvailability
+  - If there are overlapping BusyPeriod time ranges with different "busyStatus" properties
+    the server MUST choose the value in the following order: confirmed > unavailable > tentative.
+  - Return event properties
 
 */
 

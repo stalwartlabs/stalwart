@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::jmap::{ChangeType, JMAPTest, JmapUtils};
 
 pub async fn test(params: &mut JMAPTest) {
-    println!("Running Address book tests...");
+    println!("Running AddressBook tests...");
     let account = params.account("jdoe@example.com");
 
     // Make sure the default address book exists
@@ -55,6 +55,7 @@ pub async fn test(params: &mut JMAPTest) {
                 "isSubscribed": true
 
             })],
+            Vec::<(&str, &str)>::new(),
         )
         .await
         .created(0)
@@ -173,6 +174,7 @@ pub async fn test(params: &mut JMAPTest) {
                 }
               }
             })],
+            Vec::<(&str, &str)>::new(),
         )
         .await
         .created(0)

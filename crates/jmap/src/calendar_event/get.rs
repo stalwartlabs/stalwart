@@ -8,7 +8,7 @@ use crate::{calendar_event::CalendarSyntheticId, changes::state::JmapCacheState}
 use calcard::{
     common::{PartialDateTime, timezone::Tz},
     icalendar::{
-        ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry,
+        ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarParameter,
         ICalendarParameterName, ICalendarParameterValue, ICalendarParticipationRole,
         ICalendarProperty, ICalendarValue,
     },
@@ -16,6 +16,7 @@ use calcard::{
         JSCalendarDateTime, JSCalendarProperty, JSCalendarValue, import::ConversionOptions,
     },
 };
+use chrono::DateTime;
 use common::{Server, auth::AccessToken};
 use groupware::{
     cache::GroupwareCache,
@@ -30,7 +31,7 @@ use jmap_proto::{
     request::{IntoValid, reference::MaybeResultReference},
 };
 use jmap_tools::{Key, Map, Value};
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use store::{
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
@@ -281,6 +282,7 @@ impl CalendarEventGet for Server {
                             is_recurrent || component.is_recurrence_override();
                         let mut has_duration = false;
                         let component_ids = &component.component_ids;
+                        let mut tz = None;
                         let mut component = ICalendarComponent {
                             component_type: component.component_type.clone(),
                             component_ids: Vec::new(),
@@ -294,7 +296,16 @@ impl CalendarEventGet for Server {
                                     | ICalendarProperty::Exrule
                                     | ICalendarProperty::Rdate
                                     | ICalendarProperty::Rrule
-                                    | ICalendarProperty::RecurrenceId => false,
+                                    | ICalendarProperty::RecurrenceId => {
+                                        if let Some(new_tz) = entry
+                                            .tz_id()
+                                            .and_then(|id| Tz::from_str(id).ok())
+                                            .filter(|tz| *tz != Tz::UTC)
+                                        {
+                                            tz = Some(new_tz);
+                                        }
+                                        false
+                                    }
                                     ICalendarProperty::Due
                                     | ICalendarProperty::Completed
                                     | ICalendarProperty::Created => is_recurrent,
@@ -307,28 +318,46 @@ impl CalendarEventGet for Server {
                                 .cloned()
                                 .collect::<Vec<_>>(),
                         };
+
+                        let tz = tz.unwrap_or(default_tz);
+                        let tz_name = tz.name().unwrap_or_default().to_string();
+
+                        let start_timestamp = DateTime::from_timestamp(expansion.start, 0)
+                            .map(|dt| dt.with_timezone(&tz))
+                            .map(|dt| dt.naive_local())
+                            .map(|dt| dt.and_utc().timestamp())
+                            .unwrap_or(expansion.start);
+
+                        let end_timestamp = DateTime::from_timestamp(expansion.end, 0)
+                            .map(|dt| dt.with_timezone(&tz))
+                            .map(|dt| dt.naive_local())
+                            .map(|dt| dt.and_utc().timestamp())
+                            .unwrap_or(expansion.end);
+
                         component.entries.push(ICalendarEntry {
                             name: ICalendarProperty::Dtstart,
-                            params: vec![],
+                            params: vec![ICalendarParameter::tzid(tz_name.clone())],
                             values: vec![ICalendarValue::PartialDateTime(Box::new(
-                                PartialDateTime::from_utc_timestamp(expansion.start),
+                                PartialDateTime::from_naive_timestamp(start_timestamp),
                             ))],
                         });
+
                         if is_recurrent_or_override {
                             component.entries.push(ICalendarEntry {
                                 name: ICalendarProperty::RecurrenceId,
-                                params: vec![],
+                                params: vec![ICalendarParameter::tzid(tz_name.clone())],
                                 values: vec![ICalendarValue::PartialDateTime(Box::new(
-                                    PartialDateTime::from_utc_timestamp(expansion.start),
+                                    PartialDateTime::from_naive_timestamp(start_timestamp),
                                 ))],
                             });
                         }
+
                         if !has_duration {
                             component.entries.push(ICalendarEntry {
                                 name: ICalendarProperty::Dtend,
-                                params: vec![],
+                                params: vec![ICalendarParameter::tzid(tz_name)],
                                 values: vec![ICalendarValue::PartialDateTime(Box::new(
-                                    PartialDateTime::from_utc_timestamp(expansion.end),
+                                    PartialDateTime::from_naive_timestamp(end_timestamp),
                                 ))],
                             });
                         }

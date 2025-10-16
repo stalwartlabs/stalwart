@@ -9,7 +9,7 @@ use crate::{
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
 };
 use jmap_tools::{Element, Key, Property};
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 use types::id::Id;
 
 #[derive(Debug, Clone, Default)]
@@ -75,6 +75,15 @@ impl ParticipantIdentityProperty {
             b"calendarAddress" => ParticipantIdentityProperty::CalendarAddress,
             b"isDefault" => ParticipantIdentityProperty::IsDefault
         )
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            ParticipantIdentityProperty::Id => "id",
+            ParticipantIdentityProperty::Name => "name",
+            ParticipantIdentityProperty::CalendarAddress => "calendarAddress",
+            ParticipantIdentityProperty::IsDefault => "isDefault",
+        }
     }
 }
 
@@ -186,5 +195,11 @@ impl JmapObjectId for ParticipantIdentityProperty {
 
     fn try_set_id(&mut self, _: AnyId) -> bool {
         false
+    }
+}
+
+impl Display for ParticipantIdentityProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
     }
 }

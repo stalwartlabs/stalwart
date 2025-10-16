@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use types::{collection::SyncCollection, id::Id};
 
 pub async fn test(params: &mut JMAPTest) {
-    println!("Running contacts tests...");
+    println!("Running Contact Card tests...");
     let account = params.account("jdoe@example.com");
 
     // Create test address books
@@ -32,6 +32,7 @@ pub async fn test(params: &mut JMAPTest) {
                     "name": "Test #2",
                 }),
             ],
+            Vec::<(&str, &str)>::new(),
         )
         .await;
     let book1_id = response.created(0).id().to_string();
@@ -69,6 +70,7 @@ pub async fn test(params: &mut JMAPTest) {
                 carlos_contact.clone(),
                 acme_contact.clone(),
             ],
+            Vec::<(&str, &str)>::new(),
         )
         .await;
     let sarah_contact_id = response.created(0).id().to_string();
@@ -120,6 +122,7 @@ pub async fn test(params: &mut JMAPTest) {
                     },
                     "addressBookIds": {},
                 }),],
+                Vec::<(&str, &str)>::new()
             )
             .await
             .not_created(0)
@@ -141,6 +144,7 @@ pub async fn test(params: &mut JMAPTest) {
                         &book1_id: true
                     },
                 }),],
+                Vec::<(&str, &str)>::new()
             )
             .await
             .not_created(0)

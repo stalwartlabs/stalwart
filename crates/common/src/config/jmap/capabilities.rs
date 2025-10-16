@@ -83,7 +83,8 @@ impl JmapConfig {
                 max_calendars_per_event: None,
                 min_date_time: UTCDate::from_timestamp(DateTime::<Utc>::MIN_UTC.timestamp()),
                 max_date_time: UTCDate::from_timestamp(DateTime::<Utc>::MAX_UTC.timestamp()),
-                max_expanded_query_duration: ICalendarDuration::from_seconds(86400 * 365),
+                max_expanded_query_duration: ICalendarDuration::from_seconds(86400 * 365)
+                    .to_string(),
                 max_participants_per_event: groupware_config.max_ical_attendees_per_instance.into(),
                 may_create_calendar: true,
             }),
@@ -152,7 +153,7 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::PrincipalsAvailability,
             Capabilities::PrincipalsAvailability(PrincipalAvailabilityCapabilities {
-                max_availability_duration: ICalendarDuration::from_seconds(86400 * 365),
+                max_availability_duration: ICalendarDuration::from_seconds(86400 * 365).to_string(),
             }),
         );
 

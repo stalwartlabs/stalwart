@@ -15,6 +15,7 @@ use calcard::{
     jscalendar::{JSCalendar, JSCalendarProperty, JSCalendarValue},
 };
 use common::{Server, TinyCalendarPreferences, auth::AccessToken};
+use directory::Permission;
 use groupware::{
     cache::GroupwareCache,
     calendar::{CALENDAR_SUBSCRIBED, CalendarEvent},
@@ -53,6 +54,14 @@ impl PrincipalGetAvailability for Server {
         request: GetAvailabilityRequest,
         access_token: &AccessToken,
     ) -> trc::Result<GetAvailabilityResponse> {
+        if !self.core.groupware.allow_directory_query
+            && !access_token.has_permission(Permission::IndividualList)
+        {
+            return Err(trc::JmapEvent::Forbidden
+                .into_err()
+                .details("The administrator has disabled directory queries.".to_string()));
+        }
+
         // Process parameters
         if !request.id.is_valid() {
             return Err(trc::JmapEvent::InvalidArguments
@@ -94,13 +103,16 @@ impl PrincipalGetAvailability for Server {
             let is_account_owner = principal_id == account_id;
             let shared_ids = if !access_token.is_member(account_id) {
                 // Condition: The user has the "mayReadFreeBusy" permission for the calendar.
-                resources
-                    .shared_containers(
-                        access_token,
-                        [Acl::ReadItems, Acl::SchedulingReadFreeBusy],
-                        true,
-                    )
-                    .into()
+                let shared_ids = resources.shared_items(
+                    access_token,
+                    [Acl::ReadItems, Acl::SchedulingReadFreeBusy],
+                    true,
+                );
+                if shared_ids.is_empty() {
+                    continue;
+                }
+
+                shared_ids.into()
             } else {
                 None
             };
@@ -158,6 +170,7 @@ impl PrincipalGetAvailability for Server {
                         IncludeInAvailability::None
                     }
                 });
+
                 if !is_subscribed || include_in_availability == IncludeInAvailability::None {
                     continue 'next_event;
                 }

@@ -17,7 +17,7 @@ use store::{
     write::{AlignedBytes, Archive, Archiver, BatchBuilder},
 };
 use trc::AddContext;
-use types::{collection::Collection, field::PrincipalField};
+use types::{collection::Collection, field::PrincipalField, id::Id};
 
 pub trait ParticipantIdentityGet: Sync + Send {
     fn participant_identity_get(
@@ -65,9 +65,11 @@ impl ParticipantIdentityGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            (0..identities.identities.len() as u32)
+            identities
+                .identities
+                .iter()
                 .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
+                .map(|i| Id::from(i.id.to_native()))
                 .collect::<Vec<_>>()
         };
 
@@ -75,15 +77,6 @@ impl ParticipantIdentityGet for Server {
             // Obtain the identity object
             let document_id = id.document_id();
             let Some(identity) = identities.identities.iter().find(|i| i.id == document_id) else {
-                response.not_found.push(id);
-                continue;
-            };
-            let _identity = if let Some(identity) = self
-                .get_archive(account_id, Collection::Identity, document_id)
-                .await?
-            {
-                identity
-            } else {
                 response.not_found.push(id);
                 continue;
             };
@@ -153,7 +146,7 @@ impl ParticipantIdentityGet for Server {
         }
 
         // Build identities
-        let identities = Archiver::new(ParticipantIdentities {
+        let identities = ParticipantIdentities {
             identities: principal
                 .emails
                 .iter()
@@ -166,16 +159,19 @@ impl ParticipantIdentityGet for Server {
                 .collect(),
             default: 0,
             default_name: principal.description.unwrap_or(principal.name),
-        })
-        .serialize()
-        .caused_by(trc::location!())?;
+        };
 
         let mut batch = BatchBuilder::new();
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Principal)
             .update_document(0)
-            .set(PrincipalField::ParticipantIdentities, identities);
+            .set(
+                PrincipalField::ParticipantIdentities,
+                Archiver::new(identities)
+                    .serialize()
+                    .caused_by(trc::location!())?,
+            );
 
         self.commit_batch(batch).await.caused_by(trc::location!())?;
 

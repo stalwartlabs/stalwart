@@ -191,7 +191,9 @@ impl PropFindRequestHandler for Server {
                             StatusCode::NOT_FOUND,
                         ));
                     } else if access_token.has_account_access(account_id)
-                        || access_token.has_permission(Permission::DavPrincipalList)
+                        || (self.core.groupware.allow_directory_query
+                            && access_token.has_permission(Permission::DavPrincipalList))
+                        || access_token.has_permission(Permission::IndividualList)
                     {
                         self.prepare_principal_propfind_response(
                             access_token,
@@ -244,7 +246,10 @@ impl PropFindRequestHandler for Server {
                     RoaringBitmap::from_iter(
                         access_token.all_ids_by_collection(resource.collection),
                     )
-                } else if access_token.has_permission(Permission::DavPrincipalList) {
+                } else if (self.core.groupware.allow_directory_query
+                    && access_token.has_permission(Permission::DavPrincipalList))
+                    || access_token.has_permission(Permission::IndividualList)
+                {
                     // Return all principals
                     let principals = self
                         .store()
