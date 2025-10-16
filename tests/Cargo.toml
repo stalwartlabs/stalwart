@@ -30,7 +30,7 @@ imap_proto = { path = "../crates/imap-proto" }
 types = { path = "../crates/types" }
 dav = { path = "../crates/dav", features = ["test_mode"] }
 dav-proto = { path = "../crates/dav-proto", features = ["test_mode"] }
-calcard = { path = "/Users/me/code/calcard", features = ["rkyv"] }
+calcard = { version = "0.3.0", features = ["rkyv"] }
 groupware = { path = "../crates/groupware", features = ["test_mode"] }
 http = { path = "../crates/http", features = ["test_mode", "enterprise"] }
 http_proto = { path = "../crates/http-proto" }

@@ -8,7 +8,7 @@ trc = { path = "../trc" }
 types = { path = "../types" }
 hashify = "0.2.6"
 quick-xml = { version = "0.38" }
-calcard = { path = "/Users/me/code/calcard", features = ["rkyv"] }
+calcard = { version = "0.3.0", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
 hyper = "1.6.0"
 rkyv = { version = "0.8.10", features = ["little_endian"] }
@@ -16,7 +16,7 @@ chrono = { version = "0.4.40", features = ["serde"], optional = true }
 compact_str = "0.9.0"
 
 [dev-dependencies]
-calcard = { path = "/Users/me/code/calcard", features = ["serde", "rkyv"] }
+calcard = { version = "0.3.0", features = ["serde", "rkyv"] }
 types = { path = "../types", features = ["test_mode"] }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
