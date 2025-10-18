@@ -66,7 +66,7 @@ impl SessionHandler for Server {
                     .unwrap_or_else(|| Id::from(*id).to_string()),
                 is_personal,
                 is_readonly,
-                Some(&[Capability::Mail, Capability::Quota, Capability::Blob]),
+                Some(&[Capability::Mail, Capability::Quota, Capability::Blob, Capability::Sieve]),
                 &self.core.jmap.capabilities.account,
             );
         }
