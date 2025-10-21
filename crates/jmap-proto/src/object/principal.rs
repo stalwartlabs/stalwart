@@ -10,7 +10,7 @@ use types::id::Id;
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::deserialize::DeserializeArguments,
+    request::{capability::Capability, deserialize::DeserializeArguments},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -25,6 +25,9 @@ pub enum PrincipalProperty {
     Email,
     Timezone,
     Capabilities,
+    Accounts,
+    IdValue(Id),
+    Capability(Capability),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -56,6 +59,9 @@ impl Property for PrincipalProperty {
             PrincipalProperty::Name => "name",
             PrincipalProperty::Timezone => "timezone",
             PrincipalProperty::Type => "type",
+            PrincipalProperty::Accounts => "accounts",
+            PrincipalProperty::Capability(cap) => cap.as_str(),
+            PrincipalProperty::IdValue(id) => return id.to_string().into(),
         }
         .into()
     }
@@ -85,16 +91,32 @@ impl Element for PrincipalValue {
 }
 
 impl PrincipalProperty {
-    fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         hashify::tiny_map!(value.as_bytes(),
             b"id" => PrincipalProperty::Id,
             b"type" => PrincipalProperty::Type,
             b"name" => PrincipalProperty::Name,
             b"description" => PrincipalProperty::Description,
             b"email" => PrincipalProperty::Email,
-            b"timezone" => PrincipalProperty::Timezone,
+            b"timeZone" => PrincipalProperty::Timezone,
             b"capabilities" => PrincipalProperty::Capabilities,
+            b"accounts" => PrincipalProperty::Accounts,
         )
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PrincipalProperty::Id => "id",
+            PrincipalProperty::Type => "type",
+            PrincipalProperty::Name => "name",
+            PrincipalProperty::Description => "description",
+            PrincipalProperty::Email => "email",
+            PrincipalProperty::Timezone => "timeZone",
+            PrincipalProperty::Capabilities => "capabilities",
+            PrincipalProperty::Accounts => "accounts",
+            PrincipalProperty::Capability(cap) => cap.as_str(),
+            PrincipalProperty::IdValue(_) => "",
+        }
     }
 }
 
@@ -117,15 +139,6 @@ impl PrincipalType {
             PrincipalType::Location => "location",
             PrincipalType::Other => "other",
         }
-    }
-}
-
-impl serde::Serialize for PrincipalProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
     }
 }
 
@@ -155,6 +168,8 @@ impl JmapObject for Principal {
     type QueryArguments = ();
 
     type CopyArguments = ();
+
+    type ParseArguments = ();
 
     const ID_PROPERTY: Self::Property = PrincipalProperty::Id;
 }
@@ -199,7 +214,7 @@ impl<'de> DeserializeArguments<'de> for PrincipalFilter {
             b"type" => {
                 *self = PrincipalFilter::Type(map.next_value()?);
             },
-            b"timezone" => {
+            b"timeZone" => {
                 *self = PrincipalFilter::Timezone(map.next_value()?);
             },
             _ => {
@@ -289,16 +304,13 @@ impl JmapObjectId for PrincipalValue {
     fn as_id_ref(&self) -> Option<&str> {
         None
     }
-}
 
-impl TryFrom<AnyId> for PrincipalValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        if let AnyId::Id(id) = value {
-            Ok(PrincipalValue::Id(id))
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = PrincipalValue::Id(id);
+            true
         } else {
-            Err(())
+            false
         }
     }
 }
@@ -314,5 +326,29 @@ impl Display for PrincipalFilter {
             PrincipalFilter::Timezone(_) => "timezone",
             PrincipalFilter::_T(other) => other,
         })
+    }
+}
+
+impl JmapObjectId for PrincipalProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
+    }
+}
+
+impl Display for PrincipalProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }

@@ -8,7 +8,7 @@ use super::{
     ArchivedCalendarEventData, ArchivedTimezone, CalendarEventData, Timezone,
     alarm::{CalendarAlarm, ExpandAlarm},
 };
-use crate::calendar::ComponentTimeRange;
+use crate::calendar::{ComponentTimeRange, alarm::CalendarAlarmType};
 use calcard::{
     common::timezone::Tz,
     icalendar::{ICalendar, ICalendarComponentType, dates::TimeOrDelta},
@@ -69,7 +69,7 @@ impl CalendarEventData {
                     .filter_map(|alarm_id| {
                         ical.component_by_id(*alarm_id).and_then(|alarm| {
                             if alarm.component_type == ICalendarComponentType::VAlarm {
-                                alarm.expand_alarm(*alarm_id, event.comp_id)
+                                alarm.expand_alarm(*alarm_id as u16, event.comp_id as u16)
                             } else {
                                 None
                             }
@@ -88,30 +88,34 @@ impl CalendarEventData {
                     if alarm_time > max {
                         max = alarm_time;
                     }
-                    if alarm.is_email_alert && alarm_time > now {
-                        if let Some(next) = next_email_alarm {
-                            if alarm_time < next.alarm_time {
-                                *next = CalendarAlarm {
-                                    alarm_id: alarm.id,
-                                    event_id: alarm.parent_id,
-                                    alarm_time,
+                    if alarm_time > now
+                        && next_email_alarm
+                            .as_ref()
+                            .is_none_or(|next| alarm_time < next.alarm_time)
+                    {
+                        *next_email_alarm = Some(CalendarAlarm {
+                            alarm_id: alarm.id,
+                            event_id: alarm.parent_id,
+                            alarm_time,
+                            typ: if alarm.is_email_alert {
+                                CalendarAlarmType::Email {
                                     event_start: start_timestamp_naive,
                                     event_end: end_timestamp_naive,
                                     event_start_tz: start_tz,
                                     event_end_tz: end_tz,
-                                };
-                            }
-                        } else {
-                            *next_email_alarm = Some(CalendarAlarm {
-                                alarm_id: alarm.id,
-                                event_id: alarm.parent_id,
-                                alarm_time,
-                                event_start: start_timestamp_naive,
-                                event_end: end_timestamp_naive,
-                                event_start_tz: start_tz,
-                                event_end_tz: end_tz,
-                            });
-                        }
+                                }
+                            } else {
+                                CalendarAlarmType::Display {
+                                    recurrence_id: if ical.components[alarm.parent_id as usize]
+                                        .is_recurrent_or_override()
+                                    {
+                                        start_timestamp_naive.into()
+                                    } else {
+                                        None
+                                    },
+                                }
+                            },
+                        });
                     }
                 }
             }
@@ -122,7 +126,7 @@ impl CalendarEventData {
                 .entry((
                     start_tz,
                     end_tz,
-                    event.comp_id,
+                    event.comp_id as u16,
                     (end_timestamp_naive - start_timestamp_naive) as i32,
                 ))
                 .or_default()

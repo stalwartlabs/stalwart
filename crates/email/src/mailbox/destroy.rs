@@ -12,7 +12,6 @@ use crate::{
 use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
 };
-use directory::Permission;
 use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, field::MailboxField};
@@ -45,17 +44,8 @@ impl MailboxDestroy for Server {
         remove_emails: bool,
     ) -> trc::Result<Result<Option<u64>, MailboxDestroyError>> {
         // Internal folders cannot be deleted
-        #[cfg(feature = "test_mode")]
-        if [INBOX_ID, TRASH_ID].contains(&document_id)
-            && !access_token.has_permission(Permission::DeleteSystemFolders)
-        {
-            return Ok(Err(MailboxDestroyError::CannotDestroy));
-        }
-
         #[cfg(not(feature = "test_mode"))]
-        if [INBOX_ID, TRASH_ID, JUNK_ID].contains(&document_id)
-            && !access_token.has_permission(Permission::DeleteSystemFolders)
-        {
+        if [INBOX_ID, TRASH_ID, JUNK_ID].contains(&document_id) {
             return Ok(Err(MailboxDestroyError::CannotDestroy));
         }
 
@@ -159,9 +149,7 @@ impl MailboxDestroy for Server {
             // Validate ACLs
             if access_token.is_shared(account_id) {
                 let acl = mailbox.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Administer)
-                    && (!acl.contains(Acl::Delete)
-                        || (remove_emails && !acl.contains(Acl::RemoveItems)))
+                if !acl.contains(Acl::Delete) || (remove_emails && !acl.contains(Acl::RemoveItems))
                 {
                     return Ok(Err(MailboxDestroyError::Forbidden));
                 }

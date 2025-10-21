@@ -6,10 +6,11 @@
 
 use crate::scheduling::{ArchivedItipSummary, ItipMessage, ItipMessages};
 use calcard::{
-    common::PartialDateTime,
+    common::{IanaString, PartialDateTime},
     icalendar::{
         ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarMethod,
-        ICalendarParameter, ICalendarParticipationStatus, ICalendarProperty, ICalendarValue,
+        ICalendarParameter, ICalendarParameterName, ICalendarParameterValue,
+        ICalendarParticipationStatus, ICalendarProperty, ICalendarValue,
     },
 };
 use common::PROD_ID;
@@ -81,16 +82,19 @@ pub(crate) fn itip_export_component(
                 let mut rsvp = true;
 
                 for entry in &entry.params {
-                    match entry {
-                        ICalendarParameter::ScheduleStatus(_)
-                        | ICalendarParameter::ScheduleAgent(_)
-                        | ICalendarParameter::ScheduleForceSend(_) => {}
+                    match &entry.name {
+                        ICalendarParameterName::ScheduleStatus
+                        | ICalendarParameterName::ScheduleAgent
+                        | ICalendarParameterName::ScheduleForceSend => {}
                         _ => {
-                            match entry {
-                                ICalendarParameter::Rsvp(false) => {
-                                    rsvp = false;
+                            match &entry.name {
+                                ICalendarParameterName::Rsvp => {
+                                    rsvp = !matches!(
+                                        entry.value,
+                                        ICalendarParameterValue::Bool(false)
+                                    );
                                 }
-                                ICalendarParameter::Partstat(_) => {
+                                ICalendarParameterName::Partstat => {
                                     has_partstat = true;
                                 }
                                 _ => {}
@@ -104,7 +108,7 @@ pub(crate) fn itip_export_component(
                 if !has_partstat && rsvp && entry.name == ICalendarProperty::Attendee {
                     new_entry
                         .params
-                        .push(ICalendarParameter::Partstat((*partstat).clone()));
+                        .push(ICalendarParameter::partstat((*partstat).clone()));
                 }
 
                 comp.entries.push(new_entry);
@@ -123,10 +127,10 @@ pub(crate) fn itip_export_component(
                             .iter()
                             .filter(|param| {
                                 !matches!(
-                                    param,
-                                    ICalendarParameter::ScheduleStatus(_)
-                                        | ICalendarParameter::ScheduleAgent(_)
-                                        | ICalendarParameter::ScheduleForceSend(_)
+                                    &param.name,
+                                    ICalendarParameterName::ScheduleStatus
+                                        | ICalendarParameterName::ScheduleAgent
+                                        | ICalendarParameterName::ScheduleForceSend
                                 )
                             })
                             .cloned()
@@ -190,9 +194,9 @@ pub(crate) fn itip_finalize(ical: &mut ICalendar, scheduling_object_ids: &[u16])
                     entry.name,
                     ICalendarProperty::Organizer | ICalendarProperty::Attendee
                 ) {
-                    entry
-                        .params
-                        .retain(|param| !matches!(param, ICalendarParameter::ScheduleForceSend(_)));
+                    entry.params.retain(|param| {
+                        !matches!(param.name, ICalendarParameterName::ScheduleForceSend)
+                    });
                 }
             }
         }
@@ -229,7 +233,7 @@ pub(crate) fn itip_add_tz(message: &mut ICalendar, ical: &ICalendar) {
             && c.entries.iter().any(|e| {
                 e.params
                     .iter()
-                    .any(|p| matches!(p, ICalendarParameter::Tzid(_)))
+                    .any(|p| matches!(p.name, ICalendarParameterName::Tzid))
             })
     }) && !has_timezones
     {

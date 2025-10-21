@@ -14,8 +14,8 @@ RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path && \
     env CARGO_HOME=/opt/rust/cargo \
     rustup component add rustfmt
-RUN curl -LO https://github.com/apple/foundationdb/releases/download/7.1.0/foundationdb-clients_7.1.0-1_amd64.deb && \
-    dpkg -i foundationdb-clients_7.1.0-1_amd64.deb
+RUN curl -LO https://github.com/apple/foundationdb/releases/download/7.3.69/foundationdb-clients_7.3.69-1_amd64.deb && \
+    dpkg -i foundationdb-clients_7.3.69-1_amd64.deb
 RUN env CARGO_HOME=/opt/rust/cargo cargo install cargo-chef && \
     rm -rf /opt/rust/cargo/registry/
 WORKDIR /app
@@ -42,8 +42,8 @@ FROM debian:buster-slim AS runtime
 
 COPY --from=builder /app/target/release/stalwart /usr/local/bin/stalwart
 RUN apt-get update -y && apt-get install -yq ca-certificates
-RUN curl -LO https://github.com/apple/foundationdb/releases/download/7.1.0/foundationdb-clients_7.1.0-1_amd64.deb && \
-    dpkg -i foundationdb-clients_7.1.0-1_amd64.deb
+RUN curl -LO https://github.com/apple/foundationdb/releases/download/7.3.69/foundationdb-clients_7.3.69-1_amd64.deb && \
+    dpkg -i foundationdb-clients_7.3.69-1_amd64.deb
 RUN useradd stalwart -s /sbin/nologin -M
 RUN mkdir -p /opt/stalwart
 RUN chown stalwart:stalwart /opt/stalwart

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, storage::index::ObjectIndexBuilder};
+use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use directory::QueryParams;
 use email::identity::{EmailAddress, Identity};
 use jmap_proto::{
-    error::set::SetError,
+    error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
     object::identity::{self, IdentityProperty, IdentityValue},
     references::resolve::ResolveCreatedReference,
@@ -29,6 +29,7 @@ pub trait IdentitySet: Sync + Send {
     fn identity_set(
         &self,
         request: SetRequest<'_, identity::Identity>,
+        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<identity::Identity>>> + Send;
 }
 
@@ -36,6 +37,7 @@ impl IdentitySet for Server {
     async fn identity_set(
         &self,
         mut request: SetRequest<'_, identity::Identity>,
+        access_token: &AccessToken,
     ) -> trc::Result<SetResponse<identity::Identity>> {
         let account_id = request.account_id.document_id();
         let identity_ids = self
@@ -66,7 +68,7 @@ impl IdentitySet for Server {
                     .directory()
                     .query(QueryParams::id(account_id).with_return_member_of(false))
                     .await?
-                    .is_none_or(|p| !p.emails.iter().any(|e| e == &identity.email))
+                    .is_none_or(|p| !p.email_addresses().any(|e| e == &identity.email))
                 {
                     response.not_created.append(
                         id,
@@ -84,6 +86,18 @@ impl IdentitySet for Server {
                     SetError::invalid_properties()
                         .with_property(IdentityProperty::Email)
                         .with_description("Missing e-mail address."),
+                );
+                continue 'create;
+            }
+
+            // Validate quota
+            if identity_ids.len() >= access_token.object_quota(Collection::Identity) as u64 {
+                response.not_created.append(
+                    id,
+                    SetError::new(SetErrorType::OverQuota).with_description(concat!(
+                        "There are too many identities, ",
+                        "please delete some before adding a new one."
+                    )),
                 );
                 continue 'create;
             }

@@ -27,22 +27,20 @@ use crate::{
         propfind::{PrincipalPropFind, build_home_set},
     },
 };
-use calcard::common::timezone::Tz;
-use common::{
-    DavResourcePath, DavResources, Server,
-    auth::{AccessToken, AsTenantId},
-};
+use calcard::{common::timezone::Tz, icalendar::ICalendarComponentType};
+use common::{DavResourcePath, DavResources, Server, auth::AccessToken};
 use dav_proto::{
     Depth, RequestHeaders,
     parser::header::dav_base_uri,
+    requests::NsDeadProperty,
     schema::{
         Collation, Namespace,
         property::{
-            ActiveLock, CalDavProperty, CardDavProperty, DavProperty, DavValue, PrincipalProperty,
-            Privilege, ReportSet, ResourceType, Rfc1123DateTime, SupportedCollation, SupportedLock,
-            WebDavProperty,
+            ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue,
+            PrincipalProperty, Privilege, ReportSet, ResourceType, Rfc1123DateTime,
+            SupportedCollation, SupportedLock, WebDavProperty,
         },
-        request::{DavPropertyValue, DeadProperty, PropFind},
+        request::{DavDeadProperty, DavPropertyValue, PropFind},
         response::{
             AclRestrictions, BaseCondition, Href, List, MultiStatus, PropStat, Response,
             SupportedPrivilege,
@@ -50,7 +48,7 @@ use dav_proto::{
     },
 };
 use directory::{Permission, Type, backend::internal::manage::ManageDirectory};
-use groupware::calendar::SCHEDULE_INBOX_ID;
+use groupware::calendar::{SCHEDULE_INBOX_ID, SupportedComponent};
 use groupware::{
     DavCalendarResource, DavResourceName, cache::GroupwareCache, calendar::ArchivedTimezone,
 };
@@ -67,7 +65,9 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    dead_property::DeadProperty,
 };
+use utils::map::bitmap::Bitmap;
 
 pub(crate) trait PropFindRequestHandler: Sync + Send {
     fn handle_propfind_request(
@@ -139,7 +139,7 @@ impl PropFindRequestHandler for Server {
                 {
                     true
                 }
-                Collection::CalendarScheduling if resource.account_id.is_some() => true,
+                Collection::CalendarEventNotification if resource.account_id.is_some() => true,
                 _ => {
                     return Err(DavErrorCondition::new(
                         StatusCode::FORBIDDEN,
@@ -156,13 +156,13 @@ impl PropFindRequestHandler for Server {
                 Collection::FileNode
                 | Collection::Calendar
                 | Collection::AddressBook
-                | Collection::CalendarScheduling => {
+                | Collection::CalendarEventNotification => {
                     // Validate permissions
                     access_token.assert_has_permission(match resource.collection {
                         Collection::FileNode => Permission::DavFilePropFind,
                         Collection::Calendar
                         | Collection::CalendarEvent
-                        | Collection::CalendarScheduling => Permission::DavCalPropFind,
+                        | Collection::CalendarEventNotification => Permission::DavCalPropFind,
                         Collection::AddressBook | Collection::ContactCard => {
                             Permission::DavCardPropFind
                         }
@@ -192,7 +192,9 @@ impl PropFindRequestHandler for Server {
                             StatusCode::NOT_FOUND,
                         ));
                     } else if access_token.has_account_access(account_id)
-                        || access_token.has_permission(Permission::DavPrincipalList)
+                        || (self.core.groupware.allow_directory_query
+                            && access_token.has_permission(Permission::DavPrincipalList))
+                        || access_token.has_permission(Permission::IndividualList)
                     {
                         self.prepare_principal_propfind_response(
                             access_token,
@@ -236,7 +238,7 @@ impl PropFindRequestHandler for Server {
                         Collection::FileNode => Permission::DavFilePropFind,
                         Collection::Calendar
                         | Collection::CalendarEvent
-                        | Collection::CalendarScheduling => Permission::DavCalPropFind,
+                        | Collection::CalendarEventNotification => Permission::DavCalPropFind,
                         Collection::AddressBook | Collection::ContactCard => {
                             Permission::DavCardPropFind
                         }
@@ -245,7 +247,10 @@ impl PropFindRequestHandler for Server {
                     RoaringBitmap::from_iter(
                         access_token.all_ids_by_collection(resource.collection),
                     )
-                } else if access_token.has_permission(Permission::DavPrincipalList) {
+                } else if (self.core.groupware.allow_directory_query
+                    && access_token.has_permission(Permission::DavPrincipalList))
+                    || access_token.has_permission(Permission::IndividualList)
+                {
                     // Return all principals
                     let principals = self
                         .store()
@@ -363,7 +368,7 @@ impl PropFindRequestHandler for Server {
                     Collection::FileNode => {
                         (FILE_CONTAINER_PROPS.as_slice(), FILE_ITEM_PROPS.as_slice())
                     }
-                    Collection::Calendar | Collection::CalendarScheduling => (
+                    Collection::Calendar | Collection::CalendarEventNotification => (
                         CALENDAR_CONTAINER_PROPS.as_slice(),
                         CALENDAR_ITEM_PROPS.as_slice(),
                     ),
@@ -408,8 +413,7 @@ impl PropFindRequestHandler for Server {
             PropFind::Prop(items) => items.clone(),
         };
 
-        let view_as_id = access_token.primary_id();
-        let is_scheduling = collection_container == Collection::CalendarScheduling;
+        let is_scheduling = collection_container == Collection::CalendarEventNotification;
         'outer: for item in paths {
             let account_id = item.account_id;
             let document_id = item.document_id;
@@ -423,7 +427,7 @@ impl PropFindRequestHandler for Server {
             let archive_;
             let archive = if is_scheduling && item.is_container {
                 archive_ = Archive::default();
-                ArchivedResource::CalendarSchedulingCollection(
+                ArchivedResource::CalendarEventNotificationCollection(
                     item.document_id == SCHEDULE_INBOX_ID,
                 )
             } else if let Some(archive) = self
@@ -461,7 +465,7 @@ impl PropFindRequestHandler for Server {
                             data.resources(self, access_token, account_id, SyncCollection::Calendar)
                                 .await
                                 .caused_by(trc::location!())?
-                                .calendar_default_tz(calendar_id)
+                                .calendar_default_tz(calendar_id, account_id)
                                 .unwrap_or(Tz::UTC)
                         } else {
                             Tz::UTC
@@ -491,7 +495,7 @@ impl PropFindRequestHandler for Server {
                             ));
                         }
                         WebDavProperty::DisplayName => {
-                            if let Some(name) = archive.display_name(view_as_id) {
+                            if let Some(name) = archive.display_name(access_token) {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
                                     DavValue::String(name.to_string()),
@@ -684,8 +688,10 @@ impl PropFindRequestHandler for Server {
                                     property.clone(),
                                     vec![SupportedPrivilege::all_scheduling_privileges(matches!(
                                         archive,
-                                        ArchivedResource::CalendarScheduling(_)
-                                            | ArchivedResource::CalendarSchedulingCollection(true)
+                                        ArchivedResource::CalendarEventNotification(_)
+                                            | ArchivedResource::CalendarEventNotificationCollection(
+                                                true
+                                            )
                                     ))],
                                 ));
                             }
@@ -695,8 +701,10 @@ impl PropFindRequestHandler for Server {
                                 Privilege::scheduling(
                                     matches!(
                                         archive,
-                                        ArchivedResource::CalendarScheduling(_)
-                                            | ArchivedResource::CalendarSchedulingCollection(true)
+                                        ArchivedResource::CalendarEventNotification(_)
+                                            | ArchivedResource::CalendarEventNotificationCollection(
+                                                true
+                                            )
                                     ),
                                     access_token.is_member(account_id),
                                 )
@@ -777,11 +785,17 @@ impl PropFindRequestHandler for Server {
                         (
                             CardDavProperty::AddressbookDescription,
                             ArchivedResource::AddressBook(book),
-                        ) if book.inner.description.is_some() => {
-                            fields.push(DavPropertyValue::new(
-                                property.clone(),
-                                book.inner.description.as_ref().unwrap().to_string(),
-                            ));
+                        ) => {
+                            if let Some(desc) =
+                                book.inner.preferences(access_token).description.as_deref()
+                            {
+                                fields.push(DavPropertyValue::new(
+                                    property.clone(),
+                                    desc.to_string(),
+                                ));
+                            } else {
+                                fields_not_found.push(DavPropertyValue::empty(property.clone()));
+                            }
                         }
                         (
                             CardDavProperty::SupportedAddressData,
@@ -844,7 +858,7 @@ impl PropFindRequestHandler for Server {
                         ) => {
                             if let Some(desc) = calendar
                                 .inner
-                                .preferences(account_id)
+                                .preferences(access_token)
                                 .description
                                 .as_deref()
                             {
@@ -861,7 +875,7 @@ impl PropFindRequestHandler for Server {
                             ArchivedResource::Calendar(calendar),
                         ) => {
                             if let ArchivedTimezone::Custom(tz) =
-                                &calendar.inner.preferences(account_id).time_zone
+                                &calendar.inner.preferences(access_token).time_zone
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
@@ -873,7 +887,7 @@ impl PropFindRequestHandler for Server {
                         }
                         (CalDavProperty::TimezoneId, ArchivedResource::Calendar(calendar)) => {
                             if let ArchivedTimezone::IANA(tz) =
-                                &calendar.inner.preferences(account_id).time_zone
+                                &calendar.inner.preferences(access_token).time_zone
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
@@ -885,11 +899,23 @@ impl PropFindRequestHandler for Server {
                         }
                         (
                             CalDavProperty::SupportedCalendarComponentSet,
-                            ArchivedResource::Calendar(_),
+                            ArchivedResource::Calendar(calendar),
                         ) => {
+                            let supported_components =
+                                calendar.inner.supported_components.to_native();
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::SupportedCalendarComponentSet,
+                                if supported_components != 0 {
+                                    DavValue::Components(List(
+                                        Bitmap::<SupportedComponent>::from(supported_components)
+                                            .into_iter()
+                                            .map(ICalendarComponentType::from)
+                                            .map(Comp)
+                                            .collect(),
+                                    ))
+                                } else {
+                                    DavValue::all_calendar_components()
+                                },
                             ));
                         }
                         (CalDavProperty::SupportedCalendarData, ArchivedResource::Calendar(_)) => {
@@ -974,11 +1000,11 @@ impl PropFindRequestHandler for Server {
                         }
                         (
                             CalDavProperty::CalendarData(_),
-                            ArchivedResource::CalendarScheduling(event),
+                            ArchivedResource::CalendarEventNotification(event),
                         ) => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::CData(event.inner.itip.to_string()),
+                                DavValue::CData(event.inner.event.to_string()),
                             ));
                         }
                         (CalDavProperty::ScheduleTag, ArchivedResource::CalendarEvent(event))
@@ -1003,7 +1029,7 @@ impl PropFindRequestHandler for Server {
                         }
                         (
                             CalDavProperty::ScheduleDefaultCalendarURL,
-                            ArchivedResource::CalendarSchedulingCollection(true),
+                            ArchivedResource::CalendarEventNotificationCollection(true),
                         ) => {
                             if let Some(default_cal) = &self.core.groupware.default_calendar_name {
                                 fields.push(DavPropertyValue::new(

@@ -5,7 +5,7 @@
  */
 
 use super::SieveScript;
-use common::{Server, auth::ResourceToken, storage::index::ObjectIndexBuilder};
+use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use store::write::BatchBuilder;
 use trc::AddContext;
 use types::{collection::Collection, field::SieveField};
@@ -13,55 +13,46 @@ use types::{collection::Collection, field::SieveField};
 pub trait SieveScriptDelete: Sync + Send {
     fn sieve_script_delete(
         &self,
-        resource_token: &ResourceToken,
+        account_id: u32,
         document_id: u32,
-        fail_if_active: bool,
+        access_token: &AccessToken,
         batch: &mut BatchBuilder,
-    ) -> impl Future<Output = trc::Result<Option<bool>>> + Send;
+    ) -> impl Future<Output = trc::Result<bool>> + Send;
 }
 
 impl SieveScriptDelete for Server {
     async fn sieve_script_delete(
         &self,
-        resource_token: &ResourceToken,
+        account_id: u32,
         document_id: u32,
-        fail_if_active: bool,
+        access_token: &AccessToken,
         batch: &mut BatchBuilder,
-    ) -> trc::Result<Option<bool>> {
+    ) -> trc::Result<bool> {
         // Fetch record
-        let account_id = resource_token.account_id;
-        let obj_ = if let Some(obj) = self
+        if let Some(obj_) = self
             .get_archive(account_id, Collection::SieveScript, document_id)
             .await?
         {
-            obj
+            // Delete record
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::SieveScript)
+                .delete_document(document_id)
+                .clear(SieveField::Ids)
+                .custom(
+                    ObjectIndexBuilder::<_, ()>::new()
+                        .with_current(
+                            obj_.to_unarchived::<SieveScript>()
+                                .caused_by(trc::location!())?,
+                        )
+                        .with_access_token(access_token),
+                )
+                .caused_by(trc::location!())?
+                .commit_point();
+
+            Ok(true)
         } else {
-            return Ok(None);
-        };
-
-        let obj = obj_
-            .to_unarchived::<SieveScript>()
-            .caused_by(trc::location!())?;
-
-        // Make sure the script is not active
-        if fail_if_active && obj.inner.is_active {
-            return Ok(Some(false));
+            Ok(false)
         }
-
-        // Delete record
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::SieveScript)
-            .delete_document(document_id)
-            .clear(SieveField::Ids)
-            .custom(
-                ObjectIndexBuilder::<_, ()>::new()
-                    .with_current(obj)
-                    .with_tenant_id(resource_token),
-            )
-            .caused_by(trc::location!())?
-            .commit_point();
-
-        Ok(Some(true))
     }
 }

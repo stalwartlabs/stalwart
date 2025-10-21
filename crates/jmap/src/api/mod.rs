@@ -5,13 +5,18 @@
  */
 
 use crate::blob::UploadResponse;
+use calcard::jscalendar::JSCalendarDateTime;
+use common::ipc::{CalendarAlert, PushNotification};
 use http_proto::{HttpResponse, JsonResponse, ToHttpResponse};
 use hyper::StatusCode;
 use jmap_proto::{
     error::request::{RequestError, RequestLimitError},
     request::capability::Session,
-    response::Response,
+    response::{Response, status::PushObject},
+    types::state::State,
 };
+use types::{id::Id, type_state::DataType};
+use utils::map::vec_map::VecMap;
 
 pub mod acl;
 pub mod auth;
@@ -116,6 +121,66 @@ impl ToRequestError for trc::Error {
                 _ => RequestError::internal_server_error(),
             },
             _ => RequestError::internal_server_error(),
+        }
+    }
+}
+
+pub(crate) trait IntoPushObject {
+    fn into_push_object(self) -> PushObject;
+}
+
+impl IntoPushObject for Vec<PushNotification> {
+    fn into_push_object(self) -> PushObject {
+        let mut changed: VecMap<Id, VecMap<DataType, State>> = VecMap::new();
+        let mut objects = Vec::with_capacity(self.len());
+        for notification in self {
+            match notification {
+                PushNotification::StateChange(state_change) => {
+                    for type_state in state_change.types {
+                        changed
+                            .get_mut_or_insert(state_change.account_id.into())
+                            .set(type_state, (state_change.change_id).into());
+                    }
+                }
+                PushNotification::CalendarAlert(calendar_alert) => {
+                    objects.push(calendar_alert.into_push_object());
+                }
+                PushNotification::EmailPush(email_push) => {
+                    let state_change = email_push.to_state_change();
+                    for type_state in state_change.types {
+                        changed
+                            .get_mut_or_insert(state_change.account_id.into())
+                            .set(type_state, state_change.change_id.into());
+                    }
+                }
+            }
+        }
+
+        if !objects.is_empty() {
+            if changed.is_empty() {
+                objects.push(PushObject::StateChange { changed });
+            }
+            if objects.len() > 1 {
+                PushObject::Group { entries: objects }
+            } else {
+                objects.into_iter().next().unwrap()
+            }
+        } else {
+            PushObject::StateChange { changed }
+        }
+    }
+}
+
+impl IntoPushObject for CalendarAlert {
+    fn into_push_object(self) -> PushObject {
+        PushObject::CalendarAlert {
+            account_id: self.account_id.into(),
+            calendar_event_id: self.event_id.into(),
+            uid: self.uid,
+            recurrence_id: self
+                .recurrence_id
+                .map(|timestamp| JSCalendarDateTime::new(timestamp, true).to_rfc3339()),
+            alert_id: self.alert_id,
         }
     }
 }

@@ -93,7 +93,7 @@ impl Server {
                             let mut role_permissions = RolePermissions::default();
 
                             // Obtain principal
-                            let mut principal = self
+                            let principal = self
                                 .store()
                                 .query(QueryParams::id(role_id).with_return_member_of(true))
                                 .await
@@ -110,9 +110,11 @@ impl Server {
                             // Add permissions
                             for permission in principal.permissions() {
                                 if permission.grant {
-                                    role_permissions.enabled.set(permission.permission.id());
+                                    role_permissions.enabled.set(permission.permission as usize);
                                 } else {
-                                    role_permissions.disabled.set(permission.permission.id());
+                                    role_permissions
+                                        .disabled
+                                        .set(permission.permission as usize);
                                 }
                             }
 
@@ -120,11 +122,10 @@ impl Server {
                             return_permissions.union(&role_permissions);
 
                             // Add parent roles
-                            if let Some(parent_role_ids) =
-                                principal.roles_mut().filter(|r| !r.is_empty())
-                            {
+                            let mut principal_roles = principal.roles().peekable();
+                            if principal_roles.peek().is_some() {
                                 role_ids_stack.push(role_ids);
-                                role_ids = std::mem::take(parent_role_ids).into_iter();
+                                role_ids = principal_roles.collect::<Vec<_>>().into_iter();
                             } else {
                                 // Cache role
                                 self.inner
@@ -168,7 +169,7 @@ fn tenant_admin_permissions() -> Arc<RolePermissions> {
     let mut permissions = RolePermissions::default();
 
     for permission_id in 0..Permission::COUNT {
-        let permission = Permission::from_id(permission_id).unwrap();
+        let permission = Permission::from_id(permission_id as u32).unwrap();
         if permission.is_tenant_admin_permission() {
             permissions.enabled.set(permission_id);
         }
@@ -181,7 +182,7 @@ fn user_permissions() -> Arc<RolePermissions> {
     let mut permissions = RolePermissions::default();
 
     for permission_id in 0..Permission::COUNT {
-        let permission = Permission::from_id(permission_id).unwrap();
+        let permission = Permission::from_id(permission_id as u32).unwrap();
         if permission.is_user_permission() {
             permissions.enabled.set(permission_id);
         }

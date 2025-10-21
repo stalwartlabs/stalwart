@@ -65,13 +65,45 @@ impl ChangesLookup for Server {
 
                 (SyncCollection::EmailSubmission, false)
             }
-            _ => {
+            MethodObject::AddressBook => {
+                access_token.assert_has_access(request.account_id, Collection::AddressBook)?;
+
+                (SyncCollection::AddressBook, true)
+            }
+            MethodObject::ContactCard => {
+                access_token.assert_has_access(request.account_id, Collection::ContactCard)?;
+
+                (SyncCollection::AddressBook, false)
+            }
+            MethodObject::FileNode => {
+                access_token.assert_has_access(request.account_id, Collection::FileNode)?;
+
+                (SyncCollection::FileNode, false)
+            }
+            MethodObject::Calendar => {
+                access_token.assert_has_access(request.account_id, Collection::Calendar)?;
+
+                (SyncCollection::Calendar, true)
+            }
+            MethodObject::CalendarEvent => {
+                access_token.assert_has_access(request.account_id, Collection::CalendarEvent)?;
+
+                (SyncCollection::Calendar, false)
+            }
+            MethodObject::CalendarEventNotification => {
                 access_token.assert_is_member(request.account_id)?;
 
+                (SyncCollection::CalendarEventNotification, false)
+            }
+            MethodObject::ShareNotification => {
+                access_token.assert_is_member(request.account_id)?;
+
+                (SyncCollection::ShareNotification, false)
+            }
+            _ => {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
             }
         };
-
         let max_changes = std::cmp::min(
             request
                 .max_changes
@@ -230,7 +262,29 @@ impl IntermediateChangesResponse {
             MethodObject::EmailSubmission => {
                 ChangesResponseMethod::EmailSubmission(transmute_response(self.response))
             }
-            MethodObject::Core
+            MethodObject::AddressBook => {
+                ChangesResponseMethod::AddressBook(transmute_response(self.response))
+            }
+            MethodObject::ContactCard => {
+                ChangesResponseMethod::ContactCard(transmute_response(self.response))
+            }
+            MethodObject::FileNode => {
+                ChangesResponseMethod::FileNode(transmute_response(self.response))
+            }
+            MethodObject::Calendar => {
+                ChangesResponseMethod::Calendar(transmute_response(self.response))
+            }
+            MethodObject::CalendarEvent => {
+                ChangesResponseMethod::CalendarEvent(transmute_response(self.response))
+            }
+            MethodObject::CalendarEventNotification => {
+                ChangesResponseMethod::CalendarEventNotification(transmute_response(self.response))
+            }
+            MethodObject::ShareNotification => {
+                ChangesResponseMethod::ShareNotification(transmute_response(self.response))
+            }
+            MethodObject::ParticipantIdentity
+            | MethodObject::Core
             | MethodObject::Blob
             | MethodObject::PushSubscription
             | MethodObject::SearchSnippet

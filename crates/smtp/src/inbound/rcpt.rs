@@ -4,24 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
+use crate::{
+    core::{Session, SessionAddress},
+    scripts::ScriptResult,
+};
 use common::{
     KV_GREYLIST, config::smtp::session::Stage, listener::SessionStream, scripts::ScriptModification,
 };
-
 use directory::backend::RcptType;
 use smtp_proto::{
     RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, RcptTo,
 };
+use std::borrow::Cow;
 use store::dispatch::lookup::KeyValue;
 use trc::{SecurityEvent, SmtpEvent};
-
-use crate::{
-    core::{Session, SessionAddress},
-    queue::DomainPart,
-    scripts::ScriptResult,
-};
+use utils::DomainPart;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_rcpt_to(&mut self, to: RcptTo<Cow<'_, str>>) -> Result<(), ()> {

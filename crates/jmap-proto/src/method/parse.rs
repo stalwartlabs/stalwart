@@ -5,10 +5,11 @@
  */
 
 use crate::{
-    object::email::{EmailProperty, EmailValue},
+    object::JmapObject,
     request::{
         MaybeInvalid,
         deserialize::{DeserializeArguments, deserialize_request},
+        reference::MaybeIdReference,
     },
 };
 use jmap_tools::Value;
@@ -16,26 +17,22 @@ use serde::{Deserialize, Deserializer};
 use types::{blob::BlobId, id::Id};
 use utils::map::vec_map::VecMap;
 
-#[derive(Debug, Clone, Default)]
-pub struct ParseEmailRequest {
+#[derive(Debug, Clone)]
+pub struct ParseRequest<T: JmapObject> {
     pub account_id: Id,
-    pub blob_ids: Vec<MaybeInvalid<BlobId>>,
-    pub properties: Option<Vec<MaybeInvalid<EmailProperty>>>,
-    pub body_properties: Option<Vec<MaybeInvalid<EmailProperty>>>,
-    pub fetch_text_body_values: Option<bool>,
-    pub fetch_html_body_values: Option<bool>,
-    pub fetch_all_body_values: Option<bool>,
-    pub max_body_value_bytes: Option<usize>,
+    pub blob_ids: Vec<MaybeIdReference<BlobId>>,
+    pub properties: Option<Vec<MaybeInvalid<T::Property>>>,
+    pub arguments: T::ParseArguments,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ParseEmailResponse {
+pub struct ParseResponse<T: JmapObject> {
     #[serde(rename = "accountId")]
     pub account_id: Id,
 
     #[serde(rename = "parsed")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub parsed: VecMap<BlobId, Value<'static, EmailProperty, EmailValue>>,
+    pub parsed: VecMap<BlobId, Value<'static, T::Property, T::Element>>,
 
     #[serde(rename = "notParsable")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -46,7 +43,7 @@ pub struct ParseEmailResponse {
     pub not_found: Vec<BlobId>,
 }
 
-impl<'de> DeserializeArguments<'de> for ParseEmailRequest {
+impl<'de, T: JmapObject> DeserializeArguments<'de> for ParseRequest<T> {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
         A: serde::de::MapAccess<'de>,
@@ -61,23 +58,8 @@ impl<'de> DeserializeArguments<'de> for ParseEmailRequest {
             b"properties" => {
                 self.properties = map.next_value()?;
             },
-            b"bodyProperties" => {
-                self.body_properties = map.next_value()?;
-            },
-            b"fetchTextBodyValues" => {
-                self.fetch_text_body_values = map.next_value()?;
-            },
-            b"fetchHTMLBodyValues" => {
-                self.fetch_html_body_values = map.next_value()?;
-            },
-            b"fetchAllBodyValues" => {
-                self.fetch_all_body_values = map.next_value()?;
-            },
-            b"maxBodyValueBytes" => {
-                self.max_body_value_bytes = map.next_value()?;
-            },
             _ => {
-                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                self.arguments.deserialize_argument(key, map)?;
             }
         );
 
@@ -85,11 +67,22 @@ impl<'de> DeserializeArguments<'de> for ParseEmailRequest {
     }
 }
 
-impl<'de> Deserialize<'de> for ParseEmailRequest {
+impl<'de, T: JmapObject> Deserialize<'de> for ParseRequest<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         deserialize_request(deserializer)
+    }
+}
+
+impl<T: JmapObject> Default for ParseRequest<T> {
+    fn default() -> Self {
+        Self {
+            account_id: Id::default(),
+            blob_ids: Vec::default(),
+            properties: None,
+            arguments: T::ParseArguments::default(),
+        }
     }
 }

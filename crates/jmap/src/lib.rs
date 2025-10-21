@@ -24,15 +24,23 @@ use store::{
 use trc::AddContext;
 use types::collection::Collection;
 
+pub mod addressbook;
 pub mod api;
 pub mod blob;
+pub mod calendar;
+pub mod calendar_event;
+pub mod calendar_event_notification;
 pub mod changes;
+pub mod contact;
 pub mod email;
+pub mod file;
 pub mod identity;
 pub mod mailbox;
+pub mod participant_identity;
 pub mod principal;
 pub mod push;
 pub mod quota;
+pub mod share_notification;
 pub mod sieve;
 pub mod submission;
 pub mod thread;
@@ -89,11 +97,10 @@ impl JmapMethods for Server {
 
     async fn build_query_response<T: JmapObject + Sync + Send>(
         &'_ self,
-        result_set: &ResultSet,
+        total: usize,
         query_state: State,
         request: &QueryRequest<T>,
     ) -> trc::Result<(QueryResponse, Option<Pagination<'_>>)> {
-        let total = result_set.results.len() as usize;
         let (limit_total, limit) = if let Some(limit) = request.limit {
             if limit > 0 {
                 let limit = std::cmp::min(limit, self.core.jmap.query_max_results);
@@ -185,7 +192,7 @@ pub trait JmapMethods: Sync + Send {
 
     fn build_query_response<T: JmapObject + Sync + Send>(
         &'_ self,
-        result_set: &ResultSet,
+        total: usize,
         query_state: State,
         request: &QueryRequest<T>,
     ) -> impl Future<Output = trc::Result<(QueryResponse, Option<Pagination<'_>>)>> + Send;
@@ -208,11 +215,7 @@ impl UpdateResults for QueryResponse {
         // Prepare response
         if sorted_results.found_anchor {
             self.position = sorted_results.position;
-            self.ids = sorted_results
-                .ids
-                .into_iter()
-                .map(|id| id.into())
-                .collect::<Vec<_>>();
+            self.ids = sorted_results.ids;
             Ok(())
         } else {
             Err(trc::JmapEvent::AnchorNotFound.into_err())

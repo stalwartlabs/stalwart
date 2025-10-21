@@ -56,6 +56,24 @@ impl SnowflakeIdGenerator {
             .and_then(|diff| Self::from_duration(Duration::from_secs(diff)))
     }
 
+    pub fn from_sequence_and_node_id(sequence: u64, node_id: Option<u64>) -> Option<u64> {
+        let node_id = node_id.unwrap_or_else(rand::random::<u64>);
+        let sequence = sequence & SEQUENCE_MASK;
+
+        (SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_EPOCH))
+            .elapsed()
+            .ok()
+            .map(|elapsed| {
+                ((elapsed.as_millis() as u64) << (SEQUENCE_LEN + NODE_ID_LEN))
+                    | (sequence << NODE_ID_LEN)
+                    | (node_id & NODE_ID_MASK)
+            })
+    }
+
+    pub fn to_timestamp(id: u64) -> u64 {
+        (id >> (SEQUENCE_LEN + NODE_ID_LEN)) / 1000 + DEFAULT_EPOCH
+    }
+
     pub fn with_node_id(node_id: u64) -> Self {
         Self {
             epoch: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_EPOCH), // 52 years after UNIX_EPOCH

@@ -66,6 +66,10 @@ impl Store {
         collection: LogCollection,
         query: Query,
     ) -> trc::Result<Changes> {
+        let is_share_log = matches!(
+            collection,
+            LogCollection::Sync(SyncCollection::ShareNotification)
+        );
         let collection = u8::from(collection);
 
         let (is_inclusive, from_change_id, to_change_id) = match query {
@@ -102,15 +106,19 @@ impl Store {
                         changelog.from_change_id = change_id;
                     }
                     changelog.to_change_id = change_id;
-                    let (has_container_changes, has_item_changes) =
-                        changelog.deserialize(value).ok_or_else(|| {
-                            trc::Error::corrupted_key(key, value.into(), trc::location!())
-                        })?;
-                    if has_container_changes {
-                        changelog.container_change_id = Some(change_id);
-                    }
-                    if has_item_changes {
-                        changelog.item_change_id = Some(change_id);
+                    if !is_share_log {
+                        let (has_container_changes, has_item_changes) =
+                            changelog.deserialize(value).ok_or_else(|| {
+                                trc::Error::corrupted_key(key, value.into(), trc::location!())
+                            })?;
+                        if has_container_changes {
+                            changelog.container_change_id = Some(change_id);
+                        }
+                        if has_item_changes {
+                            changelog.item_change_id = Some(change_id);
+                        }
+                    } else {
+                        changelog.changes.push(Change::InsertItem(change_id));
                     }
                 }
                 Ok(true)

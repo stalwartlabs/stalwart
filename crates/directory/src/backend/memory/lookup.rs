@@ -80,8 +80,8 @@ impl MemoryDirectory {
                     if let EmailType::List(uid) = item {
                         for principal in &self.principals {
                             if principal.id == *uid {
-                                if let Some(addr) = principal.emails.first() {
-                                    result.push(addr.clone())
+                                if let Some(addr) = principal.primary_email() {
+                                    result.push(addr.to_string())
                                 }
                                 break;
                             }

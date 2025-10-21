@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use imap_proto::ResponseType;
-
-use crate::jmap::delivery::SmtpConnection;
+use crate::jmap::mail::delivery::SmtpConnection;
 
 use super::{AssertResult, ImapConnection, Type};
+use imap_proto::ResponseType;
+use std::time::Duration;
 
 const SLEEP: Duration = Duration::from_millis(200);
 

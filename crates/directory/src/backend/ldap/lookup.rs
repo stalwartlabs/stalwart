@@ -214,7 +214,6 @@ impl LdapDirectory {
 
         // Query groups
         if !member_of.is_empty() && by.return_member_of {
-            let mut data = Vec::with_capacity(member_of.len());
             for mut name in member_of {
                 if name.contains('=') {
                     let (rs, _res) = conn
@@ -241,15 +240,16 @@ impl LdapDirectory {
                     }
                 }
 
-                data.push(
-                    self.data_store
-                        .get_or_create_principal_id(&name, Type::Group)
-                        .await
-                        .caused_by(trc::location!())?,
-                );
-            }
+                let account_id = self
+                    .data_store
+                    .get_or_create_principal_id(&name, Type::Group)
+                    .await
+                    .caused_by(trc::location!())?;
 
-            external_principal.data.push(PrincipalData::MemberOf(data));
+                external_principal
+                    .data
+                    .push(PrincipalData::MemberOf(account_id));
+            }
         }
 
         // Obtain account ID if not available
@@ -430,6 +430,8 @@ impl LdapMappings {
         let mut principal = Principal::new(0, Type::Individual);
         let mut role = ROLE_USER;
         let mut member_of = vec![];
+        let mut description = None;
+        let mut has_primary_email = false;
 
         for (attr, value) in entry.attrs {
             if self.attr_name.contains(&attr) {
@@ -437,7 +439,16 @@ impl LdapMappings {
                     principal.name = value.into_iter().next().unwrap_or_default();
                 } else {
                     for (idx, item) in value.into_iter().enumerate() {
-                        principal.emails.insert(0, item.to_lowercase());
+                        if !has_primary_email {
+                            has_primary_email = true;
+                            principal
+                                .data
+                                .push(PrincipalData::PrimaryEmail(item.to_lowercase()));
+                        } else {
+                            principal
+                                .data
+                                .push(PrincipalData::EmailAlias(item.to_lowercase()));
+                        }
                         if idx == 0 {
                             principal.name = item;
                         }
@@ -445,34 +456,49 @@ impl LdapMappings {
                 }
             } else if self.attr_secret.contains(&attr) {
                 for item in value {
-                    principal.secrets.push(item);
+                    principal.data.push(PrincipalData::Secret(item));
                 }
             } else if self.attr_secret_changed.contains(&attr) {
                 // Create a disabled AppPassword, used to indicate that the password has been changed
                 // but cannot be used for authentication.
                 for item in value {
-                    principal.secrets.push(format!(
+                    principal.data.push(PrincipalData::Secret(format!(
                         "$app${}$",
                         xxhash_rust::xxh3::xxh3_64(item.as_bytes())
-                    ));
+                    )));
                 }
             } else if self.attr_email_address.contains(&attr) {
                 for item in value {
-                    principal.emails.insert(0, item.to_lowercase());
+                    if !has_primary_email {
+                        has_primary_email = true;
+                        principal
+                            .data
+                            .push(PrincipalData::PrimaryEmail(item.to_lowercase()));
+                    } else {
+                        principal
+                            .data
+                            .push(PrincipalData::EmailAlias(item.to_lowercase()));
+                    }
                 }
             } else if self.attr_email_alias.contains(&attr) {
                 for item in value {
-                    principal.emails.push(item.to_lowercase());
+                    principal
+                        .data
+                        .push(PrincipalData::EmailAlias(item.to_lowercase()));
                 }
             } else if let Some(idx) = self.attr_description.iter().position(|a| a == &attr) {
-                if principal.description.is_none() || idx == 0 {
-                    principal.description = value.into_iter().next();
+                if (description.is_none() || idx == 0)
+                    && let Some(desc) = value.into_iter().next()
+                {
+                    description = Some(desc);
                 }
             } else if self.attr_groups.contains(&attr) {
                 member_of.extend(value);
             } else if self.attr_quota.contains(&attr) {
-                if let Ok(quota) = value.into_iter().next().unwrap_or_default().parse::<u64>() {
-                    principal.quota = quota.into();
+                if let Ok(quota) = value.into_iter().next().unwrap_or_default().parse::<u64>()
+                    && quota > 0
+                {
+                    principal.data.push(PrincipalData::DiskQuota(quota));
                 }
             } else if self.attr_type.contains(&attr) {
                 for value in value {
@@ -494,7 +520,11 @@ impl LdapMappings {
             }
         }
 
-        principal.data.push(PrincipalData::Roles(vec![role]));
+        if let Some(desc) = description {
+            principal.data.push(PrincipalData::Description(desc));
+        }
+
+        principal.data.push(PrincipalData::Role(role));
 
         LdapResult {
             dn: entry.dn,

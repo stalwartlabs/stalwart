@@ -590,14 +590,14 @@ impl From<Principal> for TestPrincipal {
         Self {
             id: value.id(),
             typ: value.typ(),
-            quota: value.quota(),
-            member_of: value.member_of().iter().map(|v| v.to_string()).collect(),
-            roles: value.roles().iter().map(|v| v.to_string()).collect(),
-            lists: value.lists().iter().map(|v| v.to_string()).collect(),
+            quota: value.quota().unwrap_or_default(),
+            member_of: value.member_of().map(|v| v.to_string()).collect(),
+            roles: value.roles().map(|v| v.to_string()).collect(),
+            lists: value.lists().map(|v| v.to_string()).collect(),
+            secrets: value.secrets().map(|v| v.to_string()).collect(),
+            emails: value.email_addresses().map(|v| v.to_string()).collect(),
+            description: value.description().map(|v| v.to_string()),
             name: value.name,
-            secrets: value.secrets,
-            emails: value.emails,
-            description: value.description,
         }
     }
 }

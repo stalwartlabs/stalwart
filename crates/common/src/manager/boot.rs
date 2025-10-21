@@ -14,7 +14,7 @@ use crate::{
     Caches, Core, Data, IPC_CHANNEL_BUFFER, Inner, Ipc,
     config::{network::AsnGeoLookupConfig, server::Listeners, telemetry::Telemetry},
     core::BuildServer,
-    ipc::{BroadcastEvent, HousekeeperEvent, QueueEvent, ReportingEvent, StateEvent},
+    ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEvent},
 };
 use arc_swap::ArcSwap;
 use pwhash::sha512_crypt;
@@ -42,7 +42,7 @@ pub struct BootManager {
 }
 
 pub struct IpcReceivers {
-    pub state_rx: Option<mpsc::Receiver<StateEvent>>,
+    pub push_rx: Option<mpsc::Receiver<PushEvent>>,
     pub housekeeper_rx: Option<mpsc::Receiver<HousekeeperEvent>>,
     pub queue_rx: Option<mpsc::Receiver<QueueEvent>>,
     pub report_rx: Option<mpsc::Receiver<ReportingEvent>>,
@@ -541,14 +541,14 @@ impl BootManager {
 
 pub fn build_ipc(has_pubsub: bool) -> (Ipc, IpcReceivers) {
     // Build ipc receivers
-    let (state_tx, state_rx) = mpsc::channel(IPC_CHANNEL_BUFFER);
+    let (push_tx, push_rx) = mpsc::channel(IPC_CHANNEL_BUFFER);
     let (housekeeper_tx, housekeeper_rx) = mpsc::channel(IPC_CHANNEL_BUFFER);
     let (queue_tx, queue_rx) = mpsc::channel(IPC_CHANNEL_BUFFER);
     let (report_tx, report_rx) = mpsc::channel(IPC_CHANNEL_BUFFER);
     let (broadcast_tx, broadcast_rx) = mpsc::channel(IPC_CHANNEL_BUFFER);
     (
         Ipc {
-            state_tx,
+            push_tx,
             housekeeper_tx,
             queue_tx,
             report_tx,
@@ -556,7 +556,7 @@ pub fn build_ipc(has_pubsub: bool) -> (Ipc, IpcReceivers) {
             task_tx: Arc::new(Notify::new()),
         },
         IpcReceivers {
-            state_rx: Some(state_rx),
+            push_rx: Some(push_rx),
             housekeeper_rx: Some(housekeeper_rx),
             queue_rx: Some(queue_rx),
             report_rx: Some(report_rx),

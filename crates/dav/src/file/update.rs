@@ -188,7 +188,7 @@ impl FileUpdateRequestHandler for Server {
                     ObjectIndexBuilder::new()
                         .with_current(node)
                         .with_changes(new_node)
-                        .with_tenant_id(access_token),
+                        .with_access_token(access_token),
                 )
                 .caused_by(trc::location!())?;
             let etag = batch.etag();
@@ -283,7 +283,7 @@ impl FileUpdateRequestHandler for Server {
                 .custom(
                     ObjectIndexBuilder::<(), _>::new()
                         .with_changes(node)
-                        .with_tenant_id(access_token),
+                        .with_access_token(access_token),
                 )
                 .caused_by(trc::location!())?;
             let etag = batch.etag();

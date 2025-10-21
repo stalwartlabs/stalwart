@@ -53,10 +53,18 @@ Key features:
     * Distributed virtual queues with delayed delivery, priority delivery, quotas, routing rules and throttling support.
     * Envelope rewriting and message modification.
 - **Collaboration** server:
-  - Calendaring with [CalDAV](https://datatracker.ietf.org/doc/html/rfc4791), [CalDAV Scheduling](https://datatracker.ietf.org/doc/html/rfc6638) and e-mail alarms support.
-  - Contact management with [CardDAV](https://datatracker.ietf.org/doc/html/rfc6352) support.
-  - File storage with [WebDAV](https://datatracker.ietf.org/doc/html/rfc4918) support.
-  - Sharing with [WebDAV ACL](https://datatracker.ietf.org/doc/html/rfc3744) support for fine-grained access control.
+  - Calendaring and scheduling:
+    - [CalDAV](https://datatracker.ietf.org/doc/html/rfc4791) and [CalDAV Scheduling](https://datatracker.ietf.org/doc/html/rfc6638) support.
+    - [JMAP for Calendars](https://datatracker.ietf.org/doc/html/draft-ietf-jmap-calendars-24) support.
+  - Contact management:
+    - [CardDAV](https://datatracker.ietf.org/doc/html/rfc6352) support.
+    - [JMAP for Contacts](https://datatracker.ietf.org/doc/html/rfc9610) support.
+  - File storage:
+    - [WebDAV](https://datatracker.ietf.org/doc/html/rfc4918) support.
+    - [JMAP for File Storage](https://datatracker.ietf.org/doc/html/draft-ietf-jmap-filenode-03) support.
+  - Sharing with fine-grained access controls:
+    - [WebDAV ACL](https://datatracker.ietf.org/doc/html/rfc3744) support.
+    - [JMAP Sharing](https://datatracker.ietf.org/doc/html/rfc9670) support.
 - **Spam** and **Phishing** built-in filter:
   - Comprehensive set of filtering **rules** on par with popular solutions.
   - LLM-driven spam filtering and message analysis.
@@ -135,6 +143,14 @@ All documentation is available at [stalw.art/docs](https://stalw.art/docs/instal
 If you are having problems running Stalwart, you found a bug or just have a question, do not hesitate to reach us on [GitHub Discussions](https://github.com/stalwartlabs/stalwart/discussions), [Reddit](https://www.reddit.com/r/stalwartlabs) or [Discord](https://discord.com/servers/stalwart-923615863037390889).
 Additionally you may purchase an [Enterprise License](https://stalw.art/enterprise) to obtain priority support from Stalwart Labs LLC.
 
+## Roadmap
+
+Stalwart has reached an exciting point in its journey, it’s now **feature complete**. All the core functionality and open standard email and collaboration protocols that we set out to support are in place. In other words, Stalwart already does everything you’d expect from a modern, standards-compliant mail and collaboration platform.
+
+The next major milestone is all about refinement: finalizing the database schema and focusing on performance optimizations to ensure everything runs as efficiently and reliably as possible. Once that’s done, we’ll be ready to roll out version **1.0**.
+
+Of course, development doesn’t stop there. The community has contributed hundreds of great ideas for improvements and new features, everything from subtle usability tweaks to entirely new integrations. You can see the full list of proposals over on our [GitHub issues](https://github.com/stalwartlabs/stalwart/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc+label%3Aenhancement). If there’s something you’d like to see prioritized, just give it a thumbs up as we plan to implement enhancements based on the community’s votes.
+
 ## Sponsorship
 
 Your support is crucial in helping us continue to improve the project, add new features, and maintain the highest level of quality. By [becoming a sponsor](https://opencollective.com/stalwart), you help fund the development and future of Stalwart. As a thank-you, sponsors who contribute $5 per month or more will automatically receive a [Enterprise edition](https://stalw.art/enterprise/) license. And, sponsors who contribute $30 per month or more, also have access to [Premium Support](https://stalw.art/support) from Stalwart Labs.
@@ -144,13 +160,6 @@ These are some of our open-source sponsors:
 <!-- sponsors --><a href="https://github.com/kbjr"><img src="https:&#x2F;&#x2F;github.com&#x2F;kbjr.png" width="60px" alt="User avatar: James Brumond" /></a><a href="https://github.com/MailRoute"><img src="https:&#x2F;&#x2F;github.com&#x2F;MailRoute.png" width="60px" alt="User avatar: MailRoute, Inc." /></a><a href="https://github.com/JAMflow-Cloud"><img src="https:&#x2F;&#x2F;github.com&#x2F;JAMflow-Cloud.png" width="60px" alt="User avatar: JAMflow Cloud" /></a><a href="https://github.com/starsong-consulting"><img src="https:&#x2F;&#x2F;github.com&#x2F;starsong-consulting.png" width="60px" alt="User avatar: Starsong GmbH" /></a><a href="https://github.com/mingfu-design"><img src="https:&#x2F;&#x2F;github.com&#x2F;mingfu-design.png" width="60px" alt="User avatar: Ming Fu Design Ltd. 明孚設計有限公司" /></a><a href="https://github.com/tamwuff"><img src="https:&#x2F;&#x2F;github.com&#x2F;tamwuff.png" width="60px" alt="User avatar: Tamino" /></a><a href="https://github.com/panascais"><img src="https:&#x2F;&#x2F;github.com&#x2F;panascais.png" width="60px" alt="User avatar: panascais" /></a><!-- sponsors -->
 
 <br/>If you would like to support our work, please consider [becoming a sponsor](https://opencollective.com/stalwart).
-
-## Roadmap
-
-- [ ] JMAP for Calendars, Contacts and File Storage support
-- [ ] Webmail client
-
-See the [enhancement requests](https://github.com/stalwartlabs/stalwart/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc+label%3Aenhancement) page for a full list of proposed features by the community.
 
 ## Funding
 

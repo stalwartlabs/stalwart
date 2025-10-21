@@ -316,7 +316,7 @@ CATEGORIES:Technology,B2B,Solutions,Services
 NOTE:Business hours: Mon-Fri 9:00-17:30 GMT. Closed on UK bank holidays. VAT
   Reg: GB123456789
 TZ:Z
-GEO:51.5074\;-0.1278
+GEO:51.5074;-0.1278
 KEY;TYPE=PGP:https://pgp.example.com/pks/lookup?op=get&search=info@acme-solu
  tions.example
 UID:urn:uuid:a9e95948-7b1c-46e8-bd85-c729a9e910f2

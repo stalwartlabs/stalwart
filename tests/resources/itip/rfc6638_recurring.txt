@@ -43,7 +43,7 @@ to: bernard@example.net
 summary: invite
 summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
 summary.dtstart: Time(ItipTime { start: 1243882800, tz_id: 167 })
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
 summary.summary: Text("Review Internet-Draft")
 BEGIN:VCALENDAR
 METHOD:REQUEST
@@ -54,8 +54,8 @@ SUMMARY:Review Internet-Draft
 DTEND;TZID=America/Montreal:20090601T160000
 DTSTART;TZID=America/Montreal:20090601T150000
 TRANSP:OPAQUE
-ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;RSVP=
- TRUE;PARTSTAT=NEEDS-ACTION:mailto:bernard@example.net
+ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;
+ RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:bernard@example.net
 ATTENDEE;CN="Cyrus Daboo";CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED:mailto:cyrus@e
  xample.com
 ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
@@ -181,7 +181,7 @@ to: cyrus@example.com
 summary: rsvp ACCEPTED
 summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
 summary.dtstart: Time(ItipTime { start: 1243882800, tz_id: 167 })
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
 summary.summary: Text("Review Internet-Draft")
 BEGIN:VCALENDAR
 METHOD:REPLY
@@ -191,8 +191,8 @@ BEGIN:VEVENT
 SUMMARY:Review Internet-Draft
 DTEND;TZID=America/Montreal:20090601T160000
 DTSTART;TZID=America/Montreal:20090601T150000
-ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;ROLE=
- REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
+ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;
+ ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
 ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
 UID:9263504FD3AD
 DTSTAMP:0
@@ -203,8 +203,8 @@ BEGIN:VEVENT
 SUMMARY:Review Internet-Draft
 DTEND;TZID=America/Montreal:20090602T160000
 DTSTART;TZID=America/Montreal:20090602T150000
-ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;PARTSTAT=DECLINED;ROLE=
- REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
+ATTENDEE;CN="Bernard Desruisseaux";CUTYPE=INDIVIDUAL;PARTSTAT=DECLINED;
+ ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
 ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
 RECURRENCE-ID;TZID=America/Montreal:20090602T150000
 UID:9263504FD3AD
@@ -339,7 +339,7 @@ to: cyrus@example.com
 summary: rsvp DECLINED
 summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
 summary.dtstart: Time(ItipTime { start: 1243882800, tz_id: 167 })
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
 summary.summary: Text("Review Internet-Draft")
 BEGIN:VCALENDAR
 METHOD:REPLY

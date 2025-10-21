@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{JmapMethods, changes::state::MessageCacheState};
+use crate::{JmapMethods, changes::state::JmapCacheState};
 use common::{Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use jmap_proto::{
@@ -46,8 +46,9 @@ impl MailboxQuery for Server {
                 Filter::Property(cond) => {
                     match cond {
                         MailboxFilter::ParentId(parent_id) => {
-                            let parent_id =
-                                parent_id.map(|id| id.document_id()).unwrap_or(u32::MAX);
+                            let parent_id = parent_id
+                                .and_then(|id| id.try_unwrap().map(|id| id.document_id()))
+                                .unwrap_or(u32::MAX);
                             filters.push(query::Filter::is_in_set(
                                 mailboxes
                                     .mailboxes
@@ -159,7 +160,11 @@ impl MailboxQuery for Server {
             result_set.apply_mask(mailboxes.shared_mailboxes(access_token, Acl::Read));
         }
         let (mut response, mut paginate) = self
-            .build_query_response(&result_set, mailboxes.get_state(true), &request)
+            .build_query_response(
+                result_set.results.len() as usize,
+                mailboxes.get_state(true),
+                &request,
+            )
             .await?;
 
         // Filter as tree

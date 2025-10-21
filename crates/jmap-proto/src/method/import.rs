@@ -6,6 +6,7 @@
 
 use crate::{
     error::set::SetError,
+    method::JmapDict,
     object::{
         AnyId,
         email::{EmailProperty, EmailValue},
@@ -93,13 +94,13 @@ impl<'de> DeserializeArguments<'de> for ImportEmail {
                 self.blob_id = map.next_value()?;
             },
             b"keywords" => {
-                self.keywords = map.next_value()?;
+                self.keywords = map.next_value::<JmapDict<Keyword>>()?.0;
             },
             b"receivedAt" => {
                 self.received_at = map.next_value()?;
             },
             b"mailboxIds" => {
-                self.mailbox_ids = MaybeResultReference::Value(map.next_value::<Vec<MaybeIdReference<Id>>>()?);
+                self.mailbox_ids = MaybeResultReference::Value(map.next_value::<JmapDict<MaybeIdReference<Id>>>()?.0);
             },
             b"#mailboxIds" => {
                 self.mailbox_ids = MaybeResultReference::Reference(map.next_value::<ResultReference>()?);

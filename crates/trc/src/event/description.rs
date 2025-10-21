@@ -195,6 +195,7 @@ impl TaskQueueEvent {
             TaskQueueEvent::TaskLocked => "Task is locked by another process",
             TaskQueueEvent::BlobNotFound => "Blob not found for task",
             TaskQueueEvent::MetadataNotFound => "Metadata not found for task",
+            TaskQueueEvent::TaskIgnored => "Task ignored based on current server roles",
         }
     }
 
@@ -204,6 +205,7 @@ impl TaskQueueEvent {
             TaskQueueEvent::TaskLocked => "The task id is locked by another process",
             TaskQueueEvent::BlobNotFound => "The requested blob was not found for task",
             TaskQueueEvent::MetadataNotFound => "The metadata was not found for task",
+            TaskQueueEvent::TaskIgnored => "The task was ignored based on the current server roles",
         }
     }
 }

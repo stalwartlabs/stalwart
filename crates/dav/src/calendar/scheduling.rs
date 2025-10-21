@@ -29,7 +29,7 @@ use dav_proto::{
         response::{CalCondition, Href, ScheduleResponse, ScheduleResponseItem},
     },
 };
-use groupware::{DestroyArchive, cache::GroupwareCache, calendar::CalendarScheduling};
+use groupware::{DestroyArchive, cache::GroupwareCache, calendar::CalendarEventNotification};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::{ahash::AHashMap, write::BatchBuilder};
@@ -37,7 +37,7 @@ use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
 use utils::sanitize_email;
 
-pub(crate) trait CalendarSchedulingHandler: Sync + Send {
+pub(crate) trait CalendarEventNotificationHandler: Sync + Send {
     fn handle_scheduling_get_request(
         &self,
         access_token: &AccessToken,
@@ -59,7 +59,7 @@ pub(crate) trait CalendarSchedulingHandler: Sync + Send {
     ) -> impl Future<Output = crate::Result<HttpResponse>> + Send;
 }
 
-impl CalendarSchedulingHandler for Server {
+impl CalendarEventNotificationHandler for Server {
     async fn handle_scheduling_get_request(
         &self,
         access_token: &AccessToken,
@@ -73,7 +73,11 @@ impl CalendarSchedulingHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::CalendarScheduling)
+            .fetch_dav_resources(
+                access_token,
+                account_id,
+                SyncCollection::CalendarEventNotification,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource = resources
@@ -96,14 +100,14 @@ impl CalendarSchedulingHandler for Server {
         let event_ = self
             .get_archive(
                 account_id,
-                Collection::CalendarScheduling,
+                Collection::CalendarEventNotification,
                 resource.document_id(),
             )
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
         let event = event_
-            .unarchive::<CalendarScheduling>()
+            .unarchive::<CalendarEventNotification>()
             .caused_by(trc::location!())?;
 
         // Validate headers
@@ -113,7 +117,7 @@ impl CalendarSchedulingHandler for Server {
             headers,
             vec![ResourceState {
                 account_id,
-                collection: Collection::CalendarScheduling,
+                collection: Collection::CalendarEventNotification,
                 document_id: resource.document_id().into(),
                 etag: etag.clone().into(),
                 path: resource_.resource.unwrap(),
@@ -129,7 +133,7 @@ impl CalendarSchedulingHandler for Server {
             .with_etag(etag)
             .with_last_modified(Rfc1123DateTime::new(i64::from(event.modified)).to_string());
 
-        let ical = event.itip.to_string();
+        let ical = event.event.to_string();
 
         if !is_head {
             Ok(response.with_binary_body(ical))
@@ -154,7 +158,11 @@ impl CalendarSchedulingHandler for Server {
             .filter(|r| !r.is_empty())
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::CalendarScheduling)
+            .fetch_dav_resources(
+                access_token,
+                account_id,
+                SyncCollection::CalendarEventNotification,
+            )
             .await
             .caused_by(trc::location!())?;
 
@@ -173,7 +181,11 @@ impl CalendarSchedulingHandler for Server {
 
         let document_id = resource.document_id();
         let event_ = self
-            .get_archive(account_id, Collection::CalendarScheduling, document_id)
+            .get_archive(
+                account_id,
+                Collection::CalendarEventNotification,
+                document_id,
+            )
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -184,7 +196,7 @@ impl CalendarSchedulingHandler for Server {
             headers,
             vec![ResourceState {
                 account_id,
-                collection: Collection::CalendarScheduling,
+                collection: Collection::CalendarEventNotification,
                 document_id: document_id.into(),
                 etag: event_.etag().into(),
                 path: delete_path,
@@ -196,7 +208,7 @@ impl CalendarSchedulingHandler for Server {
         .await?;
 
         let event = event_
-            .to_unarchived::<CalendarScheduling>()
+            .to_unarchived::<CalendarEventNotification>()
             .caused_by(trc::location!())?;
 
         // Delete event
@@ -282,10 +294,10 @@ impl CalendarSchedulingHandler for Server {
                 let tz_id = entry.tz_id();
                 match (&entry.name, entry.values.first()) {
                     (ICalendarProperty::Dtstart, Some(ICalendarValue::PartialDateTime(dt))) => {
-                        from_date = dt.to_date_time_with_tz(tz_resolver.resolve(tz_id));
+                        from_date = dt.to_date_time_with_tz(tz_resolver.resolve_or_default(tz_id));
                     }
                     (ICalendarProperty::Dtend, Some(ICalendarValue::PartialDateTime(dt))) => {
-                        to_date = dt.to_date_time_with_tz(tz_resolver.resolve(tz_id));
+                        to_date = dt.to_date_time_with_tz(tz_resolver.resolve_or_default(tz_id));
                     }
                     (ICalendarProperty::Uid, Some(ICalendarValue::Text(_))) => {
                         uid = Some(entry);

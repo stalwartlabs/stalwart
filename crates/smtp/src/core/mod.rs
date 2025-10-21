@@ -4,31 +4,26 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    hash::Hash,
-    net::IpAddr,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
+use crate::{inbound::auth::SaslToken, queue::QueueId};
 use common::{
     Inner, Server,
     auth::AccessToken,
     config::smtp::auth::VerifyStrategy,
     listener::{ServerInstance, asn::AsnGeoLookupResult},
 };
-
 use directory::Directory;
 use mail_auth::{IprevOutput, SpfOutput};
 use smtp_proto::request::receiver::{
     BdatReceiver, DataReceiver, DummyDataReceiver, DummyLineReceiver, LineReceiver, RequestReceiver,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
-
-use crate::{
-    inbound::auth::SaslToken,
-    queue::{DomainPart, QueueId},
+use std::{
+    hash::Hash,
+    net::IpAddr,
+    sync::Arc,
+    time::{Duration, Instant},
 };
+use tokio::io::{AsyncRead, AsyncWrite};
+use utils::DomainPart;
 
 pub mod params;
 pub mod throttle;

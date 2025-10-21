@@ -143,6 +143,7 @@ impl LanguageDetector {
                     Lang::Cat => Language::Catalan,
                     Lang::Tgl => Language::Tagalog,
                     Lang::Hye => Language::Armenian,
+                    _ => Language::Unknown,
                 },
                 info.confidence(),
             )

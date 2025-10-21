@@ -7,7 +7,7 @@
 use crate::{
     JmapMethods,
     api::acl::{JmapAcl, JmapRights},
-    changes::state::MessageCacheState,
+    changes::state::JmapCacheState,
 };
 use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
@@ -98,6 +98,18 @@ impl MailboxSet for Server {
                 continue;
             };
 
+            // Validate quota
+            if ctx.mailbox_ids.len() >= access_token.object_quota(Collection::Mailbox) as u64 {
+                ctx.response.not_created.append(
+                    id,
+                    SetError::new(SetErrorType::OverQuota).with_description(concat!(
+                        "There are too many mailboxes, ",
+                        "please delete some before adding a new one."
+                    )),
+                );
+                continue 'create;
+            }
+
             match self.mailbox_set_item(object, None, &ctx).await? {
                 Ok(builder) => {
                     batch
@@ -177,7 +189,7 @@ impl MailboxSet for Server {
                         );
                         continue 'update;
                     } else if object.contains_key(&Key::Property(MailboxProperty::ShareWith))
-                        && !acl.contains(Acl::Administer)
+                        && !acl.contains(Acl::Share)
                     {
                         ctx.response.not_updated.append(
                             id,
@@ -391,7 +403,6 @@ impl MailboxSet for Server {
                         }
                     }
                 }
-
                 (Key::Property(MailboxProperty::Pointer(pointer)), value)
                     if matches!(
                         pointer.first(),
@@ -460,7 +471,7 @@ impl MailboxSet for Server {
                         && !mailbox
                             .acls
                             .effective_acl(ctx.access_token)
-                            .contains_any([Acl::CreateChild, Acl::Administer].into_iter())
+                            .contains(Acl::CreateChild)
                     {
                         return Ok(Err(SetError::forbidden().with_description(
                             "You are not allowed to create sub mailboxes under this mailbox.",

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken};
+use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use jmap_proto::{
     error::set::SetError,
     object::{JmapRight, JmapSharedObject},
@@ -96,15 +96,20 @@ impl JmapRights {
                 .ok_or_else(|| {
                     SetError::invalid_properties()
                         .with_property(T::SHARE_WITH_PROPERTY)
-                        .with_description("Invalid permission.")
+                        .with_description(format!(
+                            "Invalid permission {:?}.",
+                            right.to_cow().unwrap_or_default()
+                        ))
                 })?
-                .to_acl();
+                .to_acl()
+                .iter()
+                .copied();
 
             if let Some(acl_item) = grants.iter_mut().find(|item| item.account_id == account_id) {
                 if is_set {
-                    acl_item.grants.insert(acl);
+                    acl_item.grants.insert_many(acl);
                 } else {
-                    acl_item.grants.remove(acl);
+                    acl_item.grants.insert_many(acl);
                     if acl_item.grants.is_empty() {
                         grants.retain(|item| item.account_id != account_id);
                     }
@@ -112,7 +117,7 @@ impl JmapRights {
             } else if is_set {
                 grants.push(AclGrant {
                     account_id,
-                    grants: Bitmap::from_iter([acl]),
+                    grants: Bitmap::from_iter(acl),
                 });
             }
         } else {
@@ -145,15 +150,17 @@ impl JmapRights {
         let mut acls = Bitmap::new();
 
         for key in value.into_expanded_boolean_set() {
-            acls.insert(
-                key.try_into_property()
-                    .and_then(|p| T::Right::try_from(p).ok())
+            acls.insert_many(
+                key.as_property()
+                    .and_then(|p| T::Right::try_from(p.clone()).ok())
                     .ok_or_else(|| {
                         SetError::invalid_properties()
                             .with_property(T::SHARE_WITH_PROPERTY)
-                            .with_description("Invalid permission.")
+                            .with_description(format!("Invalid permission {:?}.", key.to_string()))
                     })?
-                    .to_acl(),
+                    .to_acl()
+                    .iter()
+                    .copied(),
             );
         }
 
@@ -176,10 +183,11 @@ impl JmapRights {
     ) -> Value<'static, T::Property, T::Element> {
         let mut obj = Map::with_capacity(3);
 
-        for acl in acls.into_iter() {
-            for right in T::Right::from_acl(acl) {
-                obj.insert_unchecked(Key::Property((*right).into()), Value::Bool(true));
-            }
+        for right in T::Right::all_rights() {
+            obj.insert_unchecked(
+                Key::Property((*right).into()),
+                Value::Bool(right.to_acl().iter().all(|acl| acls.contains(*acl))),
+            );
         }
 
         Value::Object(obj)
@@ -194,9 +202,7 @@ impl JmapRights {
         T::Property: From<Id>,
     {
         if access_token.is_member(account_id)
-            || grants.iter().any(|item| {
-                item.grants.contains(Acl::Administer) && access_token.is_member(item.account_id)
-            })
+            || grants.effective_acl(access_token).contains(Acl::Share)
         {
             let mut share_with = Map::with_capacity(grants.len());
             for grant in grants {

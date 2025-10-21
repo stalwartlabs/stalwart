@@ -4,25 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{tokenizer::Tokenizer, DavParser, RawElement, Token, XmlValueParser};
+use crate::schema::{
+    property::{
+        CalDavProperty, CalDavPropertyName, CalendarData, CardDavProperty, CardDavPropertyName,
+        Comp, DavProperty, DavValue, PrincipalProperty, ResourceType, WebDavProperty,
+    },
+    request::{DavPropertyValue, VCardPropertyWithGroup},
+    response::List,
+    Attribute, AttributeValue, Element, NamedElement, Namespace,
+};
 use calcard::{
-    common::PartialDateTime,
+    common::{IanaParse, PartialDateTime},
     icalendar::{ICalendar, ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardProperty},
     Entry, Parser,
 };
 use mail_parser::DateTime;
-
-use crate::schema::{
-    property::{
-        CalDavProperty, CalDavPropertyName, CalendarData, CardDavProperty, CardDavPropertyName,
-        Comp, DavProperty, DavValue, PrincipalProperty, ResourceType, TimeRange, WebDavProperty,
-    },
-    request::{DavPropertyValue, DeadProperty, VCardPropertyWithGroup},
-    response::List,
-    Attribute, AttributeValue, Element, NamedElement, Namespace,
-};
-
-use super::{tokenizer::Tokenizer, DavParser, RawElement, Token, XmlValueParser};
+use types::{dead_property::DeadProperty, TimeRange};
 
 impl Tokenizer<'_> {
     pub(crate) fn collect_properties(
@@ -384,26 +383,12 @@ impl Tokenizer<'_> {
     }
 }
 
-impl TimeRange {
-    pub fn is_in_range(&self, match_overlap: bool, start: i64, end: i64) -> bool {
-        /*let c = println!(
-            "is_in_range ({match_overlap}): {} to {}, resource from {} to {}, result: {}",
-            chrono::DateTime::from_timestamp(self.start, 0).unwrap(),
-            chrono::DateTime::from_timestamp(self.end, 0).unwrap(),
-            chrono::DateTime::from_timestamp(start, 0).unwrap(),
-            chrono::DateTime::from_timestamp(end, 0).unwrap(),
-            result
-        );*/
-        if !match_overlap {
-            // RFC4791#9.9: (start <  DTEND AND end > DTSTART)
-            self.start < end && self.end > start
-        } else {
-            // RFC4791#9.9: ((start <  DUE) OR (start <= DTSTART)) AND ((end > DTSTART) OR (end >= DUE))
-            ((start < self.end) || (start <= self.start)) && (end > self.start || end >= self.end)
-        }
-    }
+pub(crate) trait TimeRangeFromRaw {
+    fn from_raw(raw: &RawElement<'_>) -> super::Result<Option<TimeRange>>;
+}
 
-    pub fn from_raw(raw: &RawElement<'_>) -> super::Result<Option<Self>> {
+impl TimeRangeFromRaw for TimeRange {
+    fn from_raw(raw: &RawElement<'_>) -> super::Result<Option<Self>> {
         let mut range = TimeRange {
             start: i64::MIN,
             end: i64::MAX,
@@ -637,7 +622,7 @@ impl AttributeValue for ICalendarComponentType {
     where
         Self: Sized,
     {
-        ICalendarComponentType::try_from(s.as_bytes()).ok()
+        ICalendarComponentType::parse(s.as_bytes())
     }
 }
 
@@ -646,8 +631,8 @@ impl AttributeValue for ICalendarProperty {
     where
         Self: Sized,
     {
-        ICalendarProperty::try_from(s.as_bytes())
-            .unwrap_or_else(|_| ICalendarProperty::Other(s.to_string()))
+        ICalendarProperty::parse(s.as_bytes())
+            .unwrap_or_else(|| ICalendarProperty::Other(s.to_string()))
             .into()
     }
 }
@@ -668,15 +653,15 @@ impl AttributeValue for VCardPropertyWithGroup {
     {
         if let Some((group, s)) = s.split_once('.') {
             VCardPropertyWithGroup {
-                name: VCardProperty::try_from(s.as_bytes())
-                    .unwrap_or_else(|_| VCardProperty::Other(s.to_string())),
+                name: VCardProperty::parse(s.as_bytes())
+                    .unwrap_or_else(|| VCardProperty::Other(s.to_string())),
                 group: group.to_string().into(),
             }
             .into()
         } else {
             VCardPropertyWithGroup {
-                name: VCardProperty::try_from(s.as_bytes())
-                    .unwrap_or_else(|_| VCardProperty::Other(s.to_string())),
+                name: VCardProperty::parse(s.as_bytes())
+                    .unwrap_or_else(|| VCardProperty::Other(s.to_string())),
                 group: None,
             }
             .into()

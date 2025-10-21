@@ -177,7 +177,12 @@ impl IntoForm for HeaderValue<'_> {
             (
                 HeaderValue::Address(mail_parser::Address::Group(grouplist)),
                 HeaderForm::Addresses,
-            ) => from_mail_grouplist(grouplist),
+            ) => Value::Array(
+                grouplist
+                    .into_iter()
+                    .flat_map(|group| group.addresses.into_iter().map(from_mail_addr))
+                    .collect(),
+            ),
             (
                 HeaderValue::Address(mail_parser::Address::List(addrlist)),
                 HeaderForm::GroupedAddresses,
@@ -190,7 +195,12 @@ impl IntoForm for HeaderValue<'_> {
             (
                 HeaderValue::Address(mail_parser::Address::Group(grouplist)),
                 HeaderForm::GroupedAddresses,
-            ) => from_mail_grouplist(grouplist),
+            ) => Value::Array(
+                grouplist
+                    .into_iter()
+                    .map(from_mail_group)
+                    .collect::<Vec<Value<'static, EmailProperty, EmailValue>>>(),
+            ),
 
             _ => Value::Null,
         }
@@ -510,15 +520,6 @@ fn from_mail_addrlist(addrlist: Vec<Addr<'_>>) -> Value<'static, EmailProperty, 
         addrlist
             .into_iter()
             .map(from_mail_addr)
-            .collect::<Vec<Value<'static, EmailProperty, EmailValue>>>(),
-    )
-}
-
-fn from_mail_grouplist(grouplist: Vec<Group<'_>>) -> Value<'static, EmailProperty, EmailValue> {
-    Value::Array(
-        grouplist
-            .into_iter()
-            .map(from_mail_group)
             .collect::<Vec<Value<'static, EmailProperty, EmailValue>>>(),
     )
 }

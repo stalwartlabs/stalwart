@@ -6,8 +6,11 @@
 
 use super::get::ChangesLookup;
 use crate::{
-    email::query::EmailQuery, mailbox::query::MailboxQuery, sieve::query::SieveScriptQuery,
-    submission::query::EmailSubmissionQuery,
+    api::request::set_account_id_if_missing, calendar_event::query::CalendarEventQuery,
+    calendar_event_notification::query::CalendarEventNotificationQuery,
+    contact::query::ContactCardQuery, email::query::EmailQuery, file::query::FileNodeQuery,
+    mailbox::query::MailboxQuery, share_notification::query::ShareNotificationQuery,
+    sieve::query::SieveScriptQuery, submission::query::EmailSubmissionQuery,
 };
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
@@ -42,8 +45,9 @@ impl QueryChanges for Server {
         let up_to_id;
 
         match request {
-            QueryChangesRequestMethod::Email(request) => {
+            QueryChangesRequestMethod::Email(mut request) => {
                 // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
                 changes = self
                     .changes(
                         build_changes_request(&request),
@@ -69,8 +73,9 @@ impl QueryChanges for Server {
 
                 results = self.email_query(request.into(), access_token).await?;
             }
-            QueryChangesRequestMethod::Mailbox(request) => {
+            QueryChangesRequestMethod::Mailbox(mut request) => {
                 // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
                 changes = self
                     .changes(
                         build_changes_request(&request),
@@ -90,8 +95,9 @@ impl QueryChanges for Server {
                 up_to_id = request.up_to_id;
                 results = self.mailbox_query(request.into(), access_token).await?;
             }
-            QueryChangesRequestMethod::EmailSubmission(request) => {
+            QueryChangesRequestMethod::EmailSubmission(mut request) => {
                 // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
                 changes = self
                     .changes(
                         build_changes_request(&request),
@@ -111,8 +117,9 @@ impl QueryChanges for Server {
                 up_to_id = request.up_to_id;
                 results = self.email_submission_query(request.into()).await?;
             }
-            QueryChangesRequestMethod::Sieve(request) => {
+            QueryChangesRequestMethod::Sieve(mut request) => {
                 // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
                 changes = self
                     .changes(
                         build_changes_request(&request),
@@ -131,6 +138,122 @@ impl QueryChanges for Server {
 
                 up_to_id = request.up_to_id;
                 results = self.sieve_script_query(request.into()).await?;
+            }
+            QueryChangesRequestMethod::ContactCard(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::ContactCard,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self
+                    .contact_card_query(request.into(), access_token)
+                    .await?;
+            }
+            QueryChangesRequestMethod::FileNode(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::FileNode,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self.file_node_query(request.into(), access_token).await?;
+            }
+            QueryChangesRequestMethod::CalendarEvent(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::CalendarEvent,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self
+                    .calendar_event_query(request.into(), access_token)
+                    .await?;
+            }
+            QueryChangesRequestMethod::CalendarEventNotification(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::CalendarEventNotification,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self
+                    .calendar_event_notification_query(request.into(), access_token)
+                    .await?;
+            }
+            QueryChangesRequestMethod::ShareNotification(mut request) => {
+                // Query changes
+                set_account_id_if_missing(&mut request.account_id, access_token);
+                changes = self
+                    .changes(
+                        build_changes_request(&request),
+                        MethodObject::ShareNotification,
+                        access_token,
+                    )
+                    .await?
+                    .response;
+                let calculate_total = request.calculate_total.unwrap_or(false);
+                has_changes = changes.has_changes();
+                response = build_query_changes_response(&request, &changes);
+
+                if !has_changes && !calculate_total {
+                    return Ok(response);
+                }
+
+                up_to_id = request.up_to_id;
+                results = self.share_notification_query(request.into()).await?;
             }
             QueryChangesRequestMethod::Principal(_) => {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());

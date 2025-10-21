@@ -1,6 +1,6 @@
 [package]
 name = "nlp"
-version = "0.13.3"
+version = "0.14.0"
 edition = "2024"
 resolver = "2"
 
@@ -12,13 +12,13 @@ siphasher = "1.0"
 serde = { version = "1.0", features = ["derive"]}
 nohash = "0.2.0"
 ahash = { version = "0.8.3", features = ["serde"] }
-whatlang = "0.16" # Language detection
+whatlang = "0.18" # Language detection
 rust-stemmers = "1.2" # Stemmers
 jieba-rs = "0.8" # Chinese stemmer
 lru-cache = "0.1.2"
 parking_lot = "0.12.1"
 psl = "2"
-radix_trie = "0.2.1"
+radix_trie = "0.3"
 maplit = "1.0.2"
 hashify = "0.2.1"
 

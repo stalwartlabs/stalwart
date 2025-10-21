@@ -23,7 +23,7 @@ use common::{
     Inner, KV_ACME, Server,
     auth::{AccessToken, oauth::GrantType},
     core::BuildServer,
-    ipc::StateEvent,
+    ipc::PushEvent,
     listener::{SessionData, SessionManager, SessionStream},
     manager::webadmin::Resource,
 };
@@ -850,7 +850,7 @@ impl SessionManager for HttpSessionManager {
     #[allow(clippy::manual_async_fn)]
     fn shutdown(&self) -> impl std::future::Future<Output = ()> + Send {
         async {
-            let _ = self.inner.ipc.state_tx.send(StateEvent::Stop).await;
+            let _ = self.inner.ipc.push_tx.send(PushEvent::Stop).await;
         }
     }
 }

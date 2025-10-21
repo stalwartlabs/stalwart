@@ -4,11 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{
+    body::{ToBodyPart, TruncateBody},
+    headers::HeaderToValue,
+};
+use crate::blob::download::BlobDownload;
 use common::{Server, auth::AccessToken};
 use email::message::index::PREVIEW_LENGTH;
 use jmap_proto::{
-    method::parse::{ParseEmailRequest, ParseEmailResponse},
-    object::email::EmailProperty,
+    method::parse::{ParseRequest, ParseResponse},
+    object::email::{Email, EmailProperty},
     request::IntoValid,
 };
 use jmap_tools::{Key, Map, Value};
@@ -18,27 +23,20 @@ use mail_parser::{
 use std::future::Future;
 use utils::map::vec_map::VecMap;
 
-use crate::blob::download::BlobDownload;
-
-use super::{
-    body::{ToBodyPart, TruncateBody},
-    headers::HeaderToValue,
-};
-
 pub trait EmailParse: Sync + Send {
     fn email_parse(
         &self,
-        request: ParseEmailRequest,
+        request: ParseRequest<Email>,
         access_token: &AccessToken,
-    ) -> impl Future<Output = trc::Result<ParseEmailResponse>> + Send;
+    ) -> impl Future<Output = trc::Result<ParseResponse<Email>>> + Send;
 }
 
 impl EmailParse for Server {
     async fn email_parse(
         &self,
-        request: ParseEmailRequest,
+        request: ParseRequest<Email>,
         access_token: &AccessToken,
-    ) -> trc::Result<ParseEmailResponse> {
+    ) -> trc::Result<ParseResponse<Email>> {
         if request.blob_ids.len() > self.core.jmap.mail_parse_max_items {
             return Err(trc::JmapEvent::RequestTooLarge.into_err());
         }
@@ -70,6 +68,7 @@ impl EmailParse for Server {
                 ]
             });
         let body_properties = request
+            .arguments
             .body_properties
             .map(|v| v.into_valid().collect())
             .unwrap_or_else(|| {
@@ -86,12 +85,12 @@ impl EmailParse for Server {
                     EmailProperty::Location,
                 ]
             });
-        let fetch_text_body_values = request.fetch_text_body_values.unwrap_or(false);
-        let fetch_html_body_values = request.fetch_html_body_values.unwrap_or(false);
-        let fetch_all_body_values = request.fetch_all_body_values.unwrap_or(false);
-        let max_body_value_bytes = request.max_body_value_bytes.unwrap_or(0);
+        let fetch_text_body_values = request.arguments.fetch_text_body_values.unwrap_or(false);
+        let fetch_html_body_values = request.arguments.fetch_html_body_values.unwrap_or(false);
+        let fetch_all_body_values = request.arguments.fetch_all_body_values.unwrap_or(false);
+        let max_body_value_bytes = request.arguments.max_body_value_bytes.unwrap_or(0);
 
-        let mut response = ParseEmailResponse {
+        let mut response = ParseResponse {
             account_id: request.account_id,
             parsed: VecMap::with_capacity(request.blob_ids.len()),
             not_parsable: vec![],

@@ -28,7 +28,7 @@ pub struct BlobLookupResponse {
     pub list: Vec<BlobInfo>,
 
     #[serde(rename = "notFound")]
-    pub not_found: Vec<MaybeInvalid<BlobId>>,
+    pub not_found: Vec<BlobId>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]

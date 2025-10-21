@@ -50,6 +50,7 @@ pub struct GroupwareConfig {
 
     // Sharing settings
     pub max_shares_per_item: usize,
+    pub allow_directory_query: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
@@ -182,6 +183,9 @@ impl GroupwareConfig {
                 None
             },
             max_shares_per_item: config.property("sharing.max-shares-per-item").unwrap_or(10),
+            allow_directory_query: config
+                .property("sharing.allow-directory-query")
+                .unwrap_or(false),
             itip_http_rsvp_expiration: config
                 .property_or_default::<Duration>("calendar.scheduling.http-rsvp.expiration", "90d")
                 .map(|d| d.as_secs())

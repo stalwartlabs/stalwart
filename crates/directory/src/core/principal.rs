@@ -5,9 +5,11 @@
  */
 
 use crate::{
-    ArchivedPrincipal, FALLBACK_ADMIN_ID, Permission, PermissionGrant, Principal, PrincipalData,
-    ROLE_ADMIN, Type,
-    backend::internal::{PrincipalField, PrincipalSet, PrincipalUpdate, PrincipalValue},
+    ArchivedPrincipal, ArchivedPrincipalData, FALLBACK_ADMIN_ID, Permission, PermissionGrant,
+    Principal, PrincipalData, ROLE_ADMIN, Type,
+    backend::internal::{
+        PrincipalField, PrincipalSet, PrincipalUpdate, PrincipalValue, SpecialSecrets,
+    },
 };
 use ahash::AHashSet;
 use nlp::tokenizers::word::WordTokenizer;
@@ -16,6 +18,7 @@ use serde::{
     de::{self, IgnoredAny, Visitor},
     ser::SerializeMap,
 };
+use serde_json::Value;
 use std::{collections::hash_map::Entry, fmt, str::FromStr};
 use store::{
     U32_LEN, U64_LEN,
@@ -29,11 +32,6 @@ impl Principal {
             id,
             typ,
             name: "".into(),
-            description: None,
-            secrets: Default::default(),
-            emails: Default::default(),
-            quota: Default::default(),
-            tenant: Default::default(),
             data: Default::default(),
         }
     }
@@ -50,25 +48,26 @@ impl Principal {
         self.name.as_str()
     }
 
-    pub fn quota(&self) -> u64 {
-        self.quota.unwrap_or_default()
+    pub fn quota(&self) -> Option<u64> {
+        self.data.iter().find_map(|d| {
+            if let PrincipalData::DiskQuota(quota) = d {
+                if *quota > 0 { Some(*quota) } else { None }
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn principal_quota(&self, typ: &Type) -> Option<u64> {
-        self.data
-            .iter()
-            .find_map(|d| {
-                if let PrincipalData::PrincipalQuota(q) = d {
-                    Some(q)
-                } else {
-                    None
-                }
-            })
-            .and_then(|quotas| {
-                quotas
-                    .iter()
-                    .find_map(|q| if q.typ == *typ { Some(q.quota) } else { None })
-            })
+    pub fn directory_quota(&self, typ: &Type) -> Option<u32> {
+        self.data.iter().find_map(|d| {
+            if let PrincipalData::DirectoryQuota { quota, typ: qtyp } = d
+                && qtyp == typ
+            {
+                Some(*quota)
+            } else {
+                None
+            }
+        })
     }
 
     // SPDX-SnippetBegin
@@ -77,7 +76,13 @@ impl Principal {
 
     #[cfg(feature = "enterprise")]
     pub fn tenant(&self) -> Option<u32> {
-        self.tenant
+        self.data.iter().find_map(|item| {
+            if let PrincipalData::Tenant(tenant) = item {
+                Some(*tenant)
+            } else {
+                None
+            }
+        })
     }
     // SPDX-SnippetEnd
 
@@ -87,92 +92,150 @@ impl Principal {
     }
 
     pub fn description(&self) -> Option<&str> {
-        self.description.as_deref()
-    }
-
-    pub fn member_of(&self) -> &[u32] {
-        self.data
-            .iter()
-            .find_map(|item| {
-                if let PrincipalData::MemberOf(items) = item {
-                    items.as_slice().into()
+        self.data.iter().find_map(|item| {
+            if let PrincipalData::Description(description) = item {
+                if !description.is_empty() {
+                    Some(description.as_str())
                 } else {
                     None
                 }
-            })
-            .unwrap_or_default()
-    }
-
-    pub fn member_of_mut(&mut self) -> Option<&mut Vec<u32>> {
-        self.data.iter_mut().find_map(|item| {
-            if let PrincipalData::MemberOf(items) = item {
-                items.into()
             } else {
                 None
             }
         })
     }
 
-    pub fn roles(&self) -> &[u32] {
+    pub fn secrets(&self) -> impl Iterator<Item = &String> {
+        let mut found_secret = false;
         self.data
             .iter()
-            .find_map(|item| {
-                if let PrincipalData::Roles(items) = item {
-                    items.as_slice().into()
+            .take_while(move |item| {
+                if matches!(item, PrincipalData::Secret(_)) {
+                    found_secret = true;
+                    true
+                } else {
+                    !found_secret
+                }
+            })
+            .filter_map(|item| {
+                if let PrincipalData::Secret(secret) = item {
+                    Some(secret)
                 } else {
                     None
                 }
             })
-            .unwrap_or_default()
     }
 
-    pub fn permissions(&self) -> &[PermissionGrant] {
-        self.data
-            .iter()
-            .find_map(|item| {
-                if let PrincipalData::Permissions(items) = item {
-                    items.as_slice().into()
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default()
-    }
-
-    pub fn urls(&self) -> &[String] {
-        self.data
-            .iter()
-            .find_map(|item| {
-                if let PrincipalData::Urls(items) = item {
-                    items.as_slice().into()
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default()
-    }
-
-    pub fn roles_mut(&mut self) -> Option<&mut Vec<u32>> {
-        self.data.iter_mut().find_map(|item| {
-            if let PrincipalData::Roles(items) = item {
-                items.into()
+    pub fn primary_email(&self) -> Option<&str> {
+        self.data.iter().find_map(|item| {
+            if let PrincipalData::PrimaryEmail(email) = item {
+                Some(email.as_str())
             } else {
                 None
             }
         })
     }
 
-    pub fn lists(&self) -> &[u32] {
+    pub fn email_addresses(&self) -> impl Iterator<Item = &String> {
+        let mut found_email = false;
         self.data
             .iter()
-            .find_map(|item| {
-                if let PrincipalData::Lists(items) = item {
-                    items.as_slice().into()
+            .take_while(move |item| {
+                if matches!(
+                    item,
+                    PrincipalData::PrimaryEmail(_) | PrincipalData::EmailAlias(_)
+                ) {
+                    found_email = true;
+                    true
+                } else {
+                    !found_email
+                }
+            })
+            .filter_map(|item| {
+                if let PrincipalData::PrimaryEmail(email) | PrincipalData::EmailAlias(email) = item
+                {
+                    Some(email)
                 } else {
                     None
                 }
             })
-            .unwrap_or_default()
+    }
+
+    pub fn into_primary_email(self) -> Option<String> {
+        self.data.into_iter().find_map(|item| {
+            if let PrincipalData::PrimaryEmail(email) = item {
+                Some(email)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn into_email_addresses(self) -> impl Iterator<Item = String> {
+        self.data.into_iter().filter_map(|item| {
+            if let PrincipalData::PrimaryEmail(email) | PrincipalData::EmailAlias(email) = item {
+                Some(email)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn member_of(&self) -> impl Iterator<Item = u32> {
+        self.data.iter().filter_map(|item| {
+            if let PrincipalData::MemberOf(item) = item {
+                Some(*item)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn roles(&self) -> impl Iterator<Item = u32> {
+        self.data.iter().filter_map(|item| {
+            if let PrincipalData::Role(item) = item {
+                Some(*item)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn permissions(&self) -> impl Iterator<Item = PermissionGrant> {
+        self.data.iter().filter_map(|item| {
+            if let PrincipalData::Permission {
+                permission_id,
+                grant,
+            } = item
+            {
+                Permission::from_id(*permission_id).map(|permission| PermissionGrant {
+                    permission,
+                    grant: *grant,
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn urls(&self) -> impl Iterator<Item = &String> {
+        self.data.iter().filter_map(|item| {
+            if let PrincipalData::Url(item) = item {
+                Some(item)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn lists(&self) -> impl Iterator<Item = &u32> {
+        self.data.iter().filter_map(|item| {
+            if let PrincipalData::List(item) = item {
+                Some(item)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn picture(&self) -> Option<&String> {
@@ -196,134 +259,177 @@ impl Principal {
     }
 
     pub fn add_permission(&mut self, permission: Permission, grant: bool) {
+        let permission = permission.id();
         if let Some(permissions) = self.data.iter_mut().find_map(|item| {
-            if let PrincipalData::Permissions(permissions) = item {
-                Some(permissions)
+            if let PrincipalData::Permission {
+                permission_id,
+                grant,
+            } = item
+            {
+                if *permission_id == permission {
+                    Some(grant)
+                } else {
+                    None
+                }
             } else {
                 None
             }
         }) {
-            if let Some(current) = permissions.iter_mut().find(|p| p.permission == permission) {
-                current.grant = grant;
-            } else {
-                permissions.push(PermissionGrant { permission, grant });
-            }
+            *permissions = grant;
         } else {
-            self.data
-                .push(PrincipalData::Permissions(vec![PermissionGrant {
-                    permission,
-                    grant,
-                }]));
+            self.data.push(PrincipalData::Permission {
+                permission_id: permission,
+                grant,
+            });
         }
     }
 
     pub fn add_permissions(&mut self, iter: impl Iterator<Item = PermissionGrant>) {
-        if let Some(permissions) = self.data.iter_mut().find_map(|item| {
-            if let PrincipalData::Permissions(permissions) = item {
-                Some(permissions)
-            } else {
-                None
-            }
-        }) {
-            permissions.extend(iter);
-        } else {
-            self.data.push(PrincipalData::Permissions(iter.collect()));
+        for grant in iter {
+            self.add_permission(grant.permission, grant.grant);
         }
     }
 
     pub fn remove_permission(&mut self, permission: Permission, grant: bool) {
-        if let Some(permissions) = self.data.iter_mut().find_map(|item| {
-            if let PrincipalData::Permissions(permissions) = item {
-                Some(permissions)
+        let permission = permission.id();
+        self.data.retain(|data| {
+            if let PrincipalData::Permission {
+                permission_id: p,
+                grant: g,
+            } = data
+            {
+                *p != permission || *g != grant
             } else {
-                None
+                true
             }
-        }) && let Some(idx) = permissions
-            .iter_mut()
-            .position(|p| p.permission == permission && p.grant == grant)
-        {
-            permissions.swap_remove(idx);
-        }
+        });
     }
 
     pub fn remove_permissions(&mut self, grant: bool) {
-        if let Some(permissions) = self.data.iter_mut().find_map(|item| {
-            if let PrincipalData::Permissions(permissions) = item {
-                Some(permissions)
+        self.data.retain(|data| {
+            if let PrincipalData::Permission { grant: g, .. } = data {
+                *g != grant
             } else {
-                None
+                true
             }
-        }) {
-            permissions.retain(|p| p.grant != grant);
-        }
+        });
     }
 
     pub fn update_external(
         &mut self,
-        mut external: Principal,
+        external: Principal,
         overwrite_emails: bool,
     ) -> Vec<PrincipalUpdate> {
         let mut updates = Vec::new();
 
         // Add external members
-        if let Some(member_of) = external.member_of_mut().filter(|s| !s.is_empty()) {
-            self.data
-                .push(PrincipalData::MemberOf(std::mem::take(member_of)));
+        for (idx, member_of) in external.member_of().enumerate() {
+            if idx == 0 {
+                self.data
+                    .retain(|item| !matches!(item, PrincipalData::MemberOf(_)));
+            }
+            self.data.push(PrincipalData::MemberOf(member_of));
         }
 
         // If the principal has no roles, take the ones from the external principal
-        if let Some(roles) = external.roles_mut().filter(|s| !s.is_empty())
-            && self.roles().is_empty()
-        {
-            self.data.push(PrincipalData::Roles(std::mem::take(roles)));
+        for (idx, role) in external.roles().enumerate() {
+            if idx == 0 && self.roles().next().is_some() {
+                break;
+            }
+
+            self.data.push(PrincipalData::Role(role));
         }
 
-        if external.description.as_ref().is_some_and(|v| !v.is_empty())
-            && self.description != external.description
-        {
-            self.description = external.description;
-            updates.push(PrincipalUpdate::set(
-                PrincipalField::Description,
-                PrincipalValue::String(self.description.clone().unwrap()),
-            ));
+        // Update description
+        match (external.description(), self.description()) {
+            (Some(external), current) if Some(external) != current => {
+                if current.is_some() {
+                    self.data
+                        .retain(|item| !matches!(item, PrincipalData::Description(_)));
+                }
+                self.data
+                    .push(PrincipalData::Description(external.to_string()));
+                updates.push(PrincipalUpdate::set(
+                    PrincipalField::Description,
+                    PrincipalValue::String(external.to_string()),
+                ));
+            }
+            _ => {}
         }
 
-        if !external.secrets.is_empty() && external.secrets != self.secrets {
-            self.secrets = external.secrets;
+        // Update secrets
+        if update_list(external.secrets(), self.secrets()) {
+            let mut new_secrets = Vec::new();
+            self.data
+                .retain(|item| !matches!(item, PrincipalData::Secret(_)));
+            self.data.extend(external.secrets().map(|secret| {
+                new_secrets.push(secret.to_string());
+                PrincipalData::Secret(secret.to_string())
+            }));
             updates.push(PrincipalUpdate::set(
                 PrincipalField::Secrets,
-                PrincipalValue::StringList(self.secrets.clone()),
+                PrincipalValue::StringList(new_secrets),
             ));
         }
 
-        if !external.emails.is_empty() && external.emails != self.emails {
+        // Update emails
+        if update_list(external.email_addresses(), self.email_addresses()) {
             if overwrite_emails {
-                self.emails = external.emails;
+                let mut new_emails = Vec::new();
+                self.data.retain(|item| {
+                    !matches!(
+                        item,
+                        PrincipalData::PrimaryEmail(_) | PrincipalData::EmailAlias(_)
+                    )
+                });
+                self.data
+                    .extend(external.data.iter().filter_map(|v| match v {
+                        PrincipalData::PrimaryEmail(email) => {
+                            new_emails.push(email.clone());
+                            Some(PrincipalData::PrimaryEmail(email.clone()))
+                        }
+                        PrincipalData::EmailAlias(email) => {
+                            new_emails.push(email.clone());
+                            Some(PrincipalData::EmailAlias(email.clone()))
+                        }
+                        _ => None,
+                    }));
                 updates.push(PrincipalUpdate::set(
                     PrincipalField::Emails,
-                    PrincipalValue::StringList(self.emails.clone()),
+                    PrincipalValue::StringList(new_emails),
                 ));
             } else {
                 // Missing emails are appended to avoid overwriting locally defined aliases
                 // This means that old email addresses need to be deleted either manually or using the API
-                for email in external.emails {
+                let current_emails = self.email_addresses().collect::<AHashSet<_>>();
+                let mut new_emails = Vec::new();
+                for email in external.email_addresses() {
                     let email = email.to_lowercase();
-                    if !self.emails.contains(&email) {
+                    if !current_emails.contains(&email) {
                         updates.push(PrincipalUpdate::add_item(
                             PrincipalField::Emails,
                             PrincipalValue::String(email.clone()),
                         ));
-                        self.emails.push(email);
+                        new_emails.push(PrincipalData::EmailAlias(email));
                     }
                 }
+                self.data.extend(new_emails);
             }
         }
 
-        if external.quota.is_some() && self.quota != external.quota {
-            self.quota = external.quota;
+        let external_quota = external.quota();
+        let this_quota = self.quota();
+        if let Some(external_quota) = external_quota
+            && this_quota.is_none_or(|this_quota| this_quota != external_quota)
+        {
+            if this_quota.is_some() {
+                self.data
+                    .retain(|item| !matches!(item, PrincipalData::DiskQuota(_)));
+            }
+            self.data.push(PrincipalData::DiskQuota(external_quota));
             updates.push(PrincipalUpdate::set(
                 PrincipalField::Quota,
-                PrincipalValue::Integer(self.quota.unwrap()),
+                PrincipalValue::Integer(external_quota),
             ));
         }
 
@@ -332,23 +438,10 @@ impl Principal {
 
     pub fn object_size(&self) -> usize {
         self.name.len()
-            + self.description.as_ref().map_or(0, |d| d.len())
-            + self.secrets.iter().map(|s| s.len()).sum::<usize>()
-            + self.emails.iter().map(|e| e.len()).sum::<usize>()
             + self
                 .data
                 .iter()
-                .map(|d| match d {
-                    PrincipalData::MemberOf(items)
-                    | PrincipalData::Roles(items)
-                    | PrincipalData::Lists(items) => items.len() * U32_LEN,
-                    PrincipalData::Permissions(items) => items.len() * U32_LEN,
-                    PrincipalData::ExternalMembers(items) | PrincipalData::Urls(items) => {
-                        items.iter().map(|s| s.len()).sum::<usize>()
-                    }
-                    PrincipalData::PrincipalQuota(items) => items.len() * U32_LEN,
-                    PrincipalData::Picture(value) | PrincipalData::Locale(value) => value.len(),
-                })
+                .map(|item| item.object_size())
                 .sum::<usize>()
     }
 
@@ -357,12 +450,82 @@ impl Principal {
             id: FALLBACK_ADMIN_ID,
             typ: Type::Individual,
             name: "Fallback Administrator".into(),
-            secrets: vec![fallback_pass.into()],
-            data: vec![PrincipalData::Roles(vec![ROLE_ADMIN])],
-            description: Default::default(),
-            emails: Default::default(),
-            quota: Default::default(),
-            tenant: Default::default(),
+            data: vec![
+                PrincipalData::Role(ROLE_ADMIN),
+                PrincipalData::Secret(fallback_pass.into()),
+            ],
+        }
+    }
+
+    pub fn sort(&mut self) {
+        self.data.sort_unstable_by_key(|d| d.rank());
+    }
+}
+
+impl PrincipalData {
+    fn rank(&self) -> usize {
+        match self {
+            PrincipalData::Secret(v) => {
+                if v.is_otp_auth() {
+                    0
+                } else {
+                    1
+                }
+            }
+            PrincipalData::PrimaryEmail(_) => 2,
+            PrincipalData::EmailAlias(_) => 3,
+            _ => 4,
+        }
+    }
+}
+
+fn update_list<'x>(
+    new: impl Iterator<Item = &'x String>,
+    mut current: impl Iterator<Item = &'x String>,
+) -> bool {
+    let mut new = new.peekable();
+    if new.peek().is_some() {
+        loop {
+            match (new.next(), current.next()) {
+                (Some(n), Some(c)) => {
+                    if n != c {
+                        return true;
+                    }
+                }
+                (Some(_), None) => {
+                    return true;
+                }
+                (None, Some(_)) => {
+                    return true;
+                }
+                (None, None) => {
+                    return false;
+                }
+            }
+        }
+    } else {
+        false
+    }
+}
+
+impl PrincipalData {
+    pub fn object_size(&self) -> usize {
+        match self {
+            PrincipalData::Secret(v)
+            | PrincipalData::Description(v)
+            | PrincipalData::PrimaryEmail(v)
+            | PrincipalData::EmailAlias(v)
+            | PrincipalData::Picture(v)
+            | PrincipalData::ExternalMember(v)
+            | PrincipalData::Url(v)
+            | PrincipalData::Locale(v) => v.len(),
+            PrincipalData::DiskQuota(_) => U64_LEN,
+            PrincipalData::Permission { .. } => U32_LEN + 1,
+            PrincipalData::DirectoryQuota { .. } | PrincipalData::ObjectQuota { .. } => U64_LEN + 1,
+            PrincipalData::Tenant(_)
+            | PrincipalData::MemberOf(_)
+            | PrincipalData::Role(_)
+            | PrincipalData::List(_) => U32_LEN,
         }
     }
 }
@@ -871,9 +1034,14 @@ pub(crate) fn build_search_index(
     let mut new_words = AHashSet::new();
 
     if let Some(current) = current {
-        for word in [Some(current.name.as_str()), current.description.as_deref()]
+        for word in [Some(current.name.as_str())]
             .into_iter()
-            .chain(current.emails.iter().map(|s| Some(s.as_str())))
+            .chain(current.data.iter().map(|s| match s {
+                ArchivedPrincipalData::Description(v)
+                | ArchivedPrincipalData::PrimaryEmail(v)
+                | ArchivedPrincipalData::EmailAlias(v) => Some(v.as_str()),
+                _ => None,
+            }))
             .flatten()
         {
             current_words.extend(WordTokenizer::new(word, MAX_TOKEN_LENGTH).map(|t| t.word));
@@ -881,9 +1049,14 @@ pub(crate) fn build_search_index(
     }
 
     if let Some(new) = new {
-        for word in [Some(new.name.as_str()), new.description.as_deref()]
+        for word in [Some(new.name.as_str())]
             .into_iter()
-            .chain(new.emails.iter().map(|s| Some(s.as_str())))
+            .chain(new.data.iter().map(|s| match s {
+                PrincipalData::Description(v)
+                | PrincipalData::PrimaryEmail(v)
+                | PrincipalData::EmailAlias(v) => Some(v.as_str()),
+                _ => None,
+            }))
             .flatten()
         {
             new_words.extend(WordTokenizer::new(word, MAX_TOKEN_LENGTH).map(|t| t.word));
@@ -909,7 +1082,7 @@ pub(crate) fn build_search_index(
 }
 
 impl Type {
-    pub fn to_jmap(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Individual => "individual",
             Self::Group => "group",
@@ -925,7 +1098,7 @@ impl Type {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub fn description(&self) -> &'static str {
         match self {
             Self::Individual => "Individual",
             Self::Group => "Group",
@@ -995,7 +1168,7 @@ impl serde::Serialize for PrincipalSet {
         let mut map = serializer.serialize_map(None)?;
 
         map.serialize_entry("id", &self.id)?;
-        map.serialize_entry("type", &self.typ.to_jmap())?;
+        map.serialize_entry("type", &self.typ.as_str())?;
 
         for (key, value) in &self.fields {
             match value {
@@ -1124,18 +1297,15 @@ impl<'de> serde::Deserialize<'de> for PrincipalSet {
                 let mut principal = PrincipalSet::default();
 
                 while let Some(key) = map.next_key::<&str>()? {
-                    let key = PrincipalField::try_parse(key)
-                        .or_else(|| {
-                            if key == "id" {
-                                // Ignored
-                                Some(PrincipalField::UsedQuota)
-                            } else {
-                                None
-                            }
-                        })
-                        .ok_or_else(|| {
-                            serde::de::Error::custom(format!("invalid principal field: {}", key))
-                        })?;
+                    if key == "id" {
+                        // Ignored
+                        map.next_value::<IgnoredAny>()?;
+                        continue;
+                    }
+
+                    let key = PrincipalField::try_parse(key).ok_or_else(|| {
+                        serde::de::Error::custom(format!("invalid principal field: {}", key))
+                    })?;
 
                     let value = match key {
                         PrincipalField::Name => {
@@ -1177,18 +1347,37 @@ impl<'de> serde::Deserialize<'de> for PrincipalSet {
                         | PrincipalField::EnabledPermissions
                         | PrincipalField::DisabledPermissions
                         | PrincipalField::Urls
-                        | PrincipalField::ExternalMembers => {
-                            match map.next_value::<StringOrMany>()? {
-                                StringOrMany::One(v) => PrincipalValue::StringList(vec![v]),
-                                StringOrMany::Many(v) => {
-                                    if !v.is_empty() {
-                                        PrincipalValue::StringList(v)
-                                    } else {
-                                        continue;
-                                    }
+                        | PrincipalField::ExternalMembers => match map.next_value::<Value>()? {
+                            Value::String(v) => {
+                                if v.len() <= MAX_STRING_LEN {
+                                    PrincipalValue::StringList(vec![v])
+                                } else {
+                                    return Err(serde::de::Error::custom("string too long"));
                                 }
                             }
-                        }
+                            Value::Array(v) => {
+                                if !v.is_empty() {
+                                    PrincipalValue::StringList(
+                                        v.into_iter()
+                                            .filter_map(|item| {
+                                                if let Value::String(s) = item {
+                                                    if s.len() <= MAX_STRING_LEN {
+                                                        Some(s)
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect(),
+                                    )
+                                } else {
+                                    continue;
+                                }
+                            }
+                            _ => continue,
+                        },
                         PrincipalField::UsedQuota => {
                             // consume and ignore
                             map.next_value::<IgnoredAny>()?;
@@ -1261,69 +1450,9 @@ impl<'de> serde::Deserialize<'de> for StringOrU64 {
     }
 }
 
-#[derive(Debug)]
-enum StringOrMany {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl<'de> serde::Deserialize<'de> for StringOrMany {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct StringOrManyVisitor;
-
-        impl<'de> Visitor<'de> for StringOrManyVisitor {
-            type Value = StringOrMany;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a string or a sequence of strings")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if value.len() <= MAX_STRING_LEN {
-                    Ok(StringOrMany::One(value.into()))
-                } else {
-                    Err(serde::de::Error::custom("string too long"))
-                }
-            }
-
-            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if v.len() <= MAX_STRING_LEN {
-                    Ok(StringOrMany::One(v))
-                } else {
-                    Err(serde::de::Error::custom("string too long"))
-                }
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: de::SeqAccess<'de>,
-            {
-                let mut vec = Vec::new();
-
-                while let Some(value) = seq.next_element::<String>()? {
-                    vec.push(value);
-                }
-
-                Ok(StringOrMany::Many(vec))
-            }
-        }
-
-        deserializer.deserialize_any(StringOrManyVisitor)
-    }
-}
-
 impl Permission {
     pub fn all() -> impl Iterator<Item = Permission> {
-        (0..Permission::COUNT).filter_map(Permission::from_id)
+        (0..Permission::COUNT as u32).filter_map(Permission::from_id)
     }
 
     pub const fn is_user_permission(&self) -> bool {
@@ -1425,6 +1554,8 @@ impl Permission {
                 | Permission::DavSyncCollection
                 | Permission::DavExpandProperty
                 | Permission::DavPrincipalAcl
+                | Permission::DavPrincipalList
+                | Permission::DavPrincipalSearch
                 | Permission::DavPrincipalMatch
                 | Permission::DavPrincipalSearchPropSet
                 | Permission::DavFilePropFind
@@ -1465,6 +1596,49 @@ impl Permission {
                 | Permission::CalendarAlarms
                 | Permission::CalendarSchedulingSend
                 | Permission::CalendarSchedulingReceive
+                | Permission::JmapAddressBookGet
+                | Permission::JmapAddressBookSet
+                | Permission::JmapAddressBookChanges
+                | Permission::JmapContactCardGet
+                | Permission::JmapContactCardChanges
+                | Permission::JmapContactCardQuery
+                | Permission::JmapContactCardQueryChanges
+                | Permission::JmapContactCardSet
+                | Permission::JmapContactCardCopy
+                | Permission::JmapContactCardParse
+                | Permission::JmapFileNodeGet
+                | Permission::JmapFileNodeSet
+                | Permission::JmapFileNodeChanges
+                | Permission::JmapFileNodeQuery
+                | Permission::JmapFileNodeQueryChanges
+                | Permission::JmapPrincipalGetAvailability
+                | Permission::JmapPrincipalChanges
+                | Permission::JmapPrincipalQuery
+                | Permission::JmapPrincipalGet
+                | Permission::JmapPrincipalQueryChanges
+                | Permission::JmapShareNotificationGet
+                | Permission::JmapShareNotificationSet
+                | Permission::JmapShareNotificationChanges
+                | Permission::JmapShareNotificationQuery
+                | Permission::JmapShareNotificationQueryChanges
+                | Permission::JmapCalendarGet
+                | Permission::JmapCalendarSet
+                | Permission::JmapCalendarChanges
+                | Permission::JmapCalendarEventGet
+                | Permission::JmapCalendarEventSet
+                | Permission::JmapCalendarEventChanges
+                | Permission::JmapCalendarEventQuery
+                | Permission::JmapCalendarEventQueryChanges
+                | Permission::JmapCalendarEventCopy
+                | Permission::JmapCalendarEventParse
+                | Permission::JmapCalendarEventNotificationGet
+                | Permission::JmapCalendarEventNotificationSet
+                | Permission::JmapCalendarEventNotificationChanges
+                | Permission::JmapCalendarEventNotificationQuery
+                | Permission::JmapCalendarEventNotificationQueryChanges
+                | Permission::JmapParticipantIdentityGet
+                | Permission::JmapParticipantIdentitySet
+                | Permission::JmapParticipantIdentityChanges
         )
     }
 
@@ -1524,9 +1698,6 @@ impl Permission {
                 | Permission::Undelete
                 | Permission::DkimSignatureCreate
                 | Permission::DkimSignatureGet
-                | Permission::JmapPrincipalGet
-                | Permission::JmapPrincipalQueryChanges
-                | Permission::JmapPrincipalQuery
                 | Permission::ApiKeyList
                 | Permission::ApiKeyGet
                 | Permission::ApiKeyCreate

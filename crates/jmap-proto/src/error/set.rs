@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use types::id::Id;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(bound(serialize = "InvalidProperty<P>: serde::Serialize"))]
 pub struct SetError<P: Property> {
     #[serde(rename = "type")]
     pub type_: SetErrorType,
@@ -82,6 +83,12 @@ pub enum SetErrorType {
     InvalidScript,
     #[serde(rename = "scriptIsActive")]
     ScriptIsActive,
+    #[serde(rename = "addressBookHasContents")]
+    AddressBookHasContents,
+    #[serde(rename = "nodeHasChildren")]
+    NodeHasChildren,
+    #[serde(rename = "calendarHasEvent")]
+    CalendarHasEvent,
 }
 
 impl SetErrorType {
@@ -112,6 +119,9 @@ impl SetErrorType {
             SetErrorType::AlreadyExists => "alreadyExists",
             SetErrorType::InvalidScript => "invalidScript",
             SetErrorType::ScriptIsActive => "scriptIsActive",
+            SetErrorType::AddressBookHasContents => "addressBookHasContents",
+            SetErrorType::NodeHasChildren => "nodeHasChildren",
+            SetErrorType::CalendarHasEvent => "calendarHasEvent",
         }
     }
 }
@@ -183,6 +193,19 @@ impl<T: Property> SetError<T> {
 
     pub fn will_destroy() -> Self {
         Self::new(SetErrorType::WillDestroy).with_description("ID will be destroyed.")
+    }
+
+    pub fn address_book_has_contents() -> Self {
+        Self::new(SetErrorType::AddressBookHasContents)
+            .with_description("Address book is not empty.")
+    }
+
+    pub fn node_has_children() -> Self {
+        Self::new(SetErrorType::NodeHasChildren).with_description("Cannot delete non-empty folder.")
+    }
+
+    pub fn calendar_has_event() -> Self {
+        Self::new(SetErrorType::CalendarHasEvent).with_description("Calendar is not empty.")
     }
 }
 

@@ -9,7 +9,7 @@ use crate::{
     op::ImapContext,
 };
 use ahash::AHashSet;
-use common::listener::SessionStream;
+use common::{ipc::PushNotification, listener::SessionStream};
 use directory::Permission;
 use imap_proto::{
     Command, StatusResponse,
@@ -48,10 +48,10 @@ impl<T: SessionStream> Session<T> {
         let is_utf8 = self.is_utf8;
         let is_qresync = self.is_qresync;
 
-        // Register with state manager
-        let mut change_rx = self
+        // Register with push manager
+        let mut push_rx = self
             .server
-            .subscribe_state_manager(data.account_id, types)
+            .subscribe_push_manager(&data.access_token, types)
             .await
             .imap_ctx(&request.tag, trc::location!())?;
 
@@ -92,21 +92,30 @@ impl<T: SessionStream> Session<T> {
                         }
                     }
                 }
-                state_change = change_rx.recv() => {
-                    if let Some(state_change) = state_change {
+                push_notification = push_rx.recv() => {
+                    if let Some(push_notification) = push_notification {
                         let mut has_mailbox_changes = false;
                         let mut has_email_changes = false;
 
-                        for type_state in state_change.types {
-                            match type_state {
-                                DataType::Email | DataType::EmailDelivery => {
-                                    has_email_changes = true;
+                        match push_notification {
+                            PushNotification::StateChange(state_change) => {
+                                for type_state in state_change.types {
+                                    match type_state {
+                                        DataType::Email | DataType::EmailDelivery => {
+                                            has_email_changes = true;
+                                        }
+                                        DataType::Mailbox => {
+                                            has_mailbox_changes = true;
+                                        }
+                                        _ => {}
+                                    }
                                 }
-                                DataType::Mailbox => {
-                                    has_mailbox_changes = true;
-                                }
-                                _ => {}
-                            }
+                            },
+                            PushNotification::EmailPush(_) => {
+                                has_email_changes = true;
+                                has_mailbox_changes = true;
+                            },
+                            PushNotification::CalendarAlert(_) => (),
                         }
 
                         if has_mailbox_changes || has_email_changes {

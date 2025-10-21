@@ -6,7 +6,7 @@
 
 use ahash::{AHashMap, AHashSet};
 use calcard::{
-    common::PartialDateTime,
+    common::{IanaString, PartialDateTime},
     icalendar::{
         ICalendarComponent, ICalendarDuration, ICalendarEntry, ICalendarMethod, ICalendarParameter,
         ICalendarParticipationRole, ICalendarParticipationStatus, ICalendarPeriod,
@@ -14,7 +14,6 @@ use calcard::{
         ICalendarStatus, ICalendarUserTypes, ICalendarValue, Uri,
     },
 };
-use dav_proto::schema::response::CalCondition;
 use std::{fmt::Display, hash::Hash};
 
 pub mod attendee;
@@ -333,7 +332,7 @@ impl ItipDateTime<'_> {
             name,
             params: self
                 .tz_id
-                .map(|tz_id| vec![ICalendarParameter::Tzid(tz_id.to_string())])
+                .map(|tz_id| vec![ICalendarParameter::tzid(tz_id.to_string())])
                 .unwrap_or_default(),
             values: vec![ICalendarValue::PartialDateTime(Box::new(self.date.clone()))],
         }
@@ -341,26 +340,26 @@ impl ItipDateTime<'_> {
 }
 
 impl ItipError {
-    pub fn failed_precondition(&self) -> Option<CalCondition> {
-        match self {
-            ItipError::MultipleOrganizer => Some(CalCondition::SameOrganizerInAllComponents),
-            ItipError::OrganizerIsLocalAddress
-            | ItipError::SenderIsNotParticipant(_)
-            | ItipError::OrganizerMismatch => Some(CalCondition::ValidOrganizer),
-            ItipError::CannotModifyProperty(_)
-            | ItipError::CannotModifyInstance
-            | ItipError::CannotModifyAddress => Some(CalCondition::AllowedAttendeeObjectChange),
-            ItipError::MissingUid
-            | ItipError::MultipleUid
-            | ItipError::MultipleObjectTypes
-            | ItipError::MultipleObjectInstances
-            | ItipError::MissingMethod
-            | ItipError::InvalidComponentType
-            | ItipError::OutOfSequence
-            | ItipError::UnknownParticipant(_)
-            | ItipError::UnsupportedMethod(_) => Some(CalCondition::ValidSchedulingMessage),
-            _ => None,
-        }
+    pub fn is_jmap_error(&self) -> bool {
+        matches!(
+            self,
+            ItipError::MultipleOrganizer
+                | ItipError::OrganizerIsLocalAddress
+                | ItipError::SenderIsNotParticipant(_)
+                | ItipError::OrganizerMismatch
+                | ItipError::CannotModifyProperty(_)
+                | ItipError::CannotModifyInstance
+                | ItipError::CannotModifyAddress
+                //| ItipError::MissingUid
+                | ItipError::MultipleUid
+                | ItipError::MultipleObjectTypes
+                | ItipError::MultipleObjectInstances
+                | ItipError::MissingMethod
+                | ItipError::InvalidComponentType
+                | ItipError::OutOfSequence
+                | ItipError::UnknownParticipant(_)
+                | ItipError::UnsupportedMethod(_)
+        )
     }
 }
 

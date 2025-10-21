@@ -57,13 +57,14 @@ summary: invite
 summary.attendee: Participants([ItipParticipant { email: "a@gmail.com", name: Some("John Doe"), is_organizer: true }, ItipParticipant { email: "b@gmail.com", name: Some("b@gmail.com"), is_organizer: false }])
 summary.description: Text("This is the event description")
 summary.dtstart: Time(ItipTime { start: 1750338000, tz_id: 148 })
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(2), interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Thursday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: Some(Sunday) })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(2), interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Thursday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: Some(Sunday), rscale: None, skip: None })
 summary.summary: Text("Meet me maybe")
 BEGIN:VCALENDAR
 METHOD:REQUEST
 PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
 VERSION:2.0
 BEGIN:VEVENT
+X-MICROSOFT-CDO-OWNERAPPTID:299828133
 DESCRIPTION:This is the event description
 LOCATION:
 STATUS:CONFIRMED
@@ -71,8 +72,8 @@ SUMMARY:Meet me maybe
 DTEND;TZID=America/Los_Angeles:20250619T064500
 DTSTART;TZID=America/Los_Angeles:20250619T060000
 TRANSP:OPAQUE
-ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=
- TRUE;CN=b@gmail.com;X-NUM-GUESTS=0:mailto:b@gmail.com
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;
+ CN=b@gmail.com;X-NUM-GUESTS=0:mailto:b@gmail.com
 ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE;
  CN="John Doe";X-NUM-GUESTS=0:mailto:a@gmail.com
 ORGANIZER;CN="John Doe":mailto:a@gmail.com
@@ -82,7 +83,6 @@ CREATED:20250616T182358Z
 DTSTAMP:0
 LAST-MODIFIED:20250616T182358Z
 SEQUENCE:1
-X-MICROSOFT-CDO-OWNERAPPTID:299828133
 BEGIN:VALARM
 DESCRIPTION:This is an event reminder
 ACTION:DISPLAY
@@ -90,8 +90,8 @@ TRIGGER:-PT10M
 END:VALARM
 END:VEVENT
 BEGIN:VTIMEZONE
-TZID:America/Los_Angeles
 X-LIC-LOCATION:America/Los_Angeles
+TZID:America/Los_Angeles
 BEGIN:DAYLIGHT
 DTSTART:19700308T020000
 TZNAME:PDT
@@ -171,7 +171,7 @@ summary: update REQUEST
 summary.attendee: Participants([ItipParticipant { email: "a@gmail.com", name: Some("John Doe"), is_organizer: true }, ItipParticipant { email: "b@gmail.com", name: Some("b@gmail.com"), is_organizer: false }])
 summary.description: Text("This is the updated event description")
 summary.dtstart: Time(ItipTime { start: 1750338000, tz_id: 148 })
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(2), interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Thursday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: Some(Sunday) })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(2), interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Thursday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: Some(Sunday), rscale: None, skip: None })
 summary.summary: Text("Meet me maybe")
 ~summary.description: Text("This is the event description")
 BEGIN:VCALENDAR
@@ -179,6 +179,7 @@ METHOD:REQUEST
 PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
 VERSION:2.0
 BEGIN:VEVENT
+X-MICROSOFT-CDO-OWNERAPPTID:299828133
 DESCRIPTION:This is the updated event description
 LOCATION:
 STATUS:CONFIRMED
@@ -186,8 +187,8 @@ SUMMARY:Meet me maybe
 DTEND;TZID=America/Los_Angeles:20250619T064500
 DTSTART;TZID=America/Los_Angeles:20250619T060000
 TRANSP:OPAQUE
-ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=
- TRUE;CN=b@gmail.com;X-NUM-GUESTS=0:mailto:b@gmail.com
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;
+ CN=b@gmail.com;X-NUM-GUESTS=0:mailto:b@gmail.com
 ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE;
  CN="John Doe";X-NUM-GUESTS=0:mailto:a@gmail.com
 ORGANIZER;CN="John Doe":mailto:a@gmail.com
@@ -197,11 +198,10 @@ CREATED:20250616T182358Z
 DTSTAMP:0
 LAST-MODIFIED:20250616T182415Z
 SEQUENCE:1
-X-MICROSOFT-CDO-OWNERAPPTID:299828133
 END:VEVENT
 BEGIN:VTIMEZONE
-TZID:America/Los_Angeles
 X-LIC-LOCATION:America/Los_Angeles
+TZID:America/Los_Angeles
 BEGIN:DAYLIGHT
 DTSTART:19700308T020000
 TZNAME:PDT
@@ -227,6 +227,7 @@ BEGIN:VCALENDAR
 PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
 VERSION:2.0
 BEGIN:VEVENT
+X-MICROSOFT-CDO-OWNERAPPTID:299828133
 DESCRIPTION:This is the updated event description
 LOCATION:
 STATUS:CONFIRMED
@@ -234,8 +235,8 @@ SUMMARY:Meet me maybe
 DTEND;TZID=America/Los_Angeles:20250619T064500
 DTSTART;TZID=America/Los_Angeles:20250619T060000
 TRANSP:OPAQUE
-ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=
- TRUE;CN=b@gmail.com;X-NUM-GUESTS=0:mailto:b@gmail.com
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;
+ CN=b@gmail.com;X-NUM-GUESTS=0:mailto:b@gmail.com
 ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE;
  CN="John Doe";X-NUM-GUESTS=0:mailto:a@gmail.com
 ORGANIZER;CN="John Doe":mailto:a@gmail.com
@@ -245,7 +246,6 @@ CREATED:20250616T182358Z
 DTSTAMP:0
 LAST-MODIFIED:20250616T182358Z
 SEQUENCE:1
-X-MICROSOFT-CDO-OWNERAPPTID:299828133
 BEGIN:VALARM
 DESCRIPTION:This is an event reminder
 ACTION:DISPLAY
@@ -253,8 +253,8 @@ TRIGGER:-PT10M
 END:VALARM
 END:VEVENT
 BEGIN:VTIMEZONE
-TZID:America/Los_Angeles
 X-LIC-LOCATION:America/Los_Angeles
+TZID:America/Los_Angeles
 BEGIN:DAYLIGHT
 DTSTART:19700308T020000
 TZNAME:PDT

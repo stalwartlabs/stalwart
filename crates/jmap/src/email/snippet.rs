@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::blob::download::BlobDownload;
 use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
@@ -25,7 +24,7 @@ use nlp::language::{Language, search_snippet::generate_snippet, stemmer::Stemmer
 use std::future::Future;
 use store::backend::MAX_TOKEN_LENGTH;
 use trc::AddContext;
-use types::{acl::Acl, blob_hash::BlobHash, collection::Collection, field::EmailField};
+use types::{acl::Acl, collection::Collection, field::EmailField};
 
 pub trait EmailSearchSnippet: Sync + Send {
     fn email_search_snippet(
@@ -162,7 +161,8 @@ impl EmailSearchSnippet for Server {
             } else {*/
             // Download message
             let raw_message = if let Some(raw_message) = self
-                .get_blob(&BlobHash::from(&metadata.blob_hash), 0..usize::MAX)
+                .blob_store()
+                .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
                 .await?
             {
                 raw_message

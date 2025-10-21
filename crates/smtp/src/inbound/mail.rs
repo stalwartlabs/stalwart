@@ -6,7 +6,6 @@
 
 use crate::{
     core::{Session, SessionAddress},
-    queue::DomainPart,
     scripts::ScriptResult,
 };
 use common::{config::smtp::session::Stage, listener::SessionStream, scripts::ScriptModification};
@@ -17,7 +16,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 use trc::SmtpEvent;
-use utils::config::Rate;
+use utils::{DomainPart, config::Rate};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_mail_from(&mut self, from: MailFrom<Cow<'_, str>>) -> Result<(), ()> {

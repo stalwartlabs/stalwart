@@ -1,6 +1,6 @@
 [package]
 name = "jmap"
-version = "0.13.3"
+version = "0.14.0"
 edition = "2024"
 resolver = "2"
 
@@ -18,13 +18,15 @@ directory = { path =  "../directory" }
 trc = { path = "../trc" }
 spam-filter = { path = "../spam-filter" }
 email = { path = "../email" }
+groupware = { path = "../groupware" }
+calcard = { version = "0.3" }
 smtp-proto = { version = "0.2" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = { version = "0.4" }
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
 mail-auth = { version = "0.7.1", features = ["generate"] }
 sieve-rs = { version = "0.7", features = ["rkyv"] } 
-jmap-tools = { path = "/Users/me/code/jmap-tool", features = ["rkyv"] }
+jmap-tools = { version = "0.1", features = ["rkyv"] }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }

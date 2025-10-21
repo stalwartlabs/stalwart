@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, str::FromStr};
-
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
-use types::{acl::Acl, id::Id, special_use::SpecialUse};
-
 use crate::{
     object::{
         AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference, parse_ref,
     },
-    request::deserialize::DeserializeArguments,
+    request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
 };
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
+use std::{borrow::Cow, str::FromStr};
+use types::{acl::Acl, id::Id, special_use::SpecialUse};
 
 #[derive(Debug, Clone, Default)]
 pub struct Mailbox;
@@ -51,6 +49,7 @@ pub enum MailboxRight {
     MayRename,
     MaySubmit,
     MayDelete,
+    MayShare,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -62,10 +61,16 @@ pub enum MailboxValue {
 
 impl Property for MailboxProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        if let Some(Key::Property(MailboxProperty::ShareWith)) = key {
-            Id::from_str(value).ok().map(MailboxProperty::IdValue)
+        let allow_patch = key.is_none();
+        if let Some(Key::Property(key)) = key {
+            match key.patch_or_prop() {
+                MailboxProperty::ShareWith => {
+                    Id::from_str(value).ok().map(MailboxProperty::IdValue)
+                }
+                _ => MailboxProperty::parse(value, allow_patch),
+            }
         } else {
-            MailboxProperty::parse(value, key.is_none())
+            MailboxProperty::parse(value, allow_patch)
         }
     }
 
@@ -103,6 +108,7 @@ impl MailboxRight {
             MailboxRight::MayRename => "mayRename",
             MailboxRight::MaySubmit => "maySubmit",
             MailboxRight::MayDelete => "mayDelete",
+            MailboxRight::MayShare => "mayShare",
         }
     }
 }
@@ -158,6 +164,7 @@ impl MailboxProperty {
             b"mayRename" => MailboxProperty::Rights(MailboxRight::MayRename),
             b"maySubmit" => MailboxProperty::Rights(MailboxRight::MaySubmit),
             b"mayDelete" => MailboxProperty::Rights(MailboxRight::MayDelete),
+            b"mayShare" => MailboxProperty::Rights(MailboxRight::MayShare),
             b"isSubscribed" => MailboxProperty::IsSubscribed,
         )
         .or_else(|| {
@@ -235,15 +242,6 @@ impl FromStr for MailboxProperty {
     }
 }
 
-impl serde::Serialize for MailboxProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl JmapObject for Mailbox {
     type Property = MailboxProperty;
 
@@ -262,6 +260,8 @@ impl JmapObject for Mailbox {
     type QueryArguments = MailboxQueryArguments;
 
     type CopyArguments = ();
+
+    type ParseArguments = ();
 
     const ID_PROPERTY: Self::Property = MailboxProperty::Id;
 }
@@ -305,7 +305,7 @@ impl TryFrom<MailboxProperty> for MailboxRight {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MailboxFilter {
     Name(String),
-    ParentId(Option<Id>),
+    ParentId(Option<MaybeIdReference<Id>>),
     Role(Option<SpecialUse>),
     HasAnyRole(bool),
     IsSubscribed(bool),
@@ -435,46 +435,30 @@ impl JmapObjectId for MailboxValue {
             None
         }
     }
-}
 
-impl TryFrom<AnyId> for MailboxValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        if let AnyId::Id(id) = value {
-            Ok(MailboxValue::Id(id))
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = MailboxValue::Id(id);
+            true
         } else {
-            Err(())
+            false
         }
     }
 }
 
 impl JmapRight for MailboxRight {
-    fn from_acl(acl: Acl) -> &'static [Self] {
-        match acl {
-            Acl::ReadItems => &[MailboxRight::MayReadItems],
-            Acl::AddItems => &[MailboxRight::MayAddItems],
-            Acl::RemoveItems => &[MailboxRight::MayRemoveItems],
-            Acl::ModifyItems => &[MailboxRight::MaySetSeen, MailboxRight::MaySetKeywords],
-            Acl::CreateChild => &[MailboxRight::MayCreateChild],
-            Acl::Modify => &[MailboxRight::MayRename],
-            Acl::Submit => &[MailboxRight::MaySubmit],
-            Acl::Delete => &[MailboxRight::MayDelete],
-            _ => &[],
-        }
-    }
-
-    fn to_acl(&self) -> Acl {
+    fn to_acl(&self) -> &'static [Acl] {
         match self {
-            MailboxRight::MayReadItems => Acl::ReadItems,
-            MailboxRight::MayAddItems => Acl::AddItems,
-            MailboxRight::MayRemoveItems => Acl::RemoveItems,
-            MailboxRight::MaySetSeen => Acl::ModifyItems,
-            MailboxRight::MaySetKeywords => Acl::ModifyItems,
-            MailboxRight::MayCreateChild => Acl::CreateChild,
-            MailboxRight::MayRename => Acl::Modify,
-            MailboxRight::MaySubmit => Acl::Submit,
-            MailboxRight::MayDelete => Acl::Delete,
+            MailboxRight::MayReadItems => &[Acl::Read, Acl::ReadItems],
+            MailboxRight::MayAddItems => &[Acl::AddItems],
+            MailboxRight::MayRemoveItems => &[Acl::RemoveItems],
+            MailboxRight::MaySetSeen => &[Acl::ModifyItems],
+            MailboxRight::MaySetKeywords => &[Acl::ModifyItems],
+            MailboxRight::MayCreateChild => &[Acl::CreateChild],
+            MailboxRight::MayRename => &[Acl::Modify],
+            MailboxRight::MaySubmit => &[Acl::Submit],
+            MailboxRight::MayDelete => &[Acl::Delete],
+            MailboxRight::MayShare => &[Acl::Share],
         }
     }
 
@@ -489,6 +473,7 @@ impl JmapRight for MailboxRight {
             MailboxRight::MayRename,
             MailboxRight::MaySubmit,
             MailboxRight::MayDelete,
+            MailboxRight::MayShare,
         ]
     }
 }
@@ -496,5 +481,36 @@ impl JmapRight for MailboxRight {
 impl From<MailboxRight> for MailboxProperty {
     fn from(right: MailboxRight) -> Self {
         MailboxProperty::Rights(right)
+    }
+}
+
+impl JmapObjectId for MailboxProperty {
+    fn as_id(&self) -> Option<Id> {
+        if let MailboxProperty::IdValue(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        if let MailboxProperty::IdValue(id) = self {
+            Some(AnyId::Id(*id))
+        } else {
+            None
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = MailboxProperty::IdValue(id);
+            true
+        } else {
+            false
+        }
     }
 }

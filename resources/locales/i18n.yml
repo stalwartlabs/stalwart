@@ -12,6 +12,7 @@ calendar.alarm_subject_prefix:
   da: Notifikation
   ca: Notificació
   el: Ειδοποίηση
+  sv: Notifikation
 
 calendar.alarm_header:
   en: You have an upcoming event
@@ -24,6 +25,7 @@ calendar.alarm_header:
   da: Du har en kommende begivenhed
   ca: Tens un esdeveniment d'aquí poc
   el: Έχετε μία επερχόμενη εκδήλωση
+  sv: Du har en kommande händelse
 
 calendar.alarm_footer:
   en: You are receiving this email because you have enabled calendar notifications. To stop receiving these emails, login to the self-service portal and disable event notifications.
@@ -36,6 +38,7 @@ calendar.alarm_footer:
   da: Du modtager denne e-mail, fordi du har aktiveret kalendernotifikationer. Du kan deaktivere notifikationer i selvbetjeningsportalen.
   ca: Estàs revent aquest correu perquè tens habilitada les notificacions del calendari. Per no rebre més aquests correus, identificat al portal d'autoservei i desactiva les notificacions d'esdeveniments.
   el: Λαμβάνεται αυτό το e-mail γιατί έχετε ένεργοποιήσει τις ειδοποιήσεις ημερολογίου. Για διακοπή της λήψης τους, μπείτε στη πύλη αυτοεξυπηρέτησης και απενεργοποιείστε τις ειδοποιήσεις εκδηλώσεων.
+  sv: Du får det här mejlet för att du har slagit på kalendernotifikationer. För att sluta få dessa mejl, stäng av inställningen i självbetjäningsportalen.
 
 calendar.alarm_open:
   en: View Event
@@ -48,6 +51,7 @@ calendar.alarm_open:
   da: Vis begivenhed
   ca: Veure esdeveniment
   el: Προβολή Εκδήλωσης
+  sv: Visa händelse
 
 calendar.organizer:
   en: Organizer
@@ -60,6 +64,7 @@ calendar.organizer:
   da: Arrangør
   ca: Organitzador
   el: Διοργανωτής
+  sv: Arrangör
 
 calendar.attendees:
   en: Guests
@@ -72,6 +77,7 @@ calendar.attendees:
   da: Gæster
   ca: Invitats
   el: Συμμετέχωντες
+  sv: Gäster
 
 calendar.start:
   en: Start
@@ -84,6 +90,7 @@ calendar.start:
   da: Start
   ca: Inici
   el: Έναρξη
+  sv: Start
 
 calendar.end:
   en: End
@@ -96,6 +103,7 @@ calendar.end:
   da: Slut
   ca: Fi
   en: Λήξη
+  sv: Slut
 
 calendar.location:
   en: Location
@@ -108,6 +116,7 @@ calendar.location:
   da: Lokation
   ca: Lloc
   el: Τοποθεσία
+  sv: Plats
 
 calendar.date_template:
   # English: "Sun May 25, 2025 9am"
@@ -130,6 +139,8 @@ calendar.date_template:
   ca: "%a %-d %b %Y %-Hh"
   # Greek: "Κυρ 25 Μαϊ 2025 9πμ" (day month year hour)
   el: "%a %-d %b %Y %-H η ώρα"
+  # Svenska: "sön 25 maj 2025 kl. 9" (weekday date month year hour)
+  sv: "%a %-d %b %Y kl. %-H"
 
 calendar.date_template_long:
   # English: "Sunday May 25, 2025 9am"
@@ -153,6 +164,8 @@ calendar.date_template_long:
   # Greek: "Κυριακή 25 Μαΐου 2025 9πμ" (day month year hour)
   el: "%A %-d %B %Y %-H η ώρα"
   
+  # Svenska: "söndag 25 maj 2025 kl. 9" (weekday date month year hour)
+  sv: "%A %-d. %B %Y kl. %-H"
 
 calendar.invitation:
   en: Invitation
@@ -165,6 +178,7 @@ calendar.invitation:
   da: Invitation
   ca: Invitació
   el: Πρόσκληση
+  sv: Inbjudan
 
 calendar.updated_invitation:
   en: Updated invitation
@@ -177,6 +191,7 @@ calendar.updated_invitation:
   da: Opdateret invitation
   ca: Invitació actualitzada
   el: Ενημερωμένη πρόσκληση
+  sv: Uppdaterad inbjudan
 
 calendar.event_updated:
   en: This event has been updated
@@ -189,6 +204,7 @@ calendar.event_updated:
   da: Denne begivenhed er blevet opdateret
   ca: Aquest esdeveniment s'ha actualitzat
   el: Αυτή η εκδήλωση ενημερώθηκε
+  sv: Den här händelsen har blivit uppdaterad
 
 calendar.cancelled:
   en: Cancelled
@@ -201,6 +217,8 @@ calendar.cancelled:
   da: Aflyst
   ca: Cancel·lat 
   el: Ακυρώθηκε
+  ca: Cancel·lat
+  sv: Inställd
 
 calendar.event_cancelled:
   en: This event has been canceled
@@ -213,6 +231,7 @@ calendar.event_cancelled:
   da: Denne begivenhed er blevet aflyst
   ca: Aquest esdeveniment s'ha cancel·lat
   el: Αυτή η εκδήλωση ακυρώθηκε
+  sv: Den här händelsen har blivit inställd
 
 calendar.accepted:
   en: Accepted
@@ -225,6 +244,7 @@ calendar.accepted:
   da: Accepteret
   ca: Acceptat
   el: Αποδοχή
+  sv: Accepterat
 
 calendar.participant_accepted:
   en: Participant $name accepted the invitation
@@ -237,6 +257,7 @@ calendar.participant_accepted:
   da: Deltager $name accepterede invitationen
   ca: El participatn $name a acceptat la invitació
   el: Το συμμετέχων πρόσωπο $name αποδέχτηκε τη πρόσκληση
+  sv: Deltagaren $name har tackat ja till inbjudan
 
 calendar.declined:
   en: Declined
@@ -249,6 +270,7 @@ calendar.declined:
   da: Afvist
   ca: Rebutjat
   el: Απορρίφθηκε
+  sv: Avböjt
 
 calendar.participant_declined:
   en: Participant $name declined the invitation
@@ -261,6 +283,7 @@ calendar.participant_declined:
   da: Deltager $name afslog invitationen
   ca: El participatn $name ha rebutjat la invitació
   el: Το συμμετέχων πρόσωπο $name απέρριψε τη πρόσκληση
+  sv: Deltagaren $name har tackat nej till inbjudan
 
 calendar.tentative:
   en: Tentative
@@ -273,6 +296,7 @@ calendar.tentative:
   da: Foreløbig
   ca: Provisional
   el: Μη δεσμευτικά
+  sv: Möjligen
 
 calendar.participant_tentative:
   en: Participant $name tentatively accepted the invitation
@@ -285,6 +309,7 @@ calendar.participant_tentative:
   da: Deltager $name accepterede foreløbigt invitationen
   ca: El participan $name accepta provisionalment la invitació a l'esdeveniment
   el: Το συμμετέχων πρόσωπο $name αποδέχτηκε μη δεσμευτικά τη πρόσκληση
+  sv: Deltagaren $name har preliminärt tackat ja till inbjudan
 
 calendar.delegated:
   en: Delegated
@@ -297,6 +322,7 @@ calendar.delegated:
   da: Delegeret
   ca: Delegat
   el: Ανατέθηκε
+  sv: Delegerat
 
 calendar.participant_delegated:
   en: Participant $name delegated the invitation
@@ -309,6 +335,7 @@ calendar.participant_delegated:
   da: Deltager $name delegerede invitationen
   ca: El participant $name ha delegat la invitació
   el: Το συμμετέχων πρόσωπο $name ανέθεσε τη πρόσκληση
+  sv: Deltagaren $name delegerade inbjudan
 
 calendar.reply:
   en: Reply
@@ -321,6 +348,7 @@ calendar.reply:
   da: Svar
   ca: Resposta
   el: Απάντηση
+  sv: Svar
 
 calendar.participant_reply:
   en: Participant $name replied to the invitation
@@ -333,6 +361,7 @@ calendar.participant_reply:
   da: Deltager $name svarede på invitationen
   ca: El participant $name ha respost a la invitació
   el: Το συμμετέχων πρόσωπο $name απάντησε στη πρόσκληση
+  sv: Deltagaren $name har svarat på inbjudan
 
 calendar.summary:
   en: Summary
@@ -345,6 +374,7 @@ calendar.summary:
   da: Resumé
   ca: Resum
   el: Περίληψη
+  sv: Sammanfattning
 
 calendar.description:
   en: Description
@@ -357,6 +387,7 @@ calendar.description:
   da: Beskrivelse
   ca: Descripció
   el: Περιγραφή
+  sv: Beskrivning
 
 calendar.when:
   en: When
@@ -369,6 +400,7 @@ calendar.when:
   da: Hvornår
   ca: Quan
   el: Πότε
+  sv: När
 
 calendar.changed:
   en: Changed
@@ -381,6 +413,7 @@ calendar.changed:
   da: Ændret
   ca: Canviat
   el: Μεταβλήθηκε
+  sv: Ändrat
 
 calendar.reply_as:
   en: Reply as $name for this event series
@@ -393,6 +426,7 @@ calendar.reply_as:
   da: Svar som $name for denne begivenhedsserie
   ca: Respondre com a $name per aquesta serie d'esdeveniments
   el: Απάντηση ως $name για αυτή τη σειρά εκδηλώσεων
+  sv: Svara som $name på den här inbjudan
 
 calendar.yes:
   en: Yes
@@ -405,6 +439,7 @@ calendar.yes:
   da: Ja
   ca: Sí
   el: Ναι
+  sv: Ja
 
 calendar.no:
   en: No
@@ -417,6 +452,7 @@ calendar.no:
   da: Nej
   ca: No
   el: Όχι
+  sv: Nej
 
 calendar.maybe:
   en: Maybe
@@ -429,6 +465,7 @@ calendar.maybe:
   da: Måske
   ca: Potser
   el: Ίσως
+  sv: Kanske
 
 calendar.imip_footer_1:
   en: You're receiving this e-mail as you're listed as a participant for this event.
@@ -441,6 +478,7 @@ calendar.imip_footer_1:
   da: Du modtager denne e-mail, fordi du er opført som deltager i denne begivenhed.
   ca: Reps aquest correu electrònic perquè ets registrat com a participant d'aquest esdeveniment.
   el: Λαμβάνετε αυτό το e-mail καθώς είστε στη λίστα συμμετεχόντων αυτής της εκδήλωσης.
+  sv: Du får det här mejlet för att du är uppskriven som deltagare i den här händelsen
 
 calendar.imip_footer_2:
   en: Forwarding this e-mail could allow any recipient to reply to the organizer, join the guest list, extend the invitation to others, or alter your RSVP.
@@ -453,6 +491,7 @@ calendar.imip_footer_2:
   da: Videresendelse af denne e-mail kan give andre mulighed for at svare arrangøren, tilslutte sig gæstelisten, videreformidle invitationen eller ændre din tilmelding.
   ca: Reenviar aquest correu electrònic podria fer que qualsevol destinatari respongues a l'organitzador, afegir-se a la llista de convidats, estengui la invitació a d'altres o modificar la teva confirmació d'assistència.
   el: Προωθόντας αυτό το e-mail μπορεί να επιτρέψει σε οποιοδήποτε παραλήπτη να απαντήση στον οργανωτή, να μπει στη λίστα επισκεπτών, να επεκτείνει τη πρόσκληση σε άλλους ή να αλλάξει την παρουσία σας.
+  sv: Att vidarebefordra det här mejlet kan göra det möjligt för vilken mottagare som helst att skicka svar till arrangören, lägga till sig själv på gästlistan, skicka inbjudan vidare till andra, samt ändra ditt svar.
 
 calendar.rsvp_recorded:
   en: Your RSVP has been recorded.
@@ -465,6 +504,7 @@ calendar.rsvp_recorded:
   da: Din tilmelding er blevet registreret.
   ca: La teva confirmació d'assistència ha sigut registrada.
   el: Η κοινοποίηση της παρουσίας σας καταγράφηκε.
+  sv: Ditt svar har registrerats.
 
 calendar.rsvp_failed:
   en: Failed to record your RSVP.
@@ -477,6 +517,7 @@ calendar.rsvp_failed:
   da: Kunne ikke registrere din tilmelding.
   ca: No s'ha pogut registrar la teva confirmació d'assistència.
   el: Αποτυχία κατα τη καταγραφή της παρουσίας σας
+  sv: Det gick inte att registrera ditt svar.
 
 calendar.event_not_found:
   en: The event you are trying to RSVP to was not found.
@@ -489,6 +530,7 @@ calendar.event_not_found:
   da: Begivenheden du forsøger at tilmelde dig blev ikke fundet.
   ca: L'esdeveniment al que intentes confirmar l'assistència no es troba.
   el: Η εκδήλωση που θέλετε να κοινοποιήσετε την παρουσία σας δεν υπάρχει.
+  sv: Händelsen du försöker OSA till kunde inte hittas.
 
 calendar.invalid_rsvp:
   en: The RSVP request was invalid or malformed.
@@ -501,6 +543,7 @@ calendar.invalid_rsvp:
   da: Tilmeldingsanmodningen var ugyldig eller forkert udformet.
   ca: La sol·licitud de confirmació d'assistència no era vàlida o estava mal formada.
   el: Η αίτητη για κοινοποίηση παρουσίας είναι άκυρη ή έχει πρόβλημα.
+  sv: Svaret på inbjudan var ogiltigt eller i fel format.
 
 calendar.not_participant:
   en: You are no longer a participant in this event.
@@ -513,3 +556,4 @@ calendar.not_participant:
   da: Du deltager ikke længere i denne begivenhed.
   ca: Ja no ets un participant d'aquest esdeveniment.
   el: Δε συμμετέχετε πια σε αυτή την εκδήλωση.
+  sv: Du är inte längre en deltagare i den här händelse.

@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
 use crate::expr::{if_block::IfBlock, tokenizer::TokenMap};
 use ahash::AHashSet;
-
-use utils::config::{Config, Rate};
+use std::time::Duration;
+use utils::config::{Config, Rate, utils::ParseValue};
 
 use super::*;
 
@@ -38,13 +36,29 @@ pub struct ContactForm {
     pub field_honey_pot: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ClusterRoles {
-    pub purge_stores: bool,
-    pub purge_accounts: bool,
-    pub renew_acme: bool,
-    pub calculate_metrics: bool,
-    pub push_metrics: bool,
+    pub purge_stores: ClusterRole,
+    pub purge_accounts: ClusterRole,
+    pub push_notifications: ClusterRole,
+    pub fts_indexing: ClusterRole,
+    pub bayes_training: ClusterRole,
+    pub imip_processing: ClusterRole,
+    pub calendar_alerts: ClusterRole,
+    pub renew_acme: ClusterRole,
+    pub calculate_metrics: ClusterRole,
+    pub push_metrics: ClusterRole,
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum ClusterRole {
+    #[default]
+    Enabled,
+    Disabled,
+    Sharded {
+        shard_id: u32,
+        total_shards: u32,
+    },
 }
 
 #[derive(Clone, Default)]
@@ -104,13 +118,7 @@ impl Default for Network {
             asn_geo_lookup: AsnGeoLookupConfig::Disabled,
             server_name: Default::default(),
             report_domain: Default::default(),
-            roles: ClusterRoles {
-                purge_stores: true,
-                purge_accounts: true,
-                renew_acme: true,
-                calculate_metrics: true,
-                push_metrics: true,
-            },
+            roles: ClusterRoles::default(),
         }
     }
 }
@@ -228,14 +236,49 @@ impl Network {
                 &mut network.roles.push_metrics,
                 "cluster.roles.metrics.push",
             ),
+            (
+                &mut network.roles.push_notifications,
+                "cluster.roles.push-notifications",
+            ),
+            (
+                &mut network.roles.fts_indexing,
+                "cluster.roles.fts-indexing",
+            ),
+            (
+                &mut network.roles.bayes_training,
+                "cluster.roles.bayes-training",
+            ),
+            (
+                &mut network.roles.imip_processing,
+                "cluster.roles.imip-processing",
+            ),
+            (
+                &mut network.roles.calendar_alerts,
+                "cluster.roles.calendar-alerts",
+            ),
         ] {
-            let node_ids = config
-                .properties::<u64>(key)
+            let shards = config
+                .properties::<NodeList>(key)
                 .into_iter()
                 .map(|(_, v)| v)
-                .collect::<AHashSet<_>>();
-            if !node_ids.is_empty() && !node_ids.contains(&network.node_id) {
-                *value = false;
+                .collect::<Vec<_>>();
+            let shard_size = shards.len() as u32;
+            let mut found_node = false;
+            for (shard_id, shard) in shards.iter().enumerate() {
+                if shard.0.contains(&network.node_id) {
+                    if shard_size > 1 {
+                        *value = ClusterRole::Sharded {
+                            shard_id: shard_id as u32,
+                            total_shards: shard_size,
+                        };
+                    }
+                    found_node = true;
+                    break;
+                }
+            }
+
+            if !shards.is_empty() && !found_node {
+                *value = ClusterRole::Disabled;
             }
         }
 
@@ -249,6 +292,18 @@ impl Network {
         }
 
         network
+    }
+}
+
+struct NodeList(AHashSet<u64>);
+
+impl ParseValue for NodeList {
+    fn parse_value(value: &str) -> utils::config::Result<Self> {
+        value
+            .split(',')
+            .map(|s| s.trim().parse::<u64>().map_err(|e| e.to_string()))
+            .collect::<Result<AHashSet<u64>, String>>()
+            .map(NodeList)
     }
 }
 
@@ -293,6 +348,37 @@ impl AsnGeoLookupConfig {
             _ => {
                 config.new_build_error("asn.type", "Invalid value");
                 None
+            }
+        }
+    }
+}
+
+impl ClusterRole {
+    pub fn is_enabled_or_sharded(&self) -> bool {
+        matches!(self, ClusterRole::Enabled | ClusterRole::Sharded { .. })
+    }
+
+    pub fn is_enabled_for_account(&self, account_id: u32) -> bool {
+        match self {
+            ClusterRole::Enabled => true,
+            ClusterRole::Disabled => false,
+            ClusterRole::Sharded {
+                shard_id,
+                total_shards,
+            } => (account_id % total_shards) == *shard_id,
+        }
+    }
+
+    pub fn is_enabled_for_hash(&self, item: &impl std::hash::Hash) -> bool {
+        match self {
+            ClusterRole::Enabled => true,
+            ClusterRole::Disabled => false,
+            ClusterRole::Sharded {
+                shard_id,
+                total_shards,
+            } => {
+                (ahash::RandomState::new().hash_one(item) % (*total_shards as u64))
+                    == (*shard_id as u64)
             }
         }
     }

@@ -34,6 +34,7 @@ pub struct AccessToken {
     pub locale: Option<String>,
     pub emails: Vec<String>,
     pub quota: u64,
+    pub object_quota: [u32; Collection::MAX],
     pub permissions: Permissions,
     pub tenant: Option<TenantInfo>,
     pub concurrent_http_requests: Option<ConcurrencyLimiter>,
@@ -158,7 +159,7 @@ impl Server {
                                     AccountName = username.to_string(),
                                     SpanId = req.session_id,
                                     AccountId = principal.id(),
-                                    Type = principal.typ().as_str(),
+                                    Type = principal.typ().description(),
                                 );
 
                                 return Ok(principal);
@@ -314,27 +315,5 @@ impl CredentialsUsername for Credentials<String> {
             }
             Credentials::OAuthBearer { .. } => None,
         }
-    }
-}
-
-pub trait AsTenantId {
-    fn tenant_id(&self) -> Option<u32>;
-}
-
-impl AsTenantId for Option<u32> {
-    fn tenant_id(&self) -> Option<u32> {
-        *self
-    }
-}
-
-impl AsTenantId for AccessToken {
-    fn tenant_id(&self) -> Option<u32> {
-        self.tenant.map(|t| t.id)
-    }
-}
-
-impl AsTenantId for ResourceToken {
-    fn tenant_id(&self) -> Option<u32> {
-        self.tenant.map(|t| t.id)
     }
 }

@@ -171,7 +171,6 @@ pub async fn test(test: &WebDavTest) {
             [
                 ("D:displayname", "Named Events 2"),
                 ("A:calendar-description", ""),
-                ("A:supported-calendar-component-set", ""),
             ],
         )
         .await
@@ -181,6 +180,61 @@ pub async fn test(test: &WebDavTest) {
             "A:mkcalendar-response.D:propstat.D:status",
             ["HTTP/1.1 200 OK"],
         );
+    client
+        .mkcol(
+            "MKCALENDAR",
+            "/dav/cal/john/my-named-events3",
+            [],
+            [
+                ("D:displayname", "Named Events 3"),
+                (
+                    "A:supported-calendar-component-set",
+                    "<A:comp name=\"VEVENT\"/><A:comp name=\"VTODO\"/>",
+                ),
+            ],
+        )
+        .await
+        .with_status(StatusCode::CREATED)
+        .with_value("A:mkcalendar-response.D:propstat.D:prop.D:displayname", "")
+        .with_values(
+            "A:mkcalendar-response.D:propstat.D:status",
+            ["HTTP/1.1 200 OK"],
+        );
+    // Check the properties of the created calendars
+    client
+        .propfind(
+            "/dav/cal/john/my-named-events2/",
+            ["A:supported-calendar-component-set"],
+        )
+        .await
+        .properties("/dav/cal/john/my-named-events2/")
+        .get("A:supported-calendar-component-set")
+        .with_status(StatusCode::OK)
+        .with_values([
+            "A:comp.[name]:VJOURNAL",
+            "A:comp.[name]:VTIMEZONE",
+            "A:comp.[name]:VAVAILABILITY",
+            "A:comp.[name]:VALARM",
+            "A:comp.[name]:VRESOURCE",
+            "A:comp.[name]:AVAILABLE",
+            "A:comp.[name]:VTODO",
+            "A:comp.[name]:VFREEBUSY",
+            "A:comp.[name]:VEVENT",
+            "A:comp.[name]:STANDARD",
+            "A:comp.[name]:DAYLIGHT",
+            "A:comp.[name]:VLOCATION",
+            "A:comp.[name]:PARTICIPANT",
+        ]);
+    client
+        .propfind(
+            "/dav/cal/john/my-named-events3/",
+            ["A:supported-calendar-component-set"],
+        )
+        .await
+        .properties("/dav/cal/john/my-named-events3/")
+        .get("A:supported-calendar-component-set")
+        .with_status(StatusCode::OK)
+        .with_values(["A:comp.[name]:VEVENT", "A:comp.[name]:VTODO"]);
 
     // Delete everything
     for path in [
@@ -191,6 +245,7 @@ pub async fn test(test: &WebDavTest) {
         "/dav/card/john/my-named-cards",
         "/dav/cal/john/my-named-events",
         "/dav/cal/john/my-named-events2",
+        "/dav/cal/john/my-named-events3",
     ] {
         client
             .request("DELETE", path, "")

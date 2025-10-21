@@ -1,6 +1,6 @@
 [package]
 name = "jmap_proto"
-version = "0.13.3"
+version = "0.14.0"
 edition = "2024"
 resolver = "2"
 
@@ -9,7 +9,8 @@ store = { path = "../store" }
 utils = { path = "../utils" }
 types = { path = "../types" }
 trc = { path = "../trc" }
-jmap-tools = { path = "/Users/me/code/jmap-tool" }
+jmap-tools = { version = "0.1" }
+calcard = { version = "0.3" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 serde = { version = "1.0", features = ["derive"]}
 ahash = { version = "0.8.2", features = ["serde"] }

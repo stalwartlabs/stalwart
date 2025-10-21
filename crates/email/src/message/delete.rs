@@ -32,7 +32,7 @@ pub trait EmailDeletion: Sync + Send {
         document_ids: RoaringBitmap,
     ) -> impl Future<Output = trc::Result<RoaringBitmap>> + Send;
 
-    fn purge_accounts(&self) -> impl Future<Output = ()> + Send;
+    fn purge_accounts(&self, use_roles: bool) -> impl Future<Output = ()> + Send;
 
     fn purge_account(&self, account_id: u32) -> impl Future<Output = ()> + Send;
 
@@ -99,10 +99,21 @@ impl EmailDeletion for Server {
         Ok(not_destroyed)
     }
 
-    async fn purge_accounts(&self) {
+    async fn purge_accounts(&self, use_roles: bool) {
         if let Ok(Some(account_ids)) = self.get_document_ids(u32::MAX, Collection::Principal).await
         {
-            let mut account_ids: Vec<u32> = account_ids.into_iter().collect();
+            let mut account_ids: Vec<u32> = account_ids
+                .into_iter()
+                .filter(|id| {
+                    !use_roles
+                        || self
+                            .core
+                            .network
+                            .roles
+                            .purge_accounts
+                            .is_enabled_for_account(*id)
+                })
+                .collect();
 
             // Shuffle account ids
             account_ids.shuffle(&mut store::rand::rng());
@@ -165,8 +176,13 @@ impl EmailDeletion for Server {
         }
 
         // Purge changelogs
-        if let Some(history) = self.core.jmap.changes_max_history
-            && let Err(err) = self.delete_changes(account_id, history).await
+        if let Err(err) = self
+            .delete_changes(
+                account_id,
+                self.core.jmap.changes_max_history,
+                self.core.jmap.share_notification_max_history,
+            )
+            .await
         {
             trc::error!(
                 err.details("Failed to purge changes.")

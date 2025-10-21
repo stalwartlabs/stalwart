@@ -24,7 +24,7 @@ use config::{
     storage::Storage,
     telemetry::Metrics,
 };
-use ipc::{BroadcastEvent, HousekeeperEvent, QueueEvent, ReportingEvent, StateEvent};
+use ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEvent};
 use listener::{asn::AsnGeoLookupData, blocked::Security, tls::AcmeProviders};
 use mail_auth::{MX, Txt};
 use manager::webadmin::{Resource, WebAdminManager};
@@ -37,6 +37,7 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
+use store::rand::{Rng, distr::Alphanumeric};
 use tinyvec::TinyVec;
 use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio_rustls::TlsConnector;
@@ -86,10 +87,11 @@ Schema history:
 1 - v0.12.0
 2 - v0.12.4
 3 - v0.13.0
+4 - v0.14.0
 
 */
 
-pub const DATABASE_SCHEMA_VERSION: u32 = 3;
+pub const DATABASE_SCHEMA_VERSION: u32 = 4;
 
 pub const LONG_1D_SLUMBER: Duration = Duration::from_secs(60 * 60 * 24);
 pub const LONG_1Y_SLUMBER: Duration = Duration::from_secs(60 * 60 * 24 * 365);
@@ -243,7 +245,7 @@ pub struct HttpAuthCache {
 }
 
 pub struct Ipc {
-    pub state_tx: mpsc::Sender<StateEvent>,
+    pub push_tx: mpsc::Sender<PushEvent>,
     pub housekeeper_tx: mpsc::Sender<HousekeeperEvent>,
     pub task_tx: Arc<Notify>,
     pub queue_tx: mpsc::Sender<QueueEvent>,
@@ -301,14 +303,14 @@ pub enum DavResourceMetadata {
     Calendar {
         name: String,
         acls: TinyVec<[AclGrant; 2]>,
-        tz: Tz,
+        preferences: TinyVec<[TinyCalendarPreferences; 2]>,
     },
     CalendarEvent {
         names: TinyVec<[DavName; 2]>,
         start: i64,
         duration: u32,
     },
-    CalendarScheduling {
+    CalendarEventNotification {
         names: TinyVec<[DavName; 2]>,
     },
     AddressBook {
@@ -318,6 +320,13 @@ pub enum DavResourceMetadata {
     ContactCard {
         names: TinyVec<[DavName; 2]>,
     },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TinyCalendarPreferences {
+    pub account_id: u32,
+    pub tz: Tz,
+    pub flags: u16,
 }
 
 #[derive(
@@ -495,7 +504,7 @@ impl Default for Caches {
 impl Default for Ipc {
     fn default() -> Self {
         Self {
-            state_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
+            push_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
             housekeeper_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
             task_tx: Default::default(),
             queue_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
@@ -557,7 +566,7 @@ impl DavResourcePath<'_> {
 
     #[inline(always)]
     pub fn size(&self) -> u32 {
-        self.resource.size()
+        self.resource.size().unwrap_or_default()
     }
 }
 
@@ -573,6 +582,19 @@ impl DavResources {
         self.resources
             .iter()
             .find(|res| res.document_id == id && res.is_container())
+    }
+
+    pub fn container_resource_path_by_id(&self, id: u32) -> Option<DavResourcePath<'_>> {
+        self.resources
+            .iter()
+            .enumerate()
+            .find(|(_, resource)| resource.document_id == id && resource.is_container())
+            .and_then(|(idx, resource)| {
+                self.paths
+                    .iter()
+                    .find(|path| path.resource_idx == idx)
+                    .map(|path| DavResourcePath { path, resource })
+            })
     }
 
     pub fn subtree(&self, search_path: &str) -> impl Iterator<Item = DavResourcePath<'_>> {
@@ -635,6 +657,13 @@ impl DavResources {
             })
     }
 
+    pub fn children_ids(&self, parent_id: u32) -> impl Iterator<Item = u32> {
+        self.paths
+            .iter()
+            .filter(move |item| item.parent_id.is_some_and(|id| id == parent_id))
+            .map(|path| self.resources[path.resource_idx].document_id)
+    }
+
     pub fn format_resource(&self, resource: DavResourcePath<'_>) -> String {
         if resource.resource.is_container() {
             format!("{}{}/", self.base_path, resource.path.path)
@@ -664,10 +693,24 @@ impl DavResource {
             DavResourceMetadata::ContactCard { names } => {
                 names.iter().any(|name| name.parent_id == parent_id)
             }
-            DavResourceMetadata::CalendarScheduling { names } => {
+            DavResourceMetadata::CalendarEventNotification { names } => {
                 names.is_empty() && parent_id == SCHEDULE_INBOX_ID
             }
             _ => false,
+        }
+    }
+
+    pub fn parent_id(&self) -> Option<u32> {
+        match &self.data {
+            DavResourceMetadata::File { parent_id, .. } => *parent_id,
+            DavResourceMetadata::CalendarEvent { names, .. } => {
+                names.first().map(|name| name.parent_id)
+            }
+            DavResourceMetadata::ContactCard { names } => names.first().map(|name| name.parent_id),
+            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
+                Some(SCHEDULE_INBOX_ID)
+            }
+            _ => None,
         }
     }
 
@@ -675,7 +718,7 @@ impl DavResource {
         match &self.data {
             DavResourceMetadata::CalendarEvent { names, .. } => Some(names.as_slice()),
             DavResourceMetadata::ContactCard { names } => Some(names.as_slice()),
-            DavResourceMetadata::CalendarScheduling { names } if !names.is_empty() => {
+            DavResourceMetadata::CalendarEventNotification { names } if !names.is_empty() => {
                 Some(names.as_slice())
             }
             _ => None,
@@ -687,7 +730,7 @@ impl DavResource {
             DavResourceMetadata::File { name, .. } => Some(name.as_str()),
             DavResourceMetadata::Calendar { name, .. } => Some(name.as_str()),
             DavResourceMetadata::AddressBook { name, .. } => Some(name.as_str()),
-            DavResourceMetadata::CalendarScheduling { names } if names.is_empty() => {
+            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
                 Some(if self.document_id == SCHEDULE_INBOX_ID {
                     "inbox"
                 } else {
@@ -729,8 +772,8 @@ impl DavResource {
                 DavResourceMetadata::ContactCard { names: b, .. },
             ) => a != b,
             (
-                DavResourceMetadata::CalendarScheduling { names: a, .. },
-                DavResourceMetadata::CalendarScheduling { names: b, .. },
+                DavResourceMetadata::CalendarEventNotification { names: a, .. },
+                DavResourceMetadata::CalendarEventNotification { names: b, .. },
             ) => a != b,
             _ => unreachable!(),
         }
@@ -745,9 +788,12 @@ impl DavResource {
         }
     }
 
-    pub fn timezone(&self) -> Option<Tz> {
+    pub fn calendar_preferences(&self, account_id: u32) -> Option<&TinyCalendarPreferences> {
         match &self.data {
-            DavResourceMetadata::Calendar { tz, .. } => Some(*tz),
+            DavResourceMetadata::Calendar { preferences, .. } => preferences
+                .iter()
+                .find(|pref| pref.account_id == account_id)
+                .or_else(|| preferences.first()),
             _ => None,
         }
     }
@@ -756,15 +802,15 @@ impl DavResource {
         match &self.data {
             DavResourceMetadata::File { size, .. } => size.is_none(),
             DavResourceMetadata::Calendar { .. } | DavResourceMetadata::AddressBook { .. } => true,
-            DavResourceMetadata::CalendarScheduling { names } => names.is_empty(),
+            DavResourceMetadata::CalendarEventNotification { names } => names.is_empty(),
             _ => false,
         }
     }
 
-    pub fn size(&self) -> u32 {
+    pub fn size(&self) -> Option<u32> {
         match &self.data {
-            DavResourceMetadata::File { size, .. } => size.unwrap_or_default(),
-            _ => 0,
+            DavResourceMetadata::File { size, .. } => *size,
+            _ => None,
         }
     }
 
@@ -821,6 +867,17 @@ impl std::borrow::Borrow<u32> for DavResource {
 impl DavName {
     pub fn new(name: String, parent_id: u32) -> Self {
         Self { name, parent_id }
+    }
+
+    pub fn new_with_rand_name(parent_id: u32) -> Self {
+        Self {
+            name: store::rand::rng()
+                .sample_iter(Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect::<String>(),
+            parent_id,
+        }
     }
 }
 

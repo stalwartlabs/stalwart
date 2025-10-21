@@ -210,8 +210,7 @@ impl Autoconfig for Server {
                 .query(QueryParams::id(id).with_return_member_of(false))
                 .await
             && principal
-                .emails
-                .first()
+                .primary_email()
                 .is_some_and(|email| email.eq_ignore_ascii_case(emailaddress))
         {
             account_name = principal.name;

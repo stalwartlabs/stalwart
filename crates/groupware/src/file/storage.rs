@@ -33,7 +33,7 @@ impl FileNode {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|b| b.commit_point())
     }
@@ -56,7 +56,7 @@ impl FileNode {
                 ObjectIndexBuilder::new()
                     .with_current(node)
                     .with_changes(new_node)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )
             .map(|b| b.commit_point())
     }
@@ -79,7 +79,7 @@ impl DestroyArchive<Archive<&ArchivedFileNode>> {
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
                     .with_current(self.0)
-                    .with_tenant_id(access_token),
+                    .with_access_token(access_token),
             )?
             .log_vanished_item(VanishedCollection::FileNode, path)
             .commit_point();
@@ -97,6 +97,28 @@ impl DestroyArchive<Vec<u32>> {
     ) -> trc::Result<()> {
         // Process deletions
         let mut batch = BatchBuilder::new();
+        self.delete_batch(server, access_token, account_id, delete_path, &mut batch)
+            .await?;
+        // Write changes
+        if !batch.is_empty() {
+            server
+                .commit_batch(batch)
+                .await
+                .caused_by(trc::location!())?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_batch(
+        self,
+        server: &Server,
+        access_token: &AccessToken,
+        account_id: u32,
+        delete_path: Option<String>,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        // Process deletions
         batch
             .with_account_id(account_id)
             .with_collection(Collection::FileNode);
@@ -110,7 +132,7 @@ impl DestroyArchive<Vec<u32>> {
                     .delete_document(document_id)
                     .custom(
                         ObjectIndexBuilder::<_, ()>::new()
-                            .with_tenant_id(access_token)
+                            .with_access_token(access_token)
                             .with_current(
                                 node.to_unarchived::<FileNode>()
                                     .caused_by(trc::location!())?,
@@ -121,15 +143,10 @@ impl DestroyArchive<Vec<u32>> {
             }
         }
 
-        // Write changes
-        if !batch.is_empty() {
-            if let Some(delete_path) = delete_path {
-                batch.log_vanished_item(VanishedCollection::FileNode, delete_path);
-            }
-            server
-                .commit_batch(batch)
-                .await
-                .caused_by(trc::location!())?;
+        if !batch.is_empty()
+            && let Some(delete_path) = delete_path
+        {
+            batch.log_vanished_item(VanishedCollection::FileNode, delete_path);
         }
 
         Ok(())

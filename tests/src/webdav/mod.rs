@@ -276,7 +276,7 @@ impl WebDavTest {
     }
 
     pub async fn assert_is_empty(&self) {
-        assert_is_empty(self.server.clone()).await;
+        assert_is_empty(&self.server).await;
         self.clear_cache();
     }
 }
@@ -559,6 +559,15 @@ impl DavResponse {
         } else {
             self.dump_response();
             panic!("Expected empty body but no body was returned.")
+        }
+    }
+
+    pub fn expect_body(&self) -> &str {
+        if self.body.is_ok() {
+            self.body.as_ref().unwrap()
+        } else {
+            self.dump_response();
+            panic!("Expected body but no body was returned.")
         }
     }
 
@@ -1198,6 +1207,9 @@ auto-add = true
 
 [dav.collection]
 assisted-discovery = {ASSISTED_DISCOVERY}
+
+[sharing]
+allow-directory-query = true
 
 [store."auth"]
 type = "sqlite"

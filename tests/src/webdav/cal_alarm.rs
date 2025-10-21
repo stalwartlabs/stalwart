@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::mailbox::destroy_all_mailboxes_for_account;
-
 use super::WebDavTest;
+use crate::jmap::mail::mailbox::destroy_all_mailboxes_for_account;
 use email::cache::MessageCacheFetch;
 use hyper::StatusCode;
 use mail_parser::{DateTime, MessageParser};
@@ -44,8 +43,6 @@ pub async fn test(test: &WebDavTest) {
         let contents = test
             .fetch_email(client.account_id, message.document_id)
             .await;
-
-        //let t = std::fs::write(format!("message_{}.eml", message.document_id), &contents).unwrap();
 
         let message = MessageParser::new().parse(&contents).unwrap();
         let contents = message

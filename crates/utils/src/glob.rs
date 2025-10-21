@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use std::borrow::Cow;
+
 use ahash::{AHashMap, AHashSet};
+use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobPattern {
@@ -205,5 +208,17 @@ impl<V> GlobMap<V> {
 impl<V> Default for GlobMap<V> {
     fn default() -> Self {
         GlobMap::new()
+    }
+}
+
+impl<'de> Deserialize<'de> for GlobPattern {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(GlobPattern::compile(
+            <Cow<&str>>::deserialize(deserializer)?.as_ref(),
+            true,
+        ))
     }
 }

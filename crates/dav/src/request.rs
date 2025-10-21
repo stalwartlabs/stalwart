@@ -5,12 +5,12 @@
  */
 
 use crate::{
-    DavError, DavMethod, DavResourceName,
+    DavError, DavErrorCondition, DavMethod, DavResourceName,
     calendar::{
         copy_move::CalendarCopyMoveRequestHandler, delete::CalendarDeleteRequestHandler,
         freebusy::CalendarFreebusyRequestHandler, get::CalendarGetRequestHandler,
         mkcol::CalendarMkColRequestHandler, proppatch::CalendarPropPatchRequestHandler,
-        query::CalendarQueryRequestHandler, scheduling::CalendarSchedulingHandler,
+        query::CalendarQueryRequestHandler, scheduling::CalendarEventNotificationHandler,
         update::CalendarUpdateRequestHandler,
     },
     card::{
@@ -43,7 +43,7 @@ use dav_proto::{
         property::WebDavProperty,
         request::{Acl, LockInfo, MkCol, PropFind, PropertyUpdate, Report},
         response::{
-            BaseCondition, ErrorResponse, PrincipalSearchProperty, PrincipalSearchPropertySet,
+            BaseCondition, ErrorResponse, List, PrincipalSearchProperty, PrincipalSearchPropertySet,
         },
     },
 };
@@ -184,6 +184,17 @@ impl DavRequestDispatcher for Server {
                 }
                 Report::AclPrincipalPropSet(report) => {
                     // Validate permissions
+                    if !self.core.groupware.allow_directory_query
+                        && !access_token.has_permission(Permission::IndividualList)
+                    {
+                        return Err(DavError::Condition(
+                            DavErrorCondition::new(
+                                StatusCode::FORBIDDEN,
+                                BaseCondition::NeedPrivileges(List(Default::default())),
+                            )
+                            .with_details("The administrator has disabled directory queries."),
+                        ));
+                    }
                     access_token.assert_has_permission(Permission::DavPrincipalAcl)?;
 
                     self.handle_acl_prop_set(&access_token, headers, report)
@@ -191,6 +202,17 @@ impl DavRequestDispatcher for Server {
                 }
                 Report::PrincipalMatch(report) => {
                     // Validate permissions
+                    if !self.core.groupware.allow_directory_query
+                        && !access_token.has_permission(Permission::IndividualList)
+                    {
+                        return Err(DavError::Condition(
+                            DavErrorCondition::new(
+                                StatusCode::FORBIDDEN,
+                                BaseCondition::NeedPrivileges(List(Default::default())),
+                            )
+                            .with_details("The administrator has disabled directory queries."),
+                        ));
+                    }
                     access_token.assert_has_permission(Permission::DavPrincipalMatch)?;
 
                     self.handle_principal_match(&access_token, headers, report)
@@ -199,6 +221,18 @@ impl DavRequestDispatcher for Server {
                 Report::PrincipalPropertySearch(report) => {
                     if resource == DavResourceName::Principal {
                         // Validate permissions
+                        if !self.core.groupware.allow_directory_query
+                            && !access_token.has_permission(Permission::IndividualList)
+                        {
+                            return Err(DavError::Condition(
+                                DavErrorCondition::new(
+                                    StatusCode::FORBIDDEN,
+                                    BaseCondition::NeedPrivileges(List(Default::default())),
+                                )
+                                .with_details("The administrator has disabled directory queries."),
+                            ));
+                        }
+
                         access_token.assert_has_permission(Permission::DavPrincipalSearch)?;
 
                         self.handle_principal_property_search(&access_token, report)

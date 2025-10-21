@@ -6,17 +6,14 @@
 
 use super::WebDavTest;
 use ahash::AHashSet;
-use calcard::{
-    common::timezone::Tz,
-    icalendar::{ICalendar, dates::CalendarEvent},
-};
-use dav_proto::schema::property::TimeRange;
+use calcard::{common::timezone::Tz, icalendar::ICalendar};
 use groupware::{
     DavResourceName,
-    calendar::{CalendarEventData, alarm::ExpandAlarm},
+    calendar::{CalendarEventData, alarm::ExpandAlarm, expand::CalendarEventExpansion},
 };
 use hyper::StatusCode;
 use store::write::serialize::rkyv_unarchive;
+use types::TimeRange;
 
 pub async fn test(test: &WebDavTest) {
     println!("Running REPORT calendar-query & free-busy-query tests...");
@@ -219,7 +216,8 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
     let mut events = expanded
         .events
         .into_iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
             let e = e.try_into_date_time().unwrap();
             let start = e.start.timestamp();
             let end = e.end.timestamp();
@@ -247,8 +245,9 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             if max > max_utc {
                 max_utc = max;
             }
-            CalendarEvent {
+            CalendarEventExpansion {
                 comp_id: e.comp_id,
+                expansion_id: i as u32,
                 start,
                 end,
             }
@@ -289,6 +288,19 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             },
         )
         .unwrap();
+
+    assert_eq!(
+        events_archive,
+        event_data
+            .expand_from_ids(
+                &mut events
+                    .iter()
+                    .map(|e| e.expansion_id)
+                    .collect::<AHashSet<_>>(),
+                Tz::UTC
+            )
+            .unwrap()
+    );
     events.sort_by(|a, b| {
         if a.comp_id == b.comp_id {
             a.start.cmp(&b.start)
@@ -303,6 +315,9 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             a.comp_id.cmp(&b.comp_id)
         }
     });
+    for event in events.iter_mut().chain(events_archive.iter_mut()) {
+        event.expansion_id = 0;
+    }
 
     assert_eq!(events, events_archive);
 }
@@ -732,7 +747,7 @@ BEGIN:VFREEBUSY
 DTSTART:20060104T140000Z
 DTEND:20060105T220000Z
 FREEBUSY;FBTYPE=BUSY-TENTATIVE:20060104T150000Z/20060104T160000Z
-FREEBUSY;FBTYPE=BUSY:20060104T190000Z/20060104T200000Z;20060105T170000Z/20060105T180000Z
+FREEBUSY;FBTYPE=BUSY:20060104T190000Z/20060104T200000Z,20060105T170000Z/20060105T180000Z
 FREEBUSY;FBTYPE=BUSY-UNAVAILABLE:20060105T100000Z/20060105T120000Z
 END:VFREEBUSY
 END:VCALENDAR
@@ -753,8 +768,8 @@ DTSTART:20060101T000000Z
 DTEND:20060104T140000Z
 DTSTAMP:20250505T105255Z
 FREEBUSY;FBTYPE=BUSY-TENTATIVE:20060102T100000Z/20060102T120000Z
-FREEBUSY;FBTYPE=BUSY:20060102T150000Z/20060102T160000Z;20060102T170000Z/20060102T180000Z;
- 20060103T100000Z/20060103T120000Z;20060103T170000Z/20060103T180000Z;20060104T100000Z/20060104T120000Z
+FREEBUSY;FBTYPE=BUSY:20060102T150000Z/20060102T160000Z,20060102T170000Z/20060102T180000Z,
+ 20060103T100000Z/20060103T120000Z,20060103T170000Z/20060103T180000Z,20060104T100000Z/20060104T120000Z
 END:VFREEBUSY
 END:VCALENDAR
 "#;

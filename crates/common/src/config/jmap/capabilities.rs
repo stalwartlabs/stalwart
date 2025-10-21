@@ -5,16 +5,25 @@
  */
 
 use super::settings::JmapConfig;
+use crate::config::groupware::GroupwareConfig;
 use ahash::AHashSet;
-use jmap_proto::request::capability::{
-    BlobCapabilities, Capabilities, Capability, CoreCapabilities, EmptyCapabilities,
-    MailCapabilities, SieveAccountCapabilities, SieveSessionCapabilities, SubmissionCapabilities,
+use calcard::icalendar::ICalendarDuration;
+use chrono::{DateTime, Utc};
+use jmap_proto::{
+    object::email::EmailComparator,
+    request::capability::{
+        BlobCapabilities, CalendarCapabilities, Capabilities, Capability, ContactsCapabilities,
+        CoreCapabilities, EmptyCapabilities, FileNodeCapabilities, MailCapabilities,
+        PrincipalAvailabilityCapabilities, PrincipalCapabilities, SieveAccountCapabilities,
+        SieveSessionCapabilities, SubmissionCapabilities,
+    },
+    types::date::UTCDate,
 };
-use types::type_state::DataType;
+use types::{collection::Collection, type_state::DataType};
 use utils::{config::Config, map::vec_map::VecMap};
 
 impl JmapConfig {
-    pub fn add_capabilities(&mut self, config: &mut Config) {
+    pub fn add_capabilities(&mut self, config: &mut Config, groupware_config: &GroupwareConfig) {
         // Add core capabilities
         self.capabilities.session.append(
             Capability::Core,
@@ -41,28 +50,110 @@ impl JmapConfig {
             Capability::Mail,
             Capabilities::Empty(EmptyCapabilities::default()),
         );
-        self.capabilities.account.append(
+        self.capabilities.account.insert(
             Capability::Mail,
             Capabilities::Mail(MailCapabilities {
                 max_mailboxes_per_email: None,
                 max_mailbox_depth: self.mailbox_max_depth,
                 max_size_mailbox_name: self.mailbox_name_max_len,
                 max_size_attachments_per_email: self.mail_attachments_max_size,
-                email_query_sort_options: [
-                    "receivedAt",
-                    "size",
-                    "from",
-                    "to",
-                    "subject",
-                    "sentAt",
-                    "hasKeyword",
-                    "allInThreadHaveKeyword",
-                    "someInThreadHaveKeyword",
-                ]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+                email_query_sort_options: vec![
+                    EmailComparator::ReceivedAt,
+                    EmailComparator::Size,
+                    EmailComparator::From,
+                    EmailComparator::To,
+                    EmailComparator::Subject,
+                    EmailComparator::SentAt,
+                    EmailComparator::HasKeyword(Default::default()),
+                    EmailComparator::AllInThreadHaveKeyword(Default::default()),
+                    EmailComparator::SomeInThreadHaveKeyword(Default::default()),
+                ],
                 may_create_top_level_mailbox: true,
+            }),
+        );
+
+        // Add calendar capabilities
+        self.capabilities.session.append(
+            Capability::Calendars,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::Calendars,
+            Capabilities::Calendar(CalendarCapabilities {
+                max_calendars_per_event: None,
+                min_date_time: UTCDate::from_timestamp(DateTime::<Utc>::MIN_UTC.timestamp()),
+                max_date_time: UTCDate::from_timestamp(DateTime::<Utc>::MAX_UTC.timestamp()),
+                max_expanded_query_duration: ICalendarDuration::from_seconds(86400 * 365)
+                    .to_string(),
+                max_participants_per_event: groupware_config.max_ical_attendees_per_instance.into(),
+                may_create_calendar: true,
+            }),
+        );
+
+        self.capabilities.session.append(
+            Capability::CalendarsParse,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::CalendarsParse,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+
+        // Add contacts capabilities
+        self.capabilities.session.append(
+            Capability::Contacts,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::Contacts,
+            Capabilities::Contacts(ContactsCapabilities {
+                max_address_books_per_card: None,
+                may_create_address_book: true,
+            }),
+        );
+        self.capabilities.session.append(
+            Capability::ContactsParse,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::ContactsParse,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+
+        // Add file node capabilities
+        self.capabilities.session.append(
+            Capability::FileNode,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::FileNode,
+            Capabilities::FileNode(FileNodeCapabilities {
+                max_file_node_depth: None,
+                max_size_file_node_name: 255,
+                file_node_query_sort_options: vec![],
+                may_create_top_level_file_node: true,
+            }),
+        );
+
+        // Add principal capabilities
+        self.capabilities.session.append(
+            Capability::Principals,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::Principals,
+            Capabilities::Principals(PrincipalCapabilities {
+                current_user_principal_id: None,
+            }),
+        );
+        self.capabilities.session.append(
+            Capability::PrincipalsAvailability,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::PrincipalsAvailability,
+            Capabilities::PrincipalsAvailability(PrincipalAvailabilityCapabilities {
+                max_availability_duration: ICalendarDuration::from_seconds(86400 * 365).to_string(),
             }),
         );
 
@@ -71,7 +162,7 @@ impl JmapConfig {
             Capability::Submission,
             Capabilities::Empty(EmptyCapabilities::default()),
         );
-        self.capabilities.account.append(
+        self.capabilities.account.insert(
             Capability::Submission,
             Capabilities::Submission(SubmissionCapabilities {
                 max_delayed_send: 86400 * 30,
@@ -91,7 +182,7 @@ impl JmapConfig {
             Capability::VacationResponse,
             Capabilities::Empty(EmptyCapabilities::default()),
         );
-        self.capabilities.account.append(
+        self.capabilities.account.insert(
             Capability::VacationResponse,
             Capabilities::Empty(EmptyCapabilities::default()),
         );
@@ -123,14 +214,14 @@ impl JmapConfig {
             Capability::Sieve,
             Capabilities::SieveSession(SieveSessionCapabilities::default()),
         );
-        self.capabilities.account.append(
+        self.capabilities.account.insert(
             Capability::Sieve,
             Capabilities::SieveAccount(SieveAccountCapabilities {
                 max_script_name: self.sieve_max_script_name,
                 max_script_size: config
                     .property("sieve.untrusted.max-script-size")
                     .unwrap_or(1024 * 1024),
-                max_scripts: self.sieve_max_scripts,
+                max_scripts: self.max_objects[Collection::SieveScript as usize] as usize,
                 max_redirects: config
                     .property("sieve.untrusted.max-redirects")
                     .unwrap_or(1),
@@ -149,7 +240,7 @@ impl JmapConfig {
             Capability::Blob,
             Capabilities::Empty(EmptyCapabilities::default()),
         );
-        self.capabilities.account.append(
+        self.capabilities.account.insert(
             Capability::Blob,
             Capabilities::Blob(BlobCapabilities {
                 max_size_blob_set: (self.request_max_size * 3 / 4) - 512,
@@ -168,7 +259,7 @@ impl JmapConfig {
             Capability::Quota,
             Capabilities::Empty(EmptyCapabilities::default()),
         );
-        self.capabilities.account.append(
+        self.capabilities.account.insert(
             Capability::Quota,
             Capabilities::Empty(EmptyCapabilities::default()),
         );

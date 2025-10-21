@@ -244,6 +244,7 @@ pub enum CalCondition {
         Vec<Filter<Vec<ICalendarComponentType>, ICalendarProperty, ICalendarParameterName>>,
     ),
     SupportedCollation(String),
+    SupportedCalendarComponent,
     MinDateTime,
     MaxDateTime,
     MaxResourceSize(u32),
@@ -366,6 +367,7 @@ impl CalCondition {
             CalCondition::ValidScheduleDefaultCalendarUrl => "ValidScheduleDefaultCalendarUrl",
             CalCondition::ValidSchedulingMessage => "ValidSchedulingMessage",
             CalCondition::ValidOrganizer => "ValidOrganizer",
+            CalCondition::SupportedCalendarComponent => "SupportedCalendarComponent",
         }
     }
 }

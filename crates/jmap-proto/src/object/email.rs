@@ -12,6 +12,7 @@ use crate::{
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use mail_parser::HeaderName;
+use serde::Serialize;
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 use store::fts::{FilterItem, FilterType};
 use types::{blob::BlobId, id::Id, keyword::Keyword};
@@ -77,6 +78,7 @@ pub enum EmailProperty {
     // Other
     Keyword(Keyword),
     IdValue(Id),
+    IdReference(String),
     Pointer(JsonPointer<EmailProperty>),
 }
 
@@ -112,6 +114,11 @@ impl Property for EmailProperty {
         if let Some(Key::Property(key)) = key {
             match key.patch_or_prop() {
                 EmailProperty::Keywords => EmailProperty::Keyword(Keyword::parse(value)).into(),
+                EmailProperty::MailboxIds => match parse_ref(value) {
+                    MaybeReference::Value(v) => Some(EmailProperty::IdValue(v)),
+                    MaybeReference::Reference(v) => Some(EmailProperty::IdReference(v)),
+                    MaybeReference::ParseError => None,
+                },
                 _ => EmailProperty::parse(value, allow_patch),
             }
         } else {
@@ -165,6 +172,7 @@ impl Property for EmailProperty {
             EmailProperty::Keyword(keyword) => return keyword.to_string().into(),
             EmailProperty::IdValue(id) => return id.to_string().into(),
             EmailProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
+            EmailProperty::IdReference(r) => return format!("#{r}").into(),
         }
         .into()
     }
@@ -395,6 +403,15 @@ pub struct EmailQueryArguments {
     pub collapse_threads: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct EmailParseArguments {
+    pub body_properties: Option<Vec<MaybeInvalid<EmailProperty>>>,
+    pub fetch_text_body_values: Option<bool>,
+    pub fetch_html_body_values: Option<bool>,
+    pub fetch_all_body_values: Option<bool>,
+    pub max_body_value_bytes: Option<usize>,
+}
+
 impl<'de> DeserializeArguments<'de> for EmailGetArguments {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
@@ -440,12 +457,33 @@ impl<'de> DeserializeArguments<'de> for EmailQueryArguments {
     }
 }
 
-impl serde::Serialize for EmailProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+impl<'de> DeserializeArguments<'de> for EmailParseArguments {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
-        S: serde::Serializer,
+        A: serde::de::MapAccess<'de>,
     {
-        serializer.serialize_str(self.to_cow().as_ref())
+        hashify::fnc_map!(key.as_bytes(),
+            b"bodyProperties" => {
+                self.body_properties = map.next_value()?;
+            },
+            b"fetchTextBodyValues" => {
+                self.fetch_text_body_values = map.next_value()?;
+            },
+            b"fetchHTMLBodyValues" => {
+                self.fetch_html_body_values = map.next_value()?;
+            },
+            b"fetchAllBodyValues" => {
+                self.fetch_all_body_values = map.next_value()?;
+            },
+            b"maxBodyValueBytes" => {
+                self.max_body_value_bytes = map.next_value()?;
+            },
+            _ => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+            }
+        );
+
+        Ok(())
     }
 }
 
@@ -467,6 +505,8 @@ impl JmapObject for Email {
     type QueryArguments = EmailQueryArguments;
 
     type CopyArguments = ();
+
+    type ParseArguments = EmailParseArguments;
 
     const ID_PROPERTY: Self::Property = EmailProperty::Id;
 }
@@ -732,7 +772,13 @@ impl Display for EmailFilter {
 
 impl Display for EmailComparator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
+        f.write_str(self.as_str())
+    }
+}
+
+impl EmailComparator {
+    pub fn as_str(&self) -> &str {
+        match self {
             EmailComparator::ReceivedAt => "receivedAt",
             EmailComparator::Size => "size",
             EmailComparator::From => "from",
@@ -745,7 +791,16 @@ impl Display for EmailComparator {
             EmailComparator::AllInThreadHaveKeyword(_) => "allInThreadHaveKeyword",
             EmailComparator::SomeInThreadHaveKeyword(_) => "someInThreadHaveKeyword",
             EmailComparator::_T(v) => v.as_str(),
-        })
+        }
+    }
+}
+
+impl Serialize for EmailComparator {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -843,16 +898,17 @@ impl JmapObjectId for EmailValue {
             None
         }
     }
-}
 
-impl TryFrom<AnyId> for EmailValue {
-    type Error = ();
-
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(EmailValue::Id(id)),
-            AnyId::BlobId(id) => Ok(EmailValue::BlobId(id)),
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        match new_id {
+            AnyId::Id(id) => {
+                *self = EmailValue::Id(id);
+            }
+            AnyId::BlobId(id) => {
+                *self = EmailValue::BlobId(id);
+            }
         }
+        true
     }
 }
 
@@ -871,5 +927,56 @@ impl From<BlobId> for EmailValue {
 impl From<UTCDate> for EmailValue {
     fn from(date: UTCDate) -> Self {
         EmailValue::Date(date)
+    }
+}
+
+impl JmapObjectId for EmailProperty {
+    fn as_id(&self) -> Option<Id> {
+        if let EmailProperty::IdValue(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    fn as_any_id(&self) -> Option<AnyId> {
+        if let EmailProperty::IdValue(id) = self {
+            Some(AnyId::Id(*id))
+        } else {
+            None
+        }
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        match self {
+            EmailProperty::IdReference(r) => Some(r),
+            EmailProperty::Pointer(value) => {
+                let value = value.as_slice();
+                match (value.first(), value.get(1)) {
+                    (
+                        Some(JsonPointerItem::Key(Key::Property(EmailProperty::MailboxIds))),
+                        Some(JsonPointerItem::Key(Key::Property(EmailProperty::IdReference(r)))),
+                    ) => Some(r),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            if let EmailProperty::Pointer(value) = self {
+                let value = value.as_mut_slice();
+                if let Some(value) = value.get_mut(1) {
+                    *value = JsonPointerItem::Key(Key::Property(EmailProperty::IdValue(id)));
+                    return true;
+                }
+            } else {
+                *self = EmailProperty::IdValue(id);
+                return true;
+            }
+        }
+        false
     }
 }

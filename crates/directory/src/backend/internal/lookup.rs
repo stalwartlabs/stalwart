@@ -13,6 +13,7 @@ use store::{
     write::{DirectoryClass, ValueClass},
 };
 use trc::AddContext;
+use utils::DomainPart;
 
 #[allow(async_fn_in_trait)]
 pub trait DirectoryStore: Sync + Send {
@@ -55,26 +56,18 @@ impl DirectoryStore for Store {
             }
 
             if by.return_member_of {
-                let mut roles = vec![];
-                let mut lists = vec![];
-                let mut member_of = vec![];
-
                 for member in self.get_member_of(principal.id).await? {
                     match member.typ {
-                        Type::List => lists.push(member.principal_id),
-                        Type::Role => roles.push(member.principal_id),
-                        _ => member_of.push(member.principal_id),
+                        Type::List => principal
+                            .data
+                            .push(PrincipalData::List(member.principal_id)),
+                        Type::Role => principal
+                            .data
+                            .push(PrincipalData::Role(member.principal_id)),
+                        _ => principal
+                            .data
+                            .push(PrincipalData::MemberOf(member.principal_id)),
                     }
-                }
-
-                if !roles.is_empty() {
-                    principal.data.push(PrincipalData::Roles(roles));
-                }
-                if !lists.is_empty() {
-                    principal.data.push(PrincipalData::Lists(lists));
-                }
-                if !member_of.is_empty() {
-                    principal.data.push(PrincipalData::MemberOf(member_of));
                 }
             }
             return Ok(Some(principal));
@@ -117,7 +110,7 @@ impl DirectoryStore for Store {
 
     async fn vrfy(&self, address: &str) -> trc::Result<Vec<String>> {
         let mut results = Vec::new();
-        let address = address.split('@').next().unwrap_or(address);
+        let address = address.try_local_part().unwrap_or(address);
         if address.len() > 3 {
             self.iterate(
                 IterateParams::new(
@@ -129,7 +122,7 @@ impl DirectoryStore for Store {
                 |key, value| {
                     let key =
                         std::str::from_utf8(key.get(1..).unwrap_or_default()).unwrap_or_default();
-                    if key.split('@').next().unwrap_or(key).contains(address)
+                    if key.try_local_part().unwrap_or(key).contains(address)
                         && PrincipalInfo::deserialize(value)
                             .caused_by(trc::location!())?
                             .typ
@@ -164,25 +157,29 @@ impl DirectoryStore for Store {
     async fn expn_by_id(&self, list_id: u32) -> trc::Result<Vec<String>> {
         let mut results = Vec::new();
         for account_id in self.get_members(list_id).await? {
-            if let Some(email) = self
-                .get_principal(account_id)
-                .await?
-                .and_then(|p| p.emails.into_iter().next())
-            {
+            if let Some(email) = self.get_principal(account_id).await?.and_then(|p| {
+                p.data.into_iter().find_map(|data| {
+                    if let PrincipalData::PrimaryEmail(email) | PrincipalData::EmailAlias(email) =
+                        data
+                    {
+                        Some(email)
+                    } else {
+                        None
+                    }
+                })
+            }) {
                 results.push(email);
             }
         }
 
-        if let Some(emails) = self.get_principal(list_id).await?.and_then(|p| {
-            p.data.into_iter().find_map(|data| {
-                if let PrincipalData::ExternalMembers(members) = data {
-                    Some(members)
+        if let Some(principal) = self.get_principal(list_id).await? {
+            results.extend(principal.data.into_iter().filter_map(|data| {
+                if let PrincipalData::ExternalMember(member) = data {
+                    Some(member)
                 } else {
                     None
                 }
-            })
-        }) {
-            results.extend(emails);
+            }));
         }
 
         Ok(results)

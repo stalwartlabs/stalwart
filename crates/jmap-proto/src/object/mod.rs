@@ -10,28 +10,31 @@ use serde::Serialize;
 use std::{fmt::Debug, str::FromStr};
 use types::{acl::Acl, blob::BlobId, id::Id};
 
+pub mod addressbook;
 pub mod blob;
+pub mod calendar;
+pub mod calendar_event;
+pub mod calendar_event_notification;
+pub mod contact;
 pub mod email;
 pub mod email_submission;
+pub mod file_node;
 pub mod identity;
 pub mod mailbox;
+pub mod participant_identity;
 pub mod principal;
 pub mod push_subscription;
 pub mod quota;
 pub mod search_snippet;
+pub mod share_notification;
 pub mod sieve;
 pub mod thread;
 pub mod vacation_response;
 
 pub trait JmapObject: std::fmt::Debug {
-    type Property: Property + FromStr + Serialize + Debug + Sync + Send;
-    type Element: Element<Property = Self::Property>
-        + From<Self::Id>
-        + JmapObjectId
-        + Debug
-        + Sync
-        + Send;
-    type Id: FromStr + TryFrom<AnyId> + Serialize + Debug + Sync + Send;
+    type Property: Property + JmapObjectId + FromStr + Debug + Sync + Send;
+    type Element: Element<Property = Self::Property> + JmapObjectId + Debug + Sync + Send;
+    type Id: FromStr + TryFrom<AnyId> + Into<Self::Element> + Serialize + Debug + Sync + Send;
 
     type Filter: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
     type Comparator: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
@@ -40,20 +43,20 @@ pub trait JmapObject: std::fmt::Debug {
     type SetArguments<'de>: Default + DeserializeArguments<'de> + Debug + Sync + Send;
     type QueryArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
     type CopyArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
+    type ParseArguments: Default + for<'de> DeserializeArguments<'de> + Debug + Sync + Send;
 
     const ID_PROPERTY: Self::Property;
 }
 
 pub trait JmapSharedObject: JmapObject {
-    type Right: JmapRight + Into<Self::Property> + Debug + Sync + Send;
+    type Right: JmapRight + Into<Self::Property> + Debug + Clone + Copy + Sync + Send;
 
     const SHARE_WITH_PROPERTY: Self::Property;
 }
 
 pub trait JmapRight: Clone + Copy + Sized + 'static {
-    fn from_acl(acl: Acl) -> &'static [Self];
     fn all_rights() -> &'static [Self];
-    fn to_acl(&self) -> Acl;
+    fn to_acl(&self) -> &'static [Acl];
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -63,10 +66,11 @@ pub enum AnyId {
     BlobId(BlobId),
 }
 
-pub trait JmapObjectId: TryFrom<AnyId> {
+pub trait JmapObjectId {
     fn as_id(&self) -> Option<Id>;
     fn as_any_id(&self) -> Option<AnyId>;
     fn as_id_ref(&self) -> Option<&str>;
+    fn try_set_id(&mut self, new_id: AnyId) -> bool;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,20 +160,17 @@ impl JmapObject for NullObject {
     type SetArguments<'de> = ();
     type QueryArguments = ();
     type CopyArguments = ();
+    type ParseArguments = ();
 
     const ID_PROPERTY: Self::Property = Null;
 }
 
 impl JmapRight for Null {
-    fn from_acl(_: Acl) -> &'static [Self] {
-        unreachable!()
-    }
-
     fn all_rights() -> &'static [Self] {
         unreachable!()
     }
 
-    fn to_acl(&self) -> Acl {
+    fn to_acl(&self) -> &'static [Acl] {
         unreachable!()
     }
 }
@@ -192,6 +193,10 @@ impl JmapObjectId for Null {
     }
 
     fn as_id_ref(&self) -> Option<&str> {
+        unreachable!()
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
         unreachable!()
     }
 }

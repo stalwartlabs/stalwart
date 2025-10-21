@@ -7,12 +7,12 @@
 use super::{DavResponse, DummyWebDavClient, WebDavTest};
 use crate::webdav::{GenerateTestDavResource, TEST_ICAL_2, TEST_VTIMEZONE_1};
 use ahash::{AHashMap, AHashSet};
-use dav_proto::schema::{
-    property::{CalDavProperty, CardDavProperty, DavProperty, PrincipalProperty, WebDavProperty},
-    request::DeadElementTag,
+use dav_proto::schema::property::{
+    CalDavProperty, CardDavProperty, DavProperty, PrincipalProperty, WebDavProperty,
 };
 use groupware::DavResourceName;
 use hyper::StatusCode;
+use types::dead_property::DeadElementTag;
 
 pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
     let client = test.client("jane");
@@ -533,8 +533,8 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
                 ),
                 (DavProperty::WebDav(WebDavProperty::DisplayName), ""),
             ];
-            if !is_file && resource_type == DavResourceName::Cal {
-                // DisplayName can be removed from calendar collections
+            if !is_file {
+                // DisplayName can't be removed from calendar/contact collections
                 props.pop();
             }
             client.patch_and_check(path, props).await;

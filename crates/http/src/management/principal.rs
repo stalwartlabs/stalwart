@@ -710,7 +710,7 @@ impl PrincipalManager for Server {
                 .await?
                 .ok_or_else(|| trc::ManageEvent::NotFound.into_err())?;
 
-            for secret in &principal.secrets {
+            for secret in principal.secrets() {
                 if secret.is_otp_auth() {
                     response.otp_auth = true;
                 } else if let Some((app_name, _)) =

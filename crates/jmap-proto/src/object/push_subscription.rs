@@ -126,15 +126,6 @@ impl Element for PushSubscriptionValue {
     }
 }
 
-impl serde::Serialize for PushSubscriptionProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl FromStr for PushSubscriptionProperty {
     type Err = ();
 
@@ -161,6 +152,8 @@ impl JmapObject for PushSubscription {
     type QueryArguments = ();
 
     type CopyArguments = ();
+
+    type ParseArguments = ();
 
     const ID_PROPERTY: Self::Property = PushSubscriptionProperty::Id;
 }
@@ -189,15 +182,31 @@ impl JmapObjectId for PushSubscriptionValue {
     fn as_id_ref(&self) -> Option<&str> {
         None
     }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = PushSubscriptionValue::Id(id);
+            true
+        } else {
+            false
+        }
+    }
 }
 
-impl TryFrom<AnyId> for PushSubscriptionValue {
-    type Error = ();
+impl JmapObjectId for PushSubscriptionProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
 
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(PushSubscriptionValue::Id(id)),
-            _ => Err(()),
-        }
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
     }
 }

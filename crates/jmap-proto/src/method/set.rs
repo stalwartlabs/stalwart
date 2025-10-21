@@ -216,7 +216,7 @@ impl<T: JmapObject> SetResponse<T> {
             id,
             Value::Object(Map::from(vec![(
                 Key::Property(T::ID_PROPERTY),
-                Value::Element(T::Element::from(document_id.into())),
+                Value::Element(document_id.into().into()),
             )])),
         );
     }

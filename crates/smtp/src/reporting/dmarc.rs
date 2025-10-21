@@ -5,11 +5,7 @@
  */
 
 use super::{AggregateTimestamp, SerializedSize};
-use crate::{
-    core::Session,
-    queue::{DomainPart, RecipientDomain},
-    reporting::SmtpReporting,
-};
+use crate::{core::Session, queue::RecipientDomain, reporting::SmtpReporting};
 use ahash::AHashMap;
 use common::{
     Server,
@@ -31,7 +27,7 @@ use store::{
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, QueueClass, ReportEvent, ValueClass},
 };
 use trc::{AddContext, OutgoingReportEvent};
-use utils::config::Rate;
+use utils::{DomainPart, config::Rate};
 
 #[derive(
     Debug,

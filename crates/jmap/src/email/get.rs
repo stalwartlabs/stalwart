@@ -8,9 +8,7 @@ use super::{
     body::{ToBodyPart, truncate_html, truncate_plain},
     headers::IntoForm,
 };
-use crate::{
-    blob::download::BlobDownload, changes::state::MessageCacheState, email::headers::HeaderToValue,
-};
+use crate::{changes::state::JmapCacheState, email::headers::HeaderToValue};
 use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
@@ -181,7 +179,11 @@ impl EmailGet for Server {
             // Retrieve raw message if needed
             let blob_hash = BlobHash::from(&metadata.blob_hash);
             let raw_message: Cow<[u8]> = if needs_body {
-                if let Some(raw_message) = self.get_blob(&blob_hash, 0..usize::MAX).await? {
+                if let Some(raw_message) = self
+                    .blob_store()
+                    .get_blob(blob_hash.as_slice(), 0..usize::MAX)
+                    .await?
+                {
                     raw_message.into()
                 } else {
                     trc::event!(

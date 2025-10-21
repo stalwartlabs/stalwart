@@ -15,7 +15,8 @@ use crate::{
 };
 use calcard::common::timezone::Tz;
 use common::{
-    DavName, DavPath, DavResource, DavResourceMetadata, DavResources, Server, auth::AccessToken,
+    DavName, DavPath, DavResource, DavResourceMetadata, DavResources, Server,
+    TinyCalendarPreferences, auth::AccessToken,
 };
 use directory::backend::internal::manage::ManageDirectory;
 use std::sync::Arc;
@@ -183,7 +184,7 @@ pub(super) async fn build_scheduling_resources(
         .core
         .storage
         .data
-        .get_last_change_id(account_id, SyncCollection::CalendarScheduling.into())
+        .get_last_change_id(account_id, SyncCollection::CalendarEventNotification.into())
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -196,7 +197,7 @@ pub(super) async fn build_scheduling_resources(
         .unwrap_or_else(|| format!("_{account_id}"));
 
     let item_ids = server
-        .get_document_ids(account_id, Collection::CalendarScheduling)
+        .get_document_ids(account_id, Collection::CalendarEventNotification)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -295,11 +296,15 @@ pub(super) fn resource_from_calendar(calendar: &ArchivedCalendar, document_id: u
                     grants: Bitmap::from(&acl.grants),
                 })
                 .collect(),
-            tz: calendar
+            preferences: calendar
                 .preferences
-                .first()
-                .and_then(|pref| pref.time_zone.tz())
-                .unwrap_or(Tz::UTC),
+                .iter()
+                .map(|pref| TinyCalendarPreferences {
+                    account_id: pref.account_id.to_native(),
+                    flags: pref.flags.to_native(),
+                    tz: pref.time_zone.tz().unwrap_or(Tz::UTC),
+                })
+                .collect(),
         },
     }
 }
@@ -326,7 +331,7 @@ pub(super) fn resource_from_event(event: &ArchivedCalendarEvent, document_id: u3
 pub(super) fn resource_from_scheduling(document_id: u32, is_container: bool) -> DavResource {
     DavResource {
         document_id,
-        data: DavResourceMetadata::CalendarScheduling {
+        data: DavResourceMetadata::CalendarEventNotification {
             names: if !is_container {
                 [DavName {
                     name: format!("{document_id}.ics"),

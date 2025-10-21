@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::get::PushSubscriptionFetch;
 use base64::{Engine, engine::general_purpose};
-use common::{Server, auth::AccessToken};
-use email::push::{Keys, PushSubscription};
+use common::{Server, auth::AccessToken, ipc::PushEvent};
+use email::push::{Keys, PushSubscription, PushSubscriptions};
 use jmap_proto::{
-    error::set::SetError,
+    error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
     object::push_subscription::{self, PushSubscriptionProperty, PushSubscriptionValue},
     references::resolve::ResolveCreatedReference,
@@ -24,8 +23,8 @@ use store::{
     rand::{Rng, rng},
     write::{Archiver, BatchBuilder, now},
 };
-use trc::AddContext;
-use types::{collection::Collection, field::Field};
+use trc::{AddContext, ServerEvent};
+use types::{collection::Collection, field::PrincipalField};
 use utils::map::bitmap::Bitmap;
 
 const EXPIRES_MAX: i64 = 7 * 24 * 3600; // 7 days
@@ -45,21 +44,46 @@ impl PushSubscriptionSet for Server {
         mut request: SetRequest<'_, push_subscription::PushSubscription>,
         access_token: &AccessToken,
     ) -> trc::Result<SetResponse<push_subscription::PushSubscription>> {
+        // Load existing push subscriptions
         let account_id = access_token.primary_id();
-        let push_ids = self
-            .get_document_ids(account_id, Collection::PushSubscription)
-            .await?
-            .unwrap_or_default();
+        let subscriptions_archive = self
+            .get_archive_by_property(
+                account_id,
+                Collection::Principal,
+                0,
+                PrincipalField::PushSubscriptions.into(),
+            )
+            .await?;
+        let mut subscriptions = if let Some(subscriptions) = &subscriptions_archive {
+            subscriptions
+                .deserialize::<PushSubscriptions>()
+                .caused_by(trc::location!())?
+        } else {
+            PushSubscriptions::default()
+        };
+
+        let num_subscriptions = subscriptions.subscriptions.len();
+        let mut max_id = 0;
+        let current_time = now();
+        subscriptions.subscriptions.retain(|s| {
+            max_id = max_id.max(s.id);
+
+            s.expires > current_time
+        });
+        let mut has_changes = num_subscriptions != subscriptions.subscriptions.len();
+
+        // Prepare response
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
 
         // Process creates
-        let mut batch = BatchBuilder::new();
         'create: for (id, object) in request.unwrap_create() {
             let mut push = PushSubscription::default();
 
-            if push_ids.len() as usize >= self.core.jmap.push_max_total {
-                response.not_created.append(id, SetError::forbidden().with_description(
+            if subscriptions.subscriptions.len()
+                >= access_token.object_quota(Collection::PushSubscription) as usize
+            {
+                response.not_created.append(id, SetError::new(SetErrorType::OverQuota).with_description(
                     "There are too many subscriptions, please delete some before adding a new one.",
                 ));
                 continue 'create;
@@ -101,23 +125,13 @@ impl PushSubscriptionSet for Server {
                 .map(char::from)
                 .collect::<String>();
 
+            // Set id
+            max_id += 1;
+            let document_id = max_id;
+            push.id = document_id;
+
             // Insert record
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::PushSubscription, 1)
-                .await
-                .caused_by(trc::location!())?;
-            batch
-                .with_account_id(account_id)
-                .with_collection(Collection::PushSubscription)
-                .create_document(document_id)
-                .set(
-                    Field::ARCHIVE,
-                    Archiver::new(push)
-                        .serialize()
-                        .caused_by(trc::location!())?,
-                )
-                .commit_point();
+            subscriptions.subscriptions.push(push);
             response.created.insert(
                 id,
                 Map::with_capacity(1)
@@ -132,6 +146,7 @@ impl PushSubscriptionSet for Server {
                     )
                     .into(),
             );
+            has_changes = true;
         }
 
         // Process updates
@@ -144,13 +159,11 @@ impl PushSubscriptionSet for Server {
 
             // Obtain push subscription
             let document_id = id.document_id();
-            let mut push = if let Some(push) = self
-                .get_archive(account_id, Collection::PushSubscription, document_id)
-                .await?
-            {
-                push.deserialize::<email::push::PushSubscription>()
-                    .caused_by(trc::location!())?
-            } else {
+            let Some(push) = subscriptions
+                .subscriptions
+                .iter_mut()
+                .find(|p| p.id == document_id)
+            else {
                 response.not_updated.append(id, SetError::not_found());
                 continue 'update;
             };
@@ -158,53 +171,91 @@ impl PushSubscriptionSet for Server {
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response
                     .resolve_self_references(&mut value)
-                    .and_then(|_| validate_push_value(&property, value, &mut push, false))
+                    .and_then(|_| validate_push_value(&property, value, push, false))
                 {
                     response.not_updated.append(id, err);
                     continue 'update;
                 }
             }
 
-            // Update record
-            batch
-                .with_account_id(account_id)
-                .with_collection(Collection::PushSubscription)
-                .update_document(document_id)
-                .set(
-                    Field::ARCHIVE,
-                    Archiver::new(push)
-                        .serialize()
-                        .caused_by(trc::location!())?,
-                )
-                .commit_point();
+            has_changes = true;
             response.updated.append(id, None);
         }
 
         // Process deletions
         for id in will_destroy {
             let document_id = id.document_id();
-            if push_ids.contains(document_id) {
-                // Update record
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(Collection::PushSubscription)
-                    .delete_document(document_id)
-                    .clear(Field::ARCHIVE)
-                    .commit_point();
+            if let Some(idx) = subscriptions
+                .subscriptions
+                .iter()
+                .position(|p| p.id == document_id)
+            {
+                subscriptions.subscriptions.swap_remove(idx);
+                has_changes = true;
                 response.destroyed.push(id);
             } else {
                 response.not_destroyed.append(id, SetError::not_found());
             }
         }
 
-        // Write changes
-        if !batch.is_empty() {
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
-        }
-
         // Update push subscriptions
-        if response.has_changes() {
-            self.update_push_subscriptions(account_id).await;
+        if has_changes {
+            // Save changes
+            let mut batch = BatchBuilder::new();
+
+            if subscriptions_archive.is_none() {
+                batch
+                    .with_account_id(u32::MAX)
+                    .with_collection(Collection::PushSubscription)
+                    .create_document(account_id);
+            } else if subscriptions.subscriptions.is_empty() {
+                batch
+                    .with_account_id(u32::MAX)
+                    .with_collection(Collection::PushSubscription)
+                    .delete_document(account_id);
+            }
+
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .update_document(0);
+
+            if let Some(subscriptions_archive) = subscriptions_archive {
+                batch.assert_value(PrincipalField::PushSubscriptions, subscriptions_archive);
+            }
+
+            if !subscriptions.subscriptions.is_empty() {
+                batch.set(
+                    PrincipalField::PushSubscriptions,
+                    Archiver::new(subscriptions)
+                        .serialize()
+                        .caused_by(trc::location!())?,
+                );
+            } else {
+                batch.clear(PrincipalField::PushSubscriptions);
+            }
+
+            self.commit_batch(batch).await.caused_by(trc::location!())?;
+
+            // Notify push manager
+            if self
+                .inner
+                .ipc
+                .push_tx
+                .clone()
+                .send(PushEvent::PushServerUpdate {
+                    account_id,
+                    broadcast: true,
+                })
+                .await
+                .is_err()
+            {
+                trc::event!(
+                    Server(ServerEvent::ThreadError),
+                    Details = "Error sending push updates.",
+                    CausedBy = trc::location!()
+                );
+            }
         }
 
         Ok(response)

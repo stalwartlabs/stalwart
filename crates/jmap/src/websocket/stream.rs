@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::api::{ToRequestError, request::RequestHandler};
-use common::{Server, auth::AccessToken};
+use crate::api::{IntoPushObject, ToRequestError, request::RequestHandler};
+use common::{Server, auth::AccessToken, ipc::PushNotification};
 use futures_util::{SinkExt, StreamExt};
 use http_proto::HttpSessionData;
 use hyper::upgrade::Upgraded;
@@ -13,7 +13,7 @@ use hyper_util::rt::TokioIo;
 use jmap_proto::{
     error::request::RequestError,
     request::websocket::{
-        WebSocketMessage, WebSocketRequestError, WebSocketResponse, WebSocketStateChange,
+        WebSocketMessage, WebSocketPushObject, WebSocketRequestError, WebSocketResponse,
     },
 };
 use std::future::Future;
@@ -21,7 +21,7 @@ use std::{sync::Arc, time::Instant};
 use tokio_tungstenite::WebSocketStream;
 use trc::JmapEvent;
 use tungstenite::Message;
-use types::type_state::DataType;
+use types::type_state::{DataType, StateChange};
 use utils::map::bitmap::Bitmap;
 
 pub trait WebSocketHandler: Sync + Send {
@@ -56,15 +56,15 @@ impl WebSocketHandler for Server {
         let mut last_heartbeat = Instant::now() - heartbeat;
         let mut next_event = heartbeat;
 
-        // Register with state manager
-        let mut change_rx = match self
-            .subscribe_state_manager(access_token.primary_id(), Bitmap::all())
+        // Register with push manager
+        let mut push_rx = match self
+            .subscribe_push_manager(&access_token, Bitmap::all())
             .await
         {
-            Ok(change_rx) => change_rx,
+            Ok(push_rx) => push_rx,
             Err(err) => {
                 trc::error!(
-                    err.details("Failed to subscribe to state manager")
+                    err.details("Failed to subscribe to push manager")
                         .span_id(session.session_id)
                 );
 
@@ -79,7 +79,7 @@ impl WebSocketHandler for Server {
             }
         };
 
-        let mut changes = WebSocketStateChange::new(None);
+        let mut notifications = Vec::new();
         let mut change_types: Bitmap<DataType> = Bitmap::new();
 
         loop {
@@ -102,7 +102,6 @@ impl WebSocketHandler for Server {
                                                     &session,
                                                 )
                                                 .await;
-
                                             WebSocketResponse::from_response(response, request.id)
                                             .to_json()
                                         }
@@ -174,17 +173,47 @@ impl WebSocketHandler for Server {
                         }
                     }
                 }
-                state_change = change_rx.recv() => {
-                    if let Some(state_change) = state_change {
-                        let mut types = state_change.types;
-                        types.intersection(&change_types);
+                push_notification = push_rx.recv() => {
+                    if let Some(push_notification) = push_notification {
+                        match push_notification {
+                            PushNotification::StateChange(state_change) => {
+                                let mut types = state_change.types;
+                                types.intersection(&change_types);
 
-                        for type_state in types {
-                            changes
-                                .changed
-                                .get_mut_or_insert(state_change.account_id.into())
-                                .set(type_state, state_change.change_id.into());
+                                if !types.is_empty() {
+                                    notifications.push(PushNotification::StateChange(
+                                        StateChange {
+                                            account_id: state_change.account_id,
+                                            types,
+                                            change_id: state_change.change_id,
+                                        }
+                                    ));
+                                }
+                            },
+                            PushNotification::EmailPush(email_push) => {
+                                let state_change = email_push.to_state_change();
+                                let mut types = state_change.types;
+                                types.intersection(&change_types);
+
+                                if !types.is_empty() {
+                                    notifications.push(PushNotification::StateChange(
+                                        StateChange {
+                                            account_id: state_change.account_id,
+                                            types,
+                                            change_id: state_change.change_id,
+                                        }
+                                    ));
+                                }
+                            },
+                            PushNotification::CalendarAlert(calendar_alert) => {
+                                if change_types.contains(DataType::CalendarAlert) {
+                                    notifications.push(PushNotification::CalendarAlert(
+                                        calendar_alert
+                                    ));
+                                }
+                            },
                         }
+
                     } else {
                         trc::event!(
                             Jmap(JmapEvent::WebsocketStop),
@@ -197,11 +226,15 @@ impl WebSocketHandler for Server {
                 }
             }
 
-            if !changes.changed.is_empty() {
+            if !notifications.is_empty() {
                 // Send any queued changes
                 let elapsed = last_changes_sent.elapsed();
                 if elapsed >= throttle {
-                    if let Err(err) = stream.send(Message::Text(changes.to_json().into())).await {
+                    let payload = WebSocketPushObject {
+                        push: std::mem::take(&mut notifications).into_push_object(),
+                        push_state: None,
+                    };
+                    if let Err(err) = stream.send(Message::Text(payload.to_json().into())).await {
                         trc::event!(
                             Jmap(JmapEvent::WebsocketError),
                             Details = "Failed to send state change message.",
@@ -209,7 +242,6 @@ impl WebSocketHandler for Server {
                             Reason = err.to_string()
                         );
                     }
-                    changes.changed.clear();
                     last_changes_sent = Instant::now();
                     last_heartbeat = Instant::now();
                     next_event = heartbeat;

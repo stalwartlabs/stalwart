@@ -9,16 +9,14 @@ use crate::{
     error::request::{RequestError, RequestErrorType, RequestLimitError},
     object::AnyId,
     request::{Call, deserialize::DeserializeArguments},
-    response::{Response, ResponseMethod, serialize::serialize_hex},
-    types::state::State,
+    response::{Response, ResponseMethod, serialize::serialize_hex, status::PushObject},
 };
 use serde::{
     Deserialize, Deserializer,
     de::{self, MapAccess, Visitor},
 };
 use std::{borrow::Cow, collections::HashMap, fmt};
-use types::{id::Id, type_state::DataType};
-use utils::map::vec_map::VecMap;
+use types::type_state::DataType;
 
 #[derive(Debug)]
 pub struct WebSocketRequest<'x> {
@@ -66,18 +64,13 @@ pub enum WebSocketMessage<'x> {
 }
 
 #[derive(serde::Serialize, Debug)]
-pub enum WebSocketStateChangeType {
-    StateChange,
-}
+pub struct WebSocketPushObject {
+    #[serde(flatten)]
+    pub push: PushObject,
 
-#[derive(serde::Serialize, Debug)]
-pub struct WebSocketStateChange {
-    #[serde(rename = "@type")]
-    pub type_: WebSocketStateChangeType,
-    pub changed: VecMap<Id, VecMap<DataType, State>>,
     #[serde(rename = "pushState")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    push_state: Option<String>,
+    pub push_state: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -168,7 +161,7 @@ impl<'de> Visitor<'de> for WebSocketMessageVisitor {
                     message_type = MessageType::parse(map.next_value()?);
                 },
                 b"dataTypes" => {
-                    push_enable.data_types = map.next_value()?;
+                    push_enable.data_types = map.next_value::<Option<Vec<DataType>>>()?.unwrap_or_default();
                     found_push_keys = true;
                 },
                 b"pushState" => {
@@ -248,15 +241,7 @@ impl<'x> WebSocketResponse<'x> {
     }
 }
 
-impl WebSocketStateChange {
-    pub fn new(push_state: Option<String>) -> Self {
-        WebSocketStateChange {
-            type_: WebSocketStateChangeType::StateChange,
-            changed: VecMap::new(),
-            push_state,
-        }
-    }
-
+impl WebSocketPushObject {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap()
     }

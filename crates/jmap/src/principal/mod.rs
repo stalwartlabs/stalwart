@@ -4,5 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+pub mod availability;
 pub mod get;
 pub mod query;

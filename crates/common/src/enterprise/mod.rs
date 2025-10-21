@@ -170,7 +170,7 @@ impl Server {
                 {
                     if let Some(logo) = principal.picture_mut().filter(|l| l.starts_with("http")) {
                         std::mem::take(logo).into()
-                    } else if let Some(tenant_id) = principal.tenant {
+                    } else if let Some(tenant_id) = principal.tenant() {
                         if let Some(logo) = self
                             .store()
                             .query(QueryParams::id(tenant_id).with_return_member_of(false))

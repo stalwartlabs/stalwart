@@ -232,6 +232,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
     }
 
     // Delete messageId index, now in References
+    const MESSAGE_ID_FIELD: u8 = 11;
     server
         .store()
         .delete_range(
@@ -240,7 +241,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                 key: KeySerializer::new(U64_LEN)
                     .write(account_id)
                     .write(u8::from(Collection::Email))
-                    .write(u8::from(EmailField::MessageId))
+                    .write(MESSAGE_ID_FIELD)
                     .finalize(),
             },
             AnyKey {
@@ -248,7 +249,7 @@ pub(crate) async fn migrate_emails(server: &Server, account_id: u32) -> trc::Res
                 key: KeySerializer::new(U64_LEN)
                     .write(account_id)
                     .write(u8::from(Collection::Email))
-                    .write(u8::from(EmailField::MessageId))
+                    .write(MESSAGE_ID_FIELD)
                     .write(&[u8::MAX; 8][..])
                     .finalize(),
             },

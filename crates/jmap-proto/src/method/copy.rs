@@ -14,7 +14,7 @@ use crate::{
     },
     types::state::State,
 };
-use jmap_tools::Value;
+use jmap_tools::{Key, Map, Value};
 use serde::{Deserialize, Deserializer, Serialize};
 use types::{blob::BlobId, id::Id};
 use utils::map::vec_map::VecMap;
@@ -74,7 +74,7 @@ pub struct CopyBlobResponse {
 
     #[serde(rename = "notCopied")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_copied: VecMap<MaybeInvalid<BlobId>, SetError<BlobProperty>>,
+    pub not_copied: VecMap<BlobId, SetError<BlobProperty>>,
 }
 
 impl<'de, T: JmapObject> DeserializeArguments<'de> for CopyRequest<'de, T> {
@@ -166,5 +166,18 @@ impl<'de, T: JmapObject> Default for CopyRequest<'de, T> {
             on_success_destroy_original: None,
             destroy_from_if_in_state: None,
         }
+    }
+}
+
+impl<T: JmapObject> CopyResponse<T> {
+    pub fn created(&mut self, id: Id, document_id: impl Into<T::Id>) {
+        let document_id = document_id.into();
+        self.created.append(
+            id,
+            Value::Object(Map::from(vec![(
+                Key::Property(T::ID_PROPERTY),
+                Value::Element(document_id.into()),
+            )])),
+        );
     }
 }

@@ -51,7 +51,15 @@ pub enum DataType {
     ContactCard = 17,
     #[serde(rename = "FileNode")]
     FileNode = 18,
-    None = 19,
+    #[serde(rename = "Principal")]
+    Principal = 19,
+    #[serde(rename = "ShareNotification")]
+    ShareNotification = 20,
+    #[serde(rename = "ParticipantIdentity")]
+    ParticipantIdentity = 21,
+    #[serde(rename = "CalendarAlert")]
+    CalendarAlert = 22,
+    None = 23,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,10 +70,10 @@ pub struct StateChange {
 }
 
 impl StateChange {
-    pub fn new(account_id: u32, change_id: u64) -> Self {
+    pub fn new(account_id: u32) -> Self {
         Self {
             account_id,
-            change_id,
+            change_id: 0,
             types: Default::default(),
         }
     }
@@ -76,6 +84,11 @@ impl StateChange {
 
     pub fn with_change(mut self, type_state: DataType) -> Self {
         self.set_change(type_state);
+        self
+    }
+
+    pub fn with_change_id(mut self, change_id: u64) -> Self {
+        self.change_id = change_id;
         self
     }
 
@@ -116,6 +129,10 @@ impl From<u64> for DataType {
             16 => DataType::AddressBook,
             17 => DataType::ContactCard,
             18 => DataType::FileNode,
+            19 => DataType::Principal,
+            20 => DataType::ShareNotification,
+            21 => DataType::ParticipantIdentity,
+            22 => DataType::CalendarAlert,
             _ => {
                 debug_assert!(false, "Invalid type_state value: {}", value);
                 DataType::None
@@ -171,6 +188,10 @@ impl DataType {
             b"AddressBook" => DataType::AddressBook,
             b"ContactCard" => DataType::ContactCard,
             b"FileNode" => DataType::FileNode,
+            b"Principal" => DataType::Principal,
+            b"ShareNotification" => DataType::ShareNotification,
+            b"ParticipantIdentity" => DataType::ParticipantIdentity,
+            b"CalendarAlert" => DataType::CalendarAlert,
         )
     }
 
@@ -195,6 +216,10 @@ impl DataType {
             DataType::AddressBook => "AddressBook",
             DataType::ContactCard => "ContactCard",
             DataType::FileNode => "FileNode",
+            DataType::Principal => "Principal",
+            DataType::ShareNotification => "ShareNotification",
+            DataType::ParticipantIdentity => "ParticipantIdentity",
+            DataType::CalendarAlert => "CalendarAlert",
             DataType::None => "",
         }
     }

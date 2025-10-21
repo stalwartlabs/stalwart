@@ -7,7 +7,7 @@
 use crate::core::{Session, StatusResponse};
 use common::listener::SessionStream;
 use directory::Permission;
-use email::sieve::SieveScript;
+use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use std::time::Instant;
 use trc::AddContext;
 use types::collection::Collection;
@@ -32,6 +32,7 @@ impl<T: SessionStream> Session<T> {
 
         let mut response = Vec::with_capacity(128);
         let count = document_ids.len();
+        let active_script_id = self.server.sieve_script_get_active_id(account_id).await?;
 
         for document_id in document_ids {
             if let Some(script_) = self
@@ -50,7 +51,7 @@ impl<T: SessionStream> Session<T> {
                     }
                     response.push(*ch);
                 }
-                if script.is_active {
+                if active_script_id == Some(document_id) {
                     response.extend_from_slice(b"\" ACTIVE\r\n");
                 } else {
                     response.extend_from_slice(b"\"\r\n");

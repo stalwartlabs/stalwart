@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 use jmap_tools::{Element, Property, Value};
 
@@ -223,6 +223,14 @@ impl From<Keyword> for Vec<u8> {
             Keyword::MdnSent => vec![MDN_SENT as u8],
             Keyword::Other(string) => string.as_bytes().to_vec(),
         }
+    }
+}
+
+impl FromStr for Keyword {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Keyword::parse(s))
     }
 }
 

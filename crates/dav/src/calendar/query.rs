@@ -19,19 +19,22 @@ use calcard::{
         ArchivedICalendar, ArchivedICalendarComponent, ArchivedICalendarEntry,
         ArchivedICalendarParameter, ArchivedICalendarProperty, ArchivedICalendarValue,
         ICalendarComponentType, ICalendarEntry, ICalendarParameterName, ICalendarProperty,
-        ICalendarValue, dates::CalendarEvent,
+        ICalendarValue,
     },
 };
 use common::{DavResource, Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders,
     schema::{
-        property::{CalDavProperty, CalendarData, DavProperty, TimeRange},
+        property::{CalDavProperty, CalendarData, DavProperty},
         request::{CalendarQuery, Filter, FilterOp, PropFind, Timezone},
         response::MultiStatus,
     },
 };
-use groupware::{cache::GroupwareCache, calendar::ArchivedCalendarEvent};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{ArchivedCalendarEvent, expand::CalendarEventExpansion},
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::{fmt::Write, slice::Iter, str::FromStr};
@@ -40,7 +43,7 @@ use store::{
     write::serialize::rkyv_deserialize,
 };
 use trc::AddContext;
-use types::{acl::Acl, collection::SyncCollection};
+use types::{TimeRange, acl::Acl, collection::SyncCollection};
 
 pub(crate) trait CalendarQueryRequestHandler: Sync + Send {
     fn handle_calendar_query_request(
@@ -122,20 +125,8 @@ impl CalendarQueryRequestHandler for Server {
 }
 
 pub(crate) fn is_resource_in_time_range(resource: &DavResource, filter: &TimeRange) -> bool {
+    // Check whether the resource has a time range and if it overlaps with the filter
     if let Some((start, end)) = resource.event_time_range() {
-        /*let range_from = DateTime::from_timestamp(filter.start, 0).unwrap();
-        let range_end = DateTime::from_timestamp(filter.end, 0).unwrap();
-        let result = ((filter.start < end) || (filter.start <= start))
-            && (filter.end > start || filter.end >= end);
-
-        let c = println!(
-            "filter from {range_from} to {range_end}, resource is {} from {} to {}, result: {}",
-            resource.path(),
-            DateTime::from_timestamp(start, 0).unwrap(),
-            DateTime::from_timestamp(end, 0).unwrap(),
-            result
-        );*/
-
         ((filter.start < end) || (filter.start <= start))
             && (filter.end > start || filter.end >= end)
     } else {
@@ -219,7 +210,7 @@ pub fn try_parse_tz(tz: &Timezone) -> Option<Tz> {
 
 pub(crate) struct CalendarQueryHandler {
     default_tz: Tz,
-    expanded_times: Vec<CalendarEvent<i64, i64>>,
+    expanded_times: Vec<CalendarEventExpansion>,
 }
 
 impl CalendarQueryHandler {
@@ -338,7 +329,7 @@ impl CalendarQueryHandler {
                             FilterOp::Exists => true,
                             FilterOp::Undefined => false,
                             FilterOp::TextMatch(text_match) => {
-                                if let Some(text) = entry.as_text() {
+                                if let Some(text) = entry.value.as_text() {
                                     text_match.matches(text)
                                 } else {
                                     false
@@ -363,7 +354,7 @@ impl CalendarQueryHandler {
                         FilterOp::TimeRange(range) => {
                             if !matches!(comp.last(), Some(ICalendarComponentType::VAlarm)) {
                                 let matching_comp_ids = find_components(ical, comp)
-                                    .map(|(id, comp)| (id as u16, &comp.component_type))
+                                    .map(|(id, comp)| (id as u32, &comp.component_type))
                                     .collect::<AHashMap<_, _>>();
 
                                 !matching_comp_ids.is_empty()
@@ -381,14 +372,14 @@ impl CalendarQueryHandler {
                                     .data
                                     .alarms
                                     .iter()
-                                    .map(|alarm| alarm.parent_id.to_native())
+                                    .map(|alarm| alarm.parent_id.to_native() as u32)
                                     .collect::<AHashSet<_>>();
 
                                 !matching_comp_ids.is_empty()
                                     && self.expanded_times.iter().any(|time| {
                                         matching_comp_ids.contains(&time.comp_id)
                                             && event.data.alarms.iter().any(|alarm| {
-                                                alarm.parent_id.to_native() == time.comp_id
+                                                alarm.parent_id.to_native() as u32 == time.comp_id
                                                     && alarm
                                                         .delta
                                                         .to_timestamp(
@@ -428,8 +419,8 @@ impl CalendarQueryHandler {
     ) -> Option<String> {
         let mut out = String::with_capacity(event.size.to_native() as usize);
         let _v = [0.into()];
-        let mut component_iter: Iter<'_, rkyv::rend::u16_le> = _v.iter();
-        let mut component_stack: Vec<(&ArchivedICalendarComponent, Iter<'_, rkyv::rend::u16_le>)> =
+        let mut component_iter: Iter<'_, rkyv::rend::u32_le> = _v.iter();
+        let mut component_stack: Vec<(&ArchivedICalendarComponent, Iter<'_, rkyv::rend::u32_le>)> =
             Vec::with_capacity(4);
 
         if data.expand.is_some() {
@@ -620,7 +611,7 @@ impl CalendarQueryHandler {
         Some(out)
     }
 
-    pub fn into_expanded_times(self) -> Vec<CalendarEvent<i64, i64>> {
+    pub fn into_expanded_times(self) -> Vec<CalendarEventExpansion> {
         self.expanded_times
     }
 }
@@ -653,5 +644,5 @@ fn find_parameter<'x>(
     entry: &'x ArchivedICalendarEntry,
     name: &ICalendarParameterName,
 ) -> Option<&'x ArchivedICalendarParameter> {
-    entry.params.iter().find(|param| param.matches_name(name))
+    entry.params.iter().find(|param| param.name == *name)
 }

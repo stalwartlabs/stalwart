@@ -7,6 +7,7 @@
 use super::assert_is_unique_uid;
 use crate::{
     DavError, DavErrorCondition, DavMethod,
+    calendar::ItipPrecondition,
     common::{
         ETag, ExtractETag,
         lock::{LockRequestHandler, ResourceState},
@@ -167,17 +168,6 @@ impl CalendarUpdateRequestHandler for Server {
                 return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
             }
 
-            // Validate quota
-            let extra_bytes =
-                (bytes.len() as u64).saturating_sub(u32::from(event.inner.size) as u64);
-            if extra_bytes > 0 {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    extra_bytes,
-                )
-                .await?;
-            }
-
             // Validate iCal
             if event.inner.data.event.uids().next().unwrap_or_default() != validate_ical(&ical)? {
                 return Err(DavError::Condition(DavErrorCondition::new(
@@ -278,6 +268,17 @@ impl CalendarUpdateRequestHandler for Server {
             }
             let nudge_queue = next_email_alarm.is_some() || itip_messages.is_some();
 
+            // Validate quota
+            let extra_bytes =
+                (bytes.len() as u64).saturating_sub(u32::from(event.inner.size) as u64);
+            if extra_bytes > 0 {
+                self.has_available_quota(
+                    &self.get_resource_token(access_token, account_id).await?,
+                    extra_bytes,
+                )
+                .await?;
+            }
+
             // Prepare write batch
             let mut batch = BatchBuilder::new();
             let schedule_tag = new_event.schedule_tag;
@@ -337,15 +338,6 @@ impl CalendarUpdateRequestHandler for Server {
                 DavMethod::PUT,
             )
             .await?;
-
-            // Validate quota
-            if !bytes.is_empty() {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    bytes.len() as u64,
-                )
-                .await?;
-            }
 
             // Validate ical object
             assert_is_unique_uid(
@@ -409,6 +401,15 @@ impl CalendarUpdateRequestHandler for Server {
                 }
             }
             let nudge_queue = next_email_alarm.is_some() || itip_messages.is_some();
+
+            // Validate quota
+            if !bytes.is_empty() {
+                self.has_available_quota(
+                    &self.get_resource_token(access_token, account_id).await?,
+                    bytes.len() as u64,
+                )
+                .await?;
+            }
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();

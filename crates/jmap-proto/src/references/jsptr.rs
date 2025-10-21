@@ -7,12 +7,18 @@
 use crate::{
     method::{
         PropertyWrapper,
+        availability::{BusyPeriod, GetAvailabilityResponse},
         changes::ChangesResponse,
         get::GetResponse,
         query::QueryResponse,
         query_changes::{AddedItem, QueryChangesResponse},
     },
-    object::{AnyId, JmapObject, JmapObjectId},
+    object::{
+        AnyId, JmapObject, JmapObjectId,
+        calendar_event_notification::{
+            CalendarEventNotificationGetResponse, CalendarEventNotificationObject,
+        },
+    },
     request::reference::ResultReference,
 };
 use compact_str::format_compact;
@@ -136,7 +142,7 @@ impl ResponsePtr for BlobId {
     }
 }
 
-impl<T: Property + serde::Serialize> ResponsePtr for PropertyWrapper<T> {
+impl<T: Property> ResponsePtr for PropertyWrapper<T> {
     fn eval_jptr(&self, _: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
         results.0.push(EvalResult::Property(self.0.to_cow()));
         true
@@ -211,6 +217,68 @@ impl ResponsePtr for AddedItem {
         match pointer.next().and_then(|item| item.as_string_key()) {
             Some("id") => {
                 results.0.push(EvalResult::Id(AnyId::Id(self.id)));
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl ResponsePtr for CalendarEventNotificationGetResponse {
+    fn eval_jptr(&self, mut pointer: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
+        match pointer.next().and_then(|item| item.as_string_key()) {
+            Some("list") => {
+                self.list.eval_jptr(pointer, results);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl ResponsePtr for CalendarEventNotificationObject {
+    fn eval_jptr(&self, mut pointer: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
+        match pointer.next().and_then(|item| item.as_string_key()) {
+            Some("id") => {
+                results.0.push(EvalResult::Id(AnyId::Id(self.id)));
+                true
+            }
+            Some("calendarEventId") => {
+                if let Some(id) = &self.calendar_event_id {
+                    results.0.push(EvalResult::Id(AnyId::Id(*id)));
+                }
+                true
+            }
+            Some("event") => {
+                if let Some(event) = &self.event {
+                    event.0.eval_jptr(pointer, results);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl ResponsePtr for GetAvailabilityResponse {
+    fn eval_jptr(&self, mut pointer: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
+        match pointer.next().and_then(|item| item.as_string_key()) {
+            Some("list") => {
+                self.list.eval_jptr(pointer, results);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl ResponsePtr for BusyPeriod {
+    fn eval_jptr(&self, mut pointer: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
+        match pointer.next().and_then(|item| item.as_string_key()) {
+            Some("event") => {
+                if let Some(event) = &self.event {
+                    event.0.eval_jptr(pointer, results);
+                }
                 true
             }
             _ => false,

@@ -18,7 +18,10 @@ use dav_proto::{
     RequestHeaders, Return,
     schema::{Namespace, request::MkCol, response::MkColResponse},
 };
-use groupware::{cache::GroupwareCache, contact::AddressBook};
+use groupware::{
+    cache::GroupwareCache,
+    contact::{AddressBook, AddressBookPreferences},
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::BatchBuilder;
@@ -82,6 +85,11 @@ impl CardMkColRequestHandler for Server {
         // Build file container
         let mut book = AddressBook {
             name: name.to_string(),
+            preferences: vec![AddressBookPreferences {
+                account_id,
+                name: "Address Book".to_string(),
+                ..Default::default()
+            }],
             ..Default::default()
         };
 
@@ -89,7 +97,13 @@ impl CardMkColRequestHandler for Server {
         let mut return_prop_stat = None;
         if let Some(mkcol) = request {
             let mut prop_stat = PropStatBuilder::default();
-            if !self.apply_addressbook_properties(&mut book, false, mkcol.props, &mut prop_stat) {
+            if !self.apply_addressbook_properties(
+                access_token,
+                &mut book,
+                false,
+                mkcol.props,
+                &mut prop_stat,
+            ) {
                 return Ok(HttpResponse::new(StatusCode::FORBIDDEN).with_xml_body(
                     MkColResponse::new(prop_stat.build())
                         .with_namespace(Namespace::CardDav)

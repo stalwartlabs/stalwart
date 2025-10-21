@@ -13,9 +13,10 @@ pub mod property;
 pub mod propstat;
 pub mod schedule;
 
+use types::dead_property::{DeadProperty, DeadPropertyTag};
+
 use crate::schema::{
     property::{Comp, ResourceType, SupportedCollation},
-    request::{DeadProperty, DeadPropertyTag},
     response::{Href, List, Location, ResponseDescription, Status, SyncToken},
     Namespaces,
 };
@@ -140,7 +141,7 @@ impl Display for SyncToken {
 
 impl Display for Comp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<A:comp name=\"{}\">", self.0.as_str())
+        write!(f, "<A:comp name=\"{}\"/>", self.0.as_str())
     }
 }
 
@@ -168,7 +169,11 @@ impl Display for SupportedCollation {
     }
 }
 
-impl Display for DeadProperty {
+pub trait DeadPropertyFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+}
+
+impl DeadPropertyFormat for DeadProperty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut last_tag = "";
 
@@ -203,6 +208,7 @@ mod tests {
     use calcard::{icalendar::ICalendar, vcard::VCard};
     use hyper::StatusCode;
     use mail_parser::DateTime;
+    use types::dead_property::{DeadElementTag, DeadProperty, DeadPropertyTag};
 
     use crate::{
         parser::{tokenizer::Tokenizer, Token},
@@ -212,7 +218,7 @@ mod tests {
                 ActiveLock, CalDavProperty, CardDavProperty, DavValue, LockScope, Privilege,
                 ResourceType, Rfc1123DateTime, SupportedLock, WebDavProperty,
             },
-            request::{DavPropertyValue, DeadElementTag, DeadProperty, DeadPropertyTag},
+            request::DavPropertyValue,
             response::{
                 Ace, AclRestrictions, BaseCondition, ErrorResponse, GrantDeny, Href, List,
                 MkColResponse, MultiStatus, Principal, PrincipalSearchProperty,

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::blob::download::BlobDownload;
 use common::{
     Server,
     config::smtp::queue::QueueName,
@@ -39,7 +38,7 @@ use std::{borrow::Cow, future::Future};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use store::write::{BatchBuilder, now};
 use trc::AddContext;
-use types::{blob_hash::BlobHash, collection::Collection, field::EmailField, id::Id};
+use types::{collection::Collection, field::EmailField, id::Id};
 use utils::{map::vec_map::VecMap, sanitize_email};
 
 pub trait EmailSubmissionSet: Sync + Send {
@@ -563,7 +562,8 @@ impl EmailSubmissionSet for Server {
 
         // Obtain raw message
         let mut message = if let Some(message) = self
-            .get_blob(&BlobHash::from(&metadata.blob_hash), 0..usize::MAX)
+            .blob_store()
+            .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
             .await?
         {
             if message.len() > self.core.jmap.mail_max_size {

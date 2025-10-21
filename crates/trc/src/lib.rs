@@ -239,6 +239,7 @@ pub enum HousekeeperEvent {
 pub enum TaskQueueEvent {
     TaskAcquired,
     TaskLocked,
+    TaskIgnored,
     BlobNotFound,
     MetadataNotFound,
 }

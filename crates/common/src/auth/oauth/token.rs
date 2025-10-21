@@ -6,7 +6,7 @@
 
 use super::{CLIENT_ID_MAX_LEN, GrantType, RANDOM_CODE_LEN, crypto::SymmetricEncrypt};
 use crate::Server;
-use directory::QueryParams;
+use directory::{PrincipalData, QueryParams};
 use mail_builder::encoders::base64::base64_encode;
 use mail_parser::decoders::base64::base64_decode;
 use std::time::SystemTime;
@@ -228,8 +228,15 @@ impl Server {
                         .into_err()
                         .details("Account no longer exists")
                 })?
-                .secrets
+                .data
                 .into_iter()
+                .filter_map(|v| {
+                    if let PrincipalData::Secret(secret) = v {
+                        Some(secret)
+                    } else {
+                        None
+                    }
+                })
                 .next()
                 .ok_or(
                     trc::AuthEvent::Error

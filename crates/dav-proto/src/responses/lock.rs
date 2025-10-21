@@ -6,10 +6,13 @@
 
 use std::fmt::Display;
 
+use types::dead_property::DeadProperty;
+
 use crate::{
+    responses::DeadPropertyFormat,
     schema::{
         property::{ActiveLock, LockDiscovery, LockEntry, LockScope, LockType, SupportedLock},
-        request::{DeadProperty, LockInfo},
+        request::LockInfo,
         response::{Href, List},
     },
     Depth, Timeout,
@@ -36,7 +39,9 @@ impl Display for ActiveLock {
         )?;
 
         if let Some(owner) = &self.owner {
-            write!(f, "<D:owner>{}</D:owner>", owner)?;
+            f.write_str("<D:owner>")?;
+            owner.fmt(f)?;
+            f.write_str("</D:owner>")?;
         }
 
         write!(f, "{}", self.timeout)?;
@@ -79,7 +84,9 @@ impl Display for LockInfo {
         write!(f, "<D:lockinfo>{}{}", self.lock_scope, self.lock_type)?;
 
         if let Some(owner) = &self.owner {
-            write!(f, "<D:owner>{}</D:owner>", owner)?;
+            f.write_str("<D:owner>")?;
+            owner.fmt(f)?;
+            f.write_str("</D:owner>")?;
         }
 
         write!(f, "</D:lockinfo>",)

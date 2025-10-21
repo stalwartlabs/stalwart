@@ -7,8 +7,7 @@
 pub mod index;
 pub mod storage;
 
-use dav_proto::schema::request::DeadProperty;
-use types::{acl::AclGrant, blob_hash::BlobHash};
+use types::{acl::AclGrant, blob_hash::BlobHash, dead_property::DeadProperty};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,

@@ -10,7 +10,7 @@ use directory::Permission;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::copy::{CopyBlobRequest, CopyBlobResponse},
-    request::MaybeInvalid,
+    request::IntoValid,
 };
 use std::future::Future;
 use store::{
@@ -43,18 +43,7 @@ impl BlobCopy for Server {
         };
         let account_id = request.account_id.document_id();
 
-        for blob_id in request.blob_ids {
-            let blob_id = match blob_id {
-                MaybeInvalid::Value(blob_id) => blob_id,
-                MaybeInvalid::Invalid(_) => {
-                    response.not_copied.append(
-                        blob_id,
-                        SetError::invalid_properties().with_description("Invalid blobId."),
-                    );
-                    continue;
-                }
-            };
-
+        for blob_id in request.blob_ids.into_valid() {
             if self.has_access_blob(&blob_id, access_token).await? {
                 // Enforce quota
                 let used = self
@@ -72,7 +61,7 @@ impl BlobCopy for Server {
                     && !access_token.has_permission(Permission::UnlimitedUploads)
                 {
                     response.not_copied.append(
-                        MaybeInvalid::Value(blob_id),
+                        blob_id,
                         SetError::over_quota().with_description(format!(
                             "You have exceeded the blob quota of {} files or {} bytes.",
                             self.core.jmap.upload_tmp_quota_amount,
@@ -108,7 +97,7 @@ impl BlobCopy for Server {
                 response.copied.append(blob_id, dest_blob_id);
             } else {
                 response.not_copied.append(
-                    MaybeInvalid::Value(blob_id),
+                    blob_id,
                     SetError::new(SetErrorType::BlobNotFound).with_description(
                         "blobId does not exist or not enough permissions to access it.",
                     ),

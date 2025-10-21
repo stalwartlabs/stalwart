@@ -164,6 +164,50 @@ pub fn rustls_client_config(allow_invalid_certs: bool) -> ClientConfig {
     }
 }
 
+pub trait DomainPart {
+    fn to_lowercase_domain(&self) -> String;
+    fn domain_part(&self) -> &str;
+    fn try_domain_part(&self) -> Option<&str>;
+    fn try_local_part(&self) -> Option<&str>;
+}
+
+impl<T: AsRef<str>> DomainPart for T {
+    fn to_lowercase_domain(&self) -> String {
+        let address = self.as_ref();
+        if let Some((local, domain)) = address.rsplit_once('@') {
+            let mut address = String::with_capacity(address.len());
+            address.push_str(local);
+            address.push('@');
+            for ch in domain.chars() {
+                for ch in ch.to_lowercase() {
+                    address.push(ch);
+                }
+            }
+            address
+        } else {
+            address.to_string()
+        }
+    }
+
+    #[inline(always)]
+    fn try_domain_part(&self) -> Option<&str> {
+        self.as_ref().rsplit_once('@').map(|(_, d)| d)
+    }
+
+    #[inline(always)]
+    fn try_local_part(&self) -> Option<&str> {
+        self.as_ref().rsplit_once('@').map(|(l, _)| l)
+    }
+
+    #[inline(always)]
+    fn domain_part(&self) -> &str {
+        self.as_ref()
+            .rsplit_once('@')
+            .map(|(_, d)| d)
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug)]
 struct DummyVerifier;
 

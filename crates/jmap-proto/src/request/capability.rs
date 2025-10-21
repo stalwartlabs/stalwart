@@ -6,7 +6,12 @@
 
 use std::fmt;
 
-use crate::response::serialize::serialize_hex;
+use crate::{
+    object::{email::EmailComparator, file_node::FileNodeComparator},
+    response::serialize::serialize_hex,
+    types::date::UTCDate,
+};
+use ahash::AHashMap;
 use serde::{Deserialize, Deserializer};
 use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
@@ -14,41 +19,41 @@ use utils::map::vec_map::VecMap;
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Session {
     #[serde(rename(serialize = "capabilities"))]
-    capabilities: VecMap<Capability, Capabilities>,
+    pub capabilities: VecMap<Capability, Capabilities>,
     #[serde(rename(serialize = "accounts"))]
-    accounts: VecMap<Id, Account>,
+    pub accounts: VecMap<Id, Account>,
     #[serde(rename(serialize = "primaryAccounts"))]
-    primary_accounts: VecMap<Capability, Id>,
+    pub primary_accounts: VecMap<Capability, Id>,
     #[serde(rename(serialize = "username"))]
-    username: String,
+    pub username: String,
     #[serde(rename(serialize = "apiUrl"))]
-    api_url: String,
+    pub api_url: String,
     #[serde(rename(serialize = "downloadUrl"))]
-    download_url: String,
+    pub download_url: String,
     #[serde(rename(serialize = "uploadUrl"))]
-    upload_url: String,
+    pub upload_url: String,
     #[serde(rename(serialize = "eventSourceUrl"))]
-    event_source_url: String,
+    pub event_source_url: String,
     #[serde(rename(serialize = "state"))]
     #[serde(serialize_with = "serialize_hex")]
-    state: u32,
+    pub state: u32,
     #[serde(skip)]
-    base_url: String,
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-struct Account {
+pub struct Account {
     #[serde(rename(serialize = "name"))]
-    name: String,
+    pub name: String,
     #[serde(rename(serialize = "isPersonal"))]
-    is_personal: bool,
+    pub is_personal: bool,
     #[serde(rename(serialize = "isReadOnly"))]
-    is_read_only: bool,
+    pub is_read_only: bool,
     #[serde(rename(serialize = "accountCapabilities"))]
-    account_capabilities: VecMap<Capability, Capabilities>,
+    pub account_capabilities: VecMap<Capability, Capabilities>,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, serde::Serialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Capability {
     #[serde(rename(serialize = "urn:ietf:params:jmap:core"))]
     Core = 1 << 0,
@@ -60,16 +65,28 @@ pub enum Capability {
     VacationResponse = 1 << 3,
     #[serde(rename(serialize = "urn:ietf:params:jmap:contacts"))]
     Contacts = 1 << 4,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:contacts:parse"))]
+    ContactsParse = 1 << 5,
     #[serde(rename(serialize = "urn:ietf:params:jmap:calendars"))]
-    Calendars = 1 << 5,
+    Calendars = 1 << 6,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:calendars:parse"))]
+    CalendarsParse = 1 << 7,
     #[serde(rename(serialize = "urn:ietf:params:jmap:websocket"))]
-    WebSocket = 1 << 6,
+    WebSocket = 1 << 8,
     #[serde(rename(serialize = "urn:ietf:params:jmap:sieve"))]
-    Sieve = 1 << 7,
+    Sieve = 1 << 9,
     #[serde(rename(serialize = "urn:ietf:params:jmap:blob"))]
-    Blob = 1 << 8,
+    Blob = 1 << 10,
     #[serde(rename(serialize = "urn:ietf:params:jmap:quota"))]
-    Quota = 1 << 9,
+    Quota = 1 << 11,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:principals"))]
+    Principals = 1 << 12,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:principals:owner"))]
+    PrincipalsOwner = 1 << 13,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:principals:availability"))]
+    PrincipalsAvailability = 1 << 14,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:filenode"))]
+    FileNode = 1 << 15,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -87,6 +104,11 @@ pub enum Capabilities {
     SieveAccount(SieveAccountCapabilities),
     SieveSession(SieveSessionCapabilities),
     Blob(BlobCapabilities),
+    Contacts(ContactsCapabilities),
+    Principals(PrincipalCapabilities),
+    PrincipalsAvailability(PrincipalAvailabilityCapabilities),
+    Calendar(CalendarCapabilities),
+    FileNode(FileNodeCapabilities),
     Empty(EmptyCapabilities),
 }
 
@@ -153,7 +175,7 @@ pub struct MailCapabilities {
     #[serde(rename(serialize = "maxSizeAttachmentsPerEmail"))]
     pub max_size_attachments_per_email: usize,
     #[serde(rename(serialize = "emailQuerySortOptions"))]
-    pub email_query_sort_options: Vec<String>,
+    pub email_query_sort_options: Vec<EmailComparator>,
     #[serde(rename(serialize = "mayCreateTopLevelMailbox"))]
     pub may_create_top_level_mailbox: bool,
 }
@@ -178,13 +200,125 @@ pub struct BlobCapabilities {
     pub supported_digest_algorithms: Vec<&'static str>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CalendarCapabilities {
+    #[serde(rename(serialize = "maxCalendarsPerEvent"))]
+    pub max_calendars_per_event: Option<usize>,
+    #[serde(rename(serialize = "minDateTime"))]
+    pub min_date_time: UTCDate,
+    #[serde(rename(serialize = "maxDateTime"))]
+    pub max_date_time: UTCDate,
+    #[serde(rename(serialize = "maxExpandedQueryDuration"))]
+    pub max_expanded_query_duration: String,
+    #[serde(rename(serialize = "maxParticipantsPerEvent"))]
+    pub max_participants_per_event: Option<usize>,
+    #[serde(rename(serialize = "mayCreateCalendar"))]
+    pub may_create_calendar: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContactsCapabilities {
+    #[serde(rename(serialize = "maxAddressBooksPerCard"))]
+    pub max_address_books_per_card: Option<usize>,
+    #[serde(rename(serialize = "mayCreateAddressBook"))]
+    pub may_create_address_book: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalAvailabilityCapabilities {
+    #[serde(rename(serialize = "maxAvailabilityDuration"))]
+    pub max_availability_duration: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalCapabilities {
+    #[serde(rename(serialize = "currentUserPrincipalId"))]
+    pub current_user_principal_id: Option<Id>,
+}
+
+/*#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalOwnerCapabilities {
+    #[serde(rename(serialize = "accountIdForPrincipal"))]
+    pub account_id_for_principal: Id,
+
+    #[serde(rename(serialize = "principalId"))]
+    pub principal_id: Id,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrincipalCalendarCapabilities {
+    #[serde(rename(serialize = "accountIdForPrincipal"))]
+    pub account_id_for_principal: Option<Id>,
+    #[serde(rename(serialize = "mayGetAvailability"))]
+    pub may_get_availability: bool,
+    #[serde(rename(serialize = "mayShareWith"))]
+    pub may_share_with: bool,
+    #[serde(rename(serialize = "calendarAddress"))]
+    pub calendar_address: String,
+}*/
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FileNodeCapabilities {
+    #[serde(rename(serialize = "maxFileNodeDepth"))]
+    pub max_file_node_depth: Option<usize>,
+    #[serde(rename(serialize = "maxSizeFileNodeName"))]
+    pub max_size_file_node_name: usize,
+    #[serde(rename(serialize = "fileNodeQuerySortOptions"))]
+    pub file_node_query_sort_options: Vec<FileNodeComparator>,
+    #[serde(rename(serialize = "mayCreateTopLevelFileNode"))]
+    pub may_create_top_level_file_node: bool,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct EmptyCapabilities {}
 
 #[derive(Default, Clone)]
 pub struct BaseCapabilities {
     pub session: VecMap<Capability, Capabilities>,
-    pub account: VecMap<Capability, Capabilities>,
+    pub account: AHashMap<Capability, Capabilities>,
+}
+
+impl Capability {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Capability::Core => "urn:ietf:params:jmap:core",
+            Capability::Mail => "urn:ietf:params:jmap:mail",
+            Capability::Submission => "urn:ietf:params:jmap:submission",
+            Capability::VacationResponse => "urn:ietf:params:jmap:vacationresponse",
+            Capability::Contacts => "urn:ietf:params:jmap:contacts",
+            Capability::ContactsParse => "urn:ietf:params:jmap:contacts:parse",
+            Capability::Calendars => "urn:ietf:params:jmap:calendars",
+            Capability::CalendarsParse => "urn:ietf:params:jmap:calendars:parse",
+            Capability::WebSocket => "urn:ietf:params:jmap:websocket",
+            Capability::Sieve => "urn:ietf:params:jmap:sieve",
+            Capability::Blob => "urn:ietf:params:jmap:blob",
+            Capability::Quota => "urn:ietf:params:jmap:quota",
+            Capability::Principals => "urn:ietf:params:jmap:principals",
+            Capability::PrincipalsOwner => "urn:ietf:params:jmap:principals:owner",
+            Capability::PrincipalsAvailability => "urn:ietf:params:jmap:principals:availability",
+            Capability::FileNode => "urn:ietf:params:jmap:filenode",
+        }
+    }
+
+    pub fn all_capabilities() -> &'static [Capability] {
+        &[
+            Capability::Core,
+            Capability::Mail,
+            Capability::Submission,
+            Capability::VacationResponse,
+            Capability::Contacts,
+            Capability::ContactsParse,
+            Capability::Calendars,
+            Capability::CalendarsParse,
+            Capability::WebSocket,
+            Capability::Sieve,
+            Capability::Blob,
+            Capability::Quota,
+            Capability::Principals,
+            Capability::PrincipalsAvailability,
+            Capability::FileNode,
+        ]
+    }
 }
 
 impl Session {
@@ -216,48 +350,6 @@ impl Session {
         }
     }
 
-    pub fn set_primary_account(
-        &mut self,
-        account_id: Id,
-        username: String,
-        name: String,
-        capabilities: Option<&[Capability]>,
-        account_capabilities: &VecMap<Capability, Capabilities>,
-    ) {
-        self.username = username;
-
-        if let Some(capabilities) = capabilities {
-            for capability in capabilities {
-                self.primary_accounts.append(*capability, account_id);
-            }
-        } else {
-            for capability in self.capabilities.keys() {
-                self.primary_accounts.append(*capability, account_id);
-            }
-        }
-
-        self.accounts.set(
-            account_id,
-            Account::new(name, true, false).add_capabilities(capabilities, account_capabilities),
-        );
-    }
-
-    pub fn add_account(
-        &mut self,
-        account_id: Id,
-        name: String,
-        is_personal: bool,
-        is_read_only: bool,
-        capabilities: Option<&[Capability]>,
-        account_capabilities: &VecMap<Capability, Capabilities>,
-    ) {
-        self.accounts.set(
-            account_id,
-            Account::new(name, is_personal, is_read_only)
-                .add_capabilities(capabilities, account_capabilities),
-        );
-    }
-
     pub fn set_state(&mut self, state: u32) {
         self.state = state;
     }
@@ -268,34 +360,6 @@ impl Session {
 
     pub fn base_url(&self) -> &str {
         &self.base_url
-    }
-}
-
-impl Account {
-    pub fn new(name: String, is_personal: bool, is_read_only: bool) -> Account {
-        Account {
-            name,
-            is_personal,
-            is_read_only,
-            account_capabilities: VecMap::new(),
-        }
-    }
-
-    pub fn add_capabilities(
-        mut self,
-        capabilities: Option<&[Capability]>,
-        account_capabilities: &VecMap<Capability, Capabilities>,
-    ) -> Account {
-        if let Some(capabilities) = capabilities {
-            for capability in capabilities {
-                if let Some(value) = account_capabilities.get(capability) {
-                    self.account_capabilities.append(*capability, value.clone());
-                }
-            }
-        } else {
-            self.account_capabilities = account_capabilities.clone();
-        }
-        self
     }
 }
 
@@ -319,6 +383,39 @@ impl WebSocketCapabilities {
     }
 }
 
+impl Capabilities {
+    pub fn to_account_capabilities(
+        &self,
+        current_user_principal_id: Option<Id>,
+        may_create: bool,
+    ) -> Capabilities {
+        match self {
+            Capabilities::Contacts(contacts_capabilities) => {
+                Capabilities::Contacts(ContactsCapabilities {
+                    may_create_address_book: may_create,
+                    ..contacts_capabilities.clone()
+                })
+            }
+            Capabilities::Principals(_) => Capabilities::Principals(PrincipalCapabilities {
+                current_user_principal_id,
+            }),
+            Capabilities::Calendar(calendar_capabilities) => {
+                Capabilities::Calendar(CalendarCapabilities {
+                    may_create_calendar: may_create,
+                    ..calendar_capabilities.clone()
+                })
+            }
+            Capabilities::FileNode(file_node_capabilities) => {
+                Capabilities::FileNode(FileNodeCapabilities {
+                    may_create_top_level_file_node: may_create,
+                    ..file_node_capabilities.clone()
+                })
+            }
+            _ => self.clone(),
+        }
+    }
+}
+
 impl Capability {
     pub fn parse(s: &str) -> Option<Self> {
         hashify::tiny_map!(s.as_bytes(),
@@ -332,6 +429,12 @@ impl Capability {
             "urn:ietf:params:jmap:sieve" => Capability::Sieve,
             "urn:ietf:params:jmap:blob" => Capability::Blob,
             "urn:ietf:params:jmap:quota" => Capability::Quota,
+            "urn:ietf:params:jmap:principals" => Capability::Principals,
+            "urn:ietf:params:jmap:principals:owner" => Capability::PrincipalsOwner,
+            "urn:ietf:params:jmap:filenode" => Capability::FileNode,
+            "urn:ietf:params:jmap:principals:availability" => Capability::PrincipalsAvailability,
+            "urn:ietf:params:jmap:contacts:parse" => Capability::ContactsParse,
+            "urn:ietf:params:jmap:calendars:parse" => Capability::CalendarsParse,
         )
     }
 }

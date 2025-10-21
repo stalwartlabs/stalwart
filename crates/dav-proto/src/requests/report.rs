@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use calcard::{
-    icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
-    vcard::VCardParameterName,
-};
-
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, RawElement, Token, XmlValueParser},
+    parser::{
+        property::TimeRangeFromRaw, tokenizer::Tokenizer, DavParser, RawElement, Token,
+        XmlValueParser,
+    },
     schema::{
-        property::{DavProperty, TimeRange},
+        property::DavProperty,
         request::{
-            AclPrincipalPropSet, AddressbookQuery, CalendarQuery, DeadElementTag, ExpandProperty,
+            AclPrincipalPropSet, AddressbookQuery, CalendarQuery, ExpandProperty,
             ExpandPropertyItem, Filter, FilterOp, FreeBusyQuery, MultiGet, PrincipalMatch,
             PrincipalPropertySearch, PropFind, Report, SyncCollection, TextMatch, Timezone,
             VCardPropertyWithGroup,
@@ -23,6 +21,11 @@ use crate::{
     },
     Depth,
 };
+use calcard::{
+    icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
+    vcard::VCardParameterName,
+};
+use types::{dead_property::DeadElementTag, TimeRange};
 
 impl DavParser for Report {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {

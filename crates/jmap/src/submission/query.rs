@@ -10,6 +10,7 @@ use email::submission::UndoStatus;
 use jmap_proto::{
     method::query::{Comparator, Filter, QueryRequest, QueryResponse},
     object::email_submission::{self, EmailSubmissionComparator, EmailSubmissionFilter},
+    request::IntoValid,
 };
 use std::future::Future;
 use store::{
@@ -41,7 +42,7 @@ impl EmailSubmissionQuery for Server {
                 Filter::Property(cond) => match cond {
                     EmailSubmissionFilter::IdentityIds(ids) => {
                         filters.push(query::Filter::Or);
-                        for id in ids {
+                        for id in ids.into_valid() {
                             filters.push(query::Filter::eq(
                                 EmailSubmissionField::IdentityId,
                                 id.document_id().serialize(),
@@ -51,7 +52,7 @@ impl EmailSubmissionQuery for Server {
                     }
                     EmailSubmissionFilter::EmailIds(ids) => {
                         filters.push(query::Filter::Or);
-                        for id in ids {
+                        for id in ids.into_valid() {
                             filters.push(query::Filter::eq(
                                 EmailSubmissionField::EmailId,
                                 id.id().serialize(),
@@ -61,7 +62,7 @@ impl EmailSubmissionQuery for Server {
                     }
                     EmailSubmissionFilter::ThreadIds(ids) => {
                         filters.push(query::Filter::Or);
-                        for id in ids {
+                        for id in ids.into_valid() {
                             filters.push(query::Filter::eq(
                                 EmailSubmissionField::ThreadId,
                                 id.document_id().serialize(),
@@ -107,7 +108,7 @@ impl EmailSubmissionQuery for Server {
 
         let (response, paginate) = self
             .build_query_response(
-                &result_set,
+                result_set.results.len() as usize,
                 self.get_state(account_id, SyncCollection::EmailSubmission)
                     .await?,
                 &request,
@@ -119,7 +120,7 @@ impl EmailSubmissionQuery for Server {
             let mut comparators = Vec::with_capacity(request.sort.as_ref().map_or(1, |s| s.len()));
             for comparator in request
                 .sort
-                .and_then(|s| if !s.is_empty() { s.into() } else { None })
+                .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| vec![Comparator::descending(EmailSubmissionComparator::SentAt)])
             {
                 comparators.push(match comparator.property {

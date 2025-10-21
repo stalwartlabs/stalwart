@@ -6,7 +6,7 @@
 
 use ahash::AHashMap;
 use calcard::{
-    common::PartialDateTime,
+    common::{IanaString, PartialDateTime},
     icalendar::{ICalendar, ICalendarProperty, ICalendarValue},
 };
 use groupware::scheduling::{
@@ -422,11 +422,11 @@ fn normalize_ical(mut ical: ICalendar, map: &mut AHashMap<PartialDateTime, usize
         .filter(|(comp_id, _)| {
             ical.components[0]
                 .component_ids
-                .contains(&(*comp_id as u16))
+                .contains(&(*comp_id as u32))
         })
         .collect::<Vec<_>>();
     comps.sort_unstable_by_key(|(_, comp)| *comp);
-    ical.components[0].component_ids = comps.iter().map(|(comp_id, _)| *comp_id as u16).collect();
+    ical.components[0].component_ids = comps.iter().map(|(comp_id, _)| *comp_id as u32).collect();
 
     for comp in &mut ical.components {
         for entry in &mut comp.entries {

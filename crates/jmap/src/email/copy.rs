@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    changes::state::MessageCacheState,
+    changes::state::JmapCacheState,
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
 use common::{Server, auth::AccessToken};
@@ -97,7 +97,7 @@ impl JmapEmailCopy for Server {
                 response.not_created.append(
                     id,
                     SetError::not_found().with_description(format!(
-                        "Item {} not found not found in account {}.",
+                        "Item {} not found in account {}.",
                         id, response.from_account_id
                     )),
                 );
@@ -221,7 +221,7 @@ impl JmapEmailCopy for Server {
                         id,
                         match err {
                             CopyMessageError::NotFound => SetError::not_found()
-                                .with_description("Message not found not found in account."),
+                                .with_description("Message not found in account."),
                             CopyMessageError::OverQuota => SetError::over_quota(),
                         },
                     );

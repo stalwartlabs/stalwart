@@ -6,7 +6,7 @@
 
 use super::method::MethodName;
 use jmap_tools::{JsonPointer, Null};
-use std::{fmt::Display, str::FromStr};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResultReference {
@@ -16,7 +16,7 @@ pub struct ResultReference {
     pub path: JsonPointer<Null>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MaybeIdReference<V: FromStr> {
     Id(V),
     Reference(String),
@@ -54,28 +54,45 @@ impl<'de, V: FromStr> serde::Deserialize<'de> for MaybeIdReference<V> {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <&str>::deserialize(deserializer)?;
+        let value = <Cow<'de, str>>::deserialize(deserializer)?;
 
         if let Some(reference) = value.strip_prefix('#') {
             if reference.is_empty() {
-                return Ok(MaybeIdReference::Invalid(value.to_string()));
+                return Ok(MaybeIdReference::Invalid(value.into_owned()));
             }
             Ok(MaybeIdReference::Reference(reference.to_string()))
-        } else if let Ok(id) = V::from_str(value) {
+        } else if let Ok(id) = V::from_str(value.as_ref()) {
             Ok(MaybeIdReference::Id(id))
         } else {
-            Ok(MaybeIdReference::Invalid(value.to_string()))
+            Ok(MaybeIdReference::Invalid(value.into_owned()))
         }
     }
 }
 
-impl<V: serde::Serialize + FromStr> serde::Serialize for MaybeIdReference<V> {
+impl<V: FromStr> FromStr for MaybeIdReference<V> {
+    type Err = V::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(reference) = s.strip_prefix('#') {
+            if reference.is_empty() {
+                return Ok(MaybeIdReference::Invalid(s.to_string()));
+            }
+            Ok(MaybeIdReference::Reference(reference.to_string()))
+        } else if let Ok(id) = V::from_str(s) {
+            Ok(MaybeIdReference::Id(id))
+        } else {
+            Ok(MaybeIdReference::Invalid(s.to_string()))
+        }
+    }
+}
+
+impl<V: Display + FromStr> serde::Serialize for MaybeIdReference<V> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         match self {
-            MaybeIdReference::Id(id) => id.serialize(serializer),
+            MaybeIdReference::Id(id) => serializer.serialize_str(&id.to_string()),
             MaybeIdReference::Reference(str) => serializer.serialize_str(&format!("#{}", str)),
             MaybeIdReference::Invalid(str) => serializer.serialize_str(str),
         }

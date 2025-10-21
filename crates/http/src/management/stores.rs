@@ -212,8 +212,11 @@ impl ManageStore for Server {
                     None
                 };
 
-                self.housekeeper_request(HousekeeperEvent::Purge(PurgeType::Account(account_id)))
-                    .await
+                self.housekeeper_request(HousekeeperEvent::Purge(PurgeType::Account {
+                    account_id,
+                    use_roles: false,
+                }))
+                .await
             }
             (Some("reindex"), id, None, &Method::GET) => {
                 // Validate the access token

@@ -155,15 +155,6 @@ impl<'de> DeserializeArguments<'de> for BlobGetArguments {
     }
 }
 
-impl serde::Serialize for BlobProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl JmapObject for Blob {
     type Property = BlobProperty;
 
@@ -182,6 +173,8 @@ impl JmapObject for Blob {
     type QueryArguments = ();
 
     type CopyArguments = ();
+
+    type ParseArguments = ();
 
     const ID_PROPERTY: Self::Property = BlobProperty::Id;
 }
@@ -211,15 +204,30 @@ impl JmapObjectId for BlobValue {
             None
         }
     }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::BlobId(id) = new_id {
+            *self = BlobValue::BlobId(id);
+            return true;
+        }
+        false
+    }
 }
 
-impl TryFrom<AnyId> for BlobValue {
-    type Error = ();
+impl JmapObjectId for BlobProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
 
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::BlobId(id) => Ok(BlobValue::BlobId(id)),
-            _ => Err(()),
-        }
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
     }
 }

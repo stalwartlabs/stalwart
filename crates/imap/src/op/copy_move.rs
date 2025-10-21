@@ -9,7 +9,7 @@ use crate::{
     core::{MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
+use common::{ipc::PushNotification, listener::SessionStream, storage::index::ObjectIndexBuilder};
 use directory::Permission;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
@@ -437,12 +437,13 @@ impl<T: SessionStream> SessionData<T> {
             // Broadcast changes on destination account
             if let Some(change_id) = dest_change_id {
                 self.server
-                    .broadcast_state_change(
-                        StateChange::new(dest_account_id, change_id)
+                    .broadcast_push_notification(PushNotification::StateChange(
+                        StateChange::new(dest_account_id)
+                            .with_change_id(change_id)
                             .with_change(DataType::Email)
                             .with_change(DataType::Thread)
                             .with_change(DataType::Mailbox),
-                    )
+                    ))
                     .await;
             }
         }

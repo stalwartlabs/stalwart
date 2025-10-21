@@ -106,7 +106,7 @@ impl From<DavResourceName> for Collection {
             DavResourceName::Cal => Collection::Calendar,
             DavResourceName::File => Collection::FileNode,
             DavResourceName::Principal => Collection::Principal,
-            DavResourceName::Scheduling => Collection::CalendarScheduling,
+            DavResourceName::Scheduling => Collection::CalendarEventNotification,
         }
     }
 }
@@ -118,7 +118,7 @@ impl From<Collection> for DavResourceName {
             Collection::Calendar => DavResourceName::Cal,
             Collection::FileNode => DavResourceName::File,
             Collection::Principal => DavResourceName::Principal,
-            Collection::CalendarScheduling => DavResourceName::Scheduling,
+            Collection::CalendarEventNotification => DavResourceName::Scheduling,
             _ => unreachable!(),
         }
     }
@@ -130,19 +130,20 @@ impl From<SyncCollection> for DavResourceName {
             SyncCollection::AddressBook => DavResourceName::Card,
             SyncCollection::Calendar => DavResourceName::Cal,
             SyncCollection::FileNode => DavResourceName::File,
-            SyncCollection::CalendarScheduling => DavResourceName::Scheduling,
+            SyncCollection::CalendarEventNotification => DavResourceName::Scheduling,
             _ => unreachable!(),
         }
     }
 }
 
 pub trait DavCalendarResource {
-    fn calendar_default_tz(&self, calendar_id: u32) -> Option<Tz>;
+    fn calendar_default_tz(&self, calendar_id: u32, account_id: u32) -> Option<Tz>;
 }
 
 impl DavCalendarResource for DavResources {
-    fn calendar_default_tz(&self, calendar_id: u32) -> Option<Tz> {
+    fn calendar_default_tz(&self, calendar_id: u32, account_id: u32) -> Option<Tz> {
         self.container_resource_by_id(calendar_id)
-            .and_then(|c| c.timezone())
+            .and_then(|c| c.calendar_preferences(account_id))
+            .map(|p| p.tz)
     }
 }

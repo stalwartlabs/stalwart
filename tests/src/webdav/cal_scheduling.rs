@@ -6,7 +6,7 @@
 
 use super::WebDavTest;
 use crate::{
-    jmap::mailbox::destroy_all_mailboxes_for_account,
+    jmap::mail::mailbox::destroy_all_mailboxes_for_account,
     webdav::{DummyWebDavClient, prop::ALL_DAV_PROPERTIES},
 };
 use calcard::{
@@ -27,7 +27,7 @@ use groupware::{
 };
 use hyper::StatusCode;
 use mail_parser::{DateTime, MessageParser};
-use services::task_manager::{Task, TaskAction, imip::build_itip_template};
+use services::task_manager::imip::build_itip_template;
 use std::str::FromStr;
 use store::write::now;
 use types::collection::SyncCollection;
@@ -199,7 +199,7 @@ pub async fn test(test: &WebDavTest) {
             .fetch_dav_resources(
                 &access_token,
                 client.account_id,
-                SyncCollection::CalendarScheduling,
+                SyncCollection::CalendarEventNotification,
             )
             .await
             .unwrap();
@@ -594,12 +594,6 @@ async fn fetch_icals(client: &DummyWebDavClient) -> Vec<CalEntry> {
 
 pub async fn test_build_itip_templates(server: &Server) {
     let dummy_access_token = AccessToken::from_id(0);
-    let dummy_task = Task {
-        account_id: 123,
-        document_id: 156,
-        due: 0,
-        action: TaskAction::SendImip,
-    };
 
     for (idx, summary) in [
         ItipSummary::Invite(vec![
@@ -796,7 +790,8 @@ pub async fn test_build_itip_templates(server: &Server) {
         let html = build_itip_template(
             server,
             &dummy_access_token,
-            &dummy_task,
+            0,
+            1,
             "john.doe@example.org",
             "jane.smith@example.net",
             summary,

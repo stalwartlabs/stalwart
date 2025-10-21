@@ -5,42 +5,47 @@
  */
 
 use crate::{
-    calendar::migrate_calendar_events,
     queue::{migrate_queue_v011, migrate_queue_v012},
-    tasks::migrate_tasks_v011,
+    v011::migrate_v0_11,
+    v012::migrate_v0_12,
+    v013::migrate_v0_13,
 };
-use changelog::reset_changelog;
-use common::{
-    DATABASE_SCHEMA_VERSION, KV_LOCK_HOUSEKEEPER, Server, manager::boot::DEFAULT_SETTINGS,
-};
-use principal::{migrate_principal, migrate_principals};
-use report::migrate_reports;
+use common::{DATABASE_SCHEMA_VERSION, Server, manager::boot::DEFAULT_SETTINGS};
 use std::time::Duration;
 use store::{
     Deserialize, IterateParams, SUBSPACE_PROPERTY, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_REPORT_IN,
     SUBSPACE_REPORT_OUT, SUBSPACE_SETTINGS, SerializeInfallible, U32_LEN, Value, ValueKey,
-    dispatch::{DocumentSet, lookup::KeyValue},
-    rand::{self, seq::SliceRandom},
+    dispatch::DocumentSet,
     write::{AnyClass, AnyKey, BatchBuilder, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;
 use types::collection::Collection;
 
-pub mod calendar;
+pub mod addressbook_v2;
+pub mod calendar_v2;
 pub mod changelog;
+pub mod contact_v2;
 pub mod email;
 pub mod encryption;
+pub mod event_v1;
+pub mod event_v2;
 pub mod identity;
 pub mod mailbox;
 pub mod object;
-pub mod principal;
-pub mod push;
+pub mod principal_v1;
+pub mod principal_v2;
+pub mod push_v1;
+pub mod push_v2;
 pub mod queue;
 pub mod report;
-pub mod sieve;
+pub mod sieve_v1;
+pub mod sieve_v2;
 pub mod submission;
 pub mod tasks;
 pub mod threads;
+pub mod v011;
+pub mod v012;
+pub mod v013;
 
 const LOCK_WAIT_TIME_ACCOUNT: u64 = 3 * 60;
 const LOCK_WAIT_TIME_CORE: u64 = 5 * 60;
@@ -51,7 +56,7 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
     {
-        if version == 12 {
+        if version == 12 || version <= 2 {
             migrate_queue_v012(server)
                 .await
                 .caused_by(trc::location!())?;
@@ -61,15 +66,8 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
                 .caused_by(trc::location!())?;
         }
         return Ok(());
-    } else if let Some(account_id) = std::env::var("FORCE_MIGRATE_ACCOUNT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-    {
-        migrate_principal(server, account_id)
-            .await
-            .caused_by(trc::location!())?;
-        return Ok(());
-    } else if let Some(version) = std::env::var("FORCE_MIGRATE")
+    }
+    if let Some(version) = std::env::var("FORCE_MIGRATE")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
     {
@@ -78,11 +76,16 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
                 migrate_v0_12(server, true)
                     .await
                     .caused_by(trc::location!())?;
+                migrate_v0_13(server).await.caused_by(trc::location!())?;
             }
             2 => {
                 migrate_v0_12(server, false)
                     .await
                     .caused_by(trc::location!())?;
+                migrate_v0_13(server).await.caused_by(trc::location!())?;
+            }
+            3 => {
+                migrate_v0_13(server).await.caused_by(trc::location!())?;
             }
             _ => {
                 panic!("Unknown migration version: {version}");
@@ -107,13 +110,19 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
             migrate_v0_12(server, true)
                 .await
                 .caused_by(trc::location!())?;
+            migrate_v0_13(server).await.caused_by(trc::location!())?;
             true
         }
         Some(2) => {
             migrate_v0_12(server, false)
                 .await
                 .caused_by(trc::location!())?;
+            migrate_v0_13(server).await.caused_by(trc::location!())?;
             true
+        }
+        Some(3) => {
+            migrate_v0_13(server).await.caused_by(trc::location!())?;
+            false
         }
         Some(version) => {
             panic!(
@@ -162,211 +171,6 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
         .write(batch.build_all())
         .await
         .caused_by(trc::location!())?;
-
-    Ok(())
-}
-
-async fn migrate_v0_12(server: &Server, migrate_tasks: bool) -> trc::Result<()> {
-    let force_lock = std::env::var("FORCE_LOCK").is_ok();
-    let in_memory = server.in_memory_store();
-
-    loop {
-        if force_lock
-            || in_memory
-                .try_lock(
-                    KV_LOCK_HOUSEKEEPER,
-                    b"migrate_core_lock",
-                    LOCK_WAIT_TIME_CORE,
-                )
-                .await
-                .caused_by(trc::location!())?
-        {
-            migrate_queue_v012(server)
-                .await
-                .caused_by(trc::location!())?;
-
-            if migrate_tasks {
-                migrate_tasks_v011(server)
-                    .await
-                    .caused_by(trc::location!())?;
-            }
-
-            in_memory
-                .remove_lock(KV_LOCK_HOUSEKEEPER, b"migrate_core_lock")
-                .await
-                .caused_by(trc::location!())?;
-            break;
-        } else {
-            trc::event!(
-                Server(trc::ServerEvent::Startup),
-                Details = format!("Migration lock busy, waiting 30 seconds.",)
-            );
-
-            tokio::time::sleep(LOCK_RETRY_TIME).await;
-        }
-    }
-
-    if migrate_tasks {
-        migrate_calendar_events(server)
-            .await
-            .caused_by(trc::location!())
-    } else {
-        Ok(())
-    }
-}
-
-async fn migrate_v0_11(server: &Server) -> trc::Result<()> {
-    let force_lock = std::env::var("FORCE_LOCK").is_ok();
-    let in_memory = server.in_memory_store();
-    let principal_ids;
-
-    loop {
-        if force_lock
-            || in_memory
-                .try_lock(
-                    KV_LOCK_HOUSEKEEPER,
-                    b"migrate_core_lock",
-                    LOCK_WAIT_TIME_CORE,
-                )
-                .await
-                .caused_by(trc::location!())?
-        {
-            if in_memory
-                .key_get::<()>(KeyValue::<()>::build_key(
-                    KV_LOCK_HOUSEKEEPER,
-                    b"migrate_core_done",
-                ))
-                .await
-                .caused_by(trc::location!())?
-                .is_none()
-            {
-                migrate_queue_v011(server)
-                    .await
-                    .caused_by(trc::location!())?;
-                migrate_reports(server).await.caused_by(trc::location!())?;
-                reset_changelog(server).await.caused_by(trc::location!())?;
-                principal_ids = migrate_principals(server)
-                    .await
-                    .caused_by(trc::location!())?;
-
-                in_memory
-                    .key_set(
-                        KeyValue::new(
-                            KeyValue::<()>::build_key(KV_LOCK_HOUSEKEEPER, b"migrate_core_done"),
-                            b"1".to_vec(),
-                        )
-                        .expires(86400),
-                    )
-                    .await
-                    .caused_by(trc::location!())?;
-            } else {
-                principal_ids = server
-                    .get_document_ids(u32::MAX, Collection::Principal)
-                    .await
-                    .caused_by(trc::location!())?
-                    .unwrap_or_default();
-
-                trc::event!(
-                    Server(trc::ServerEvent::Startup),
-                    Details = format!("Migration completed by another node.",)
-                );
-            }
-
-            in_memory
-                .remove_lock(KV_LOCK_HOUSEKEEPER, b"migrate_core_lock")
-                .await
-                .caused_by(trc::location!())?;
-            break;
-        } else {
-            trc::event!(
-                Server(trc::ServerEvent::Startup),
-                Details = format!("Migration lock busy, waiting 30 seconds.",)
-            );
-
-            tokio::time::sleep(LOCK_RETRY_TIME).await;
-        }
-    }
-
-    if !principal_ids.is_empty() {
-        let mut principal_ids = principal_ids.into_iter().collect::<Vec<_>>();
-        principal_ids.shuffle(&mut rand::rng());
-
-        loop {
-            let mut skipped_principal_ids = Vec::new();
-            let mut num_migrated = 0;
-
-            for principal_id in principal_ids {
-                let lock_key = format!("migrate_{principal_id}_lock");
-                let done_key = format!("migrate_{principal_id}_done");
-
-                if force_lock
-                    || in_memory
-                        .try_lock(
-                            KV_LOCK_HOUSEKEEPER,
-                            lock_key.as_bytes(),
-                            LOCK_WAIT_TIME_ACCOUNT,
-                        )
-                        .await
-                        .caused_by(trc::location!())?
-                {
-                    if in_memory
-                        .key_get::<()>(KeyValue::<()>::build_key(
-                            KV_LOCK_HOUSEKEEPER,
-                            done_key.as_bytes(),
-                        ))
-                        .await
-                        .caused_by(trc::location!())?
-                        .is_none()
-                    {
-                        migrate_principal(server, principal_id)
-                            .await
-                            .caused_by(trc::location!())?;
-
-                        num_migrated += 1;
-
-                        in_memory
-                            .key_set(
-                                KeyValue::new(
-                                    KeyValue::<()>::build_key(
-                                        KV_LOCK_HOUSEKEEPER,
-                                        done_key.as_bytes(),
-                                    ),
-                                    b"1".to_vec(),
-                                )
-                                .expires(86400),
-                            )
-                            .await
-                            .caused_by(trc::location!())?;
-                    }
-
-                    in_memory
-                        .remove_lock(KV_LOCK_HOUSEKEEPER, lock_key.as_bytes())
-                        .await
-                        .caused_by(trc::location!())?;
-                } else {
-                    skipped_principal_ids.push(principal_id);
-                }
-            }
-
-            if !skipped_principal_ids.is_empty() {
-                trc::event!(
-                    Server(trc::ServerEvent::Startup),
-                    Details = format!(
-                        "Migrated {num_migrated} accounts and {} are locked by another node, waiting 30 seconds.",
-                        skipped_principal_ids.len()
-                    )
-                );
-                tokio::time::sleep(LOCK_RETRY_TIME).await;
-                principal_ids = skipped_principal_ids;
-            } else {
-                trc::event!(
-                    Server(trc::ServerEvent::Startup),
-                    Details = format!("Account migration completed.",)
-                );
-                break;
-            }
-        }
-    }
 
     Ok(())
 }

@@ -17,6 +17,9 @@ pub struct Field(u8);
 pub enum ContactField {
     Uid,
     Email,
+    Created,
+    Updated,
+    Text,
     Archive,
 }
 
@@ -25,6 +28,10 @@ pub enum ContactField {
 pub enum CalendarField {
     Uid,
     Created,
+    Updated,
+    Start,
+    Text,
+    EventId,
     Archive,
 }
 
@@ -44,11 +51,6 @@ pub enum EmailField {
     To,
     Cc,
     Bcc,
-    ReplyTo,
-    Sender,
-    InReplyTo,
-    MessageId,
-    EmailIds,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,7 +64,6 @@ pub enum MailboxField {
 #[repr(u8)]
 pub enum SieveField {
     Name,
-    IsActive,
     Ids,
     Archive,
 }
@@ -83,6 +84,11 @@ pub enum EmailSubmissionField {
 pub enum PrincipalField {
     Archive,
     EncryptionKeys,
+    ParticipantIdentities,
+    DefaultCalendarId,
+    DefaultAddressBookId,
+    ActiveScriptId,
+    PushSubscriptions,
 }
 
 impl From<ContactField> for u8 {
@@ -90,6 +96,9 @@ impl From<ContactField> for u8 {
         match value {
             ContactField::Uid => 0,
             ContactField::Email => 1,
+            ContactField::Created => 2,
+            ContactField::Updated => 3,
+            ContactField::Text => 4,
             ContactField::Archive => ARCHIVE_FIELD,
         }
     }
@@ -99,7 +108,11 @@ impl From<CalendarField> for u8 {
     fn from(value: CalendarField) -> Self {
         match value {
             CalendarField::Uid => 0,
+            CalendarField::Text => 1,
             CalendarField::Created => 2,
+            CalendarField::Updated => 3,
+            CalendarField::Start => 4,
+            CalendarField::EventId => 5,
             CalendarField::Archive => ARCHIVE_FIELD,
         }
     }
@@ -108,23 +121,18 @@ impl From<CalendarField> for u8 {
 impl From<EmailField> for u8 {
     fn from(value: EmailField) -> Self {
         match value {
+            EmailField::From => 87,
+            EmailField::To => 35,
+            EmailField::Cc => 74,
+            EmailField::Bcc => 69,
+            EmailField::Subject => 29,
             EmailField::Size => 27,
             EmailField::Metadata => 71,
-            EmailField::Subject => 29,
             EmailField::References => 20,
             EmailField::MailboxIds => 7,
             EmailField::ReceivedAt => 19,
-            EmailField::MessageId => 11,
-            EmailField::ReplyTo => 21,
-            EmailField::Sender => 25,
             EmailField::SentAt => 26,
-            EmailField::To => 35,
-            EmailField::Bcc => 69,
-            EmailField::Cc => 74,
-            EmailField::EmailIds => 84,
-            EmailField::From => 87,
             EmailField::HasAttachment => 89,
-            EmailField::InReplyTo => 96,
             EmailField::Archive => ARCHIVE_FIELD,
         }
     }
@@ -143,7 +151,6 @@ impl From<SieveField> for u8 {
     fn from(value: SieveField) -> Self {
         match value {
             SieveField::Name => 13,
-            SieveField::IsActive => 0,
             SieveField::Ids => 84,
             SieveField::Archive => ARCHIVE_FIELD,
         }
@@ -166,7 +173,12 @@ impl From<EmailSubmissionField> for u8 {
 impl From<PrincipalField> for u8 {
     fn from(value: PrincipalField) -> Self {
         match value {
+            PrincipalField::ParticipantIdentities => 45,
             PrincipalField::EncryptionKeys => 46,
+            PrincipalField::DefaultCalendarId => 47,
+            PrincipalField::DefaultAddressBookId => 48,
+            PrincipalField::ActiveScriptId => 49,
+            PrincipalField::PushSubscriptions => 44,
             PrincipalField::Archive => ARCHIVE_FIELD,
         }
     }
@@ -222,6 +234,10 @@ impl From<EmailSubmissionField> for Field {
 
 impl Field {
     pub const ARCHIVE: Field = Field(ARCHIVE_FIELD);
+
+    pub fn new(value: u8) -> Self {
+        Field(value)
+    }
 }
 
 impl FieldType for Field {}

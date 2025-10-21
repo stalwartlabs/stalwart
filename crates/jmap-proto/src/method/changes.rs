@@ -54,7 +54,7 @@ impl<'de> DeserializeArguments<'de> for ChangesRequest {
             b"accountId" => {
                 self.account_id = map.next_value()?;
             },
-            b"sinceQueryState" => {
+            b"sinceState" => {
                 self.since_state = map.next_value()?;
             },
             b"maxChanges" => {

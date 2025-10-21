@@ -9,6 +9,7 @@ use crate::{IndexKeyPrefix, IterateParams, Store, U32_LEN, write::key::Deseriali
 use ahash::{AHashMap, AHashSet};
 use std::cmp::Ordering;
 use trc::AddContext;
+use types::id::Id;
 
 #[derive(Debug)]
 pub struct Pagination<'x> {
@@ -19,7 +20,7 @@ pub struct Pagination<'x> {
     anchor_offset: i32,
     has_anchor: bool,
     anchor_found: bool,
-    pub ids: Vec<u64>,
+    pub ids: Vec<Id>,
     prefix_map: Option<&'x AHashMap<u32, u32>>,
     prefix_unique: bool,
 }
@@ -124,8 +125,9 @@ impl Store {
             let mut sorted_results = paginate.build();
             if let Some(prefix_map) = prefix_map {
                 for id in sorted_results.ids.iter_mut() {
-                    if let Some(prefix_id) = prefix_map.get(&(*id as u32)) {
-                        *id |= (*prefix_id as u64) << 32;
+                    let document_id = id.document_id();
+                    if let Some(prefix_id) = prefix_map.get(&document_id) {
+                        *id = Id::from_parts(*prefix_id, document_id);
                     }
                 }
             }
@@ -319,8 +321,13 @@ impl<'x> Pagination<'x> {
         self
     }
 
+    #[inline(always)]
     pub fn add(&mut self, prefix_id: u32, document_id: u32) -> bool {
-        let id = ((prefix_id as u64) << 32) | document_id as u64;
+        self.add_id(Id::from_parts(prefix_id, document_id))
+    }
+
+    pub fn add_id(&mut self, id: Id) -> bool {
+        let document_id = id.document_id();
 
         // Pagination
         if !self.has_anchor {

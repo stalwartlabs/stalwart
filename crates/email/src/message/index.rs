@@ -139,7 +139,13 @@ impl MessageMetadata {
                 }
                 HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc => {
                     if !seen_headers[header.name.id() as usize] {
-                        let property = property_from_header(&header.name);
+                        let property = match &header.name {
+                            HeaderName::From => EmailField::From,
+                            HeaderName::To => EmailField::To,
+                            HeaderName::Cc => EmailField::Cc,
+                            HeaderName::Bcc => EmailField::Bcc,
+                            _ => unreachable!(),
+                        };
                         let mut sort_text = SortedAddressBuilder::new();
                         let mut found_addr = false;
 
@@ -336,7 +342,13 @@ impl ArchivedMessageMetadata {
                 | ArchivedHeaderName::Cc
                 | ArchivedHeaderName::Bcc => {
                     if !seen_headers[header.name.id() as usize] {
-                        let property = property_from_archived_header(&header.name);
+                        let property = match &header.name {
+                            ArchivedHeaderName::From => EmailField::From,
+                            ArchivedHeaderName::To => EmailField::To,
+                            ArchivedHeaderName::Cc => EmailField::Cc,
+                            ArchivedHeaderName::Bcc => EmailField::Bcc,
+                            _ => unreachable!(),
+                        };
                         let mut sort_text = SortedAddressBuilder::new();
                         let mut found_addr = false;
 
@@ -1033,41 +1045,5 @@ impl TrimTextValue for Cow<'_, str> {
 impl<T: TrimTextValue> TrimTextValue for Vec<T> {
     fn trim_text(self, length: usize) -> Self {
         self.into_iter().map(|v| v.trim_text(length)).collect()
-    }
-}
-
-pub fn property_from_header(header: &HeaderName) -> EmailField {
-    match header {
-        HeaderName::Subject => EmailField::Subject,
-        HeaderName::From => EmailField::From,
-        HeaderName::To => EmailField::To,
-        HeaderName::Cc => EmailField::Cc,
-        HeaderName::Date => EmailField::SentAt,
-        HeaderName::Bcc => EmailField::Bcc,
-        HeaderName::ReplyTo => EmailField::ReplyTo,
-        HeaderName::Sender => EmailField::Sender,
-        HeaderName::InReplyTo => EmailField::InReplyTo,
-        HeaderName::MessageId => EmailField::MessageId,
-        HeaderName::References => EmailField::References,
-        HeaderName::ResentMessageId => EmailField::EmailIds,
-        _ => unreachable!(),
-    }
-}
-
-pub fn property_from_archived_header(header: &ArchivedHeaderName) -> EmailField {
-    match header {
-        ArchivedHeaderName::Subject => EmailField::Subject,
-        ArchivedHeaderName::From => EmailField::From,
-        ArchivedHeaderName::To => EmailField::To,
-        ArchivedHeaderName::Cc => EmailField::Cc,
-        ArchivedHeaderName::Date => EmailField::SentAt,
-        ArchivedHeaderName::Bcc => EmailField::Bcc,
-        ArchivedHeaderName::ReplyTo => EmailField::ReplyTo,
-        ArchivedHeaderName::Sender => EmailField::Sender,
-        ArchivedHeaderName::InReplyTo => EmailField::InReplyTo,
-        ArchivedHeaderName::MessageId => EmailField::MessageId,
-        ArchivedHeaderName::References => EmailField::References,
-        ArchivedHeaderName::ResentMessageId => EmailField::EmailIds,
-        _ => unreachable!(),
     }
 }

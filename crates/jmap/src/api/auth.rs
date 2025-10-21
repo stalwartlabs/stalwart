@@ -7,8 +7,8 @@
 use common::auth::AccessToken;
 use directory::Permission;
 use jmap_proto::request::{
-    CopyRequestMethod, GetRequestMethod, QueryChangesRequestMethod, QueryRequestMethod,
-    RequestMethod, SetRequestMethod, method::MethodObject,
+    CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
+    QueryRequestMethod, RequestMethod, SetRequestMethod, method::MethodObject,
 };
 use types::{collection::Collection, id::Id};
 
@@ -67,6 +67,19 @@ impl JmapAuthorization for AccessToken {
                 GetRequestMethod::Principal(_) => Permission::JmapPrincipalGet,
                 GetRequestMethod::Quota(_) => Permission::JmapQuotaGet,
                 GetRequestMethod::Blob(_) => Permission::JmapBlobGet,
+                GetRequestMethod::AddressBook(_) => Permission::JmapAddressBookGet,
+                GetRequestMethod::ContactCard(_) => Permission::JmapContactCardGet,
+                GetRequestMethod::FileNode(_) => Permission::JmapFileNodeGet,
+                GetRequestMethod::PrincipalAvailability(_) => {
+                    Permission::JmapPrincipalGetAvailability
+                }
+                GetRequestMethod::Calendar(_) => Permission::JmapCalendarGet,
+                GetRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventGet,
+                GetRequestMethod::CalendarEventNotification(_) => {
+                    Permission::JmapCalendarEventNotificationGet
+                }
+                GetRequestMethod::ParticipantIdentity(_) => Permission::JmapParticipantIdentityGet,
+                GetRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationGet,
             },
             RequestMethod::Set(m) => match &m {
                 SetRequestMethod::Email(_) => Permission::JmapEmailSet,
@@ -76,6 +89,16 @@ impl JmapAuthorization for AccessToken {
                 SetRequestMethod::PushSubscription(_) => Permission::JmapPushSubscriptionSet,
                 SetRequestMethod::Sieve(_) => Permission::JmapSieveScriptSet,
                 SetRequestMethod::VacationResponse(_) => Permission::JmapVacationResponseSet,
+                SetRequestMethod::AddressBook(_) => Permission::JmapAddressBookSet,
+                SetRequestMethod::ContactCard(_) => Permission::JmapContactCardSet,
+                SetRequestMethod::FileNode(_) => Permission::JmapFileNodeSet,
+                SetRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationSet,
+                SetRequestMethod::Calendar(_) => Permission::JmapCalendarSet,
+                SetRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventSet,
+                SetRequestMethod::CalendarEventNotification(_) => {
+                    Permission::JmapCalendarEventNotificationSet
+                }
+                SetRequestMethod::ParticipantIdentity(_) => Permission::JmapParticipantIdentitySet,
             },
             RequestMethod::Changes(_) => match object {
                 MethodObject::Email => Permission::JmapEmailChanges,
@@ -84,20 +107,36 @@ impl JmapAuthorization for AccessToken {
                 MethodObject::Identity => Permission::JmapIdentityChanges,
                 MethodObject::EmailSubmission => Permission::JmapEmailSubmissionChanges,
                 MethodObject::Quota => Permission::JmapQuotaChanges,
+                MethodObject::ContactCard => Permission::JmapContactCardChanges,
+                MethodObject::FileNode => Permission::JmapFileNodeChanges,
+                MethodObject::Calendar => Permission::JmapCalendarChanges,
+                MethodObject::CalendarEvent => Permission::JmapCalendarEventChanges,
+                MethodObject::CalendarEventNotification => {
+                    Permission::JmapCalendarEventNotificationChanges
+                }
+                MethodObject::ParticipantIdentity => Permission::JmapParticipantIdentityChanges,
+                MethodObject::ShareNotification => Permission::JmapShareNotificationChanges,
+                MethodObject::Principal => Permission::JmapPrincipalChanges,
                 MethodObject::Core
                 | MethodObject::Blob
                 | MethodObject::PushSubscription
                 | MethodObject::SearchSnippet
                 | MethodObject::VacationResponse
                 | MethodObject::SieveScript
-                | MethodObject::Principal => Permission::JmapEmailChanges, // Unimplemented
+                | MethodObject::AddressBook => Permission::JmapEmailChanges,
             },
             RequestMethod::Copy(m) => match &m {
                 CopyRequestMethod::Email(_) => Permission::JmapEmailCopy,
                 CopyRequestMethod::Blob(_) => Permission::JmapBlobCopy,
+                CopyRequestMethod::ContactCard(_) => Permission::JmapContactCardCopy,
+                CopyRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventCopy,
             },
             RequestMethod::ImportEmail(_) => Permission::JmapEmailImport,
-            RequestMethod::ParseEmail(_) => Permission::JmapEmailParse,
+            RequestMethod::Parse(m) => match &m {
+                ParseRequestMethod::Email(_) => Permission::JmapEmailParse,
+                ParseRequestMethod::ContactCard(_) => Permission::JmapContactCardParse,
+                ParseRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventParse,
+            },
             RequestMethod::QueryChanges(m) => match m {
                 QueryChangesRequestMethod::Email(_) => Permission::JmapEmailQueryChanges,
                 QueryChangesRequestMethod::Mailbox(_) => Permission::JmapMailboxQueryChanges,
@@ -107,6 +146,19 @@ impl JmapAuthorization for AccessToken {
                 QueryChangesRequestMethod::Sieve(_) => Permission::JmapSieveScriptQueryChanges,
                 QueryChangesRequestMethod::Principal(_) => Permission::JmapPrincipalQueryChanges,
                 QueryChangesRequestMethod::Quota(_) => Permission::JmapQuotaQueryChanges,
+                QueryChangesRequestMethod::ContactCard(_) => {
+                    Permission::JmapContactCardQueryChanges
+                }
+                QueryChangesRequestMethod::FileNode(_) => Permission::JmapFileNodeQueryChanges,
+                QueryChangesRequestMethod::CalendarEvent(_) => {
+                    Permission::JmapCalendarEventQueryChanges
+                }
+                QueryChangesRequestMethod::CalendarEventNotification(_) => {
+                    Permission::JmapCalendarEventNotificationQueryChanges
+                }
+                QueryChangesRequestMethod::ShareNotification(_) => {
+                    Permission::JmapShareNotificationQueryChanges
+                }
             },
             RequestMethod::Query(m) => match m {
                 QueryRequestMethod::Email(_) => Permission::JmapEmailQuery,
@@ -115,6 +167,13 @@ impl JmapAuthorization for AccessToken {
                 QueryRequestMethod::Sieve(_) => Permission::JmapSieveScriptQuery,
                 QueryRequestMethod::Principal(_) => Permission::JmapPrincipalQuery,
                 QueryRequestMethod::Quota(_) => Permission::JmapQuotaQuery,
+                QueryRequestMethod::ContactCard(_) => Permission::JmapContactCardQuery,
+                QueryRequestMethod::FileNode(_) => Permission::JmapFileNodeQuery,
+                QueryRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventQuery,
+                QueryRequestMethod::CalendarEventNotification(_) => {
+                    Permission::JmapCalendarEventNotificationQuery
+                }
+                QueryRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationQuery,
             },
             RequestMethod::SearchSnippet(_) => Permission::JmapSearchSnippet,
             RequestMethod::ValidateScript(_) => Permission::JmapSieveScriptValidate,

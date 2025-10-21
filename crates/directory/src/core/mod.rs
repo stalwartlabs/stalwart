@@ -251,6 +251,74 @@ impl Permission {
             Permission::CalendarSchedulingReceive => {
                 "Receive calendar scheduling requests via e-mail"
             }
+            Permission::JmapAddressBookGet => "Retrieve address books via JMAP",
+            Permission::JmapAddressBookSet => "Create or update address books via JMAP",
+            Permission::JmapAddressBookChanges => "Track address book changes via JMAP",
+            Permission::JmapContactCardGet => "Retrieve contact cards via JMAP",
+            Permission::JmapContactCardChanges => "Track contact card changes via JMAP",
+            Permission::JmapContactCardQuery => {
+                "Search for contact cards matching criteria via JMAP"
+            }
+            Permission::JmapContactCardQueryChanges => "Track contact card query changes via JMAP",
+            Permission::JmapContactCardSet => "Create or update contact cards via JMAP",
+            Permission::JmapContactCardCopy => "Copy contact cards to new locations via JMAP",
+            Permission::JmapContactCardParse => "Parse contact cards via JMAP",
+            Permission::JmapFileNodeGet => "Retrieve file nodes via JMAP",
+            Permission::JmapFileNodeSet => "Create or update file nodes via JMAP",
+            Permission::JmapFileNodeChanges => "Track file node changes via JMAP",
+            Permission::JmapFileNodeQuery => "Search for file nodes matching criteria via JMAP",
+            Permission::JmapFileNodeQueryChanges => "Track file node query changes via JMAP",
+            Permission::JmapPrincipalGetAvailability => {
+                "Retrieve availability information via JMAP"
+            }
+            Permission::JmapPrincipalChanges => "Track principal changes via JMAP",
+            Permission::JmapShareNotificationGet => "Retrieve share notifications via JMAP",
+            Permission::JmapShareNotificationSet => "Create or update share notifications via JMAP",
+            Permission::JmapShareNotificationChanges => "Track share notification changes via JMAP",
+            Permission::JmapShareNotificationQuery => {
+                "Search for share notifications matching criteria via JMAP"
+            }
+            Permission::JmapShareNotificationQueryChanges => {
+                "Track share notification query changes via JMAP"
+            }
+            Permission::JmapCalendarGet => "Retrieve calendars via JMAP",
+            Permission::JmapCalendarSet => "Create or update calendars via JMAP",
+            Permission::JmapCalendarChanges => "Track calendar changes via JMAP",
+            Permission::JmapCalendarEventGet => "Retrieve calendar events via JMAP",
+            Permission::JmapCalendarEventSet => "Create or update calendar events via JMAP",
+            Permission::JmapCalendarEventChanges => "Track calendar event changes via JMAP",
+            Permission::JmapCalendarEventQuery => {
+                "Search for calendar events matching criteria via JMAP"
+            }
+            Permission::JmapCalendarEventQueryChanges => {
+                "Track calendar event query changes via JMAP"
+            }
+            Permission::JmapCalendarEventCopy => "Copy calendar events to new locations via JMAP",
+            Permission::JmapCalendarEventParse => "Parse calendar events via JMAP",
+            Permission::JmapCalendarEventNotificationGet => {
+                "Retrieve calendar event notifications via JMAP"
+            }
+            Permission::JmapCalendarEventNotificationSet => {
+                "Create or update calendar event notifications via JMAP"
+            }
+            Permission::JmapCalendarEventNotificationChanges => {
+                "Track calendar event notification changes via JMAP"
+            }
+            Permission::JmapCalendarEventNotificationQuery => {
+                "Search for calendar event notifications matching criteria via JMAP"
+            }
+            Permission::JmapCalendarEventNotificationQueryChanges => {
+                "Track calendar event notification query changes via JMAP"
+            }
+            Permission::JmapParticipantIdentityGet => {
+                "Retrieve participant identity information via JMAP"
+            }
+            Permission::JmapParticipantIdentitySet => {
+                "Create or update participant identities via JMAP"
+            }
+            Permission::JmapParticipantIdentityChanges => {
+                "Track participant identity changes via JMAP"
+            }
         }
     }
 }

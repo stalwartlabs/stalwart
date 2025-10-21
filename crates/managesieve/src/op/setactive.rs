@@ -8,9 +8,10 @@ use std::time::Instant;
 
 use common::listener::SessionStream;
 use directory::Permission;
-use email::sieve::activate::SieveScriptActivate;
 use imap_proto::receiver::Request;
+use store::{SerializeInfallible, write::BatchBuilder};
 use trc::AddContext;
+use types::{collection::Collection, field::PrincipalField};
 
 use crate::core::{Command, Session, StatusResponse};
 
@@ -33,15 +34,23 @@ impl<T: SessionStream> Session<T> {
 
         // De/activate script
         let account_id = self.state.access_token().primary_id();
+        let mut batch = BatchBuilder::new();
+        if !name.is_empty() {
+            let document_id = self.get_script_id(account_id, &name).await?;
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .update_document(0)
+                .set(PrincipalField::ActiveScriptId, document_id.serialize());
+        } else {
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .update_document(0)
+                .clear(PrincipalField::ActiveScriptId);
+        }
         self.server
-            .sieve_activate_script(
-                account_id,
-                if !name.is_empty() {
-                    self.get_script_id(account_id, &name).await?.into()
-                } else {
-                    None
-                },
-            )
+            .commit_batch(batch)
             .await
             .caused_by(trc::location!())?;
 

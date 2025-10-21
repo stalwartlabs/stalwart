@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::Task;
 use calcard::{
     common::timezone::Tz,
-    icalendar::{ArchivedICalendarParameter, ArchivedICalendarProperty},
+    icalendar::{ArchivedICalendarParameterName, ArchivedICalendarProperty, ICalendarProperty},
 };
 use chrono::{DateTime, Locale};
 use common::{
@@ -15,10 +14,14 @@ use common::{
     auth::AccessToken,
     config::groupware::CalendarTemplateVariable,
     i18n,
+    ipc::{CalendarAlert, PushNotification},
     listener::{ServerInstance, stream::NullIo},
 };
 use directory::Permission;
-use groupware::calendar::{ArchivedCalendarEvent, CalendarEvent, alarm::CalendarAlarm};
+use groupware::calendar::{
+    ArchivedCalendarEvent, CalendarEvent,
+    alarm::{CalendarAlarm, CalendarAlarmType},
+};
 use mail_builder::{
     MessageBuilder,
     headers::{HeaderType, content_type::ContentType},
@@ -36,7 +39,8 @@ use utils::{sanitize_email, template::Variables};
 pub trait SendAlarmTask: Sync + Send {
     fn send_alarm(
         &self,
-        task: &Task,
+        account_id: u32,
+        document_id: u32,
         alarm: &CalendarAlarm,
         server_instance: Arc<ServerInstance>,
     ) -> impl Future<Output = bool> + Send;
@@ -45,34 +49,55 @@ pub trait SendAlarmTask: Sync + Send {
 impl SendAlarmTask for Server {
     async fn send_alarm(
         &self,
-        task: &Task,
+        account_id: u32,
+        document_id: u32,
         alarm: &CalendarAlarm,
         server_instance: Arc<ServerInstance>,
     ) -> bool {
-        match send_alarm(self, task, alarm, server_instance).await {
-            Ok(result) => result,
-            Err(err) => {
-                trc::error!(
-                    err.account_id(task.account_id)
-                        .document_id(task.document_id)
-                        .caused_by(trc::location!())
-                        .details("Failed to process alarm")
-                );
-                false
+        match &alarm.typ {
+            CalendarAlarmType::Display { .. } => {
+                match send_display_alarm(self, account_id, document_id, alarm).await {
+                    Ok(result) => result,
+                    Err(err) => {
+                        trc::error!(
+                            err.account_id(account_id)
+                                .document_id(document_id)
+                                .caused_by(trc::location!())
+                                .details("Failed to process e-mail alarm")
+                        );
+                        false
+                    }
+                }
+            }
+            CalendarAlarmType::Email { .. } => {
+                match send_email_alarm(self, account_id, document_id, alarm, server_instance).await
+                {
+                    Ok(result) => result,
+                    Err(err) => {
+                        trc::error!(
+                            err.account_id(account_id)
+                                .document_id(document_id)
+                                .caused_by(trc::location!())
+                                .details("Failed to process e-mail alarm")
+                        );
+                        false
+                    }
+                }
             }
         }
     }
 }
 
-async fn send_alarm(
+async fn send_email_alarm(
     server: &Server,
-    task: &Task,
+    account_id: u32,
+    document_id: u32,
     alarm: &CalendarAlarm,
     server_instance: Arc<ServerInstance>,
 ) -> trc::Result<bool> {
     // Obtain access token
     let access_token = server
-        .get_access_token(task.account_id)
+        .get_access_token(account_id)
         .await
         .caused_by(trc::location!())?;
 
@@ -80,31 +105,31 @@ async fn send_alarm(
         trc::event!(
             Calendar(trc::CalendarEvent::AlarmSkipped),
             Reason = "Account does not have permission to send calendar alarms",
-            AccountId = task.account_id,
-            DocumentId = task.document_id,
+            AccountId = account_id,
+            DocumentId = document_id,
         );
         return Ok(true);
     } else if access_token.emails.is_empty() {
         trc::event!(
             Calendar(trc::CalendarEvent::AlarmFailed),
             Reason = "Account does not have any email addresses",
-            AccountId = task.account_id,
-            DocumentId = task.document_id,
+            AccountId = account_id,
+            DocumentId = document_id,
         );
         return Ok(true);
     }
 
     // Fetch event
     let Some(event_) = server
-        .get_archive(task.account_id, Collection::CalendarEvent, task.document_id)
+        .get_archive(account_id, Collection::CalendarEvent, document_id)
         .await
         .caused_by(trc::location!())?
     else {
         trc::event!(
             TaskQueue(TaskQueueEvent::MetadataNotFound),
             Details = "Calendar Event metadata not found",
-            AccountId = task.account_id,
-            DocumentId = task.document_id,
+            AccountId = account_id,
+            DocumentId = document_id,
         );
 
         return Ok(true);
@@ -119,7 +144,16 @@ async fn send_alarm(
     let account_main_email = access_token.emails.first().unwrap();
     let account_main_domain = account_main_email.rsplit('@').next().unwrap_or("localhost");
     let logo_cid = format!("logo.{}@{account_main_domain}", now());
-    let Some(tpl) = build_template(server, &access_token, task, alarm, event, &logo_cid).await?
+    let Some(tpl) = build_template(
+        server,
+        &access_token,
+        account_id,
+        document_id,
+        alarm,
+        event,
+        &logo_cid,
+    )
+    .await?
     else {
         return Ok(true);
     };
@@ -240,16 +274,16 @@ async fn send_alarm(
         Ok(Ok(queue_id)) => {
             trc::event!(
                 Calendar(trc::CalendarEvent::AlarmSent),
-                AccountId = task.account_id,
-                DocumentId = task.document_id,
+                AccountId = account_id,
+                DocumentId = document_id,
                 QueueId = queue_id,
             );
         }
         Ok(Err(err)) => {
             trc::event!(
                 Calendar(trc::CalendarEvent::AlarmFailed),
-                AccountId = task.account_id,
-                DocumentId = task.document_id,
+                AccountId = account_id,
+                DocumentId = document_id,
                 Reason = err,
             );
         }
@@ -257,14 +291,88 @@ async fn send_alarm(
             trc::event!(
                 Server(trc::ServerEvent::ThreadError),
                 Details = "Join Error",
-                AccountId = task.account_id,
-                DocumentId = task.document_id,
+                AccountId = account_id,
+                DocumentId = document_id,
                 CausedBy = trc::location!(),
             );
             return Ok(false);
         }
     }
 
+    write_next_alarm(server, account_id, document_id, event).await
+}
+
+async fn send_display_alarm(
+    server: &Server,
+    account_id: u32,
+    document_id: u32,
+    alarm: &CalendarAlarm,
+) -> trc::Result<bool> {
+    // Fetch event
+    let Some(event_) = server
+        .get_archive(account_id, Collection::CalendarEvent, document_id)
+        .await
+        .caused_by(trc::location!())?
+    else {
+        trc::event!(
+            TaskQueue(TaskQueueEvent::MetadataNotFound),
+            Details = "Calendar Event metadata not found",
+            AccountId = account_id,
+            DocumentId = document_id,
+        );
+
+        return Ok(true);
+    };
+
+    // Unarchive event
+    let event = event_
+        .unarchive::<CalendarEvent>()
+        .caused_by(trc::location!())?;
+
+    let recurrence_id = match &alarm.typ {
+        CalendarAlarmType::Display { recurrence_id } => *recurrence_id,
+        _ => None,
+    };
+
+    let ical = &event.data.event;
+    server
+        .broadcast_push_notification(PushNotification::CalendarAlert(CalendarAlert {
+            account_id,
+            event_id: document_id,
+            recurrence_id,
+            uid: ical.uids().next().unwrap_or_default().to_string(),
+            alert_id: ical
+                .components
+                .get(alarm.alarm_id as usize)
+                .and_then(|c| c.property(&ICalendarProperty::Jsid))
+                .and_then(|v| v.values.first())
+                .and_then(|v| v.as_text())
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| {
+                    format!(
+                        "k{}",
+                        ical.components
+                            .get(alarm.event_id as usize)
+                            .and_then(|c| c
+                                .component_ids
+                                .iter()
+                                .position(|id| id.to_native() == alarm.alarm_id as u32))
+                            .unwrap_or_default()
+                            + 1
+                    )
+                }),
+        }))
+        .await;
+
+    write_next_alarm(server, account_id, document_id, event).await
+}
+
+async fn write_next_alarm(
+    server: &Server,
+    account_id: u32,
+    document_id: u32,
+    event: &ArchivedCalendarEvent,
+) -> trc::Result<bool> {
     // Find next alarm time and write to task queue
     let now = now() as i64;
     if let Some(next_alarm) =
@@ -279,8 +387,8 @@ async fn send_alarm(
                         Calendar(trc::CalendarEvent::AlarmSkipped),
                         Reason = "Next alarm skipped due to minimum interval",
                         Details = next_alarm.alarm_time - now,
-                        AccountId = task.account_id,
-                        DocumentId = task.document_id,
+                        AccountId = account_id,
+                        DocumentId = document_id,
                     );
                     event.data.next_alarm(max_next_alarm, Default::default())
                 } else {
@@ -290,15 +398,16 @@ async fn send_alarm(
     {
         let mut batch = BatchBuilder::new();
         batch
-            .with_account_id(task.account_id)
+            .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)
-            .update_document(task.document_id);
+            .update_document(document_id);
         next_alarm.write_task(&mut batch);
         server
             .store()
             .write(batch.build_all())
             .await
             .caused_by(trc::location!())?;
+        server.notify_task_queue();
     }
 
     Ok(true)
@@ -313,7 +422,8 @@ struct Details {
 async fn build_template(
     server: &Server,
     access_token: &AccessToken,
-    task: &Task,
+    account_id: u32,
+    document_id: u32,
     alarm: &CalendarAlarm,
     event: &ArchivedCalendarEvent,
     logo_cid: &str,
@@ -325,8 +435,8 @@ async fn build_template(
         trc::event!(
             TaskQueue(TaskQueueEvent::MetadataNotFound),
             Details = "Calendar Alarm component not found",
-            AccountId = task.account_id,
-            DocumentId = task.document_id,
+            AccountId = account_id,
+            DocumentId = document_id,
         );
         return Ok(None);
     };
@@ -336,8 +446,8 @@ async fn build_template(
         Ok(uri) => uri,
         Err(err) => {
             trc::error!(
-                err.account_id(task.account_id)
-                    .document_id(task.document_id)
+                err.account_id(account_id)
+                    .document_id(document_id)
                     .caused_by(trc::location!())
                     .details("Failed to generate webcal URI")
             );
@@ -391,8 +501,8 @@ async fn build_template(
                     .and_then(|v| v.as_text())
                     .map(|v| v.strip_prefix("mailto:").unwrap_or(v));
                 let name = entry.params.iter().find_map(|param| {
-                    if let ArchivedICalendarParameter::Cn(name) = param {
-                        Some(name.as_str())
+                    if let ArchivedICalendarParameterName::Cn = param.name {
+                        param.value.as_text()
                     } else {
                         None
                     }
@@ -421,8 +531,8 @@ async fn build_template(
                 Calendar(trc::CalendarEvent::AlarmRecipientOverride),
                 Reason = "External recipient not allowed for calendar alarms",
                 Details = rcpt_to,
-                AccountId = task.account_id,
-                DocumentId = task.document_id,
+                AccountId = account_id,
+                DocumentId = document_id,
             );
 
             access_token.emails.first().unwrap().to_string()
@@ -451,19 +561,35 @@ async fn build_template(
         .as_deref()
         .and_then(|locale| Locale::from_str(locale).ok())
         .unwrap_or(Locale::en_US);
+    let (event_start, event_start_tz, event_end, event_end_tz) = match alarm.typ {
+        CalendarAlarmType::Email {
+            event_start,
+            event_start_tz,
+            event_end,
+            event_end_tz,
+        } => (event_start, event_start_tz, event_end, event_end_tz),
+        CalendarAlarmType::Display { .. } => unreachable!(),
+    };
+
     let start = format!(
         "{} ({})",
-        DateTime::from_timestamp(alarm.event_start, 0)
+        DateTime::from_timestamp(event_start, 0)
             .unwrap_or_default()
             .format_localized(locale.calendar_date_template, chrono_locale),
-        Tz::from_id(alarm.event_start_tz).unwrap_or(Tz::UTC).name()
+        Tz::from_id(event_start_tz)
+            .unwrap_or(Tz::UTC)
+            .name()
+            .unwrap_or_default()
     );
     let end = format!(
         "{} ({})",
-        DateTime::from_timestamp(alarm.event_end, 0)
+        DateTime::from_timestamp(event_end, 0)
             .unwrap_or_default()
             .format_localized(locale.calendar_date_template, chrono_locale),
-        Tz::from_id(alarm.event_end_tz).unwrap_or(Tz::UTC).name()
+        Tz::from_id(event_end_tz)
+            .unwrap_or(Tz::UTC)
+            .name()
+            .unwrap_or_default()
     );
     let subject = format!(
         "{}: {} @ {}",

@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use aes_gcm::{
-    Aes128Gcm, Nonce,
-    aead::{Aead, generic_array::GenericArray},
-};
+use aes_gcm::{Aes128Gcm, Nonce, aead::Aead};
 use hkdf::Hkdf;
 use p256::{
     PublicKey,
     ecdh::EphemeralSecret,
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
 };
-use sha2::Sha256;
+use sha2::{Sha256, digest::generic_array::GenericArray};
 use store::rand::Rng;
 
 /*

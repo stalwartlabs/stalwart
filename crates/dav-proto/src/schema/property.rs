@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{
+    request::DavPropertyValue,
+    response::{Ace, AclRestrictions, Href, List, Response, SupportedPrivilege},
+    Collation, Namespace,
+};
+use crate::{Depth, Timeout};
 use calcard::{
     icalendar::{ICalendar, ICalendarComponentType, ICalendarProperty},
     vcard::{VCard, VCardProperty},
 };
-
-use crate::{Depth, Timeout};
-
-use super::{
-    request::{DavPropertyValue, DeadElementTag, DeadProperty},
-    response::{Ace, AclRestrictions, Href, List, Response, SupportedPrivilege},
-    Collation, Namespace,
+use types::{
+    dead_property::{DeadElementTag, DeadProperty},
+    TimeRange,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,13 +131,6 @@ pub struct CalendarData {
     pub limit_freebusy: Option<TimeRange>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-pub struct TimeRange {
-    pub start: i64,
-    pub end: i64,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub struct CalDavPropertyName {
@@ -174,7 +169,6 @@ pub enum DavValue {
     DeadProperty(DeadProperty),
     SupportedAddressData,
     SupportedCalendarData,
-    SupportedCalendarComponentSet,
     Null,
 }
 

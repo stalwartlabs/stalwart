@@ -11,6 +11,7 @@ use utils::map::bitmap::Bitmap;
 
 pub mod acl;
 pub mod document;
+pub mod notification;
 pub mod resources;
 
 pub trait EffectiveAcl {

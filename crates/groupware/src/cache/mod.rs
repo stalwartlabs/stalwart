@@ -7,7 +7,7 @@
 use crate::{
     cache::calcard::{build_scheduling_resources, path_from_scheduling, resource_from_scheduling},
     calendar::{Calendar, CalendarEvent, CalendarPreferences},
-    contact::{AddressBook, ContactCard},
+    contact::{AddressBook, AddressBookPreferences, ContactCard},
     file::FileNode,
 };
 use ahash::AHashSet;
@@ -77,7 +77,7 @@ impl GroupwareCache for Server {
             SyncCollection::Calendar => &self.inner.cache.events,
             SyncCollection::AddressBook => &self.inner.cache.contacts,
             SyncCollection::FileNode => &self.inner.cache.files,
-            SyncCollection::CalendarScheduling => &self.inner.cache.scheduling,
+            SyncCollection::CalendarEventNotification => &self.inner.cache.scheduling,
             _ => unreachable!(),
         };
         let cache_ = match cache_store.get_value_or_guard_async(&account_id).await {
@@ -178,7 +178,7 @@ impl GroupwareCache for Server {
         }
 
         let num_changes = changes.changes.len();
-        let cache = if !matches!(collection, SyncCollection::CalendarScheduling) {
+        let cache = if !matches!(collection, SyncCollection::CalendarEventNotification) {
             let mut updated_resources = AHashMap::with_capacity(8);
             let has_no_children = collection == SyncCollection::FileNode;
 
@@ -327,17 +327,19 @@ impl GroupwareCache for Server {
                 .await?;
             AddressBook {
                 name: name.clone(),
-                display_name: format!(
-                    "{} ({})",
-                    self.core
-                        .groupware
-                        .default_addressbook_display_name
-                        .as_ref()
-                        .unwrap_or(name),
-                    account_name
-                )
-                .into(),
-                is_default: true,
+                preferences: vec![AddressBookPreferences {
+                    account_id,
+                    name: format!(
+                        "{} ({})",
+                        self.core
+                            .groupware
+                            .default_addressbook_display_name
+                            .as_ref()
+                            .unwrap_or(name),
+                        account_name
+                    ),
+                    ..Default::default()
+                }],
                 ..Default::default()
             }
             .insert(access_token, account_id, document_id, &mut batch)?;
@@ -514,7 +516,7 @@ async fn full_cache_build(
             .await
         }
         SyncCollection::FileNode => build_file_resources(server, account_id, update_lock).await,
-        SyncCollection::CalendarScheduling => {
+        SyncCollection::CalendarEventNotification => {
             build_scheduling_resources(server, account_id, update_lock).await
         }
         _ => unreachable!(),

@@ -18,7 +18,7 @@ use dav_proto::{Depth, RequestHeaders};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
-    contact::{AddressBook, ContactCard},
+    contact::{AddressBook, AddressBookPreferences, ContactCard},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -759,10 +759,16 @@ async fn copy_container(
             .caused_by(trc::location!())?;
     }
 
+    let preference = book.preferences.into_iter().next().unwrap();
     book.name = new_name.to_string();
     book.subscribers.clear();
     book.acls.clear();
-    book.is_default = false;
+    book.preferences = vec![AddressBookPreferences {
+        account_id: to_account_id,
+        name: preference.name,
+        description: preference.description,
+        sort_order: 0,
+    }];
 
     let is_overwrite = to_document_id.is_some();
     let to_document_id = if let Some(to_document_id) = to_document_id {

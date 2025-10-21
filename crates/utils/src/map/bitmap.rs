@@ -69,6 +69,12 @@ impl<T: BitmapItem> Bitmap<T> {
         self.bitmap |= 1 << item.into();
     }
 
+    pub fn insert_many(&mut self, items: impl IntoIterator<Item = T>) {
+        for item in items.into_iter() {
+            self.insert(item);
+        }
+    }
+
     #[inline(always)]
     pub fn with_item(mut self, item: T) -> Self {
         self.insert(item);
@@ -134,6 +140,10 @@ impl<T: BitmapItem> Bitmap<T> {
             bitmap,
             _state: std::marker::PhantomData,
         }
+    }
+
+    pub fn into_inner(self) -> u64 {
+        self.bitmap
     }
 }
 

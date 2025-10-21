@@ -65,15 +65,6 @@ impl ThreadProperty {
     }
 }
 
-impl serde::Serialize for ThreadProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl FromStr for ThreadProperty {
     type Err = ();
 
@@ -101,6 +92,8 @@ impl JmapObject for Thread {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = ThreadProperty::Id;
 }
 
@@ -124,15 +117,31 @@ impl JmapObjectId for ThreadValue {
     fn as_id_ref(&self) -> Option<&str> {
         None
     }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = ThreadValue::Id(id);
+            true
+        } else {
+            false
+        }
+    }
 }
 
-impl TryFrom<AnyId> for ThreadValue {
-    type Error = ();
+impl JmapObjectId for ThreadProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
 
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(ThreadValue::Id(id)),
-            _ => Err(()),
-        }
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
     }
 }

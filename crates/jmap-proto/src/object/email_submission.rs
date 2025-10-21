@@ -10,7 +10,7 @@ use crate::{
         email::{EmailProperty, EmailValue},
         parse_ref,
     },
-    request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
+    request::{MaybeInvalid, deserialize::DeserializeArguments, reference::MaybeIdReference},
     types::date::UTCDate,
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property, Value};
@@ -114,13 +114,14 @@ impl Element for EmailSubmissionValue {
     fn try_parse<P>(key: &Key<'_, Self::Property>, value: &str) -> Option<Self> {
         if let Key::Property(prop) = key {
             match prop.patch_or_prop() {
-                EmailSubmissionProperty::Id | EmailSubmissionProperty::ThreadId => {
-                    match parse_ref(value) {
-                        MaybeReference::Value(v) => Some(EmailSubmissionValue::Id(v)),
-                        MaybeReference::Reference(v) => Some(EmailSubmissionValue::IdReference(v)),
-                        MaybeReference::ParseError => None,
-                    }
-                }
+                EmailSubmissionProperty::Id
+                | EmailSubmissionProperty::ThreadId
+                | EmailSubmissionProperty::IdentityId
+                | EmailSubmissionProperty::EmailId => match parse_ref(value) {
+                    MaybeReference::Value(v) => Some(EmailSubmissionValue::Id(v)),
+                    MaybeReference::Reference(v) => Some(EmailSubmissionValue::IdReference(v)),
+                    MaybeReference::ParseError => None,
+                },
                 EmailSubmissionProperty::MdnBlobIds | EmailSubmissionProperty::DsnBlobIds => {
                     match parse_ref(value) {
                         MaybeReference::Value(v) => Some(EmailSubmissionValue::BlobId(v)),
@@ -283,15 +284,6 @@ impl<'x> DeserializeArguments<'x> for EmailSubmissionSetArguments<'x> {
     }
 }
 
-impl serde::Serialize for EmailSubmissionProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl FromStr for EmailSubmissionProperty {
     type Err = ();
 
@@ -329,14 +321,16 @@ impl JmapObject for EmailSubmission {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = EmailSubmissionProperty::Id;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmailSubmissionFilter {
-    IdentityIds(Vec<Id>),
-    EmailIds(Vec<Id>),
-    ThreadIds(Vec<Id>),
+    IdentityIds(Vec<MaybeInvalid<Id>>),
+    EmailIds(Vec<MaybeInvalid<Id>>),
+    ThreadIds(Vec<MaybeInvalid<Id>>),
     Before(UTCDate),
     After(UTCDate),
     UndoStatus(UndoStatus),
@@ -456,15 +450,34 @@ impl JmapObjectId for EmailSubmissionValue {
             None
         }
     }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        match new_id {
+            AnyId::Id(id) => {
+                *self = EmailSubmissionValue::Id(id);
+            }
+            AnyId::BlobId(blob_id) => {
+                *self = EmailSubmissionValue::BlobId(blob_id);
+            }
+        }
+        true
+    }
 }
 
-impl TryFrom<AnyId> for EmailSubmissionValue {
-    type Error = ();
+impl JmapObjectId for EmailSubmissionProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
 
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(EmailSubmissionValue::Id(id)),
-            AnyId::BlobId(blob_id) => Ok(EmailSubmissionValue::BlobId(blob_id)),
-        }
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
     }
 }

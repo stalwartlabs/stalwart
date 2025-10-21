@@ -31,14 +31,15 @@ pub enum Acl {
     ModifyItems = 5,
     RemoveItems = 6,
     CreateChild = 7,
-    Administer = 8,
+    Share = 8,
     Submit = 9,
     SchedulingReadFreeBusy = 10,
     SchedulingInvite = 11,
     SchedulingReply = 12,
     ModifyItemsOwn = 13,
     ModifyPrivateProperties = 14,
-    None = 15,
+    ModifyRSVP = 15,
+    None = 16,
 }
 
 #[derive(
@@ -69,7 +70,7 @@ impl Acl {
             Acl::ModifyItems => "modifyItems",
             Acl::RemoveItems => "removeItems",
             Acl::CreateChild => "createChild",
-            Acl::Administer => "administer",
+            Acl::Share => "share",
             Acl::Submit => "submit",
             Acl::ModifyItemsOwn => "modifyItemsOwn",
             Acl::ModifyPrivateProperties => "modifyPrivateProperties",
@@ -77,6 +78,7 @@ impl Acl {
             Acl::SchedulingReadFreeBusy => "schedulingReadFreeBusy",
             Acl::SchedulingInvite => "schedulingInvite",
             Acl::SchedulingReply => "schedulingReply",
+            Acl::ModifyRSVP => "modifyRSVP",
         }
     }
 }
@@ -123,13 +125,14 @@ impl From<u64> for Acl {
             5 => Acl::ModifyItems,
             6 => Acl::RemoveItems,
             7 => Acl::CreateChild,
-            8 => Acl::Administer,
+            8 => Acl::Share,
             9 => Acl::Submit,
             10 => Acl::SchedulingReadFreeBusy,
             11 => Acl::SchedulingInvite,
             12 => Acl::SchedulingReply,
             13 => Acl::ModifyItemsOwn,
             14 => Acl::ModifyPrivateProperties,
+            15 => Acl::ModifyRSVP,
             _ => Acl::None,
         }
     }

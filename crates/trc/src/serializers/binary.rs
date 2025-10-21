@@ -893,6 +893,7 @@ impl EventType {
             EventType::Calendar(CalendarEvent::ItipMessageSent) => 583,
             EventType::Calendar(CalendarEvent::ItipMessageReceived) => 584,
             EventType::Calendar(CalendarEvent::ItipMessageError) => 585,
+            EventType::TaskQueue(TaskQueueEvent::TaskIgnored) => 586,
         }
     }
 
@@ -1524,6 +1525,7 @@ impl EventType {
             583 => Some(EventType::Calendar(CalendarEvent::ItipMessageSent)),
             584 => Some(EventType::Calendar(CalendarEvent::ItipMessageReceived)),
             585 => Some(EventType::Calendar(CalendarEvent::ItipMessageError)),
+            586 => Some(EventType::TaskQueue(TaskQueueEvent::TaskIgnored)),
             _ => None,
         }
     }

@@ -289,10 +289,9 @@ BEGIN:VEVENT
 SUMMARY:Phone Conference
 DTEND:19970701T190000Z
 DTSTART:19970701T180000Z
-ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@ex
- ample.com
-ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com":mailto:e@example.c
- om
+ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@examp
+ le.com
+ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com":mailto:e@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777@example.com
 DTSTAMP:0
@@ -316,16 +315,16 @@ STATUS:CONFIRMED
 SUMMARY:Phone Conference
 DTEND:19970701T190000Z
 DTSTART:19970701T180000Z
-ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@ex
- ample.com
+ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@examp
+ le.com
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
 ATTENDEE;ROLE=NON-PARTICIPANT;RSVP=FALSE;CUTYPE=ROOM:mailto:conf@example.com
 ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=Hal;PARTSTAT=NEEDS-ACTION:mailto:d@e
  xample.com
 ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;PARTSTAT=NEEDS-ACTION:mailto:b@example.
  com
-ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=NEEDS-AC
- TION:mailto:e@example.com
+ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=NEEDS-ACTIO
+ N:mailto:e@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777@example.com
 DTSTAMP:0
@@ -428,10 +427,10 @@ BEGIN:VEVENT
 SUMMARY:Phone Conference
 DTEND:19970701T190000Z
 DTSTART:19970701T180000Z
-ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@ex
- ample.com
-ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=ACCEPTED:
- mailto:e@example.com
+ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@examp
+ le.com
+ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=ACCEPTED:mai
+ lto:e@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777@example.com
 DTSTAMP:0
@@ -535,10 +534,10 @@ BEGIN:VEVENT
 SUMMARY:Phone Conference
 DTEND:19970701T190000Z
 DTSTART:19970701T180000Z
-ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@ex
- ample.com
-ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=DECLINED:
- mailto:e@example.com
+ATTENDEE;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example.com":mailto:c@examp
+ le.com
+ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=DECLINED:mai
+ lto:e@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777@example.com
 DTSTAMP:0
@@ -643,14 +642,14 @@ STATUS:CONFIRMED
 SUMMARY:Phone Conference
 DTEND:19970701T190000Z
 DTSTART:19970701T180000Z
-ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@exam
- ple.com":mailto:c@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example
+ .com":mailto:c@example.com
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
 ATTENDEE;ROLE=NON-PARTICIPANT;RSVP=FALSE;CUTYPE=ROOM:mailto:conf@example.com
 ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=Hal;PARTSTAT=NEEDS-ACTION:mailto:d@e
  xample.com
-ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=DECLINED:
- mailto:e@example.com
+ATTENDEE;RSVP=TRUE;DELEGATED-FROM="mailto:c@example.com";PARTSTAT=DECLINED:mai
+ lto:e@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777@example.com
 DTSTAMP:0
@@ -719,8 +718,8 @@ STATUS:CANCELLED
 SUMMARY:Phone Conference
 DTEND:19970701T190000Z
 DTSTART:19970701T180000Z
-ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@exam
- ple.com";SCHEDULE-STATUS=2.0:mailto:c@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=DELEGATED;DELEGATED-TO="mailto:e@example
+ .com";SCHEDULE-STATUS=2.0:mailto:c@example.com
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
 ATTENDEE;ROLE=NON-PARTICIPANT;RSVP=FALSE;CUTYPE=ROOM:mailto:conf@example.com
 ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=Hal:mailto:d@example.com

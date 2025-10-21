@@ -10,8 +10,8 @@ use crate::scheduling::{
 };
 use ahash::AHashMap;
 use calcard::icalendar::{
-    ICalendar, ICalendarParameter, ICalendarProperty, ICalendarScheduleAgentValue, ICalendarValue,
-    Uri,
+    ICalendar, ICalendarParameterName, ICalendarParameterValue, ICalendarProperty,
+    ICalendarScheduleAgentValue, ICalendarValue, Uri,
 };
 
 pub fn itip_snapshot<'x, 'y>(
@@ -78,15 +78,26 @@ pub fn itip_snapshot<'x, 'y>(
                             has_local_emails |= part.email.is_local;
 
                             for param in &entry.params {
-                                match param {
-                                    ICalendarParameter::ScheduleAgent(agent) => {
-                                        part.is_server_scheduling =
-                                            agent == &ICalendarScheduleAgentValue::Server;
+                                match (&param.name, &param.value) {
+                                    (
+                                        ICalendarParameterName::ScheduleAgent,
+                                        ICalendarParameterValue::ScheduleAgent(
+                                            ICalendarScheduleAgentValue::Client
+                                            | ICalendarScheduleAgentValue::None,
+                                        ),
+                                    ) => {
+                                        part.is_server_scheduling = false;
                                     }
-                                    ICalendarParameter::ScheduleForceSend(force_send) => {
+                                    (
+                                        ICalendarParameterName::ScheduleForceSend,
+                                        ICalendarParameterValue::ScheduleForceSend(force_send),
+                                    ) => {
                                         part.force_send = Some(force_send);
                                     }
-                                    ICalendarParameter::Cn(name) => {
+                                    (
+                                        ICalendarParameterName::Cn,
+                                        ICalendarParameterValue::Text(name),
+                                    ) => {
                                         part.name = Some(name.as_str());
                                     }
                                     _ => {}
@@ -133,42 +144,70 @@ pub fn itip_snapshot<'x, 'y>(
                             };
 
                             for param in &entry.params {
-                                match param {
-                                    ICalendarParameter::ScheduleAgent(agent) => {
+                                match (&param.name, &param.value) {
+                                    (
+                                        ICalendarParameterName::ScheduleAgent,
+                                        ICalendarParameterValue::ScheduleAgent(agent),
+                                    ) => {
                                         part.is_server_scheduling =
                                             agent == &ICalendarScheduleAgentValue::Server;
                                     }
-                                    ICalendarParameter::Rsvp(rsvp) => {
+                                    (
+                                        ICalendarParameterName::Rsvp,
+                                        ICalendarParameterValue::Bool(rsvp),
+                                    ) => {
                                         part.rsvp = Some(*rsvp);
                                     }
-                                    ICalendarParameter::ScheduleForceSend(force_send) => {
+                                    (
+                                        ICalendarParameterName::ScheduleForceSend,
+                                        ICalendarParameterValue::ScheduleForceSend(force_send),
+                                    ) => {
                                         part.force_send = Some(force_send);
                                     }
-                                    ICalendarParameter::Partstat(value) => {
+                                    (
+                                        ICalendarParameterName::Partstat,
+                                        ICalendarParameterValue::Partstat(value),
+                                    ) => {
                                         part.part_stat = Some(value);
                                     }
-                                    ICalendarParameter::Cutype(value) => {
+                                    (
+                                        ICalendarParameterName::Cutype,
+                                        ICalendarParameterValue::Cutype(value),
+                                    ) => {
                                         part.cu_type = Some(value);
                                     }
-                                    ICalendarParameter::DelegatedFrom(value) => {
-                                        part.delegated_from = value
-                                            .iter()
-                                            .filter_map(|uri| Email::from_uri(uri, account_emails))
-                                            .collect();
+                                    (
+                                        ICalendarParameterName::DelegatedFrom,
+                                        ICalendarParameterValue::Uri(uri),
+                                    ) => {
+                                        if let Some(uri) = Email::from_uri(uri, account_emails) {
+                                            part.delegated_from.push(uri);
+                                        }
                                     }
-                                    ICalendarParameter::DelegatedTo(value) => {
-                                        part.delegated_to = value
-                                            .iter()
-                                            .filter_map(|uri| Email::from_uri(uri, account_emails))
-                                            .collect();
+                                    (
+                                        ICalendarParameterName::DelegatedTo,
+                                        ICalendarParameterValue::Uri(uri),
+                                    ) => {
+                                        if let Some(uri) = Email::from_uri(uri, account_emails) {
+                                            part.delegated_to.push(uri);
+                                        }
                                     }
-                                    ICalendarParameter::Role(value) => {
+                                    (
+                                        ICalendarParameterName::Role,
+                                        ICalendarParameterValue::Role(value),
+                                    ) => {
                                         part.role = Some(value);
                                     }
-                                    ICalendarParameter::SentBy(value) => {
+                                    (
+                                        ICalendarParameterName::SentBy,
+                                        ICalendarParameterValue::Uri(value),
+                                    ) => {
                                         part.sent_by = Email::from_uri(value, account_emails);
                                     }
-                                    ICalendarParameter::Cn(name) => {
+                                    (
+                                        ICalendarParameterName::Cn,
+                                        ICalendarParameterValue::Text(name),
+                                    ) => {
                                         part.name = Some(name.as_str());
                                     }
                                     _ => {}
@@ -213,11 +252,14 @@ pub fn itip_snapshot<'x, 'y>(
                             let mut tz_id = None;
 
                             for param in &entry.params {
-                                match param {
-                                    ICalendarParameter::Tzid(id) => {
+                                match (&param.name, &param.value) {
+                                    (
+                                        ICalendarParameterName::Tzid,
+                                        ICalendarParameterValue::Text(id),
+                                    ) => {
                                         tz_id = Some(id.as_str());
                                     }
-                                    ICalendarParameter::Range => {
+                                    (ICalendarParameterName::Range, _) => {
                                         this_and_future = true;
                                     }
                                     _ => (),
@@ -230,7 +272,7 @@ pub fn itip_snapshot<'x, 'y>(
                                     .to_date_time_with_tz(
                                         tz_resolver
                                             .get_or_insert_with(|| ical.build_tz_resolver())
-                                            .resolve(tz_id),
+                                            .resolve_or_default(tz_id),
                                     )
                                     .map(|dt| dt.timestamp())
                                     .unwrap_or_else(|| date.to_timestamp().unwrap_or_default()),
@@ -270,7 +312,7 @@ pub fn itip_snapshot<'x, 'y>(
                                 ICalendarValue::PartialDateTime(date) => {
                                     let tz = tz_resolver
                                         .get_or_insert_with(|| ical.build_tz_resolver())
-                                        .resolve(tz_id);
+                                        .resolve_or_default(tz_id);
                                     ItipEntryValue::DateTime(ItipDateTime {
                                         date: date.as_ref(),
                                         tz_id,

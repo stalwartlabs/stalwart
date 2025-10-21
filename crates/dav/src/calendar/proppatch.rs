@@ -25,7 +25,7 @@ use dav_proto::{
 };
 use groupware::{
     cache::GroupwareCache,
-    calendar::{Calendar, CalendarEvent, Timezone},
+    calendar::{Calendar, CalendarEvent, SupportedComponent, Timezone},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -36,6 +36,7 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
+use utils::map::bitmap::Bitmap;
 
 pub(crate) trait CalendarPropPatchRequestHandler: Sync + Send {
     fn handle_calendar_proppatch_request(
@@ -47,7 +48,7 @@ pub(crate) trait CalendarPropPatchRequestHandler: Sync + Send {
 
     fn apply_calendar_properties(
         &self,
-        account_id: u32,
+        access_token: &AccessToken,
         calendar: &mut Calendar,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
@@ -149,7 +150,7 @@ impl CalendarPropPatchRequestHandler for Server {
             // Remove properties
             if !request.set_first && !request.remove.is_empty() {
                 remove_calendar_properties(
-                    account_id,
+                    access_token,
                     &mut new_calendar,
                     std::mem::take(&mut request.remove),
                     &mut items,
@@ -158,7 +159,7 @@ impl CalendarPropPatchRequestHandler for Server {
 
             // Set properties
             is_success = self.apply_calendar_properties(
-                account_id,
+                access_token,
                 &mut new_calendar,
                 true,
                 request.set,
@@ -168,7 +169,7 @@ impl CalendarPropPatchRequestHandler for Server {
             // Remove properties
             if is_success && !request.remove.is_empty() {
                 remove_calendar_properties(
-                    account_id,
+                    access_token,
                     &mut new_calendar,
                     request.remove,
                     &mut items,
@@ -238,7 +239,7 @@ impl CalendarPropPatchRequestHandler for Server {
 
     fn apply_calendar_properties(
         &self,
-        account_id: u32,
+        access_token: &AccessToken,
         calendar: &mut Calendar,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
@@ -250,7 +251,7 @@ impl CalendarPropPatchRequestHandler for Server {
             match (&property.property, property.value) {
                 (DavProperty::WebDav(WebDavProperty::DisplayName), DavValue::String(name)) => {
                     if name.len() <= self.core.groupware.live_property_size {
-                        calendar.preferences_mut(account_id).name = name;
+                        calendar.preferences_mut(access_token).name = name;
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -266,7 +267,7 @@ impl CalendarPropPatchRequestHandler for Server {
                     DavValue::String(name),
                 ) => {
                     if name.len() <= self.core.groupware.live_property_size {
-                        calendar.preferences_mut(account_id).description = Some(name);
+                        calendar.preferences_mut(access_token).description = Some(name);
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -298,13 +299,14 @@ impl CalendarPropPatchRequestHandler for Server {
                         );
                         has_errors = true;
                     } else {
-                        calendar.preferences_mut(account_id).time_zone = Timezone::Custom(ical);
+                        calendar.preferences_mut(access_token).time_zone = Timezone::Custom(ical);
                         items.insert_ok(property.property);
                     }
                 }
                 (DavProperty::CalDav(CalDavProperty::TimezoneId), DavValue::String(tz_id)) => {
                     if let Ok(tz) = Tz::from_str(&tz_id) {
-                        calendar.preferences_mut(account_id).time_zone = Timezone::IANA(tz.as_id());
+                        calendar.preferences_mut(access_token).time_zone =
+                            Timezone::IANA(tz.as_id());
                         items.insert_ok(property.property);
                     } else {
                         items.insert_precondition_failed_with_description(
@@ -339,6 +341,39 @@ impl CalendarPropPatchRequestHandler for Server {
                         items.insert_ok(property.property);
                     }
                 }
+                (
+                    DavProperty::CalDav(CalDavProperty::SupportedCalendarComponentSet),
+                    DavValue::Components(components),
+                ) => {
+                    if !is_update {
+                        calendar.supported_components = Bitmap::<SupportedComponent>::from_iter(
+                            components
+                                .0
+                                .into_iter()
+                                .map(|v| SupportedComponent::from(v.0)),
+                        )
+                        .into_inner();
+                        if calendar.supported_components != 0 {
+                            items.insert_ok(property.property);
+                        } else {
+                            items.insert_precondition_failed_with_description(
+                                property.property,
+                                StatusCode::PRECONDITION_FAILED,
+                                CalCondition::SupportedCalendarComponent,
+                                "At least one supported component must be specified",
+                            );
+                            has_errors = true;
+                        }
+                    } else {
+                        items.insert_precondition_failed_with_description(
+                            property.property,
+                            StatusCode::PRECONDITION_FAILED,
+                            CalCondition::SupportedCalendarComponent,
+                            "Property cannot be modified",
+                        );
+                        has_errors = true;
+                    }
+                }
                 (DavProperty::DeadProperty(dead), DavValue::DeadProperty(values))
                     if self.core.groupware.dead_property_size.is_some() =>
                 {
@@ -361,7 +396,7 @@ impl CalendarPropPatchRequestHandler for Server {
                         has_errors = true;
                     }
                 }
-                (_, DavValue::Null | DavValue::Components(_)) => {
+                (_, DavValue::Null) => {
                     items.insert_ok(property.property);
                 }
                 _ => {
@@ -472,7 +507,7 @@ fn remove_event_properties(
 }
 
 fn remove_calendar_properties(
-    account_id: u32,
+    access_token: &AccessToken,
     calendar: &mut Calendar,
     properties: Vec<DavProperty>,
     items: &mut PropStatBuilder,
@@ -480,12 +515,12 @@ fn remove_calendar_properties(
     for property in properties {
         match &property {
             DavProperty::CalDav(CalDavProperty::CalendarDescription) => {
-                calendar.preferences_mut(account_id).description = None;
+                calendar.preferences_mut(access_token).description = None;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             DavProperty::CalDav(CalDavProperty::CalendarTimezone)
             | DavProperty::CalDav(CalDavProperty::TimezoneId) => {
-                calendar.preferences_mut(account_id).time_zone = Timezone::Default;
+                calendar.preferences_mut(access_token).time_zone = Timezone::Default;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             DavProperty::DeadProperty(dead) => {

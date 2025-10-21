@@ -78,9 +78,10 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
         let mut queue = Queue::default();
         {
             let server = inner.build_server();
+            let roles = &server.core.network.roles;
 
             // Account purge
-            if server.core.network.roles.purge_accounts {
+            if roles.purge_accounts.is_enabled_or_sharded() {
                 queue.schedule(
                     Instant::now() + server.core.jmap.account_purge_frequency.time_to_next(),
                     ActionClass::Account,
@@ -88,7 +89,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
             }
 
             // Store purges
-            if server.core.network.roles.purge_stores {
+            if roles.purge_stores.is_enabled_or_sharded() {
                 for (idx, schedule) in server.core.storage.purge_schedules.iter().enumerate() {
                     queue.schedule(
                         Instant::now() + schedule.cron.time_to_next(),
@@ -98,7 +99,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
             }
 
             // OTEL Push Metrics
-            if server.core.network.roles.push_metrics
+            if roles.push_metrics.is_enabled_or_sharded()
                 && let Some(otel) = &server.core.metrics.otel
             {
                 OtelMetrics::enable_errors();
@@ -109,8 +110,8 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
             queue.schedule(Instant::now(), ActionClass::CalculateMetrics);
 
             // Add all ACME renewals to heap
-            if server.core.network.roles.renew_acme {
-                for provider in server.core.acme.providers.values() {
+            for provider in server.core.acme.providers.values() {
+                if roles.renew_acme.is_enabled_for_hash(&provider.id) {
                     match server.init_acme(provider).await {
                         Ok(renew_at) => {
                             queue.schedule(
@@ -343,7 +344,15 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                     ActionClass::Account,
                                 );
                                 tokio::spawn(async move {
-                                    server.purge(PurgeType::Account(None), 0).await;
+                                    server
+                                        .purge(
+                                            PurgeType::Account {
+                                                account_id: None,
+                                                use_roles: true,
+                                            },
+                                            0,
+                                        )
+                                        .await;
                                 });
                             }
                             ActionClass::Store(idx) => {
@@ -436,7 +445,13 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
 
                                 let server = server.clone();
                                 tokio::spawn(async move {
-                                    if server.core.network.roles.calculate_metrics {
+                                    if server
+                                        .core
+                                        .network
+                                        .roles
+                                        .calculate_metrics
+                                        .is_enabled_or_sharded()
+                                    {
                                         // SPDX-SnippetBegin
                                         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                                         // SPDX-License-Identifier: LicenseRef-SEL
@@ -665,7 +680,7 @@ impl Purge for Server {
                     .into(),
             ),
             PurgeType::Lookup { .. } => ("in-memory-prefix", None),
-            PurgeType::Account(_) => ("account", None),
+            PurgeType::Account { .. } => ("account", None),
         };
         if let Some(lock_name) = &lock_name {
             match self
@@ -750,11 +765,14 @@ impl Purge for Server {
                     trc::error!(err.details("Failed to purge in-memory store"));
                 }
             }
-            PurgeType::Account(account_id) => {
+            PurgeType::Account {
+                account_id,
+                use_roles,
+            } => {
                 if let Some(account_id) = account_id {
                     self.purge_account(account_id).await;
                 } else {
-                    self.purge_accounts().await;
+                    self.purge_accounts(use_roles).await;
                 }
             }
         }

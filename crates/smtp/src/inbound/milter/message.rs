@@ -4,26 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, time::Instant};
-
+use super::{Action, Error, Macros, Modification};
+use crate::{
+    core::{Session, SessionAddress, SessionData},
+    inbound::{FilterResponse, milter::MilterClient},
+};
 use common::{
     DAEMON_NAME,
     config::smtp::session::{Milter, Stage},
     listener::SessionStream,
 };
-
 use mail_auth::AuthenticatedMessage;
 use smtp_proto::{IntoString, request::parser::Rfc5321Parser};
+use std::{borrow::Cow, time::Instant};
 use tokio::io::{AsyncRead, AsyncWrite};
 use trc::MilterEvent;
-
-use crate::{
-    core::{Session, SessionAddress, SessionData},
-    inbound::{FilterResponse, milter::MilterClient},
-    queue::DomainPart,
-};
-
-use super::{Action, Error, Macros, Modification};
+use utils::DomainPart;
 
 enum Rejection {
     Action(Action),

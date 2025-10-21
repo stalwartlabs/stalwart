@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{JmapMethods, changes::state::MessageCacheState};
+use crate::{JmapMethods, changes::state::JmapCacheState};
 use common::{MessageStoreCache, Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use jmap_proto::{
@@ -325,7 +325,11 @@ impl EmailQuery for Server {
             result_set.apply_mask(cached_messages.shared_messages(access_token, Acl::ReadItems));
         }
         let (response, paginate) = self
-            .build_query_response(&result_set, cached_messages.get_state(false), &request)
+            .build_query_response(
+                result_set.results.len() as usize,
+                cached_messages.get_state(false),
+                &request,
+            )
             .await?;
 
         if let Some(paginate) = paginate {
@@ -333,7 +337,7 @@ impl EmailQuery for Server {
             let mut comparators = Vec::with_capacity(request.sort.as_ref().map_or(1, |s| s.len()));
             for comparator in request
                 .sort
-                .and_then(|s| if !s.is_empty() { s.into() } else { None })
+                .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| vec![Comparator::descending(EmailComparator::ReceivedAt)])
             {
                 comparators.push(match comparator.property {

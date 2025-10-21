@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::task_manager::Task;
 use calcard::{
     common::timezone::Tz,
     icalendar::{
-        ArchivedICalendarDay, ArchivedICalendarFrequency, ArchivedICalendarParticipationStatus,
-        ArchivedICalendarRecurrenceRule, ArchivedICalendarWeekday, ICalendarParticipationStatus,
-        ICalendarProperty,
+        ArchivedICalendarDay, ArchivedICalendarFrequency, ArchivedICalendarMonth,
+        ArchivedICalendarParticipationStatus, ArchivedICalendarRecurrenceRule,
+        ArchivedICalendarWeekday, ICalendarParticipationStatus, ICalendarProperty,
     },
 };
 use chrono::{DateTime, Locale};
@@ -46,19 +45,27 @@ use utils::template::{Variable, Variables};
 pub trait SendImipTask: Sync + Send {
     fn send_imip(
         &self,
-        task: &Task,
+        account_id: u32,
+        document_id: u32,
+        due: u64,
         server_instance: Arc<ServerInstance>,
     ) -> impl Future<Output = bool> + Send;
 }
 
 impl SendImipTask for Server {
-    async fn send_imip(&self, task: &Task, server_instance: Arc<ServerInstance>) -> bool {
-        match send_imip(self, task, server_instance).await {
+    async fn send_imip(
+        &self,
+        account_id: u32,
+        document_id: u32,
+        due: u64,
+        server_instance: Arc<ServerInstance>,
+    ) -> bool {
+        match send_imip(self, account_id, document_id, due, server_instance).await {
             Ok(result) => result,
             Err(err) => {
                 trc::error!(
-                    err.account_id(task.account_id)
-                        .document_id(task.document_id)
+                    err.account_id(account_id)
+                        .document_id(document_id)
                         .caused_by(trc::location!())
                         .details("Failed to process alarm")
                 );
@@ -70,12 +77,14 @@ impl SendImipTask for Server {
 
 async fn send_imip(
     server: &Server,
-    task: &Task,
+    account_id: u32,
+    document_id: u32,
+    due: u64,
     server_instance: Arc<ServerInstance>,
 ) -> trc::Result<bool> {
     // Obtain access token
     let access_token = server
-        .get_access_token(task.account_id)
+        .get_access_token(account_id)
         .await
         .caused_by(trc::location!())?;
 
@@ -83,11 +92,11 @@ async fn send_imip(
     let Some(archive) = server
         .store()
         .get_value::<Archive<AlignedBytes>>(ValueKey {
-            account_id: task.account_id,
+            account_id,
             collection: 0,
-            document_id: task.document_id,
+            document_id,
             class: ValueClass::TaskQueue(TaskQueueClass::SendImip {
-                due: task.due,
+                due,
                 is_payload: true,
             }),
         })
@@ -96,8 +105,8 @@ async fn send_imip(
     else {
         trc::event!(
             Calendar(trc::CalendarEvent::ItipMessageError),
-            AccountId = task.account_id,
-            DocumentId = task.document_id,
+            AccountId = account_id,
+            DocumentId = document_id,
             Reason = "Missing iMIP payload",
         );
         return Ok(true);
@@ -146,7 +155,8 @@ async fn send_imip(
             let tpl = build_itip_template(
                 server,
                 &access_token,
-                task,
+                account_id,
+                document_id,
                 itip_message.from.as_str(),
                 recipient.as_str(),
                 &itip_message.summary,
@@ -211,8 +221,6 @@ async fn send_imip(
             let access_token = access_token.clone();
             let from = itip_message.from.to_string();
             let to = recipient.to_string();
-            let account_id = task.account_id;
-            let document_id = task.document_id;
             tokio::spawn(async move {
                 let mut session = Session::<NullIo>::local(
                     server_,
@@ -301,10 +309,12 @@ pub struct Details {
     pub body: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn build_itip_template(
     server: &Server,
     access_token: &AccessToken,
-    task: &Task,
+    account_id: u32,
+    document_id: u32,
     from: &str,
     to: &str,
     summary: &ArchivedItipSummary,
@@ -513,9 +523,7 @@ pub async fn build_itip_template(
     if matches!(
         summary,
         ArchivedItipSummary::Invite(_) | ArchivedItipSummary::Update { .. }
-    ) && let Some(rsvp_url) = server
-        .http_rsvp_url(task.account_id, task.document_id, to)
-        .await
+    ) && let Some(rsvp_url) = server.http_rsvp_url(account_id, document_id, to).await
     {
         variables.insert_single(
             CalendarTemplateVariable::Rsvp,
@@ -587,7 +595,7 @@ fn format_field(value: &ArchivedItipValue, template: &str, chrono_locale: Locale
                         .naive_local()
                 )
                 .format_localized(template, chrono_locale),
-                tz.name()
+                tz.name().unwrap_or_default()
             )
         }
         ArchivedItipValue::Rrule(rrule) => RecurrenceFormatter.format(rrule),
@@ -758,8 +766,11 @@ impl RecurrenceFormatter {
         format!("on the {}", self.format_list(&day_strings))
     }
 
-    fn format_months(&self, months: &[u8]) -> String {
-        let month_names: Vec<String> = months.iter().map(|&month| self.month_name(month)).collect();
+    fn format_months(&self, months: &[ArchivedICalendarMonth]) -> String {
+        let month_names: Vec<String> = months
+            .iter()
+            .map(|month| self.month_name(month.month()))
+            .collect();
 
         format!("in {}", self.format_list(&month_names))
     }

@@ -119,7 +119,7 @@ impl ClientRegistrationHandler for Server {
             .filter(|p| p.typ() == Type::OauthClient)
         {
             if let Some(redirect_uri) = redirect_uri {
-                if client.urls().iter().any(|uri| uri == redirect_uri) {
+                if client.urls().any(|uri| uri == redirect_uri) {
                     return Ok(None);
                 }
             } else {

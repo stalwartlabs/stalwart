@@ -132,7 +132,7 @@ async fn oidc_directory() {
             .unwrap();
         assert_eq!(principal.name(), "jdoe");
         assert_eq!(
-            principal.emails.first().map(|s| s.as_str()),
+            principal.email_addresses().next().map(|s| s.as_str()),
             Some("john@example.org")
         );
         assert_eq!(principal.description(), Some("John Doe"));

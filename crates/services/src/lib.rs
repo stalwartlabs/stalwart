@@ -10,7 +10,7 @@ use common::{
     manager::boot::{BootManager, IpcReceivers},
 };
 use housekeeper::spawn_housekeeper;
-use state_manager::manager::spawn_state_manager;
+use state_manager::manager::spawn_push_router;
 use std::sync::Arc;
 use task_manager::spawn_task_manager;
 
@@ -50,8 +50,8 @@ impl StartServices for BootManager {
 
 impl SpawnServices for IpcReceivers {
     fn spawn_services(&mut self, inner: Arc<Inner>) {
-        // Spawn state manager
-        spawn_state_manager(inner.clone(), self.state_rx.take().unwrap());
+        // Spawn push manager
+        spawn_push_router(inner.clone(), self.push_rx.take().unwrap());
 
         // Spawn housekeeper
         spawn_housekeeper(inner.clone(), self.housekeeper_rx.take().unwrap());

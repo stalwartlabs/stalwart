@@ -9,7 +9,7 @@ use crate::{
     core::{ImapUidToId, MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::listener::SessionStream;
+use common::{ipc::PushNotification, listener::SessionStream};
 use directory::Permission;
 use email::message::ingest::{EmailIngest, IngestEmail, IngestSource};
 use imap_proto::{
@@ -144,12 +144,13 @@ impl<T: SessionStream> SessionData<T> {
         // Broadcast changes
         if let Some(change_id) = last_change_id {
             self.server
-                .broadcast_state_change(
-                    StateChange::new(account_id, change_id)
+                .broadcast_push_notification(PushNotification::StateChange(
+                    StateChange::new(account_id)
+                        .with_change_id(change_id)
                         .with_change(DataType::Email)
                         .with_change(DataType::Mailbox)
                         .with_change(DataType::Thread),
-                )
+                ))
                 .await;
         }
 

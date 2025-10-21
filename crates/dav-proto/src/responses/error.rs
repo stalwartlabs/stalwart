@@ -137,6 +137,9 @@ impl Display for CalCondition {
             }
             CalCondition::ValidSchedulingMessage => write!(f, "<A:valid-scheduling-message/>"),
             CalCondition::ValidOrganizer => write!(f, "<A:valid-organizer/>"),
+            CalCondition::SupportedCalendarComponent => {
+                write!(f, "<A:supported-calendar-component/>")
+            }
         }
     }
 }

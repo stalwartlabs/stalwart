@@ -9,98 +9,55 @@ pub mod http;
 pub mod manager;
 pub mod push;
 
-use common::ipc::EncryptionKeys;
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
-use types::{
-    id::Id,
-    type_state::{DataType, StateChange},
+use common::ipc::PushNotification;
+use email::push::PushSubscription;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
+use types::{id::Id, type_state::DataType};
 use utils::map::bitmap::Bitmap;
 
+const PURGE_EVERY: Duration = Duration::from_secs(3600);
+const SEND_TIMEOUT: Duration = Duration::from_millis(500);
+
 #[derive(Debug)]
-struct Subscriber {
+struct IpcSubscriber {
     types: Bitmap<DataType>,
-    subscription: SubscriberType,
+    tx: mpsc::Sender<PushNotification>,
 }
 
 #[derive(Debug)]
-pub enum SubscriberType {
-    Ipc { tx: mpsc::Sender<StateChange> },
-    Push { expires: u64 },
-}
-
-#[derive(Debug)]
-pub struct PushServer {
-    url: String,
-    keys: Option<EncryptionKeys>,
+pub struct PushRegistration {
+    server: Arc<PushSubscription>,
+    member_account_ids: Vec<u32>,
     num_attempts: u32,
     last_request: Instant,
-    state_changes: Vec<StateChange>,
+    notifications: Vec<PushNotification>,
     in_flight: bool,
 }
 
 #[derive(Debug)]
 pub enum Event {
-    Update {
-        updates: Vec<PushUpdate>,
-    },
     Push {
-        ids: Vec<Id>,
-        state_change: StateChange,
+        notification: PushNotification,
+    },
+    Update {
+        account_id: u32,
     },
     DeliverySuccess {
         id: Id,
     },
     DeliveryFailure {
         id: Id,
-        state_changes: Vec<StateChange>,
+        notifications: Vec<PushNotification>,
     },
     Reset,
 }
 
-#[derive(Debug)]
-pub enum PushUpdate {
-    Verify {
-        id: u32,
-        account_id: u32,
-        url: String,
-        code: String,
-        keys: Option<EncryptionKeys>,
-    },
-    Register {
-        id: Id,
-        url: String,
-        keys: Option<EncryptionKeys>,
-    },
-    Unregister {
-        id: Id,
-    },
-}
-
-impl Subscriber {
-    fn is_valid(&self, current_time: u64) -> bool {
-        match &self.subscription {
-            SubscriberType::Ipc { tx } => !tx.is_closed(),
-            SubscriberType::Push { expires } => expires > &current_time,
-        }
-    }
-}
-
-const PURGE_EVERY: Duration = Duration::from_secs(3600);
-const SEND_TIMEOUT: Duration = Duration::from_millis(500);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum SubscriberId {
-    Ipc(u32),
-    Push(u32),
-}
-
-impl From<SubscriberId> for u32 {
-    fn from(subscriber_id: SubscriberId) -> u32 {
-        match subscriber_id {
-            SubscriberId::Ipc(id) => id,
-            SubscriberId::Push(id) => id,
-        }
+impl IpcSubscriber {
+    fn is_valid(&self) -> bool {
+        !self.tx.is_closed()
     }
 }

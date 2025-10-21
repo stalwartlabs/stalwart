@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::object::{AnyId, JmapObject, JmapObjectId};
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::id::Id;
-
-use crate::object::{AnyId, JmapObject, JmapObjectId};
 
 #[derive(Debug, Clone, Default)]
 pub struct Identity;
@@ -107,15 +106,6 @@ impl IdentityProperty {
     }
 }
 
-impl serde::Serialize for IdentityProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_cow().as_ref())
-    }
-}
-
 impl FromStr for IdentityProperty {
     type Err = ();
 
@@ -143,6 +133,8 @@ impl JmapObject for Identity {
 
     type CopyArguments = ();
 
+    type ParseArguments = ();
+
     const ID_PROPERTY: Self::Property = IdentityProperty::Id;
 }
 
@@ -168,15 +160,31 @@ impl JmapObjectId for IdentityValue {
     fn as_id_ref(&self) -> Option<&str> {
         None
     }
+
+    fn try_set_id(&mut self, new_id: AnyId) -> bool {
+        if let AnyId::Id(id) = new_id {
+            *self = IdentityValue::Id(id);
+            true
+        } else {
+            false
+        }
+    }
 }
 
-impl TryFrom<AnyId> for IdentityValue {
-    type Error = ();
+impl JmapObjectId for IdentityProperty {
+    fn as_id(&self) -> Option<Id> {
+        None
+    }
 
-    fn try_from(value: AnyId) -> Result<Self, Self::Error> {
-        match value {
-            AnyId::Id(id) => Ok(IdentityValue::Id(id)),
-            _ => Err(()),
-        }
+    fn as_any_id(&self) -> Option<AnyId> {
+        None
+    }
+
+    fn as_id_ref(&self) -> Option<&str> {
+        None
+    }
+
+    fn try_set_id(&mut self, _: AnyId) -> bool {
+        false
     }
 }

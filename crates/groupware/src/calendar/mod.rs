@@ -11,10 +11,12 @@ pub mod index;
 pub mod itip;
 pub mod storage;
 
-use calcard::icalendar::ICalendar;
-use common::DavName;
-use dav_proto::schema::request::DeadProperty;
-use types::acl::{Acl, AclGrant};
+use calcard::icalendar::{
+    ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarDuration, ICalendarEntry,
+};
+use common::{DavName, auth::AccessToken};
+use types::{acl::AclGrant, dead_property::DeadProperty};
+use utils::map::bitmap::BitmapItem;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -22,18 +24,38 @@ use types::acl::{Acl, AclGrant};
 pub struct Calendar {
     pub name: String,
     pub preferences: Vec<CalendarPreferences>,
-    pub default_alerts: Vec<DefaultAlert>,
     pub acls: Vec<AclGrant>,
+    pub supported_components: u64,
     pub dead_properties: DeadProperty,
     pub created: i64,
     pub modified: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupportedComponent {
+    VCalendar,     // [RFC5545, Section 3.4]
+    VEvent,        // [RFC5545, Section 3.6.1]
+    VTodo,         // [RFC5545, Section 3.6.2]
+    VJournal,      // [RFC5545, Section 3.6.3]
+    VFreebusy,     // [RFC5545, Section 3.6.4]
+    VTimezone,     // [RFC5545, Section 3.6.5]
+    VAlarm,        // [RFC5545, Section 3.6.6]
+    Standard,      // [RFC5545, Section 3.6.5]
+    Daylight,      // [RFC5545, Section 3.6.5]
+    VAvailability, // [RFC7953, Section 3.1]
+    Available,     // [RFC7953, Section 3.1]
+    Participant,   // [RFC9073, Section 7.1]
+    VLocation,     // [RFC9073, Section 7.2] [RFC Errata 7381]
+    VResource,     // [RFC9073, Section 7.3]
+    VStatus,       // draft-ietf-calext-ical-tasks-14
+    Other,
+}
+
 pub const CALENDAR_SUBSCRIBED: u16 = 1;
-pub const CALENDAR_DEFAULT: u16 = 1 << 1;
-pub const CALENDAR_VISIBLE: u16 = 1 << 2;
-pub const CALENDAR_AVAILABILITY_ALL: u16 = 1 << 3;
-pub const CALENDAR_AVAILABILITY_ATTENDING: u16 = 1 << 4;
+pub const CALENDAR_INVISIBLE: u16 = 1 << 1;
+pub const CALENDAR_AVAILABILITY_NONE: u16 = 1 << 2;
+pub const CALENDAR_AVAILABILITY_ATTENDING: u16 = 1 << 3;
+pub const CALENDAR_AVAILABILITY_ALL: u16 = 1 << 4;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -46,17 +68,39 @@ pub struct CalendarPreferences {
     pub color: Option<String>,
     pub flags: u16,
     pub time_zone: Timezone,
+    pub default_alerts: Vec<DefaultAlert>,
 }
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
 pub struct DefaultAlert {
-    pub account_id: u32,
     pub id: String,
-    pub alert: ICalendar,
-    pub with_time: bool,
+    pub offset: ICalendarDuration,
+    pub flags: u16,
 }
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+pub struct ParticipantIdentities {
+    pub identities: Vec<ParticipantIdentity>,
+    pub default_name: String,
+    pub default: u32,
+}
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+pub struct ParticipantIdentity {
+    pub id: u32,
+    pub name: Option<String>,
+    pub calendar_address: String,
+}
+
+pub const ALERT_WITH_TIME: u16 = 1;
+pub const ALERT_EMAIL: u16 = 1 << 1;
+pub const ALERT_RELATIVE_TO_END: u16 = 1 << 2;
 
 pub const SCHEDULE_INBOX_ID: u32 = u32::MAX - 1;
 pub const SCHEDULE_OUTBOX_ID: u32 = u32::MAX - 2;
@@ -65,7 +109,11 @@ pub const EVENT_INVITE_SELF: u16 = 1;
 pub const EVENT_INVITE_OTHERS: u16 = 1 << 1;
 pub const EVENT_HIDE_ATTENDEES: u16 = 1 << 2;
 pub const EVENT_DRAFT: u16 = 1 << 3;
-pub const EVENT_ORIGIN: u16 = 1 << 4;
+
+pub const EVENT_NOTIFICATION_IS_DRAFT: u16 = 1;
+pub const EVENT_NOTIFICATION_IS_CHANGE: u16 = 1 << 1;
+
+pub const PREF_USE_DEFAULT_ALERTS: u16 = 1;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -74,7 +122,7 @@ pub struct CalendarEvent {
     pub names: Vec<DavName>,
     pub display_name: Option<String>,
     pub data: CalendarEventData,
-    pub user_properties: Vec<UserProperties>,
+    pub preferences: Vec<EventPreferences>,
     pub flags: u16,
     pub dead_properties: DeadProperty,
     pub size: u32,
@@ -86,13 +134,20 @@ pub struct CalendarEvent {
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
-pub struct CalendarScheduling {
-    pub itip: ICalendar,
+pub struct CalendarEventNotification {
+    pub event: ICalendar,
     pub event_id: Option<u32>,
+    pub changed_by: ChangedBy,
     pub flags: u16,
     pub size: u32,
     pub created: i64,
     pub modified: i64,
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
+pub enum ChangedBy {
+    PrincipalId(u32),
+    CalendarAddress(String),
 }
 
 #[derive(
@@ -139,9 +194,11 @@ pub struct ComponentTimeRange {
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
-pub struct UserProperties {
+pub struct EventPreferences {
     pub account_id: u32,
-    pub properties: ICalendar,
+    pub flags: u16,
+    pub properties: Vec<ICalendarEntry>,
+    pub alerts: Vec<ICalendarComponent>,
 }
 
 #[derive(
@@ -154,55 +211,12 @@ pub enum Timezone {
     Default,
 }
 
-pub enum CalendarRight {
-    ReadFreeBusy,
-    ReadItems,
-    WriteAll,
-    WriteOwn,
-    UpdatePrivate,
-    RSVP,
-    Share,
-    Delete,
-}
-
-impl TryFrom<Acl> for CalendarRight {
-    type Error = Acl;
-
-    fn try_from(value: Acl) -> Result<Self, Self::Error> {
-        match value {
-            Acl::SchedulingReadFreeBusy => Ok(CalendarRight::ReadFreeBusy),
-            Acl::ReadItems => Ok(CalendarRight::ReadItems),
-            Acl::Modify => Ok(CalendarRight::WriteAll),
-            Acl::ModifyItemsOwn => Ok(CalendarRight::WriteOwn),
-            Acl::ModifyPrivateProperties => Ok(CalendarRight::UpdatePrivate),
-            Acl::SchedulingReply => Ok(CalendarRight::RSVP),
-            Acl::Administer => Ok(CalendarRight::Share),
-            Acl::Delete => Ok(CalendarRight::Delete),
-            _ => Err(value),
-        }
-    }
-}
-
-impl From<CalendarRight> for Acl {
-    fn from(value: CalendarRight) -> Self {
-        match value {
-            CalendarRight::ReadFreeBusy => Acl::SchedulingReadFreeBusy,
-            CalendarRight::ReadItems => Acl::ReadItems,
-            CalendarRight::WriteAll => Acl::Modify,
-            CalendarRight::WriteOwn => Acl::ModifyItemsOwn,
-            CalendarRight::UpdatePrivate => Acl::ModifyPrivateProperties,
-            CalendarRight::RSVP => Acl::SchedulingReply,
-            CalendarRight::Share => Acl::Administer,
-            CalendarRight::Delete => Acl::Delete,
-        }
-    }
-}
-
 impl Calendar {
-    pub fn preferences(&self, account_id: u32) -> &CalendarPreferences {
+    pub fn preferences(&self, access_token: &AccessToken) -> &CalendarPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
+            let account_id = access_token.primary_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -211,30 +225,223 @@ impl Calendar {
         }
     }
 
-    pub fn preferences_mut(&mut self, account_id: u32) -> &mut CalendarPreferences {
-        if self.preferences.len() == 1 {
-            &mut self.preferences[0]
+    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut CalendarPreferences {
+        let account_id = access_token.primary_id();
+        let idx = if let Some(idx) = self
+            .preferences
+            .iter()
+            .position(|p| p.account_id == account_id)
+        {
+            idx
         } else {
-            let idx = self
-                .preferences
-                .iter()
-                .position(|p| p.account_id == account_id)
-                .unwrap_or(0);
-            &mut self.preferences[idx]
-        }
+            let mut preferences = self.preferences[0].clone();
+            preferences.account_id = account_id;
+            self.preferences.push(preferences);
+            self.preferences.len() - 1
+        };
+
+        &mut self.preferences[idx]
     }
 }
 
 impl ArchivedCalendar {
-    pub fn preferences(&self, account_id: u32) -> &ArchivedCalendarPreferences {
+    pub fn default_alerts(
+        &self,
+        access_token: &AccessToken,
+        with_time: bool,
+    ) -> impl Iterator<Item = &ArchivedDefaultAlert> {
+        self.preferences(access_token)
+            .default_alerts
+            .iter()
+            .filter(move |a| (a.flags & ALERT_WITH_TIME != 0) == with_time)
+    }
+
+    pub fn preferences(&self, access_token: &AccessToken) -> &ArchivedCalendarPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
+            let account_id = access_token.primary_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
                 .or_else(|| self.preferences.first())
                 .unwrap()
+        }
+    }
+}
+
+impl CalendarEvent {
+    pub fn preferences(&self, access_token: &AccessToken) -> Option<&EventPreferences> {
+        self.preferences
+            .iter()
+            .find(|p| p.account_id == access_token.primary_id())
+    }
+
+    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut EventPreferences {
+        let account_id = access_token.primary_id();
+        let idx = if let Some(idx) = self
+            .preferences
+            .iter()
+            .position(|p| p.account_id == account_id)
+        {
+            idx
+        } else {
+            self.preferences.push(EventPreferences {
+                account_id,
+                flags: PREF_USE_DEFAULT_ALERTS,
+                properties: Vec::new(),
+                alerts: Vec::new(),
+            });
+            self.preferences.len() - 1
+        };
+
+        &mut self.preferences[idx]
+    }
+
+    pub fn added_calendar_ids(
+        &self,
+        prev_data: &ArchivedCalendarEvent,
+    ) -> impl Iterator<Item = u32> {
+        self.names
+            .iter()
+            .filter(|m| prev_data.names.iter().all(|pm| pm.parent_id != m.parent_id))
+            .map(|m| m.parent_id)
+    }
+
+    pub fn removed_calendar_ids(
+        &self,
+        prev_data: &ArchivedCalendarEvent,
+    ) -> impl Iterator<Item = u32> {
+        prev_data
+            .names
+            .iter()
+            .filter(|m| self.names.iter().all(|pm| pm.parent_id != m.parent_id))
+            .map(|m| m.parent_id.to_native())
+    }
+
+    pub fn unchanged_calendar_ids(
+        &self,
+        prev_data: &ArchivedCalendarEvent,
+    ) -> impl Iterator<Item = u32> {
+        self.names
+            .iter()
+            .filter(|m| prev_data.names.iter().any(|pm| pm.parent_id == m.parent_id))
+            .map(|m| m.parent_id)
+    }
+}
+
+impl ArchivedCalendarEvent {
+    pub fn preferences(&self, access_token: &AccessToken) -> Option<&ArchivedEventPreferences> {
+        self.preferences
+            .iter()
+            .find(|p| p.account_id == access_token.primary_id())
+    }
+}
+
+impl Default for ChangedBy {
+    fn default() -> Self {
+        ChangedBy::CalendarAddress("".into())
+    }
+}
+
+impl From<u64> for SupportedComponent {
+    fn from(value: u64) -> Self {
+        match value {
+            0 => SupportedComponent::VCalendar,
+            1 => SupportedComponent::VEvent,
+            2 => SupportedComponent::VTodo,
+            3 => SupportedComponent::VJournal,
+            4 => SupportedComponent::VFreebusy,
+            5 => SupportedComponent::VTimezone,
+            6 => SupportedComponent::VAlarm,
+            7 => SupportedComponent::Standard,
+            8 => SupportedComponent::Daylight,
+            9 => SupportedComponent::VAvailability,
+            10 => SupportedComponent::Available,
+            11 => SupportedComponent::Participant,
+            12 => SupportedComponent::VLocation,
+            13 => SupportedComponent::VResource,
+            14 => SupportedComponent::VStatus,
+            _ => SupportedComponent::Other,
+        }
+    }
+}
+
+impl From<SupportedComponent> for u64 {
+    fn from(value: SupportedComponent) -> Self {
+        match value {
+            SupportedComponent::VCalendar => 0,
+            SupportedComponent::VEvent => 1,
+            SupportedComponent::VTodo => 2,
+            SupportedComponent::VJournal => 3,
+            SupportedComponent::VFreebusy => 4,
+            SupportedComponent::VTimezone => 5,
+            SupportedComponent::VAlarm => 6,
+            SupportedComponent::Standard => 7,
+            SupportedComponent::Daylight => 8,
+            SupportedComponent::VAvailability => 9,
+            SupportedComponent::Available => 10,
+            SupportedComponent::Participant => 11,
+            SupportedComponent::VLocation => 12,
+            SupportedComponent::VResource => 13,
+            SupportedComponent::VStatus => 14,
+            SupportedComponent::Other => 15,
+        }
+    }
+}
+
+impl BitmapItem for SupportedComponent {
+    fn max() -> u64 {
+        u64::from(SupportedComponent::Other)
+    }
+
+    fn is_valid(&self) -> bool {
+        !matches!(self, SupportedComponent::Other)
+    }
+}
+
+impl From<ICalendarComponentType> for SupportedComponent {
+    fn from(value: ICalendarComponentType) -> Self {
+        match value {
+            ICalendarComponentType::VCalendar => SupportedComponent::VCalendar,
+            ICalendarComponentType::VEvent => SupportedComponent::VEvent,
+            ICalendarComponentType::VTodo => SupportedComponent::VTodo,
+            ICalendarComponentType::VJournal => SupportedComponent::VJournal,
+            ICalendarComponentType::VFreebusy => SupportedComponent::VFreebusy,
+            ICalendarComponentType::VTimezone => SupportedComponent::VTimezone,
+            ICalendarComponentType::VAlarm => SupportedComponent::VAlarm,
+            ICalendarComponentType::Standard => SupportedComponent::Standard,
+            ICalendarComponentType::Daylight => SupportedComponent::Daylight,
+            ICalendarComponentType::VAvailability => SupportedComponent::VAvailability,
+            ICalendarComponentType::Available => SupportedComponent::Available,
+            ICalendarComponentType::Participant => SupportedComponent::Participant,
+            ICalendarComponentType::VLocation => SupportedComponent::VLocation,
+            ICalendarComponentType::VResource => SupportedComponent::VResource,
+            ICalendarComponentType::VStatus => SupportedComponent::VStatus,
+            _ => SupportedComponent::Other,
+        }
+    }
+}
+
+impl From<SupportedComponent> for ICalendarComponentType {
+    fn from(value: SupportedComponent) -> Self {
+        match value {
+            SupportedComponent::VCalendar => ICalendarComponentType::VCalendar,
+            SupportedComponent::VEvent => ICalendarComponentType::VEvent,
+            SupportedComponent::VTodo => ICalendarComponentType::VTodo,
+            SupportedComponent::VJournal => ICalendarComponentType::VJournal,
+            SupportedComponent::VFreebusy => ICalendarComponentType::VFreebusy,
+            SupportedComponent::VTimezone => ICalendarComponentType::VTimezone,
+            SupportedComponent::VAlarm => ICalendarComponentType::VAlarm,
+            SupportedComponent::Standard => ICalendarComponentType::Standard,
+            SupportedComponent::Daylight => ICalendarComponentType::Daylight,
+            SupportedComponent::VAvailability => ICalendarComponentType::VAvailability,
+            SupportedComponent::Available => ICalendarComponentType::Available,
+            SupportedComponent::Participant => ICalendarComponentType::Participant,
+            SupportedComponent::VLocation => ICalendarComponentType::VLocation,
+            SupportedComponent::VResource => ICalendarComponentType::VResource,
+            SupportedComponent::VStatus => ICalendarComponentType::VStatus,
+            SupportedComponent::Other => ICalendarComponentType::Other(Default::default()),
         }
     }
 }

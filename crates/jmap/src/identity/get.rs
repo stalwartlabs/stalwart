@@ -6,7 +6,7 @@
 
 use crate::changes::state::StateManager;
 use common::{Server, storage::index::ObjectIndexBuilder};
-use directory::QueryParams;
+use directory::{PrincipalData, QueryParams};
 use email::identity::{ArchivedEmailAddress, Identity};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
@@ -162,7 +162,18 @@ impl IdentityGet for Server {
         } else {
             return Ok(identity_ids);
         };
-        let num_emails = principal.emails.len();
+
+        let mut emails = Vec::new();
+        let mut description = None;
+        for data in principal.data {
+            match data {
+                PrincipalData::PrimaryEmail(v) | PrincipalData::EmailAlias(v) => emails.push(v),
+                PrincipalData::Description(v) => description = Some(v),
+                _ => {}
+            }
+        }
+
+        let num_emails = emails.len();
         if num_emails == 0 {
             return Ok(identity_ids);
         }
@@ -173,13 +184,13 @@ impl IdentityGet for Server {
             .with_collection(Collection::Identity);
 
         // Create identities
-        let name = principal.description.unwrap_or(principal.name);
+        let name = description.unwrap_or(principal.name);
         let mut next_document_id = self
             .store()
             .assign_document_ids(account_id, Collection::Identity, num_emails as u64)
             .await
             .caused_by(trc::location!())?;
-        for email in &principal.emails {
+        for email in &emails {
             let email = sanitize_email(email).unwrap_or_default();
             if email.is_empty() || email.starts_with('@') {
                 continue;

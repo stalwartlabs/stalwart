@@ -380,6 +380,7 @@ impl EventType {
                 TaskQueueEvent::BlobNotFound
                 | TaskQueueEvent::TaskAcquired
                 | TaskQueueEvent::TaskLocked
+                | TaskQueueEvent::TaskIgnored
                 | TaskQueueEvent::MetadataNotFound => Level::Debug,
             },
             EventType::Dmarc(_) => Level::Debug,

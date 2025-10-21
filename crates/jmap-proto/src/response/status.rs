@@ -9,28 +9,33 @@ use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub enum StateChangeType {
-    StateChange,
+#[serde(tag = "@type")]
+pub enum PushObject {
+    StateChange {
+        changed: VecMap<Id, VecMap<DataType, State>>,
+    },
+    EmailPush {
+        #[serde(rename = "accountId")]
+        account_id: Id,
+        email: EmailPushObject,
+    },
+    CalendarAlert {
+        #[serde(rename = "accountId")]
+        account_id: Id,
+        #[serde(rename = "calendarEventId")]
+        calendar_event_id: Id,
+        uid: String,
+        #[serde(rename = "recurrenceId")]
+        recurrence_id: Option<String>,
+        #[serde(rename = "alertId")]
+        alert_id: String,
+    },
+    Group {
+        entries: Vec<PushObject>,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct StateChangeResponse {
-    #[serde(rename = "@type")]
-    pub type_: StateChangeType,
-    pub changed: VecMap<Id, VecMap<DataType, State>>,
-}
-
-impl StateChangeResponse {
-    pub fn new() -> Self {
-        Self {
-            type_: StateChangeType::StateChange,
-            changed: VecMap::new(),
-        }
-    }
-}
-
-impl Default for StateChangeResponse {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct EmailPushObject {
+    pub subject: String,
 }

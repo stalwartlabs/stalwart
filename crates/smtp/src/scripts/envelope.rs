@@ -9,11 +9,9 @@ use smtp_proto::{
     MAIL_BY_NOTIFY, MAIL_BY_RETURN, MAIL_BY_TRACE, MAIL_RET_FULL, MAIL_RET_HDRS, RCPT_NOTIFY_DELAY,
     RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS,
 };
+use utils::DomainPart;
 
-use crate::{
-    core::{SessionAddress, SessionData},
-    queue::DomainPart,
-};
+use crate::core::{SessionAddress, SessionData};
 
 impl SessionData {
     pub fn apply_envelope_modification(&mut self, envelope: Envelope, value: String) {

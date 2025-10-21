@@ -1,13 +1,13 @@
 [package]
 name = "types"
-version = "0.13.3"
+version = "0.14.0"
 edition = "2024"
 resolver = "2"
 
 [dependencies]
 utils = { path = "../utils" }
 trc = { path = "../trc" }
-jmap-tools = { path = "/Users/me/code/jmap-tool" }
+jmap-tools = { version = "0.1" }
 hashify = "0.2"
 serde = { version = "1.0", features = ["derive"]}
 rkyv = { version = "0.8.10", features = ["little_endian"] }

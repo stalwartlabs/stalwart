@@ -4,11 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::config::groupware::GroupwareConfig;
 use jmap_proto::request::capability::BaseCapabilities;
 use nlp::language::Language;
 use std::{str::FromStr, time::Duration};
-use types::special_use::SpecialUse;
-use utils::config::{Config, Rate, cron::SimpleCron, utils::ParseValue};
+use types::{collection::Collection, special_use::SpecialUse};
+use utils::{
+    config::{Config, Rate, cron::SimpleCron, utils::ParseValue},
+    map::bitmap::Bitmap,
+};
 
 #[derive(Default, Clone)]
 pub struct JmapConfig {
@@ -18,6 +22,7 @@ pub struct JmapConfig {
 
     pub changes_max_results: Option<usize>,
     pub changes_max_history: Option<usize>,
+    pub share_notification_max_history: Option<Duration>,
 
     pub request_max_size: usize,
     pub request_max_calls: usize,
@@ -40,14 +45,16 @@ pub struct JmapConfig {
     pub mail_max_size: usize,
     pub mail_autoexpunge_after: Option<u64>,
 
+    pub contact_parse_max_items: usize,
+    pub calendar_parse_max_items: usize,
+
     pub sieve_max_script_name: usize,
-    pub sieve_max_scripts: usize,
+    pub max_objects: [u32; Collection::MAX],
 
     pub rate_authenticated: Option<Rate>,
     pub rate_anonymous: Option<Rate>,
 
     pub event_source_throttle: Duration,
-    pub push_max_total: usize,
     pub push_attempt_interval: Duration,
     pub push_attempts_max: u32,
     pub push_retry_interval: Duration,
@@ -85,7 +92,7 @@ pub struct DefaultFolder {
 }
 
 impl JmapConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(config: &mut Config, groupware_config: &GroupwareConfig) -> Self {
         // Parse HTTP headers
         let mut http_headers = config
             .values("http.headers")
@@ -221,6 +228,9 @@ impl JmapConfig {
             changes_max_history: config
                 .property_or_default::<Option<usize>>("changes.max-history", "10000")
                 .unwrap_or_default(),
+            share_notification_max_history: config
+                .property_or_default::<Option<Duration>>("sharing.max-history", "30d")
+                .unwrap_or_default(),
             snippet_max_results: config
                 .property("jmap.protocol.search-snippet.max-results")
                 .unwrap_or(100),
@@ -271,9 +281,7 @@ impl JmapConfig {
             sieve_max_script_name: config
                 .property("sieve.untrusted.limits.name-length")
                 .unwrap_or(512),
-            sieve_max_scripts: config
-                .property("sieve.untrusted.limits.max-scripts")
-                .unwrap_or(256),
+            max_objects: [u32::MAX; Collection::MAX],
             capabilities: BaseCapabilities::default(),
             rate_authenticated: config
                 .property_or_default::<Option<Rate>>("http.rate-limit.account", "1000/1m")
@@ -293,9 +301,6 @@ impl JmapConfig {
             web_socket_heartbeat: config
                 .property_or_default("jmap.web-socket.heartbeat", "1m")
                 .unwrap_or_else(|| Duration::from_secs(60)),
-            push_max_total: config
-                .property_or_default("jmap.push.max-total", "100")
-                .unwrap_or(100),
             encrypt: config
                 .property_or_default("email.encryption.enable", "true")
                 .unwrap_or(true),
@@ -337,12 +342,44 @@ impl JmapConfig {
                     .value("authentication.master.secret")
                     .map(|p| (u.to_string(), p.to_string()))
             }),
+            contact_parse_max_items: config
+                .property("jmap.contact.parse.max-items")
+                .unwrap_or(100),
+            calendar_parse_max_items: config
+                .property("jmap.calendar.parse.max-items")
+                .unwrap_or(100),
             default_folders,
             shared_folder,
         };
 
+        for collection in Bitmap::<Collection>::all() {
+            let key = format!("object-quota.{}", collection.as_config_case());
+            jmap.max_objects[collection as usize] =
+                if let Some(value) = config.property::<u32>(&key) {
+                    value
+                } else {
+                    match collection {
+                        Collection::Mailbox => 250,
+                        Collection::SieveScript => 100,
+                        Collection::Identity => 20,
+                        Collection::EmailSubmission => 500,
+                        Collection::PushSubscription => 15,
+                        Collection::Calendar => 250,
+                        Collection::AddressBook => 250,
+                        Collection::Principal
+                        | Collection::None
+                        | Collection::CalendarEventNotification
+                        | Collection::CalendarEvent
+                        | Collection::ContactCard
+                        | Collection::FileNode
+                        | Collection::Email
+                        | Collection::Thread => u32::MAX,
+                    }
+                };
+        }
+
         // Add capabilities
-        jmap.add_capabilities(config);
+        jmap.add_capabilities(config, groupware_config);
         jmap
     }
 }
