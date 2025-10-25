@@ -19,8 +19,14 @@ pub struct Cli {
     /// Server base URL
     #[clap(short, long)]
     pub url: Option<String>,
-    /// Authentication credentials
-    #[clap(short, long)]
+    #[clap(
+        short,
+        long,
+        help = r#"Authentication credentials
+    accountname:password
+    orJustpassword
+(for default accountname 'admin')"#
+    )]
     pub credentials: Option<String>,
     /// Connection timeout in seconds
     #[clap(short, long)]
