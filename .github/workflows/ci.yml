@@ -247,7 +247,7 @@ jobs:
           targets: ${{(github.event_name == 'push' || inputs.Docker) && 'build,image' || 'build'}}
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: artifact-${{matrix.target}}
           path: |
@@ -264,7 +264,7 @@ jobs:
 
       - name: Upload digest
         if: github.event_name == 'push' || inputs.Docker
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: digests-${{matrix.suffix == '' && 'gnu' || 'musl'}}-${{ matrix.target }}
           path: ${{ runner.temp }}/digests/*
@@ -272,7 +272,7 @@ jobs:
           retention-days: 1
 
       - name: Upload GNU meta bake definition
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: (github.event_name == 'push' || inputs.Docker) && endsWith(matrix.target,'gnu') && startsWith(matrix.target,'x86')
         with:
           name: bake-meta-gnu
@@ -281,7 +281,7 @@ jobs:
           retention-days: 1
 
       - name: Upload musl meta bake definition
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: (github.event_name == 'push' || inputs.Docker) && endsWith(matrix.target,'musl') && startsWith(matrix.target,'x86')
         with:
           name: bake-meta-musl
@@ -318,7 +318,7 @@ jobs:
           mv ./target/${{matrix.target}}/release/stalwart-cli.exe ./artifacts/stalwart-cli.exe
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: artifact-${{matrix.target}}
           path: artifacts
@@ -363,7 +363,7 @@ jobs:
           mv ./target/${{matrix.target}}/release/stalwart-cli ./artifacts/stalwart-cli
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: artifact-${{matrix.target}}
           path: artifacts
