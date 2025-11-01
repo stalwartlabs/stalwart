@@ -57,13 +57,13 @@ jobs:
           password: ${{secrets.DOCKERHUB_TOKEN}}
 
       - name: Download ${{matrix.variant}} meta bake definition
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: bake-meta-${{matrix.variant}}
           path: ${{ runner.temp }}/${{matrix.variant}}
 
       - name: Download ${{matrix.variant}} digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: ${{ runner.temp }}/${{matrix.variant}}/digests
           pattern: digests-${{matrix.variant}}-*
@@ -379,7 +379,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: archive
           pattern: artifact-*
