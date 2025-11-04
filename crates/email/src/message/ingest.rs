@@ -631,6 +631,23 @@ impl EmailIngest for Server {
                 .log_container_insert(SyncCollection::Thread);
         }
 
+        let received_at = params.received_at.unwrap_or_else(|| {
+            message
+                .root_part()
+                .headers()
+                .iter()
+                .find_map(|header| {
+                    if let (HeaderName::Received, HeaderValue::Received(received)) =
+                        (&header.name, &header.value)
+                    {
+                        received.date.as_ref().map(|dt| dt.to_timestamp() as u64)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(now)
+        });
+
         let due = now();
         let document_id = self
             .store()
@@ -650,7 +667,7 @@ impl EmailIngest for Server {
                     keywords: params.keywords,
                     thread_id,
                 },
-                params.received_at.unwrap_or_else(now),
+                received_at,
             )
             .caused_by(trc::location!())?
             .set(
