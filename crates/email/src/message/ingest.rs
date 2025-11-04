@@ -636,7 +636,7 @@ impl EmailIngest for Server {
                 .root_part()
                 .headers()
                 .iter()
-                .find_map(|header| {
+                .filter_map(|header| {
                     if let (HeaderName::Received, HeaderValue::Received(received)) =
                         (&header.name, &header.value)
                     {
@@ -645,6 +645,7 @@ impl EmailIngest for Server {
                         None
                     }
                 })
+                .max()
                 .unwrap_or_else(now)
         });
 
