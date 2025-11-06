@@ -228,7 +228,8 @@ impl LdapDirectory {
                         .map_err(|err| err.into_error().caused_by(trc::location!()))?;
                     for entry in rs {
                         'outer: for (attr, value) in SearchEntry::construct(entry).attrs {
-                            if self.mappings.attr_name.contains(&attr)
+                            let lattr = attr.to_lowercase();
+                            if self.mappings.attr_name.contains(&lattr)
                                 && let Some(group) = value.into_iter().next()
                                 && !group.is_empty()
                             {
@@ -311,15 +312,18 @@ impl LdapDirectory {
 
         for entry in rs {
             let entry = SearchEntry::construct(entry);
-            for attr in &self.mappings.attr_name {
-                if let Some(name) = entry.attrs.get(attr).and_then(|v| v.first())
-                    && !name.is_empty()
-                {
-                    return self
-                        .data_store
-                        .get_or_create_principal_id(name, Type::Individual)
-                        .await
-                        .map(Some);
+            for (attr, value) in entry.attrs {
+                let lattr = attr.to_lowercase();
+                if self.mappings.attr_name.contains(&lattr) {
+                    for name in value {
+                        if !name.is_empty() {
+                            return self
+                                .data_store
+                                .get_or_create_principal_id(&name, Type::Individual)
+                                .await
+                                .map(Some);
+                        }
+                    }
                 }
             }
         }
@@ -436,8 +440,9 @@ impl LdapMappings {
         let mut email_aliases = Vec::new();
 
         for (attr, value) in entry.attrs {
-            if self.attr_name.contains(&attr) {
-                if !self.attr_email_address.contains(&attr) {
+            let lattr = attr.to_lowercase();
+            if self.attr_name.contains(&lattr) {
+                if !self.attr_email_address.contains(&lattr) {
                     principal.name = value.into_iter().next().unwrap_or_default();
                 } else {
                     for (idx, item) in value.into_iter().enumerate() {
@@ -450,7 +455,7 @@ impl LdapMappings {
                         }
                     }
                 }
-            } else if self.attr_secret.contains(&attr) {
+            } else if self.attr_secret.contains(&lattr) {
                 for item in value {
                     if item.is_otp_secret() {
                         otp_secret = Some(item);
@@ -460,7 +465,7 @@ impl LdapMappings {
                         secret = Some(item);
                     }
                 }
-            } else if self.attr_secret_changed.contains(&attr) {
+            } else if self.attr_secret_changed.contains(&lattr) {
                 // Create a disabled AppPassword, used to indicate that the password has been changed
                 // but cannot be used for authentication.
                 if secret.is_none() {
@@ -468,7 +473,7 @@ impl LdapMappings {
                         format!("$app${}$", xxhash_rust::xxh3::xxh3_64(item.as_bytes()))
                     });
                 }
-            } else if self.attr_email_address.contains(&attr) {
+            } else if self.attr_email_address.contains(&lattr) {
                 for item in value {
                     if email.is_some() {
                         email_aliases.push(item.to_lowercase());
@@ -476,25 +481,25 @@ impl LdapMappings {
                         email = Some(item.to_lowercase());
                     }
                 }
-            } else if self.attr_email_alias.contains(&attr) {
+            } else if self.attr_email_alias.contains(&lattr) {
                 for item in value {
                     email_aliases.push(item.to_lowercase());
                 }
-            } else if let Some(idx) = self.attr_description.iter().position(|a| a == &attr) {
+            } else if let Some(idx) = self.attr_description.iter().position(|a| a == &lattr) {
                 if (description.is_none() || idx == 0)
                     && let Some(desc) = value.into_iter().next()
                 {
                     description = Some(desc);
                 }
-            } else if self.attr_groups.contains(&attr) {
+            } else if self.attr_groups.contains(&lattr) {
                 member_of.extend(value);
-            } else if self.attr_quota.contains(&attr) {
+            } else if self.attr_quota.contains(&lattr) {
                 if let Ok(quota) = value.into_iter().next().unwrap_or_default().parse::<u64>()
                     && quota > 0
                 {
                     principal.data.push(PrincipalData::DiskQuota(quota));
                 }
-            } else if self.attr_type.contains(&attr) {
+            } else if self.attr_type.contains(&lattr) {
                 for value in value {
                     match value.to_ascii_lowercase().as_str() {
                         "admin" | "administrator" | "root" | "superuser" => {
