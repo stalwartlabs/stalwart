@@ -4205,6 +4205,7 @@ dependencies = [
  "registry",
  "reqwest 0.13.5",
  "rkyv",
+ "sd-notify",
  "serde",
  "serde_json",
  "services",
@@ -7379,6 +7380,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sd-notify"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e4ef7359e694bfaf1dd27a30f9d760b54c00dfae9f19bd0c05a39bc9128fe76"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "sec1"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8259,6 +8269,7 @@ dependencies = [
  "registry",
  "rustls",
  "scim",
+ "sd-notify",
  "services",
  "smtp",
  "smtp-proto",

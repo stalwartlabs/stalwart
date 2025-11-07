@@ -26,6 +26,7 @@ use registry::{
     },
     types::{EnumImpl, ObjectImpl},
 };
+use sd_notify;
 use smtp_proto::{MAIL_BODY_7BIT, MAIL_BODY_8BITMIME, MAIL_BODY_BINARYMIME, MAIL_SMTPUTF8};
 use spam_filter::{
     MessageTexts, SpamFilterInput,
@@ -79,6 +80,17 @@ pub(crate) async fn action_set(
             | Action::ReloadTlsCertificates
             | Action::ReloadLookupStores
             | Action::ReloadBlockedIps => {
+                #[cfg(target_os = "linux")]
+                let is_systemd = match sd_notify::booted() {
+                    Ok(booted) => booted,
+                    _ => false,
+                };
+
+                #[cfg(target_os = "linux")]
+                if (is_systemd) {
+                    let _ = sd_notify::notify(&[sd_notify::NotifyState::Reloading]);
+                }
+
                 let object = match action {
                     Action::ReloadSettings => ObjectType::DataStore,
                     Action::ReloadTlsCertificates => ObjectType::Certificate,
@@ -100,6 +112,11 @@ pub(crate) async fn action_set(
                     set.response
                         .not_created
                         .append(id, map_bootstrap_error(result.errors));
+                }
+
+                #[cfg(target_os = "linux")]
+                if (is_systemd) {
+                    let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
                 }
             }
             Action::InvalidateCaches => {

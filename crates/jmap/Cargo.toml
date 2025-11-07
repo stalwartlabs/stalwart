@@ -21,7 +21,7 @@ groupware = { path = "../groupware" }
 registry = { path = "../registry" }
 calcard = { version = "0.4" }
 smtp-proto = { version = "0.2" }
-mail-parser = { version = "1.0", features = ["full_encoding"] } 
+mail-parser = { version = "1.0", features = ["full_encoding"] }
 mail-builder = { version = "2.0" }
 mail-auth = { version = "0.14", features = ["generate", "arc"] }
 sieve-rs = { version = "2.0" }
@@ -47,6 +47,7 @@ rkyv.workspace = true
 hashify = "0.3"
 compact_str = "0.10.0"
 memchr = "2.8"
+sd-notify = "0.5.0"
 
 [features]
 test_mode = []
