@@ -329,47 +329,41 @@ impl<'x> Pagination<'x> {
     pub fn add_id(&mut self, id: Id) -> bool {
         let document_id = id.document_id();
 
-        // Pagination
         if !self.has_anchor {
+            // By position
             if self.position >= 0 {
                 if self.position > 0 {
                     self.position -= 1;
                 } else {
                     self.ids.push(id);
-                    if self.ids.len() == self.limit {
-                        return false;
-                    }
                 }
             } else {
                 self.ids.push(id);
             }
-        } else if self.anchor_offset >= 0 {
+        } else {
+            // By anchor
             if !self.anchor_found {
-                if document_id != self.anchor {
+                self.anchor_found = document_id == self.anchor;
+                if !self.anchor_found {
+                    self.position += 1;
                     return true;
                 }
-                self.anchor_found = true;
+                // do one more iteration to skip the anchor itself when using an
+                // anchor offset
+                if self.anchor_offset > 0 {
+                    self.anchor_offset += 1;
+                }
             }
 
             if self.anchor_offset > 0 {
                 self.anchor_offset -= 1;
+                self.position += 1;
             } else {
                 self.ids.push(id);
-                if self.ids.len() == self.limit {
-                    return false;
-                }
-            }
-        } else {
-            self.anchor_found = document_id == self.anchor;
-            self.ids.push(id);
-
-            if self.anchor_found {
-                self.position = self.anchor_offset;
-                return false;
             }
         }
 
-        true
+        self.ids.len() != self.limit
     }
 
     pub fn is_full(&self) -> bool {
