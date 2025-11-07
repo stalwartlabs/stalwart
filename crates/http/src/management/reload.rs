@@ -10,12 +10,12 @@ use common::{
     ipc::{BroadcastEvent, HousekeeperEvent},
 };
 use directory::Permission;
+use http_proto::*;
 use hyper::Method;
+use sd_notify;
 use serde_json::json;
 use std::future::Future;
 use utils::url_params::UrlParams;
-
-use http_proto::*;
 
 pub trait ManageReload: Sync + Send {
     fn handle_manage_reload(
@@ -43,7 +43,16 @@ impl ManageReload for Server {
         // Validate the access token
         access_token.assert_has_permission(Permission::SettingsReload)?;
 
-        match (path.get(1).copied(), req.method()) {
+        let is_systemd = match sd_notify::booted() {
+            Ok(booted) => booted,
+            _ => false,
+        };
+
+        if (is_systemd) {
+            let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Reloading]);
+        }
+
+        let response = match (path.get(1).copied(), req.method()) {
             (Some("lookup"), &Method::GET) => {
                 let result = self.reload_lookups().await?;
                 // Update core
@@ -117,7 +126,13 @@ impl ManageReload for Server {
                 .into_http_response())
             }
             _ => Err(trc::ResourceEvent::NotFound.into_err()),
+        };
+
+        if (is_systemd) {
+            let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
         }
+
+        response
     }
 
     async fn handle_manage_update(
