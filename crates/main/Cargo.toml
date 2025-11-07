@@ -41,6 +41,9 @@ migration = { path = "../migration" }
 tokio = { version = "1.53", features = ["full"] }
 rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+sd-notify = "0.5.0"
+
 [target.'cfg(not(any(target_env = "msvc", target_os = "freebsd")))'.dependencies]
 tikv-jemallocator = "0.7"
 
@@ -59,12 +62,12 @@ azure = ["store/azure"]
 nats = ["coordinator/nats"]
 zenoh = ["coordinator/zenoh"]
 kafka = ["coordinator/kafka"]
-enterprise = [ "jmap/enterprise", 
-               "smtp/enterprise", 
-               "common/enterprise", 
-               "store/enterprise", 
-               "managesieve/enterprise", 
-               "directory/enterprise", 
+enterprise = [ "jmap/enterprise",
+               "smtp/enterprise",
+               "common/enterprise",
+               "store/enterprise",
+               "managesieve/enterprise",
+               "directory/enterprise",
                "email/enterprise",
                "spam-filter/enterprise",
                "http/enterprise",
@@ -74,8 +77,8 @@ enterprise = [ "jmap/enterprise",
                "trc/enterprise",
                "services/enterprise",
                "migration/enterprise" ]
-dev_mode = [ "common/dev_mode", 
-             "trc/dev_mode", 
+dev_mode = [ "common/dev_mode",
+             "trc/dev_mode",
              "dav/dev_mode",
              "http/dev_mode",
              "http_proto/dev_mode",

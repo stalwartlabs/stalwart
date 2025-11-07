@@ -14,6 +14,8 @@ use http::HttpSessionManager;
 use imap::core::ImapSessionManager;
 use managesieve::core::ManageSieveSessionManager;
 use pop3::Pop3SessionManager;
+#[cfg(target_os = "linux")]
+use sd_notify;
 use services::{StartServices, broadcast::subscriber::spawn_broadcast_subscriber};
 use smtp::{StartQueueManager, core::SmtpSessionManager};
 use std::time::Duration;
@@ -115,8 +117,18 @@ async fn main() -> std::io::Result<()> {
     // Start broadcast subscriber
     spawn_broadcast_subscriber(init.inner, shutdown_rx);
 
+    #[cfg(target_os = "linux")]
+    if (sd_notify::booted().is_ok_and(true)) {
+        let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
+    }
+
     // Wait for shutdown signal
     wait_for_shutdown().await;
+
+    #[cfg(target_os = "linux")]
+    if (sd_notify::booted().is_ok_and(true)) {
+        let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
+    }
 
     // Shutdown collector
     Collector::shutdown();

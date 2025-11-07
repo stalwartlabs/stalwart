@@ -363,7 +363,10 @@ async fn update_preserves_uids(
     assert_eq!(uids[&INBOX_ID], inbox_uid);
     assert_ne!(uids[&test_mailbox_document_id], 0);
 
-    client.mailbox_destroy(&test_mailbox_id, true).await.unwrap();
+    client
+        .mailbox_destroy(&test_mailbox_id, true)
+        .await
+        .unwrap();
 }
 
 async fn message_uids(
