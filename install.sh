@@ -124,7 +124,7 @@ main() {
     # Create service file
     say "🚀 Starting service..."
     if [ "${_os}" = "linux" ]; then
-        local _issystemdlinux=$(which systemctl)
+        local _issystemdlinux=$(command -v systemctl)
         if [ -n "$_issystemdlinux" ]; then
             create_service_linux_systemd "$_dir"
         else
