@@ -20,7 +20,7 @@ use jmap_proto::{
     request::MaybeInvalid,
     types::state::State,
 };
-use mail_parser::MessageParser;
+use mail_parser::{HeaderName, HeaderValue, MessageParser};
 use std::future::Future;
 use types::{acl::Acl, id::Id};
 use utils::map::vec_map::VecMap;
@@ -143,15 +143,35 @@ impl EmailImport for Server {
                 }
             };
 
+            let message = MessageParser::new().parse(&raw_message);
+
+            let received_at = email.received_at.map(|r| r.into()).or_else(|| {
+                message.clone().and_then(|msg| {
+                    msg.root_part()
+                        .headers()
+                        .iter()
+                        .filter_map(|header| {
+                            if let (HeaderName::Received, HeaderValue::Received(received)) =
+                                (&header.name, &header.value)
+                            {
+                                received.date.map(|dt| dt.to_timestamp() as u64)
+                            } else {
+                                None
+                            }
+                        })
+                        .max()
+                })
+            });
+
             // Import message
             match self
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
-                    message: MessageParser::new().parse(&raw_message),
+                    message,
                     access_token: import_access_token.as_deref().unwrap_or(access_token),
                     mailbox_ids,
                     keywords: email.keywords,
-                    received_at: email.received_at.map(|r| r.into()),
+                    received_at,
                     source: IngestSource::Jmap,
                     spam_classify: false,
                     spam_train: can_train_spam,
