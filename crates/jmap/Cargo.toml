@@ -21,10 +21,10 @@ groupware = { path = "../groupware" }
 registry = { path = "../registry" }
 calcard = { version = "0.3" }
 smtp-proto = { version = "0.2" }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
+mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
 mail-builder = { version = "1.0" }
 mail-auth = { version = "0.13", features = ["generate", "arc"] }
-sieve-rs = { version = "0.7", features = ["rkyv"] } 
+sieve-rs = { version = "0.7", features = ["rkyv"] }
 jmap-tools = { version = "0.1", features = ["rkyv"] }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
@@ -45,6 +45,7 @@ chrono = "0.4"
 rand = "0.10.2"
 rkyv = { version = "0.8.18", features = ["little_endian"] }
 hashify = "0.2"
+sd-notify = "0.5.0"
 
 [features]
 test_mode = []
