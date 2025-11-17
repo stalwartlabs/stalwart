@@ -74,104 +74,129 @@ impl LdapDirectory {
                         template,
                         can_search,
                     } => {
-                        let (auth_bind_conn, mut ldap) = LdapConnAsync::with_settings(
-                            self.pool.manager().settings.clone(),
-                            &self.pool.manager().address,
-                        )
-                        .await
-                        .map_err(|err| err.into_error().caused_by(trc::location!()))?;
-
-                        ldap3::drive!(auth_bind_conn);
-
-                        let dn = template.build(username);
-
-                        if ldap
-                            .simple_bind(&dn, secret)
-                            .await
-                            .map_err(|err| err.into_error().caused_by(trc::location!()))?
-                            .success()
-                            .is_err()
-                        {
-                            trc::event!(
-                                Store(trc::StoreEvent::LdapWarning),
-                                Reason = "Secret rejected during auth bind using template",
-                                Details = dn
-                            );
-                            return Ok(None);
-                        }
-
                         let filter = self.mappings.filter_name.build(username);
-                        let result = if *can_search {
-                            self.find_principal(&mut ldap, &filter).await
-                        } else {
-                            self.find_principal(&mut conn, &filter).await
-                        };
-
-                        match result {
-                            Ok(Some(mut result)) => {
-                                if result.principal.name.is_empty() {
-                                    result.principal.name = username.into();
-                                }
-                                (result.principal, result.member_of, None)
-                            }
-                            Err(err)
-                                if err
-                                    .matches(trc::EventType::Store(trc::StoreEvent::LdapError))
-                                    && err
-                                        .value(trc::Key::Code)
-                                        .and_then(|v| v.to_uint())
-                                        .is_some_and(|rc| [49, 50].contains(&rc)) =>
-                            {
-                                trc::event!(
-                                    Store(trc::StoreEvent::LdapWarning),
-                                    Reason = "Error codes 49 or 50 returned by LDAP server",
-                                    Details = vec![dn, filter]
-                                );
-                                return Ok(None);
-                            }
-                            Ok(None) => {
-                                trc::event!(
-                                    Store(trc::StoreEvent::LdapWarning),
-                                    Reason = "Auth bind successful but filter yielded no results",
-                                    Details = vec![dn, filter]
-                                );
-
-                                return Ok(None);
-                            }
-                            Err(err) => return Err(err),
-                        }
-                    }
-                    AuthBind::Lookup => {
-                        let filter = self.mappings.filter_name.build(username);
+                        // First check app passwords
                         if let Some(mut result) = self.find_principal(&mut conn, &filter).await? {
-                            // Perform bind auth using the found dn
-                            let (auth_bind_conn, mut ldap) = LdapConnAsync::with_settings(
-                                self.pool.manager().settings.clone(),
-                                &self.pool.manager().address,
-                            )
-                            .await
-                            .map_err(|err| err.into_error().caused_by(trc::location!()))?;
-
-                            ldap3::drive!(auth_bind_conn);
-
-                            if ldap
-                                .simple_bind(&result.dn, secret)
-                                .await
-                                .map_err(|err| err.into_error().caused_by(trc::location!()))?
-                                .success()
-                                .is_ok()
-                            {
+                            if result.principal.verify_secret(secret, true, false).await? {
                                 if result.principal.name.is_empty() {
                                     result.principal.name = username.into();
                                 }
                                 (result.principal, result.member_of, None)
                             } else {
-                                trc::event!(
-                                    Store(trc::StoreEvent::LdapWarning),
-                                    Reason = "Secret rejected during auth bind using lookup filter",
-                                    Details = vec![result.dn, filter]
-                                );
-                                return Ok(None);
+                                let (auth_bind_conn, mut ldap) = LdapConnAsync::with_settings(
+                                    self.pool.manager().settings.clone(),
+                                    &self.pool.manager().address,
+                                )
+                                .await
+                                .map_err(|err| err.into_error().caused_by(trc::location!()))?;
+
+                                ldap3::drive!(auth_bind_conn);
+
+                                let dn = template.build(username);
+
+                                if ldap
+                                    .simple_bind(&dn, secret)
+                                    .await
+                                    .map_err(|err| err.into_error().caused_by(trc::location!()))?
+                                    .success()
+                                    .is_err()
+                                {
+                                    trc::event!(
+                                        Store(trc::StoreEvent::LdapWarning),
+                                        Reason = "Secret rejected during auth bind using template",
+                                        Details = dn
+                                    );
+                                    return Ok(None);
+                                }
+
+                                let result = if *can_search {
+                                    self.find_principal(&mut ldap, &filter).await
+                                } else {
+                                    self.find_principal(&mut conn, &filter).await
+                                };
+
+                                match result {
+                                    Ok(Some(mut result)) => {
+                                        if result.principal.name.is_empty() {
+                                            result.principal.name = username.into();
+                                        }
+                                        (result.principal, result.member_of, None)
+                                    }
+                                    Err(err)
+                                        if err.matches(trc::EventType::Store(
+                                            trc::StoreEvent::LdapError,
+                                        )) && err
+                                            .value(trc::Key::Code)
+                                            .and_then(|v| v.to_uint())
+                                            .is_some_and(|rc| [49, 50].contains(&rc)) =>
+                                    {
+                                        trc::event!(
+                                            Store(trc::StoreEvent::LdapWarning),
+                                            Reason = "Error codes 49 or 50 returned by LDAP server",
+                                            Details = vec![dn, filter]
+                                        );
+                                        return Ok(None);
+                                    }
+                                    Ok(None) => {
+                                        trc::event!(
+                                            Store(trc::StoreEvent::LdapWarning),
+                                            Reason = "Auth bind successful but filter yielded no results",
+                                            Details = vec![dn, filter]
+                                        );
+                                        return Ok(None);
+                                    }
+                                    Err(err) => return Err(err),
+                                }
+                            }
+                        } else {
+                            trc::event!(
+                                Store(trc::StoreEvent::LdapWarning),
+                                Reason = "Name filter yielded no results",
+                                Details = filter
+                            );
+                            return Ok(None);
+                        }
+                    }
+                    AuthBind::Lookup => {
+                        let filter = self.mappings.filter_name.build(username);
+                        if let Some(mut result) = self.find_principal(&mut conn, &filter).await? {
+                            // First check app passwords
+                            if result.principal.verify_secret(secret, true, false).await? {
+                                if result.principal.name.is_empty() {
+                                    result.principal.name = username.into();
+                                }
+                                (result.principal, result.member_of, None)
+                            } else {
+                                // Perform bind auth using the found dn
+                                let (auth_bind_conn, mut ldap) = LdapConnAsync::with_settings(
+                                    self.pool.manager().settings.clone(),
+                                    &self.pool.manager().address,
+                                )
+                                .await
+                                .map_err(|err| err.into_error().caused_by(trc::location!()))?;
+
+                                ldap3::drive!(auth_bind_conn);
+
+                                if ldap
+                                    .simple_bind(&result.dn, secret)
+                                    .await
+                                    .map_err(|err| err.into_error().caused_by(trc::location!()))?
+                                    .success()
+                                    .is_ok()
+                                {
+                                    if result.principal.name.is_empty() {
+                                        result.principal.name = username.into();
+                                    }
+                                    (result.principal, result.member_of, None)
+                                } else {
+                                    trc::event!(
+                                        Store(trc::StoreEvent::LdapWarning),
+                                        Reason =
+                                            "Secret rejected during auth bind using lookup filter",
+                                        Details = vec![result.dn, filter]
+                                    );
+                                    return Ok(None);
+                                }
                             }
                         } else {
                             trc::event!(
