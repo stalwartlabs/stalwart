@@ -329,47 +329,41 @@ impl<'x> Pagination<'x> {
     pub fn add_id(&mut self, id: Id) -> bool {
         let document_id = id.document_id();
 
-        // Pagination
         if !self.has_anchor {
+            // By position
             if self.position >= 0 {
                 if self.position > 0 {
                     self.position -= 1;
                 } else {
                     self.ids.push(id);
-                    if self.ids.len() == self.limit {
-                        return false;
-                    }
                 }
             } else {
                 self.ids.push(id);
             }
-        } else if self.anchor_offset >= 0 {
+        } else {
+            // By anchor
             if !self.anchor_found {
-                if document_id != self.anchor {
+                self.anchor_found = document_id == self.anchor;
+                if !self.anchor_found {
+                    self.position += 1;
                     return true;
                 }
-                self.anchor_found = true;
+                // do one more iteration to skip the anchor itself when using an
+                // anchor offset
+                if self.anchor_offset > 0 {
+                    self.anchor_offset += 1;
+                }
             }
 
             if self.anchor_offset > 0 {
                 self.anchor_offset -= 1;
+                self.position += 1;
             } else {
                 self.ids.push(id);
-                if self.ids.len() == self.limit {
-                    return false;
-                }
-            }
-        } else {
-            self.anchor_found = document_id == self.anchor;
-            self.ids.push(id);
-
-            if self.anchor_found {
-                self.position = self.anchor_offset;
-                return false;
             }
         }
 
-        true
+        self.ids.len() != self.limit
     }
 
     pub fn is_full(&self) -> bool {
@@ -411,5 +405,143 @@ impl<'x> Pagination<'x> {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use types::id::Id;
+
+    #[test]
+    fn test_pagination_position_with_1_anchor_offset() {
+        let mut pagination = Pagination::new(3, 0, Some(3), 1);
+
+        for i in 0..10 {
+            let should_continue = pagination.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = pagination.build();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 5, "First item should be 5");
+        assert_eq!(result.ids[1].document_id(), 6, "Second item should be 6");
+        assert_eq!(result.ids[2].document_id(), 7, "Third item should be 7");
+        assert!(result.found_anchor, "Should have found anchor");
+        assert_eq!(
+            result.position, 5,
+            "Position should be 5 (where we started collecting)"
+        );
+    }
+
+    #[test]
+    fn test_pagination_position_with_positive_anchor_offset() {
+        let mut pagination = Pagination::new(3, 0, Some(3), 2);
+
+        for i in 0..10 {
+            let should_continue = pagination.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = pagination.build();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 6, "First item should be 6");
+        assert_eq!(result.ids[1].document_id(), 7, "Second item should be 7");
+        assert_eq!(result.ids[2].document_id(), 8, "Third item should be 8");
+        assert!(result.found_anchor, "Should have found anchor");
+        assert_eq!(
+            result.position, 6,
+            "Position should be 6 (where we started collecting)"
+        );
+    }
+
+    #[test]
+    fn test_pagination_position_with_zero_anchor_offset() {
+        let mut pagination = Pagination::new(3, 0, Some(5), 0);
+
+        for i in 0..10 {
+            let should_continue = pagination.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = pagination.build();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 5, "First item should be 5");
+        assert_eq!(result.ids[1].document_id(), 6, "Second item should be 6");
+        assert_eq!(result.ids[2].document_id(), 7, "Third item should be 7");
+        assert!(result.found_anchor, "Should have found anchor");
+        assert_eq!(result.position, 5, "Position should be 5 (anchor position)");
+    }
+
+    #[test]
+    fn test_pagination_without_anchor_from_start() {
+        let mut pagination = Pagination::new(3, 0, None, 0);
+
+        for i in 0..10 {
+            let should_continue = pagination.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = pagination.build();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 0, "First item should be 0");
+        assert_eq!(result.ids[1].document_id(), 1, "Second item should be 1");
+        assert_eq!(result.ids[2].document_id(), 2, "Third item should be 2");
+        assert_eq!(result.position, 0, "Position should be 0");
+    }
+
+    #[test]
+    fn test_pagination_without_anchor_with_offset() {
+        let mut pagination = Pagination::new(3, 5, None, 0);
+
+        for i in 0..10 {
+            let should_continue = pagination.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = pagination.build();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 5, "First item should be 5");
+        assert_eq!(result.ids[1].document_id(), 6, "Second item should be 6");
+        assert_eq!(result.ids[2].document_id(), 7, "Third item should be 7");
+        assert_eq!(result.position, 5, "Position should be 5");
+    }
+
+    #[test]
+    fn test_pagination_without_anchor_partial_results() {
+        let mut pagination = Pagination::new(5, 3, None, 0);
+
+        for i in 0..5 {
+            let should_continue = pagination.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = pagination.build();
+
+        assert_eq!(
+            result.ids.len(),
+            2,
+            "Should collect 2 items (not full limit)"
+        );
+        assert_eq!(result.ids[0].document_id(), 3, "First item should be 3");
+        assert_eq!(result.ids[1].document_id(), 4, "Second item should be 4");
+        assert_eq!(result.position, 3, "Position should be 3");
     }
 }
