@@ -22,6 +22,7 @@ pub struct OpenIdMetadata {
     pub userinfo_endpoint: String,
     pub jwks_uri: String,
     pub registration_endpoint: String,
+    pub device_authorization_endpoint: String,
     pub scopes_supported: Vec<String>,
     pub response_types_supported: Vec<String>,
     pub subject_types_supported: Vec<String>,
@@ -75,6 +76,7 @@ impl OpenIdHandler for Server {
             userinfo_endpoint: format!("{base_url}/auth/userinfo"),
             jwks_uri: format!("{base_url}/auth/jwks.json"),
             registration_endpoint: format!("{base_url}/auth/register"),
+            device_authorization_endpoint: format!("{base_url}/auth/device"),
             response_types_supported: vec![
                 "code".into(),
                 "id_token".into(),
