@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  stalwart:
+    image: stalwartlabs/stalwart:latest
+    container_name: stalwart
+    ports:
+      - "443:443"     # HTTPS 
+      - "8080:8080"   # Admin UI
+      - "25:25"       # SMTP
+      - "587:587"     # Submission
+      - "465:465"     # SMTPS
+      - "143:143"     # IMAP
+      - "993:993"     # IMAPS
+      - "4190:4190"   # Sieve
+      - "110:110"     # POP3
+      - "995:995"     # POP3S
+    volumes:
+      - ./stalwart-data:/opt/stalwart
+    restart: unless-stopped
