@@ -90,6 +90,7 @@ pub struct WebhookTracer {
     pub discard_after: Duration,
     pub tls_allow_invalid_certs: bool,
     pub headers: HeaderMap,
+    pub batch_size: usize,
 }
 
 // SPDX-SnippetBegin
@@ -751,6 +752,20 @@ fn parse_webhook(
     let mut headers = parse_http_headers(config, ("webhook", id));
     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
 
+    // Parse batch size with validation
+    let batch_size = config
+        .property_or_default::<usize>(("webhook", id, "batch-size"), "100")
+        .unwrap_or(100);
+    let batch_size = if batch_size >= 1 {
+        batch_size
+    } else {
+        config.new_build_warning(
+            ("webhook", id, "batch-size"),
+            "Invalid batch size, using default",
+        );
+        100
+    };
+
     // Build tracer
     let mut tracer = TelemetrySubscriber {
         id: format!("w_{id}"),
@@ -777,6 +792,7 @@ fn parse_webhook(
             discard_after: config
                 .property_or_default(("webhook", id, "discard-after"), "5m")
                 .unwrap_or_else(|| Duration::from_secs(300)),
+            batch_size,
         }),
     };
 
