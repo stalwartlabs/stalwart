@@ -28,6 +28,7 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
         .await
         .assert_folders([("INBOX", [""]), ("Deleted Items", [""])], true);
 
+
     // Create folders
     imap.send("CREATE \"Tofu\"").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
@@ -324,6 +325,48 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
     // Restore Trash folder's original name
     imap.send("RENAME \"Recycle Bin\" \"Deleted Items\"").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    let mut imap_group = ImapConnection::connect(b"_z ").await;
+    imap_group.send("AUTHENTICATE PLAIN {40+}\r\nAGphbmUuc21pdGhAZXhhbXBsZS5jb20Ac2VjcmV0")
+        .await;
+    imap_group.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    imap_group.send("CREATE \"Shared Folders/support@example.com/INBOX/Test\"").await;
+    imap_group.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    imap_group.send("CREATE \"Shared Folders/support@example.com/Test\"").await;
+    imap_group.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    // Uncomment to list folders to stdout
+    /*imap_group.send("LIST \"\" \"*\"").await;
+    let res = imap_group.read(Type::Tagged).await;
+    println!("{:#?}", res);*/
+
+    imap_group.send("LIST \"\" \"*\"").await;
+    imap_group.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_folders(
+            [
+                ("INBOX", [""]),
+                ("Deleted Items", [""]),
+                ("Drafts", [""]),
+                ("Junk Mail", [""]),
+                ("Sent Items", [""]),
+                ("Shared Folders", [""]),
+                ("Shared Folders/support@example.com", [""]),
+                ("Shared Folders/support@example.com/Deleted Items", [""]),
+                ("Shared Folders/support@example.com/Drafts", [""]),
+                ("Shared Folders/support@example.com/INBOX", [""]),
+                ("Shared Folders/support@example.com/INBOX/Test", [""]),
+                ("Shared Folders/support@example.com/Junk Mail", [""]),
+                ("Shared Folders/support@example.com/Sent Items", [""]),
+                ("Shared Folders/support@example.com/Test", [""]), // This folder should have been created
+                //("Shared Folders/support@example.com/Shared Folders", [""]),
+                //("Shared Folders/support@example.com/Shared Folders/support@example.com", [""]),
+                //("Shared Folders/support@example.com/Shared Folders/support@example.com/Test", [""]),
+            ],
+            true,
+        );
 }
 
 fn mailbox_matches_pattern() {
