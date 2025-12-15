@@ -182,7 +182,7 @@ jobs:
           echo "checksum=$(yq -p toml -oy '.package[] | select((.source | contains("")) or (.checksum | contains("")))' Cargo.lock | sha256sum | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Cache apt
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: apt-cache
         with:
           path: |
@@ -191,7 +191,7 @@ jobs:
           key: apt-cache-${{ hashFiles('Dockerfile.build') }}
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: cargo-cache
         with:
           path: |
