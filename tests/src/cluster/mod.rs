@@ -9,6 +9,7 @@ use crate::{
     directory::internal::TestInternalDirectory,
     imap::{ImapConnection, Type},
     jmap::server::enterprise::EnterpriseCore,
+    store::cleanup::store_destroy,
 };
 use ahash::AHashMap;
 use common::{
@@ -103,7 +104,7 @@ async fn init_cluster_tests(delete_if_exists: bool) -> ClusterTest {
 
     let store = servers.first().unwrap().store().clone();
     if delete_if_exists {
-        store.destroy().await;
+        store_destroy(&store).await;
     }
 
     // Create test users

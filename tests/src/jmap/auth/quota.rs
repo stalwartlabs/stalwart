@@ -6,11 +6,13 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest, emails_purge_tombstoned, mail::delivery::SmtpConnection},
+    jmap::{JMAPTest, mail::delivery::SmtpConnection, wait_for_index},
     smtp::queue::QueuedEvents,
+    store::cleanup::store_blob_expire_all,
 };
 use common::config::smtp::queue::QueueName;
-use email::mailbox::INBOX_ID;
+use email::{cache::MessageCacheFetch, mailbox::INBOX_ID};
+use http::management::stores::recalculate_quota;
 use jmap::blob::upload::DISABLE_UPLOAD_QUOTA;
 use jmap_client::{
     core::set::{SetErrorType, SetObject},
@@ -18,7 +20,7 @@ use jmap_client::{
 };
 use serde_json::json;
 use smtp::queue::spool::SmtpSpool;
-use types::{collection::Collection, id::Id};
+use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running quota tests...");
@@ -42,7 +44,7 @@ pub async fn test(params: &mut JMAPTest) {
     server.inner.cache.access_tokens.clear();
 
     // Delete temporary blobs from previous tests
-    server.core.storage.data.blob_expire_all().await;
+    store_blob_expire_all(&server.core.storage.data).await;
 
     // Test temporary blob quota (3 files)
     DISABLE_UPLOAD_QUOTA.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -65,7 +67,7 @@ pub async fn test(params: &mut JMAPTest) {
         jmap_client::Error::Problem(err) if err.detail().unwrap().contains("quota") => (),
         other => panic!("Unexpected error: {:?}", other),
     }
-    server.core.storage.data.blob_expire_all().await;
+    store_blob_expire_all(&server.core.storage.data).await;
 
     // Test temporary blob quota (50000 bytes)
     for i in 0..2 {
@@ -86,7 +88,7 @@ pub async fn test(params: &mut JMAPTest) {
         jmap_client::Error::Problem(err) if err.detail().unwrap().contains("quota") => (),
         other => panic!("Unexpected error: {:?}", other),
     }
-    server.core.storage.data.blob_expire_all().await;
+    store_blob_expire_all(&server.core.storage.data).await;
 
     // Test JMAP Quotas extension
     let response = account
@@ -158,7 +160,9 @@ pub async fn test(params: &mut JMAPTest) {
     for message_id in message_ids {
         client.email_destroy(&message_id).await.unwrap();
     }
-    emails_purge_tombstoned(&server).await;
+
+    // Wait for pending index tasks
+    wait_for_index(&server).await;
     assert_eq!(
         server
             .get_used_quota(account.id().document_id())
@@ -207,8 +211,7 @@ pub async fn test(params: &mut JMAPTest) {
         .get_used_quota(account.id().document_id())
         .await
         .unwrap();
-    server
-        .recalculate_quota(account.id().document_id())
+    recalculate_quota(&server, account.id().document_id())
         .await
         .unwrap();
     assert_eq!(
@@ -223,7 +226,8 @@ pub async fn test(params: &mut JMAPTest) {
     for message_id in message_ids {
         client.email_destroy(&message_id).await.unwrap();
     }
-    emails_purge_tombstoned(&server).await;
+    // Wait for pending index tasks
+    wait_for_index(&server).await;
     assert_eq!(
         server
             .get_used_quota(account.id().document_id())
@@ -286,7 +290,8 @@ pub async fn test(params: &mut JMAPTest) {
     for message_id in message_ids {
         client.email_destroy(&message_id).await.unwrap();
     }
-    emails_purge_tombstoned(&server).await;
+    // Wait for pending index tasks
+    wait_for_index(&server).await;
     assert_eq!(
         server
             .get_used_quota(account.id().document_id())
@@ -318,10 +323,11 @@ pub async fn test(params: &mut JMAPTest) {
     assert!(quota > 0 && quota <= 1024, "Quota is {}", quota);
     assert_eq!(
         server
-            .get_document_ids(account.id().document_id(), Collection::Email)
+            .get_cached_messages(account.id().document_id())
             .await
             .unwrap()
-            .unwrap()
+            .emails
+            .items
             .len(),
         1,
     );

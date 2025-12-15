@@ -30,7 +30,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Map, Value};
 use std::{collections::hash_map::Entry, future::Future};
-use store::ahash::AHashMap;
+use store::{ValueKey, ahash::AHashMap, write::{AlignedBytes, Archive}};
 use trc::AddContext;
 use types::{
     TimeRange,
@@ -178,7 +178,12 @@ impl PrincipalGetAvailability for Server {
                 // Fetch event
                 let document_id = resource.document_id;
                 let Some(archive) = self
-                    .get_archive(account_id, Collection::CalendarEvent, document_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        account_id,
+                        Collection::CalendarEvent,
+                        document_id,
+                    ))
                     .await
                     .caused_by(trc::location!())?
                 else {

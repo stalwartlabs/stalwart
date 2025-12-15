@@ -15,7 +15,7 @@ use common::{
     config::spamfilter::{DnsBlServer, Element, IpResolver, Location},
     expr::functions::ResolveVariable,
 };
-use compact_str::CompactString;
+
 use mail_auth::{Error, common::resolver::IntoFqdn};
 use trc::SpamEvent;
 
@@ -81,10 +81,10 @@ async fn is_dnsbl(
     resolver: SpamFilterResolver<'_, impl ResolveVariable>,
     element: Element,
     checks: &mut usize,
-) -> Option<CompactString> {
+) -> Option<String> {
     let time = Instant::now();
     let zone = server
-        .eval_if::<CompactString, _>(&config.zone, &resolver, resolver.ctx.input.span_id)
+        .eval_if::<String, _>(&config.zone, &resolver, resolver.ctx.input.span_id)
         .await?;
 
     #[cfg(feature = "test_mode")]

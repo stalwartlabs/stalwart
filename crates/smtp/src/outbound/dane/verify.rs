@@ -19,7 +19,7 @@ pub trait TlsaVerify {
         session_id: u64,
         hostname: &str,
         certificates: Option<&[CertificateDer<'_>]>,
-    ) -> Result<(), Status<HostResponse<String>, ErrorDetails>>;
+    ) -> Result<(), Status<HostResponse<Box<str>>, ErrorDetails>>;
 }
 
 impl TlsaVerify for Tlsa {
@@ -28,7 +28,7 @@ impl TlsaVerify for Tlsa {
         session_id: u64,
         hostname: &str,
         certificates: Option<&[CertificateDer<'_>]>,
-    ) -> Result<(), Status<HostResponse<String>, ErrorDetails>> {
+    ) -> Result<(), Status<HostResponse<Box<str>>, ErrorDetails>> {
         let certificates = if let Some(certificates) = certificates {
             certificates
         } else {

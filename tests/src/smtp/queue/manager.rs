@@ -175,7 +175,7 @@ pub fn new_message(queue_id: u64) -> MessageWrapper {
             flags: 0,
             env_id: None,
             priority: 0,
-            quota_keys: vec![],
+            quota_keys: Default::default(),
             blob_hash: Default::default(),
             received_from_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             received_via_port: 0,

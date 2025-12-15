@@ -1,8 +1,7 @@
 [package]
 name = "common"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
-resolver = "2"
 build = "build.rs"
 
 [dependencies]
@@ -74,6 +73,7 @@ rkyv = { version = "0.8.10", features = ["little_endian"] }
 indexmap = "2.7.1"
 tinyvec = "1.9.0"
 compact_str = { version = "0.9.0", features = ["rkyv", "serde"] }
+lz4_flex = { version = "0.12", features = ["frame"], default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 privdrop = "0.5.3"

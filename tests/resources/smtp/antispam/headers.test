@@ -55,6 +55,13 @@ Subject:test
 
 Test
 <!-- NEXT TEST -->
+expect 
+
+Subject:
+ test
+
+Test
+<!-- NEXT TEST -->
 expect MAILLIST
 
 List-Archive: 1

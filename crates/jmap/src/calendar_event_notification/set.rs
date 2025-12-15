@@ -14,7 +14,7 @@ use jmap_proto::{
     request::IntoValid,
     types::state::State,
 };
-use store::write::BatchBuilder;
+use store::{ValueKey, write::{AlignedBytes, Archive, BatchBuilder}};
 use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
 
@@ -72,11 +72,12 @@ impl CalendarEventNotificationSet for Server {
             };
 
             let _event = if let Some(event) = self
-                .get_archive(
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEventNotification,
                     document_id,
-                )
+                ))
                 .await?
             {
                 event

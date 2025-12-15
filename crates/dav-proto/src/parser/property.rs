@@ -4,24 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{tokenizer::Tokenizer, DavParser, RawElement, Token, XmlValueParser};
+use super::{DavParser, RawElement, Token, XmlValueParser, tokenizer::Tokenizer};
 use crate::schema::{
+    Attribute, AttributeValue, Element, NamedElement, Namespace,
     property::{
         CalDavProperty, CalDavPropertyName, CalendarData, CardDavProperty, CardDavPropertyName,
         Comp, DavProperty, DavValue, PrincipalProperty, ResourceType, WebDavProperty,
     },
     request::{DavPropertyValue, VCardPropertyWithGroup},
     response::List,
-    Attribute, AttributeValue, Element, NamedElement, Namespace,
 };
 use calcard::{
+    Entry, Parser,
     common::{IanaParse, PartialDateTime},
     icalendar::{ICalendar, ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardProperty},
-    Entry, Parser,
 };
 use mail_parser::DateTime;
-use types::{dead_property::DeadProperty, TimeRange};
+use types::{TimeRange, dead_property::DeadProperty};
 
 impl Tokenizer<'_> {
     pub(crate) fn collect_properties(
@@ -200,16 +200,15 @@ impl Tokenizer<'_> {
                     if depth == 0 {
                         break;
                     }
-                    if let Some(last_component) = components.pop() {
-                        if last_component != ICalendarComponentType::VCalendar
-                            && !matches!(data.properties.last(), Some(CalDavPropertyName { component: Some(component), .. }) if component == &last_component)
-                        {
-                            data.properties.push(CalDavPropertyName {
-                                component: Some(last_component),
-                                name: None,
-                                no_value: false,
-                            });
-                        }
+                    if let Some(last_component) = components.pop()
+                        && last_component != ICalendarComponentType::VCalendar
+                        && !matches!(data.properties.last(), Some(CalDavPropertyName { component: Some(component), .. }) if component == &last_component)
+                    {
+                        data.properties.push(CalDavPropertyName {
+                            component: Some(last_component),
+                            name: None,
+                            no_value: false,
+                        });
                     }
                 }
                 Token::Eof => {

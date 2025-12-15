@@ -6,11 +6,11 @@
 
 use imap_proto::ResponseType;
 
-use crate::imap::{AssertResult, expand_uid_list};
+use crate::imap::{AssertResult, IMAPTest, expand_uid_list};
 
 use super::{ImapConnection, Type, append::build_messages};
 
-pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
+pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, handle: &IMAPTest) {
     println!("Running THREAD tests...");
 
     // Create test messages
@@ -80,12 +80,15 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
         .assert_contains("(5 6 7 8)")
         .assert_contains("(9 10 11 12)");
 
-    imap.send("THREAD REFERENCES UTF-8 SUBJECT T1").await;
-    imap.assert_read(Type::Tagged, ResponseType::Ok)
-        .await
-        .assert_contains("(5 6 7 8)")
-        .assert_count("(1 2 3 4)", 0)
-        .assert_count("(9 10 11 12)", 0);
+    // Filter by subject (mySQL does not support searching for short keywords)
+    if !handle.server.search_store().is_mysql() {
+        imap.send("THREAD REFERENCES UTF-8 SUBJECT T1").await;
+        imap.assert_read(Type::Tagged, ResponseType::Ok)
+            .await
+            .assert_contains("(5 6 7 8)")
+            .assert_count("(1 2 3 4)", 0)
+            .assert_count("(9 10 11 12)", 0);
+    }
 
     // Filter by threadId and messageId
     imap.send(&format!(

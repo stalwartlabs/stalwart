@@ -6,17 +6,15 @@
 
 use std::net::IpAddr;
 
-use compact_str::CompactString;
-
 use crate::{Email, Hostname};
 
 impl Hostname {
     pub fn new(host: &str) -> Self {
-        let mut fqdn = CompactString::from_str_to_lowercase(host.trim_end_matches('.'));
+        let mut fqdn = host.trim_end_matches('.').to_lowercase();
 
         // Decode punycode
         if fqdn.contains("xn--") {
-            let mut decoded = CompactString::with_capacity(fqdn.len());
+            let mut decoded = String::with_capacity(fqdn.len());
 
             for part in fqdn.split('.') {
                 if !decoded.is_empty() {
@@ -63,7 +61,7 @@ impl Hostname {
 
 impl Email {
     pub fn new(address: &str) -> Self {
-        let address = CompactString::from_str_to_lowercase(address);
+        let address = address.to_lowercase();
         let (local_part, domain) = address.rsplit_once('@').unwrap_or_default();
 
         Email {

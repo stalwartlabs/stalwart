@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::JmapMethods;
+use crate::api::query::QueryResponseBuilder;
 use common::{Server, auth::AccessToken};
 use directory::{Permission, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use http_proto::HttpSessionData;
@@ -14,9 +14,12 @@ use jmap_proto::{
     types::state::State,
 };
 use std::future::Future;
-use store::{query::ResultSet, roaring::RoaringBitmap};
+use store::{
+    roaring::RoaringBitmap,
+    search::{SearchFilter, SearchQuery},
+    write::SearchIndex,
+};
 use trc::AddContext;
-use types::collection::Collection;
 
 pub trait PrincipalQuery: Sync + Send {
     fn principal_query(
@@ -42,12 +45,6 @@ impl PrincipalQuery for Server {
                 .details("The administrator has disabled directory queries.".to_string()));
         }
 
-        let mut result_set = ResultSet {
-            account_id: request.account_id.document_id(),
-            collection: Collection::Principal,
-            results: RoaringBitmap::new(),
-        };
-        let mut is_set = true;
         let principal_ids = self
             .store()
             .list_principals(
@@ -70,6 +67,7 @@ impl PrincipalQuery for Server {
             .map(|p| p.id())
             .collect::<RoaringBitmap>();
 
+        let mut filters = Vec::with_capacity(request.filter.len());
         for cond in std::mem::take(&mut request.filter) {
             match cond {
                 Filter::Property(cond) => match cond {
@@ -81,74 +79,52 @@ impl PrincipalQuery for Server {
                             .query(QueryParams::name(name.as_str()).with_return_member_of(false))
                             .await?
                         {
-                            if is_set || result_set.results.contains(principal.id()) {
-                                result_set.results =
-                                    RoaringBitmap::from_sorted_iter([principal.id()]).unwrap();
-                            } else {
-                                result_set.results = RoaringBitmap::new();
-                            }
-                        } else {
-                            result_set.results = RoaringBitmap::new();
+                            filters.push(SearchFilter::is_in_set(
+                                RoaringBitmap::from_sorted_iter([principal.id()]).unwrap(),
+                            ));
                         }
-                        is_set = false;
                     }
                     PrincipalFilter::Email(email) => {
-                        let mut ids = RoaringBitmap::new();
                         if let Some(id) = self
                             .email_to_id(self.directory(), &email, session.session_id)
                             .await?
                         {
-                            ids.insert(id);
-                        }
-                        if is_set {
-                            result_set.results = ids;
-                            is_set = false;
-                        } else {
-                            result_set.results &= ids;
+                            filters.push(SearchFilter::is_in_set(
+                                RoaringBitmap::from_sorted_iter([id]).unwrap(),
+                            ));
                         }
                     }
                     PrincipalFilter::AccountIds(ids) => {
-                        let ids = ids
-                            .into_iter()
-                            .filter_map(|id| {
-                                let id = id.document_id();
-                                if principal_ids.contains(id) {
-                                    Some(id)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<RoaringBitmap>();
-                        if is_set {
-                            result_set.results = ids;
-                            is_set = false;
-                        } else {
-                            result_set.results &= ids;
-                        }
+                        filters.push(SearchFilter::is_in_set(
+                            ids.into_iter()
+                                .filter_map(|id| {
+                                    let id = id.document_id();
+                                    if principal_ids.contains(id) {
+                                        Some(id)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<RoaringBitmap>(),
+                        ));
                     }
                     PrincipalFilter::Text(text) => {
-                        let ids = self
-                            .store()
-                            .list_principals(
-                                Some(text.as_str()),
-                                access_token.tenant.map(|t| t.id),
-                                &[],
-                                false,
-                                0,
-                                0,
-                            )
-                            .await?
-                            .items
-                            .into_iter()
-                            .map(|p| p.id())
-                            .collect::<RoaringBitmap>();
-
-                        if is_set {
-                            result_set.results = ids;
-                            is_set = false;
-                        } else {
-                            result_set.results &= ids;
-                        }
+                        filters.push(SearchFilter::is_in_set(
+                            self.store()
+                                .list_principals(
+                                    Some(text.as_str()),
+                                    access_token.tenant.map(|t| t.id),
+                                    &[],
+                                    false,
+                                    0,
+                                    0,
+                                )
+                                .await?
+                                .items
+                                .into_iter()
+                                .map(|p| p.id())
+                                .collect::<RoaringBitmap>(),
+                        ));
                     }
                     PrincipalFilter::Type(principal_type) => {
                         let typ = match principal_type {
@@ -159,28 +135,22 @@ impl PrincipalQuery for Server {
                             PrincipalType::Other => Type::Other,
                         };
 
-                        let ids = self
-                            .store()
-                            .list_principals(
-                                None,
-                                access_token.tenant.map(|t| t.id),
-                                &[typ],
-                                false,
-                                0,
-                                0,
-                            )
-                            .await?
-                            .items
-                            .into_iter()
-                            .map(|p| p.id())
-                            .collect::<RoaringBitmap>();
-
-                        if is_set {
-                            result_set.results = ids;
-                            is_set = false;
-                        } else {
-                            result_set.results &= ids;
-                        }
+                        filters.push(SearchFilter::is_in_set(
+                            self.store()
+                                .list_principals(
+                                    None,
+                                    access_token.tenant.map(|t| t.id),
+                                    &[typ],
+                                    false,
+                                    0,
+                                    0,
+                                )
+                                .await?
+                                .items
+                                .into_iter()
+                                .map(|p| p.id())
+                                .collect::<RoaringBitmap>(),
+                        ));
                     }
                     other => {
                         return Err(trc::JmapEvent::UnsupportedFilter
@@ -188,28 +158,40 @@ impl PrincipalQuery for Server {
                             .details(other.to_string()));
                     }
                 },
-                Filter::And | Filter::Or | Filter::Not | Filter::Close => {
-                    return Err(trc::JmapEvent::UnsupportedFilter
-                        .into_err()
-                        .details("Logical operators are not supported"));
+                Filter::And => {
+                    filters.push(SearchFilter::And);
+                }
+                Filter::Or => {
+                    filters.push(SearchFilter::Or);
+                }
+                Filter::Not => {
+                    filters.push(SearchFilter::Not);
+                }
+                Filter::Close => {
+                    filters.push(SearchFilter::End);
                 }
             }
         }
 
-        if is_set {
-            result_set.results = principal_ids;
-        } else {
-            result_set.results &= principal_ids;
+        let results = SearchQuery::new(SearchIndex::InMemory)
+            .with_filters(filters)
+            .with_mask(principal_ids)
+            .filter()
+            .into_bitmap();
+
+        let mut response = QueryResponseBuilder::new(
+            results.len() as usize,
+            self.core.jmap.query_max_results,
+            State::Initial,
+            &request,
+        );
+
+        for document_id in results {
+            if !response.add(0, document_id) {
+                break;
+            }
         }
 
-        let (response, paginate) = self
-            .build_query_response(result_set.results.len() as usize, State::Initial, &request)
-            .await?;
-
-        if let Some(paginate) = paginate {
-            self.sort(result_set, Vec::new(), paginate, response).await
-        } else {
-            Ok(response)
-        }
+        response.build()
     }
 }

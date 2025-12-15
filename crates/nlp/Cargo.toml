@@ -1,14 +1,11 @@
 [package]
 name = "nlp"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
-resolver = "2"
 
 [dependencies]
 utils = { path =  "../utils" }
 xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
-farmhash = "1.1.5"
-siphasher = "1.0"
 serde = { version = "1.0", features = ["derive"]}
 nohash = "0.2.0"
 ahash = { version = "0.8.3", features = ["serde"] }
@@ -18,9 +15,10 @@ jieba-rs = "0.8" # Chinese stemmer
 lru-cache = "0.1.2"
 parking_lot = "0.12.1"
 psl = "2"
-radix_trie = "0.3"
 maplit = "1.0.2"
 hashify = "0.2.1"
+rand = "0.9.2"
+rkyv = { version = "0.8.10", features = ["little_endian"] }
 
 [features]
 test_mode = []

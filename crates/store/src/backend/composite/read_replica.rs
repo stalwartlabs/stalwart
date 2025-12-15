@@ -8,19 +8,17 @@
  *
  */
 
+use crate::{
+    Deserialize, IterateParams, Key, Store, Stores, ValueKey,
+    search::{IndexDocument, SearchComparator, SearchDocumentId, SearchFilter, SearchQuery},
+    write::{AssignedIds, Batch, SearchIndex, ValueClass},
+};
 use std::{
     future::Future,
     ops::Range,
     sync::atomic::{AtomicUsize, Ordering},
 };
-
-use roaring::RoaringBitmap;
 use utils::config::{Config, utils::AsKey};
-
-use crate::{
-    BitmapKey, Deserialize, IterateParams, Key, Store, Stores, ValueKey,
-    write::{AssignedIds, Batch, BitmapClass, ValueClass},
-};
 
 pub struct SQLReadReplica {
     primary: Store,
@@ -33,7 +31,8 @@ impl SQLReadReplica {
         config: &mut Config,
         prefix: impl AsKey,
         stores: &Stores,
-        create_tables: bool,
+        create_store_tables: bool,
+        create_search_tables: bool,
     ) -> Option<Self> {
         let prefix = prefix.as_key();
         let primary_id = config.value_require((&prefix, "primary"))?.to_string();
@@ -80,12 +79,12 @@ impl SQLReadReplica {
             }
         }
         if !replicas.is_empty() {
-            if create_tables {
+            if create_store_tables {
                 let result = match &primary {
                     #[cfg(feature = "postgres")]
-                    Store::PostgreSQL(store) => store.create_tables().await,
+                    Store::PostgreSQL(store) => store.create_storage_tables().await,
                     #[cfg(feature = "mysql")]
-                    Store::MySQL(store) => store.create_tables().await,
+                    Store::MySQL(store) => store.create_storage_tables().await,
                     _ => panic!("Invalid store type"),
                 };
 
@@ -93,6 +92,23 @@ impl SQLReadReplica {
                     config.new_build_error(
                         (&prefix, "primary"),
                         format!("Failed to create tables: {err}"),
+                    );
+                }
+            }
+
+            if create_search_tables {
+                let result = match &primary {
+                    #[cfg(feature = "postgres")]
+                    Store::PostgreSQL(store) => store.create_search_tables().await,
+                    #[cfg(feature = "mysql")]
+                    Store::MySQL(store) => store.create_search_tables().await,
+                    _ => panic!("Invalid store type"),
+                };
+
+                if let Err(err) = result {
+                    config.new_build_warning(
+                        (&prefix, "primary"),
+                        format!("Failed to create search tables: {err}"),
                     );
                 }
             }
@@ -192,26 +208,6 @@ impl SQLReadReplica {
         .await
     }
 
-    pub async fn get_bitmap(
-        &self,
-        key: BitmapKey<BitmapClass>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        self.run_op(move |store| {
-            let key = key.clone();
-
-            async move {
-                match store {
-                    #[cfg(feature = "postgres")]
-                    Store::PostgreSQL(store) => store.get_bitmap(key).await,
-                    #[cfg(feature = "mysql")]
-                    Store::MySQL(store) => store.get_bitmap(key).await,
-                    _ => panic!("Invalid store type"),
-                }
-            }
-        })
-        .await
-    }
-
     pub async fn iterate<T: Key>(
         &self,
         params: IterateParams<T>,
@@ -287,6 +283,41 @@ impl SQLReadReplica {
             Store::PostgreSQL(store) => store.purge_store().await,
             #[cfg(feature = "mysql")]
             Store::MySQL(store) => store.purge_store().await,
+            _ => panic!("Invalid store type"),
+        }
+    }
+
+    pub async fn index(&self, documents: Vec<IndexDocument>) -> trc::Result<()> {
+        match &self.primary {
+            #[cfg(feature = "postgres")]
+            Store::PostgreSQL(store) => store.index(documents).await,
+            #[cfg(feature = "mysql")]
+            Store::MySQL(store) => store.index(documents).await,
+            _ => panic!("Invalid store type"),
+        }
+    }
+
+    pub async fn unindex(&self, query: SearchQuery) -> trc::Result<u64> {
+        match &self.primary {
+            #[cfg(feature = "postgres")]
+            Store::PostgreSQL(store) => store.unindex(query).await,
+            #[cfg(feature = "mysql")]
+            Store::MySQL(store) => store.unindex(query).await,
+            _ => panic!("Invalid store type"),
+        }
+    }
+
+    pub async fn query<R: SearchDocumentId>(
+        &self,
+        index: SearchIndex,
+        filters: &[SearchFilter],
+        sort: &[SearchComparator],
+    ) -> trc::Result<Vec<R>> {
+        match &self.primary {
+            #[cfg(feature = "postgres")]
+            Store::PostgreSQL(store) => store.query(index, filters, sort).await,
+            #[cfg(feature = "mysql")]
+            Store::MySQL(store) => store.query(index, filters, sort).await,
             _ => panic!("Invalid store type"),
         }
     }

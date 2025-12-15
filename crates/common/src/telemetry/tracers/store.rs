@@ -8,12 +8,13 @@
  *
  */
 
-use std::{future::Future, time::Duration};
-
+use crate::config::telemetry::StoreTracer;
 use ahash::{AHashMap, AHashSet};
+use std::{collections::HashSet, future::Future, time::Duration};
 use store::{
-    Deserialize, IterateParams, Store, U64_LEN, ValueKey,
-    write::{BatchBuilder, TelemetryClass, ValueClass, key::DeserializeBigEndian},
+    Deserialize, SearchStore, Store, ValueKey,
+    search::{IndexDocument, SearchField, SearchFilter, SearchQuery, TracingSearchField},
+    write::{BatchBuilder, SearchIndex, TaskEpoch, TaskQueueClass, TelemetryClass, ValueClass},
 };
 use trc::{
     AddContext, AuthEvent, Event, EventDetails, EventType, Key, MessageIngestEvent,
@@ -22,8 +23,6 @@ use trc::{
     serializers::binary::{deserialize_events, serialize_events},
 };
 use utils::snowflake::SnowflakeIdGenerator;
-
-use crate::config::telemetry::StoreTracer;
 
 const MAX_EVENTS: usize = 2048;
 
@@ -43,44 +42,16 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
                         if events.len() < MAX_EVENTS {
                             events.push(event);
                         }
-                    } else if let Some(events) = active_spans.remove(&span_id) {
-                        let mut queue_ids = AHashSet::new();
-                        let mut values = AHashSet::new();
-
-                        for event in events.iter().chain([span, &event]) {
-                            for (key, value) in &event.keys {
-                                match (key, value) {
-                                    (Key::QueueId, Value::UInt(queue_id)) => {
-                                        queue_ids.insert(*queue_id);
-                                    }
-                                    (
-                                        Key::From | Key::To | Key::Domain | Key::Hostname,
-                                        Value::String(address),
-                                    ) => {
-                                        values.insert(address.clone());
-                                    }
-                                    (Key::To, Value::Array(value)) => {
-                                        for value in value {
-                                            if let Value::String(address) = value {
-                                                values.insert(address.clone());
-                                            }
-                                        }
-                                    }
-                                    (Key::RemoteIp, Value::Ipv4(ip)) => {
-                                        values.insert(ip.to_string().into());
-                                    }
-                                    (Key::RemoteIp, Value::Ipv6(ip)) => {
-                                        values.insert(ip.to_string().into());
-                                    }
-
-                                    _ => {}
-                                }
-                            }
-                        }
-
-                        if !queue_ids.is_empty() {
-                            // Serialize events
-                            batch.set(
+                    } else if let Some(events) = active_spans.remove(&span_id)
+                        && events
+                            .iter()
+                            .chain([span, &event])
+                            .flat_map(|event| event.keys.iter())
+                            .any(|(k, v)| matches!((k, v), (Key::QueueId, Value::UInt(_))))
+                    {
+                        // Serialize events
+                        batch
+                            .set(
                                 ValueClass::Telemetry(TelemetryClass::Span { span_id }),
                                 serialize_events(
                                     [span.as_ref()]
@@ -89,35 +60,17 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
                                         .chain([event.as_ref()].into_iter()),
                                     events.len() + 2,
                                 ),
-                            );
-
-                            // Build index
-                            batch.set(
-                                ValueClass::Telemetry(TelemetryClass::Index {
-                                    span_id,
-                                    value: (span.inner.typ.code() as u16).to_be_bytes().to_vec(),
+                            )
+                            .with_account_id((span_id >> 32) as u32) // TODO: This is hacky, improve
+                            .with_document(span_id as u32)
+                            .set(
+                                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                                    due: TaskEpoch::now(),
+                                    index: SearchIndex::Tracing,
+                                    is_insert: true,
                                 }),
                                 vec![],
                             );
-                            for queue_id in queue_ids {
-                                batch.set(
-                                    ValueClass::Telemetry(TelemetryClass::Index {
-                                        span_id,
-                                        value: queue_id.to_be_bytes().to_vec(),
-                                    }),
-                                    vec![],
-                                );
-                            }
-                            for value in values {
-                                batch.set(
-                                    ValueClass::Telemetry(TelemetryClass::Index {
-                                        span_id,
-                                        value: value.as_bytes().to_vec(),
-                                    }),
-                                    vec![],
-                                );
-                            }
-                        }
                     }
                 }
             }
@@ -132,12 +85,6 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
     });
 }
 
-pub enum TracingQuery {
-    EventType(EventType),
-    QueueId(u64),
-    Keywords(String),
-}
-
 pub trait TracingStore: Sync + Send {
     fn get_span(
         &self,
@@ -147,13 +94,11 @@ pub trait TracingStore: Sync + Send {
         &self,
         span_id: u64,
     ) -> impl Future<Output = trc::Result<Option<Vec<u8>>>> + Send;
-    fn query_spans(
+    fn purge_spans(
         &self,
-        params: &[TracingQuery],
-        from_span_id: u64,
-        to_span_id: u64,
-    ) -> impl Future<Output = trc::Result<Vec<u64>>> + Send;
-    fn purge_spans(&self, period: Duration) -> impl Future<Output = trc::Result<()>> + Send;
+        period: Duration,
+        search_store: Option<&SearchStore>,
+    ) -> impl Future<Output = trc::Result<()>> + Send;
 }
 
 impl TracingStore for Store {
@@ -175,77 +120,11 @@ impl TracingStore for Store {
         .map(|span| span.map(|span| span.0))
     }
 
-    async fn query_spans(
+    async fn purge_spans(
         &self,
-        params: &[TracingQuery],
-        from_span_id: u64,
-        to_span_id: u64,
-    ) -> trc::Result<Vec<u64>> {
-        let mut spans = SpanCollector::Empty;
-        let num_params = params.len();
-
-        for (param_num, param) in params.iter().enumerate() {
-            let (value, exact_len) = match param {
-                TracingQuery::EventType(event) => (
-                    (event.code() as u16).to_be_bytes().to_vec(),
-                    std::mem::size_of::<u16>() + U64_LEN,
-                ),
-                TracingQuery::QueueId(id) => (
-                    id.to_be_bytes().to_vec(),
-                    std::mem::size_of::<u64>() + U64_LEN,
-                ),
-                TracingQuery::Keywords(value) => {
-                    if let Some(value) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-                        (value.as_bytes().to_vec(), value.len() + U64_LEN)
-                    } else {
-                        (value.as_bytes().to_vec(), 0)
-                    }
-                }
-            };
-
-            let mut param_spans = SpanCollector::new(num_params);
-            self.iterate(
-                IterateParams::new(
-                    ValueKey::from(ValueClass::Telemetry(TelemetryClass::Index {
-                        span_id: 0,
-                        value: value.clone(),
-                    })),
-                    ValueKey::from(ValueClass::Telemetry(TelemetryClass::Index {
-                        span_id: u64::MAX,
-                        value,
-                    })),
-                )
-                .no_values(),
-                |key, _| {
-                    if exact_len == 0 || key.len() == exact_len {
-                        let span_id = key
-                            .deserialize_be_u64(key.len() - U64_LEN)
-                            .caused_by(trc::location!())?;
-
-                        if (from_span_id == 0 || span_id >= from_span_id)
-                            && (to_span_id == 0 || span_id <= to_span_id)
-                        {
-                            param_spans.insert(span_id);
-                        }
-                    }
-
-                    Ok(true)
-                },
-            )
-            .await
-            .caused_by(trc::location!())?;
-
-            if param_num == 0 {
-                spans = param_spans;
-            } else if spans.intersect(param_spans) {
-                return Ok(Vec::new());
-            }
-        }
-
-        Ok(spans.into_vec())
-    }
-
-    async fn purge_spans(&self, period: Duration) -> trc::Result<()> {
+        period: Duration,
+        search_store: Option<&SearchStore>,
+    ) -> trc::Result<()> {
         let until_span_id = SnowflakeIdGenerator::from_duration(period).ok_or_else(|| {
             trc::StoreEvent::UnexpectedError
                 .caused_by(trc::location!())
@@ -261,105 +140,17 @@ impl TracingStore for Store {
         .await
         .caused_by(trc::location!())?;
 
-        let mut delete_keys: Vec<ValueClass> = Vec::new();
-        self.iterate(
-            IterateParams::new(
-                ValueKey::from(ValueClass::Telemetry(TelemetryClass::Index {
-                    span_id: 0,
-                    value: vec![],
-                })),
-                ValueKey::from(ValueClass::Telemetry(TelemetryClass::Index {
-                    span_id: u64::MAX,
-                    value: vec![u8::MAX; 16],
-                })),
-            )
-            .no_values(),
-            |key, _| {
-                let span_id = key
-                    .deserialize_be_u64(key.len() - U64_LEN)
-                    .caused_by(trc::location!())?;
-                if span_id < until_span_id {
-                    delete_keys.push(ValueClass::Telemetry(TelemetryClass::Index {
-                        span_id,
-                        value: key[0..key.len() - U64_LEN].to_vec(),
-                    }));
-                }
-
-                Ok(true)
-            },
-        )
-        .await
-        .caused_by(trc::location!())?;
-
-        if !delete_keys.is_empty() {
-            // Commit index
-            let mut batch = BatchBuilder::new();
-
-            for key in delete_keys {
-                if batch.is_large_batch() {
-                    self.write(batch.build_all()).await?;
-                    batch = BatchBuilder::new();
-                }
-                batch.clear(key);
-            }
-
-            if !batch.is_empty() {
-                self.write(batch.build_all()).await?;
-            }
+        if let Some(search_store) = search_store {
+            search_store
+                .unindex(
+                    SearchQuery::new(SearchIndex::Tracing)
+                        .with_filter(SearchFilter::lt(SearchField::Id, until_span_id)),
+                )
+                .await
+                .caused_by(trc::location!())?;
         }
 
         Ok(())
-    }
-}
-
-enum SpanCollector {
-    Vec(Vec<u64>),
-    HashSet(AHashSet<u64>),
-    Empty,
-}
-
-impl SpanCollector {
-    fn new(num_params: usize) -> Self {
-        if num_params == 1 {
-            Self::Vec(Vec::new())
-        } else {
-            Self::HashSet(AHashSet::new())
-        }
-    }
-
-    fn insert(&mut self, span_id: u64) {
-        match self {
-            Self::Vec(vec) => vec.push(span_id),
-            Self::HashSet(set) => {
-                set.insert(span_id);
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    fn into_vec(self) -> Vec<u64> {
-        match self {
-            Self::Vec(mut vec) => {
-                vec.sort_unstable_by(|a, b| b.cmp(a));
-                vec
-            }
-            Self::HashSet(set) => {
-                let mut vec: Vec<u64> = set.into_iter().collect();
-                vec.sort_unstable_by(|a, b| b.cmp(a));
-                vec
-            }
-            Self::Empty => Vec::new(),
-        }
-    }
-
-    fn intersect(&mut self, other_span: Self) -> bool {
-        match (self, other_span) {
-            (Self::HashSet(set), Self::HashSet(other_set)) => {
-                set.retain(|span_id| other_set.contains(span_id));
-                set.is_empty()
-            }
-            _ => unreachable!(),
-        }
     }
 }
 
@@ -442,4 +233,82 @@ impl Deserialize for RawSpan {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
         Ok(Self(bytes.to_vec()))
     }
+}
+
+pub fn build_span_document(
+    span_id: u64,
+    events: Vec<Event<EventDetails>>,
+    index_fields: &AHashSet<SearchField>,
+) -> IndexDocument {
+    let mut document = IndexDocument::new(SearchIndex::Tracing).with_id(span_id);
+    let mut keywords = HashSet::new();
+
+    for (idx, event) in events.into_iter().enumerate() {
+        if idx == 0
+            && (index_fields.is_empty()
+                || index_fields.contains(&TracingSearchField::EventType.into()))
+        {
+            document.index_unsigned(TracingSearchField::EventType, event.inner.typ.code());
+        }
+
+        for (key, value) in event.keys {
+            match (key, value) {
+                (Key::QueueId, Value::UInt(queue_id)) => {
+                    if index_fields.is_empty()
+                        || index_fields.contains(&TracingSearchField::QueueId.into())
+                    {
+                        document.index_unsigned(TracingSearchField::QueueId, queue_id);
+                    }
+                }
+                (Key::From | Key::To | Key::Domain | Key::Hostname, Value::String(address)) => {
+                    if index_fields.is_empty()
+                        || index_fields.contains(&TracingSearchField::Keywords.into())
+                    {
+                        keywords.insert(address.to_string());
+                    }
+                }
+                (Key::To, Value::Array(value)) => {
+                    if index_fields.is_empty()
+                        || index_fields.contains(&TracingSearchField::Keywords.into())
+                    {
+                        for value in value {
+                            if let Value::String(address) = value {
+                                keywords.insert(address.to_string());
+                            }
+                        }
+                    }
+                }
+                (Key::RemoteIp, Value::Ipv4(ip)) => {
+                    if index_fields.is_empty()
+                        || index_fields.contains(&TracingSearchField::Keywords.into())
+                    {
+                        keywords.insert(ip.to_string());
+                    }
+                }
+                (Key::RemoteIp, Value::Ipv6(ip)) => {
+                    if index_fields.is_empty()
+                        || index_fields.contains(&TracingSearchField::Keywords.into())
+                    {
+                        keywords.insert(ip.to_string());
+                    }
+                }
+
+                _ => {}
+            }
+        }
+    }
+
+    if !keywords.is_empty() {
+        let mut keyword_str = String::new();
+        for keyword in keywords {
+            if !keyword_str.is_empty() {
+                keyword_str.push(' ');
+            }
+            keyword_str.push_str(&keyword);
+        }
+
+        document.index_keyword(TracingSearchField::Keywords, keyword_str);
+    }
+
+    document
 }

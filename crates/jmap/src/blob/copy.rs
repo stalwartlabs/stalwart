@@ -13,10 +13,7 @@ use jmap_proto::{
     request::IntoValid,
 };
 use std::future::Future;
-use store::{
-    SerializeInfallible,
-    write::{BatchBuilder, BlobOp, now},
-};
+use store::write::{BatchBuilder, BlobLink, BlobOp, now};
 use trc::AddContext;
 use types::blob::{BlobClass, BlobId};
 use utils::map::vec_map::VecMap;
@@ -74,11 +71,11 @@ impl BlobCopy for Server {
                 let mut batch = BatchBuilder::new();
                 let until = now() + self.core.jmap.upload_tmp_ttl;
                 batch.with_account_id(account_id).set(
-                    BlobOp::Reserve {
-                        until,
+                    BlobOp::Link {
                         hash: blob_id.hash.clone(),
+                        to: BlobLink::Temporary { until },
                     },
-                    0u32.serialize(),
+                    vec![],
                 );
                 self.store()
                     .write(batch.build_all())

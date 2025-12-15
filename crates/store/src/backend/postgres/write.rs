@@ -6,9 +6,10 @@
 
 use super::{PostgresStore, into_error};
 use crate::{
-    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA, U64_LEN,
+    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
+    backend::postgres::into_pool_error,
     write::{
-        AssignedIds, Batch, BitmapClass, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, Operation,
+        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
         ValueClass, ValueOp,
     },
 };
@@ -22,12 +23,12 @@ use tokio_postgres::{IsolationLevel, error::SqlState};
 enum CommitError {
     Postgres(tokio_postgres::Error),
     Internal(trc::Error),
-    Retry,
+    //Retry,
 }
 
 impl PostgresStore {
     pub(crate) async fn write(&self, mut batch: Batch<'_>) -> trc::Result<AssignedIds> {
-        let mut conn = self.conn_pool.get().await.map_err(into_error)?;
+        let mut conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let start = Instant::now();
         let mut retry_count = 0;
 
@@ -47,12 +48,13 @@ impl PostgresStore {
                             Some(&SqlState::UNIQUE_VIOLATION) => {
                                 return Err(trc::StoreEvent::AssertValueFailed
                                     .into_err()
+                                    .reason("Unique violation")
                                     .caused_by(trc::location!()));
                             }
                             _ => return Err(into_error(err)),
                         },
                         CommitError::Internal(err) => return Err(err),
-                        CommitError::Retry => {
+                        /*CommitError::Retry => {
                             if retry_count > MAX_COMMIT_ATTEMPTS
                                 || start.elapsed() > MAX_COMMIT_TIME
                             {
@@ -60,7 +62,7 @@ impl PostgresStore {
                                     .into_err()
                                     .caused_by(trc::location!()));
                             }
-                        }
+                        }*/
                     }
 
                     let backoff = rand::rng().random_range(50..=300);
@@ -113,7 +115,7 @@ impl PostgresStore {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.last_change_id(account_id)?;
+                        change_id = result.set_current_change_id(account_id)?;
                     }
                 }
                 Operation::Collection {
@@ -131,15 +133,7 @@ impl PostgresStore {
                     let table = char::from(class.subspace(collection));
 
                     match op {
-                        ValueOp::Set {
-                            value,
-                            version_offset,
-                        } => {
-                            if let Some(offset) = version_offset {
-                                value[*offset..*offset + U64_LEN]
-                                    .copy_from_slice(&change_id.to_be_bytes());
-                            }
-
+                        ValueOp::Set(value) => {
                             let s = if let Some(exists) = asserted_values.get(&key) {
                                 if *exists {
                                     trx.prepare_cached(&format!(
@@ -170,6 +164,101 @@ impl PostgresStore {
                                     .into_err()
                                     .caused_by(trc::location!())
                                     .into());
+                            }
+                        }
+                        ValueOp::SetFnc(set_op) => {
+                            let value = (set_op.fnc)(&set_op.params, &result)?;
+
+                            let s = if let Some(exists) = asserted_values.get(&key) {
+                                if *exists {
+                                    trx.prepare_cached(&format!(
+                                        "UPDATE {} SET v = $2 WHERE k = $1",
+                                        table
+                                    ))
+                                    .await?
+                                } else {
+                                    trx.prepare_cached(&format!(
+                                        "INSERT INTO {} (k, v) VALUES ($1, $2)",
+                                        table
+                                    ))
+                                    .await?
+                                }
+                            } else {
+                                trx.prepare_cached(&format!(
+                                    concat!(
+                                        "INSERT INTO {} (k, v) VALUES ($1, $2) ",
+                                        "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v"
+                                    ),
+                                    table
+                                ))
+                                .await?
+                            };
+
+                            if trx.execute(&s, &[&key, &value]).await? == 0 {
+                                return Err(trc::StoreEvent::AssertValueFailed
+                                    .into_err()
+                                    .caused_by(trc::location!())
+                                    .into());
+                            }
+                        }
+                        ValueOp::MergeFnc(merge_op) => {
+                            let s = trx
+                                .prepare_cached(&format!(
+                                    "SELECT v FROM {} WHERE k = $1 FOR UPDATE",
+                                    table
+                                ))
+                                .await?;
+                            let (exists, merge_result) = trx
+                                .query_opt(&s, &[&key])
+                                .await?
+                                .map(|row| {
+                                    row.try_get::<_, &[u8]>(0)
+                                        .map_err(CommitError::from)
+                                        .and_then(|v| {
+                                            (merge_op.fnc)(&merge_op.params, &result, Some(v))
+                                                .map(|v| (true, v))
+                                                .map_err(CommitError::from)
+                                        })
+                                })
+                                .unwrap_or_else(|| {
+                                    (merge_op.fnc)(&merge_op.params, &result, None)
+                                        .map(|v| (false, v))
+                                        .map_err(CommitError::from)
+                                })?;
+
+                            match merge_result {
+                                MergeResult::Update(value) => {
+                                    let s = if exists {
+                                        trx.prepare_cached(&format!(
+                                            "UPDATE {} SET v = $2 WHERE k = $1",
+                                            table
+                                        ))
+                                        .await?
+                                    } else {
+                                        trx.prepare_cached(&format!(
+                                            "INSERT INTO {} (k, v) VALUES ($1, $2)",
+                                            table
+                                        ))
+                                        .await?
+                                    };
+
+                                    trx.execute(&s, &[&key, &value]).await?;
+                                }
+                                MergeResult::Delete if exists => {
+                                    let s = trx
+                                        .prepare_cached(&format!(
+                                            "DELETE FROM {} WHERE k = $1",
+                                            table
+                                        ))
+                                        .await?;
+                                    trx.execute(&s, &[&key]).await?;
+
+                                    // Update asserted value
+                                    if let Some(exists) = asserted_values.get_mut(&key) {
+                                        *exists = false;
+                                    }
+                                }
+                                _ => (),
                             }
                         }
                         ValueOp::AtomicAdd(by) => {
@@ -209,47 +298,6 @@ impl PostgresStore {
                                     .and_then(|row| row.try_get::<_, i64>(0))?,
                             );
                         }
-                        ValueOp::Merge(merge) => {
-                            let s = trx
-                                .prepare_cached(&format!(
-                                    "SELECT v FROM {} WHERE k = $1 FOR UPDATE",
-                                    table
-                                ))
-                                .await?;
-                            let (exists, value) = trx
-                                .query_opt(&s, &[&key])
-                                .await?
-                                .map(|row| {
-                                    row.try_get::<_, &[u8]>(0)
-                                        .map_err(CommitError::from)
-                                        .and_then(|v| {
-                                            (merge.fnc)(Some(v))
-                                                .map(|v| (true, v))
-                                                .map_err(CommitError::from)
-                                        })
-                                })
-                                .unwrap_or_else(|| {
-                                    (merge.fnc)(None)
-                                        .map(|v| (false, v))
-                                        .map_err(CommitError::from)
-                                })?;
-
-                            let s = if exists {
-                                trx.prepare_cached(&format!(
-                                    "UPDATE {} SET v = $2 WHERE k = $1",
-                                    table
-                                ))
-                                .await?
-                            } else {
-                                trx.prepare_cached(&format!(
-                                    "INSERT INTO {} (k, v) VALUES ($1, $2)",
-                                    table
-                                ))
-                                .await?
-                            };
-
-                            trx.execute(&s, &[&key, &value]).await?;
-                        }
                         ValueOp::Clear => {
                             let s = trx
                                 .prepare_cached(&format!("DELETE FROM {} WHERE k = $1", table))
@@ -282,35 +330,6 @@ impl PostgresStore {
                         trx.prepare_cached("DELETE FROM i WHERE k = $1").await?
                     };
                     trx.execute(&s, &[&key]).await?;
-                }
-                Operation::Bitmap { class, set } => {
-                    let is_document_id = matches!(class, BitmapClass::DocumentIds);
-                    let key = class.serialize(account_id, collection, document_id, 0);
-                    let table = char::from(class.subspace());
-
-                    let s = if *set {
-                        if is_document_id {
-                            trx.prepare_cached("INSERT INTO b (k) VALUES ($1)").await?
-                        } else {
-                            trx.prepare_cached(&format!(
-                                "INSERT INTO {} (k) VALUES ($1) ON CONFLICT (k) DO NOTHING",
-                                table
-                            ))
-                            .await?
-                        }
-                    } else {
-                        trx.prepare_cached(&format!("DELETE FROM {} WHERE k = $1", table))
-                            .await?
-                    };
-
-                    trx.execute(&s, &[&key]).await.map_err(|err| {
-                        if is_document_id && matches!(err.code(), Some(&SqlState::UNIQUE_VIOLATION))
-                        {
-                            CommitError::Retry
-                        } else {
-                            CommitError::Postgres(err)
-                        }
-                    })?;
                 }
                 Operation::Log { collection, set } => {
                     let key = LogKey {
@@ -362,7 +381,7 @@ impl PostgresStore {
     }
 
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
-        let conn = self.conn_pool.get().await.map_err(into_error)?;
+        let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
 
         for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
             let s = conn
@@ -379,7 +398,7 @@ impl PostgresStore {
     }
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
-        let conn = self.conn_pool.get().await.map_err(into_error)?;
+        let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
 
         let s = conn
             .prepare_cached(&format!(

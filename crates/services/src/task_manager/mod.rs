@@ -5,21 +5,25 @@
  */
 
 use crate::task_manager::imip::SendImipTask;
+use crate::task_manager::index::SearchIndexTask;
+use crate::task_manager::lock::{TaskLock, TaskLockManager};
+use crate::task_manager::merge_threads::MergeThreadsTask;
 use alarm::SendAlarmTask;
-use bayes::BayesTrainTask;
 use common::IPC_CHANNEL_BUFFER;
 use common::config::server::ServerProtocol;
 use common::listener::limiter::ConcurrencyLimiter;
 use common::listener::{ServerInstance, TcpAcceptor};
 use common::{Inner, KV_LOCK_TASK, Server, core::BuildServer};
-use fts::FtsIndexTask;
+use email::message::ingest::MergeThreadIds;
 use groupware::calendar::alarm::{CalendarAlarm, CalendarAlarmType};
 use std::collections::hash_map::Entry;
 use std::future::Future;
 use std::time::Duration;
 use std::{sync::Arc, time::Instant};
+use store::ahash::AHashSet;
 use store::rand;
 use store::rand::seq::SliceRandom;
+use store::write::{SearchIndex, TaskEpoch};
 use store::{
     IterateParams, U16_LEN, U32_LEN, U64_LEN, ValueKey,
     ahash::AHashMap,
@@ -31,40 +35,48 @@ use store::{
 };
 use tokio::sync::{mpsc, watch};
 use trc::TaskQueueEvent;
-use types::blob_hash::{BLOB_HASH_LEN, BlobHash};
 use utils::snowflake::SnowflakeIdGenerator;
 
 pub mod alarm;
-pub mod bayes;
-pub mod fts;
 pub mod imip;
+pub mod index;
+pub mod lock;
+pub mod merge_threads;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct Task {
+pub struct Task<T> {
     pub account_id: u32,
     pub document_id: u32,
-    pub due: u64,
-    pub action: TaskAction,
+    pub due: TaskEpoch,
+    pub action: T,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum TaskAction {
-    Index { hash: BlobHash },
-    BayesTrain { hash: BlobHash, learn_spam: bool },
-    SendAlarm { alarm: CalendarAlarm },
+    UpdateIndex(IndexAction),
+    SendAlarm(CalendarAlarm),
     SendImip,
+    MergeThreads(MergeThreadIds<AHashSet<u32>>),
 }
 
-const FTS_LOCK_EXPIRY: u64 = 60 * 5; // 5 minutes
-const BAYES_LOCK_EXPIRY: u64 = 60 * 30; // 30 minutes
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct IndexAction {
+    pub index: SearchIndex,
+    pub is_insert: bool,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) struct ImipAction;
+
+const INDEX_EXPIRY: u64 = 60 * 5; // 5 minutes
 const ALARM_EXPIRY: u64 = 60 * 2; // 2 minutes
 const QUEUE_REFRESH_INTERVAL: u64 = 60 * 5; // 5 minutes
 
 pub(crate) struct TaskManagerIpc {
-    tx_fts: mpsc::Sender<Task>,
-    tx_bayes: mpsc::Sender<Task>,
-    tx_alarm: mpsc::Sender<Task>,
-    tx_imip: mpsc::Sender<Task>,
+    tx_fts: mpsc::Sender<Task<IndexAction>>,
+    tx_alarm: mpsc::Sender<Task<CalendarAlarm>>,
+    tx_imip: mpsc::Sender<Task<ImipAction>>,
+    tx_threads: mpsc::Sender<Task<MergeThreadIds<AHashSet<u32>>>>,
     locked: AHashMap<Vec<u8>, Locked>,
     revision: u64,
 }
@@ -75,11 +87,12 @@ struct Locked {
 }
 
 pub fn spawn_task_manager(inner: Arc<Inner>) {
-    // Create three mpsc channels for the different task types
-    let (tx_index_1, rx_index_1) = mpsc::channel::<Task>(IPC_CHANNEL_BUFFER);
-    let (tx_index_2, rx_index_2) = mpsc::channel::<Task>(IPC_CHANNEL_BUFFER);
-    let (tx_index_3, rx_index_3) = mpsc::channel::<Task>(IPC_CHANNEL_BUFFER);
-    let (tx_index_4, rx_index_4) = mpsc::channel::<Task>(IPC_CHANNEL_BUFFER);
+    // Create mpsc channels for the different task types
+    let (tx_index_1, mut rx_index_1) = mpsc::channel::<Task<IndexAction>>(IPC_CHANNEL_BUFFER);
+    let (tx_index_2, mut rx_index_2) = mpsc::channel::<Task<CalendarAlarm>>(IPC_CHANNEL_BUFFER);
+    let (tx_index_3, mut rx_index_3) = mpsc::channel::<Task<ImipAction>>(IPC_CHANNEL_BUFFER);
+    let (tx_index_4, mut rx_index_4) =
+        mpsc::channel::<Task<MergeThreadIds<AHashSet<u32>>>>(IPC_CHANNEL_BUFFER);
 
     // Create dummy server instance for alarms
     let server_instance = Arc::new(ServerInstance {
@@ -92,79 +105,189 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
         span_id_gen: Arc::new(SnowflakeIdGenerator::new()),
     });
 
-    for mut rx_index in [rx_index_1, rx_index_2, rx_index_3, rx_index_4] {
+    // Indexing worker
+    {
+        let inner = inner.clone();
+        tokio::spawn(async move {
+            while let Some(task) = rx_index_1.recv().await {
+                let server = inner.build_server();
+                let batch_size = server.core.jmap.index_batch_size;
+                let mut batch = Vec::with_capacity(batch_size);
+                batch.push(task);
+
+                while batch.len() < batch_size {
+                    match rx_index_1.try_recv() {
+                        Ok(task) => batch.push(task),
+                        Err(_) => break,
+                    }
+                }
+
+                if batch.len() > 1 {
+                    batch.shuffle(&mut rand::rng());
+                }
+
+                // Lock tasks
+                let mut locked_batch = Vec::with_capacity(batch.len());
+                for task in batch {
+                    if server
+                        .try_lock_task(
+                            task.account_id,
+                            task.document_id,
+                            task.lock_key(),
+                            task.lock_expiry(),
+                        )
+                        .await
+                    {
+                        locked_batch.push(task);
+                    }
+                }
+
+                // Dispatch
+                if !locked_batch.is_empty() {
+                    let success = server.index(&locked_batch).await;
+
+                    if success.iter().all(|t| t.is_done()) {
+                        delete_tasks(&server, &locked_batch).await;
+                    } else {
+                        trc::event!(
+                            TaskQueue(TaskQueueEvent::TaskFailed),
+                            Total = locked_batch.len(),
+                            Details = "Indexing task failed",
+                        );
+
+                        // Remove successful entries from queue
+                        let mut to_delete = Vec::with_capacity(locked_batch.len());
+                        for (task, result) in locked_batch.into_iter().zip(success.into_iter()) {
+                            if result.is_done() {
+                                to_delete.push(task);
+                            }
+                        }
+                        if !to_delete.is_empty() {
+                            delete_tasks(&server, &to_delete).await;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Send alarm worker
+    {
         let inner = inner.clone();
         let server_instance = server_instance.clone();
-
         tokio::spawn(async move {
-            while let Some(task) = rx_index.recv().await {
+            while let Some(task) = rx_index_2.recv().await {
                 let server = inner.build_server();
 
                 // Lock task
-                if server.try_lock_task(&task).await {
-                    let success = match &task.action {
-                        TaskAction::Index { hash } => {
-                            server
-                                .fts_index(task.account_id, task.document_id, hash)
-                                .await
-                        }
-                        TaskAction::BayesTrain { hash, learn_spam } => {
-                            server
-                                .bayes_train(task.account_id, task.document_id, hash, *learn_spam)
-                                .await
-                        }
-                        TaskAction::SendAlarm { alarm } => {
-                            if server.core.groupware.alarms_enabled {
-                                server
-                                    .send_alarm(
-                                        task.account_id,
-                                        task.document_id,
-                                        alarm,
-                                        server_instance.clone(),
-                                    )
-                                    .await
-                            } else {
-                                true
-                            }
-                        }
-                        TaskAction::SendImip => {
-                            if server.core.groupware.itip_enabled {
-                                server
-                                    .send_imip(
-                                        task.account_id,
-                                        task.document_id,
-                                        task.due,
-                                        server_instance.clone(),
-                                    )
-                                    .await
-                            } else {
-                                true
-                            }
-                        }
-                    };
+                if server.core.groupware.alarms_enabled
+                    && server
+                        .try_lock_task(
+                            task.account_id,
+                            task.document_id,
+                            task.lock_key(),
+                            task.lock_expiry(),
+                        )
+                        .await
+                {
+                    let success = server
+                        .send_alarm(
+                            task.account_id,
+                            task.document_id,
+                            &task.action,
+                            server_instance.clone(),
+                        )
+                        .await;
 
                     // Remove entry from queue
                     if success {
-                        let mut batch = BatchBuilder::new();
-                        batch
-                            .with_account_id(task.account_id)
-                            .update_document(task.document_id);
+                        delete_tasks(&server, &[task]).await;
+                    } else {
+                        trc::event!(
+                            TaskQueue(TaskQueueEvent::TaskFailed),
+                            AccountId = task.account_id,
+                            DocumentId = task.document_id,
+                            Details = "Sending alarm task failed",
+                        );
+                    }
+                }
+            }
+        });
+    }
 
-                        for value in task.value_classes() {
-                            batch.clear(value);
-                        }
+    // Send iMIP worker
+    {
+        let inner = inner.clone();
+        let server_instance = server_instance.clone();
+        tokio::spawn(async move {
+            while let Some(task) = rx_index_3.recv().await {
+                let server = inner.build_server();
 
-                        if let Err(err) = server.core.storage.data.write(batch.build_all()).await {
-                            trc::error!(
-                                err.account_id(task.account_id)
-                                    .document_id(task.document_id)
-                                    .details("Failed to remove task from queue.")
-                            );
-                        }
+                // Lock task
+                if server.core.groupware.itip_enabled
+                    && server
+                        .try_lock_task(
+                            task.account_id,
+                            task.document_id,
+                            task.lock_key(),
+                            task.lock_expiry(),
+                        )
+                        .await
+                {
+                    let success = server
+                        .send_imip(
+                            task.account_id,
+                            task.document_id,
+                            task.due,
+                            server_instance.clone(),
+                        )
+                        .await;
 
-                        if task.remove_lock() {
-                            server.remove_index_lock(&task).await;
-                        }
+                    // Remove entry from queue
+                    if success {
+                        delete_tasks(&server, &[task]).await;
+                    } else {
+                        trc::event!(
+                            TaskQueue(TaskQueueEvent::TaskFailed),
+                            AccountId = task.account_id,
+                            DocumentId = task.document_id,
+                            Details = "Sending iMIP task failed",
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    // Merge threads worker
+    {
+        let inner = inner.clone();
+        tokio::spawn(async move {
+            while let Some(task) = rx_index_4.recv().await {
+                let server = inner.build_server();
+
+                // Lock task
+                if server
+                    .try_lock_task(
+                        task.account_id,
+                        task.document_id,
+                        task.lock_key(),
+                        task.lock_expiry(),
+                    )
+                    .await
+                {
+                    let success = server.merge_threads(task.account_id, &task.action).await;
+
+                    // Remove entry from queue
+                    if success {
+                        delete_tasks(&server, &[task]).await;
+                    } else {
+                        trc::event!(
+                            TaskQueue(TaskQueueEvent::TaskFailed),
+                            AccountId = task.account_id,
+                            DocumentId = task.document_id,
+                            Details = "Merging threads task failed",
+                        );
                     }
                 }
             }
@@ -174,9 +297,9 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
     tokio::spawn(async move {
         let mut ipc = TaskManagerIpc {
             tx_fts: tx_index_1,
-            tx_bayes: tx_index_2,
-            tx_alarm: tx_index_3,
-            tx_imip: tx_index_4,
+            tx_alarm: tx_index_2,
+            tx_imip: tx_index_3,
+            tx_threads: tx_index_4,
             locked: Default::default(),
             revision: 0,
         };
@@ -193,8 +316,6 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
 
 pub(crate) trait TaskQueueManager: Sync + Send {
     fn process_tasks(&self, ipc: &mut TaskManagerIpc) -> impl Future<Output = Duration> + Send;
-    fn try_lock_task(&self, event: &Task) -> impl Future<Output = bool> + Send;
-    fn remove_index_lock(&self, event: &Task) -> impl Future<Output = ()> + Send;
 }
 
 impl TaskQueueManager for Server {
@@ -204,18 +325,22 @@ impl TaskQueueManager for Server {
             account_id: 0,
             collection: 0,
             document_id: 0,
-            class: ValueClass::TaskQueue(TaskQueueClass::IndexEmail {
-                due: 0,
-                hash: BlobHash::default(),
+            class: ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                due: TaskEpoch::from_inner(0),
+                index: SearchIndex::Email,
+                is_insert: true,
             }),
         };
         let to_key = ValueKey::<ValueClass> {
             account_id: u32::MAX,
             collection: u8::MAX,
             document_id: u32::MAX,
-            class: ValueClass::TaskQueue(TaskQueueClass::IndexEmail {
-                due: now_timestamp + QUEUE_REFRESH_INTERVAL,
-                hash: BlobHash::default(),
+            class: ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                due: TaskEpoch::new(now_timestamp + QUEUE_REFRESH_INTERVAL)
+                    .with_attempt(u16::MAX)
+                    .with_sequence_id(u16::MAX),
+                index: SearchIndex::Email,
+                is_insert: true,
             }),
         };
 
@@ -230,7 +355,9 @@ impl TaskQueueManager for Server {
                 IterateParams::new(from_key, to_key).ascending(),
                 |key, value| {
                     let task = Task::deserialize(key, value)?;
-                    if task.due <= now_timestamp {
+
+                    let task_due = task.due.due();
+                    if task_due <= now_timestamp {
                         match ipc.locked.entry(key.to_vec()) {
                             Entry::Occupied(mut entry) => {
                                 let locked = entry.get_mut();
@@ -253,7 +380,7 @@ impl TaskQueueManager for Server {
 
                         Ok(true)
                     } else {
-                        next_event = Some(task.due);
+                        next_event = Some(task_due);
                         Ok(false)
                     }
                 },
@@ -282,39 +409,99 @@ impl TaskQueueManager for Server {
         // Dispatch tasks
         let roles = &self.core.network.roles;
         for event in tasks {
-            let tx = match &event.action {
-                TaskAction::Index { .. } if roles.fts_indexing.is_enabled_for_hash(&event) => {
-                    &ipc.tx_fts
-                }
-                TaskAction::BayesTrain { .. }
-                    if roles.bayes_training.is_enabled_for_hash(&event) =>
+            match event.action {
+                TaskAction::UpdateIndex(index)
+                    if roles.fts_indexing.is_enabled_for_hash(&event) =>
                 {
-                    &ipc.tx_bayes
+                    if ipc
+                        .tx_fts
+                        .send(Task {
+                            account_id: event.account_id,
+                            document_id: event.document_id,
+                            due: event.due,
+                            action: index,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        trc::event!(
+                            Server(trc::ServerEvent::ThreadError),
+                            Details = "Error sending task.",
+                            CausedBy = trc::location!()
+                        );
+                    }
                 }
-                TaskAction::SendAlarm { .. }
+                TaskAction::SendAlarm(alarm)
                     if roles.calendar_alerts.is_enabled_for_hash(&event) =>
                 {
-                    &ipc.tx_alarm
+                    if ipc
+                        .tx_alarm
+                        .send(Task {
+                            account_id: event.account_id,
+                            document_id: event.document_id,
+                            due: event.due,
+                            action: alarm,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        trc::event!(
+                            Server(trc::ServerEvent::ThreadError),
+                            Details = "Error sending task.",
+                            CausedBy = trc::location!()
+                        );
+                    }
                 }
                 TaskAction::SendImip if roles.imip_processing.is_enabled_for_hash(&event) => {
-                    &ipc.tx_imip
+                    if ipc
+                        .tx_imip
+                        .send(Task {
+                            account_id: event.account_id,
+                            document_id: event.document_id,
+                            due: event.due,
+                            action: ImipAction,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        trc::event!(
+                            Server(trc::ServerEvent::ThreadError),
+                            Details = "Error sending task.",
+                            CausedBy = trc::location!()
+                        );
+                    }
+                }
+                TaskAction::MergeThreads(info)
+                    if roles.merge_threads.is_enabled_for_hash(&event) =>
+                {
+                    if ipc
+                        .tx_threads
+                        .send(Task {
+                            account_id: event.account_id,
+                            document_id: event.document_id,
+                            due: event.due,
+                            action: info,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        trc::event!(
+                            Server(trc::ServerEvent::ThreadError),
+                            Details = "Error sending task.",
+                            CausedBy = trc::location!()
+                        );
+                    }
                 }
                 _ => {
                     trc::event!(
                         TaskQueue(TaskQueueEvent::TaskIgnored),
+                        Details = event.action.name(),
                         AccountId = event.account_id,
                         DocumentId = event.document_id,
                     );
 
                     continue;
                 }
-            };
-            if tx.send(event).await.is_err() {
-                trc::event!(
-                    Server(trc::ServerEvent::ThreadError),
-                    Details = "Error sending task.",
-                    CausedBy = trc::location!()
-                );
             }
         }
 
@@ -326,185 +513,37 @@ impl TaskQueueManager for Server {
             timestamp.saturating_sub(store::write::now())
         }))
     }
+}
 
-    async fn try_lock_task(&self, event: &Task) -> bool {
-        match self
-            .in_memory_store()
-            .try_lock(KV_LOCK_TASK, &event.lock_key(), event.lock_expiry())
-            .await
-        {
-            Ok(result) => {
-                if !result {
-                    trc::event!(
-                        TaskQueue(TaskQueueEvent::TaskLocked),
-                        AccountId = event.account_id,
-                        DocumentId = event.document_id,
-                        Expires = trc::Value::Timestamp(now() + event.lock_expiry()),
-                    );
-                }
-                result
-            }
-            Err(err) => {
-                trc::error!(
-                    err.account_id(event.account_id)
-                        .document_id(event.document_id)
-                        .details("Failed to lock task")
-                );
+async fn delete_tasks<T: TaskLock>(server: &Server, tasks: &[T]) {
+    let mut batch = BatchBuilder::new();
 
-                false
-            }
+    for task in tasks {
+        batch
+            .with_account_id(task.account_id())
+            .with_document(task.document_id());
+
+        for value in task.value_classes() {
+            batch.clear(value);
         }
     }
 
-    async fn remove_index_lock(&self, event: &Task) {
-        let key = event.lock_key();
-        if let Err(err) = self.in_memory_store().remove_lock(KV_LOCK_TASK, &key).await {
-            trc::error!(
-                err.details("Failed to unlock task")
-                    .ctx(trc::Key::Key, key)
-                    .caused_by(trc::location!())
-            );
-        }
+    if let Err(err) = server.store().write(batch.build_all()).await {
+        trc::error!(err.details("Failed to remove task(s) from queue."));
+    }
+
+    for task in tasks {
+        server.remove_index_lock(task.lock_key()).await;
     }
 }
 
-impl Task {
-    fn remove_lock(&self) -> bool {
-        // Bayes locks are not removed to avoid constant retraining
-        !matches!(self.action, TaskAction::BayesTrain { .. })
-    }
-
-    fn lock_key(&self) -> Vec<u8> {
-        match &self.action {
-            TaskAction::Index { .. } => KeySerializer::new((U32_LEN * 2) + U64_LEN + 1)
-                .write(0u8)
-                .write(self.due)
-                .write_leb128(self.account_id)
-                .write_leb128(self.document_id)
-                .finalize(),
-            TaskAction::BayesTrain { .. } => KeySerializer::new((U32_LEN * 2) + 1)
-                .write(1u8)
-                .write_leb128(self.account_id)
-                .write_leb128(self.document_id)
-                .finalize(),
-            TaskAction::SendAlarm { .. } => KeySerializer::new((U32_LEN * 2) + U64_LEN + 1)
-                .write(2u8)
-                .write(self.due)
-                .write_leb128(self.account_id)
-                .write_leb128(self.document_id)
-                .finalize(),
-            TaskAction::SendImip => KeySerializer::new((U32_LEN * 2) + U64_LEN + 1)
-                .write(3u8)
-                .write(self.due)
-                .write_leb128(self.account_id)
-                .write_leb128(self.document_id)
-                .finalize(),
+impl TaskAction {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TaskAction::UpdateIndex(_) => "UpdateIndex",
+            TaskAction::SendAlarm(_) => "SendAlarm",
+            TaskAction::SendImip => "SendImip",
+            TaskAction::MergeThreads(_) => "MergeThreads",
         }
-    }
-
-    fn lock_expiry(&self) -> u64 {
-        match self.action {
-            TaskAction::Index { .. } => FTS_LOCK_EXPIRY,
-            TaskAction::BayesTrain { .. } => BAYES_LOCK_EXPIRY,
-            TaskAction::SendAlarm { .. } | TaskAction::SendImip => ALARM_EXPIRY,
-        }
-    }
-
-    fn value_classes(&self) -> impl Iterator<Item = ValueClass> {
-        [
-            Some(ValueClass::TaskQueue(match &self.action {
-                TaskAction::Index { hash } => TaskQueueClass::IndexEmail {
-                    hash: hash.clone(),
-                    due: self.due,
-                },
-                TaskAction::BayesTrain { hash, learn_spam } => TaskQueueClass::BayesTrain {
-                    hash: hash.clone(),
-                    due: self.due,
-                    learn_spam: *learn_spam,
-                },
-                TaskAction::SendAlarm { alarm } => TaskQueueClass::SendAlarm {
-                    event_id: alarm.event_id,
-                    alarm_id: alarm.alarm_id,
-                    due: self.due,
-                    is_email_alert: matches!(alarm.typ, CalendarAlarmType::Email { .. }),
-                },
-                TaskAction::SendImip => TaskQueueClass::SendImip {
-                    due: self.due,
-                    is_payload: false,
-                },
-            })),
-            (matches!(self.action, TaskAction::SendImip)).then_some(ValueClass::TaskQueue(
-                TaskQueueClass::SendImip {
-                    due: self.due,
-                    is_payload: true,
-                },
-            )),
-        ]
-        .into_iter()
-        .flatten()
-    }
-
-    fn deserialize(key: &[u8], value: &[u8]) -> trc::Result<Self> {
-        Ok(Task {
-            due: key.deserialize_be_u64(0)?,
-            account_id: key.deserialize_be_u32(U64_LEN)?,
-            document_id: key.deserialize_be_u32(U64_LEN + U32_LEN + 1)?,
-            action: match key.get(U64_LEN + U32_LEN) {
-                Some(0) => TaskAction::Index {
-                    hash: key
-                        .get(
-                            U64_LEN + U32_LEN + U32_LEN + 1
-                                ..U64_LEN + U32_LEN + U32_LEN + BLOB_HASH_LEN + 1,
-                        )
-                        .and_then(|bytes| BlobHash::try_from_hash_slice(bytes).ok())
-                        .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))?,
-                },
-                Some(v @ (1 | 2)) => TaskAction::BayesTrain {
-                    learn_spam: *v == 1,
-                    hash: key
-                        .get(
-                            U64_LEN + U32_LEN + U32_LEN + 1
-                                ..U64_LEN + U32_LEN + U32_LEN + BLOB_HASH_LEN + 1,
-                        )
-                        .and_then(|bytes| BlobHash::try_from_hash_slice(bytes).ok())
-                        .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))?,
-                },
-                Some(3) => TaskAction::SendAlarm {
-                    alarm: CalendarAlarm {
-                        event_id: key.deserialize_be_u16(U64_LEN + U32_LEN + U32_LEN + 1)?,
-                        alarm_id: key
-                            .deserialize_be_u16(U64_LEN + U32_LEN + U32_LEN + U16_LEN + 1)?,
-                        alarm_time: 0,
-                        typ: CalendarAlarmType::Email {
-                            event_start: value.deserialize_be_u64(0)? as i64,
-                            event_end: value.deserialize_be_u64(U64_LEN)? as i64,
-                            event_start_tz: value.deserialize_be_u16(U64_LEN * 2)?,
-                            event_end_tz: value.deserialize_be_u16((U64_LEN * 2) + U16_LEN)?,
-                        },
-                    },
-                },
-                Some(6) => {
-                    let recurrence_id = value.deserialize_be_u64(0)? as i64;
-
-                    TaskAction::SendAlarm {
-                        alarm: CalendarAlarm {
-                            event_id: key.deserialize_be_u16(U64_LEN + U32_LEN + U32_LEN + 1)?,
-                            alarm_id: key
-                                .deserialize_be_u16(U64_LEN + U32_LEN + U32_LEN + U16_LEN + 1)?,
-                            alarm_time: 0,
-                            typ: CalendarAlarmType::Display {
-                                recurrence_id: if recurrence_id != 0 {
-                                    Some(recurrence_id)
-                                } else {
-                                    None
-                                },
-                            },
-                        },
-                    }
-                }
-                Some(4) => TaskAction::SendImip,
-                _ => return Err(trc::Error::corrupted_key(key, None, trc::location!())),
-            },
-        })
     }
 }

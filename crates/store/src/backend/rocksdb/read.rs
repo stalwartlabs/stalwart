@@ -4,16 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use roaring::RoaringBitmap;
-use rocksdb::{Direction, IteratorMode};
-
 use super::{RocksDbStore, into_error};
-
 use crate::{
-    BitmapKey, Deserialize, IterateParams, Key, U32_LEN, ValueKey,
-    backend::rocksdb::CfHandle,
-    write::{BitmapClass, ValueClass, key::DeserializeBigEndian},
+    Deserialize, IterateParams, Key, ValueKey, backend::rocksdb::CfHandle, write::ValueClass,
 };
+use rocksdb::{Direction, IteratorMode};
 
 impl RocksDbStore {
     pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -35,36 +30,6 @@ impl RocksDbStore {
                     Ok(None)
                 }
             })
-        })
-        .await
-    }
-
-    pub(crate) async fn get_bitmap(
-        &self,
-        mut key: BitmapKey<BitmapClass>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        let db = self.db.clone();
-        self.spawn_worker(move || {
-            let mut bm = RoaringBitmap::new();
-            let subspace = key.subspace();
-            let begin = key.serialize(0);
-            key.document_id = u32::MAX;
-            let end = key.serialize(0);
-            let key_len = begin.len();
-            for row in db.iterator_cf(
-                &db.subspace_handle(subspace),
-                IteratorMode::From(&begin, Direction::Forward),
-            ) {
-                let (key, _) = row.map_err(into_error)?;
-                let key = key.as_ref();
-                if key.len() == key_len && key >= begin.as_slice() && key <= end.as_slice() {
-                    bm.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
-                } else {
-                    break;
-                }
-            }
-
-            Ok(if !bm.is_empty() { Some(bm) } else { None })
         })
         .await
     }

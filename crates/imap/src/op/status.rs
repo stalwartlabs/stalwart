@@ -20,12 +20,8 @@ use imap_proto::{
     receiver::Request,
 };
 use std::time::Instant;
-use store::{Deserialize, U32_LEN};
-use store::{
-    IndexKeyPrefix, IterateParams, roaring::RoaringBitmap, write::key::DeserializeBigEndian,
-};
 use trc::AddContext;
-use types::{collection::Collection, field::EmailField, id::Id, keyword::Keyword};
+use types::{id::Id, keyword::Keyword};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_status(&mut self, requests: Vec<Request<Command>>) -> trc::Result<()> {
@@ -218,27 +214,14 @@ impl<T: SessionStream> SessionData<T> {
 
             for item in items_update {
                 let result = match item {
-                    Status::DeletedStorage => self
-                        .calculate_mailbox_size(
-                            mailbox.account_id,
-                            &RoaringBitmap::from_iter(
-                                cache
-                                    .in_mailbox_with_keyword(mailbox.mailbox_id, &Keyword::Deleted)
-                                    .map(|x| x.document_id),
-                            ),
-                        )
-                        .await
-                        .caused_by(trc::location!())?,
-                    Status::Size => self
-                        .calculate_mailbox_size(
-                            mailbox.account_id,
-                            &RoaringBitmap::from_iter(
-                                cache.in_mailbox(mailbox.mailbox_id).map(|x| x.document_id),
-                            ),
-                        )
-                        .await
-                        .caused_by(trc::location!())?,
-
+                    Status::DeletedStorage => cache
+                        .in_mailbox_with_keyword(mailbox.mailbox_id, &Keyword::Deleted)
+                        .map(|x| x.size)
+                        .sum::<u32>() as u64,
+                    Status::Size => cache
+                        .in_mailbox(mailbox.mailbox_id)
+                        .map(|x| x.size)
+                        .sum::<u32>() as u64,
                     _ => {
                         unreachable!()
                     }
@@ -285,50 +268,5 @@ impl<T: SessionStream> SessionData<T> {
             mailbox_name,
             items: items_response,
         })
-    }
-
-    async fn calculate_mailbox_size(
-        &self,
-        account_id: u32,
-        message_ids: &RoaringBitmap,
-    ) -> trc::Result<u64> {
-        let mut total_size = 0u64;
-        self.server
-            .core
-            .storage
-            .data
-            .iterate(
-                IterateParams::new(
-                    IndexKeyPrefix {
-                        account_id,
-                        collection: Collection::Email.into(),
-                        field: EmailField::Size.into(),
-                    },
-                    IndexKeyPrefix {
-                        account_id,
-                        collection: Collection::Email.into(),
-                        field: u8::from(EmailField::Size) + 1,
-                    },
-                )
-                .ascending()
-                .no_values(),
-                |key, _| {
-                    let id_pos = key.len() - U32_LEN;
-                    let document_id = key.deserialize_be_u32(id_pos)?;
-
-                    if message_ids.contains(document_id) {
-                        key.get(IndexKeyPrefix::len()..id_pos)
-                            .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))
-                            .and_then(u32::deserialize)
-                            .map(|size| {
-                                total_size += size as u64;
-                            })?;
-                    }
-                    Ok(true)
-                },
-            )
-            .await
-            .caused_by(trc::location!())
-            .map(|_| total_size)
     }
 }

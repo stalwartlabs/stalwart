@@ -6,23 +6,45 @@
 
 use crate::{
     directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest},
+    imap::antispam::{spam_delete_samples, spam_training_samples},
+    jmap::JMAPTest,
+    store::cleanup::store_blob_expire_all,
     webdav::DummyWebDavClient,
 };
+use common::Server;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    mailbox::{INBOX_ID, JUNK_ID},
+    mailbox::{INBOX_ID, JUNK_ID, SENT_ID},
+    message::metadata::MessageMetadata,
 };
 use groupware::DavResourceName;
-use std::time::Duration;
+use jmap::blob::download::BlobDownload;
+use std::{sync::Arc, time::Duration};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive},
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf},
     net::TcpStream,
 };
-use types::collection::Collection;
+use types::{
+    blob::{BlobClass, BlobId},
+    collection::Collection,
+    field::EmailField,
+    id::Id,
+};
+use utils::chained_bytes::ChainedBytes;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running message delivery tests...");
+
+    // Enable delivered to
+    let old_core = params.server.core.clone();
+    let mut new_core = old_core.as_ref().clone();
+    new_core.smtp.session.data.add_delivered_to = true;
+    params.server.inner.shared_core.store(Arc::new(new_core));
 
     // Create a domain name and a test account
     let server = params.server.clone();
@@ -55,7 +77,6 @@ pub async fn test(params: &mut JMAPTest) {
             "From: bill@example.com\r\n",
             "To: jdoe@example.com\r\n",
             "Subject: TPS Report\r\n",
-            "X-Spam-Status: No\r\n",
             "\r\n",
             "I'm going to need those TPS reports ASAP. ",
             "So, if you could do that, that'd be great."
@@ -68,27 +89,22 @@ pub async fn test(params: &mut JMAPTest) {
         .await
         .unwrap();
 
-    assert_eq!(
-        server
-            .get_document_ids(john.id().document_id(), Collection::Email)
-            .await
-            .unwrap()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert_eq!(john_cache.emails.items.len(), 1);
     assert_eq!(john_cache.in_mailbox(INBOX_ID).count(), 1);
     assert_eq!(john_cache.in_mailbox(JUNK_ID).count(), 0);
 
-    // Delivering to individuals' aliases
+    // Make sure there are no spam training samples
+    spam_delete_samples(&params.server).await;
+    assert_eq!(spam_training_samples(&params.server).await.total_count, 0);
+
+    // Test spam filtering
     lmtp.ingest(
         "bill@example.com",
         &["john.doe@example.com"],
         concat!(
             "From: bill@example.com\r\n",
             "To: john.doe@example.com\r\n",
-            "Subject: Fwd: TPS Report\r\n",
-            "X-Spam-Status: Yes, score=13.9\r\n",
+            "Subject: XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\r\n",
             "\r\n",
             "--- Forwarded Message ---\r\n\r\n ",
             "I'm going to need those TPS reports ASAP. ",
@@ -100,18 +116,25 @@ pub async fn test(params: &mut JMAPTest) {
         .get_cached_messages(john.id().document_id())
         .await
         .unwrap();
-
-    assert_eq!(
-        server
-            .get_document_ids(john.id().document_id(), Collection::Email)
-            .await
-            .unwrap()
-            .unwrap()
-            .len(),
-        2
-    );
-    assert_eq!(john_cache.in_mailbox(INBOX_ID).count(), 1);
-    assert_eq!(john_cache.in_mailbox(JUNK_ID).count(), 1);
+    let inbox_ids = john_cache
+        .in_mailbox(INBOX_ID)
+        .map(|e| e.document_id)
+        .collect::<RoaringBitmap>();
+    let junk_ids = john_cache
+        .in_mailbox(JUNK_ID)
+        .map(|e| e.document_id)
+        .collect::<RoaringBitmap>();
+    assert_eq!(john_cache.emails.items.len(), 2);
+    assert_eq!(inbox_ids.len(), 1);
+    assert_eq!(junk_ids.len(), 1);
+    assert_message_headers_contains(
+        &server,
+        john.id().document_id(),
+        junk_ids.min().unwrap(),
+        "X-Spam-Status: Yes",
+    )
+    .await;
+    assert_eq!(spam_training_samples(&params.server).await.total_count, 0);
 
     // CardDAV spam override
     let dav_client = DummyWebDavClient::new(u32::MAX, john.name(), john.secret(), john.emails()[0]);
@@ -138,8 +161,7 @@ END:VCARD
         concat!(
             "From: dmarc-bill@example.com\r\n",
             "To: john.doe@example.com\r\n",
-            "Subject: Fwd: TPS Report (CardDAV spam override)\r\n",
-            "X-Spam-Status: Yes, score=13.9\r\n",
+            "Subject: XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\r\n",
             "\r\n",
             "--- Forwarded Message ---\r\n\r\n ",
             "I'm going to need those TPS reports ASAP. ",
@@ -151,19 +173,100 @@ END:VCARD
         .get_cached_messages(john.id().document_id())
         .await
         .unwrap();
+    let inbox_ids = john_cache
+        .in_mailbox(INBOX_ID)
+        .map(|e| e.document_id)
+        .collect::<RoaringBitmap>();
+    let junk_ids = john_cache
+        .in_mailbox(JUNK_ID)
+        .map(|e| e.document_id)
+        .collect::<RoaringBitmap>();
+    assert_eq!(john_cache.emails.items.len(), 3);
+    assert_eq!(inbox_ids.len(), 2);
+    assert_eq!(junk_ids.len(), 1);
+    dav_client.delete_default_containers().await;
+    assert_message_headers_contains(
+        &server,
+        john.id().document_id(),
+        inbox_ids.max().unwrap(),
+        "X-Spam-Status: No, reason=card-exists",
+    )
+    .await;
+    let samples = spam_training_samples(&params.server).await;
+    assert_eq!(samples.ham_count, 1);
+    assert_eq!(samples.spam_count, 0);
 
+    // Test trusted reply override
+    john.client()
+        .email_import(
+            concat!(
+                "From: john.doe@example.com\r\n",
+                "To: dmarc-bill@example.com\r\n",
+                "Message-ID: <trusted@message-id.example.com>\r\n",
+                "Subject: XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\r\n",
+                "\r\n",
+                "This is a trusted reply."
+            )
+            .as_bytes()
+            .to_vec(),
+            vec![Id::from(SENT_ID).to_string()],
+            None::<Vec<String>>,
+            None,
+        )
+        .await
+        .unwrap()
+        .take_id();
     assert_eq!(
         server
-            .get_document_ids(john.id().document_id(), Collection::Email)
+            .get_cached_messages(john.id().document_id())
             .await
             .unwrap()
-            .unwrap()
+            .emails
+            .items
             .len(),
-        3
+        4
     );
-    assert_eq!(john_cache.in_mailbox(INBOX_ID).count(), 2);
-    assert_eq!(john_cache.in_mailbox(JUNK_ID).count(), 1);
-    dav_client.delete_default_containers().await;
+    lmtp.ingest(
+        "dmarc-bill@example.com",
+        &["john.doe@example.com"],
+        concat!(
+            "From: dmarc-bill@example.com\r\n",
+            "To: john.doe@example.com\r\n",
+            "Message-ID: <other@message-id.example.com>\r\n",
+            "References: <trusted@message-id.example.com>\r\n",
+            "Subject: XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\r\n",
+            "\r\n",
+            "--- Forwarded Message ---\r\n\r\n ",
+            "I'm going to need those TPS reports ASAP. ",
+            "So, if you could do that, that'd be great."
+        ),
+    )
+    .await;
+    let john_cache = server
+        .get_cached_messages(john.id().document_id())
+        .await
+        .unwrap();
+    let inbox_ids = john_cache
+        .in_mailbox(INBOX_ID)
+        .map(|e| e.document_id)
+        .collect::<RoaringBitmap>();
+    let junk_ids = john_cache
+        .in_mailbox(JUNK_ID)
+        .map(|e| e.document_id)
+        .collect::<RoaringBitmap>();
+    assert_eq!(john_cache.emails.items.len(), 5);
+    assert_eq!(inbox_ids.len(), 3);
+    assert_eq!(junk_ids.len(), 1);
+    assert_message_headers_contains(
+        &server,
+        john.id().document_id(),
+        inbox_ids.max().unwrap(),
+        "X-Spam-Status: No, reason=trusted-reply",
+    )
+    .await;
+    let samples = spam_training_samples(&params.server).await;
+    assert_eq!(samples.ham_count, 2);
+    assert_eq!(samples.spam_count, 0);
 
     // EXPN and VRFY
     lmtp.expn("members@example.com", 2)
@@ -192,13 +295,16 @@ END:VCARD
     )
     .await;
 
-    for (account, num_messages) in [(john, 4), (jane, 1), (bill, 1)] {
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    for (account, num_messages) in [(john, 6), (jane, 1), (bill, 1)] {
         assert_eq!(
             server
-                .get_document_ids(account.id().document_id(), Collection::Email)
+                .get_cached_messages(account.id().document_id())
                 .await
                 .unwrap()
-                .unwrap()
+                .emails
+                .items
                 .len(),
             num_messages,
             "for {}",
@@ -229,13 +335,14 @@ END:VCARD
     )
     .await;
 
-    for (account, num_messages) in [(john, 4), (jane, 2), (bill, 2)] {
+    for (account, num_messages) in [(john, 6), (jane, 2), (bill, 2)] {
         assert_eq!(
             server
-                .get_document_ids(account.id().document_id(), Collection::Email)
+                .get_cached_messages(account.id().document_id())
                 .await
                 .unwrap()
-                .unwrap()
+                .emails
+                .items
                 .len(),
             num_messages,
             "for {}",
@@ -264,18 +371,65 @@ END:VCARD
     )
     .await;
 
-    for (account, num_messages) in [(john, 5), (jane, 3), (bill, 3)] {
+    // Make sure blobs are properly linked
+    store_blob_expire_all(params.server.store()).await;
+
+    for (account, num_messages) in [(john, 7), (jane, 3), (bill, 3)] {
+        let account_id = account.id().document_id();
+        let cache = server.get_cached_messages(account_id).await.unwrap();
         assert_eq!(
-            server
-                .get_document_ids(account.id().document_id(), Collection::Email)
-                .await
-                .unwrap()
-                .unwrap()
-                .len(),
+            cache.emails.items.len(),
             num_messages,
             "for {}",
             account.id_string()
         );
+        let access_token = server.get_access_token(account_id).await.unwrap();
+
+        for document_id in cache.in_mailbox(INBOX_ID).map(|e| e.document_id) {
+            let metadata = message_metadata(&server, account_id, document_id).await;
+            let partial_message = server
+                .store()
+                .get_blob(metadata.blob_hash.0.as_ref(), 0..usize::MAX)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_ne!(metadata.blob_body_offset, 0);
+            let expected_full_message = String::from_utf8(
+                ChainedBytes::new(metadata.raw_headers.as_ref())
+                    .with_last(
+                        partial_message
+                            .get(metadata.blob_body_offset as usize..)
+                            .unwrap_or_default(),
+                    )
+                    .to_bytes(),
+            )
+            .unwrap();
+            assert!(
+                expected_full_message.contains("Delivered-To:")
+                    && expected_full_message.contains("Subject:"),
+                "for {account_id}: {expected_full_message}"
+            );
+            let full_message = String::from_utf8(
+                server
+                    .blob_download(
+                        &BlobId {
+                            hash: metadata.blob_hash,
+                            class: BlobClass::Linked {
+                                account_id,
+                                collection: Collection::Email.into(),
+                                document_id,
+                            },
+                            section: None,
+                        },
+                        &access_token,
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(full_message, expected_full_message, "for {account_id}");
+        }
     }
 
     // Remove test data
@@ -284,6 +438,9 @@ END:VCARD
     }
     params.assert_is_empty().await;
 
+    // Restore core
+    params.server.inner.shared_core.store(old_core);
+
     // Check webhook events
     params.webhook.assert_contains(&[
         "message-ingest.",
@@ -291,6 +448,48 @@ END:VCARD
         "\"from\": \"bill@example.com\"",
         "\"john.doe@example.com\"",
     ]);
+}
+
+async fn assert_message_headers_contains(
+    server: &Server,
+    account_id: u32,
+    document_id: u32,
+    value: &str,
+) {
+    let headers = message_headers(server, account_id, document_id).await;
+    assert!(
+        headers.contains(value),
+        "Expected message headers to contain {:?}, got {:?}",
+        value,
+        headers
+    );
+}
+
+async fn message_headers(server: &Server, account_id: u32, document_id: u32) -> String {
+    std::str::from_utf8(
+        message_metadata(server, account_id, document_id)
+            .await
+            .raw_headers
+            .as_ref(),
+    )
+    .unwrap()
+    .to_string()
+}
+
+async fn message_metadata(server: &Server, account_id: u32, document_id: u32) -> MessageMetadata {
+    server
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            account_id,
+            Collection::Email,
+            document_id,
+            EmailField::Metadata,
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .deserialize::<MessageMetadata>()
+        .unwrap()
 }
 
 pub struct SmtpConnection {

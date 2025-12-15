@@ -5,10 +5,11 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, mail::mailbox::destroy_all_mailboxes_no_wait},
+    jmap::{JMAPTest, mail::mailbox::destroy_all_mailboxes_no_wait, wait_for_index},
     store::deflate_test_resource,
 };
 use ::email::{
+    cache::MessageCacheFetch,
     mailbox::INBOX_ID,
     message::ingest::{EmailIngest, IngestEmail, IngestSource},
 };
@@ -20,7 +21,7 @@ use store::{
     ahash::{AHashMap, AHashSet},
     rand::{self, Rng},
 };
-use types::{collection::Collection, id::Id};
+use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     test_single_thread(params).await;
@@ -140,6 +141,8 @@ async fn test_single_thread(params: &mut JMAPTest) {
             }
         }
 
+        wait_for_index(&params.server).await;
+
         for test_num in 0..=5 {
             let result = client
                 .set_default_account_id(Id::new((base_test_num + test_num) as u64).to_string())
@@ -227,6 +230,7 @@ async fn test_multi_thread(params: &mut JMAPTest) {
                     .email_ingest(IngestEmail {
                         raw_message: message.contents(),
                         message: MessageParser::new().parse(message.contents()),
+                        blob_hash: None,
                         access_token: &AccessToken::from_id(account_id),
                         mailbox_ids: vec![mailbox_id],
                         keywords: vec![],
@@ -234,9 +238,8 @@ async fn test_multi_thread(params: &mut JMAPTest) {
                         source: IngestSource::Smtp {
                             deliver_to: "test@domain.org",
                             is_sender_authenticated: true,
+                            is_spam: false,
                         },
-                        spam_classify: false,
-                        spam_train: false,
                         session_id: 0,
                     })
                     .await
@@ -263,14 +266,15 @@ async fn test_multi_thread(params: &mut JMAPTest) {
         handle.await.expect("Task panicked");
     }
     assert_eq!(
-        messages as u64,
+        messages,
         params
             .server
-            .get_document_ids(account_id, Collection::Email)
+            .get_cached_messages(account_id)
             .await
             .unwrap()
-            .unwrap()
-            .len()
+            .emails
+            .items
+            .len(),
     );
     println!("Deleting all messages...");
     params.destroy_all_mailboxes(account).await;

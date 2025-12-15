@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    directory::internal::TestInternalDirectory,
-    jmap::{JMAPTest},
-};
+use crate::{directory::internal::TestInternalDirectory, jmap::JMAPTest};
 use ::email::mailbox::{INBOX_ID, TRASH_ID};
 use jmap_client::{
     core::{

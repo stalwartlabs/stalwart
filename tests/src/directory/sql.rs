@@ -13,8 +13,9 @@ use mail_send::Credentials;
 #[allow(unused_imports)]
 use store::{InMemoryStore, Store};
 
-use crate::directory::{
-    DirectoryTest, IntoTestPrincipal, TestPrincipal, map_account_id, map_account_ids,
+use crate::{
+    directory::{DirectoryTest, IntoTestPrincipal, TestPrincipal, map_account_id, map_account_ids},
+    store::cleanup::store_destroy,
 };
 
 use super::DirectoryStore;
@@ -43,7 +44,7 @@ async fn sql_directory() {
         let core = config.server;
 
         // Create tables
-        base_store.destroy().await;
+        store_destroy(base_store).await;
         store.create_test_directory().await;
 
         // Create test users

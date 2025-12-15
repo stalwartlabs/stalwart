@@ -8,7 +8,7 @@ use super::*;
 use crate::expr::{if_block::IfBlock, tokenizer::TokenMap};
 use ahash::AHashSet;
 use std::{hash::Hasher, time::Duration};
-use utils::config::{Config, Rate, utils::ParseValue};
+use utils::config::{Config, Rate, http::parse_http_headers, utils::ParseValue};
 use xxhash_rust::xxh3::Xxh3Builder;
 
 #[derive(Clone)]
@@ -42,8 +42,9 @@ pub struct ClusterRoles {
     pub purge_accounts: ClusterRole,
     pub push_notifications: ClusterRole,
     pub fts_indexing: ClusterRole,
-    pub bayes_training: ClusterRole,
+    pub spam_training: ClusterRole,
     pub imip_processing: ClusterRole,
+    pub merge_threads: ClusterRole,
     pub calendar_alerts: ClusterRole,
     pub renew_acme: ClusterRole,
     pub calculate_metrics: ClusterRole,
@@ -245,8 +246,8 @@ impl Network {
                 "cluster.roles.fts-indexing",
             ),
             (
-                &mut network.roles.bayes_training,
-                "cluster.roles.bayes-training",
+                &mut network.roles.spam_training,
+                "cluster.roles.spam-training",
             ),
             (
                 &mut network.roles.imip_processing,
@@ -255,6 +256,10 @@ impl Network {
             (
                 &mut network.roles.calendar_alerts,
                 "cluster.roles.calendar-alerts",
+            ),
+            (
+                &mut network.roles.merge_threads,
+                "cluster.roles.merge-threads",
             ),
         ] {
             let shards = config
@@ -358,14 +363,14 @@ impl ClusterRole {
         matches!(self, ClusterRole::Enabled | ClusterRole::Sharded { .. })
     }
 
-    pub fn is_enabled_for_account(&self, account_id: u32) -> bool {
+    pub fn is_enabled_for_integer(&self, value: u32) -> bool {
         match self {
             ClusterRole::Enabled => true,
             ClusterRole::Disabled => false,
             ClusterRole::Sharded {
                 shard_id,
                 total_shards,
-            } => (account_id % total_shards) == *shard_id,
+            } => (value % total_shards) == *shard_id,
         }
     }
 

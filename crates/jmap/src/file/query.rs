@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{JmapMethods, changes::state::JmapCacheState};
+use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
 use common::{Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
@@ -12,11 +12,12 @@ use jmap_proto::{
     object::file_node::{FileNode, FileNodeFilter},
     request::MaybeInvalid,
 };
-use store::{query, roaring::RoaringBitmap};
-use types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
+use store::{
+    roaring::RoaringBitmap,
+    search::{SearchFilter, SearchQuery},
+    write::SearchIndex,
 };
+use types::{acl::Acl, collection::SyncCollection};
 
 pub trait FileNodeQuery: Sync + Send {
     fn file_node_query(
@@ -37,8 +38,6 @@ impl FileNodeQuery for Server {
         let cache = self
             .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
             .await?;
-        let filter_mask = (access_token.is_shared(account_id))
-            .then(|| cache.shared_containers(access_token, [Acl::ReadItems], true));
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -47,20 +46,20 @@ impl FileNodeQuery for Server {
                         if let Some(resource) =
                             cache.container_resource_path_by_id(id.document_id())
                         {
-                            filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                            filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                                 cache.subtree(resource.path()).map(|r| r.document_id()),
                             )))
                         } else {
-                            filters.push(query::Filter::is_in_set(RoaringBitmap::new()));
+                            filters.push(SearchFilter::is_in_set(RoaringBitmap::new()));
                         }
                     }
                     FileNodeFilter::ParentId(MaybeInvalid::Value(id)) => {
-                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.children_ids(id.document_id()),
                         )));
                     }
                     FileNodeFilter::HasParentId(has_parent_id) => {
-                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if has_parent_id == r.parent_id().is_some() {
                                     Some(r.document_id)
@@ -71,7 +70,7 @@ impl FileNodeQuery for Server {
                         )));
                     }
                     FileNodeFilter::Name(name) => {
-                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.container_name().is_some_and(|n| n == name) {
                                     Some(r.document_id)
@@ -82,7 +81,7 @@ impl FileNodeQuery for Server {
                         )));
                     }
                     FileNodeFilter::NameMatch(name) => {
-                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.container_name().is_some_and(|n| name.matches(n)) {
                                     Some(r.document_id)
@@ -94,7 +93,7 @@ impl FileNodeQuery for Server {
                     }
                     FileNodeFilter::MinSize(size) => {
                         let size = size as u32;
-                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.size().is_some_and(|s| s >= size) {
                                     Some(r.document_id)
@@ -106,7 +105,7 @@ impl FileNodeQuery for Server {
                     }
                     FileNodeFilter::MaxSize(size) => {
                         let size = size as u32;
-                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.size().is_some_and(|s| s <= size) {
                                     Some(r.document_id)
@@ -122,59 +121,50 @@ impl FileNodeQuery for Server {
                             .details(unsupported.into_string()));
                     }
                 },
-
-                Filter::And | Filter::Or | Filter::Not | Filter::Close => {
-                    filters.push(cond.into());
+                Filter::And => {
+                    filters.push(SearchFilter::And);
+                }
+                Filter::Or => {
+                    filters.push(SearchFilter::Or);
+                }
+                Filter::Not => {
+                    filters.push(SearchFilter::Not);
+                }
+                Filter::Close => {
+                    filters.push(SearchFilter::End);
                 }
             }
         }
 
-        let mut result_set = self
-            .filter(account_id, Collection::FileNode, filters)
-            .await?;
-
-        if let Some(filter_mask) = filter_mask {
-            result_set.apply_mask(filter_mask);
+        if request.sort.as_ref().is_some_and(|s| !s.is_empty()) {
+            return Err(trc::JmapEvent::UnsupportedSort
+                .into_err()
+                .details("Sorting is not supported on FileNode"));
         }
 
-        let (response, paginate) = self
-            .build_query_response(result_set.results.len() as usize, cache.get_state(false), &request)
-            .await?;
+        let results = SearchQuery::new(SearchIndex::InMemory)
+            .with_filters(filters)
+            .with_mask(if access_token.is_shared(account_id) {
+                cache.shared_containers(access_token, [Acl::ReadItems], true)
+            } else {
+                cache.document_ids(false).collect()
+            })
+            .filter()
+            .into_bitmap();
 
-        if let Some(paginate) = paginate {
-            // Parse sort criteria
-            /*let mut comparators = Vec::with_capacity(request.sort.as_ref().map_or(1, |s| s.len()));
-            for comparator in request
-                .sort
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| vec![Comparator::descending(FileNodeComparator::Updated)])
-            {
-                comparators.push(match comparator.property {
-                    FileNodeComparator::Created => {
-                        query::Comparator::field(ContactField::Created, comparator.is_ascending)
-                    }
-                    FileNodeComparator::Updated => {
-                        query::Comparator::field(ContactField::Updated, comparator.is_ascending)
-                    }
-                    unsupported => {
-                        return Err(trc::JmapEvent::UnsupportedSort
-                            .into_err()
-                            .details(unsupported.into_string()));
-                    }
-                });
-            }*/
+        let mut response = QueryResponseBuilder::new(
+            results.len() as usize,
+            self.core.jmap.query_max_results,
+            cache.get_state(false),
+            &request,
+        );
 
-            if request.sort.is_some_and(|s| !s.is_empty()) {
-                return Err(trc::JmapEvent::UnsupportedSort
-                    .into_err()
-                    .details("Sorting is not supported on FileNode"));
+        for document_id in results {
+            if !response.add(0, document_id) {
+                break;
             }
-
-            // Sort results
-            self.sort(result_set, Default::default(), paginate, response)
-                .await
-        } else {
-            Ok(response)
         }
+
+        response.build()
     }
 }

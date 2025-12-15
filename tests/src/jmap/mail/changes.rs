@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest};
+use crate::jmap::JMAPTest;
 use jmap_proto::types::state::State;
 use std::str::FromStr;
 use store::{ahash::AHashSet, write::BatchBuilder};
@@ -142,17 +142,17 @@ pub async fn test(params: &mut JMAPTest) {
             match change {
                 LogAction::Insert(id) => {
                     batch
-                        .update_document(id as u32)
+                        .with_document(id as u32)
                         .log_item_insert(SyncCollection::Email, None);
                 }
                 LogAction::Update(id) => {
                     batch
-                        .update_document(id as u32)
+                        .with_document(id as u32)
                         .log_item_update(SyncCollection::Email, None);
                 }
                 LogAction::Delete(id) => {
                     batch
-                        .update_document(id as u32)
+                        .with_document(id as u32)
                         .log_item_delete(SyncCollection::Email, None);
                 }
                 LogAction::UpdateChild(id) => {
@@ -160,9 +160,9 @@ pub async fn test(params: &mut JMAPTest) {
                 }
                 LogAction::Move(old_id, new_id) => {
                     batch
-                        .update_document(old_id as u32)
+                        .with_document(old_id as u32)
                         .log_item_delete(SyncCollection::Email, None)
-                        .update_document(new_id as u32)
+                        .with_document(new_id as u32)
                         .log_item_insert(SyncCollection::Email, None);
                 }
             }

@@ -1,12 +1,11 @@
 [package]
 name = "imap_proto"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
-resolver = "2"
 
 [dependencies]
 types = { path = "../types" }
-store = { path = "../store" }
+utils = { path = "../utils" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 ahash = { version = "0.8" }
 chrono = { version = "0.4"}

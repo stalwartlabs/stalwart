@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use email::message::metadata::{ArchivedMessageMetadataPart, ArchivedMetadataHeaderValue};
 use jmap_proto::{
     object::email::{EmailProperty, EmailValue, HeaderForm, HeaderProperty},
     types::date::UTCDate,
@@ -20,11 +21,8 @@ use mail_builder::{
         url::URL,
     },
 };
-use mail_parser::{
-    Addr, ArchivedHeader, ArchivedHeaderValue, DateTime, Group, Header, HeaderName, HeaderValue,
-    parsers::MessageStream,
-};
-use store::rkyv::vec::ArchivedVec;
+use mail_parser::{Addr, DateTime, Group, Header, HeaderName, HeaderValue, parsers::MessageStream};
+use utils::chained_bytes::ChainedBytes;
 
 pub trait IntoForm {
     fn into_form(self, form: &HeaderForm) -> Value<'static, EmailProperty, EmailValue>;
@@ -34,9 +32,12 @@ pub trait HeaderToValue {
     fn header_to_value(
         &self,
         property: &EmailProperty,
-        raw_message: &[u8],
+        raw_message: &ChainedBytes<'_>,
     ) -> Value<'static, EmailProperty, EmailValue>;
-    fn headers_to_value(&self, raw_message: &[u8]) -> Value<'static, EmailProperty, EmailValue>;
+    fn headers_to_value(
+        &self,
+        raw_message: &ChainedBytes<'_>,
+    ) -> Value<'static, EmailProperty, EmailValue>;
 }
 
 pub trait ValueToHeader<'x> {
@@ -57,7 +58,7 @@ impl HeaderToValue for Vec<Header<'_>> {
     fn header_to_value(
         &self,
         property: &EmailProperty,
-        raw_message: &[u8],
+        raw_message: &ChainedBytes<'_>,
     ) -> Value<'static, EmailProperty, EmailValue> {
         let (header_name, form, all) = match property {
             EmailProperty::Header(header) => (
@@ -85,10 +86,14 @@ impl HeaderToValue for Vec<Header<'_>> {
         let header_name = header_name.as_str();
         for header in self.iter().rev() {
             if header.name.as_str().eq_ignore_ascii_case(header_name) {
+                let raw_header;
                 let header_value = if is_raw || matches!(header.value, HeaderValue::Empty) {
-                    raw_message
-                        .get(header.offset_start as usize..header.offset_end as usize)
-                        .map_or(HeaderValue::Empty, |bytes| match form {
+                    raw_header =
+                        raw_message.get(header.offset_start as usize..header.offset_end as usize);
+
+                    if let Some(bytes) = &raw_header {
+                        let bytes = bytes.as_ref();
+                        match form {
                             HeaderForm::Raw => {
                                 HeaderValue::Text(String::from_utf8_lossy(bytes.trim_end()))
                             }
@@ -98,7 +103,10 @@ impl HeaderToValue for Vec<Header<'_>> {
                             | HeaderForm::URLs => MessageStream::new(bytes).parse_address(),
                             HeaderForm::MessageIds => MessageStream::new(bytes).parse_id(),
                             HeaderForm::Date => MessageStream::new(bytes).parse_date(),
-                        })
+                        }
+                    } else {
+                        HeaderValue::Empty
+                    }
                 } else {
                     header.value.clone()
                 };
@@ -119,7 +127,10 @@ impl HeaderToValue for Vec<Header<'_>> {
         }
     }
 
-    fn headers_to_value(&self, raw_message: &[u8]) -> Value<'static, EmailProperty, EmailValue> {
+    fn headers_to_value(
+        &self,
+        raw_message: &ChainedBytes<'_>,
+    ) -> Value<'static, EmailProperty, EmailValue> {
         let mut headers = Vec::with_capacity(self.len());
         for header in self.iter() {
             headers.push(Value::Object(
@@ -131,6 +142,7 @@ impl HeaderToValue for Vec<Header<'_>> {
                             raw_message
                                 .get(header.offset_start as usize..header.offset_end as usize)
                                 .unwrap_or_default()
+                                .as_ref()
                                 .trim_end(),
                         )
                         .into_owned(),
@@ -363,11 +375,11 @@ impl<'x> BuildHeader<'x> for MessageBuilder<'x> {
     }
 }
 
-impl HeaderToValue for ArchivedVec<ArchivedHeader<'_>> {
+impl HeaderToValue for ArchivedMessageMetadataPart {
     fn header_to_value(
         &self,
         property: &EmailProperty,
-        raw_message: &[u8],
+        raw_message: &ChainedBytes<'_>,
     ) -> Value<'static, EmailProperty, EmailValue> {
         let (header_name, form, all) = match property {
             EmailProperty::Header(header) => (
@@ -393,28 +405,32 @@ impl HeaderToValue for ArchivedVec<ArchivedHeader<'_>> {
         let is_raw = matches!(form, HeaderForm::Raw) || matches!(header_name, HeaderName::Other(_));
         let mut headers = Vec::new();
         let header_name = header_name.as_str();
-        for header in self.iter().rev() {
+        for header in self.headers.iter().rev() {
             if header.name.as_str().eq_ignore_ascii_case(header_name) {
-                let header_value = if is_raw || matches!(header.value, ArchivedHeaderValue::Empty) {
-                    raw_message
-                        .get(
-                            u32::from(header.offset_start) as usize
-                                ..u32::from(header.offset_end) as usize,
-                        )
-                        .map_or(HeaderValue::Empty, |bytes| match form {
-                            HeaderForm::Raw => {
-                                HeaderValue::Text(String::from_utf8_lossy(bytes.trim_end()))
+                let raw_header;
+                let header_value =
+                    if is_raw || matches!(header.value, ArchivedMetadataHeaderValue::Empty) {
+                        raw_header = raw_message.get(header.value_range());
+
+                        if let Some(bytes) = &raw_header {
+                            let bytes = bytes.as_ref();
+                            match form {
+                                HeaderForm::Raw => {
+                                    HeaderValue::Text(String::from_utf8_lossy(bytes.trim_end()))
+                                }
+                                HeaderForm::Text => MessageStream::new(bytes).parse_unstructured(),
+                                HeaderForm::Addresses
+                                | HeaderForm::GroupedAddresses
+                                | HeaderForm::URLs => MessageStream::new(bytes).parse_address(),
+                                HeaderForm::MessageIds => MessageStream::new(bytes).parse_id(),
+                                HeaderForm::Date => MessageStream::new(bytes).parse_date(),
                             }
-                            HeaderForm::Text => MessageStream::new(bytes).parse_unstructured(),
-                            HeaderForm::Addresses
-                            | HeaderForm::GroupedAddresses
-                            | HeaderForm::URLs => MessageStream::new(bytes).parse_address(),
-                            HeaderForm::MessageIds => MessageStream::new(bytes).parse_id(),
-                            HeaderForm::Date => MessageStream::new(bytes).parse_date(),
-                        })
-                } else {
-                    HeaderValue::from(&header.value)
-                };
+                        } else {
+                            HeaderValue::Empty
+                        }
+                    } else {
+                        HeaderValue::from(&header.value)
+                    };
                 headers.push(header_value.into_form(&form));
                 if !all {
                     break;
@@ -432,21 +448,22 @@ impl HeaderToValue for ArchivedVec<ArchivedHeader<'_>> {
         }
     }
 
-    fn headers_to_value(&self, raw_message: &[u8]) -> Value<'static, EmailProperty, EmailValue> {
-        let mut headers = Vec::with_capacity(self.len());
-        for header in self.iter() {
+    fn headers_to_value(
+        &self,
+        raw_message: &ChainedBytes<'_>,
+    ) -> Value<'static, EmailProperty, EmailValue> {
+        let mut headers = Vec::with_capacity(self.headers.len());
+        for header in self.headers.iter() {
             headers.push(Value::Object(
                 Map::with_capacity(2)
-                    .with_key_value(EmailProperty::Name, header.name.to_string())
+                    .with_key_value(EmailProperty::Name, header.name.as_str().to_string())
                     .with_key_value(
                         EmailProperty::Value,
                         String::from_utf8_lossy(
                             raw_message
-                                .get(
-                                    u32::from(header.offset_start) as usize
-                                        ..u32::from(header.offset_end) as usize,
-                                )
+                                .get(header.value_range())
                                 .unwrap_or_default()
+                                .as_ref()
                                 .trim_end(),
                         )
                         .into_owned(),

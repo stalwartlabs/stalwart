@@ -22,7 +22,7 @@ use jmap_proto::{
     },
     types::state::State,
 };
-use store::{roaring::RoaringBitmap, write::BatchBuilder};
+use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -107,7 +107,12 @@ impl JmapContactCardCopy for Server {
             }
 
             let Some(_contact) = self
-                .get_archive(from_account_id, Collection::ContactCard, from_contact_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    from_account_id,
+                    Collection::ContactCard,
+                    from_contact_id,
+                ))
                 .await?
             else {
                 response.not_created.append(

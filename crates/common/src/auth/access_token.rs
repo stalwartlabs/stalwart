@@ -414,6 +414,11 @@ impl AccessToken {
         self
     }
 
+    pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
+        self.tenant = tenant_id.map(|id| TenantInfo { id, quota: 0 });
+        self
+    }
+
     pub fn state(&self) -> u32 {
         // Hash state
         let mut s = DefaultHasher::new();

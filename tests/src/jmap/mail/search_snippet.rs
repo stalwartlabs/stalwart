@@ -49,6 +49,8 @@ pub async fn test(params: &mut JMAPTest) {
     }
     wait_for_index(&server).await;
 
+    let can_stem = params.server.search_store().internal_fts().is_some();
+
     // Run tests
     for (filter, email_name, snippet_subject, snippet_preview) in [
         (
@@ -121,7 +123,12 @@ pub async fn test(params: &mut JMAPTest) {
             )),
         ),
         (
-            Filter::text("es:galería vasto biblioteca").into(),
+            Filter::text(if can_stem {
+                "es:galería vasto biblioteca"
+            } else {
+                "es:galería vastos biblioteca"
+            })
+            .into(),
             "mixed",
             Some("<mark>Biblioteca</mark> de Babel"),
             Some(concat!(

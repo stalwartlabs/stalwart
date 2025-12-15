@@ -16,15 +16,12 @@ use jmap_tools::Map;
 use std::future::Future;
 use store::{
     ahash::AHashMap,
-    query::{Comparator, ResultSet, sort::Pagination},
     roaring::RoaringBitmap,
+    search::{EmailSearchField, SearchComparator, SearchField, SearchQuery},
+    write::SearchIndex,
 };
 use trc::AddContext;
-use types::{
-    collection::{Collection, SyncCollection},
-    field::EmailField,
-    id::Id,
-};
+use types::{collection::SyncCollection, id::Id};
 
 pub trait ThreadGet: Sync + Send {
     fn thread_get(
@@ -40,6 +37,7 @@ impl ThreadGet for Server {
     ) -> trc::Result<GetResponse<Thread>> {
         let account_id = request.account_id.document_id();
         let mut thread_map: AHashMap<u32, RoaringBitmap> = AHashMap::with_capacity(32);
+        let mut all_ids = RoaringBitmap::new();
         for item in &self
             .get_cached_messages(account_id)
             .await
@@ -51,6 +49,7 @@ impl ThreadGet for Server {
                 .entry(item.thread_id)
                 .or_default()
                 .insert(item.document_id);
+            all_ids.insert(item.document_id);
         }
 
         let ids = if let Some(ids) = request.unwrap_ids(self.core.jmap.get_max_objects)? {
@@ -77,30 +76,41 @@ impl ThreadGet for Server {
             not_found: vec![],
         };
 
+        let ordered_ids = if add_email_ids && !all_ids.is_empty() {
+            Some(
+                self.search_store()
+                    .query_account(
+                        SearchQuery::new(SearchIndex::Email)
+                            .with_account_id(account_id)
+                            .with_mask(all_ids)
+                            .with_comparator(SearchComparator::Field {
+                                field: SearchField::Email(EmailSearchField::ReceivedAt),
+                                ascending: true,
+                            }),
+                    )
+                    .await?,
+            )
+        } else {
+            None
+        };
+
         for id in ids {
             let thread_id = id.document_id();
-            if let Some(document_ids) = thread_map.remove(&thread_id) {
+            if let Some(mut document_ids) = thread_map.remove(&thread_id) {
                 let mut thread: Map<'_, ThreadProperty, ThreadValue> =
                     Map::with_capacity(2).with_key_value(ThreadProperty::Id, id);
-                if add_email_ids {
-                    let doc_count = document_ids.len() as usize;
-                    thread.insert_unchecked(
-                        ThreadProperty::EmailIds,
-                        self.core
-                            .storage
-                            .data
-                            .sort(
-                                ResultSet::new(account_id, Collection::Email, document_ids),
-                                vec![Comparator::ascending(EmailField::ReceivedAt)],
-                                Pagination::new(doc_count, 0, None, 0),
-                            )
-                            .await
-                            .caused_by(trc::location!())?
-                            .ids
-                            .into_iter()
-                            .map(|id| Id::from_parts(thread_id, id.document_id()))
-                            .collect::<Vec<_>>(),
-                    );
+                if let Some(ordered_ids) = &ordered_ids {
+                    let mut ids = Vec::with_capacity(document_ids.len() as usize);
+                    for &id in ordered_ids.iter() {
+                        if document_ids.remove(id) {
+                            ids.push(Id::from_parts(thread_id, id));
+                        }
+                    }
+                    for id in document_ids.iter() {
+                        ids.push(Id::from_parts(thread_id, id));
+                    }
+
+                    thread.insert_unchecked(ThreadProperty::EmailIds, ids);
                 }
                 response.list.push(thread.into());
             } else {

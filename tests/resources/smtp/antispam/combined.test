@@ -7,7 +7,7 @@ spf_ehlo.result none
 dmarc.result none
 remote_ip 195.210.29.48
 expect_header X-Spam-Result: ARC_NA (0.00), DKIM_NA (0.00), FROM_EQ_ENV_FROM (0.00), FROM_HAS_DN (0.00), HAS_DATA_URI (0.00), HAS_LINK_TO_LARGE_IMG (0.00), HTML_SHORT_1 (0.00), MID_RHS_MATCH_ENV_FROM (0.00), RCPT_COUNT_ONE (0.00), SPF_NA (0.00), SUBJECT_ENDS_EXCLAIM (0.00), TO_DN_NONE (0.00), TO_MATCH_ENVRCPT_ALL (0.00), RCVD_COUNT_ZERO (0.10), RCVD_NO_TLS_LAST (0.10), MIME_HTML_ONLY (0.20), HELO_NORES_A_OR_MX (0.30), AUTH_NA (1.00), DATE_IN_PAST (1.00), DMARC_NA (1.00), MID_RHS_MATCH_FROM (1.00), FROMHOST_NORES_A_OR_MX (1.50), HTML_SHORT_LINK_IMG_1 (2.00), RDNS_NONE (2.00), PYZOR (3.50)
-expect_header X-Spam-Status: Yes, score=13.70
+expect_header X-Spam-Score: spam, score=13.70
 
 From: Client Services <noreply@tetheer.com>
 To: licensing@stalw.art
@@ -50,7 +50,7 @@ dmarc.result pass
 remote_ip 185.58.86.181
 tls.version TLSv1.3
 expect_header X-Spam-Result: DMARC_POLICY_ALLOW (-0.50), DKIM_ALLOW (-0.20), SPF_ALLOW (-0.20), MIME_GOOD (-0.10), ARC_NA (0.00), DKIM_SIGNED (0.00), FROM_EQ_ENV_FROM (0.00), FROM_HAS_DN (0.00), HAS_ATTACHMENT (0.00), HTML_SHORT_2 (0.00), RCPT_COUNT_ONE (0.00), RCVD_COUNT_THREE (0.00), TO_DN_EQ_ADDR_ALL (0.00), TO_MATCH_ENVRCPT_ALL (0.00), RCVD_NO_TLS_LAST (0.10), HELO_NORES_A_OR_MX (0.30), SUBJECT_ENDS_SPACES (0.50), URI_COUNT_ODD (0.50), DATE_IN_PAST (1.00), FORGED_RCVD_TRAIL (1.00), FROMHOST_NORES_A_OR_MX (1.50)
-expect_header X-Spam-Status: No, score=3.90
+expect_header X-Spam-Score: ham, score=3.90
 
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=tenthrevolution.com;
 	s=mimecast20200102; t=1669138703;
@@ -575,7 +575,7 @@ dmarc.policy reject
 remote_ip 51.89.165.39
 tls.version TLS1_2
 expect_header X-Spam-Result: DKIM_ALLOW (-0.20), HAS_LIST_UNSUB (-0.01), ARC_NA (0.00), DKIM_SIGNED (0.00), FROM_EQ_ENV_FROM (0.00), FROM_HAS_DN (0.00), HAS_EXTERNAL_IMG (0.00), HAS_LINK_TO_LARGE_IMG (0.00), HAS_REPLYTO (0.00), HTML_SHORT_1 (0.00), MID_RHS_MATCH_ENV_FROM (0.00), RCPT_COUNT_ONE (0.00), REPLYTO_ADDR_EQ_FROM (0.00), REPLYTO_EQ_FROM (0.00), SPF_SOFTFAIL (0.00), TO_DN_NONE (0.00), TO_MATCH_ENVRCPT_ALL (0.00), RCVD_COUNT_ZERO (0.10), RCVD_NO_TLS_LAST (0.10), HELO_NORES_A_OR_MX (0.30), DATE_IN_PAST (1.00), MID_RHS_MATCH_FROM (1.00), PARTS_DIFFER (1.00), FROMHOST_NORES_A_OR_MX (1.50), HTML_SHORT_LINK_IMG_1 (2.00), RDNS_NONE (2.00), VIOLATED_DIRECT_SPF (3.50), DMARC_POLICY_REJECT (4.00)
-expect_header X-Spam-Status: Yes, score=16.29
+expect_header X-Spam-Score: spam, score=16.29
 
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; s=sectionalism; d=grupokonecta.net;
  h=To:Subject:Message-ID:Date:From:Reply-To:MIME-Version:List-Unsubscribe:
@@ -791,8 +791,8 @@ dmarc.result pass
 dmarc.policy reject
 remote_ip 52.103.64.5
 tls.version TLS1_2
-expect_header X-Spam-Result: DMARC_POLICY_ALLOW (-0.50), DKIM_ALLOW (-0.20), SPF_ALLOW (-0.20), ARC_NA (0.00), ARC_SIGNED (0.00), DKIM_SIGNED (0.00), FREEMAIL_FROM (0.00), FROM_EQ_ENV_FROM (0.00), FROM_HAS_DN (0.00), HAS_SEO_WORD (0.00), HAS_X_PRIO_ONE (0.00), HTML_SHORT_1 (0.00), MID_RHS_MATCH_ENV_FROMTLD (0.00), MID_RHS_MATCH_FROMTLD (0.00), RCPT_COUNT_ONE (0.00), RCPT_IN_BODY (0.00), RCVD_COUNT_TWO (0.00), TO_DN_EQ_ADDR_ALL (0.00), TO_MATCH_ENVRCPT_ALL (0.00), RCVD_NO_TLS_LAST (0.10), HELO_NORES_A_OR_MX (0.30), DATE_IN_PAST (1.00), HEADER_EMPTY_DELIMITER (1.00), FROMHOST_NORES_A_OR_MX (1.50), SEO_SPAM (5.00)
-expect_header X-Spam-Status: Yes, score=8.00
+expect_header X-Spam-Result: DMARC_POLICY_ALLOW (-0.50), DKIM_ALLOW (-0.20), SPF_ALLOW (-0.20), ARC_NA (0.00), ARC_SIGNED (0.00), DKIM_SIGNED (0.00), FREEMAIL_FROM (0.00), FROM_EQ_ENV_FROM (0.00), FROM_HAS_DN (0.00), HAS_SEO_WORD (0.00), HAS_X_PRIO_ONE (0.00), HTML_SHORT_1 (0.00), MID_RHS_MATCH_ENV_FROMTLD (0.00), MID_RHS_MATCH_FROMTLD (0.00), RCPT_COUNT_ONE (0.00), RCPT_IN_BODY (0.00), RCVD_COUNT_TWO (0.00), TO_DN_EQ_ADDR_ALL (0.00), TO_MATCH_ENVRCPT_ALL (0.00), RCVD_NO_TLS_LAST (0.10), HELO_NORES_A_OR_MX (0.30), DATE_IN_PAST (1.00), FROMHOST_NORES_A_OR_MX (1.50), SEO_SPAM (5.00)
+expect_header X-Spam-Score: spam, score=7.00
 
 Return-Path: <miah.join@outlook.com>
 ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
@@ -1022,7 +1022,7 @@ dmarc.policy reject
 remote_ip 173.224.123.255
 tls.version TLS1_2
 expect_header X-Spam-Result: DMARC_POLICY_ALLOW (-0.50), DKIM_ALLOW (-0.20), SPF_ALLOW (-0.20), ARC_NA (0.00), DKIM_SIGNED (0.00), FROM_EQ_ENV_FROM (0.00), FROM_HAS_DN (0.00), HAS_EXTERNAL_IMG (0.00), HAS_REPLYTO (0.00), HAS_X_PRIO_THREE (0.00), HTML_SHORT_1 (0.00), RCPT_COUNT_ONE (0.00), REPLYTO_DN_EQ_FROM_DN (0.00), REPLYTO_DOM_EQ_FROM_DOM (0.00), TO_DN_ALL (0.00), TO_EQ_FROM (0.00), RCVD_COUNT_ZERO (0.10), RCVD_NO_TLS_LAST (0.10), HELO_NORES_A_OR_MX (0.30), MID_RHS_NOT_FQDN (0.50), UNPARSABLE_URL (0.50), DATE_IN_PAST (1.00), FROMHOST_NORES_A_OR_MX (1.50), DIRECT_TO_MX (2.00), FORGED_RECIPIENTS (2.00), SUBJ_ALL_CAPS (3.00)
-expect_header X-Spam-Status: Yes, score=10.10
+expect_header X-Spam-Score: spam, score=10.10
 
 Return-Path: <marketing@landeray.com>
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; s=default; d=landeray.com;

@@ -9,74 +9,66 @@
  */
 
 use crate::Core;
-use serde::{Deserialize, Serialize};
 use store::{
-    IterateParams, U32_LEN, U64_LEN, ValueKey,
-    write::{
-        BatchBuilder, BlobOp, ValueClass,
-        key::{DeserializeBigEndian, KeySerializer},
-        now,
-    },
+    Deserialize, IterateParams, U32_LEN, U64_LEN, ValueKey,
+    write::{AlignedBytes, Archive, BlobOp, ValueClass, key::DeserializeBigEndian, now},
 };
 use trc::AddContext;
 use types::blob_hash::{BLOB_HASH_LEN, BlobHash};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DeletedBlob<H, T, C> {
-    pub hash: H,
-    pub size: usize,
-    #[serde(rename = "deletedAt")]
-    pub deleted_at: T,
-    #[serde(rename = "expiresAt")]
-    pub expires_at: T,
-    pub collection: C,
+pub struct DeletedBlob {
+    pub hash: BlobHash,
+    pub expires_at: u64,
+    pub item: DeletedItem,
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct DeletedItem {
+    pub typ: DeletedItemType,
+    pub size: u32,
+    pub deleted_at: u64,
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
+pub enum DeletedItemType {
+    Email {
+        from: Box<str>,
+        subject: Box<str>,
+        received_at: u64,
+    },
+    FileNode {
+        name: Box<str>,
+    },
+    CalendarEvent {
+        title: Box<str>,
+        start_time: u64,
+    },
+    ContactCard {
+        name: Box<str>,
+    },
+    SieveScript {
+        name: Box<str>,
+    },
 }
 
 impl Core {
-    pub fn hold_undelete(
-        &self,
-        batch: &mut BatchBuilder,
-        collection: u8,
-        blob_hash: &BlobHash,
-        blob_size: usize,
-    ) {
-        if let Some(undelete) = self.enterprise.as_ref().and_then(|e| e.undelete.as_ref()) {
-            let now = now();
-
-            batch.set(
-                BlobOp::Reserve {
-                    hash: blob_hash.clone(),
-                    until: now + undelete.retention.as_secs(),
-                },
-                KeySerializer::new(U64_LEN + U64_LEN)
-                    .write(blob_size as u32)
-                    .write(now)
-                    .write(collection)
-                    .finalize(),
-            );
-        }
-    }
-
-    pub async fn list_deleted(
-        &self,
-        account_id: u32,
-    ) -> trc::Result<Vec<DeletedBlob<BlobHash, u64, u8>>> {
+    pub async fn list_deleted(&self, account_id: u32) -> trc::Result<Vec<DeletedBlob>> {
         let from_key = ValueKey {
             account_id,
             collection: 0,
             document_id: 0,
-            class: ValueClass::Blob(BlobOp::Reserve {
+            class: ValueClass::Blob(BlobOp::Undelete {
                 hash: BlobHash::default(),
                 until: 0,
             }),
         };
         let to_key = ValueKey {
-            account_id: account_id + 1,
+            account_id,
             collection: 0,
-            document_id: 0,
-            class: ValueClass::Blob(BlobOp::Reserve {
-                hash: BlobHash::default(),
-                until: 0,
+            document_id: u32::MAX,
+            class: ValueClass::Blob(BlobOp::Undelete {
+                hash: BlobHash::new_max(),
+                until: u64::MAX,
             }),
         };
 
@@ -89,18 +81,25 @@ impl Core {
                 IterateParams::new(from_key, to_key).ascending(),
                 |key, value| {
                     let expires_at = key.deserialize_be_u64(key.len() - U64_LEN)?;
-                    if value.len() == U32_LEN + U64_LEN + 1 && expires_at > now {
+                    if expires_at > now {
+                        let item = <Archive<AlignedBytes> as Deserialize>::deserialize(value)
+                            .and_then(|bytes| bytes.deserialize::<DeletedItem>())
+                            .add_context(|ctx| ctx.ctx(trc::Key::Key, key))?;
+
                         results.push(DeletedBlob {
                             hash: BlobHash::try_from_hash_slice(
-                                key.get(U32_LEN..U32_LEN + BLOB_HASH_LEN).ok_or_else(|| {
-                                    trc::Error::corrupted_key(key, value.into(), trc::location!())
-                                })?,
+                                key.get(U32_LEN + 1..U32_LEN + 1 + BLOB_HASH_LEN)
+                                    .ok_or_else(|| {
+                                        trc::Error::corrupted_key(
+                                            key,
+                                            value.into(),
+                                            trc::location!(),
+                                        )
+                                    })?,
                             )
                             .unwrap(),
-                            size: value.deserialize_be_u32(0)? as usize,
-                            deleted_at: value.deserialize_be_u64(U32_LEN)?,
                             expires_at,
-                            collection: *value.last().unwrap(),
+                            item,
                         });
                     }
                     Ok(true)

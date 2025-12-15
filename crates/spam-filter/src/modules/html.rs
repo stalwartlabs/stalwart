@@ -4,24 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::CompactString;
 use mail_parser::decoders::html::add_html_token;
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
 pub enum HtmlToken {
     StartTag {
         name: u64,
-        attributes: Vec<(u64, Option<CompactString>)>,
+        attributes: Vec<(u64, Option<String>)>,
         is_self_closing: bool,
     },
     EndTag {
         name: u64,
     },
     Comment {
-        text: CompactString,
+        text: String,
     },
     Text {
-        text: CompactString,
+        text: String,
     },
 }
 
@@ -35,6 +35,12 @@ pub(crate) const META: u64 =
     (b'm' as u64) | ((b'e' as u64) << 8) | ((b't' as u64) << 16) | ((b'a' as u64) << 24);
 pub(crate) const LINK: u64 =
     (b'l' as u64) | ((b'i' as u64) << 8) | ((b'n' as u64) << 16) | ((b'k' as u64) << 24);
+pub(crate) const ALT: u64 = (b'a' as u64) | ((b'l' as u64) << 8) | ((b't' as u64) << 16);
+pub(crate) const TITLE: u64 = (b't' as u64)
+    | ((b'i' as u64) << 8)
+    | ((b't' as u64) << 16)
+    | ((b'l' as u64) << 24)
+    | ((b'e' as u64) << 32);
 
 pub(crate) const HREF: u64 =
     (b'h' as u64) | ((b'r' as u64) << 8) | ((b'e' as u64) << 16) | ((b'f' as u64) << 24);
@@ -131,7 +137,7 @@ pub fn html_to_tokens(input: &str) -> Vec<HtmlToken> {
                         last_ch = ch;
                     }
                     tags.push(HtmlToken::Comment {
-                        text: CompactString::from_utf8(comment).unwrap_or_default(),
+                        text: String::from_utf8(comment).unwrap_or_default(),
                     });
                 } else {
                     let mut is_end_tag = false;
@@ -139,11 +145,11 @@ pub fn html_to_tokens(input: &str) -> Vec<HtmlToken> {
                         match iter.peek() {
                             Some(&(_, &b'/')) => {
                                 is_end_tag = true;
-                                pos += 1;
+                                //pos += 1;
                                 iter.next();
                             }
                             Some((_, ch)) if ch.is_ascii_whitespace() => {
-                                pos += 1;
+                                //pos += 1;
                                 iter.next();
                             }
                             _ => break,
@@ -157,7 +163,7 @@ pub fn html_to_tokens(input: &str) -> Vec<HtmlToken> {
                     let mut shift = 0;
 
                     let mut tag = 0;
-                    let mut attributes: Vec<(u64, Option<CompactString>)> = vec![];
+                    let mut attributes: Vec<(u64, Option<String>)> = vec![];
 
                     'outer: while let Some((_, &ch)) = iter.next() {
                         match ch {
@@ -203,8 +209,8 @@ pub fn html_to_tokens(input: &str) -> Vec<HtmlToken> {
                                     match ch {
                                         b'>' if !in_quote => {
                                             if !value.is_empty() {
-                                                let value = CompactString::from_utf8(value)
-                                                    .unwrap_or_default();
+                                                let value =
+                                                    String::from_utf8(value).unwrap_or_default();
                                                 if let Some((_, v)) = attributes.last_mut() {
                                                     *v = value.into();
                                                 } else {
@@ -232,7 +238,7 @@ pub fn html_to_tokens(input: &str) -> Vec<HtmlToken> {
                                 }
 
                                 if !value.is_empty() {
-                                    let value = CompactString::from_utf8(value).unwrap_or_default();
+                                    let value = String::from_utf8(value).unwrap_or_default();
                                     if let Some((_, v)) = attributes.last_mut() {
                                         *v = value.into();
                                     } else {

@@ -144,7 +144,7 @@ pub async fn test(params: &mut JMAPTest) {
     batch
         .with_account_id(account.id().document_id())
         .with_collection(Collection::Principal)
-        .update_document(0)
+        .with_document(0)
         .clear(PrincipalField::ParticipantIdentities);
     params.server.commit_batch(batch).await.unwrap();
     params.assert_is_empty().await;

@@ -90,6 +90,9 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                     serialized.push(7u8);
                     let _ = serialized.write_leb128(*account_id);
                 }
+                BroadcastEvent::ReloadSpamFilter => {
+                    serialized.push(8u8);
+                }
             }
         }
         serialized
@@ -185,6 +188,8 @@ where
                     let account_id = self.messages.next_leb128().ok_or(())?;
                     Ok(Some(BroadcastEvent::ReloadPushServers(account_id)))
                 }
+
+                8 => Ok(Some(BroadcastEvent::ReloadSpamFilter)),
 
                 _ => Err(()),
             }

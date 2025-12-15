@@ -504,9 +504,12 @@ impl ParseHttp for Server {
                         });
                 }
             }
-            "autodiscover" => {
+            "autodiscover" | "Autodiscover" => {
                 if req.method() == Method::POST
-                    && path.next().unwrap_or_default() == "autodiscover.xml"
+                    && path
+                        .next()
+                        .unwrap_or_default()
+                        .eq_ignore_ascii_case("autodiscover.xml")
                 {
                     // Limit anonymous requests
                     self.is_http_anonymous_request_allowed(&session.remote_ip)

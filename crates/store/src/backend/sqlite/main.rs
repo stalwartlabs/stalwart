@@ -92,7 +92,7 @@ impl SqliteStore {
             SUBSPACE_ACL,
             SUBSPACE_DIRECTORY,
             SUBSPACE_TASK_QUEUE,
-            SUBSPACE_BLOB_RESERVE,
+            SUBSPACE_BLOB_EXTRA,
             SUBSPACE_BLOB_LINK,
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,
@@ -101,12 +101,11 @@ impl SqliteStore {
             SUBSPACE_QUEUE_EVENT,
             SUBSPACE_REPORT_OUT,
             SUBSPACE_REPORT_IN,
-            SUBSPACE_FTS_INDEX,
             SUBSPACE_LOGS,
             SUBSPACE_BLOBS,
             SUBSPACE_TELEMETRY_SPAN,
             SUBSPACE_TELEMETRY_METRIC,
-            SUBSPACE_TELEMETRY_INDEX,
+            SUBSPACE_SEARCH_INDEX,
         ] {
             let table = char::from(table);
             conn.execute(
@@ -121,23 +120,16 @@ impl SqliteStore {
             .map_err(into_error)?;
         }
 
-        for table in [
-            SUBSPACE_INDEXES,
-            SUBSPACE_BITMAP_ID,
-            SUBSPACE_BITMAP_TAG,
-            SUBSPACE_BITMAP_TEXT,
-        ] {
-            let table = char::from(table);
-            conn.execute(
-                &format!(
-                    "CREATE TABLE IF NOT EXISTS {table} (
+        let table = char::from(SUBSPACE_INDEXES);
+        conn.execute(
+            &format!(
+                "CREATE TABLE IF NOT EXISTS {table} (
                         k BLOB PRIMARY KEY
-                    )"
-                ),
-                [],
-            )
-            .map_err(into_error)?;
-        }
+                )"
+            ),
+            [],
+        )
+        .map_err(into_error)?;
 
         for table in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
             conn.execute(

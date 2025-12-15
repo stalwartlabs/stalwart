@@ -93,7 +93,7 @@ impl<T: SessionStream> SessionData<T> {
             batch
                 .with_account_id(params.account_id)
                 .with_collection(Collection::Mailbox)
-                .create_document(mailbox_id)
+                .with_document(mailbox_id)
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(mailbox))
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .commit_point();
@@ -329,6 +329,9 @@ fn attr_to_role(attr: Attribute) -> SpecialUse {
         Attribute::Sent => SpecialUse::Sent,
         Attribute::Trash => SpecialUse::Trash,
         Attribute::Important => SpecialUse::Important,
+        Attribute::Memos => SpecialUse::Memos,
+        Attribute::Scheduled => SpecialUse::Scheduled,
+        Attribute::Snoozed => SpecialUse::Snoozed,
         _ => SpecialUse::None,
     }
 }

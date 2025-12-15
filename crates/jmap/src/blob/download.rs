@@ -7,11 +7,17 @@
 use common::{Server, auth::AccessToken};
 use email::cache::MessageCacheFetch;
 use email::cache::email::MessageCacheAccess;
+use email::message::metadata::MessageMetadata;
+use groupware::cache::GroupwareCache;
+use store::ValueKey;
+use store::write::{AlignedBytes, Archive};
 use std::future::Future;
 use trc::AddContext;
 use types::acl::Acl;
 use types::blob::{BlobClass, BlobId};
-use types::collection::Collection;
+use types::collection::{Collection, SyncCollection};
+use types::field::EmailField;
+use utils::chained_bytes::ChainedBytes;
 
 pub trait BlobDownload: Sync + Send {
     fn blob_download(
@@ -34,64 +40,59 @@ impl BlobDownload for Server {
         blob_id: &BlobId,
         access_token: &AccessToken,
     ) -> trc::Result<Option<Vec<u8>>> {
-        if !self
-            .core
-            .storage
-            .data
-            .blob_has_access(&blob_id.hash, &blob_id.class)
-            .await
-            .caused_by(trc::location!())?
-        {
-            return Ok(None);
-        }
-
-        if !access_token.is_member(blob_id.class.account_id()) {
-            match &blob_id.class {
-                BlobClass::Linked {
-                    account_id,
-                    collection,
-                    document_id,
-                } => {
-                    if Collection::from(*collection) == Collection::Email {
-                        if !self
-                            .get_cached_messages(*account_id)
+        if self.has_access_blob(blob_id, access_token).await? {
+            if let Some(section) = &blob_id.section {
+                self.get_blob_section(&blob_id.hash, section)
+                    .await
+                    .caused_by(trc::location!())
+            } else {
+                let blob = self
+                    .blob_store()
+                    .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
+                    .await
+                    .caused_by(trc::location!());
+                match (&blob_id.class, blob) {
+                    (
+                        BlobClass::Linked {
+                            account_id,
+                            collection,
+                            document_id,
+                        },
+                        Ok(Some(data)),
+                    ) if *collection == Collection::Email as u8 => {
+                        let Some(archive) = self
+                            .store()
+                            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+                                *account_id,
+                                Collection::Email,
+                                *document_id,
+                                EmailField::Metadata,
+                            ))
                             .await
                             .caused_by(trc::location!())?
-                            .shared_messages(access_token, Acl::ReadItems)
-                            .contains(*document_id)
-                        {
-                            return Ok(None);
-                        }
-                    } else {
-                        match self
-                            .has_access_to_document(
-                                access_token,
-                                *account_id,
-                                *collection,
-                                *document_id,
-                                Acl::Read,
+                        else {
+                            return Ok(Some(data));
+                        };
+                        let metadata = archive
+                            .to_unarchived::<MessageMetadata>()
+                            .caused_by(trc::location!())?;
+                        let body_offset = metadata.inner.blob_body_offset.to_native();
+                        if metadata.inner.root_part().offset_body.to_native() != body_offset {
+                            let raw_message = ChainedBytes::new(
+                                metadata.inner.raw_headers.as_ref(),
                             )
-                            .await
-                        {
-                            Ok(has_access) if has_access => (),
-                            _ => return Ok(None),
+                            .with_last(data.get(body_offset as usize..).unwrap_or_default());
+                            Ok(Some(raw_message.to_bytes()))
+                        } else {
+                            Ok(Some(data))
                         }
                     }
-                }
-                BlobClass::Reserved { .. } => {
-                    return Ok(None);
+                    (_, blob) => blob,
                 }
             }
-        }
-
-        if let Some(section) = &blob_id.section {
-            self.get_blob_section(&blob_id.hash, section).await
         } else {
-            self.blob_store()
-                .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
-                .await
+            Ok(None)
         }
-        .caused_by(trc::location!())
     }
 
     async fn has_access_blob(
@@ -100,9 +101,7 @@ impl BlobDownload for Server {
         access_token: &AccessToken,
     ) -> trc::Result<bool> {
         Ok(self
-            .core
-            .storage
-            .data
+            .store()
             .blob_has_access(&blob_id.hash, &blob_id.class)
             .await
             .caused_by(trc::location!())?
@@ -112,26 +111,30 @@ impl BlobDownload for Server {
                     collection,
                     document_id,
                 } => {
-                    if Collection::from(*collection) == Collection::Email {
-                        access_token.is_member(*account_id)
-                            || self
+                    if access_token.is_member(*account_id) {
+                        true
+                    } else {
+                        match Collection::from(*collection) {
+                            Collection::Email => self
                                 .get_cached_messages(*account_id)
                                 .await
                                 .caused_by(trc::location!())?
                                 .shared_messages(access_token, Acl::ReadItems)
-                                .contains(*document_id)
-                    } else {
-                        access_token.is_member(*account_id)
-                            || (access_token.has_access(*account_id, *collection)
-                                && self
-                                    .has_access_to_document(
-                                        access_token,
-                                        *account_id,
-                                        *collection,
-                                        *document_id,
-                                        Acl::Read,
-                                    )
-                                    .await?)
+                                .contains(*document_id),
+                            collection @ (Collection::FileNode
+                            | Collection::ContactCard
+                            | Collection::CalendarEvent) => self
+                                .fetch_dav_resources(
+                                    access_token,
+                                    *account_id,
+                                    SyncCollection::from(collection),
+                                )
+                                .await
+                                .caused_by(trc::location!())?
+                                .shared_items(access_token, [Acl::ReadItems], true)
+                                .contains(*document_id),
+                            _ => false,
+                        }
                     }
                 }
                 BlobClass::Reserved { account_id, .. } => access_token.is_member(*account_id),

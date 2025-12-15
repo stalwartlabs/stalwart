@@ -14,7 +14,6 @@ use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
 use mail_parser::HeaderName;
 use serde::Serialize;
 use std::{borrow::Cow, fmt::Display, str::FromStr};
-use store::fts::{FilterItem, FilterType};
 use types::{blob::BlobId, id::Id, keyword::Keyword};
 
 #[derive(Debug, Clone, Default)]
@@ -726,14 +725,16 @@ impl Default for EmailComparator {
 impl EmailComparator {
     fn take_keyword(&mut self) -> Keyword {
         match self {
-            EmailComparator::HasKeyword(k) => std::mem::replace(k, Keyword::Other(String::new())),
+            EmailComparator::HasKeyword(k) => {
+                std::mem::replace(k, Keyword::Other(Default::default()))
+            }
             EmailComparator::AllInThreadHaveKeyword(k) => {
-                std::mem::replace(k, Keyword::Other(String::new()))
+                std::mem::replace(k, Keyword::Other(Default::default()))
             }
             EmailComparator::SomeInThreadHaveKeyword(k) => {
-                std::mem::replace(k, Keyword::Other(String::new()))
+                std::mem::replace(k, Keyword::Other(Default::default()))
             }
-            _ => Keyword::Other(String::new()),
+            _ => Keyword::Other(Default::default()),
         }
     }
 }
@@ -855,22 +856,6 @@ impl EmailComparator {
                 | EmailComparator::Cc
                 | EmailComparator::SentAt
         )
-    }
-}
-
-impl FilterItem for EmailFilter {
-    fn filter_type(&self) -> FilterType {
-        match self {
-            EmailFilter::From(_)
-            | EmailFilter::To(_)
-            | EmailFilter::Cc(_)
-            | EmailFilter::Bcc(_)
-            | EmailFilter::Subject(_)
-            | EmailFilter::Body(_)
-            | EmailFilter::Header(_)
-            | EmailFilter::Text(_) => FilterType::Fts,
-            _ => FilterType::Store,
-        }
     }
 }
 

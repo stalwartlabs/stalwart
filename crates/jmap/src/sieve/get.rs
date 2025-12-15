@@ -12,11 +12,13 @@ use jmap_proto::{
     object::sieve::{Sieve, SieveProperty, SieveValue},
 };
 use jmap_tools::{Map, Value};
+use store::{ValueKey, write::{AlignedBytes, Archive}};
 use std::future::Future;
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId, BlobSection},
     collection::{Collection, SyncCollection},
+    field::SieveField,
 };
 
 pub trait SieveScriptGet: Sync + Send {
@@ -39,14 +41,13 @@ impl SieveScriptGet for Server {
             SieveProperty::IsActive,
         ]);
         let account_id = request.account_id.document_id();
-        let push_ids = self
-            .get_document_ids(account_id, Collection::SieveScript)
-            .await?
-            .unwrap_or_default();
+        let script_ids = self
+            .document_ids(account_id, Collection::SieveScript, SieveField::Name)
+            .await?;
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            push_ids
+            script_ids
                 .iter()
                 .take(self.core.jmap.get_max_objects)
                 .map(Into::into)
@@ -66,12 +67,17 @@ impl SieveScriptGet for Server {
         for id in ids {
             // Obtain the sieve script object
             let document_id = id.document_id();
-            if !push_ids.contains(document_id) {
+            if !script_ids.contains(document_id) {
                 response.not_found.push(id);
                 continue;
             }
             let sieve_ = if let Some(sieve) = self
-                .get_archive(account_id, Collection::SieveScript, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::SieveScript,
+                    document_id,
+                ))
                 .await?
             {
                 sieve

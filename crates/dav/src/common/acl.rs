@@ -24,6 +24,10 @@ use groupware::{cache::GroupwareCache, calendar::Calendar, contact::AddressBook,
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use rkyv::vec::ArchivedVec;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use store::{ahash::AHashSet, roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{
@@ -108,7 +112,12 @@ impl DavAclHandler for Server {
 
         // Fetch node
         let archive = self
-            .get_archive(account_id, collection, resource.document_id())
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                collection,
+                resource.document_id(),
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -212,7 +221,12 @@ impl DavAclHandler for Server {
         }
 
         let archive = self
-            .get_archive(uri.account_id, uri.collection, uri.resource)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                uri.account_id,
+                uri.collection,
+                uri.resource,
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;

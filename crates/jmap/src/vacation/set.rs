@@ -5,7 +5,7 @@
  */
 
 use super::get::VacationResponseGet;
-use crate::{JmapMethods, changes::state::StateManager};
+use crate::changes::state::StateManager;
 use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use email::sieve::{
     SieveScript, VacationResponse, delete::SieveScriptDelete, ingest::SieveScriptIngest,
@@ -24,8 +24,8 @@ use mail_parser::decoders::html::html_to_text;
 use std::borrow::Cow;
 use std::future::Future;
 use store::{
-    Serialize, SerializeInfallible,
-    write::{Archiver, BatchBuilder},
+    Serialize, SerializeInfallible, ValueKey,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -51,17 +51,15 @@ impl VacationResponseSet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<SetResponse<vacation_response::VacationResponse>> {
         let account_id = request.account_id.document_id();
-        let mut response = self
-            .prepare_set_response(
-                &request,
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(
                 self.assert_state(
                     account_id,
                     SyncCollection::SieveScript,
                     &request.if_in_state,
                 )
                 .await?,
-            )
-            .await?;
+            );
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
 
         // Process set or update requests
@@ -134,7 +132,12 @@ impl VacationResponseSet for Server {
 
             let (mut sieve, prev_sieve) = if let Some(document_id) = document_id {
                 let prev_sieve = self
-                    .get_archive(account_id, Collection::SieveScript, document_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        account_id,
+                        Collection::SieveScript,
+                        document_id,
+                    ))
                     .await?
                     .ok_or_else(|| {
                         trc::StoreEvent::NotFound
@@ -261,7 +264,7 @@ impl VacationResponseSet for Server {
 
             // Update id
             let document_id = if let Some(document_id) = document_id {
-                batch.update_document(document_id);
+                batch.with_document(document_id);
                 document_id
             } else {
                 let document_id = self
@@ -269,21 +272,22 @@ impl VacationResponseSet for Server {
                     .assign_document_ids(account_id, Collection::SieveScript, 1)
                     .await
                     .caused_by(trc::location!())?;
-                batch.create_document(document_id);
+                batch.with_document(document_id);
                 document_id
             };
 
             // Create sieve script only if there are changes
             if build_script {
                 // Upload new blob
-                obj.changes_mut().unwrap().blob_hash = self
-                    .put_blob(
+                let (blob_hash, blob_hold) = self
+                    .put_temporary_blob(
                         account_id,
                         &self.build_script(obj.changes_mut().unwrap())?,
-                        false,
+                        60,
                     )
-                    .await?
-                    .hash;
+                    .await?;
+                obj.changes_mut().unwrap().blob_hash = blob_hash;
+                batch.clear(blob_hold);
             };
             batch.custom(obj).caused_by(trc::location!())?;
 
@@ -293,13 +297,13 @@ impl VacationResponseSet for Server {
                 if !was_active {
                     batch
                         .with_collection(Collection::Principal)
-                        .update_document(0)
+                        .with_document(0)
                         .set(PrincipalField::ActiveScriptId, document_id.serialize());
                 }
             } else if was_active {
                 batch
                     .with_collection(Collection::Principal)
-                    .update_document(0)
+                    .with_document(0)
                     .clear(PrincipalField::ActiveScriptId);
             }
 
@@ -335,7 +339,7 @@ impl VacationResponseSet for Server {
                     if active_script_id == Some(document_id) {
                         batch
                             .with_collection(Collection::Principal)
-                            .update_document(0)
+                            .with_document(0)
                             .clear(PrincipalField::ActiveScriptId);
                     }
 

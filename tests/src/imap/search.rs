@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{AssertResult, ImapConnection, Type};
+use crate::imap::IMAPTest;
 use imap_proto::ResponseType;
 
-use super::{AssertResult, ImapConnection, Type};
-
-pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
+pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection, handle: &IMAPTest) {
     println!("Running SEARCH tests...");
 
     // Searches without selecting a mailbox should fail.
@@ -119,5 +119,9 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
         .await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains("COUNT 10 ALL 6,4:5,1,10,9,3,7:8,2");
+        .assert_contains(if !handle.server.search_store().is_mysql() {
+            "COUNT 10 ALL 6,4:5,1,10,3,7:8,2,9"
+        } else {
+            "COUNT 10 ALL 9,3,7:8,2,6,4:5,1,10"
+        }); //6,4:5,1,10,9,3,7:8,2");
 }

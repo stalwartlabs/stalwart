@@ -21,7 +21,7 @@ use mail_parser::{
     MessageParser, PartType, decoders::html::html_to_text, parsers::preview::preview_text,
 };
 use std::future::Future;
-use utils::map::vec_map::VecMap;
+use utils::{chained_bytes::ChainedBytes, map::vec_map::VecMap};
 
 pub trait EmailParse: Sync + Send {
     fn email_parse(
@@ -112,6 +112,7 @@ impl EmailParse for Server {
                 response.not_parsable.push(blob_id);
                 continue;
             };
+            let raw_message = ChainedBytes::new(&raw_message);
 
             // Prepare response
             let mut email = Map::with_capacity(properties.len());
@@ -209,6 +210,7 @@ impl EmailParse for Server {
                                     &body_properties,
                                     &raw_message,
                                     &blob_id,
+                                    0,
                                 )
                             })
                             .collect::<Vec<_>>(),
@@ -217,9 +219,13 @@ impl EmailParse for Server {
                     EmailProperty::BodyStructure => {
                         email.insert_unchecked(
                             EmailProperty::BodyStructure,
-                            message
-                                .parts
-                                .to_body_part(0, &body_properties, &raw_message, &blob_id),
+                            message.parts.to_body_part(
+                                0,
+                                &body_properties,
+                                &raw_message,
+                                &blob_id,
+                                0,
+                            ),
                         );
                     }
                     EmailProperty::BodyValues => {

@@ -7,9 +7,8 @@
 use calcard::jscalendar::JSCalendarProperty;
 use common::Server;
 use jmap_proto::error::set::SetError;
-use store::query::Filter;
 use trc::AddContext;
-use types::{collection::Collection, field::CalendarField, id::Id};
+use types::{collection::Collection, field::CalendarEventField, id::Id};
 
 pub mod copy;
 pub mod get;
@@ -64,17 +63,15 @@ pub(super) async fn assert_is_unique_uid(
     uid: Option<&str>,
 ) -> trc::Result<Result<(), SetError<JSCalendarProperty<Id>>>> {
     if let Some(uid) = uid
-        && !server
-            .store()
-            .filter(
+        && server
+            .document_exists(
                 account_id,
                 Collection::CalendarEvent,
-                vec![Filter::eq(CalendarField::Uid, uid.as_bytes().to_vec())],
+                CalendarEventField::Uid,
+                uid.as_bytes(),
             )
             .await
             .caused_by(trc::location!())?
-            .results
-            .is_empty()
     {
         Ok(Err(SetError::invalid_properties()
             .with_property(JSCalendarProperty::Uid)

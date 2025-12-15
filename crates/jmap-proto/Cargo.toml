@@ -1,11 +1,9 @@
 [package]
 name = "jmap_proto"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
-resolver = "2"
 
 [dependencies]
-store = { path = "../store" }
 utils = { path = "../utils" }
 types = { path = "../types" }
 trc = { path = "../trc" }

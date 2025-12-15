@@ -73,7 +73,7 @@ async fn queue_retry() {
     // Expect a failed DSN
     attempt.try_deliver(core.clone());
     let message = qr.expect_message().await;
-    assert_eq!(message.message.return_path, "");
+    assert_eq!(message.message.return_path.as_ref(), "");
     assert_eq!(
         message.message.recipients.first().unwrap().address(),
         "john@test.org"

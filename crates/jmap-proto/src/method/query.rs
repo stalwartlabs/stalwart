@@ -15,9 +15,8 @@ use serde::{
 };
 use std::{
     borrow::Cow,
-    fmt::{self, Display, Formatter},
+    fmt::{self},
 };
-use store::fts::{FilterItem, FilterType, FtsFilter};
 use types::id::Id;
 
 #[derive(Debug, Clone)]
@@ -71,7 +70,7 @@ where
     Close,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Comparator<T>
 where
     T: for<'de> DeserializeArguments<'de> + Default,
@@ -339,51 +338,6 @@ where
     }
 }
 
-impl<T> From<Filter<T>> for store::query::Filter
-where
-    T: for<'de> DeserializeArguments<'de> + Default,
-{
-    fn from(value: Filter<T>) -> Self {
-        match value {
-            Filter::And => Self::And,
-            Filter::Or => Self::Or,
-            Filter::Not => Self::Not,
-            Filter::Close => Self::End,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<T: Into<u8> + Display + Clone + std::fmt::Debug, U> From<Filter<U>> for FtsFilter<T>
-where
-    U: for<'de> DeserializeArguments<'de> + Default,
-{
-    fn from(value: Filter<U>) -> Self {
-        match value {
-            Filter::And => Self::And,
-            Filter::Or => Self::Or,
-            Filter::Not => Self::Not,
-            Filter::Close => Self::End,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<T> From<FilterType> for Filter<T>
-where
-    T: for<'de> DeserializeArguments<'de> + Default,
-{
-    fn from(value: FilterType) -> Self {
-        match value {
-            FilterType::And => Filter::And,
-            FilterType::Or => Filter::Or,
-            FilterType::Not => Filter::Not,
-            FilterType::End => Filter::Close,
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl<T> Comparator<T>
 where
     T: for<'de> DeserializeArguments<'de> + Default,
@@ -405,32 +359,15 @@ where
     }
 }
 
-impl<T> FilterItem for Filter<T>
+impl<T> Default for Comparator<T>
 where
-    T: for<'de> DeserializeArguments<'de> + FilterItem + Default,
+    T: for<'de> DeserializeArguments<'de> + Default,
 {
-    fn filter_type(&self) -> FilterType {
-        match self {
-            Filter::And => FilterType::And,
-            Filter::Or => FilterType::Or,
-            Filter::Not => FilterType::Not,
-            Filter::Close => FilterType::End,
-            Filter::Property(p) => p.filter_type(),
-        }
-    }
-}
-
-impl<T> Display for Filter<T>
-where
-    T: for<'de> DeserializeArguments<'de> + Display + Default,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Filter::And => write!(f, "and"),
-            Filter::Or => write!(f, "or"),
-            Filter::Not => write!(f, "not"),
-            Filter::Close => write!(f, "close"),
-            Filter::Property(p) => write!(f, "{}", p),
+    fn default() -> Self {
+        Self {
+            is_ascending: true,
+            collation: None,
+            property: T::default(),
         }
     }
 }

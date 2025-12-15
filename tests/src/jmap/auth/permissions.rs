@@ -14,13 +14,19 @@ use directory::{
     Permission, Type,
     backend::internal::{PrincipalField, PrincipalSet, PrincipalUpdate, PrincipalValue},
 };
-use email::message::delivery::{IngestMessage, LocalDeliveryStatus, MailDelivery};
+use email::message::delivery::{IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery};
 use std::sync::Arc;
-use types::blob_hash::BlobHash;
 
 pub async fn test(params: &JMAPTest) {
     println!("Running permissions tests...");
     let server = params.server.clone();
+
+    // Disable spam filtering to avoid adding extra headers
+    let old_core = params.server.core.clone();
+    let mut new_core = old_core.as_ref().clone();
+    new_core.spam.enabled = false;
+    new_core.smtp.session.data.add_delivered_to = false;
+    params.server.inner.shared_core.store(Arc::new(new_core));
 
     // Remove unlimited requests permission
     for &account in params.accounts.keys() {
@@ -611,10 +617,8 @@ pub async fn test(params: &JMAPTest) {
         );
 
     // John should not be allowed to receive email
-    let message_blob = BlobHash::generate(TEST_MESSAGE.as_bytes());
-    server
-        .blob_store()
-        .put_blob(message_blob.as_ref(), TEST_MESSAGE.as_bytes())
+    let (message_blob, _) = server
+        .put_temporary_blob(tenant_user_id, TEST_MESSAGE.as_bytes(), 60)
         .await
         .unwrap();
     assert_eq!(
@@ -622,7 +626,10 @@ pub async fn test(params: &JMAPTest) {
             .deliver_message(IngestMessage {
                 sender_address: "bill@foobar.org".to_string(),
                 sender_authenticated: true,
-                recipients: vec!["john@foobar.org".to_string()],
+                recipients: vec![IngestRecipient {
+                    address: "john@foobar.org".to_string(),
+                    is_spam: false
+                }],
                 message_blob: message_blob.clone(),
                 message_size: TEST_MESSAGE.len() as u64,
                 session_id: 0,
@@ -661,7 +668,10 @@ pub async fn test(params: &JMAPTest) {
             .deliver_message(IngestMessage {
                 sender_address: "bill@foobar.org".to_string(),
                 sender_authenticated: true,
-                recipients: vec!["john@foobar.org".to_string()],
+                recipients: vec![IngestRecipient {
+                    address: "john@foobar.org".to_string(),
+                    is_spam: false
+                }],
                 message_blob: message_blob.clone(),
                 message_size: TEST_MESSAGE.len() as u64,
                 session_id: 0,
@@ -672,13 +682,14 @@ pub async fn test(params: &JMAPTest) {
     );
 
     // Quota for the tenant and user should be updated
+    const EXTRA_BYTES: i64 = 19; // Storage overhead
     assert_eq!(
         server.get_used_quota(tenant_id).await.unwrap(),
-        TEST_MESSAGE.len() as i64
+        TEST_MESSAGE.len() as i64 + EXTRA_BYTES
     );
     assert_eq!(
         server.get_used_quota(tenant_user_id).await.unwrap(),
-        TEST_MESSAGE.len() as i64
+        TEST_MESSAGE.len() as i64 + EXTRA_BYTES
     );
 
     // Next delivery should fail due to tenant quota
@@ -687,7 +698,10 @@ pub async fn test(params: &JMAPTest) {
             .deliver_message(IngestMessage {
                 sender_address: "bill@foobar.org".to_string(),
                 sender_authenticated: true,
-                recipients: vec!["john@foobar.org".to_string()],
+                recipients: vec![IngestRecipient {
+                    address: "john@foobar.org".to_string(),
+                    is_spam: false
+                }],
                 message_blob,
                 message_size: TEST_MESSAGE.len() as u64,
                 session_id: 0,
@@ -714,7 +728,7 @@ pub async fn test(params: &JMAPTest) {
     assert_eq!(server.get_used_quota(tenant_id).await.unwrap(), 0);
     assert_eq!(
         server.get_used_quota(other_tenant_id).await.unwrap(),
-        TEST_MESSAGE.len() as i64
+        TEST_MESSAGE.len() as i64 + EXTRA_BYTES
     );
 
     // Deleting tenants with data should fail

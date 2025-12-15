@@ -17,7 +17,12 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Value};
-use store::{ahash::AHashSet, roaring::RoaringBitmap, write::BatchBuilder};
+use store::{
+    ValueKey,
+    ahash::AHashSet,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -115,7 +120,12 @@ impl ContactCardSet for Server {
             // Obtain contact card
             let document_id = id.document_id();
             let contact_card_ = if let Some(contact_card_) = self
-                .get_archive(account_id, Collection::ContactCard, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::ContactCard,
+                    document_id,
+                ))
                 .await?
             {
                 contact_card_
@@ -281,7 +291,12 @@ impl ContactCardSet for Server {
             };
 
             let Some(contact_card_) = self
-                .get_archive(account_id, Collection::ContactCard, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::ContactCard,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
             else {
@@ -325,6 +340,8 @@ impl ContactCardSet for Server {
                 .await
                 .and_then(|ids| ids.last_change_id(account_id))
                 .caused_by(trc::location!())?;
+
+            self.notify_task_queue();
 
             response.new_state = State::Exact(change_id).into();
         }
@@ -455,6 +472,19 @@ fn update_contact_card<'x>(
                         .with_description("Patch operation failed."));
                 }
                 entries = js_contact.0.as_object_mut().unwrap();
+            }
+            (JSContactProperty::Media, Value::Object(media)) => {
+                for (_, value) in media.iter() {
+                    if value.as_object().is_some_and(|v| {
+                        v.keys()
+                            .any(|k| matches!(k, Key::Property(JSContactProperty::BlobId)))
+                    }) {
+                        return Err(SetError::invalid_properties()
+                            .with_property(JSContactProperty::Media)
+                            .with_description("blobIds in media is not supported."));
+                    }
+                }
+                entries.insert(JSContactProperty::Media, Value::Object(media));
             }
             (property, value) => {
                 entries.insert(property, value);

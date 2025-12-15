@@ -53,6 +53,9 @@ impl Request<Command> {
                             "\\Sent" => Some(Attribute::Sent),
                             "\\Trash" => Some(Attribute::Trash),
                             "\\Important" => Some(Attribute::Important),
+                            "\\Memos" => Some(Attribute::Memos),
+                            "\\Scheduled" => Some(Attribute::Scheduled),
+                            "\\Snoozed" => Some(Attribute::Snoozed),
                             "\\All" => None,
                         );
 

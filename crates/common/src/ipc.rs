@@ -15,9 +15,15 @@ use mail_auth::{
     mta_sts::TlsRpt,
     report::{Record, tlsrpt::FailureDetails},
 };
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
 use store::{BlobStore, InMemoryStore, Store};
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, SemaphorePermit, mpsc};
 use types::type_state::{DataType, StateChange};
 use utils::map::bitmap::Bitmap;
 
@@ -100,6 +106,7 @@ pub enum BroadcastEvent {
     ReloadPushServers(u32),
     ReloadSettings,
     ReloadBlockedIps,
+    ReloadSpamFilter,
 }
 
 #[derive(Debug)]
@@ -151,6 +158,42 @@ pub enum PolicyType {
     Tlsa(Option<Arc<Tlsa>>),
     Sts(Option<Arc<Policy>>),
     None,
+}
+
+pub struct TrainTaskController {
+    semaphore: Semaphore,
+    stop_flag: AtomicBool,
+}
+
+impl Default for TrainTaskController {
+    fn default() -> Self {
+        Self {
+            semaphore: Semaphore::new(1),
+            stop_flag: AtomicBool::new(false),
+        }
+    }
+}
+
+impl TrainTaskController {
+    pub fn try_run(&self) -> Option<SemaphorePermit<'_>> {
+        let permit = self.semaphore.try_acquire().ok()?;
+
+        self.stop_flag.store(false, Ordering::SeqCst);
+
+        Some(permit)
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.semaphore.available_permits() == 0
+    }
+
+    pub fn stop(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
+    }
+
+    pub fn should_stop(&self) -> bool {
+        self.stop_flag.load(Ordering::SeqCst)
+    }
 }
 
 pub trait ToHash {

@@ -578,10 +578,10 @@ impl EventType {
             ) => true,
             EventType::Spam(
                 SpamEvent::PyzorError
-                | SpamEvent::Train
-                | SpamEvent::TrainError
+                | SpamEvent::TrainCompleted
+                | SpamEvent::TrainSampleAdded
                 | SpamEvent::Classify
-                | SpamEvent::ClassifyError
+                | SpamEvent::ModelNotReady
                 | SpamEvent::DnsblError,
             ) => true,
             EventType::PushSubscription(_) => true,

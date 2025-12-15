@@ -5,6 +5,7 @@
  */
 
 pub mod acl;
+pub mod antispam;
 pub mod changes;
 pub mod copy;
 pub mod crypto;

@@ -8,6 +8,7 @@ use super::{ARCHIVE_ALIGNMENT, AlignedBytes, Archive, ArchiveVersion, Archiver};
 use crate::{Deserialize, Serialize, SerializeInfallible, U32_LEN, U64_LEN, Value};
 use compact_str::format_compact;
 use rkyv::util::AlignedVec;
+use roaring::{RoaringBitmap, RoaringTreemap};
 
 const MAGIC_MARKER: u8 = 1 << 7;
 const VERSIONED: u8 = 1 << 6;
@@ -419,10 +420,10 @@ where
         }
     }
 
-    pub fn serialize_versioned(self) -> trc::Result<(usize, Vec<u8>)> {
+    pub fn serialize_versioned(self) -> trc::Result<(u64, Vec<u8>)> {
         self.with_version()
             .serialize()
-            .map(|bytes| (bytes.len() - U64_LEN - 1, bytes))
+            .map(|bytes| ((bytes.len() - U64_LEN - 1) as u64, bytes))
     }
 }
 
@@ -580,5 +581,51 @@ impl Default for Archive<AlignedBytes> {
             version: ArchiveVersion::Unversioned,
             inner: AlignedBytes::Aligned(AlignedVec::new()),
         }
+    }
+}
+
+impl Serialize for RoaringBitmap {
+    fn serialize(&self) -> trc::Result<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(self.serialized_size());
+        self.serialize_into(&mut bytes)
+            .map_err(|err| {
+                trc::StoreEvent::UnexpectedError
+                    .caused_by(trc::location!())
+                    .reason(err)
+            })
+            .map(|_| bytes)
+    }
+}
+
+impl Deserialize for RoaringBitmap {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        RoaringBitmap::deserialize_from(bytes).map_err(|err| {
+            trc::StoreEvent::DeserializeError
+                .caused_by(trc::location!())
+                .reason(err)
+        })
+    }
+}
+
+impl Serialize for RoaringTreemap {
+    fn serialize(&self) -> trc::Result<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(self.serialized_size());
+        self.serialize_into(&mut bytes)
+            .map_err(|err| {
+                trc::StoreEvent::UnexpectedError
+                    .caused_by(trc::location!())
+                    .reason(err)
+            })
+            .map(|_| bytes)
+    }
+}
+
+impl Deserialize for RoaringTreemap {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        RoaringTreemap::deserialize_from(bytes).map_err(|err| {
+            trc::StoreEvent::DeserializeError
+                .caused_by(trc::location!())
+                .reason(err)
+        })
     }
 }

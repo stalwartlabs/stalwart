@@ -12,6 +12,9 @@ use super::{AssertResult, ImapConnection, Type};
 pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnection) {
     println!("Running mailbox tests...");
 
+    // Pattern matching tests
+    mailbox_matches_pattern();
+
     // Create third connection for testing
     let mut other_conn = ImapConnection::connect(b"_z ").await;
     other_conn
@@ -323,7 +326,6 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
 }
 
-#[test]
 fn mailbox_matches_pattern() {
     let mailboxes = [
         "imaptest",

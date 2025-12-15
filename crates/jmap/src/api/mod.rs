@@ -21,6 +21,7 @@ use utils::map::vec_map::VecMap;
 pub mod acl;
 pub mod auth;
 pub mod event_source;
+pub mod query;
 pub mod request;
 pub mod session;
 

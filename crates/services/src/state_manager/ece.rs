@@ -3,7 +3,6 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
-
 use aes_gcm::{Aes128Gcm, Nonce, aead::Aead};
 use hkdf::Hkdf;
 use p256::{
@@ -11,7 +10,7 @@ use p256::{
     ecdh::EphemeralSecret,
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
 };
-use sha2::{Sha256, digest::generic_array::GenericArray};
+use sha2::Sha256;
 use store::rand::Rng;
 
 /*
@@ -158,10 +157,14 @@ fn hkdf_sha256(salt: &[u8], secret: &[u8], info: &[u8], len: usize) -> Result<Ve
     Ok(okm)
 }
 
+// TODO: Remove allow deprecated when aes-gcm 0.10 is updated
+#[allow(deprecated)]
 fn aes_gcm_128_encrypt(key: &[u8], nonce: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
-    <Aes128Gcm as aes_gcm::KeyInit>::new(&GenericArray::clone_from_slice(key))
-        .encrypt(Nonce::from_slice(nonce), data)
-        .map_err(|e| e.to_string())
+    <Aes128Gcm as aes_gcm::KeyInit>::new(
+        &sha2::digest::generic_array::GenericArray::clone_from_slice(key),
+    )
+    .encrypt(Nonce::from_slice(nonce), data)
+    .map_err(|e| e.to_string())
 }
 
 fn generate_info(

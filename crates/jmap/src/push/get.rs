@@ -14,8 +14,8 @@ use jmap_proto::{
 use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::{
-    Serialize,
-    write::{Archiver, BatchBuilder, now},
+    Serialize, ValueKey,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, now},
 };
 use trc::{AddContext, ServerEvent};
 use types::{collection::Collection, field::PrincipalField, id::Id};
@@ -54,12 +54,13 @@ impl PushSubscriptionFetch for Server {
         };
 
         let Some(subscriptions_) = self
-            .get_archive_by_property(
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                 account_id,
                 Collection::Principal,
                 0,
-                PrincipalField::PushSubscriptions.into(),
-            )
+                PrincipalField::PushSubscriptions,
+            ))
             .await?
         else {
             for id in ids.unwrap_or_default() {
@@ -158,14 +159,15 @@ impl PushSubscriptionFetch for Server {
             if updated_subscriptions.subscriptions.is_empty() {
                 batch
                     .with_account_id(u32::MAX)
-                    .with_collection(Collection::PushSubscription)
-                    .delete_document(account_id);
+                    .with_collection(Collection::Principal)
+                    .with_account_id(account_id)
+                    .tag(PrincipalField::PushSubscriptions);
             }
 
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Principal)
-                .update_document(0)
+                .with_document(0)
                 .assert_value(PrincipalField::PushSubscriptions, subscriptions);
 
             if !updated_subscriptions.subscriptions.is_empty() {

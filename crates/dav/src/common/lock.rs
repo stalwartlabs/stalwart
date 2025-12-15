@@ -18,6 +18,7 @@ use groupware::cache::GroupwareCache;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::collections::HashMap;
+use store::ValueKey;
 use store::dispatch::lookup::KeyValue;
 use store::write::serialize::rkyv_deserialize;
 use store::write::{AlignedBytes, Archive, Archiver, now};
@@ -526,11 +527,12 @@ impl LockRequestHandler for Server {
                     if let Some(document_id) =
                         resource_state.document_id.filter(|&id| id != u32::MAX)
                         && let Some(archive) = self
-                            .get_archive(
+                            .store()
+                            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
                                 resource_state.account_id,
                                 resource_state.collection,
                                 document_id,
-                            )
+                            ))
                             .await
                             .caused_by(trc::location!())?
                     {

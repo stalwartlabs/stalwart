@@ -189,6 +189,14 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                     );
                                                 }
                                             }
+                                            BroadcastEvent::ReloadSpamFilter => {
+                                                if let Err(err) = inner.build_server().spam_model_reload().await {
+                                                    trc::error!(
+                                                        err.details("Failed to reload spam filter model")
+                                                            .caused_by(trc::location!())
+                                                    );
+                                                }
+                                            }
                                         }
                                     }
                                     Ok(None) => break,
@@ -264,5 +272,6 @@ fn log_event(event: &BroadcastEvent) -> trc::Value {
         BroadcastEvent::ReloadPushServers(account_id) => {
             trc::Value::Array(vec!["ReloadPushServers".into(), (*account_id).into()])
         }
+        BroadcastEvent::ReloadSpamFilter => CompactString::const_new("ReloadSpamFilter").into(),
     }
 }

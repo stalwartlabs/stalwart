@@ -7,7 +7,6 @@
 use calcard::jscontact::JSContactProperty;
 use common::{DavName, DavResources, Server};
 use jmap_proto::error::set::SetError;
-use store::query::Filter;
 use trc::AddContext;
 use types::{collection::Collection, field::ContactField, id::Id};
 
@@ -26,15 +25,15 @@ pub(super) async fn assert_is_unique_uid(
 ) -> trc::Result<Result<(), SetError<JSContactProperty<Id>>>> {
     if let Some(uid) = uid {
         let hits = server
-            .store()
-            .filter(
+            .document_ids_matching(
                 account_id,
                 Collection::ContactCard,
-                vec![Filter::eq(ContactField::Uid, uid.as_bytes().to_vec())],
+                ContactField::Uid,
+                uid.as_bytes(),
             )
             .await
             .caused_by(trc::location!())?;
-        if !hits.results.is_empty() {
+        if !hits.is_empty() {
             for document_id in resources
                 .paths
                 .iter()
@@ -44,7 +43,7 @@ pub(super) async fn assert_is_unique_uid(
                 })
                 .map(|path| resources.resources[path.resource_idx].document_id)
             {
-                if hits.results.contains(document_id) {
+                if hits.contains(document_id) {
                     return Ok(Err(SetError::invalid_properties()
                         .with_property(JSContactProperty::Uid)
                         .with_description(format!(

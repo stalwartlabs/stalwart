@@ -23,6 +23,10 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::str::FromStr;
 use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
+use store::{
     ahash::AHashMap,
     write::{now, serialize::rkyv_deserialize},
 };
@@ -155,7 +159,12 @@ impl CalendarFreebusyRequestHandler for Server {
 
             for document_id in document_ids {
                 let Some(archive) = self
-                    .get_archive(account_id, Collection::CalendarEvent, document_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        account_id,
+                        Collection::CalendarEvent,
+                        document_id,
+                    ))
                     .await
                     .caused_by(trc::location!())?
                 else {

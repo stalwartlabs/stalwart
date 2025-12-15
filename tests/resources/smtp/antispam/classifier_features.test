@@ -1,0 +1,2763 @@
+From: bill@example.com
+To: jdoe@example.com
+Subject: TPS Report
+
+I'm going to need those TPS reports ASAP. So, if you could do that, that'd be great.
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "_allcaps"
+  },
+  {
+    "type": "word",
+    "value": "asap"
+  },
+  {
+    "type": "word",
+    "value": "could"
+  },
+  {
+    "type": "word",
+    "value": "go"
+  },
+  {
+    "type": "word",
+    "value": "great"
+  },
+  {
+    "type": "word",
+    "value": "need"
+  },
+  {
+    "type": "word",
+    "value": "report"
+  },
+  {
+    "type": "word",
+    "value": "tps"
+  },
+  {
+    "type": "sender",
+    "value": "bill@example.com"
+  },
+  {
+    "type": "sender",
+    "value": "example.com"
+  }
+]
+<!-- NEXT TEST -->
+From: Hendrik <hendrik@example.com>
+To: Harrie <harrie@example.com>
+Date: Sat, 11 Oct 2010 00:31:44 +0200
+Subject: One Two Three Four
+Content-Type: multipart/mixed; boundary=AA
+
+This is a multi-part message in MIME format.
+--AA
+Content-Type: multipart/mixed; boundary=BB
+
+This is a multi-part message in MIME format.
+--BB
+Content-Type: text/plain; charset="us-ascii"
+
+This is the first message part containing
+plain text. 
+
+--BB
+Content-Type: text/plain; charset="us-ascii"
+
+This is another plain text message part.
+
+--BB--
+This is the end of MIME multipart.
+
+--AA
+Content-Type: text/html; charset="us-ascii"
+
+<html>
+<body>This is a piece of HTML text.</body>
+</html>
+
+--AA--
+This is the end of  MIME multipart.
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "anoth"
+  },
+  {
+    "type": "word",
+    "value": "contain"
+  },
+  {
+    "type": "word",
+    "value": "first"
+  },
+  {
+    "type": "word",
+    "value": "four"
+  },
+  {
+    "type": "word",
+    "value": "html"
+  },
+  {
+    "type": "word",
+    "value": "messag"
+  },
+  {
+    "type": "word",
+    "value": "one"
+  },
+  {
+    "type": "word",
+    "value": "part"
+  },
+  {
+    "type": "word",
+    "value": "piec"
+  },
+  {
+    "type": "word",
+    "value": "plain"
+  },
+  {
+    "type": "word",
+    "value": "text"
+  },
+  {
+    "type": "word",
+    "value": "three"
+  },
+  {
+    "type": "word",
+    "value": "two"
+  },
+  {
+    "type": "sender",
+    "value": "example.com"
+  },
+  {
+    "type": "sender",
+    "value": "hendrik@example.com"
+  },
+  {
+    "type": "mime_type",
+    "value": "multipart/mixed"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  }
+]
+<!-- NEXT TEST -->
+Content-Type: text/html; charset="utf-8"
+Subject: IPs in HTML are not urls
+
+<html>
+Das System wurde um 01.01.1970 08:28:00 für die IP-Adresse
+123.123.123.123 gesperrt.<br>
+<br>
+Der Besucher hat versucht, sich mit folgenden Daten anzumelden.<br>
+Partner: 12345678<br>
+Portal: <a href="https://www.localhost.de/example.php" target="_blank">IP-Sperre einsehen</a>
+</html>
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "adress"
+  },
+  {
+    "type": "word",
+    "value": "anzumeld"
+  },
+  {
+    "type": "word",
+    "value": "besuch"
+  },
+  {
+    "type": "word",
+    "value": "dat"
+  },
+  {
+    "type": "word",
+    "value": "einseh"
+  },
+  {
+    "type": "word",
+    "value": "folgend"
+  },
+  {
+    "type": "word",
+    "value": "gesperrt"
+  },
+  {
+    "type": "word",
+    "value": "html"
+  },
+  {
+    "type": "word",
+    "value": "ip"
+  },
+  {
+    "type": "word",
+    "value": "partn"
+  },
+  {
+    "type": "word",
+    "value": "portal"
+  },
+  {
+    "type": "word",
+    "value": "sperr"
+  },
+  {
+    "type": "word",
+    "value": "syst"
+  },
+  {
+    "type": "word",
+    "value": "url"
+  },
+  {
+    "type": "word",
+    "value": "versucht"
+  },
+  {
+    "type": "word",
+    "value": "wurd"
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      2
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      4
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      8
+    ]
+  },
+  {
+    "type": "url",
+    "value": "!ip"
+  },
+  {
+    "type": "url",
+    "value": "_example"
+  },
+  {
+    "type": "url",
+    "value": "_php"
+  },
+  {
+    "type": "url",
+    "value": "localhost.de"
+  },
+  {
+    "type": "url",
+    "value": "www.localhost.de"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "html_anchor",
+    "href": "https"
+  }
+]
+<!-- NEXT TEST -->
+X-Spam-Result: DMARC_POLICY_ALLOW (-0.50),
+    TEST (0.0),
+	SOURCE_ASN_123 (1.00)
+From: Client Services <noreply@tetheer.com>
+To: user@domain.org
+Subject: Tether Important Update !
+Content-Type: text/html
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE HTML>
+
+<html><head><title></title>
+<meta http-equiv=3D"X-UA-Compatible" content=3D"IE=3Dedge">
+</head>
+<body style=3D"margin: 0.4em;"><a title=3D"CASHBACK_REWARDS" style=3D'text-=
+transform: none; text-indent: 0px; letter-spacing: normal; font-family: "Ti=
+mes New Roman"; font-size: medium; font-style: normal; font-weight: 400; wo=
+rd-spacing: 0px; white-space: normal; orphans: 2; widows: 2; font-variant-l=
+igatures: normal; font-variant-caps: normal; -webkit-text-stroke-width: 0px=
+;' href=3D"https://metaskwap.online/" target=3D"_blank" rel=3D"noopener">
+<img width=3D"55%" style=3D"margin-right: auto; margin-left: auto; float: l=
+eft; display: block;" alt=3D"If you can't read this message please click he=
+re to open it in your browser."=20
+src=3D"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABFAAAAV4CAYAAACHDynTAA=
+AgAElEQVR4XuzdB2CV1fnH8SeDJOwpICCgoAgOFAQXOIqKOLFu68BWBbVarXsPnDjr+rfWqnVvF=
+OteuCc4AZGN7L3Jzv953ptzc3Nzb3JvBpybfF9KgeQd5/2cN2nfX855TlqJbsKGAAIIIIAAAggg=
+"></a></body></html>
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "_allcaps"
+  },
+  {
+    "type": "word",
+    "value": "_null"
+  },
+  {
+    "type": "word",
+    "value": "browser"
+  },
+  {
+    "type": "word",
+    "value": "cashback"
+  },
+  {
+    "type": "word",
+    "value": "click"
+  },
+  {
+    "type": "word",
+    "value": "import"
+  },
+  {
+    "type": "word",
+    "value": "messag"
+  },
+  {
+    "type": "word",
+    "value": "open"
+  },
+  {
+    "type": "word",
+    "value": "pleas"
+  },
+  {
+    "type": "word",
+    "value": "read"
+  },
+  {
+    "type": "word",
+    "value": "reward"
+  },
+  {
+    "type": "word",
+    "value": "tether"
+  },
+  {
+    "type": "word",
+    "value": "updat"
+  },
+  {
+    "type": "sender",
+    "value": "noreply@tetheer.com"
+  },
+  {
+    "type": "sender",
+    "value": "tetheer.com"
+  },
+  {
+    "type": "asn",
+    "number": [
+      0,
+      0,
+      0,
+      123
+    ]
+  },
+  {
+    "type": "url",
+    "value": "metaskwap.online"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "html_image",
+    "src": "data"
+  },
+  {
+    "type": "html_anchor",
+    "href": "https"
+  }
+]
+<!-- NEXT TEST -->
+From: "BBVA" <noreply@grupokonecta.net>
+Reply-To: noreply@grupokonecta.net
+Content-Type: multipart/alternative; charset="UTF-8"; boundary="b1_3d217f30a568faa9ce3dd7dc73399561"
+Content-Transfer-Encoding: quoted-printable
+
+--b1_3d217f30a568faa9ce3dd7dc73399561
+Content-Type: text/plain; format=flowed; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Tarjeta de cr=C3=A9dito BBVA
+
+La tarjeta de cr=C3=A9dito para viajar con tus consumos
+Pedila 100% online y empez=C3=A1 a disfrutar
+
+Conocer oferta
+Un mundo de beneficios con las tarjetas de cr=C3=A9dito BBVA
+compras en cuotas
+Compras en cuotas
+Pod=C3=A9s disfrutar hoy de los productos =E2=80=A8que quer=C3=A9s y pagarl=
+os en cuotas
+descuentos y reintegros
+Descuentos y reintegros
+Entretenimiento, gastronom=C3=ADa, farmacia, ropa =E2=80=A8y m=C3=A1s rubro=
+s con promociones exclusivas
+puntos bbva
+Viajes con Puntos BBVA
+Vuelos, alojamientos y mucho m=C3=A1s canjeando Puntos BBVA que sum=C3=
+=A1s con tus compras
+Conocer oferta
+Descubr=C3=AD la tarjeta que mejor se adapta a vos
+Todas las tarjetas
+
+Black
+
+Platinum
+
+Gold
+
+Internacional
+
+Todas las tarjetas
+visa black
+Tarjeta Visa Signature
+L=C3=ADmites desde $600.000
+
+15% extra en acumulaci=C3=B3n de Puntos BBVA
+Acceso a salas VIP en aeropuertos
+Asistencia en viajes con cobertura de hasta 250.000 USD
+Extracci=C3=B3n de efectivo en el exterior
+Seguro de robo en cajero y compra protegida
+Atenci=C3=B3n personalizada para resolver tus consultas
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $200.000
+
+ Conocer m=C3=A1s
+mastercard black
+Tarjeta Mastercard Black
+L=C3=ADmites desde $600.000
+
+15% extra en acumulaci=C3=B3n de Puntos BBVA
+Acceso a salas VIP en aeropuertos
+Asistencia en viajes con cobertura de hasta 250.000 USD
+Extracci=C3=B3n de efectivo en el exterior
+Seguro de robo en cajero y compra protegida
+Atenci=C3=B3n personalizada para resolver tus consultas
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $200.000
+ Conocer m=C3=A1s
+tarjeta platinum visa
+Tarjeta Visa Platinum
+L=C3=ADmites desde $350.000
+
+5% extra en acumulaci=C3=B3n de Puntos BBVA
+Asistencia en viajes con cobertura de hasta 170.000 USD
+Extracci=C3=B3n de efectivo en el exterior
+Atenci=C3=B3n personalizada para resolver tus consultas
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $120.000
+
+ Conocer m=C3=A1s
+tarjeta platinum mastercard
+Tarjeta Mastercard Platinum
+L=C3=ADmites desde $350.000
+
+5% extra en acumulaci=C3=B3n de Puntos BBVA
+Asistencia en viajes con cobertura de hasta 50.000 USD y 30.000 EUR
+Extracci=C3=B3n de efectivo en el exterior
+Atenci=C3=B3n personalizada para resolver tus consultas
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $120.000
+
+ Conocer m=C3=A1s
+tarjeta gold visa
+Tarjeta Visa Gold
+L=C3=ADmites desde $100.000
+
+Puntos BBVA para viajar
+Extracci=C3=B3n de efectivo en el exterior
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $20.000
+
+ Conocer m=C3=A1s
+tarjeta gold mastercard
+Tarjeta Mastercard Gold
+L=C3=ADmites desde $100.000
+
+Puntos BBVA para viajar
+Extracci=C3=B3n de efectivo en el exterior
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $35.000
+
+ Conocer m=C3=A1s
+
+Tarjeta Visa Internacional
+L=C3=ADmites desde $10.000
+
+Puntos BBVA para viajar
+Extracci=C3=B3n de efectivo en el exterior
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $20.000
+
+ Conocer m=C3=A1s
+
+Tarjeta Mastercard Internacional
+L=C3=ADmites desde $10.000
+
+Puntos BBVA para viajar
+Extracci=C3=B3n de efectivo en el exterior
+Tarjetas adicionales sin costo
+Es necesario un ingreso m=C3=ADnimo mensual de $20.000
+
+ Conocer m=C3=A1s
+
+--b1_3d217f30a568faa9ce3dd7dc73399561
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<head>
+</head>
+
+<body>
+<div style=3D"max-width: 600px; margin: 0 auto;">
+<table border=3D"0" cellspacing=3D"0" cellpadding=3D"0">
+<tbody>
+<tr><th><a href=3D"http://track.leadsinbx.com/aff_c?offer_id=3D2906&amp;aff=
+_id=3D1980&amp;url_id=3D21948"> <img src=3D"https://i.imgur.com/1wg1VQH.jpg=
+" width=3D"100%" alt=3D"CLICK AQU&Iacute; CLICK AQU&Iacute; CLICK AQU&Iacut=
+e; CLICK AQU&Iacute; CLICK AQU&Iacute; CLICK AQU&Iacute; CLICK AQU&Iacute;"=
+ title=3D"Es la oportunidad que estabas esperando" /> </a></th></tr>
+</tbody>
+</table>
+</div>
+</body>
+</html>
+
+--b1_3d217f30a568faa9ce3dd7dc73399561--
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "_allcaps"
+  },
+  {
+    "type": "word",
+    "value": "_null"
+  },
+  {
+    "type": "word",
+    "value": "acces"
+  },
+  {
+    "type": "word",
+    "value": "acumul"
+  },
+  {
+    "type": "word",
+    "value": "adapt"
+  },
+  {
+    "type": "word",
+    "value": "adicional"
+  },
+  {
+    "type": "word",
+    "value": "aeropuert"
+  },
+  {
+    "type": "word",
+    "value": "aloj"
+  },
+  {
+    "type": "word",
+    "value": "aqu"
+  },
+  {
+    "type": "word",
+    "value": "asistent"
+  },
+  {
+    "type": "word",
+    "value": "atencion"
+  },
+  {
+    "type": "word",
+    "value": "bbva"
+  },
+  {
+    "type": "word",
+    "value": "benefici"
+  },
+  {
+    "type": "word",
+    "value": "black"
+  },
+  {
+    "type": "word",
+    "value": "cajer"
+  },
+  {
+    "type": "word",
+    "value": "canj"
+  },
+  {
+    "type": "word",
+    "value": "click"
+  },
+  {
+    "type": "word",
+    "value": "cobertur"
+  },
+  {
+    "type": "word",
+    "value": "compr"
+  },
+  {
+    "type": "word",
+    "value": "conoc"
+  },
+  {
+    "type": "word",
+    "value": "consult"
+  },
+  {
+    "type": "word",
+    "value": "consum"
+  },
+  {
+    "type": "word",
+    "value": "cost"
+  },
+  {
+    "type": "word",
+    "value": "credit"
+  },
+  {
+    "type": "word",
+    "value": "cuot"
+  },
+  {
+    "type": "word",
+    "value": "descubr"
+  },
+  {
+    "type": "word",
+    "value": "descuent"
+  },
+  {
+    "type": "word",
+    "value": "disfrut"
+  },
+  {
+    "type": "word",
+    "value": "efect"
+  },
+  {
+    "type": "word",
+    "value": "empez"
+  },
+  {
+    "type": "word",
+    "value": "entreten"
+  },
+  {
+    "type": "word",
+    "value": "es"
+  },
+  {
+    "type": "word",
+    "value": "esperando"
+  },
+  {
+    "type": "word",
+    "value": "estaba"
+  },
+  {
+    "type": "word",
+    "value": "eur"
+  },
+  {
+    "type": "word",
+    "value": "exclus"
+  },
+  {
+    "type": "word",
+    "value": "exterior"
+  },
+  {
+    "type": "word",
+    "value": "extra"
+  },
+  {
+    "type": "word",
+    "value": "extraccion"
+  },
+  {
+    "type": "word",
+    "value": "farmaci"
+  },
+  {
+    "type": "word",
+    "value": "gastronom"
+  },
+  {
+    "type": "word",
+    "value": "gold"
+  },
+  {
+    "type": "word",
+    "value": "hoy"
+  },
+  {
+    "type": "word",
+    "value": "iacut"
+  },
+  {
+    "type": "word",
+    "value": "ingres"
+  },
+  {
+    "type": "word",
+    "value": "internacional"
+  },
+  {
+    "type": "word",
+    "value": "la"
+  },
+  {
+    "type": "word",
+    "value": "limit"
+  },
+  {
+    "type": "word",
+    "value": "mastercard"
+  },
+  {
+    "type": "word",
+    "value": "mejor"
+  },
+  {
+    "type": "word",
+    "value": "mensual"
+  },
+  {
+    "type": "word",
+    "value": "minim"
+  },
+  {
+    "type": "word",
+    "value": "mund"
+  },
+  {
+    "type": "word",
+    "value": "necesari"
+  },
+  {
+    "type": "word",
+    "value": "ofert"
+  },
+  {
+    "type": "word",
+    "value": "onlin"
+  },
+  {
+    "type": "word",
+    "value": "oportunidad"
+  },
+  {
+    "type": "word",
+    "value": "pag"
+  },
+  {
+    "type": "word",
+    "value": "pedil"
+  },
+  {
+    "type": "word",
+    "value": "personaliz"
+  },
+  {
+    "type": "word",
+    "value": "platinum"
+  },
+  {
+    "type": "word",
+    "value": "podes"
+  },
+  {
+    "type": "word",
+    "value": "product"
+  },
+  {
+    "type": "word",
+    "value": "promocion"
+  },
+  {
+    "type": "word",
+    "value": "proteg"
+  },
+  {
+    "type": "word",
+    "value": "punt"
+  },
+  {
+    "type": "word",
+    "value": "que"
+  },
+  {
+    "type": "word",
+    "value": "queres"
+  },
+  {
+    "type": "word",
+    "value": "reintegr"
+  },
+  {
+    "type": "word",
+    "value": "resolv"
+  },
+  {
+    "type": "word",
+    "value": "rob"
+  },
+  {
+    "type": "word",
+    "value": "rop"
+  },
+  {
+    "type": "word",
+    "value": "rubr"
+  },
+  {
+    "type": "word",
+    "value": "sal"
+  },
+  {
+    "type": "word",
+    "value": "segur"
+  },
+  {
+    "type": "word",
+    "value": "signatur"
+  },
+  {
+    "type": "word",
+    "value": "sumas"
+  },
+  {
+    "type": "word",
+    "value": "tarjet"
+  },
+  {
+    "type": "word",
+    "value": "tod"
+  },
+  {
+    "type": "word",
+    "value": "usd"
+  },
+  {
+    "type": "word",
+    "value": "viaj"
+  },
+  {
+    "type": "word",
+    "value": "vip"
+  },
+  {
+    "type": "word",
+    "value": "vis"
+  },
+  {
+    "type": "word",
+    "value": "vos"
+  },
+  {
+    "type": "word",
+    "value": "vuel"
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      1
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      2
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      3
+    ]
+  },
+  {
+    "type": "unicode_category",
+    "value": "Sc"
+  },
+  {
+    "type": "sender",
+    "value": "grupokonecta.net"
+  },
+  {
+    "type": "sender",
+    "value": "noreply@grupokonecta.net"
+  },
+  {
+    "type": "url",
+    "value": "_aff"
+  },
+  {
+    "type": "url",
+    "value": "_jpg"
+  },
+  {
+    "type": "url",
+    "value": "i.imgur.com"
+  },
+  {
+    "type": "url",
+    "value": "imgur.com"
+  },
+  {
+    "type": "url",
+    "value": "leadsinbx.com"
+  },
+  {
+    "type": "url",
+    "value": "track.leadsinbx.com"
+  },
+  {
+    "type": "mime_type",
+    "value": "multipart/alternative"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  },
+  {
+    "type": "html_image",
+    "src": "https"
+  },
+  {
+    "type": "html_anchor",
+    "href": "http"
+  }
+]
+<!-- NEXT TEST -->
+From: Spammer Systems Iran <marketing@spammer.ir>
+Subject: =?utf-8?b?2KfZgdiy2YjZhtmH4oCM2YfYp9uMINin2LPZhdin2LHYqtix2YXbjNmEIHw=?=
+ =?utf-8?b?INiq2YjYs9i52Ycg24zYp9mB2KrZhyDYqtmI2LPYtyDYotix2qnYpw==?=
+Message-Id: <b43032037c3340adaa1f7fefb9054e34@6abf43e0d73f4ed18bb03142dd21e81c>
+To: spam@target.org
+Reply-To: Spammer Systems Iran <marketing@spammer.ir>
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+vＥⓡ𝔂 𝔽𝕌Ňℕｙ ţ乇𝕏𝓣
+
+=D8=A7=D9=81=D8=B2=D9=88=D9=86=D9=87=E2=80=8C=D9=87=D8=A7=DB=8C SpammerMail=
+ =D8=AA=D9=88=D8=B3=D8=B9=D9=87 =DB=8C=D8=A7=D9=81=D8=AA=D9=87 =D8=AA=D9=88=
+=D8=B3=D8=B7 =D8=A2=D8=B1=DA=A9=D8=A7
+
+=D8=B1=D8=A7=DB=8C=D8=A7=D9=86 =D8=B3=D8=A7=D9=85=D8=A7=D9=86=D9=87 =D8=A2=
+=D8=B1=DA=A9=D8=A7 | =D8=AA=D9=85=D8=A7=D8=B3: 91300476-021 | =D8=A7=DB=8C=
+=D9=85=DB=8C=D9=84: info@spammy.ir
+
+[Telegram]	[Instagram]	[LinkedIn]	[Email]
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "email"
+  },
+  {
+    "type": "word",
+    "value": "funny"
+  },
+  {
+    "type": "word",
+    "value": "instagram"
+  },
+  {
+    "type": "word",
+    "value": "linkedin"
+  },
+  {
+    "type": "word",
+    "value": "spammermail"
+  },
+  {
+    "type": "word",
+    "value": "telegram"
+  },
+  {
+    "type": "word",
+    "value": "text"
+  },
+  {
+    "type": "word",
+    "value": "very"
+  },
+  {
+    "type": "word",
+    "value": "آرکا"
+  },
+  {
+    "type": "word",
+    "value": "اسمارترمی"
+  },
+  {
+    "type": "word",
+    "value": "افزونه"
+  },
+  {
+    "type": "word",
+    "value": "ایمیل"
+  },
+  {
+    "type": "word",
+    "value": "تماس"
+  },
+  {
+    "type": "word",
+    "value": "توسط"
+  },
+  {
+    "type": "word",
+    "value": "توسعه"
+  },
+  {
+    "type": "word",
+    "value": "رایان"
+  },
+  {
+    "type": "word",
+    "value": "سامانه"
+  },
+  {
+    "type": "word",
+    "value": "های"
+  },
+  {
+    "type": "word",
+    "value": "یافته"
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      3
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      8
+    ]
+  },
+  {
+    "type": "unicode_category",
+    "value": "Cf"
+  },
+  {
+    "type": "unicode_category",
+    "value": "Sm"
+  },
+  {
+    "type": "sender",
+    "value": "marketing@spammer.ir"
+  },
+  {
+    "type": "sender",
+    "value": "spammer.ir"
+  },
+  {
+    "type": "email",
+    "value": "info@spammy.ir"
+  },
+  {
+    "type": "email",
+    "value": "spammy.ir"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  }
+]
+<!-- NEXT TEST -->
+Received: from localhost ([217.61.8.72])
+	by Consip with ESMTP
+	id PMLhve2ETFdIAPMLyvhh0c; Sat, 29 Nov 2025 15:55:14 +0100
+Received: from zspmta-mint02.ad.aruba.it ([127.0.0.1])
+ by localhost (zspmta-mint02.ad.aruba.it [127.0.0.1]) (amavis, port 10026)
+ with ESMTP id UV6fqMysWqKE; Sat, 29 Nov 2025 15:55:13 +0100 (CET)
+Received: from zspmbx-mint11.ad.aruba.it (unknown [10.202.133.51])
+	by zspmta-mint02.ad.aruba.it (Postfix) with ESMTP id 3042B120F77;
+	Sat, 29 Nov 2025 15:54:59 +0100 (CET)
+Date: Sat, 29 Nov 2025 15:54:59 +0100 (CET)
+From: gianfranco.mangini@interno.it
+Reply-To: "Hr. Charles Jackson Jr." <ferassutti34@gmail.com>
+Message-ID: <1933878358.10239097.1764428099117.JavaMail.zimbra@interno.it>
+Subject: 
+Content-Type: multipart/alternative; 
+	boundary="=_bf54163b-f3b6-421f-bc9d-b64439167a39"
+
+--=_bf54163b-f3b6-421f-bc9d-b64439167a39
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+
+
+Hvorfor har du ikke modtaget donationen p=C3=A5 =E2=82=AC955.000,00 fra hr.=
+ Charles Jackson Jr.? Bankdirekt=C3=B8ren informerede mig i g=C3=A5r om, at=
+ en af =E2=80=8B=E2=80=8Bmodtagerne ikke havde gjort krav p=C3=A5 donatione=
+n. Efter at have gennemg=C3=A5et mine optegnelser opdagede jeg, at du var b=
+landt de ber=C3=B8rte, og jeg er meget ked af at h=C3=B8re dette. Bem=C3=A6=
+rk venligst, at der ikke kr=C3=A6ves nogen betaling; et simpelt bekr=C3=A6f=
+telsesstempel er alt, hvad der skal til for at pengene kan frigives og kred=
+iteres din bankkonto inden for 24 timer.=20
+
+Bem=C3=A6rk: For yderligere information og for at sikre, at din donation kr=
+editeres inden for 24 timer, anbefaler jeg, at du sender mig dine oplysning=
+er med det samme via e-mail til ferassutti34@gmail.com=20
+
+Jeg =C3=B8nsker dig en velsignet m=C3=A5ned med stor succes.=20
+Hr. Charles Jackson Jr.=20
+
+--=_bf54163b-f3b6-421f-bc9d-b64439167a39
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><div style=3D"font-family: arial, helvetica, sans-serif; font-s=
+ize: 12pt; color: #000000"><div><br></div><div><br></div><div data-marker=
+=3D"__SIG_PRE__">Hvorfor har du ikke modtaget donationen p=C3=A5 =E2=82=AC9=
+55.000,00 fra hr. Charles Jackson Jr.? Bankdirekt=C3=B8ren informerede mig =
+i g=C3=A5r om, at en af =E2=80=8B=E2=80=8Bmodtagerne ikke havde gjort krav =
+p=C3=A5 donationen. Efter at have gennemg=C3=A5et mine optegnelser opdagede=
+ jeg, at du var blandt de ber=C3=B8rte, og jeg er meget ked af at h=C3=B8re=
+ dette. Bem=C3=A6rk venligst, at der ikke kr=C3=A6ves nogen betaling; et si=
+mpelt bekr=C3=A6ftelsesstempel er alt, hvad der skal til for at pengene kan=
+ frigives og krediteres din bankkonto inden for 24 timer.<br><br>Bem=C3=A6r=
+k: For yderligere information og for at sikre, at din donation krediteres i=
+nden for 24 timer, anbefaler jeg, at du sender mig dine oplysninger med det=
+ samme via e-mail til ferassutti34@gmail.com<br><br>Jeg =C3=B8nsker dig en =
+velsignet m=C3=A5ned med stor succes.<br>Hr. Charles Jackson Jr.</div></div=
+></body></html>
+--=_bf54163b-f3b6-421f-bc9d-b64439167a39--
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "anbefal"
+  },
+  {
+    "type": "word",
+    "value": "bankdirektør"
+  },
+  {
+    "type": "word",
+    "value": "bankkonto"
+  },
+  {
+    "type": "word",
+    "value": "bekræftelsesstem"
+  },
+  {
+    "type": "word",
+    "value": "bemærk"
+  },
+  {
+    "type": "word",
+    "value": "berørt"
+  },
+  {
+    "type": "word",
+    "value": "betaling"
+  },
+  {
+    "type": "word",
+    "value": "bland"
+  },
+  {
+    "type": "word",
+    "value": "charl"
+  },
+  {
+    "type": "word",
+    "value": "din"
+  },
+  {
+    "type": "word",
+    "value": "donation"
+  },
+  {
+    "type": "word",
+    "value": "e"
+  },
+  {
+    "type": "word",
+    "value": "frigiv"
+  },
+  {
+    "type": "word",
+    "value": "gennemgå"
+  },
+  {
+    "type": "word",
+    "value": "gjort"
+  },
+  {
+    "type": "word",
+    "value": "går"
+  },
+  {
+    "type": "word",
+    "value": "hr"
+  },
+  {
+    "type": "word",
+    "value": "hvorfor"
+  },
+  {
+    "type": "word",
+    "value": "hør"
+  },
+  {
+    "type": "word",
+    "value": "ind"
+  },
+  {
+    "type": "word",
+    "value": "inform"
+  },
+  {
+    "type": "word",
+    "value": "information"
+  },
+  {
+    "type": "word",
+    "value": "jackson"
+  },
+  {
+    "type": "word",
+    "value": "jr"
+  },
+  {
+    "type": "word",
+    "value": "kan"
+  },
+  {
+    "type": "word",
+    "value": "ked"
+  },
+  {
+    "type": "word",
+    "value": "krav"
+  },
+  {
+    "type": "word",
+    "value": "kredit"
+  },
+  {
+    "type": "word",
+    "value": "kræv"
+  },
+  {
+    "type": "word",
+    "value": "mail"
+  },
+  {
+    "type": "word",
+    "value": "modtag"
+  },
+  {
+    "type": "word",
+    "value": "måned"
+  },
+  {
+    "type": "word",
+    "value": "nog"
+  },
+  {
+    "type": "word",
+    "value": "opdaged"
+  },
+  {
+    "type": "word",
+    "value": "oplysning"
+  },
+  {
+    "type": "word",
+    "value": "optegn"
+  },
+  {
+    "type": "word",
+    "value": "peng"
+  },
+  {
+    "type": "word",
+    "value": "sam"
+  },
+  {
+    "type": "word",
+    "value": "send"
+  },
+  {
+    "type": "word",
+    "value": "sikr"
+  },
+  {
+    "type": "word",
+    "value": "simpelt"
+  },
+  {
+    "type": "word",
+    "value": "stor"
+  },
+  {
+    "type": "word",
+    "value": "suc"
+  },
+  {
+    "type": "word",
+    "value": "tim"
+  },
+  {
+    "type": "word",
+    "value": "velsign"
+  },
+  {
+    "type": "word",
+    "value": "ven"
+  },
+  {
+    "type": "word",
+    "value": "via"
+  },
+  {
+    "type": "word",
+    "value": "yder"
+  },
+  {
+    "type": "word",
+    "value": "ønsk"
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      2
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      3
+    ]
+  },
+  {
+    "type": "unicode_category",
+    "value": "Cf"
+  },
+  {
+    "type": "unicode_category",
+    "value": "Sc"
+  },
+  {
+    "type": "sender",
+    "value": "ferassutti34@gmail.com"
+  },
+  {
+    "type": "sender",
+    "value": "gianfranco.mangini@interno.it"
+  },
+  {
+    "type": "sender",
+    "value": "gmail.com"
+  },
+  {
+    "type": "sender",
+    "value": "interno.it"
+  },
+  {
+    "type": "hostname",
+    "value": "aruba.it"
+  },
+  {
+    "type": "hostname",
+    "value": "interno.it"
+  },
+  {
+    "type": "hostname",
+    "value": "zspmbx-mint11.ad.aruba.it"
+  },
+  {
+    "type": "hostname",
+    "value": "zspmta-mint02.ad.aruba.it"
+  },
+  {
+    "type": "mime_type",
+    "value": "multipart/alternative"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  }
+]
+<!-- NEXT TEST -->
+Delivered-To: mcfadden@domain.com
+Received: from gamma.stellaryx.space (unknown [85.120.227.61] (AS6718 NAV COMMUNICATIONS SRL, RO))
+	by mail.stalw.art (Stalwart SMTP) with ESMTP id 3D6018102E32AFD;
+	Tue, 25 Nov 2025 14:56:37 +0000
+Return-Path: <102356-235606-568806-22158-mcfadden=domain.com@mail.stellaryx.space>
+Content-Type: multipart/alternative; boundary="4521ddb80d67f83dc7585cae40234a09_39856_8ade6"
+Date: Tue, 25 Nov 2025 15:56:05 +0100
+From: "ZenFluff" <FluffCoPartner@stellaryx.space>
+Reply-To: "ZenFluff" <FluffCoPromo@stellaryx.space>
+Subject: Sleep better with FluffCo
+To: <mcfadden@domain.com>
+Message-ID: <peiqzch3l7lcfmzv-saxvjtk6vnighwql-39856-8ade6@stellaryx.space>
+
+--4521ddb80d67f83dc7585cae40234a09_39856_8ade6
+Content-Type: text/plain;
+Content-Transfer-Encoding: 8bit
+
+Sleep better with FluffCo
+
+http://stellaryx.space/Bm6NYOrhicX--9bFn47T2mFlb-Soxhs-FJ8RCnM_SXJyHmebLw
+ 
+http://stellaryx.space/Y46ntHIiWyxTreKwOcyT4txY9f-M-eCwfHuhx0SMoyGjXy1iuA
+
+--4521ddb80d67f83dc7585cae40234a09_39856_8ade6
+Content-Type: text/html;
+Content-Transfer-Encoding: 8bit
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+	<title>Newsletter</title>
+	<meta content="text/html;charset=utf-8" http-equiv="content-Type">
+</head>
+<body>
+<center><a href="http://stellaryx.space/vJeynklMB-MqGKWLe690VqFxB-Ntp0AlJ0fxkvT7yQc5lwBiGQ"><img src="http://stellaryx.space/4de461d36a49b6c16a.jpg" /><img height="1" src="http://www.stellaryx.space/gDLqH1_yixRUwfwFaFPi6qQIY1WYIXRnhpkbB5CIxKEtmAQaWQ" width="1" /></a>
+<div style="padding:10px;width:620px;font-family:Georgia;"><a href="http://stellaryx.space/Bm6NYOrhicX--9bFn47T2mFlb-Soxhs-FJ8RCnM_SXJyHmebLw" style="font-size:26px;font-weight:bold;color:#810B1B;" target="_blank"><b>Sleep better with FluffCo</b></a><br />
+<br />
+<a href="http://stellaryx.space/Bm6NYOrhicX--9bFn47T2mFlb-Soxhs-FJ8RCnM_SXJyHmebLw" rel="sponsored" target="_blank"><img alt=" " src="http://stellaryx.space/c3276c4707df73d171.jpg" /><img alt=" " src="http://stellaryx.space/de2b61ecd393e24275.jpg" /></a><br />
+<br />
+<br />
+<br />
+<a href="http://stellaryx.space/IUf5_E6B7M10afXhAXm2s-OMucE97vSt_GrBmM2mukYMqBJo3w" rel="sponsored" target="blank"><img alt=" " src="http://stellaryx.space/54ed2c4f9cfcf0e61c.jpg" /> </a><br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<a href="http://stellaryx.space/Y46ntHIiWyxTreKwOcyT4txY9f-M-eCwfHuhx0SMoyGjXy1iuA" http:="" microsoft.com="" rel="sponsored" target="_blank"><img alt=" " http:="" microsoft.com="" src="http://stellaryx.space/fff6b20f9b31af5b8e.jpg" /></a><br />
+<br />
+<br />
+<br />
+<br />
+<!--
+Eisteddfa cheese frame industrial cat threw tape canal cotton fewer Gurig is a highway useful wolf hamlet located in Ceredigion on its border poem film carried mainly happy written blood clothes with Powys and situated along the A44. texas Its name comes from the Welsh word eisteddfa, meaning seat and the name of St Curig. This gives the meaning of Curigs seat. It arrange secret sang gas leather station is said that Curig rested on the hill here and looked manner habit sugar doesn't spend guess down into the Wye Valley. He decided to build a church in the valley, which is still there today in the village of Llangurig.91193
+
+ brown adventure felt apart mill he famous Elvis Rock is located here.
+
+mw-parser-output .geo-default,.mw-parser-output instead states birds .geo-dms,.mw-parser-output .geo-decdisplayinline.mw-parser-output .geo-nondefault,.mw-parser-output parallel coast angry control lake failed nor hidden factor stuck .geo-multi-punct,.mw-parser-output .geo-inline-hiddendisplaynone.mw-parser-output .longitude,.mw-parser-output .latitudewhite-spacenowrap522628N 34612Wxfeff  xfeff52.441N 3.770Wxfeff  52.441 -3.770
+
+
+
+Newville is an unincorporated community located in the towns arrow radio virginia rhyme cannot species whose corn felt worse of Fulton and Milton, Rock County, Wisconsin, United States.91193
+
+
+
+Uniting UK is a unionist campaign opposite news reader that's memory dug nobody in Northern Ireland, campaigning for a more united wild angry seen Northern Ireland in a more united castle pitch UK.91193
+
+ cloud st. slide courage determine he campaign was founded in 2020 by Philip Smith91293 and John Hanna.91393 stick season molecular fur constantly business clothing rich The campaign launched in December 2020.91493 In February 2024, Trevor Ringland joined the campaign nearest student provide team.91593
+
+--><br />
+&nbsp;</div>
+</center>
+</body>
+</html>
+
+--4521ddb80d67f83dc7585cae40234a09_39856_8ade6--
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "better"
+  },
+  {
+    "type": "word",
+    "value": "fluffco"
+  },
+  {
+    "type": "word",
+    "value": "sleep"
+  },
+  {
+    "type": "sender",
+    "value": "fluffcopartner@stellaryx.space"
+  },
+  {
+    "type": "sender",
+    "value": "fluffcopromo@stellaryx.space"
+  },
+  {
+    "type": "sender",
+    "value": "stellaryx.space"
+  },
+  {
+    "type": "url",
+    "value": "_jpg"
+  },
+  {
+    "type": "url",
+    "value": "_sxjyhmeblw"
+  },
+  {
+    "type": "url",
+    "value": "stellaryx.space"
+  },
+  {
+    "type": "url",
+    "value": "www.stellaryx.space"
+  },
+  {
+    "type": "hostname",
+    "value": "gamma.stellaryx.space"
+  },
+  {
+    "type": "hostname",
+    "value": "stellaryx.space"
+  },
+  {
+    "type": "mime_type",
+    "value": "multipart/alternative"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  },
+  {
+    "type": "html_image",
+    "src": "http"
+  },
+  {
+    "type": "html_anchor",
+    "href": "http"
+  }
+]
+<!-- NEXT TEST -->
+Delivered-To: mcfadden@domain.com
+Received: from cache.agelessknees.za.com (unknown [193.36.60.184] (AS210107 PLUSWEB SUNUCU INTERNET HIZMETLERI TICARET LIMITED SIRKETI, TR))
+	by mail.stalw.art (Stalwart SMTP) with ESMTP id 3CB95BA83AFB5B8;
+	Sun, 9 Nov 2025 10:25:14 +0000
+Return-Path: <2993-2338-35418-95-mcfadden=domain.com@mail.agelessknees.za.com>
+Content-Type: multipart/alternative; boundary="f2a4125f95dc25c4cd4f09657da6c1b1"
+Date: Sun, 9 Nov 2025 02:05:37 -0800
+From: "ENLARGED PROSTATE" <Prostate@agelessknees.za.com>
+Reply-To: "ENLARGED PROSTATE" <Prostate@agelessknees.za.com>
+Subject: 90% Success Rate: Shrink Your Prostate by 68%... 
+To: <mcfadden@domain.com>
+Message-ID: <8btb35y8w3xurryz-6647pok20gxdwmew-8a5a@agelessknees.za.com>
+
+--f2a4125f95dc25c4cd4f09657da6c1b1
+Content-Type: text/plain;
+Content-Transfer-Encoding: 8bit
+
+http://agelessknees.za.com/WEIPdYsx_Fz316dLbPRtpgbW8tLjN6VeuG_xqNr-08jn
+
+
+http://[Unsubscribe]]
+
+--f2a4125f95dc25c4cd4f09657da6c1b1
+Content-Type: text/html;
+Content-Transfer-Encoding: 8bit
+
+<html>
+<head>
+	<title></title>
+</head>
+<body autocomplete="off" style="width:50%"><span style="font-family:arial,helvetica,sans-serif;"><a href="http://agelessknees.za.com/Mop721hCLUk-OpFxNYpITr1y86_-VkXk1GFcQlSzL97q"><img src="http://agelessknees.za.com/KmcFuxYx4pDvXwb2H5Bz3MH05JfrprwPLGrkLDafF2WV" /></a><br />
+<br />
+<span style="font-size:16px;"><span style="font-size:20px;"><span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">Urologists are in complete shock after this </span></span><a href="http://agelessknees.za.com/WEIPdYsx_Fz316dLbPRtpgbW8tLjN6VeuG_xqNr-08jn"><span class="TextRun Underlined SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); text-decoration-line: underline; line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">classified 1970 study</span></span></a>&nbsp;&nbsp;<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">has been<br />
+accidentally released to the public.</span></span><span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">In the study, almost 90% of the men emptied their bladders fully&hellip;<br />
+and stopped nighttime pee trips!</span></span><span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">And </span><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">it&rsquo;s</span><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;"> because of a </span></span><a href="http://agelessknees.za.com/WEIPdYsx_Fz316dLbPRtpgbW8tLjN6VeuG_xqNr-08jn">bizarre &ldquo;Brazilian Jelly&rdquo;...&nbsp;</a><br />
+<br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<a href="http://agelessknees.za.com/WEIPdYsx_Fz316dLbPRtpgbW8tLjN6VeuG_xqNr-08jn"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); display: inline-block;"><span class="WACImageContainer NoPadding DragDrop BlobObject SCXW186281220 BCX0" role="presentation" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; cursor: move; left: 0px; position: relative; display: inline-block; top: 2px; width: 346px; height: 196px; transform: rotate(0deg);"><img alt="click here to watch video, Picture" class="WACImage SCXW186281220 BCX0" height="325" src="http://agelessknees.za.com/ab8b1b8aa3e9d04c54.png" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; border: none; vertical-align: baseline; width: 346px; height: 196px; text-wrap-mode: nowrap !important;" unselectable="on" width="400" /></span></span></a><br />
+<br />
+<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">Which not only helps you pee like a racehorse, but it also shrinks your<br />
+prostate size by 68%, </span></span><span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); font-style: italic; line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">almost overnight.</span></span><span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">So, as you can imagine, this prostate-shrinking method<br />
+is spreading like wildfire..</span></span><span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">And </span><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">that&rsquo;s</span><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;"> why over 45,000 men have managed to<br />
+get rid of prostate problems&hellip;</span></span><span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span></span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span style="font-size: 20px;">Without painful medical procedures or Rapaflo, Uroxatral, and other&nbsp;</span><span style="font-size: 20px;">toxic medications. So, while this video is still up&hellip;</span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span style="font-size:16px;"><span style="font-size:20px;"><span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">So, while this video is still up&hellip;</span></span><span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<span class="LineBreakBlob BlobObject DragDrop SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px;"><span class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;">&nbsp;</span></span><br class="SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; text-wrap-mode: nowrap !important;" />
+<strong><a href="http://agelessknees.za.com/WEIPdYsx_Fz316dLbPRtpgbW8tLjN6VeuG_xqNr-08jn">[WATCH NOW]</a></strong><br />
+<br />
+<span class="TextRun SCXW186281220 BCX0" data-contrast="auto" lang="EN-IN" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text; white-space-collapse: preserve; background-color: rgb(255, 255, 255); line-height: 19.425px; font-variant-ligatures: none !important;" xml:lang="EN-IN"><span class="NormalTextRun SCXW186281220 BCX0" style="-webkit-user-drag: none; -webkit-tap-highlight-color: transparent; margin: 0px; padding: 0px; user-select: text;">to see how this Brazilian Jelly can help shrink your<br />
+enlarged prostate as well.</span></span><br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<span style="font-size:10px;"><a href="http://agelessknees.za.com/frap3E19OJEGf2p3NGZhnuEPSPnsjPhw8hH4rN1WsPzJ" style="font-size: 10px;">unsubscribe</a></span></span></span></span><br style="color: rgb(33, 37, 41); font-size: 10px;" />
+<span style="font-size:10px;">1770 Walnut Hill Drive Dayton, OH 45406</span></body>
+</html>
+
+--f2a4125f95dc25c4cd4f09657da6c1b1--
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "_allcaps"
+  },
+  {
+    "type": "word",
+    "value": "accident"
+  },
+  {
+    "type": "word",
+    "value": "almost"
+  },
+  {
+    "type": "word",
+    "value": "also"
+  },
+  {
+    "type": "word",
+    "value": "bizarr"
+  },
+  {
+    "type": "word",
+    "value": "bladder"
+  },
+  {
+    "type": "word",
+    "value": "brazilian"
+  },
+  {
+    "type": "word",
+    "value": "classifi"
+  },
+  {
+    "type": "word",
+    "value": "click"
+  },
+  {
+    "type": "word",
+    "value": "complet"
+  },
+  {
+    "type": "word",
+    "value": "dayton"
+  },
+  {
+    "type": "word",
+    "value": "drive"
+  },
+  {
+    "type": "word",
+    "value": "empti"
+  },
+  {
+    "type": "word",
+    "value": "enlarg"
+  },
+  {
+    "type": "word",
+    "value": "fulli"
+  },
+  {
+    "type": "word",
+    "value": "get"
+  },
+  {
+    "type": "word",
+    "value": "help"
+  },
+  {
+    "type": "word",
+    "value": "hill"
+  },
+  {
+    "type": "word",
+    "value": "http"
+  },
+  {
+    "type": "word",
+    "value": "imagin"
+  },
+  {
+    "type": "word",
+    "value": "jelli"
+  },
+  {
+    "type": "word",
+    "value": "like"
+  },
+  {
+    "type": "word",
+    "value": "manag"
+  },
+  {
+    "type": "word",
+    "value": "medic"
+  },
+  {
+    "type": "word",
+    "value": "men"
+  },
+  {
+    "type": "word",
+    "value": "method"
+  },
+  {
+    "type": "word",
+    "value": "nighttim"
+  },
+  {
+    "type": "word",
+    "value": "oh"
+  },
+  {
+    "type": "word",
+    "value": "overnight"
+  },
+  {
+    "type": "word",
+    "value": "pain"
+  },
+  {
+    "type": "word",
+    "value": "pee"
+  },
+  {
+    "type": "word",
+    "value": "pictur"
+  },
+  {
+    "type": "word",
+    "value": "problem"
+  },
+  {
+    "type": "word",
+    "value": "procedur"
+  },
+  {
+    "type": "word",
+    "value": "prostat"
+  },
+  {
+    "type": "word",
+    "value": "public"
+  },
+  {
+    "type": "word",
+    "value": "racehors"
+  },
+  {
+    "type": "word",
+    "value": "rapaflo"
+  },
+  {
+    "type": "word",
+    "value": "rate"
+  },
+  {
+    "type": "word",
+    "value": "releas"
+  },
+  {
+    "type": "word",
+    "value": "rid"
+  },
+  {
+    "type": "word",
+    "value": "see"
+  },
+  {
+    "type": "word",
+    "value": "shock"
+  },
+  {
+    "type": "word",
+    "value": "shrink"
+  },
+  {
+    "type": "word",
+    "value": "size"
+  },
+  {
+    "type": "word",
+    "value": "spread"
+  },
+  {
+    "type": "word",
+    "value": "still"
+  },
+  {
+    "type": "word",
+    "value": "stop"
+  },
+  {
+    "type": "word",
+    "value": "studi"
+  },
+  {
+    "type": "word",
+    "value": "success"
+  },
+  {
+    "type": "word",
+    "value": "toxic"
+  },
+  {
+    "type": "word",
+    "value": "trip"
+  },
+  {
+    "type": "word",
+    "value": "unsubscrib"
+  },
+  {
+    "type": "word",
+    "value": "urologist"
+  },
+  {
+    "type": "word",
+    "value": "uroxatr"
+  },
+  {
+    "type": "word",
+    "value": "video"
+  },
+  {
+    "type": "word",
+    "value": "walnut"
+  },
+  {
+    "type": "word",
+    "value": "watch"
+  },
+  {
+    "type": "word",
+    "value": "well"
+  },
+  {
+    "type": "word",
+    "value": "wildfir"
+  },
+  {
+    "type": "word",
+    "value": "without"
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      2
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      3
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      4
+    ]
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      5
+    ]
+  },
+  {
+    "type": "sender",
+    "value": "agelessknees.za.com"
+  },
+  {
+    "type": "sender",
+    "value": "prostate@agelessknees.za.com"
+  },
+  {
+    "type": "url",
+    "value": "_png"
+  },
+  {
+    "type": "url",
+    "value": "_weipdysx"
+  },
+  {
+    "type": "url",
+    "value": "agelessknees.za.com"
+  },
+  {
+    "type": "hostname",
+    "value": "agelessknees.za.com"
+  },
+  {
+    "type": "hostname",
+    "value": "cache.agelessknees.za.com"
+  },
+  {
+    "type": "mime_type",
+    "value": "multipart/alternative"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  },
+  {
+    "type": "html_image",
+    "src": "http"
+  },
+  {
+    "type": "html_anchor",
+    "href": "http"
+  }
+]
+<!-- NEXT TEST -->
+Delivered-To: hello@stalw.art
+Received: from mail-wm1-x32d.google.com (mail-wm1-x32d.google.com [2a00:1450:4864:20::32d] (AS15169 Google LLC))
+	(using TLSv1.3 with cipher TLS13_AES_256_GCM_SHA384)
+	by mail.stalw.art (Stalwart SMTP) with ESMTPS id 3BBB57D01CB793C;
+	Wed, 15 Oct 2025 18:31:22 +0000
+Return-Path: <yashbansal@spamtest.com>
+Received: by mail-wm1-x32d.google.com with SMTP id 5b1f17b1804b1-4710683a644so7830385e9.0
+        for <hello@stalw.art>; Wed, 15 Oct 2025 11:31:19 -0700 (PDT)
+Received: from 52669349336 named unknown by gmailapi.google.com with HTTPREST;
+ Wed, 15 Oct 2025 14:31:17 -0400
+Received: from 52669349336 named unknown by gmailapi.google.com with HTTPREST;
+ Wed, 15 Oct 2025 14:31:16 -0400
+MIME-Version: 1.0
+Sender: Yash from SpamTest <yashbansal@spamtest.com>
+From: Yash from SpamTest <yashbansal@spamtest.com>
+Reply-To: yashbansal@spamtest.com
+Date: Wed, 15 Oct 2025 14:31:17 -0400
+Message-ID: <CAPXczWkiThEs7oq0WxXvpnYMbKUpBDnZeKdAf3LPFfbq3xUquA@mail.gmail.com>
+Subject: SpamTest Open-Source Sponsorships for Stalwart
+To: Hello <hello@stalw.art>
+Content-Type: multipart/alternative; boundary="000000000000d8b207064136b41e"
+
+--000000000000d8b207064136b41e
+Content-Type: text/plain; charset="UTF-8"
+
+Hi Team,
+
+I'm Yash from SpamTest, a GenAI-powered quality engineering platform.
+We've been following the excellent work you're doing with Stalwart and
+would like to support your project through our Open Source Program.
+
+What we're offering:
+
+   - Free SpamTest licenses for your testing infrastructure
+   - Financial sponsorship for your project
+   - Co-marketing initiative to amplify your project's reach
+
+In return, we'd appreciate featuring the SpamTest logo in the ReadMe file
+and under your sponsors section.
+
+Would you be interested in a quick call to discuss how we can support?
+Here's my Calendly: https://calendly.com/yashbansal-spamtest/
+<https://spamtest-dot-yamm-track.appspot.com/2l-zfmIvAjAaRT6r343j5dxXdOms7caJ6JnaC4k6iqM0xACTpmQHkOzvgUdqtLiRcsNwn3bVEWJoQpyyYqWBN3QzU8YaIBttnpzya3MITC5HPMjgk0-7A3Jx_Z5NYnowWu_MY9MbtmO24pW5ksz5n2NtdzMFNK7f_2DWlbPKmRUwWp1fsjUdxW35Tdh7q9_aad3k>
+
+Regards,
+Yash
+[image: beacon]
+
+--000000000000d8b207064136b41e
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr"><div class=3D"gmail_default" style=3D"color:rgb(0,0,0)"><f=
+ont face=3D"verdana, sans-serif"></font><font face=3D"verdana, sans-serif">=
+Hi Team,</font></div><div class=3D"gmail_default" style=3D"color:rgb(0,0,0)=
+"><font face=3D"verdana, sans-serif"><br></font></div><div class=3D"gmail_d=
+efault" style=3D"color:rgb(0,0,0)"><font face=3D"verdana, sans-serif">I&#39=
+;m Yash from SpamTest, a=C2=A0GenAI-powered quality engineering platform.=
+ We&#39;ve been following the excellent work you&#39;re doing with Stalwart=
+ and would like to support your project through our Open Source Program.</f=
+ont></div><div class=3D"gmail_default" style=3D"color:rgb(0,0,0)"><font fac=
+e=3D"verdana, sans-serif"><br></font></div><div class=3D"gmail_default" sty=
+le=3D"color:rgb(0,0,0)"><font face=3D"verdana, sans-serif">What we&#39;re o=
+ffering:</font></div><div class=3D"gmail_default" style=3D"color:rgb(0,0,0)=
+"><ul><li><font face=3D"verdana, sans-serif">Free SpamTest licenses for y=
+our testing infrastructure</font></li><li><font face=3D"verdana, sans-serif=
+">Financial sponsorship for your project</font></li><li><font face=3D"verda=
+na, sans-serif">Co-marketing initiative to amplify your project&#39;s reach=
+</font></li></ul><font face=3D"verdana, sans-serif">In return, we&#39;d app=
+reciate featuring the SpamTest logo in the ReadMe file and under your spo=
+nsors section.</font></div><div class=3D"gmail_default" style=3D"color:rgb(=
+0,0,0)"><font face=3D"verdana, sans-serif"><br></font></div><div class=3D"g=
+mail_default" style=3D"color:rgb(0,0,0)"><font face=3D"verdana, sans-serif"=
+>Would you be interested in a quick call to discuss how we can support? Her=
+e&#39;s my Calendly: <a href=3D"https://spamtest-dot-yamm-track.appspot.c=
+om/2l-zfmIvAjAaRT6r343j5dxXdOms7caJ6JnaC4k6iqM0xACTpmQHkOzvgUdqtLiRcsNwn3bV=
+EWJoQpyyYqWBN3QzU8YaIBttnpzya3MITC5HPMjgk0-7A3Jx_Z5NYnowWu_MY9MbtmO24pW5ksz=
+5n2NtdzMFNK7f_2DWlbPKmRUwWp1fsjUdxW35Tdh7q9_aad3k" rel=3D"nofollow">https:/=
+/calendly.com/yashbansal-spamtest/</a></font></div><div class=3D"gmail_de=
+fault" style=3D"color:rgb(0,0,0)"><font face=3D"verdana, sans-serif"><br></=
+font></div><div class=3D"gmail_default" style=3D"color:rgb(0,0,0)"><font fa=
+ce=3D"verdana, sans-serif">Regards,</font></div><div class=3D"gmail_default=
+" style=3D"color:rgb(0,0,0)"><div style=3D"color:rgb(34,34,34)"><font face=
+=3D"verdana, sans-serif">Yash</font></div></div></div>
+<img src=3D"https://spamtest-dot-yamm-track.appspot.com/2G58JlsvTK8bqmAz0=
+K5Ih_u3r0-mM9Yb2rAbba1ASK9gtACTpmQHu5sUrI_xxQr7La7esKevIPX8E282wNGJy_Kn_Rnl=
+c4EOHrFidg72zKjycRencwaUie9zagv_8wXwyEihXEqL4fj7BUT7OfEu5kFBpHIOnVx6WaX8" w=
+idth=3D"1" height=3D"1" alt=3D"beacon" style=3D"display:none; display:none!=
+important;">
+
+--000000000000d8b207064136b41e--
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "amplifi"
+  },
+  {
+    "type": "word",
+    "value": "appreci"
+  },
+  {
+    "type": "word",
+    "value": "beacon"
+  },
+  {
+    "type": "word",
+    "value": "calend"
+  },
+  {
+    "type": "word",
+    "value": "call"
+  },
+  {
+    "type": "word",
+    "value": "co"
+  },
+  {
+    "type": "word",
+    "value": "discuss"
+  },
+  {
+    "type": "word",
+    "value": "engin"
+  },
+  {
+    "type": "word",
+    "value": "excel"
+  },
+  {
+    "type": "word",
+    "value": "featur"
+  },
+  {
+    "type": "word",
+    "value": "file"
+  },
+  {
+    "type": "word",
+    "value": "financi"
+  },
+  {
+    "type": "word",
+    "value": "follow"
+  },
+  {
+    "type": "word",
+    "value": "free"
+  },
+  {
+    "type": "word",
+    "value": "genai"
+  },
+  {
+    "type": "word",
+    "value": "hi"
+  },
+  {
+    "type": "word",
+    "value": "imag"
+  },
+  {
+    "type": "word",
+    "value": "infrastructur"
+  },
+  {
+    "type": "word",
+    "value": "initi"
+  },
+  {
+    "type": "word",
+    "value": "interest"
+  },
+  {
+    "type": "word",
+    "value": "licens"
+  },
+  {
+    "type": "word",
+    "value": "like"
+  },
+  {
+    "type": "word",
+    "value": "logo"
+  },
+  {
+    "type": "word",
+    "value": "market"
+  },
+  {
+    "type": "word",
+    "value": "offer"
+  },
+  {
+    "type": "word",
+    "value": "open"
+  },
+  {
+    "type": "word",
+    "value": "platform"
+  },
+  {
+    "type": "word",
+    "value": "power"
+  },
+  {
+    "type": "word",
+    "value": "program"
+  },
+  {
+    "type": "word",
+    "value": "project"
+  },
+  {
+    "type": "word",
+    "value": "qualiti"
+  },
+  {
+    "type": "word",
+    "value": "quick"
+  },
+  {
+    "type": "word",
+    "value": "reach"
+  },
+  {
+    "type": "word",
+    "value": "readm"
+  },
+  {
+    "type": "word",
+    "value": "regard"
+  },
+  {
+    "type": "word",
+    "value": "return"
+  },
+  {
+    "type": "word",
+    "value": "section"
+  },
+  {
+    "type": "word",
+    "value": "sourc"
+  },
+  {
+    "type": "word",
+    "value": "spamtest"
+  },
+  {
+    "type": "word",
+    "value": "sponsor"
+  },
+  {
+    "type": "word",
+    "value": "sponsorship"
+  },
+  {
+    "type": "word",
+    "value": "stalwart"
+  },
+  {
+    "type": "word",
+    "value": "support"
+  },
+  {
+    "type": "word",
+    "value": "team"
+  },
+  {
+    "type": "word",
+    "value": "test"
+  },
+  {
+    "type": "word",
+    "value": "work"
+  },
+  {
+    "type": "word",
+    "value": "would"
+  },
+  {
+    "type": "word",
+    "value": "yash"
+  },
+  {
+    "type": "unicode_category",
+    "value": "Sm"
+  },
+  {
+    "type": "sender",
+    "value": "spamtest.com"
+  },
+  {
+    "type": "sender",
+    "value": "yashbansal@spamtest.com"
+  },
+  {
+    "type": "url",
+    "value": "calendly.com"
+  },
+  {
+    "type": "url",
+    "value": "spamtest-dot-yamm-track.appspot.com"
+  },
+  {
+    "type": "hostname",
+    "value": "gmail.com"
+  },
+  {
+    "type": "hostname",
+    "value": "gmailapi.google.com"
+  },
+  {
+    "type": "hostname",
+    "value": "google.com"
+  },
+  {
+    "type": "hostname",
+    "value": "mail-wm1-x32d.google.com"
+  },
+  {
+    "type": "hostname",
+    "value": "mail.gmail.com"
+  },
+  {
+    "type": "mime_type",
+    "value": "multipart/alternative"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/html"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  },
+  {
+    "type": "html_image",
+    "src": "https"
+  },
+  {
+    "type": "html_anchor",
+    "href": "https"
+  }
+]
+<!-- NEXT TEST -->
+Delivered-To: hello@stalw.art
+Received: from Beijing--------chsi.com.cn (unknown [182.107.82.163] (AS4134 Chinanet, CN))
+	by mail.stalw.art (Stalwart SMTP) with ESMTP id 3D6F265DB441EFD;
+	Thu, 27 Nov 2025 02:01:35 +0000
+Received-SPF: none (mail.stalw.art: no SPF records found for hello-------锟斤拷锟斤拷------kefu@beijing--------chsi.com.cn)
+	receiver=mail.stalw.art; client-ip=182.107.82.163; envelope-from="hello-------锟斤拷锟斤拷------kefu@beijing--------chsi.com.cn"; helo=Beijing--------chsi.com.cn;
+Return-Path: <hello-------锟斤拷锟斤拷------kefu@beijing--------chsi.com.cn>
+Message-ID: <187bbaa5967a07c4.15a3b47be71017b4.d92ade25f52781da@mail.stalw.art>
+From: =?GB2312?B?zOGwzr36yf2439C9x+HLyciruOO2qDEwOjAxOjM0?=
+ <hello-------北京------kefu@Beijing--------chsi.com.cn>
+Subject:
+ =?GB2312?B?0afA+tGnzrvLq9akyKu5+rbAvNLL2bDssb6/xsu2yr+yqcq/ICC547jm?= AD hello
+To: hello@stalw.art
+Content-Type: multipart/mixed;
+ boundary="=_NextPart_2rfkindysadvnqw3nerasdf";charset="GB2312"
+MIME-Version: 1.0
+Date: Thu, 27 Nov 2025 10:01:37 +0800
+
+This is a multi-part message in MIME format
+
+--=_NextPart_2rfkindysadvnqw3nerasdf
+Content-Type: text/plain
+Content-Transfer-Encoding: 7bit
+
+10:01:34  hello  AD
+
+--=_NextPart_2rfkindysadvnqw3nerasdf
+Content-Type: application/octet-stream;
+        name="独家速办学历学位 学信网永久查询 本科硕博士高薪晋升职称轻松快速全搞定.txt"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment;
+        filename="独家速办学历学位 学信网永久查询 本科硕博士高薪晋升职称轻松快速全搞定.txt"
+
+5YWo5Zu954us5a625p2D5aiB5Luj5Yqe77yB77yBDQoNCueLrOWutuWFqOWbvemrmOagoemZouez
+u+S8mOi0qOi1hOa6kOa4oOmBk++8jOWFqOWbveeLrOWutuadg+WogeS7o+WKnu+8gQ0KDQrpq5jo
+lqrlt6XkvZzvvIzkvJjljprogYzkvY3vvIzmj5Dmi5TmmYvljYfvvIzogYznp7Dor4TlrprvvIzm
+iLflj6Plip7nkIbvvIzlh7rlm73np7vmsJEg6L275p2+5YWo5pCe5a6a77yB77yBDQoNCuS9oOaY
+r+WQpuWboOS4uuayoeacieWkp+WtpuWtpuWOhuWSjOWtpuS9jeiAjOaJvuS4jeWIsOS4gOS7veeQ
+huaDs+W3peS9nO+8jOaIluiAheWwveeuoeS9oOWcqOWunumZheW3peS9nOS4reenr+e0r+S6huS4
+sOWvjOe7j+mqjOWNtOWboOayoeacieWtpuWOhuWtpuS9jeivgeS5puiAjOWkseWOu+aPkOaLlOaZ
+i+WNh+eahOacuuS8mj8g5oul5pyJ5LiA5Liq5aSn5a2m5a2m5Y6G77yI5a2m5L2N77yJ77yM56Gu
+5L+d5L2g5Zyo5bel5L2c5LqL5Lia5LiK55qE5b+r6YCf5oiQ5Yqf77yBDQoNCuS4uuWuouaIt+in
+o+WGs+WPkeWxleeTtumiiOacn+mXrumimO+8jOW/q+mAn+i9u+advuWunueOsOiBjOWKoeWNh+i/
+ge+8jOiBjOensOivhOWumuWyl+S9jeaZi+WNh++8jOWkh+WPl+engeS8geWkluS8geeMjuWktOaO
+qOW0h++8jOaKlei1hOS6juWtpuWOhuWtpuS9jeS6p+eUn+eahOWbnuaKpeWSjOS7t+WAvOS5i+mr
+mOi/nOi2heS7u+S9leaKlei1hOWTgeenje+8jOS4lOS4gOasoeaKlei1hOe7iOi6q+WPl+ebiuWP
+r+aMgee7reWPkeWxle+8ge+8geaXouWPr+S7peeri+erv+ingeW9seWcqOiBjOWcuuWVhuWcuuWm
+gumxvOW+l+awtO+8jOS5n+WPr+S7peS4uuS7iuWQjueahOaKpeiAg+WNh+i/geaPkOS+m+WdmuWu
+nueahOWfuuehgO+8ge+8gQ0KDQrkvaDkuLrmsqHmnInlrabljobmib7kuI3liLDlpb3lt6XkvZzn
+g6bmgbzlkJc/6L+Y5Zug5Li65rKh5pyJ5a2m5Y6G5peg5rOV5aSn5bmF5o+Q6auY5b6F6YGH5pS2
+5YWl6ICM5b+n6JmR5ZCX77yf6L+Y5Li65rKh5pyJ5q2j6KeE5aSn5a2m5a2m5Y6G5a2m5L2N6ICM
+5peg5rOV5a6e546w6IGM56ew6K+E5a6a77yM5o+Q5ouU6YeN55So77yM5pmL57qn5Yqg6Jaq6ICM
+54Om5oG85ZCX77yfIOWtpuWOhuaUueWPmOWRvei/kOWIm+mAoOS7t+WAvO+8ge+8geacrOWFrOWP
+uOWPr+WKqeS9oOaIkOWKn+i+ieeFjO+8ge+8gQ0KDQrmnIDmnYPlqIHni6zlrrblnoTmlq3lhajl
+m73pq5jmoKHpmaLns7votYTmupDmuKDpgZPvvIzlr7nmsYLogYzmmYvljYfot7Pmp73ljYfogYzm
+tqjolqrmj5Dmi5Tpg73og73otbfliLDmnoHlhbboh7PlhbPph43opoHnmoTkvZznlKjvvIzku6Pn
+kIbllYbliqDnm5/lvoXpgYfkvJjljprlm57miqXkuLDljprvvIHvvIHliJvpgKDku7flgLzov5zo
+v5znianotoXmiYDlgLzvvIznu4jouqvlj5fnm4rvvIwg5pys56eR5Y2H56GV5aOr77yM56GV5aOr
+5Y2H5Y2a5aOr77yM6IGM56ew5b6F6YGH57qn5Yir5Lmf6YO955u45bqU5b+r6YCf5o+Q5Y2H77yB
+77yBDQoNCuWtpuS/oee9kemmlumhteacgOW6leagj+S4gOagj+KAnOiBlOezu+aIkeS7rOKAneS4
+iuacieWcsOWbvuaMh+W8leWcsOWdgOS7peWPiueUteivnemCrueuse+8jOWtpuS/oeWFrOWPuOWP
+keW4g+W5v+WRiueahOmCrueuseaYr0BjaHNpLmNvbS5jbuWfn+WQjeWQjue8gOeahOWtpuS/oee9
+keacjeWKoeWZqO+8jOWbnuWkjeWNj+iuruS7peWPiuaUr+S7mOWuneaIlumTtuihjOi0puWPt+ea
+hOmCrueuseaYr+WtpuS/oeWFrOWPuOWvueWkluWFrOW8gOeahOS8geS4mumCrueusWtlZnVAY2hz
+aS5jb20uY24NCg0K5YWo5Zu954us5a625bi45bm05Yqe55CGOg0KDQrlhajml6XliLbnu5/mi5vp
+h43ngrnpmaLmoKE5ODUgMjExIOWPjOS4gOa1gSDlhajlm73pq5jnrYnpmaLmoKHlrabljoblrabk
+vY3or4HkuabvvIzmnKznp5Hlrabljoblj4zor4HlkKvlrablo6vlrabkvY3vvIjlt6Xlrablrabl
+o6ss55CG5a2m5a2m5aOrLOWGnOWtpuWtpuWjqyznrqHnkIblrablrablo6ss57uP5rWO5a2m5a2m
+5aOrLOWMu+WtpuWtpuWjqyzmlZnogrLlrablrablo6ss5paH5a2m5a2m5aOrLOazleWtpuWtpuWj
+q+WtpuS9jeetie+8iQ0K5Y+M6K+B5YWo5pel5Yi257uf5oub56GV5aOrL+WcqOiBjOehleWjq+eg
+lOeptueUn++8iOW3peWVhueuoeeQhuehleWjq++8iE1CQe+8ieaVmeiCsuehleWjq++8iE1FQe+8
+ieazleW+i+ehleWjq++8iEpN77yJ6YeR6J6N566h55CG56GV5aOrRk1CQe+8jOazleWtpuehleWj
+q++8jOWFrOWFseeuoeeQhuehleWjq01QQe+8jOWFrOWFseWNq+eUn+ehleWjq++8jOW3peeoi+eh
+leWjq++8jOS8muiuoeehleWjq01QQWNj77yM5bu6562R5a2m56GV5aOr77yM5Li05bqK5Yy75a2m
+56GV5aOr77yM6Im65pyv56GV5aOrTUZB562J77yJ5YWo5pel5Yi25oiW5Zyo6IGM5Y+M6K+B5Y2a
+5aOr5LiT5Lia5Z6L5Y2a5aOr77ya5bel56iL5Y2a5aOr77yIRW5nRO+8ieWMu+WtpuWNmuWjq++8
+iE1E77yJ5pWZ6IKy5Y2a5aOr77yIRWRE77yJ5a2m5pyv5Z6L5Y2a5aOr77ya5aaC5ZOy5a2m5Y2a
+5aOrUGhE77yI57uP5rWO5a2m5Y2a5aOr77yMIOeuoeeQhuWtpuWNmuWjq++8jOS8muiuoeWtpuWN
+muWjq+ivreiogOWtpuWNmuWjq++8jOS4tOW6iuWMu+WtpuWNmuWjq++8jOW3peWVhueuoeeQhuWN
+muWjq++8jOmHkeiejeWtpuWNmuWjq+W/g+eQhuWtpuWNmuWjq++8jOekvuS8muWtpuWNmuWjq++8
+jOaWsOmXu+WtpuWNmuWjq++8jOazleWtpuWNmuWjq++8jOWFrOWFseeuoeeQhuWNmuWjq++8jOaV
+meiCsuWtpuWNmuWjq++8jOiuoeeul+acuuWNmuWjq++8jOaWh+WtpuWNmuWjq+etie+8iQ0K5a2m
+5L2N6K+B5Lmm77yI5a2m5aOr77yM56GV5aOrLCDljZrlo6vvvIkNCg0K5Z2H5o+Q5L6b5a6M5aSH
+5a2m57GN5qGj5qGI5oiQ57up5Y2V77yM5aSn5a2m6Iux6K+t5Zub5YWt57qnY2V0NCxjZXQ25ZCI
+5qC85oiQ57up5Y2V6K+B5piO77yM5rS+6YGj6K+B77yM55S15a2Q5rOo5YaM5YWl5a2m5L+h572R
+5pWw5o2u5bqT77yM57uI6Lqr5rC45LmF5Y+v5p+l77yM5Y+v57uP5YWs6K+B5aSE5YWs6K+B77yM
+56Gu5L+d6aG65Yip6YCa6L+H5ZCE56eN5b2i5byP55qE5a6h5p+l6aqM6K+B77yM5Y+v55So5LqO
+5oql6ICD5YWs5Yqh5ZGY77yM5ZCE57G76LWE5qC86ICD6K+V77yM6ICD56CU77yM5Y2H6IGM77yM
+6K+E6IGM56ew562J55So6YCU77yM5omA5Yqe6K+B5Lmm55Sx5YWo5Zu95ZCE5Zyw5Zu956uL5YWs
+5Yqe6Zmi5qCh5YaF6YOo5rig6YGT5YWz57O75Yqe55CG77yM5qyi6L+O6ZW/5pyf5Luj55CG5ZCI
+5L2c5Zue5oql5Liw5Y6a77yB5YWo5Zu96L+R55m+5a625Luj55CG5py65p6E77yM5Lia5Yqh6YGN
+5biD5YWo5Zu977ya5YyX5LqsIOS4iua1tyDmt7HlnLMg5aSp5rSlIOadreW3niAg5Y2X5LqsICDl
+jqbpl6ggIOW5v+W3niAg5q2m5rGJICDmiJDpg70gIOmDkeW3niDkuJzojp4gIOa1juWNlyAg56aP
+5bee562J5Zyw5Yy677yB77yB6LWE5rqQ5oyB57ut5aKe6ZW/77yBDQoNCuacrOWFrOWPuOS4muWK
+oemAgueUqOS6juWQhOexu+mrmOerr+WuouaIt+e+pCjkuJPkuJrlrp7ot7Xog73lipvlvLog5LyB
+5Lia5Li75ZKM5ZCE6KGM5Lia6YeR6aKG562JKeeahOWtpuWOhuWtpuS9jeWumuWQkeS8mOWMluaV
+tOWQiOWNh+e6p++8jOWbnuaKpeeOh+mrmO+8jOW5s+WPsOi1hOa6kOaWueWQkeeahOmAieaLqeWG
+s+WumuS6huiBjOWcuuWVhuWcuuS4iueahOmjjueUn+awtOi1t+S4gOmprOW5s+W3ne+8ge+8gemA
+ieaLqeavlOWKquWKm+mHjeimgSznq5nlnKjlt6jkurrogqnohoDkuIrmiY3og73po57lvpfmm7Tp
+q5gs5Luj55CG5ZWG5pS/562W5LyY5Y6a6L+U5Yip5Liw5Y6a77yM5qyi6L+O6L2s5Y+R5o6o6I2Q
+77yM6ZW/5pyf5qyi6L+O5ZCE55WM5oul5pyJ5a6i5oi36LWE5rqQ5rig6YGT55qE5Luj55CG5Yqg
+55uf77yB77yBDQoNCuWFqOWll+aho+ahiOWtpuexjeWtpuWOhuWtpuS9jeS7t+agvO+8mg0KDQrk
+u7fkvY3mjInkuI3lkIzmoIflh4Y5ODUgMjExIOWPjOS4gOa1gSDmma7pgJrph43ngrnlkI3niYzp
+maLmoKHkuInmoaPlt67liKvlkozkuJPkuJrng63luqblt67liKvvvIzlhajluKblrabljoblrabk
+vY3lrabnsY3moaPmoYjliqDlvIDpgJrlrabkv6HnvZHnu4jouqvmsLjkuYXmlbDmja7ms6jlhozm
+n6Xor6INCg0KdW5kZXJncmFkdWF0ZSDmnKznp5Hlrablo6vlrabkvY3lj4zor4Ey5LiHNei1tyAg
+5qC55o2u6Zmi5qCh5LiT5Lia54Ot6Zeo56iL5bqm5bGC5qyh6LCD5pW0ICDlpoLvvJrljJfkuqzl
+jJfkuqznkIblt6XlpKflraYt6K6h566X5py65a2m6ZmiLeiuoeeul+acuuenkeWtpuS4juaKgOac
+r+acrOenkS3lt6Xlrablrablo6vlrabkvY3vvIzkuIrmtbflkIzmtY7lpKflraYt57uP5rWO566h
+55CG5a2m6ZmiLeeJqea1geeuoeeQhuacrOenkS3nrqHnkIblrablrablo6vlrabkvY0gIOWMl+S6
+rOWNj+WSjOWMu+WtpumZoi3kuLTluorljLvlraYt5Yy75a2m5a2m5aOr5a2m5L2NICDmuIXljY7l
+pKflraYgIOS4reWbveS6uuawkeWkp+WtpiAg5YyX5Lqs5biI6IyD5aSn5a2mICDlpI3ml6blpKfl
+raYgIOS4iua1t+S6pOmAmuWkp+WtpiDkuK3lsbHlpKflraYg5Y2O5Y2X55CG5bel5aSn5a2m5Lit
+5Zu956eR5oqA5aSn5a2mICDkuK3ljZflpKflraYg5bGx5Lic5aSn5a2mIOWNl+S6rOWkp+WtpiDl
+jY7kuK3np5HmioDlpKflraYgIOWbvemYsuenkeaKgOWkp+WtpiDljZflvIDlpKflraYg5Lit5Zu9
+5Yac5Lia5aSn5a2mIOetiSANCg0KZ3JhZHVhdGUg5YWo5pel5Yi256GV5aOr5Zyo6IGM56GV5aOr
+M+S4hzUtLTXkuIfotbcgIOehleWjq+eglOeptueUn+WtpuWOhuWtpuS9jeWPjOivgSAg5Zyo6IGM
+56CU56m255Sf5a2m5Y6G5a2m5L2N5Y+M6K+BIOWmguW3peWVhueuoeeQhuehleWjq01CQeOAgeWF
+rOWFseeuoeeQhuehleWjq01QQSAgICAg5Y6f5aeL5a2m5Y6G5qC55o2u5LiN5ZCM5LiT5Lia6KaB
+5rGC6ZyA6KaB5pys56eR5a2m5Y6G5oiW5a2m5aOr5a2m5L2NICDlpoLvvJrkuK3lm73kurrmsJHl
+pKflraYt5ZWG5a2m6ZmiLeW3peWVhueuoeeQhuWtpuehleWjqyBNQkEsRU1CQe+8iOWcqOiBjCDl
+hajml6XliLbvvIksIOWMl+S6rOmmlumDvee7j+a1jui0uOaYk+Wkp+Wtpi3nu4/mtY7lrabpmaIt
+IOS6p+S4mue7j+a1juWtpu+8iOi0uOaYk+e7j+a1ju+8ieehleWjq++8iOWcqOiBjCDlhajml6Xl
+iLbvvInvvIzljJfkuqzlpKflraYt5YWJ5Y2O566h55CG5a2m6ZmiLU1CQSBFTUJBICAg5LiK5rW3
+5aSN5pem5aSn5a2mLeaWsOmXu+WtpumZoi3mlrDpl7vlrabkuJPkuJrnoZXlo6sgICDljY7kuJzl
+uIjojIPlpKflraYg5YyX5Lqs6Iiq56m66Iiq5aSp5aSn5a2mIOS4iua1t+i0oue7j+Wkp+WtpiAg
+5q2m5rGJ5aSn5a2mICAg5rWZ5rGf5aSn5a2mIOetiQ0KDQpEciDljZrlo6vnoJTnqbbnlJ/lrabl
+joblrabkvY3lj4zor4EgNuS4hyDotbcgIOmcgOacieehleWjq+WtpuWOhuaIluWtpuS9jSAg5aaC
+77ya5YyX5Lqs5aSn5a2m57uP5rWO5a2m6Zmi57uP5rWO5a2m5Y2a5aOrICAg5Lit5aSu6LSi57uP
+5aSn5a2m6YeR6J6N5a2m6Zmi6YeR6J6N5bel56iL5LiT5Lia5Y2a5aOrICAg5Lit5bGx5aSn5a2m
+5Yy75a2m6Zmi5Yy75a2m5Y2a5aOrICDljY7ljZfnkIblt6XlpKflraYgICDmtZnmsZ/lpKflraYt
+6K6h566X5py656eR5a2m5LiO5oqA5pyv5a2m6ZmiLeeUteWtkOS/oeaBr+W3peeoi+WNmuWjqyAg
+5Y2X5Lqs5aSn5a2mLeWVhuWtpumZoi3lupTnlKjnu4/mtY7lrabljZrlo6sgICDlk4jlsJTmu6jl
+t6XkuJrlpKflraYgICDkuK3lm73mtbfmtIvlpKflraYgICDlpKnmtKXlpKflraYgICDljqbpl6jl
+pKflraYgICDkuK3lm73np5HlrabmioDmnK/lpKflrabnrYkNCg0K5Yqe55CG6Z2e5bi45b+r5o23
+77yMMS0z5Liq5bel5L2c5pel5Y2z5Y+v5Yqe5aW95qGj5qGI6K+B5Lmm5a2m5L2N5a2m57GN6Iux
+6K+t6K+B5Lmm562J5Y6f5Lu25bm25rOo5YaM5byA6YCa5a2m5L+h572R6K6k6K+B5pWw5o2u5bqT
+5p+l6K+i77yM57uI6Lqr5rC45LmF5pyJ5pWI5p+l6K+i77yM5pys5YWs5Y+45omL5py65Y+35b6u
+5L+h5Y+36ZW/5pyf5a6e5ZCN6K6k6K+B77yM5LyB5Lia6YKu566x5a2m5L+h572R5Z+f5ZCN5pyN
+5Yqh5ZmoQGNoc2kuY29tLmNuIOWunuWQjeWkh+ahiO+8jOWvueWFrOi0puWPt+aUtuasvu+8jOWF
+qOmdouaUr+aMgeaUr+S7mOWuneW+ruS/oeaJq+eggeWSjOe9keS4iumTtuihjOaJi+acuumTtuih
+jEFQUOaUr+S7mCzmrKLov47lhajlm73ku6PnkIbllYbliqDnm5/lkIjkvZzvvIHvvIENCg0K5Yqe
+55CG5rWB56iLOg0KDQrlpIfpvZDnlLPor7fmnZDmlpnihpLlrqHmoLjpgJrov4fihpLpppbku5gz
+MCXlrabnsY3ms6jlhozotLnnlKjvvIjlr7nlhazotKbmiLfmlLbmrL7vvInihpLlip7lpb3lj5Hp
+gIHor4Hkuabmiavmj4/ku7bmn6Xor6Lpqozor4Hmu6HmhI/ihpLmlK/ku5jkvZnmrL7ihpLlj5Hp
+obrkuLDlv6vpgJLmlLblj5blhajlpZfor4Hkuabljp/ku7bvvIzljJfkuqzkuIrmtbfmt7HlnLPl
+nLDljLrpl6rpgIEgICANCg0K5YyX5Lqs5oC76YOo5Zyw5Z2A77ya5YyX5Lqs5biC6KW/5Z+O5Yy6
+6KW/55u06Zeo5aSW5aSn6KGXMTjlj7fph5HotLjlpKfljqZDM+W6p+OAgA0K5LiK5rW35YWs5Y+4
+5Zyw5Z2A77ya5LiK5rW35biC5rWm5Lic5paw5Yy65rWm5Lic5Y2X6LevMTA3OOWPt+S4reiejeWk
+p+WOpjYwOA0K5rex5Zyz5Yqe5YWs5Zyw5Z2A77ya5rex5Zyz5biC5Y2X5bGx5Yy65rex5Zyz5aSn
+5a2m5Z+O5a2m6IuR5aSn6YGTMTA2OOWPt0bmoIsxODA45a6kDQoNCuWtpuS/oee9keezu+aVmeiC
+sumDqOaMh+WumuWUr+S4gOWtpuWOhuiupOivgeafpeivoue9keerme+8jOe9keWdgCB3d3cuY2hz
+aS5jb20uY24gICANCg0K5pS25qy+6LSm5Y+3IA0K5oi35ZCN77ya5YyX5Lqs5a2m5L+h5ZKo6K+i
+5pyN5Yqh5pyJ6ZmQ5YWs5Y+4ICAg5oi35ZCN77ya5rex5Zyz5biC5pm65L+h5paw5L+h5oGv5oqA
+5pyv5pyJ6ZmQ5YWs5Y+4ICAg5oi35ZCN77ya5LiK5rW35a2m5L+h5pWZ6IKy56eR5oqA5pyJ6ZmQ
+5YWs5Y+4DQrlvIDmiLfooYzvvJrkuK3lm73msJHnlJ/pk7booYzljJfkuqzluILopb/ln47ljLrl
+ub/lronpl6jmlK/ooYwgIOW8gOaIt+ihjO+8muW3peWVhumTtuihjOa3seWcs+W4guWNl+WxseaU
+r+ihjCAg5byA5oi36KGM77ya5oub5ZWG6ZO26KGM5LiK5rW35biC5rWm5Lic5aSn6YGT5pSv6KGM
+DQoNCuWKnueQhuWtpuWOhuWtpuS9jeivt+iBlOezuyDljJfkuqzmgLvpg6jnlLXor506IDEzOTgz
+MTI1MTUx77yI5b6u5L+h5ZCM5Y+377yJIOW+ruS/oe+8mmNoc2l4dyDnjovlu7rmtpvogIHluIgg
+77yI5Li75Lu76LSf6LSj5Lq6ICDlrabkv6HnvZHmlbDmja7lupPnoJTlj5Hnu7TmiqTljYfnuqcg
+77yJIOW+ruS/oeWPt++8mmNoc2l4dyAgICDpgq7nrrE6IGtlZnVAY2hzaS5jb20uY24gICAgICAg
+IFFROjY2ODg4OCAgIA0KDQrlrqLmiLcv5Luj55CG5ZWG6YGN5biD5YWo5Zu977ya5YyX5LqsIOS4
+iua1tyDmt7HlnLMg5aSp5rSlIOadreW3niDljZfkuqwg6IuP5beeIOWOpumXqCDlub/lt54g6YeN
+5bqGIOatpuaxiSDmiJDpg70g6YOR5beeIOS4nOiOniDpnZLlspsg5rWO5Y2XIOetieWQhOWkp+WM
+ug0KDQrmt7vliqDlvq7kv6Hpobvnn6XvvJrliqDlvq7kv6Hlkqjor6Llip7nkIbliY3vvIzor7fl
+hYjnoa7lrprlrqLmiLflubTpvoTvvJ/mhI/lkJHlrabljobnmoTmgKfotKjvvIjlhajml6XliLbn
+u5/mi5sg6Ieq6ICD77yJ77yf6Zmi5qCh5Zyw5Yy65LiT5Lia77yfIOW3peS9nOS6uuWRmOS8muWF
+iOaKpeS7t++8jOWGs+WumuWKnueQhueahOWuouaIt+ivt+aJk+W8gOWtpuS/oee9keeZu+W9lemm
+lumhteW3puS4iuinkuWtpuWOhuafpeivoumhtemdouWQjuadpeeUteivne+8jOe7meaIkeS7rOWK
+nuWFrOS8geS4mumCrueusWtlZnVAY2hzaS5jb20uY27lj5HpgIHlpIfpvZDnmoTnlLPlip7mnZDm
+lpnpgq7ku7blkI7vvIzmiJHku6zlj6/ku6Xnu5nlrqLmiLfmn6XnnIvov5HmnJ/lip7lpb3nmoTl
+rabljobmoLfmnKwg6L6T5YWl5aeT5ZCN6K+B5Lmm57yW5Y+35Y2z5Y+v5p+l6K+i6aqM6K+B77yM
+5qyi6L+O5pyJ5a6i5oi36LWE5rqQ5a6e5Yqb55qE5py65p6E5Liq5Lq65Yqg55uf5Luj55CG5aSn
+5bGV5a6P5Zu+77yB77yBDQoNCuacrOWFrOWPuOaJi+acuuWPt+W+ruS/oeWPt+mVv+acn+WunuWQ
+jeiupOivge+8jOS8geS4mumCrueuseWtpuS/oee9keWfn+WQjeacjeWKoeWZqEBjaHNpLmNvbS5j
+bumVv+acn+WunuWQjeWkh+ahiO+8jOWunuWQjei0puWPt+WFqOmdouaUr+aMgeaUr+S7mOWunemT
+tuiBlOe9kemTtuaUr+S7mCzku6PnkIbllYbplb/mnJ/lkIjkvZzlronlhajlv6vmjbfvvIENCg0K
+5pyA5aW955qE5Y+j56KR5ZKM5L+h6KqJLCDni6zlrrbpm4TljprotYTmupAs5bey5oiQ5Yqf5Li6
+5aSn6YeP5rW35YaF5aSW5a6i5oi35ZyG5ruh5LqG5qKm5oOz77yMIOS4gOOAgeaVmeiCsumDqOiu
+pOivgee9keWSjOWtpuagoee9keWdh+WPr+S7peafpeivou+8jOWPr+S+m+eUqOS6uuWNleS9jeWS
+jOacieWFs+mDqOmXqOeUteivneWSqOivouWSjOS4iue9keiwg+afpSAg5LqM44CB5pyJ5a6M5pW0
+6b2Q5YWo55qE5qGj5qGI44CB5a2m57GN44CB6ICD6K+V5oiQ57up5Y2V44CB5YWl5a2m55m76K6w
+6KGo44CB5q+V5Lia55m76K6w6KGo562J44CC5a+55rGC6IGM44CB5bCx5Lia44CB5bqU6IGY44CB
+5pmL57qn44CB5rao6Jaq44CB6IGM56ew6K+E5a6a44CB6LWE5qC85oql6ICD44CB562J57qn6K6k
+6K+B44CB5Ye65Zu944CB55WZ5a2m44CB56e75rCR44CB5a2m5Y6GIOWFrOivgeetiemDveWFt+ac
+ieaViOWKm+OAgiDkuInjgIHkv53or4Hlv6vmjbfku7fkvJjvvJrlm6DkuLrmmK/lrabmoKHnm7Tm
+jqXlh7ror4Hnm7TmjqXlip7nkIbvvIzmiYDku6Xkv53or4Hkuoblh7ror4Hlv6vpgJ/vvIzku7fm
+oLzkvJjmg6DjgIIg5biC5Zy65peg5Y+v6ZmQ6YeP77yM5qyi6L+O5Yqg55uf5Luj55CG77yM5LiA
+5qyh5om56YeP5o+Q5Lqk5Yqe55CG5a6i5oi377yM5Y+v5p2l5pys5YWs5Y+46Z2i6LCI562+57qm
+77yM5Luj55CG5ZWG5Yqg55uf5b6F6YGH5LyY5Y6a5Zue5oql5Liw5Y6a77yB77yBDQoNCui/keW5
+tOadpeWBh+ivgeS5puaXqeW3sue7j+W9u+W6leiiq+a3mOaxsO+8jOaXoOiuuue6uOW8oOinhOag
+vOi0qOWcsOmYsuS8quawtOWNsOi/mOaYr+avleS4muivgeS5pueahOe8luWPt+WtpuS9jeivgeS5
+pueahOe8luWPt++8jOi/mOacieWtpuexjeWPt+aho+ahiOe8luWPt++8jOmDveaXqeW3suWFqOmD
+qOiBlOe9keWIsOaVmeiCsumDqOWtpuS/oee9keeahOaVsOaNruW6k+S6hu+8jOaXoOiuuuaYr+aK
+peiAg+i/mOaYr+W6lOiBmOmdouivleaIluaYr+WFrOivge+8jOebuOWFs+W3peS9nOS6uuWRmOmD
+veaYr+eZu+mZhuWtpuS/oee9keaVsOaNruW6k+W5s+WPsOadpeafpemqjOWtpuWOhuivgeS5puea
+hOecn+S8quOAgg0KDQrmnKzlpITni6zlrrbnmoTotYTmupDmnYPpmZDkvb/lvpflrqLmiLfkuI3n
+lKjlho3ovpvoi6blpIfogIPogJfotLnml7bpl7Tnsr7lipvlj4LliqDmvKvplb/nuYHnkJDnmoTl
+rabljobogIPor5XvvIzlj6ropoHkvaDlhbflpIfkuIDlrprnmoTkuJPkuJrln7rnoYDvvIzop4Tl
+iJLorr7orqHmnIDkvbPnmoTogYzkuJrmlrnlkJHvvIzkuLrkuI3lkIzlrqLmiLfmjqjojZDorqLl
+iLbkuI7ogYzkuJrlkozmnKrmnaXlj5HlsZXpq5jluqbljLnphY3nmoTlrabljoblrabkvY3vvIzn
+u4jouqvmsLjkuYXlrabkv6HnvZHmn6Xor6LvvIzmnKzlrabljoblrabkvY3kuJrliqHmnIDpgILl
+kIjlhbflpIfovoPlvLrlt6XkvZzog73lipvmnInovoPlpb3ku47kuJrlsaXljobnmoTpq5jnq6/l
+rqLmiLfvvIzljIXmi6zmjIflrprpmaLns7vkuJPkuJrnmoTlnKjogYznu5/mi5vlhajml6XliLbm
+nKznp5HnoZXlo6vljZrlo6vnoJTnqbbnlJ/np4HkurrlrprliLbvvIzluK7liqnlub/lpKfog73l
+ipvlh7rkvJfnu4/mtY7kvJjotornmoTlrqLmiLflrp7njrDkuobogYzlnLrpo57ot4PllYblnLro
+hb7po57ku5XpgJTlubPmraXpnZLkupHvvIHvvIHpgInmi6nmr5Tliqrlipvmm7Tph43opoHvvIzk
+uI7ml7bkv7Hov5vnq5nlnKjlt6jkurrnmoTogqnohoDkuIrkvaDlj6/ku6Xpo57lvpfmm7Tpq5jv
+vIHvvIEgDQoNCuWKnueQhuWtpuWOhuWtpuS9jeivt+iBlOezuyDljJfkuqzmgLvpg6jnlLXor506
+IDEzOTgzMTI1MTUx77yI5b6u5L+h5ZCM5Y+377yJIOW+ruS/oe+8mmNoc2l4dyDnjovlu7rmtpvo
+gIHluIgg77yI5Li75Lu76LSf6LSj5Lq6ICDlrabkv6HnvZHmlbDmja7lupPnoJTlj5Hnu7TmiqTl
+jYfnuqcg77yJIOW+ruS/oeWPt++8mmNoc2l4dyAgICDpgq7nrrE6IGtlZnVAY2hzaS5jb20uY27v
+vIjkvIHkuJrpgq7nrrFsZDg4ODhAMTg4LmNvbe+8iSAgICAgICAgUVE6NjY4ODg4ICAgDQoNCua3
+u+WKoOW+ruS/oemhu+efpe+8muWKoOW+ruS/oeWSqOivouWKnueQhuWJje+8jOivt+WFiOehruWu
+muWuouaIt+eahOW5tOm+hCDmiYDlip7mhI/lkJHlrabljobnmoTmgKfotKjvvIjlhajml6XliLbn
+u5/mi5sg6Ieq6ICD77yJIOmZouagoeWcsOWMuuS4k+S4miDlt6XkvZzkurrlkZjkvJrlhYjlm57l
+pI3miqXku7fvvIzlhrPlrprlip7nkIbnmoTlrqLmiLfor7fmiZPlvIDlrabkv6HnvZHnmbvlvZXp
+ppbpobXlt6bkuIrop5Llrabljobmn6Xor6LpobXpnaLlkI7mnaXnlLXor53vvIznu5nmiJHku6zl
+t6XkvZzpgq7nrrFrZWZ1QGNoc2kuY29tLmNu5Y+R6YCB5aSH6b2Q55qE55Sz5Yqe5p2Q5paZ6YKu
+5Lu25ZCO77yM5oiR5Lus5Y+v5Lul57uZ5a6i5oi35p+l55yL5oiR5Lus6L+R5pyf5Yqe5aW955qE
+5a2m5Y6G5qC35pys6L6T5YWl5aeT5ZCN5q+V5Lia6K+B5Lmm57yW5Y+35Y2z5Y+v5p+l6K+i6aqM
+6K+B77yM5qyi6L+O5pyJ5a6i5oi36LWE5rqQ5a6e5Yqb55qE5py65p6E5Yqg55uf5Luj55CG5aSn
+5bGV5a6P5Zu+ISENCg0K6ZmEOiDnlLPlip7lrabljobmiYDpnIDmnZDmlpkNCg0KMS7lrabljobm
+gKfotKjvvIjnu5/mi5sgIOaIkOS6uuaVmeiCsi/lnKjogYwgIOiHquWtpuiAg+ivle+8iQ0KDQrp
+maLmoKHlkI3np7DvvIjlkITlnLDljLrlm73nq4vlhazlip7pmaLmoKHvvIkNCg0K5a2m5Y6G5bGC
+5qyh77yI5LiT56eRIOacrOenkeWtpuWjqyDnoZXlo6vnoJTnqbbnlJ8g5Y2a5aOr56CU56m255Sf
+IOWmgk1CQSBFTUJBIOWQhOexu+W3peeoi+ehleWjq++8iQ0KDQrmr5XkuJrml7bpl7TvvIjoh6ro
+gIPkuLrmr4/lubQ25pyI5bqVMTLmnIjlupXlkITmr5XkuJrnmbvorrDkuIDmrKEg57uf5oubL+aI
+kOaVmS/lnKjogYzkuLrmr4/lubQ35pyI77yJDQoNCjIuIOiTneiJsuW6leS4pOWvuOaVsOeggeiv
+geS7tuW9qeeFp++8iOWbvueJh+aWh+S7tuWPr+WOi+e8qeWQjueUqOmCruS7tumZhOS7tuS4iuS8
+oOWPkeadpe+8iQ0KDQrouqvku73or4HmraPpnaLmiavmj4/ku7bvvIjnlKjpgq7ku7bpmYTku7bk
+uIrkvKDlj5HmnaXvvIkNCg0KMy4g5Y6f5aeL5a2m5Y6G5a2m5L2N5Y+R5p2l5LiO5ZCm6KeG5oiQ
+5Lq65pWZ6IKyL+S4k+WNh+acrC/lnKjogYznoZXlo6vnrYnlrabljobnmoTkuI3lkIzlhbfkvZPo
+poHmsYINCg==
+
+--=_NextPart_2rfkindysadvnqw3nerasdf--
+
+<!-- EXPECT -->
+[
+  {
+    "type": "word",
+    "value": "ad"
+  },
+  {
+    "type": "word",
+    "value": "hello"
+  },
+  {
+    "type": "word",
+    "value": "全国"
+  },
+  {
+    "type": "word",
+    "value": "博士"
+  },
+  {
+    "type": "word",
+    "value": "双"
+  },
+  {
+    "type": "word",
+    "value": "学位"
+  },
+  {
+    "type": "word",
+    "value": "学历"
+  },
+  {
+    "type": "word",
+    "value": "广告"
+  },
+  {
+    "type": "word",
+    "value": "本科"
+  },
+  {
+    "type": "word",
+    "value": "独家"
+  },
+  {
+    "type": "word",
+    "value": "硕士"
+  },
+  {
+    "type": "word",
+    "value": "证"
+  },
+  {
+    "type": "word",
+    "value": "速办"
+  },
+  {
+    "type": "number",
+    "code": [
+      105,
+      2
+    ]
+  },
+  {
+    "type": "sender",
+    "value": "beijing--------chsi.com.cn"
+  },
+  {
+    "type": "sender",
+    "value": "hello-------北京------kefu@beijing--------chsi.com.cn"
+  },
+  {
+    "type": "hostname",
+    "value": "beijing--------chsi.com.cn"
+  },
+  {
+    "type": "attachment",
+    "value": "!txt"
+  },
+  {
+    "type": "attachment",
+    "value": "_信"
+  },
+  {
+    "type": "attachment",
+    "value": "_全"
+  },
+  {
+    "type": "attachment",
+    "value": "_博士"
+  },
+  {
+    "type": "attachment",
+    "value": "_学"
+  },
+  {
+    "type": "attachment",
+    "value": "_学位"
+  },
+  {
+    "type": "attachment",
+    "value": "_学历"
+  },
+  {
+    "type": "attachment",
+    "value": "_快速"
+  },
+  {
+    "type": "attachment",
+    "value": "_搞定"
+  },
+  {
+    "type": "attachment",
+    "value": "_晋升"
+  },
+  {
+    "type": "attachment",
+    "value": "_本科"
+  },
+  {
+    "type": "attachment",
+    "value": "_查询"
+  },
+  {
+    "type": "attachment",
+    "value": "_永久"
+  },
+  {
+    "type": "attachment",
+    "value": "_独家"
+  },
+  {
+    "type": "attachment",
+    "value": "_硕"
+  },
+  {
+    "type": "attachment",
+    "value": "_网"
+  },
+  {
+    "type": "attachment",
+    "value": "_职称"
+  },
+  {
+    "type": "attachment",
+    "value": "_轻松"
+  },
+  {
+    "type": "attachment",
+    "value": "_速办"
+  },
+  {
+    "type": "attachment",
+    "value": "_高薪"
+  },
+  {
+    "type": "mime_type",
+    "value": "application/octet-stream"
+  },
+  {
+    "type": "mime_type",
+    "value": "multipart/mixed"
+  },
+  {
+    "type": "mime_type",
+    "value": "text/plain"
+  }
+]
+<!-- NEXT TEST -->

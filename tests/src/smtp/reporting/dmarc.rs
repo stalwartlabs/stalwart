@@ -116,7 +116,7 @@ async fn report_dmarc() {
         message.message.recipients.last().unwrap().address(),
         "reports@foobar.net"
     );
-    assert_eq!(message.message.return_path, "reports@example.org");
+    assert_eq!(message.message.return_path.as_ref(), "reports@example.org");
     message
         .read_lines(qr)
         .await

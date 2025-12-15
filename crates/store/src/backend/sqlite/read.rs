@@ -4,15 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use roaring::RoaringBitmap;
-use rusqlite::OptionalExtension;
-
-use crate::{
-    BitmapKey, Deserialize, IterateParams, Key, U32_LEN, ValueKey,
-    write::{BitmapClass, ValueClass, key::DeserializeBigEndian},
-};
-
 use super::{SqliteStore, into_error};
+use crate::{Deserialize, IterateParams, Key, ValueKey, write::ValueClass};
+use rusqlite::OptionalExtension;
 
 impl SqliteStore {
     pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -35,39 +29,6 @@ impl SqliteStore {
                 })
                 .optional()
                 .map_err(into_error)
-        })
-        .await
-    }
-
-    pub(crate) async fn get_bitmap(
-        &self,
-        mut key: BitmapKey<BitmapClass>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        let begin = key.serialize(0);
-        key.document_id = u32::MAX;
-        let key_len = begin.len();
-        let end = key.serialize(0);
-        let conn = self.conn_pool.get().map_err(into_error)?;
-        let table = char::from(key.subspace());
-
-        self.spawn_worker(move || {
-            let mut bm = RoaringBitmap::new();
-            let mut query = conn
-                .prepare_cached(&format!("SELECT k FROM {table} WHERE k >= ? AND k <= ?"))
-                .map_err(into_error)?;
-            let mut rows = query.query([&begin, &end]).map_err(into_error)?;
-
-            while let Some(row) = rows.next().map_err(into_error)? {
-                let key = row
-                    .get_ref(0)
-                    .map_err(into_error)?
-                    .as_bytes()
-                    .map_err(into_error)?;
-                if key.len() == key_len {
-                    bm.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
-                }
-            }
-            Ok(if !bm.is_empty() { Some(bm) } else { None })
         })
         .await
     }

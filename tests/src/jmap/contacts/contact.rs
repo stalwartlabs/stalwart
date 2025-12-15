@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{ChangeType, IntoJmapSet, JMAPTest, JmapUtils},
+    jmap::{ChangeType, IntoJmapSet, JMAPTest, JmapUtils, wait_for_index},
     webdav::DummyWebDavClient,
 };
 use ahash::AHashSet;
@@ -336,6 +336,12 @@ pub async fn test(params: &mut JMAPTest) {
     }));
 
     // Query tests
+    wait_for_index(&params.server).await;
+    let email = if !params.server.search_store().is_mysql() {
+        "sarah.johnson@example.com"
+    } else {
+        "sarah.johnson@example"
+    };
     assert_eq!(
         account
             .jmap_query(
@@ -344,7 +350,7 @@ pub async fn test(params: &mut JMAPTest) {
                     ("text", "Sarah"),
                     ("inAddressBook", book1_id.as_str()),
                     ("uid", "urn:uuid:f81d4fae-7dec-11d0-a765-00a0c91e6bf6"),
-                    ("email", "sarah.johnson@example.com"),
+                    ("email", email),
                 ],
                 ["created"],
                 Vec::<(&str, &str)>::new(),
@@ -618,7 +624,7 @@ fn test_jscontact_1() -> Value {
             "pref": true
           },
           "features": {
-            "cell": true,
+            "mobile": true,
             "voice": true
           }
         },
@@ -739,7 +745,7 @@ fn test_jscontact_2() -> Value {
             "pref": true
           },
           "features": {
-            "cell": true,
+            "mobile": true,
             "voice": true
           }
         },

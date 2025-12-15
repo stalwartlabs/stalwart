@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, future::Future};
-
+use super::ElementLocation;
+use crate::{IpParts, SpamFilterContext, TextPart, modules::dnsbl::check_dnsbl};
 use common::{
     Server,
     config::spamfilter::{Element, IpResolver, Location},
@@ -13,11 +13,8 @@ use common::{
 use mail_auth::IprevResult;
 use mail_parser::{HeaderName, HeaderValue, Host};
 use nlp::tokenizers::types::TokenType;
+use std::future::Future;
 use store::ahash::AHashSet;
-
-use crate::{IpParts, SpamFilterContext, TextPart, modules::dnsbl::check_dnsbl};
-
-use super::ElementLocation;
 
 pub trait SpamFilterAnalyzeIp: Sync + Send {
     fn spam_filter_analyze_ip(
@@ -119,15 +116,18 @@ impl SpamFilterAnalyzeIp for Server {
                 IprevResult::Pass | IprevResult::None => (),
             }
         }
+
+        // Add ASN
+        if let Some(asn_id) = &ctx.input.asn {
+            ctx.result.add_tag(format!("SOURCE_ASN_{asn_id}"));
+        }
     }
 }
 
-impl<'x> IpParts<'x> {
-    pub fn new(text: impl Into<Cow<'x, str>>) -> IpParts<'x> {
-        let text = text.into();
+impl IpParts {
+    pub fn new(text: &str) -> IpParts {
         IpParts {
             ip: text.parse().ok(),
-            text,
         }
     }
 }

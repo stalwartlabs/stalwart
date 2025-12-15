@@ -2837,6 +2837,25 @@ mod test {
                     TokenType::Punctuation('!'),
                 ],
             ),
+            (
+                "vＥⓡ𝔂 𝔽𝕌Ňℕｙ ţ乇𝕏𝓣 wWiIiIIttHh l133t5p3/-\\|<",
+                vec![
+                    TokenType::Alphabetic("vＥⓡ𝔂"),
+                    TokenType::Space,
+                    TokenType::Alphabetic("𝔽𝕌Ňℕｙ"),
+                    TokenType::Space,
+                    TokenType::Alphabetic("ţ乇𝕏𝓣"),
+                    TokenType::Space,
+                    TokenType::Alphabetic("wWiIiIIttHh"),
+                    TokenType::Space,
+                    TokenType::Alphanumeric("l133t5p3"),
+                    TokenType::Punctuation('/'),
+                    TokenType::Punctuation('-'),
+                    TokenType::Punctuation('\\'),
+                    TokenType::Punctuation('|'),
+                    TokenType::Punctuation('<'),
+                ],
+            ),
         ] {
             let result = TypesTokenizer::new(text)
                 .map(|t| t.word)

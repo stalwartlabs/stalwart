@@ -16,7 +16,7 @@ use calcard::{
 use common::PROD_ID;
 use store::{
     Serialize,
-    write::{Archiver, BatchBuilder, TaskQueueClass, ValueClass, now},
+    write::{Archiver, BatchBuilder, TaskEpoch, TaskQueueClass, ValueClass},
 };
 use trc::AddContext;
 
@@ -278,7 +278,7 @@ impl ItipMessages {
     }
 
     pub fn queue(self, batch: &mut BatchBuilder) -> trc::Result<()> {
-        let due = now();
+        let due = TaskEpoch::now().with_random_sequence_id();
         batch.set(
             ValueClass::TaskQueue(TaskQueueClass::SendImip {
                 due,

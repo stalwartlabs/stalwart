@@ -4,54 +4,47 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{
-    crypto::{EncryptMessage, EncryptMessageError},
-    index::{MAX_SORT_FIELD_LENGTH, TrimTextValue},
-};
+use super::crypto::{EncryptMessage, EncryptMessageError};
 use crate::{
-    cache::{MessageCacheFetch, email::MessageCacheAccess},
-    mailbox::{INBOX_ID, JUNK_ID, UidMailbox},
+    cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
+    mailbox::{INBOX_ID, JUNK_ID, SENT_ID, TRASH_ID, UidMailbox},
     message::{
         crypto::EncryptionParams,
-        index::{IndexMessage, MAX_ID_LENGTH, VisitText},
-        metadata::MessageData,
+        index::{IndexMessage, extractors::VisitText},
+        metadata::{MessageData, MessageMetadata},
     },
 };
-use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
+use common::{Server, auth::AccessToken};
 use directory::Permission;
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
 };
 use mail_parser::{
-    Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
+    DateTime, Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
     parsers::fields::thread::thread_name,
 };
-use spam_filter::{
-    SpamFilterInput, analysis::init::SpamFilterInit, modules::bayes::BayesClassifier,
-};
-use std::future::Future;
-use std::{
-    borrow::Cow,
-    fmt::Write,
-    time::{Duration, Instant},
-};
+use std::{borrow::Cow, cmp::Ordering, fmt::Write, time::Instant};
+use std::{future::Future, hash::Hasher};
+use store::write::{AlignedBytes, Archive};
 use store::{
-    IndexKey, IndexKeyPrefix, IterateParams, U32_LEN,
-    ahash::AHashMap,
-    query::Filter,
-    roaring::RoaringBitmap,
-    write::{BatchBuilder, TaskQueueClass, ValueClass, key::DeserializeBigEndian, now},
+    IndexKeyPrefix, IterateParams, U32_LEN, ValueKey,
+    ahash::{AHashMap, AHashSet},
+    write::{
+        AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, SearchIndex,
+        TaskEpoch, TaskQueueClass, ValueClass, key::DeserializeBigEndian, now,
+    },
 };
-use store::{SerializeInfallible, rand::Rng};
-use trc::{AddContext, MessageIngestEvent};
+use trc::{AddContext, MessageIngestEvent, SpamEvent};
 use types::{
     blob::{BlobClass, BlobId},
+    blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
     field::{ContactField, EmailField, MailboxField, PrincipalField},
     keyword::Keyword,
+    special_use::SpecialUse,
 };
-use utils::sanitize_email;
+use utils::{cheeky_hash::CheekyHash, sanitize_email};
 
 #[derive(Default)]
 pub struct IngestedEmail {
@@ -65,14 +58,13 @@ pub struct IngestedEmail {
 
 pub struct IngestEmail<'x> {
     pub raw_message: &'x [u8],
+    pub blob_hash: Option<&'x BlobHash>,
     pub message: Option<Message<'x>>,
     pub access_token: &'x AccessToken,
     pub mailbox_ids: Vec<u32>,
     pub keywords: Vec<Keyword>,
     pub received_at: Option<u64>,
     pub source: IngestSource<'x>,
-    pub spam_classify: bool,
-    pub spam_train: bool,
     pub session_id: u64,
 }
 
@@ -81,38 +73,57 @@ pub enum IngestSource<'x> {
     Smtp {
         deliver_to: &'x str,
         is_sender_authenticated: bool,
+        is_spam: bool,
     },
-    Jmap,
-    Imap,
+    Jmap {
+        train_classifier: bool,
+    },
+    Imap {
+        train_classifier: bool,
+    },
     Restore,
 }
-
-const MAX_RETRIES: u32 = 10;
 
 pub trait EmailIngest: Sync + Send {
     fn email_ingest(
         &self,
         params: IngestEmail,
     ) -> impl Future<Output = trc::Result<IngestedEmail>> + Send;
-    fn find_or_merge_thread(
+    fn find_thread_id(
         &self,
         account_id: u32,
         thread_name: &str,
-        references: Vec<&[u8]>,
-        skip_duplicate: Option<(&[u8], u32)>,
+        message_ids: &[CheekyHash],
     ) -> impl Future<Output = trc::Result<ThreadResult>> + Send;
-    fn assign_imap_uid(
+    fn assign_email_ids(
         &self,
         account_id: u32,
-        mailbox_id: u32,
-    ) -> impl Future<Output = trc::Result<u32>> + Send;
-    fn email_bayes_can_train(&self, access_token: &AccessToken) -> bool;
+        mailbox_ids: impl IntoIterator<Item = u32> + Sync + Send,
+        generate_email_id: bool,
+    ) -> impl Future<Output = trc::Result<impl Iterator<Item = u32> + 'static>> + Send;
+    fn add_account_spam_sample(
+        &self,
+        batch: &mut BatchBuilder,
+        account_id: u32,
+        document_id: u32,
+        is_spam: bool,
+        span_id: u64,
+    ) -> impl Future<Output = trc::Result<()>> + Send;
+    fn add_spam_sample(
+        &self,
+        batch: &mut BatchBuilder,
+        hash: BlobHash,
+        is_spam: bool,
+        hold_sample: bool,
+        span_id: u64,
+    );
 }
 
-pub enum ThreadResult {
-    Id(u32),
-    Create,
-    Skip,
+pub struct ThreadResult {
+    pub thread_id: Option<u32>,
+    pub thread_hash: CheekyHash,
+    pub merge_ids: Vec<u32>,
+    pub duplicate_ids: Vec<u32>,
 }
 
 impl EmailIngest for Server {
@@ -136,15 +147,92 @@ impl EmailIngest for Server {
                 .ctx(trc::Key::Reason, "Failed to parse e-mail message.")
         })?;
 
-        let mut is_spam = false;
+        // Obtain message references and thread name
+        let mut message_id = None;
+        let mut message_ids = Vec::new();
+        let thread_result = {
+            let mut subject = "";
+            for header in message.root_part().headers().iter().rev() {
+                match &header.name {
+                    HeaderName::MessageId => header.value.visit_text(|id| {
+                        if !id.is_empty() {
+                            if message_id.is_none() {
+                                message_id = id.to_string().into();
+                            }
+                            message_ids.push(CheekyHash::new(id.as_bytes()));
+                        }
+                    }),
+                    HeaderName::InReplyTo
+                    | HeaderName::References
+                    | HeaderName::ResentMessageId => {
+                        header.value.visit_text(|id| {
+                            if !id.is_empty() {
+                                message_ids.push(CheekyHash::new(id.as_bytes()));
+                            }
+                        });
+                    }
+                    HeaderName::Subject if subject.is_empty() => {
+                        subject = thread_name(match &header.value {
+                            HeaderValue::Text(text) => text.as_ref(),
+                            HeaderValue::TextList(list) if !list.is_empty() => {
+                                list.first().unwrap().as_ref()
+                            }
+                            _ => "",
+                        });
+                    }
+                    _ => (),
+                }
+            }
+
+            message_ids.sort_unstable();
+            message_ids.dedup();
+
+            self.find_thread_id(account_id, subject, &message_ids)
+                .await?
+        };
+
+        // Skip duplicate messages for SMTP ingestion
+        if !thread_result.duplicate_ids.is_empty() && params.source.is_smtp() {
+            // Fetch cached messages
+            let cache = self
+                .get_cached_messages(account_id)
+                .await
+                .caused_by(trc::location!())?;
+
+            // Skip duplicate messages
+            let target_mailbox_id = params.mailbox_ids.first().copied().unwrap_or(INBOX_ID);
+            if !cache
+                .in_mailboxes(&[target_mailbox_id, JUNK_ID])
+                .any(|m| thread_result.duplicate_ids.contains(&m.document_id))
+            {
+                trc::event!(
+                    MessageIngest(MessageIngestEvent::Duplicate),
+                    SpanId = params.session_id,
+                    AccountId = account_id,
+                    MessageId = message_id,
+                );
+
+                return Ok(IngestedEmail {
+                    document_id: 0,
+                    thread_id: 0,
+                    change_id: u64::MAX,
+                    blob_id: BlobId::default(),
+                    imap_uids: Vec::new(),
+                    size: 0,
+                });
+            }
+        }
+
+        // Spam classification and training
         let mut train_spam = None;
         let mut extra_headers = String::new();
         let mut extra_headers_parsed = Vec::new();
         let mut itip_messages = Vec::new();
-        match params.source {
+        let is_spam = match params.source {
             IngestSource::Smtp {
                 deliver_to,
                 is_sender_authenticated,
+                mut is_spam,
             } => {
                 // Add delivered to header
                 if self.core.smtp.session.data.add_delivered_to {
@@ -158,52 +246,11 @@ impl EmailIngest for Server {
                     });
                 }
 
-                // Spam classification and training
-                if params.spam_classify
-                    && self.core.spam.enabled
-                    && params.mailbox_ids == [INBOX_ID]
-                {
-                    // Set the spam filter result
-                    #[cfg(not(feature = "test_mode"))]
-                    {
-                        is_spam = self
-                            .core
-                            .spam
-                            .headers
-                            .status
-                            .as_ref()
-                            .and_then(|name| {
-                                message
-                                    .root_part()
-                                    .headers
-                                    .iter()
-                                    .find(|h| h.name.as_str().eq_ignore_ascii_case(name.as_str()))
-                                    .and_then(|v| v.value.as_text())
-                            })
-                            .is_some_and(|v| v.contains("Yes"));
-                    }
-
-                    #[cfg(feature = "test_mode")]
-                    {
-                        is_spam = self
-                            .core
-                            .spam
-                            .headers
-                            .status
-                            .as_ref()
-                            .and_then(|name| {
-                                message
-                                    .root_part()
-                                    .headers
-                                    .iter()
-                                    .rev()
-                                    .find(|h| h.name.as_str().eq_ignore_ascii_case(name.as_str()))
-                                    .and_then(|v| v.value.as_text())
-                            })
-                            .is_some_and(|v| v.contains("Yes"));
-                    }
-
-                    // If the message is classified as spam, check whether the sender address is present in the user's address book
+                // Spam training on confirmed false positives
+                if self.core.spam.enabled {
+                    let mut overridden = None;
+                    // If the message is classified as spam, check whether the
+                    // sender address is present in the user's address book.
                     if is_spam
                         && self.core.spam.card_is_ham
                         && let Some(sender) = message
@@ -213,84 +260,88 @@ impl EmailIngest for Server {
                             .and_then(sanitize_email)
                         && sender != deliver_to
                         && is_sender_authenticated
-                        && !self
-                            .store()
-                            .filter(
+                        && self
+                            .document_exists(
                                 account_id,
                                 Collection::ContactCard,
-                                vec![Filter::eq(ContactField::Email, sender.into_bytes())],
+                                ContactField::Email,
+                                sender.as_bytes(),
                             )
                             .await
                             .caused_by(trc::location!())?
-                            .results
-                            .is_empty()
                     {
                         is_spam = false;
                         if self
                             .core
                             .spam
-                            .bayes
+                            .classifier
                             .as_ref()
-                            .is_some_and(|config| config.auto_learn_card_is_ham)
+                            .is_some_and(|c| c.auto_learn_card_is_ham)
                         {
                             train_spam = Some(false);
                         }
+                        overridden = Some("card-exists");
                     }
 
-                    // Classify the message with user's model
-                    if let Some(bayes_config) = self.core.spam.bayes.as_ref().filter(|config| {
-                        config.account_classify && params.spam_train && train_spam.is_none()
-                    }) {
-                        // Initialize spam filter
-                        let ctx = self.spam_filter_init(SpamFilterInput::from_account_message(
-                            &message,
-                            account_id,
-                            params.session_id,
-                        ));
+                    // Check if the message is a trusted reply to a previous message
+                    if is_spam
+                        && self.core.spam.trusted_reply
+                        && let Some(thread_id) = thread_result.thread_id
+                    {
+                        let cache = self
+                            .get_cached_messages(account_id)
+                            .await
+                            .caused_by(trc::location!())?;
+                        let sent_folder_id = cache
+                            .mailbox_by_role(&SpecialUse::Sent)
+                            .map(|m| m.document_id)
+                            .unwrap_or(SENT_ID);
 
-                        // Bayes classify
-                        match self.bayes_classify(&ctx).await {
-                            Ok(Some(score)) => {
-                                let result = if score > bayes_config.score_spam {
-                                    is_spam = true;
-                                    "Yes"
-                                } else if score < bayes_config.score_ham {
-                                    is_spam = false;
-                                    "No"
-                                } else {
-                                    "Unknown"
-                                };
-
-                                if let Some(header) = &self.core.spam.headers.bayes_result {
-                                    let offset_field = extra_headers.len();
-                                    let offset_start = offset_field + header.len() + 1;
-
-                                    let _ = write!(
-                                        &mut extra_headers,
-                                        "{header}: {result}, {score:.2}\r\n",
-                                    );
-
-                                    extra_headers_parsed.push(Header {
-                                        name: HeaderName::Other(header.into()),
-                                        value: HeaderValue::Text(
-                                            extra_headers
-                                                [offset_start + 1..extra_headers.len() - 2]
-                                                .into(),
-                                        ),
-                                        offset_field: offset_field as u32,
-                                        offset_start: offset_start as u32,
-                                        offset_end: extra_headers.len() as u32,
-                                    });
-                                }
+                        if cache
+                            .in_thread(thread_id)
+                            .any(|m| m.mailboxes.iter().any(|mb| mb.mailbox_id == sent_folder_id))
+                        {
+                            is_spam = false;
+                            if self
+                                .core
+                                .spam
+                                .classifier
+                                .as_ref()
+                                .is_some_and(|c| c.auto_learn_reply_ham)
+                            {
+                                train_spam = Some(false);
                             }
-                            Ok(None) => (),
-                            Err(err) => {
-                                trc::error!(err.caused_by(trc::location!()));
-                            }
+                            overridden = Some("trusted-reply");
                         }
                     }
 
-                    if is_spam {
+                    // Add Spam-Status header
+                    const HEADER: &str = "X-Spam-Status";
+                    let offset_field = extra_headers.len();
+                    let offset_start = offset_field + HEADER.len() + 1;
+                    let result = if is_spam { "Yes" } else { "No" };
+                    if let Some(reason) = overridden {
+                        let _ = write!(
+                            &mut extra_headers,
+                            "{HEADER}: {result}, reason={reason}\r\n",
+                        );
+                    } else {
+                        let _ = write!(&mut extra_headers, "{HEADER}: {result}\r\n",);
+                    }
+
+                    extra_headers_parsed.push(Header {
+                        name: HeaderName::Other(HEADER.into()),
+                        value: HeaderValue::Text(
+                            extra_headers[offset_start + 1..extra_headers.len() - 2]
+                                .to_string()
+                                .into(),
+                        ),
+                        offset_field: offset_field as u32,
+                        offset_start: offset_start as u32,
+                        offset_end: extra_headers.len() as u32,
+                    });
+
+                    if is_spam && params.mailbox_ids == [INBOX_ID] {
                         params.mailbox_ids[0] = JUNK_ID;
                         params.keywords.push(Keyword::Junk);
                     }
@@ -298,11 +349,11 @@ impl EmailIngest for Server {
 
                 // iMIP processing
                 if self.core.groupware.itip_enabled
+                    && !is_spam
+                    && is_sender_authenticated
                     && params
                         .access_token
                         .has_permission(Permission::CalendarSchedulingReceive)
-                    && is_sender_authenticated
-                    && !is_spam
                 {
                     let mut sender = None;
                     for part in &message.parts {
@@ -383,172 +434,49 @@ impl EmailIngest for Server {
                         }
                     }
                 }
+
+                is_spam
             }
-            IngestSource::Jmap | IngestSource::Imap
-                if params.spam_train && self.core.spam.enabled =>
-            {
+            IngestSource::Jmap {
+                train_classifier: true,
+            }
+            | IngestSource::Imap {
+                train_classifier: true,
+            } if self.core.spam.enabled => {
                 if params.keywords.contains(&Keyword::Junk) {
                     train_spam = Some(true);
                 } else if params.keywords.contains(&Keyword::NotJunk) {
-                    train_spam = Some(false);
+                    if !params.mailbox_ids.contains(&TRASH_ID) {
+                        train_spam = Some(false);
+                    }
                 } else if params.mailbox_ids[0] == JUNK_ID {
                     train_spam = Some(true);
                 } else if params.mailbox_ids[0] == INBOX_ID {
                     train_spam = Some(false);
                 }
+                false
             }
-
-            _ => (),
-        }
-
-        // Obtain message references and thread name
-        let mut message_id = None;
-        let mut log_thread_create = false;
-        let thread_id = {
-            let mut references = Vec::with_capacity(5);
-            let mut subject = "";
-            for header in message.root_part().headers().iter().rev() {
-                match &header.name {
-                    HeaderName::MessageId => header.value.visit_text(|id| {
-                        if !id.is_empty() && id.len() < MAX_ID_LENGTH {
-                            if message_id.is_none() {
-                                message_id = id.to_string().into();
-                            }
-                            references.push(id.as_bytes());
-                        }
-                    }),
-                    HeaderName::InReplyTo
-                    | HeaderName::References
-                    | HeaderName::ResentMessageId => {
-                        header.value.visit_text(|id| {
-                            if !id.is_empty() && id.len() < MAX_ID_LENGTH {
-                                references.push(id.as_bytes());
-                            }
-                        });
-                    }
-                    HeaderName::Subject if subject.is_empty() => {
-                        subject = thread_name(match &header.value {
-                            HeaderValue::Text(text) => text.as_ref(),
-                            HeaderValue::TextList(list) if !list.is_empty() => {
-                                list.first().unwrap().as_ref()
-                            }
-                            _ => "",
-                        })
-                        .trim_text(MAX_SORT_FIELD_LENGTH);
-                    }
-                    _ => (),
-                }
-            }
-
-            let skip_duplicate = if params.source.is_smtp() {
-                message_id.as_deref().map(|message_id| {
-                    (
-                        message_id.as_bytes(),
-                        params.mailbox_ids.first().copied().unwrap_or(INBOX_ID),
-                    )
-                })
-            } else {
-                None
-            };
-            match self
-                .find_or_merge_thread(account_id, subject, references, skip_duplicate)
-                .await?
-            {
-                ThreadResult::Id(thread_id) => thread_id,
-                ThreadResult::Create => {
-                    log_thread_create = true;
-                    self.store()
-                        .assign_document_ids(account_id, Collection::Thread, 1)
-                        .await
-                        .caused_by(trc::location!())?
-                }
-                ThreadResult::Skip => {
-                    // Duplicate message
-                    trc::event!(
-                        MessageIngest(MessageIngestEvent::Duplicate),
-                        SpanId = params.session_id,
-                        AccountId = account_id,
-                        MessageId = message_id,
-                    );
-
-                    return Ok(IngestedEmail {
-                        document_id: 0,
-                        thread_id: 0,
-                        change_id: u64::MAX,
-                        blob_id: BlobId::default(),
-                        imap_uids: Vec::new(),
-                        size: 0,
-                    });
-                }
-            }
+            _ => false,
         };
-
-        // Add additional headers to message
-        if !extra_headers.is_empty() {
-            let offset_start = extra_headers.len();
-            raw_message_len += offset_start as u64;
-            let mut new_message = Vec::with_capacity(raw_message_len as usize);
-            new_message.extend_from_slice(extra_headers.as_bytes());
-            new_message.extend_from_slice(raw_message.as_ref());
-            raw_message = Cow::from(new_message);
-            message.raw_message = raw_message.as_ref().into();
-
-            // Adjust offsets
-            let mut part_iter_stack = Vec::new();
-            let mut part_iter = message.parts.iter_mut();
-
-            loop {
-                if let Some(part) = part_iter.next() {
-                    // Increment header offsets
-                    for header in part.headers.iter_mut() {
-                        header.offset_field += offset_start as u32;
-                        header.offset_start += offset_start as u32;
-                        header.offset_end += offset_start as u32;
-                    }
-
-                    // Adjust part offsets
-                    part.offset_body += offset_start as u32;
-                    part.offset_end += offset_start as u32;
-                    part.offset_header += offset_start as u32;
-
-                    if let PartType::Message(sub_message) = &mut part.body
-                        && sub_message.root_part().offset_header != 0
-                    {
-                        sub_message.raw_message = raw_message.as_ref().into();
-                        part_iter_stack.push(part_iter);
-                        part_iter = sub_message.parts.iter_mut();
-                    }
-                } else if let Some(iter) = part_iter_stack.pop() {
-                    part_iter = iter;
-                } else {
-                    break;
-                }
-            }
-
-            // Add extra headers to root part
-            let root_part = &mut message.parts[0];
-            root_part.offset_header = 0;
-            extra_headers_parsed.append(&mut root_part.headers);
-            root_part.headers = extra_headers_parsed;
-        }
 
         // Encrypt message
         let do_encrypt = match params.source {
-            IngestSource::Jmap | IngestSource::Imap => {
+            IngestSource::Jmap { .. } | IngestSource::Imap { .. } => {
                 self.core.jmap.encrypt && self.core.jmap.encrypt_append
             }
             IngestSource::Smtp { .. } => self.core.jmap.encrypt,
             IngestSource::Restore => false,
         };
-        if do_encrypt
+        let is_encrypted = if do_encrypt
             && !message.is_encrypted()
             && let Some(encrypt_params_) = self
-                .get_archive_by_property(
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                     account_id,
                     Collection::Principal,
                     0,
-                    PrincipalField::EncryptionKeys.into(),
-                )
+                    PrincipalField::EncryptionKeys,
+                ))
                 .await
                 .caused_by(trc::location!())?
         {
@@ -570,6 +498,11 @@ impl EmailIngest for Server {
                                 )
                         })?;
 
+                    // Disable spam training if requested
+                    if !encrypt_params.can_train_spam_filter() {
+                        train_spam = None;
+                    }
+
                     // Remove contents from parsed message
                     for part in &mut message.parts {
                         match &mut part.body {
@@ -585,6 +518,8 @@ impl EmailIngest for Server {
                             PartType::Multipart(_) => (),
                         }
                     }
+
+                    true
                 }
                 Err(EncryptMessageError::Error(err)) => {
                     trc::bail!(
@@ -596,23 +531,30 @@ impl EmailIngest for Server {
                 }
                 _ => unreachable!(),
             }
-        }
+        } else {
+            false
+        };
 
         // Store blob
-        let blob_id = self
-            .put_blob(account_id, raw_message.as_ref(), false)
-            .await
-            .caused_by(trc::location!())?;
+        let (blob_hash, blob_hold) = if !is_encrypted && let Some(blob_hash) = params.blob_hash {
+            (blob_hash.clone(), None)
+        } else {
+            self.put_temporary_blob(account_id, raw_message.as_ref(), 60)
+                .await
+                .map(|(hash, op)| (hash, Some(op)))
+                .caused_by(trc::location!())?
+        };
 
         // Assign IMAP UIDs
         let mut mailbox_ids = Vec::with_capacity(params.mailbox_ids.len());
         let mut imap_uids = Vec::with_capacity(params.mailbox_ids.len());
-        for mailbox_id in &params.mailbox_ids {
-            let uid = self
-                .assign_imap_uid(account_id, *mailbox_id)
-                .await
-                .caused_by(trc::location!())?;
-            mailbox_ids.push(UidMailbox::new(*mailbox_id, uid));
+        let mut ids = self
+            .assign_email_ids(account_id, params.mailbox_ids.iter().copied(), true)
+            .await
+            .caused_by(trc::location!())?;
+        let document_id = ids.next().unwrap();
+        for (uid, mailbox_id) in ids.zip(params.mailbox_ids.iter().copied()) {
+            mailbox_ids.push(UidMailbox::new(mailbox_id, uid));
             imap_uids.push(uid);
         }
 
@@ -624,52 +566,75 @@ impl EmailIngest for Server {
             .collect::<Vec<_>>();
         batch.with_account_id(account_id);
 
-        if log_thread_create {
+        // Determine thread id
+        let thread_id = if let Some(thread_id) = thread_result.thread_id {
+            thread_id
+        } else {
             batch
                 .with_collection(Collection::Thread)
-                .update_document(thread_id)
+                .with_document(document_id)
                 .log_container_insert(SyncCollection::Thread);
-        }
+            document_id
+        };
 
-        let due = now();
-        let document_id = self
-            .store()
-            .assign_document_ids(account_id, Collection::Email, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let data = MessageData {
+            mailboxes: mailbox_ids.into_boxed_slice(),
+            keywords: params.keywords.into_boxed_slice(),
+            thread_id,
+            size: (message.raw_message.len() + extra_headers.len()) as u32,
+        };
+
         batch
             .with_collection(Collection::Email)
-            .create_document(document_id)
+            .with_document(document_id)
             .index_message(
-                account_id,
                 tenant_id,
                 message,
-                blob_id.hash.clone(),
-                MessageData {
-                    mailboxes: mailbox_ids,
-                    keywords: params.keywords,
-                    thread_id,
-                },
+                extra_headers.into_bytes(),
+                extra_headers_parsed,
+                blob_hash.clone(),
+                data,
                 params.received_at.unwrap_or_else(now),
             )
             .caused_by(trc::location!())?
             .set(
-                ValueClass::TaskQueue(TaskQueueClass::IndexEmail {
-                    due,
-                    hash: blob_id.hash.clone(),
+                ValueClass::IndexProperty(IndexPropertyClass::Hash {
+                    property: EmailField::Threading.into(),
+                    hash: thread_result.thread_hash,
+                }),
+                ThreadInfo::serialize(thread_id, &message_ids),
+            )
+            .set(
+                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                    index: SearchIndex::Email,
+                    due: TaskEpoch::now(),
+                    is_insert: true,
                 }),
                 vec![],
             );
 
+        if let Some(blob_hold) = blob_hold {
+            batch.clear(blob_hold);
+        }
+
+        // Merge threads if necessary
+        if let Some(merge_threads) = MergeThreadIds::new(thread_result).serialize() {
+            batch.set(
+                ValueClass::TaskQueue(TaskQueueClass::MergeThreads {
+                    due: TaskEpoch::now(),
+                }),
+                merge_threads,
+            );
+        }
+
         // Request spam training
         if let Some(learn_spam) = train_spam {
-            batch.set(
-                ValueClass::TaskQueue(TaskQueueClass::BayesTrain {
-                    due,
-                    hash: blob_id.hash.clone(),
-                    learn_spam,
-                }),
-                vec![],
+            self.add_spam_sample(
+                &mut batch,
+                params.blob_hash.unwrap_or(&blob_hash).clone(),
+                learn_spam,
+                !is_encrypted,
+                params.session_id,
             );
         }
 
@@ -699,14 +664,14 @@ impl EmailIngest for Server {
                     } else {
                         MessageIngestEvent::Spam
                     },
-                IngestSource::Jmap | IngestSource::Restore => MessageIngestEvent::JmapAppend,
-                IngestSource::Imap => MessageIngestEvent::ImapAppend,
+                IngestSource::Jmap { .. } | IngestSource::Restore => MessageIngestEvent::JmapAppend,
+                IngestSource::Imap { .. } => MessageIngestEvent::ImapAppend,
             }),
             SpanId = params.session_id,
             AccountId = account_id,
             DocumentId = document_id,
             MailboxId = mailbox_ids_event,
-            BlobId = blob_id.hash.to_hex(),
+            BlobId = blob_hash.to_hex(),
             ChangeId = change_id,
             MessageId = message_id,
             Size = raw_message_len,
@@ -718,263 +683,410 @@ impl EmailIngest for Server {
             thread_id,
             change_id,
             blob_id: BlobId {
-                hash: blob_id.hash,
+                hash: blob_hash,
                 class: BlobClass::Linked {
                     account_id,
                     collection: Collection::Email.into(),
                     document_id,
                 },
-                section: blob_id.section,
+                section: None,
             },
             size: raw_message_len as usize,
             imap_uids,
         })
     }
 
-    async fn find_or_merge_thread(
+    async fn find_thread_id(
         &self,
         account_id: u32,
         thread_name: &str,
-        mut references: Vec<&[u8]>,
-        skip_duplicate: Option<(&[u8], u32)>,
+        message_ids: &[CheekyHash],
     ) -> trc::Result<ThreadResult> {
-        if references.is_empty() {
-            return Ok(ThreadResult::Create);
+        let mut result = ThreadResult {
+            thread_id: None,
+            thread_hash: CheekyHash::new(if !thread_name.is_empty() {
+                thread_name
+            } else {
+                "!"
+            }),
+            merge_ids: vec![],
+            duplicate_ids: vec![],
+        };
+
+        if message_ids.is_empty() {
+            return Ok(result);
         }
 
-        let mut try_count = 0;
-        let thread_name = if !thread_name.is_empty() {
-            thread_name
-        } else {
-            "!"
-        }
-        .serialize();
-
-        // Sort references ascending
-        references.sort_unstable();
-
-        loop {
-            // Find messages with a matching subject
-            let mut subj_results = RoaringBitmap::new();
-            self.store()
-                .iterate(
-                    IterateParams::new(
-                        IndexKey {
-                            account_id,
-                            collection: Collection::Email.into(),
-                            document_id: 0,
-                            field: EmailField::Subject.into(),
-                            key: thread_name.clone(),
-                        },
-                        IndexKey {
-                            account_id,
-                            collection: Collection::Email.into(),
-                            document_id: u32::MAX,
-                            field: EmailField::Subject.into(),
-                            key: thread_name.clone(),
-                        },
-                    )
-                    .no_values()
-                    .ascending(),
-                    |key, _| {
-                        let id_pos = key.len() - U32_LEN;
-                        let value = key.get(IndexKeyPrefix::len()..id_pos).ok_or_else(|| {
-                            trc::Error::corrupted_key(key, None, trc::location!())
-                        })?;
-
-                        if value == thread_name {
-                            subj_results.insert(key.deserialize_be_u32(id_pos)?);
-                        }
-
-                        Ok(true)
+        // Find thread ids
+        let key_len = IndexKeyPrefix::len() + result.thread_hash.len() + U32_LEN;
+        let document_id_pos = key_len - U32_LEN;
+        let mut thread_merge = ThreadMerge::new();
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    ValueKey {
+                        account_id,
+                        collection: Collection::Email.into(),
+                        document_id: 0,
+                        class: ValueClass::IndexProperty(IndexPropertyClass::Hash {
+                            property: EmailField::Threading.into(),
+                            hash: result.thread_hash,
+                        }),
+                    },
+                    ValueKey {
+                        account_id,
+                        collection: Collection::Email.into(),
+                        document_id: u32::MAX,
+                        class: ValueClass::IndexProperty(IndexPropertyClass::Hash {
+                            property: EmailField::Threading.into(),
+                            hash: result.thread_hash,
+                        }),
                     },
                 )
-                .await
-                .caused_by(trc::location!())?;
+                .ascending(),
+                |key, value| {
+                    if key.len() == key_len {
+                        // Find matching references
+                        let references = value.get(U32_LEN..).unwrap_or_default();
 
-            // No matching subjects were found, skip early
-            if subj_results.is_empty() {
-                return Ok(ThreadResult::Create);
-            }
+                        if has_message_id(message_ids, references) {
+                            let document_id = key.deserialize_be_u32(document_id_pos)?;
+                            let thread_id = value.deserialize_be_u32(0)?;
 
-            // Find messages with matching references
-            let mut results = RoaringBitmap::new();
-            let mut found_message_id = Vec::new();
-            self.store()
-                .iterate(
-                    IterateParams::new(
-                        IndexKey {
-                            account_id,
-                            collection: Collection::Email.into(),
-                            document_id: 0,
-                            field: EmailField::References.into(),
-                            key: references.first().unwrap().to_vec(),
-                        },
-                        IndexKey {
-                            account_id,
-                            collection: Collection::Email.into(),
-                            document_id: u32::MAX,
-                            field: EmailField::References.into(),
-                            key: references.last().unwrap().to_vec(),
-                        },
-                    )
-                    .no_values()
-                    .ascending(),
-                    |key, _| {
-                        let id_pos = key.len() - U32_LEN;
-                        let mut value =
-                            key.get(IndexKeyPrefix::len()..id_pos).ok_or_else(|| {
-                                trc::Error::corrupted_key(key, None, trc::location!())
-                            })?;
-                        let document_id = key.deserialize_be_u32(id_pos)?;
-
-                        if let Some(message_id) = value.strip_suffix(&[0]) {
-                            value = message_id;
-                            if skip_duplicate.is_some_and(|(message_id, _)| message_id == value) {
-                                found_message_id.push(document_id);
+                            if message_ids.len() == 1
+                                || (message_ids.len() == references.len() / CheekyHash::HASH_SIZE
+                                    && references
+                                        .chunks_exact(CheekyHash::HASH_SIZE)
+                                        .zip(message_ids.iter())
+                                        .all(|(a, b)| a == b.as_raw_bytes()))
+                            {
+                                result.duplicate_ids.push(document_id);
                             }
+
+                            thread_merge.add(thread_id, document_id);
                         }
-
-                        if subj_results.contains(document_id)
-                            && references.binary_search(&value).is_ok()
-                        {
-                            results.insert(document_id);
-
-                            if subj_results.len() == results.len() {
-                                return Ok(false);
-                            }
-                        }
-
-                        Ok(true)
-                    },
-                )
-                .await
-                .caused_by(trc::location!())?;
-
-            // No matching messages
-            if results.is_empty() {
-                return Ok(ThreadResult::Create);
-            }
-
-            // Fetch cached messages
-            let cache = self
-                .get_cached_messages(account_id)
-                .await
-                .caused_by(trc::location!())?;
-
-            // Skip duplicate messages
-            if !found_message_id.is_empty()
-                && cache
-                    .in_mailbox(skip_duplicate.unwrap().1)
-                    .any(|m| found_message_id.contains(&m.document_id))
-            {
-                return Ok(ThreadResult::Skip);
-            }
-
-            // Find the most common threadId
-            let mut thread_counts = AHashMap::<u32, u32>::with_capacity(16);
-            let mut thread_id = u32::MAX;
-            let mut thread_count = 0;
-            for item in &cache.emails.items {
-                if results.contains(item.document_id) {
-                    let tc = thread_counts.entry(item.thread_id).or_default();
-                    *tc += 1;
-                    if *tc > thread_count {
-                        thread_count = *tc;
-                        thread_id = item.thread_id;
                     }
-                }
+
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        match thread_merge.num_thread_ids() {
+            0 => Ok(result),
+            1 => {
+                // Happy path, only one thread id
+                result.thread_id = thread_merge.thread_ids().next().copied();
+                Ok(result)
             }
-
-            if thread_id == u32::MAX {
-                return Ok(ThreadResult::Create);
-            } else if thread_counts.len() == 1 {
-                return Ok(ThreadResult::Id(thread_id));
-            }
-
-            // Delete all but the most common threadId
-            let mut batch = BatchBuilder::new();
-            batch
-                .with_account_id(account_id)
-                .with_collection(Collection::Thread);
-            for &delete_thread_id in thread_counts.keys() {
-                if delete_thread_id != thread_id {
-                    batch
-                        .update_document(delete_thread_id)
-                        .log_container_delete(SyncCollection::Thread);
-                }
-            }
-
-            // Move messages to the new threadId
-            batch.with_collection(Collection::Email);
-
-            for item in &cache.emails.items {
-                if thread_id == item.thread_id || !thread_counts.contains_key(&item.thread_id) {
-                    continue;
-                }
-                if let Some(data_) = self
-                    .get_archive(account_id, Collection::Email, item.document_id)
-                    .await
-                    .caused_by(trc::location!())?
-                {
-                    let data = data_
-                        .to_unarchived::<MessageData>()
-                        .caused_by(trc::location!())?;
-                    if data.inner.thread_id != item.thread_id {
-                        continue;
-                    }
-                    let mut new_data = data.deserialize().caused_by(trc::location!())?;
-                    new_data.thread_id = thread_id;
-                    batch
-                        .update_document(item.document_id)
-                        .custom(
-                            ObjectIndexBuilder::new()
-                                .with_current(data)
-                                .with_changes(new_data),
-                        )
-                        .caused_by(trc::location!())?;
-                }
-            }
-
-            match self.commit_batch(batch).await {
-                Ok(_) => return Ok(ThreadResult::Id(thread_id)),
-                Err(err) if err.is_assertion_failure() && try_count < MAX_RETRIES => {
-                    let backoff = store::rand::rng().random_range(50..=300);
-                    tokio::time::sleep(Duration::from_millis(backoff)).await;
-                    try_count += 1;
-                }
-                Err(err) => {
-                    return Err(err.caused_by(trc::location!()));
-                }
+            _ => {
+                // Multiple thread ids that this message belongs to, merge them
+                let thread_merge = thread_merge.merge();
+                result.merge_ids = thread_merge.merge_ids;
+                result.thread_id = Some(thread_merge.thread_id);
+                Ok(result)
             }
         }
     }
 
-    async fn assign_imap_uid(&self, account_id: u32, mailbox_id: u32) -> trc::Result<u32> {
+    async fn assign_email_ids(
+        &self,
+        account_id: u32,
+        mailbox_ids: impl IntoIterator<Item = u32> + Sync + Send,
+        generate_email_id: bool,
+    ) -> trc::Result<impl Iterator<Item = u32> + 'static> {
         // Increment UID next
         let mut batch = BatchBuilder::new();
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::Mailbox)
-            .update_document(mailbox_id)
-            .add_and_get(MailboxField::UidCounter, 1);
-        self.core
-            .storage
-            .data
-            .write(batch.build_all())
-            .await
-            .and_then(|v| v.last_counter_id().map(|id| id as u32))
+        batch.with_account_id(account_id);
+
+        let mut expected_ids = 0;
+        if generate_email_id {
+            batch
+                .with_collection(Collection::Email)
+                .add_and_get(ValueClass::DocumentId, 1);
+            expected_ids += 1;
+        }
+
+        batch.with_collection(Collection::Mailbox);
+
+        for mailbox_id in mailbox_ids {
+            batch
+                .with_document(mailbox_id)
+                .add_and_get(MailboxField::UidCounter, 1);
+            expected_ids += 1;
+        }
+
+        let ids = if expected_ids > 0 {
+            self.core.storage.data.write(batch.build_all()).await?
+        } else {
+            AssignedIds::default()
+        };
+        if ids.ids.len() == expected_ids {
+            Ok(ids.ids.into_iter().map(|id| match id {
+                AssignedId::Counter(id) => id as u32,
+                AssignedId::ChangeId(_) => unreachable!(),
+            }))
+        } else {
+            Err(trc::StoreEvent::UnexpectedError
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Reason, "No all document ids were generated"))
+        }
     }
 
-    fn email_bayes_can_train(&self, access_token: &AccessToken) -> bool {
-        self.core.spam.bayes.as_ref().is_some_and(|bayes| {
-            bayes.account_classify && access_token.has_permission(Permission::SpamFilterTrain)
-        })
+    async fn add_account_spam_sample(
+        &self,
+        batch: &mut BatchBuilder,
+        account_id: u32,
+        document_id: u32,
+        is_spam: bool,
+        span_id: u64,
+    ) -> trc::Result<()> {
+        if self.core.spam.classifier.is_some()
+            && let Some(archive) = self
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+                    account_id,
+                    Collection::Email,
+                    document_id,
+                    EmailField::Metadata,
+                ))
+                .await
+                .caused_by(trc::location!())?
+        {
+            let metadata = archive
+                .to_unarchived::<MessageMetadata>()
+                .caused_by(trc::location!())?;
+            self.add_spam_sample(
+                batch,
+                (&metadata.inner.blob_hash).into(),
+                is_spam,
+                true,
+                span_id,
+            );
+        }
+
+        Ok(())
     }
+
+    fn add_spam_sample(
+        &self,
+        batch: &mut BatchBuilder,
+        hash: BlobHash,
+        is_spam: bool,
+        hold_sample: bool,
+        span_id: u64,
+    ) {
+        if let Some(config) = &self.core.spam.classifier {
+            let mut dt = DateTime::from_timestamp(now() as i64);
+            dt.hour = 0;
+            dt.minute = 0;
+            dt.second = 0;
+            let until = dt.to_timestamp() as u64 + config.hold_samples_for;
+
+            batch
+                .set(
+                    BlobOp::Link {
+                        hash: hash.clone(),
+                        to: BlobLink::Temporary { until },
+                    },
+                    vec![BlobLink::SPAM_SAMPLE_LINK],
+                )
+                .set(
+                    BlobOp::SpamSample { hash, until },
+                    vec![u8::from(is_spam), u8::from(hold_sample)],
+                );
+
+            trc::event!(
+                Spam(SpamEvent::TrainSampleAdded),
+                AccountId = batch.last_account_id(),
+                Details = if is_spam { "spam" } else { "ham" },
+                Expires = trc::Value::Timestamp(until),
+                SpanId = span_id,
+            );
+        }
+    }
+}
+
+fn has_message_id(a: &[CheekyHash], b: &[u8]) -> bool {
+    let mut i = 0;
+    let mut j = 0;
+
+    let a_len = a.len();
+    let b_len = b.len() / CheekyHash::HASH_SIZE;
+
+    while i < a_len && j < b_len {
+        match a[i]
+            .as_raw_bytes()
+            .as_slice()
+            .cmp(&b[j * CheekyHash::HASH_SIZE..(j + 1) * CheekyHash::HASH_SIZE])
+        {
+            std::cmp::Ordering::Equal => return true,
+            std::cmp::Ordering::Less => i += 1,
+            std::cmp::Ordering::Greater => j += 1,
+        }
+    }
+
+    false
 }
 
 impl IngestSource<'_> {
     pub fn is_smtp(&self) -> bool {
         matches!(self, Self::Smtp { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeThreadIds<T> {
+    pub thread_hash: CheekyHash,
+    pub merge_ids: T,
+}
+
+impl MergeThreadIds<Vec<u32>> {
+    pub(crate) fn new(thread_result: ThreadResult) -> Self {
+        Self {
+            thread_hash: thread_result.thread_hash,
+            merge_ids: thread_result.merge_ids,
+        }
+    }
+
+    pub(crate) fn serialize(&self) -> Option<Vec<u8>> {
+        if !self.merge_ids.is_empty() {
+            let mut buf =
+                Vec::with_capacity(self.thread_hash.len() + self.merge_ids.len() * U32_LEN);
+            buf.extend_from_slice(self.thread_hash.as_bytes());
+            for id in &self.merge_ids {
+                buf.extend_from_slice(&id.to_be_bytes());
+            }
+            Some(buf)
+        } else {
+            None
+        }
+    }
+}
+
+impl MergeThreadIds<AHashSet<u32>> {
+    pub fn deserialize(bytes: &[u8]) -> Option<Self> {
+        if !bytes.is_empty() {
+            let thread_hash = CheekyHash::deserialize(bytes)?;
+            let mut merge_ids =
+                AHashSet::with_capacity(((bytes.len() - thread_hash.len()) / U32_LEN) + 1);
+            let mut start_offset = thread_hash.len();
+
+            while let Some(id_bytes) = bytes.get(start_offset..start_offset + U32_LEN) {
+                merge_ids.insert(u32::from_be_bytes(id_bytes.try_into().ok()?));
+                start_offset += U32_LEN;
+            }
+
+            Some(Self {
+                thread_hash,
+                merge_ids,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl std::hash::Hash for MergeThreadIds<AHashSet<u32>> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.thread_hash.hash(state);
+        self.merge_ids.len().hash(state);
+    }
+}
+
+pub struct ThreadInfo;
+
+impl ThreadInfo {
+    pub fn serialize(thread_id: u32, ref_ids: &[CheekyHash]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(U32_LEN + 1 + ref_ids.len() * CheekyHash::HASH_SIZE);
+        buf.extend_from_slice(&thread_id.to_be_bytes());
+        for ref_id in ref_ids {
+            buf.extend_from_slice(ref_id.as_raw_bytes());
+        }
+        buf
+    }
+}
+
+pub struct ThreadMerge {
+    entries: AHashMap<u32, Vec<u32>>,
+}
+
+pub struct ThreadMergeResult {
+    pub thread_id: u32,
+    pub merge_ids: Vec<u32>,
+}
+
+impl ThreadMerge {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            entries: AHashMap::with_capacity(8),
+        }
+    }
+
+    pub fn add(&mut self, thread_id: u32, document_id: u32) {
+        self.entries.entry(thread_id).or_default().push(document_id);
+    }
+
+    pub fn num_thread_ids(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn thread_ids(&self) -> impl Iterator<Item = &u32> {
+        self.entries.keys()
+    }
+
+    pub fn thread_groups(&self) -> impl Iterator<Item = (&u32, &Vec<u32>)> {
+        self.entries.iter()
+    }
+
+    pub fn merge_thread_id(&self) -> u32 {
+        let mut max_thread_id = u32::MAX;
+        let mut max_count = 0;
+
+        for (thread_id, ids) in &self.entries {
+            match ids.len().cmp(&max_count) {
+                Ordering::Greater => {
+                    max_count = ids.len();
+                    max_thread_id = *thread_id;
+                }
+                Ordering::Equal => {
+                    if *thread_id < max_thread_id {
+                        max_thread_id = *thread_id;
+                    }
+                }
+                Ordering::Less => (),
+            }
+        }
+
+        max_thread_id
+    }
+
+    pub fn merge(self) -> ThreadMergeResult {
+        let mut max_thread_id = u32::MAX;
+        let mut max_count = 0;
+        let mut merge_ids = Vec::with_capacity(self.entries.len());
+
+        for (thread_id, ids) in self.entries {
+            match ids.len().cmp(&max_count) {
+                Ordering::Greater => {
+                    max_count = ids.len();
+                    max_thread_id = thread_id;
+                }
+                Ordering::Equal => {
+                    if thread_id < max_thread_id {
+                        max_thread_id = thread_id;
+                    }
+                }
+                Ordering::Less => (),
+            }
+            merge_ids.push(thread_id);
+        }
+
+        ThreadMergeResult {
+            thread_id: max_thread_id,
+            merge_ids,
+        }
     }
 }

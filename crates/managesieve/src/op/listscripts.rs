@@ -9,8 +9,12 @@ use common::listener::SessionStream;
 use directory::Permission;
 use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use std::time::Instant;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
-use types::collection::Collection;
+use types::{collection::Collection, field::SieveField};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_listscripts(&mut self) -> trc::Result<Vec<u8>> {
@@ -21,10 +25,9 @@ impl<T: SessionStream> Session<T> {
         let account_id = self.state.access_token().primary_id();
         let document_ids = self
             .server
-            .get_document_ids(account_id, Collection::SieveScript)
+            .document_ids(account_id, Collection::SieveScript, SieveField::Name)
             .await
-            .caused_by(trc::location!())?
-            .unwrap_or_default();
+            .caused_by(trc::location!())?;
 
         if document_ids.is_empty() {
             return Ok(StatusResponse::ok("").into_bytes());
@@ -37,7 +40,12 @@ impl<T: SessionStream> Session<T> {
         for document_id in document_ids {
             if let Some(script_) = self
                 .server
-                .get_archive(account_id, Collection::SieveScript, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::SieveScript,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
             {

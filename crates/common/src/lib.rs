@@ -28,7 +28,6 @@ use ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEven
 use listener::{asn::AsnGeoLookupData, blocked::Security, tls::AcmeProviders};
 use mail_auth::{MX, Txt};
 use manager::webadmin::{Resource, WebAdminManager};
-use nlp::bayes::{TokenHash, Weights};
 use parking_lot::{Mutex, RwLock};
 use rustls::sign::CertifiedKey;
 use std::{
@@ -73,6 +72,8 @@ pub mod enterprise;
 
 pub use psl;
 
+use crate::{config::spamfilter::SpamClassifier, ipc::TrainTaskController};
+
 pub static VERSION_PRIVATE: &str = env!("CARGO_PKG_VERSION");
 pub static VERSION_PUBLIC: &str = "1.0.0";
 
@@ -88,10 +89,11 @@ Schema history:
 2 - v0.12.4
 3 - v0.13.0
 4 - v0.14.0
+5 - v0.15.0
 
 */
 
-pub const DATABASE_SCHEMA_VERSION: u32 = 4;
+pub const DATABASE_SCHEMA_VERSION: u32 = 5;
 
 pub const LONG_1D_SLUMBER: Duration = Duration::from_secs(60 * 60 * 24);
 pub const LONG_1Y_SLUMBER: Duration = Duration::from_secs(60 * 60 * 24 * 365);
@@ -109,14 +111,7 @@ pub const KV_RATE_LIMIT_CONTACT: u8 = 7;
 pub const KV_RATE_LIMIT_HTTP_AUTHENTICATED: u8 = 8;
 pub const KV_RATE_LIMIT_HTTP_ANONYMOUS: u8 = 9;
 pub const KV_RATE_LIMIT_IMAP: u8 = 10;
-pub const KV_REPUTATION_IP: u8 = 12;
-pub const KV_REPUTATION_FROM: u8 = 13;
-pub const KV_REPUTATION_DOMAIN: u8 = 14;
-pub const KV_REPUTATION_ASN: u8 = 15;
 pub const KV_GREYLIST: u8 = 16;
-pub const KV_BAYES_MODEL_GLOBAL: u8 = 17;
-pub const KV_BAYES_MODEL_USER: u8 = 18;
-pub const KV_TRUSTED_REPLY: u8 = 19;
 pub const KV_LOCK_PURGE_ACCOUNT: u8 = 20;
 pub const KV_LOCK_QUEUE_MESSAGE: u8 = 21;
 pub const KV_LOCK_QUEUE_REPORT: u8 = 22;
@@ -139,6 +134,8 @@ pub struct Inner {
 }
 
 pub struct Data {
+    pub spam_classifier: ArcSwap<SpamClassifier>,
+
     pub tls_certificates: ArcSwap<AHashMap<String, Arc<CertifiedKey>>>,
     pub tls_self_signed_cert: Option<Arc<CertifiedKey>>,
 
@@ -168,8 +165,6 @@ pub struct Caches {
     pub events: Cache<u32, CacheSwap<DavResources>>,
     pub scheduling: Cache<u32, CacheSwap<DavResources>>,
 
-    pub bayes: CacheWithTtl<TokenHash, Weights>,
-
     pub dns_txt: CacheWithTtl<String, Txt>,
     pub dns_mx: CacheWithTtl<String, Arc<Vec<MX>>>,
     pub dns_ptr: CacheWithTtl<IpAddr, Arc<Vec<String>>>,
@@ -196,16 +191,16 @@ pub struct MessageStoreCache {
 pub struct MailboxesCache {
     pub change_id: u64,
     pub index: AHashMap<u32, u32>,
-    pub items: Vec<MailboxCache>,
+    pub items: Box<[MailboxCache]>,
     pub size: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct MessagesCache {
     pub change_id: u64,
-    pub items: Vec<MessageCache>,
+    pub items: Box<[MessageCache]>,
     pub index: AHashMap<u32, u32>,
-    pub keywords: Vec<String>,
+    pub keywords: Box<[Box<str>]>,
     pub size: u64,
 }
 
@@ -216,6 +211,7 @@ pub struct MessageCache {
     pub keywords: u128,
     pub thread_id: u32,
     pub change_id: u64,
+    pub size: u32,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -251,6 +247,7 @@ pub struct Ipc {
     pub queue_tx: mpsc::Sender<QueueEvent>,
     pub report_tx: mpsc::Sender<ReportingEvent>,
     pub broadcast_tx: Option<mpsc::Sender<BroadcastEvent>>,
+    pub train_task_controller: Arc<TrainTaskController>,
 }
 
 pub struct TlsConnectors {
@@ -487,7 +484,6 @@ impl Default for Caches {
             contacts: Cache::new(1024, 10 * 1024 * 1024),
             events: Cache::new(1024, 10 * 1024 * 1024),
             scheduling: Cache::new(1024, 10 * 1024 * 1024),
-            bayes: CacheWithTtl::new(1024, 10 * 1024 * 1024),
             dns_rbl: CacheWithTtl::new(1024, 10 * 1024 * 1024),
             dns_txt: CacheWithTtl::new(1024, 10 * 1024 * 1024),
             dns_mx: CacheWithTtl::new(1024, 10 * 1024 * 1024),
@@ -510,6 +506,7 @@ impl Default for Ipc {
             queue_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
             report_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
             broadcast_tx: None,
+            train_task_controller: Arc::new(TrainTaskController::default()),
         }
     }
 }
@@ -589,6 +586,19 @@ impl DavResources {
             .iter()
             .enumerate()
             .find(|(_, resource)| resource.document_id == id && resource.is_container())
+            .and_then(|(idx, resource)| {
+                self.paths
+                    .iter()
+                    .find(|path| path.resource_idx == idx)
+                    .map(|path| DavResourcePath { path, resource })
+            })
+    }
+
+    pub fn any_resource_path_by_id(&self, id: u32) -> Option<DavResourcePath<'_>> {
+        self.resources
+            .iter()
+            .enumerate()
+            .find(|(_, resource)| resource.document_id == id)
             .and_then(|(idx, resource)| {
                 self.paths
                     .iter()

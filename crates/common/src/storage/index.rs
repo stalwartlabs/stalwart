@@ -5,7 +5,6 @@
  */
 
 use crate::{auth::AccessToken, sharing::notification::ShareNotification};
-use ahash::AHashSet;
 use rkyv::{
     option::ArchivedOption,
     primitive::{ArchivedU32, ArchivedU64},
@@ -14,7 +13,10 @@ use rkyv::{
 use std::{borrow::Cow, fmt::Debug};
 use store::{
     Serialize, SerializeInfallible,
-    write::{Archive, Archiver, BatchBuilder, BlobOp, DirectoryClass, IntoOperations},
+    write::{
+        Archive, Archiver, BatchBuilder, BlobLink, BlobOp, DirectoryClass, IntoOperations, Params,
+        SearchIndex, TaskEpoch, TaskQueueClass, ValueClass,
+    },
 };
 use types::{
     acl::AclGrant,
@@ -22,7 +24,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::Field,
 };
-use utils::{map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
+use utils::{cheeky_hash::CheekyHash, map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexValue<'x> {
@@ -30,9 +32,13 @@ pub enum IndexValue<'x> {
         field: Field,
         value: IndexItem<'x>,
     },
-    IndexList {
-        field: Field,
-        value: Vec<IndexItem<'x>>,
+    Property {
+        field: ValueClass,
+        value: IndexItem<'x>,
+    },
+    SearchIndex {
+        index: SearchIndex,
+        hash: u64,
     },
     Blob {
         value: BlobHash,
@@ -62,6 +68,7 @@ pub enum IndexItem<'x> {
     Slice(&'x [u8]),
     ShortInt([u8; std::mem::size_of::<u32>()]),
     LongInt([u8; std::mem::size_of::<u64>()]),
+    Hash(CheekyHash),
     None,
 }
 
@@ -72,6 +79,7 @@ impl IndexItem<'_> {
             IndexItem::Slice(s) => s,
             IndexItem::ShortInt(s) => s,
             IndexItem::LongInt(s) => s,
+            IndexItem::Hash(h) => h.as_bytes(),
             IndexItem::None => &[],
         }
     }
@@ -82,6 +90,7 @@ impl IndexItem<'_> {
             IndexItem::Slice(s) => s.to_vec(),
             IndexItem::ShortInt(s) => s.to_vec(),
             IndexItem::LongInt(s) => s.to_vec(),
+            IndexItem::Hash(h) => h.as_bytes().to_vec(),
             IndexItem::None => vec![],
         }
     }
@@ -93,6 +102,14 @@ impl IndexItem<'_> {
             IndexItem::None => true,
             _ => false,
         }
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, IndexItem::None)
+    }
+
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
     }
 }
 
@@ -111,6 +128,7 @@ impl std::hash::Hash for IndexItem<'_> {
             IndexItem::Slice(s) => s.hash(state),
             IndexItem::ShortInt(s) => s.as_slice().hash(state),
             IndexItem::LongInt(s) => s.as_slice().hash(state),
+            IndexItem::Hash(h) => h.hash(state),
             IndexItem::None => 0.hash(state),
         }
     }
@@ -286,6 +304,11 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
         self.changed_by = access_token.primary_id();
         self
     }
+
+    pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
+        self.tenant_id = tenant_id;
+        self
+    }
 }
 
 impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
@@ -300,7 +323,21 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
                 }
                 if N::is_versioned() {
                     let (offset, bytes) = Archiver::new(changes).serialize_versioned()?;
-                    batch.set_versioned(Field::ARCHIVE, bytes, offset);
+                    batch.set_fnc(
+                        Field::ARCHIVE,
+                        Params::with_capacity(2).with_bytes(bytes).with_u64(offset),
+                        |params, ids| {
+                            let change_id = ids.current_change_id()?;
+                            let archive = params.bytes(0);
+                            let offset = params.u64(1);
+
+                            let mut bytes = Vec::with_capacity(archive.len());
+                            bytes.extend_from_slice(&archive[..offset as usize]);
+                            bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
+                            bytes.push(archive.last().copied().unwrap()); // Marker
+                            Ok(bytes)
+                        },
+                    );
                 } else {
                     batch.set(Field::ARCHIVE, Archiver::new(changes).serialize()?);
                 }
@@ -328,7 +365,21 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
                 }
                 if N::is_versioned() {
                     let (offset, bytes) = Archiver::new(changes).serialize_versioned()?;
-                    batch.set_versioned(Field::ARCHIVE, bytes, offset);
+                    batch.set_fnc(
+                        Field::ARCHIVE,
+                        Params::with_capacity(2).with_bytes(bytes).with_u64(offset),
+                        |params, ids| {
+                            let change_id = ids.current_change_id()?;
+                            let archive = params.bytes(0);
+                            let offset = params.u64(1);
+
+                            let mut bytes = Vec::with_capacity(archive.len());
+                            bytes.extend_from_slice(&archive[..offset as usize]);
+                            bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
+                            bytes.push(archive.last().copied().unwrap()); // Marker
+                            Ok(bytes)
+                        },
+                    );
                 } else {
                     batch.set(Field::ARCHIVE, Archiver::new(changes).serialize()?);
                 }
@@ -366,20 +417,39 @@ fn build_index(
                 }
             }
         }
-        IndexValue::IndexList { field, value } => {
-            for key in value {
+        IndexValue::SearchIndex { index, .. } => {
+            batch.set(
+                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                    due: TaskEpoch::now().with_random_sequence_id(),
+                    index,
+                    is_insert: set,
+                }),
+                vec![],
+            );
+        }
+        IndexValue::Property { field, value } => {
+            if !value.is_none() {
                 if set {
-                    batch.index(field, key.into_owned());
+                    batch.set(field, value.into_owned());
                 } else {
-                    batch.unindex(field, key.into_owned());
+                    batch.clear(field);
                 }
             }
         }
         IndexValue::Blob { value } => {
             if set {
-                batch.set(BlobOp::Link { hash: value }, vec![]);
+                batch.set(
+                    BlobOp::Link {
+                        hash: value,
+                        to: BlobLink::Document,
+                    },
+                    vec![],
+                );
             } else {
-                batch.clear(BlobOp::Link { hash: value });
+                batch.clear(BlobOp::Link {
+                    hash: value,
+                    to: BlobLink::Document,
+                });
             }
         }
         IndexValue::Acl { value } => {
@@ -490,30 +560,50 @@ fn merge_index(
                 batch.index(field, new_value.into_owned());
             }
         }
+        (IndexValue::SearchIndex { index, .. }, IndexValue::SearchIndex { .. }) => {
+            batch.set(
+                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                    due: TaskEpoch::now().with_random_sequence_id(),
+                    index,
+                    is_insert: true,
+                }),
+                vec![],
+            );
+        }
         (
-            IndexValue::IndexList {
-                field,
+            IndexValue::Property {
+                field: old_field,
                 value: old_value,
             },
-            IndexValue::IndexList {
-                value: new_value, ..
+            IndexValue::Property {
+                field: new_field,
+                value: new_value,
+                ..
             },
         ) => {
-            let mut remove_values = AHashSet::from_iter(old_value);
-
-            for value in new_value {
-                if !remove_values.remove(&value) {
-                    batch.index(field, value.into_owned());
+            if old_field != new_field {
+                batch.clear(old_field);
+                batch.set(new_field, new_value.into_owned());
+            } else if new_value != old_value {
+                if new_value.is_some() {
+                    batch.set(old_field, new_value.into_owned());
+                } else {
+                    batch.clear(old_field);
                 }
-            }
-
-            for value in remove_values {
-                batch.unindex(field, value.into_owned());
             }
         }
         (IndexValue::Blob { value: old_hash }, IndexValue::Blob { value: new_hash }) => {
-            batch.clear(BlobOp::Link { hash: old_hash });
-            batch.set(BlobOp::Link { hash: new_hash }, vec![]);
+            batch.clear(BlobOp::Link {
+                hash: old_hash,
+                to: BlobLink::Document,
+            });
+            batch.set(
+                BlobOp::Link {
+                    hash: new_hash,
+                    to: BlobLink::Document,
+                },
+                vec![],
+            );
         }
         (IndexValue::Acl { value: old_acl }, IndexValue::Acl { value: new_acl }) => {
             let has_old_acl = !old_acl.is_empty();

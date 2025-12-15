@@ -4,17 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{collections::HashSet, future::Future};
-
-use common::{
-    Server,
-    config::spamfilter::{Element, Location},
-};
-use compact_str::CompactString;
-use mail_auth::DkimResult;
-use mail_parser::{HeaderName, HeaderValue, Host, parsers::MessageStream};
-use nlp::tokenizers::types::TokenType;
-
+use super::{ElementLocation, is_trusted_domain};
 use crate::{
     Email, Hostname, Recipient, SpamFilterContext, TextPart,
     modules::{
@@ -23,8 +13,14 @@ use crate::{
         html::{A, HREF, HtmlToken},
     },
 };
-
-use super::{ElementLocation, is_trusted_domain};
+use common::{
+    Server,
+    config::spamfilter::{Element, Location},
+};
+use mail_auth::DkimResult;
+use mail_parser::{HeaderName, HeaderValue, Host, parsers::MessageStream};
+use nlp::tokenizers::types::TokenType;
+use std::{collections::HashSet, future::Future};
 
 pub trait SpamFilterAnalyzeDomain: Sync + Send {
     fn spam_filter_analyze_domain(
@@ -36,7 +32,7 @@ pub trait SpamFilterAnalyzeDomain: Sync + Send {
 impl SpamFilterAnalyzeDomain for Server {
     async fn spam_filter_analyze_domain(&self, ctx: &mut SpamFilterContext<'_>) {
         // Obtain email addresses and domains
-        let mut domains: HashSet<ElementLocation<CompactString>> = HashSet::new();
+        let mut domains: HashSet<ElementLocation<String>> = HashSet::new();
         let mut emails: HashSet<ElementLocation<Recipient>> = HashSet::new();
 
         // Add DKIM domains
@@ -45,7 +41,7 @@ impl SpamFilterAnalyzeDomain for Server {
                 && let Some(domain) = dkim.signature().map(|s| &s.d)
             {
                 domains.insert(ElementLocation::new(
-                    CompactString::from_str_to_lowercase(domain),
+                    domain.to_lowercase(),
                     Location::HeaderDkimPass,
                 ));
             }
@@ -59,10 +55,15 @@ impl SpamFilterAnalyzeDomain for Server {
                         .into_iter()
                         .flatten()
                     {
-                        if let Host::Name(name) = host
-                            && let Some(name) = Hostname::new(name.as_ref()).sld
-                        {
-                            domains.insert(ElementLocation::new(name, Location::HeaderReceived));
+                        if let Host::Name(name) = host {
+                            let host = Hostname::new(name.as_ref());
+
+                            if host.sld.is_some() {
+                                domains.insert(ElementLocation::new(
+                                    host.fqdn,
+                                    Location::HeaderReceived,
+                                ));
+                            }
                         }
                     }
                 }
@@ -189,7 +190,7 @@ impl SpamFilterAnalyzeDomain for Server {
 
             for token in tokens {
                 if let TokenType::Email(email) = token {
-                    if is_body && !ctx.result.has_tag("RCPT_IN_BODY") {
+                    if !ctx.input.is_train && is_body && !ctx.result.has_tag("RCPT_IN_BODY") {
                         for rcpt in ctx.output.all_recipients() {
                             if rcpt.email.address == email.address {
                                 ctx.result.add_tag("RCPT_IN_BODY");
@@ -215,42 +216,44 @@ impl SpamFilterAnalyzeDomain for Server {
             }
         }
 
-        // Validate email
-        for email in &emails {
-            // Skip trusted domains
-            if !email.element.email.is_valid()
-                || is_trusted_domain(
-                    self,
-                    &email.element.email.domain_part.fqdn,
-                    ctx.input.span_id,
-                )
-                .await
-            {
-                continue;
+        if !ctx.input.is_train {
+            // Validate email
+            for email in &emails {
+                // Skip trusted domains
+                if !email.element.email.is_valid()
+                    || is_trusted_domain(
+                        self,
+                        &email.element.email.domain_part.fqdn,
+                        ctx.input.span_id,
+                    )
+                    .await
+                {
+                    continue;
+                }
+
+                // Check Email DNSBL
+                check_dnsbl(self, ctx, &email.element, Element::Email, email.location).await;
+
+                domains.insert(ElementLocation::new(
+                    email.element.email.domain_part.fqdn.clone(),
+                    email.location,
+                ));
             }
 
-            // Check Email DNSBL
-            check_dnsbl(self, ctx, &email.element, Element::Email, email.location).await;
-
-            domains.insert(ElementLocation::new(
-                email.element.email.domain_part.fqdn.clone(),
-                email.location,
-            ));
-        }
-
-        // Validate domains
-        for domain in &domains {
-            // Skip trusted domains
-            if !is_trusted_domain(self, &domain.element, ctx.input.span_id).await {
-                // Check Domain DNSBL
-                check_dnsbl(
-                    self,
-                    ctx,
-                    &StringResolver(domain.element.as_str()),
-                    Element::Domain,
-                    domain.location,
-                )
-                .await;
+            // Validate domains
+            for domain in &domains {
+                // Skip trusted domains
+                if !is_trusted_domain(self, &domain.element, ctx.input.span_id).await {
+                    // Check Domain DNSBL
+                    check_dnsbl(
+                        self,
+                        ctx,
+                        &StringResolver(domain.element.as_str()),
+                        Element::Domain,
+                        domain.location,
+                    )
+                    .await;
+                }
             }
         }
         ctx.output.emails = emails;

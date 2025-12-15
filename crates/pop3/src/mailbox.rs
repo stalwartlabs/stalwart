@@ -11,12 +11,8 @@ use email::{
     mailbox::INBOX_ID,
 };
 use std::collections::BTreeMap;
-use store::{
-    IndexKey, IterateParams, SerializeInfallible, U32_LEN, ahash::AHashMap,
-    write::key::DeserializeBigEndian,
-};
 use trc::AddContext;
-use types::{collection::Collection, field::EmailField, special_use::SpecialUse};
+use types::special_use::SpecialUse;
 
 #[derive(Default)]
 pub struct Mailbox {
@@ -52,42 +48,6 @@ impl<T: SessionStream> Session<T> {
             .map(|x| x.uid_validity)
             .unwrap_or_default();
 
-        // Obtain message sizes
-        let mut message_sizes = AHashMap::new();
-        self.server
-            .core
-            .storage
-            .data
-            .iterate(
-                IterateParams::new(
-                    IndexKey {
-                        account_id,
-                        collection: Collection::Email.into(),
-                        document_id: 0,
-                        field: EmailField::Size.into(),
-                        key: 0u32.serialize(),
-                    },
-                    IndexKey {
-                        account_id,
-                        collection: Collection::Email.into(),
-                        document_id: u32::MAX,
-                        field: EmailField::Size.into(),
-                        key: u32::MAX.serialize(),
-                    },
-                )
-                .no_values(),
-                |key, _| {
-                    message_sizes.insert(
-                        key.deserialize_be_u32(key.len() - U32_LEN)?,
-                        key.deserialize_be_u32(key.len() - (U32_LEN * 2))?,
-                    );
-
-                    Ok(true)
-                },
-            )
-            .await
-            .caused_by(trc::location!())?;
-
         // Sort by UID
         let message_map = cache
             .emails
@@ -98,9 +58,9 @@ impl<T: SessionStream> Session<T> {
                     .mailboxes
                     .iter()
                     .find(|m| m.mailbox_id == INBOX_ID)
-                    .map(|m| (m.uid, message.document_id))
+                    .map(|m| (m.uid, (message.document_id, message.size)))
             })
-            .collect::<BTreeMap<u32, u32>>();
+            .collect::<BTreeMap<u32, (u32, u32)>>();
 
         // Create mailbox
         let mut mailbox = Mailbox {
@@ -109,17 +69,15 @@ impl<T: SessionStream> Session<T> {
             account_id,
             ..Default::default()
         };
-        for (uid, id) in message_map {
-            if let Some(size) = message_sizes.get(&id) {
-                mailbox.messages.push(Message {
-                    id,
-                    uid,
-                    size: *size,
-                    deleted: false,
-                });
-                mailbox.total += 1;
-                mailbox.size += *size;
-            }
+        for (uid, (id, size)) in message_map {
+            mailbox.messages.push(Message {
+                id,
+                uid,
+                size,
+                deleted: false,
+            });
+            mailbox.total += 1;
+            mailbox.size += size;
         }
 
         Ok(mailbox)

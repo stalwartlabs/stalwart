@@ -153,7 +153,7 @@ impl SpamFilterAnalyzeRecipient for Server {
         for rcpt in &unique_recipients {
             // Validate name
             if let Some(rcpt_name) = &rcpt.name {
-                if rcpt_name == rcpt.email.address {
+                if *rcpt_name == rcpt.email.address {
                     to_dn_eq_addr_count += 1;
                 } else {
                     to_dn_count += 1;

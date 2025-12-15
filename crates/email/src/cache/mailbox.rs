@@ -9,6 +9,10 @@ use common::{
     MailboxCache, MailboxesCache, MessageStoreCache, Server, auth::AccessToken,
     sharing::EffectiveAcl,
 };
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use store::{ahash::AHashMap, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::{
@@ -18,13 +22,20 @@ use types::{
 };
 use utils::{map::bitmap::Bitmap, topological::TopologicalSort};
 
+struct MailboxesCacheBuilder {
+    pub change_id: u64,
+    pub index: AHashMap<u32, u32>,
+    pub items: Vec<MailboxCache>,
+    pub size: u64,
+}
+
 pub(crate) async fn update_mailbox_cache(
     server: &Server,
     account_id: u32,
     changed_ids: &AHashMap<u32, bool>,
     store_cache: &MessageStoreCache,
 ) -> trc::Result<MailboxesCache> {
-    let mut new_cache = MailboxesCache {
+    let mut new_cache = MailboxesCacheBuilder {
         items: Vec::with_capacity(store_cache.mailboxes.items.len()),
         index: AHashMap::with_capacity(store_cache.mailboxes.items.len()),
         size: 0,
@@ -34,7 +45,12 @@ pub(crate) async fn update_mailbox_cache(
     for (document_id, is_update) in changed_ids {
         if *is_update
             && let Some(archive) = server
-                .get_archive(account_id, Collection::Mailbox, *document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Mailbox,
+                    *document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
         {
@@ -54,12 +70,7 @@ pub(crate) async fn update_mailbox_cache(
 
     build_tree(&mut new_cache);
 
-    if store_cache.mailboxes.items.len() > new_cache.items.len() {
-        new_cache.items.shrink_to_fit();
-        new_cache.index.shrink_to_fit();
-    }
-
-    Ok(new_cache)
+    Ok(new_cache.build())
 }
 
 pub(crate) async fn full_mailbox_cache_build(
@@ -67,7 +78,7 @@ pub(crate) async fn full_mailbox_cache_build(
     account_id: u32,
 ) -> trc::Result<MailboxesCache> {
     // Build cache
-    let mut cache = MailboxesCache {
+    let mut cache = MailboxesCacheBuilder {
         items: Default::default(),
         index: Default::default(),
         size: 0,
@@ -75,7 +86,7 @@ pub(crate) async fn full_mailbox_cache_build(
     };
 
     server
-        .get_archives(
+        .archives(
             account_id,
             Collection::Mailbox,
             &(),
@@ -93,7 +104,7 @@ pub(crate) async fn full_mailbox_cache_build(
             .await
             .caused_by(trc::location!())?;
         server
-            .get_archives(
+            .archives(
                 account_id,
                 Collection::Mailbox,
                 &(),
@@ -108,10 +119,10 @@ pub(crate) async fn full_mailbox_cache_build(
 
     build_tree(&mut cache);
 
-    Ok(cache)
+    Ok(cache.build())
 }
 
-fn insert_item(cache: &mut MailboxesCache, document_id: u32, mailbox: &ArchivedMailbox) {
+fn insert_item(cache: &mut MailboxesCacheBuilder, document_id: u32, mailbox: &ArchivedMailbox) {
     let parent_id = mailbox.parent_id.to_native();
     let item = MailboxCache {
         document_id,
@@ -143,7 +154,7 @@ fn insert_item(cache: &mut MailboxesCache, document_id: u32, mailbox: &ArchivedM
     mailbox_insert(cache, item);
 }
 
-fn build_tree(cache: &mut MailboxesCache) {
+fn build_tree(cache: &mut MailboxesCacheBuilder) {
     cache.size = 0;
     let mut topological_sort = TopologicalSort::with_capacity(cache.items.len());
 
@@ -187,6 +198,18 @@ fn build_tree(cache: &mut MailboxesCache) {
                 let folder = by_id_mut(cache, &folder_id).unwrap();
                 folder.path = new_path;
             }
+        }
+    }
+}
+
+impl MailboxesCacheBuilder {
+    fn build(mut self) -> MailboxesCache {
+        self.index.shrink_to_fit();
+        MailboxesCache {
+            change_id: self.change_id,
+            index: self.index,
+            items: self.items.into_boxed_slice(),
+            size: self.size,
         }
     }
 }
@@ -257,7 +280,7 @@ impl MailboxCacheAccess for MessageStoreCache {
 }
 
 #[inline(always)]
-fn by_id<'x>(cache: &'x MailboxesCache, id: &u32) -> Option<&'x MailboxCache> {
+fn by_id<'x>(cache: &'x MailboxesCacheBuilder, id: &u32) -> Option<&'x MailboxCache> {
     cache
         .index
         .get(id)
@@ -265,14 +288,14 @@ fn by_id<'x>(cache: &'x MailboxesCache, id: &u32) -> Option<&'x MailboxCache> {
 }
 
 #[inline(always)]
-fn by_id_mut<'x>(cache: &'x mut MailboxesCache, id: &u32) -> Option<&'x mut MailboxCache> {
+fn by_id_mut<'x>(cache: &'x mut MailboxesCacheBuilder, id: &u32) -> Option<&'x mut MailboxCache> {
     cache
         .index
         .get(id)
         .and_then(|idx| cache.items.get_mut(*idx as usize))
 }
 
-fn mailbox_insert(cache: &mut MailboxesCache, item: MailboxCache) {
+fn mailbox_insert(cache: &mut MailboxesCacheBuilder, item: MailboxCache) {
     let id = item.document_id;
     if let Some(idx) = cache.index.get(&id) {
         cache.items[*idx as usize] = item;

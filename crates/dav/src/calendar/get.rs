@@ -17,6 +17,10 @@ use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -73,11 +77,12 @@ impl CalendarGetRequestHandler for Server {
 
         // Fetch event
         let event_ = self
-            .get_archive(
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
                 account_id,
                 Collection::CalendarEvent,
                 resource.document_id(),
-            )
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;

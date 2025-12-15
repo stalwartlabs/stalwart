@@ -22,9 +22,8 @@ use dav_proto::schema::{
 };
 use groupware::scheduling::ItipError;
 use hyper::StatusCode;
-use store::query::Filter;
 use trc::AddContext;
-use types::{collection::Collection, field::CalendarField};
+use types::{collection::Collection, field::CalendarEventField};
 
 pub(crate) static CALENDAR_CONTAINER_PROPS: [DavProperty; 31] = [
     DavProperty::WebDav(WebDavProperty::CreationDate),
@@ -97,18 +96,18 @@ pub(crate) async fn assert_is_unique_uid(
 ) -> crate::Result<()> {
     if let Some(uid) = uid {
         let hits = server
-            .store()
-            .filter(
+            .document_ids_matching(
                 account_id,
                 Collection::CalendarEvent,
-                vec![Filter::eq(CalendarField::Uid, uid.as_bytes().to_vec())],
+                CalendarEventField::Uid,
+                uid.as_bytes(),
             )
             .await
             .caused_by(trc::location!())?;
 
-        if !hits.results.is_empty() {
+        if !hits.is_empty() {
             for path in resources.children(calendar_id) {
-                if hits.results.contains(path.document_id()) {
+                if hits.contains(path.document_id()) {
                     return Err(DavError::Condition(DavErrorCondition::new(
                         StatusCode::PRECONDITION_FAILED,
                         CalCondition::NoUidConflict(resources.format_resource(path).into()),

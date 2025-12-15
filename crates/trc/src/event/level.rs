@@ -34,6 +34,7 @@ impl EventType {
                 | StoreEvent::SqliteError
                 | StoreEvent::LdapError
                 | StoreEvent::ElasticsearchError
+                | StoreEvent::MeilisearchError
                 | StoreEvent::RedisError
                 | StoreEvent::S3Error
                 | StoreEvent::AzureError
@@ -273,9 +274,8 @@ impl EventType {
                 PurgeEvent::Finished => Level::Debug,
                 PurgeEvent::Running => Level::Info,
                 PurgeEvent::Error => Level::Error,
-                PurgeEvent::InProgress | PurgeEvent::AutoExpunge | PurgeEvent::TombstoneCleanup => {
-                    Level::Debug
-                }
+                PurgeEvent::BlobCleanup => Level::Info,
+                PurgeEvent::InProgress | PurgeEvent::AutoExpunge => Level::Debug,
             },
             EventType::Eval(event) => match event {
                 EvalEvent::Error | EvalEvent::StoreNotFound => Level::Debug,
@@ -340,16 +340,18 @@ impl EventType {
                 | SieveEvent::ActionReject => Level::Debug,
             },
             EventType::Spam(event) => match event {
-                SpamEvent::PyzorError
-                | SpamEvent::TrainError
+                SpamEvent::Pyzor
+                | SpamEvent::PyzorError
+                | SpamEvent::Dnsbl
                 | SpamEvent::DnsblError
-                | SpamEvent::Pyzor
-                | SpamEvent::Train
-                | SpamEvent::TrainAccount
                 | SpamEvent::Classify
-                | SpamEvent::ClassifyError
-                | SpamEvent::TrainBalance
-                | SpamEvent::Dnsbl => Level::Debug,
+                | SpamEvent::TrainSampleAdded => Level::Debug,
+                SpamEvent::TrainSampleNotFound => Level::Warn,
+                SpamEvent::TrainStarted
+                | SpamEvent::TrainCompleted
+                | SpamEvent::ModelLoaded
+                | SpamEvent::ModelNotReady
+                | SpamEvent::ModelNotFound => Level::Info,
             },
             EventType::Http(event) => match event {
                 HttpEvent::ConnectionStart | HttpEvent::ConnectionEnd => Level::Debug,
@@ -382,6 +384,7 @@ impl EventType {
                 | TaskQueueEvent::TaskLocked
                 | TaskQueueEvent::TaskIgnored
                 | TaskQueueEvent::MetadataNotFound => Level::Debug,
+                TaskQueueEvent::TaskFailed => Level::Warn,
             },
             EventType::Dmarc(_) => Level::Debug,
             EventType::Spf(_) => Level::Debug,

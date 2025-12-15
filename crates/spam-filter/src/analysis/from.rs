@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use crate::{Email, SpamFilterContext};
 use common::Server;
 use mail_parser::HeaderName;
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 use smtp_proto::{MAIL_BODY_8BITMIME, MAIL_BODY_BINARYMIME, MAIL_SMTPUTF8};
-
-use crate::{Email, SpamFilterContext};
+use std::future::Future;
 
 pub trait SpamFilterAnalyzeFrom: Sync + Send {
     fn spam_filter_analyze_from(

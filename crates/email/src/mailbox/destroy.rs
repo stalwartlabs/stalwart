@@ -7,14 +7,26 @@
 use super::*;
 use crate::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::{delete::EmailDeletion, metadata::MessageData},
+    message::metadata::MessageData,
 };
 use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
 };
-use store::{roaring::RoaringBitmap, write::BatchBuilder};
+use store::{
+    SerializeInfallible,
+    roaring::RoaringBitmap,
+    write::{BatchBuilder, SearchIndex, TaskEpoch, TaskQueueClass, ValueClass},
+};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
-use types::{acl::Acl, collection::Collection, field::MailboxField};
+use types::{
+    acl::Acl,
+    collection::{Collection, VanishedCollection},
+    field::MailboxField,
+};
 
 pub trait MailboxDestroy: Sync + Send {
     fn mailbox_destroy(
@@ -76,9 +88,7 @@ impl MailboxDestroy for Server {
                 // If the message is in multiple mailboxes, untag it from the current mailbox,
                 // otherwise delete it.
 
-                let mut destroy_ids = RoaringBitmap::new();
-
-                self.get_archives(
+                self.archives(
                     account_id,
                     Collection::Email,
                     &message_ids,
@@ -98,40 +108,68 @@ impl MailboxDestroy for Server {
 
                         if prev_message_data.inner.mailboxes.len() == 1 {
                             // Delete message
-                            destroy_ids.insert(message_id);
-                            return Ok(true);
+                            for mailbox in prev_message_data.inner.mailboxes.iter() {
+                                batch.log_vanished_item(
+                                    VanishedCollection::Email,
+                                    (mailbox.mailbox_id.to_native(), mailbox.uid.to_native()),
+                                );
+                            }
+                            batch
+                                .with_collection(Collection::Email)
+                                .with_document(message_id)
+                                .custom(
+                                    ObjectIndexBuilder::<_, ()>::new()
+                                        .with_access_token(access_token)
+                                        .with_current(prev_message_data),
+                                )
+                                .caused_by(trc::location!())?
+                                .set(
+                                    ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                                        index: SearchIndex::Email,
+                                        due: TaskEpoch::now(),
+                                        is_insert: false,
+                                    }),
+                                    0u64.serialize(),
+                                )
+                                .commit_point();
+                        } else {
+                            let new_message_data = MessageData {
+                                mailboxes: prev_message_data
+                                    .inner
+                                    .mailboxes
+                                    .iter()
+                                    .filter(|m| m.mailbox_id != document_id)
+                                    .map(|m| m.to_native())
+                                    .collect(),
+                                keywords: prev_message_data
+                                    .inner
+                                    .keywords
+                                    .iter()
+                                    .map(|k| k.to_native())
+                                    .collect(),
+                                thread_id: prev_message_data.inner.thread_id.to_native(),
+                                size: prev_message_data.inner.size.to_native(),
+                            };
+
+                            // Untag message from mailbox
+                            batch
+                                .with_collection(Collection::Email)
+                                .with_document(message_id)
+                                .custom(
+                                    ObjectIndexBuilder::new()
+                                        .with_access_token(access_token)
+                                        .with_changes(new_message_data)
+                                        .with_current(prev_message_data),
+                                )
+                                .caused_by(trc::location!())?
+                                .commit_point();
                         }
 
-                        let mut new_message_data = prev_message_data
-                            .deserialize()
-                            .caused_by(trc::location!())?;
-
-                        new_message_data
-                            .mailboxes
-                            .retain(|id| id.mailbox_id != document_id);
-
-                        // Untag message from mailbox
-                        batch
-                            .with_collection(Collection::Email)
-                            .update_document(message_id)
-                            .custom(
-                                ObjectIndexBuilder::new()
-                                    .with_changes(new_message_data)
-                                    .with_current(prev_message_data),
-                            )
-                            .caused_by(trc::location!())?
-                            .commit_point();
                         Ok(true)
                     },
                 )
                 .await
                 .caused_by(trc::location!())?;
-
-                // Bulk delete messages
-                if !destroy_ids.is_empty() {
-                    self.emails_tombstone(account_id, &mut batch, destroy_ids)
-                        .await?;
-                }
             } else {
                 return Ok(Err(MailboxDestroyError::HasEmails));
             }
@@ -139,7 +177,12 @@ impl MailboxDestroy for Server {
 
         // Obtain mailbox
         if let Some(mailbox_) = self
-            .get_archive(account_id, Collection::Mailbox, document_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::Mailbox,
+                document_id,
+            ))
             .await
             .caused_by(trc::location!())?
         {
@@ -157,7 +200,7 @@ impl MailboxDestroy for Server {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Mailbox)
-                .delete_document(document_id)
+                .with_document(document_id)
                 .clear(MailboxField::UidCounter)
                 .custom(ObjectIndexBuilder::<_, ()>::new().with_current(mailbox))
                 .caused_by(trc::location!())?;
@@ -171,7 +214,11 @@ impl MailboxDestroy for Server {
                 .await
                 .and_then(|ids| ids.last_change_id(account_id))
             {
-                Ok(change_id) => Ok(Ok(Some(change_id))),
+                Ok(change_id) => {
+                    self.notify_task_queue();
+
+                    Ok(Ok(Some(change_id)))
+                }
                 Err(err) if err.is_assertion_failure() => {
                     Ok(Err(MailboxDestroyError::AssertionFailed))
                 }

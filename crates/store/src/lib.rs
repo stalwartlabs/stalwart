@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, sync::Arc};
-
 pub mod backend;
 pub mod config;
 pub mod dispatch;
-pub mod fts;
 pub mod query;
+pub mod search;
 pub mod write;
 
 pub use ahash;
@@ -23,8 +21,11 @@ pub use xxhash_rust;
 
 use ahash::AHashMap;
 use backend::{fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
+use std::{borrow::Cow, sync::Arc};
 use utils::config::cron::SimpleCron;
-use write::{BitmapClass, ValueClass};
+use write::ValueClass;
+
+use crate::backend::{elastic::ElasticSearchStore, meili::MeiliSearchStore};
 
 pub trait Deserialize: Sized + Sync + Send {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self>;
@@ -47,14 +48,6 @@ pub(crate) const WITH_SUBSPACE: u32 = 1;
 pub trait Key: Sync + Send + Clone {
     fn serialize(&self, flags: u32) -> Vec<u8>;
     fn subspace(&self) -> u8;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BitmapKey<T: AsRef<BitmapClass>> {
-    pub account_id: u32,
-    pub collection: u8,
-    pub class: T,
-    pub document_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -93,13 +86,10 @@ pub const U32_LEN: usize = std::mem::size_of::<u32>();
 pub const U16_LEN: usize = std::mem::size_of::<u16>();
 
 pub const SUBSPACE_ACL: u8 = b'a';
-pub const SUBSPACE_BITMAP_ID: u8 = b'b';
-pub const SUBSPACE_BITMAP_TAG: u8 = b'c';
-pub const SUBSPACE_BITMAP_TEXT: u8 = b'v';
 pub const SUBSPACE_DIRECTORY: u8 = b'd';
 pub const SUBSPACE_TASK_QUEUE: u8 = b'f';
 pub const SUBSPACE_INDEXES: u8 = b'i';
-pub const SUBSPACE_BLOB_RESERVE: u8 = b'j';
+pub const SUBSPACE_BLOB_EXTRA: u8 = b'j';
 pub const SUBSPACE_BLOB_LINK: u8 = b'k';
 pub const SUBSPACE_BLOBS: u8 = b't';
 pub const SUBSPACE_LOGS: u8 = b'l';
@@ -113,12 +103,16 @@ pub const SUBSPACE_QUEUE_EVENT: u8 = b'q';
 pub const SUBSPACE_QUOTA: u8 = b'u';
 pub const SUBSPACE_REPORT_OUT: u8 = b'h';
 pub const SUBSPACE_REPORT_IN: u8 = b'r';
-pub const SUBSPACE_FTS_INDEX: u8 = b'g';
 pub const SUBSPACE_TELEMETRY_SPAN: u8 = b'o';
-pub const SUBSPACE_TELEMETRY_INDEX: u8 = b'w';
 pub const SUBSPACE_TELEMETRY_METRIC: u8 = b'x';
+pub const SUBSPACE_SEARCH_INDEX: u8 = b'z';
 
-pub const SUBSPACE_RESERVED_2: u8 = b'z';
+// TODO: Remove in v1.0
+pub const LEGACY_SUBSPACE_BITMAP_ID: u8 = b'b';
+pub const LEGACY_SUBSPACE_BITMAP_TAG: u8 = b'c';
+pub const LEGACY_SUBSPACE_BITMAP_TEXT: u8 = b'v';
+pub const LEGACY_SUBSPACE_FTS_INDEX: u8 = b'g';
+pub const LEGACY_SUBSPACE_TELEMETRY_INDEX: u8 = b'w';
 
 #[derive(Clone)]
 pub struct IterateParams<T: Key> {
@@ -133,7 +127,7 @@ pub struct IterateParams<T: Key> {
 pub struct Stores {
     pub stores: AHashMap<String, Store>,
     pub blob_stores: AHashMap<String, BlobStore>,
-    pub fts_stores: AHashMap<String, FtsStore>,
+    pub search_stores: AHashMap<String, SearchStore>,
     pub in_memory_stores: AHashMap<String, InMemoryStore>,
     pub pubsub_stores: AHashMap<String, PubSubStore>,
     pub purge_schedules: Vec<PurgeSchedule>,
@@ -190,10 +184,10 @@ pub enum BlobBackend {
 }
 
 #[derive(Clone)]
-pub enum FtsStore {
+pub enum SearchStore {
     Store(Store),
-    #[cfg(feature = "elastic")]
-    ElasticSearch(Arc<backend::elastic::ElasticSearchStore>),
+    ElasticSearch(Arc<ElasticSearchStore>),
+    MeiliSearch(Arc<MeiliSearchStore>),
 }
 
 #[derive(Clone, Debug)]
@@ -289,10 +283,15 @@ impl From<backend::azure::AzureStore> for BlobStore {
     }
 }
 
-#[cfg(feature = "elastic")]
-impl From<backend::elastic::ElasticSearchStore> for FtsStore {
-    fn from(store: backend::elastic::ElasticSearchStore) -> Self {
+impl From<ElasticSearchStore> for SearchStore {
+    fn from(store: ElasticSearchStore) -> Self {
         Self::ElasticSearch(Arc::new(store))
+    }
+}
+
+impl From<MeiliSearchStore> for SearchStore {
+    fn from(store: MeiliSearchStore) -> Self {
+        Self::MeiliSearch(Arc::new(store))
     }
 }
 
@@ -303,7 +302,7 @@ impl From<backend::redis::RedisStore> for InMemoryStore {
     }
 }
 
-impl From<Store> for FtsStore {
+impl From<Store> for SearchStore {
     fn from(store: Store) -> Self {
         Self::Store(store)
     }
@@ -339,7 +338,7 @@ impl Default for InMemoryStore {
     }
 }
 
-impl Default for FtsStore {
+impl Default for SearchStore {
     fn default() -> Self {
         Self::Store(Store::None)
     }
@@ -708,8 +707,8 @@ impl Store {
 
     pub fn is_pg_or_mysql(&self) -> bool {
         match self {
-            #[cfg(feature = "sqlite")]
-            Store::SQLite(_) => true,
+            #[cfg(feature = "mysql")]
+            Store::MySQL(_) => true,
             #[cfg(feature = "postgres")]
             Store::PostgreSQL(_) => true,
             _ => false,

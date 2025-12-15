@@ -5,12 +5,15 @@
  */
 
 use super::object::Object;
-use crate::object::{FromLegacy, Property, Value};
+use crate::{
+    get_document_ids,
+    object::{FromLegacy, Property, Value},
+    v014::{SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT},
+};
 use common::Server;
 use email::mailbox::Mailbox;
 use store::{
-    SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT, SUBSPACE_INDEXES, Serialize, U64_LEN, ValueKey,
-    rand,
+    SUBSPACE_INDEXES, Serialize, U64_LEN, ValueKey, rand,
     write::{
         AlignedBytes, AnyKey, Archive, Archiver, BatchBuilder, ValueClass, key::KeySerializer,
     },
@@ -21,8 +24,7 @@ use utils::config::utils::ParseValue;
 
 pub(crate) async fn migrate_mailboxes(server: &Server, account_id: u32) -> trc::Result<u64> {
     // Obtain email ids
-    let mailbox_ids = server
-        .get_document_ids(account_id, Collection::Mailbox)
+    let mailbox_ids = get_document_ids(server, account_id, Collection::Mailbox)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -48,7 +50,7 @@ pub(crate) async fn migrate_mailboxes(server: &Server, account_id: u32) -> trc::
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::Mailbox)
-                    .update_document(mailbox_id)
+                    .with_document(mailbox_id)
                     .set(
                         Field::ARCHIVE,
                         Archiver::new(Mailbox::from_legacy(legacy))

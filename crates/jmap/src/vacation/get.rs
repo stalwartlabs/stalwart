@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{JmapMethods, changes::state::StateManager};
+use crate::changes::state::StateManager;
 use common::Server;
 use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use jmap_proto::{
@@ -17,7 +17,10 @@ use jmap_proto::{
 };
 use jmap_tools::{Map, Value};
 use std::future::Future;
-use store::query::Filter;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
@@ -82,7 +85,12 @@ impl VacationResponseGet for Server {
         if do_get {
             if let Some(document_id) = self.get_vacation_sieve_script_id(account_id).await? {
                 if let Some(sieve_) = self
-                    .get_archive(account_id, Collection::SieveScript, document_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        account_id,
+                        Collection::SieveScript,
+                        document_id,
+                    ))
                     .await?
                 {
                     let active_script_id = self.sieve_script_get_active_id(account_id).await?;
@@ -162,12 +170,13 @@ impl VacationResponseGet for Server {
     }
 
     async fn get_vacation_sieve_script_id(&self, account_id: u32) -> trc::Result<Option<u32>> {
-        self.filter(
+        self.document_ids_matching(
             account_id,
             Collection::SieveScript,
-            vec![Filter::eq(SieveField::Name, "vacation".as_bytes().to_vec())],
+            SieveField::Name,
+            "vacation".as_bytes(),
         )
         .await
-        .map(|r| r.results.min())
+        .map(|r| r.min())
     }
 }

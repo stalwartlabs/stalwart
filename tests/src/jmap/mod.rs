@@ -11,7 +11,10 @@ use crate::{
         enterprise::{EnterpriseCore, insert_test_metrics},
         webhooks::{MockWebhookEndpoint, spawn_mock_webhook_endpoint},
     },
-    store::TempDir,
+    store::{
+        TempDir, build_store_config,
+        cleanup::{search_store_destroy, store_assert_is_empty, store_destroy},
+    },
 };
 use ahash::AHashMap;
 use base64::{
@@ -19,8 +22,7 @@ use base64::{
     engine::general_purpose::{self, STANDARD},
 };
 use common::{
-    Caches, Core, Data, Inner, KV_BAYES_MODEL_GLOBAL, Server,
-    auth::AccessToken,
+    Caches, Core, Data, Inner, Server,
     config::{
         server::{Listeners, ServerProtocol},
         telemetry::Telemetry,
@@ -31,7 +33,6 @@ use common::{
         config::{ConfigManager, Patterns},
     },
 };
-use email::message::delete::EmailDeletion;
 use http::HttpSessionManager;
 use hyper::{Method, header::AUTHORIZATION};
 use imap::core::ImapSessionManager;
@@ -42,7 +43,10 @@ use pop3::Pop3SessionManager;
 use reqwest::header;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
-use services::SpawnServices;
+use services::{
+    SpawnServices,
+    task_manager::{Task, TaskAction},
+};
 use smtp::{SpawnQueueManager, core::SmtpSessionManager};
 use std::{
     fmt::{Debug, Display},
@@ -51,12 +55,11 @@ use std::{
     time::Duration,
 };
 use store::{
-    IterateParams, SUBSPACE_PROPERTY, Stores, ValueKey,
-    roaring::RoaringBitmap,
-    write::{AnyKey, TaskQueueClass, ValueClass, key::DeserializeBigEndian},
+    IterateParams, SUBSPACE_TASK_QUEUE, Stores, U32_LEN, U64_LEN,
+    write::{AnyKey, TaskEpoch, key::DeserializeBigEndian},
 };
 use tokio::sync::watch;
-use types::{blob_hash::BlobHash, id::Id};
+use types::id::Id;
 use utils::config::Config;
 
 pub mod auth;
@@ -70,17 +73,12 @@ pub mod server;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn jmap_tests() {
-    let delete = true;
-    let mut params = init_jmap_tests(
-        &std::env::var("STORE")
-            .expect("Missing store type. Try running `STORE=<store_type> cargo test`"),
-        delete,
-    )
-    .await;
+    let delete = std::env::var("NO_DELETE").is_err();
+    let mut params = init_jmap_tests(delete).await;
 
     server::webhooks::test(&mut params).await;
 
-    /*mail::get::test(&mut params).await;
+    mail::get::test(&mut params).await;
     mail::set::test(&mut params).await;
     mail::parse::test(&mut params).await;
     mail::query::test(&mut params, delete).await;
@@ -97,6 +95,7 @@ async fn jmap_tests() {
     mail::vacation_response::test(&mut params).await;
     mail::submission::test(&mut params).await;
     mail::crypto::test(&mut params).await;
+    mail::antispam::test(&mut params).await;
 
     core::event_source::test(&mut params).await;
     core::websocket::test(&mut params).await;
@@ -106,7 +105,7 @@ async fn jmap_tests() {
     auth::limits::test(&mut params).await;
     auth::oauth::test(&mut params).await;
     auth::quota::test(&mut params).await;
-    auth::permissions::test(&params).await;*/
+    auth::permissions::test(&params).await;
 
     contacts::addressbook::test(&mut params).await;
     contacts::contact::test(&mut params).await;
@@ -129,6 +128,8 @@ async fn jmap_tests() {
     server::purge::test(&mut params).await;
     server::enterprise::test(&mut params).await;
 
+    assert_is_empty(&params.server).await;
+
     if delete {
         params.temp_dir.delete();
     }
@@ -137,12 +138,7 @@ async fn jmap_tests() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 pub async fn jmap_metric_tests() {
-    let params = init_jmap_tests(
-        &std::env::var("STORE")
-            .expect("Missing store type. Try running `STORE=<store_type> cargo test`"),
-        false,
-    )
-    .await;
+    let params = init_jmap_tests(false).await;
 
     insert_test_metrics(params.server.core.clone()).await;
 }
@@ -212,36 +208,36 @@ impl Account {
 }
 
 pub async fn wait_for_index(server: &Server) {
+    let mut count = 0;
     loop {
-        let mut has_index_tasks = false;
+        let mut has_index_tasks = None;
         server
             .core
             .storage
             .data
             .iterate(
                 IterateParams::new(
-                    ValueKey::<ValueClass> {
-                        account_id: 0,
-                        collection: 0,
-                        document_id: 0,
-                        class: ValueClass::TaskQueue(TaskQueueClass::IndexEmail {
-                            due: 0,
-                            hash: BlobHash::default(),
-                        }),
+                    AnyKey {
+                        subspace: SUBSPACE_TASK_QUEUE,
+                        key: vec![0u8],
                     },
-                    ValueKey::<ValueClass> {
-                        account_id: u32::MAX,
-                        collection: u8::MAX,
-                        document_id: u32::MAX,
-                        class: ValueClass::TaskQueue(TaskQueueClass::IndexEmail {
-                            due: u64::MAX,
-                            hash: BlobHash::default(),
-                        }),
+                    AnyKey {
+                        subspace: SUBSPACE_TASK_QUEUE,
+                        key: vec![u8::MAX; 16],
                     },
                 )
                 .ascending(),
-                |_, _| {
-                    has_index_tasks = true;
+                |key, value| {
+                    has_index_tasks = Some(
+                        Task::<TaskAction>::deserialize(key, value).unwrap_or_else(|_| Task {
+                            due: TaskEpoch::from_inner(
+                                key.deserialize_be_u64(key.len() - U64_LEN).unwrap(),
+                            ),
+                            account_id: key.deserialize_be_u32(U64_LEN).unwrap(),
+                            document_id: key.deserialize_be_u32(U64_LEN + U32_LEN + 1).unwrap(),
+                            action: TaskAction::SendImip,
+                        }),
+                    );
 
                     Ok(false)
                 },
@@ -249,7 +245,11 @@ pub async fn wait_for_index(server: &Server) {
             .await
             .unwrap();
 
-        if has_index_tasks {
+        if let Some(task) = has_index_tasks {
+            count += 1;
+            if count % 10 == 0 {
+                println!("Waiting for pending task {:?}...", task);
+            }
             tokio::time::sleep(Duration::from_millis(300)).await;
         } else {
             break;
@@ -258,24 +258,12 @@ pub async fn wait_for_index(server: &Server) {
 }
 
 pub async fn assert_is_empty(server: &Server) {
-    // Wait for pending FTS index tasks
+    // Wait for pending index tasks
     wait_for_index(server).await;
 
-    // Delete bayes model
-    server
-        .in_memory_store()
-        .key_delete_prefix(&[KV_BAYES_MODEL_GLOBAL])
-        .await
-        .unwrap();
-
-    // Purge accounts
-    emails_purge_tombstoned(server).await;
-
     // Assert is empty
-    server
-        .store()
-        .assert_is_empty(server.core.storage.blob.clone())
-        .await;
+    store_assert_is_empty(server.store(), server.core.storage.blob.clone(), false).await;
+    search_store_destroy(server.search_store()).await;
 
     // Clean caches
     for cache in [
@@ -289,56 +277,11 @@ pub async fn assert_is_empty(server: &Server) {
     server.inner.cache.messages.clear();
 }
 
-pub async fn emails_purge_tombstoned(server: &Server) {
-    let mut account_ids = RoaringBitmap::new();
-    server
-        .core
-        .storage
-        .data
-        .iterate(
-            IterateParams::new(
-                AnyKey {
-                    subspace: SUBSPACE_PROPERTY,
-                    key: vec![0u8],
-                },
-                AnyKey {
-                    subspace: SUBSPACE_PROPERTY,
-                    key: vec![u8::MAX, u8::MAX, u8::MAX, u8::MAX],
-                },
-            )
-            .no_values(),
-            |key, _| {
-                account_ids.insert(key.deserialize_be_u32(0).unwrap());
-
-                Ok(true)
-            },
-        )
-        .await
-        .unwrap();
-
-    for account_id in account_ids {
-        let do_add = server.inner.cache.access_tokens.get(&account_id).is_none();
-
-        if do_add {
-            server
-                .inner
-                .cache
-                .access_tokens
-                .insert(account_id, Arc::new(AccessToken::from_id(account_id)));
-        }
-        server.emails_purge_tombstoned(account_id).await.unwrap();
-        if do_add {
-            server.inner.cache.access_tokens.remove(&account_id);
-        }
-    }
-}
-
-async fn init_jmap_tests(store_id: &str, delete_if_exists: bool) -> JMAPTest {
+async fn init_jmap_tests(delete_if_exists: bool) -> JMAPTest {
     // Load and parse config
     let temp_dir = TempDir::new("jmap_tests", delete_if_exists);
     let mut config = Config::new(
-        add_test_certs(SERVER)
-            .replace("{STORE}", store_id)
+        add_test_certs(&(build_store_config(&temp_dir.path.to_string_lossy()) + SERVER))
             .replace("{TMP}", &temp_dir.path.display().to_string())
             .replace(
                 "{LEVEL}",
@@ -375,6 +318,7 @@ async fn init_jmap_tests(store_id: &str, delete_if_exists: bool) -> JMAPTest {
     let data = Data::parse(&mut config);
     let cache = Caches::parse(&mut config);
     let store = core.storage.data.clone();
+    let search_store = core.storage.fts.clone();
     let (ipc, mut ipc_rxs) = build_ipc(false);
     let inner = Arc::new(Inner {
         shared_core: core.into_shared(),
@@ -382,6 +326,11 @@ async fn init_jmap_tests(store_id: &str, delete_if_exists: bool) -> JMAPTest {
         ipc,
         cache,
     });
+
+    if delete_if_exists {
+        store_destroy(&store).await;
+        search_store_destroy(&search_store).await;
+    }
 
     // Parse acceptors
     servers.parse_tcp_acceptors(&mut config, inner.clone());
@@ -429,10 +378,6 @@ async fn init_jmap_tests(store_id: &str, delete_if_exists: bool) -> JMAPTest {
             ),
         };
     });
-
-    if delete_if_exists {
-        store.destroy().await;
-    }
 
     // Create tables
     let server = inner.build_server();
@@ -1477,7 +1422,6 @@ reject-non-fqdn = false
 [session.rcpt]
 relay = [ { if = "!is_empty(authenticated_as)", then = true }, 
           { else = false } ]
-directory = "'{STORE}'"
 
 [session.rcpt.errors]
 total = 5
@@ -1485,7 +1429,6 @@ wait = "1ms"
 
 [session.auth]
 mechanisms = "[plain, login, oauthbearer]"
-directory = "'{STORE}'"
 
 [session.data]
 spam-filter = "recipients[0] != 'robert@example.com'"
@@ -1523,51 +1466,9 @@ allow-invalid-certs = true
 future-release = [ { if = "!is_empty(authenticated_as)", then = "99999999d"},
                    { else = false } ]
 
-[store."sqlite"]
-type = "sqlite"
-path = "{TMP}/sqlite.db"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/rocks.db"
-
-[store."foundationdb"]
-type = "foundationdb"
-
-[store."postgresql"]
-type = "postgresql"
-host = "localhost"
-port = 5432
-database = "stalwart"
-user = "postgres"
-password = "mysecretpassword"
-
-[store."mysql"]
-type = "mysql"
-host = "localhost"
-port = 3307
-database = "stalwart"
-user = "root"
-password = "password"
-
-[store."elastic"]
-type = "elasticsearch"
-url = "https://localhost:9200"
-user = "elastic"
-password = "changeme"
-tls.allow-invalid-certs = true
-disable = true
-
 [certificate.default]
 cert = "%{file:{CERT}}%"
 private-key = "%{file:{PK}}%"
-
-[storage]
-data = "{STORE}"
-fts = "{STORE}"
-blob = "{STORE}"
-lookup = "{STORE}"
-directory = "{STORE}"
 
 [jmap.protocol.get]
 max-objects = 100000
@@ -1619,10 +1520,6 @@ emails = "SELECT address FROM emails WHERE name = ? AND type != 'list' ORDER BY 
 verify = "SELECT address FROM emails WHERE address LIKE '%' || ? || '%' AND type = 'primary' ORDER BY address LIMIT 5"
 expand = "SELECT p.address FROM emails AS p JOIN emails AS l ON p.name = l.name WHERE p.type = 'primary' AND l.address = ? AND l.type = 'list' ORDER BY p.address LIMIT 50"
 domains = "SELECT 1 FROM emails WHERE address LIKE '%@' || ? LIMIT 1"
-
-[directory."{STORE}"]
-type = "internal"
-store = "{STORE}"
 
 [imap.auth]
 allow-plain-text = true
@@ -1684,15 +1581,15 @@ WiYrLO4z8/kmkqvA7wGElBok9IqhRANCAAQxZK68FnQtHC0eyh8CA05xRIvxhVHn
 '''
 signature-algorithm = "ES256"
 
-[spam-filter.bayes.auto-learn]
-card-is-ham = false
-
 [session.extensions]
 expn = true
 vrfy = true
 
 [spam-filter]
 enable = true
+
+[spam-filter.list]
+scores = {"GTUBE_TEST" = "1000.0"}
 
 [sharing]
 allow-directory-query = true

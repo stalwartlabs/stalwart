@@ -4,16 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{MysqlStore, into_error};
+use crate::{Deserialize, IterateParams, Key, ValueKey, write::ValueClass};
 use futures::TryStreamExt;
 use mysql_async::{Row, prelude::Queryable};
-use roaring::RoaringBitmap;
-
-use crate::{
-    BitmapKey, Deserialize, IterateParams, Key, U32_LEN, ValueKey,
-    write::{BitmapClass, ValueClass, key::DeserializeBigEndian},
-};
-
-use super::{MysqlStore, into_error};
 
 impl MysqlStore {
     pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -39,35 +33,6 @@ impl MysqlStore {
                     Ok(None)
                 }
             })
-    }
-
-    pub(crate) async fn get_bitmap(
-        &self,
-        mut key: BitmapKey<BitmapClass>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        let begin = key.serialize(0);
-        key.document_id = u32::MAX;
-        let key_len = begin.len();
-        let end = key.serialize(0);
-        let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
-        let table = char::from(key.subspace());
-
-        let mut bm = RoaringBitmap::new();
-        let s = conn
-            .prep(format!("SELECT k FROM {table} WHERE k >= ? AND k <= ?"))
-            .await
-            .map_err(into_error)?;
-        let mut rows = conn
-            .exec_stream::<Vec<u8>, _, _>(&s, (begin, end))
-            .await
-            .map_err(into_error)?;
-
-        while let Some(key) = rows.try_next().await.map_err(into_error)? {
-            if key.len() == key_len {
-                bm.insert(key.as_slice().deserialize_be_u32(key.len() - U32_LEN)?);
-            }
-        }
-        Ok(if !bm.is_empty() { Some(bm) } else { None })
     }
 
     pub(crate) async fn iterate<T: Key>(

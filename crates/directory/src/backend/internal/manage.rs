@@ -26,7 +26,10 @@ use store::{
     },
 };
 use trc::AddContext;
-use types::collection::Collection;
+use types::{
+    collection::Collection,
+    field::{self},
+};
 use utils::{DomainPart, sanitize_email};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -93,6 +96,11 @@ pub trait ManageDirectory: Sized {
         typ: Option<Type>,
         tenant_id: Option<u32>,
     ) -> trc::Result<u64>;
+    async fn principal_ids(
+        &self,
+        typ: Option<Type>,
+        tenant_id: Option<u32>,
+    ) -> trc::Result<RoaringBitmap>;
     async fn map_principal(
         &self,
         principal: Principal,
@@ -151,6 +159,7 @@ impl ManageDirectory for Store {
     async fn get_principal_id(&self, name: &str) -> trc::Result<Option<u32>> {
         self.get_principal_info(name).await.map(|v| v.map(|v| v.id))
     }
+
     async fn get_principal_info(&self, name: &str) -> trc::Result<Option<PrincipalInfo>> {
         self.get_value::<PrincipalInfo>(ValueKey::from(ValueClass::Directory(
             DirectoryClass::NameToId(name.as_bytes().to_vec()),
@@ -204,7 +213,7 @@ impl ManageDirectory for Store {
                 .with_account_id(u32::MAX)
                 .with_collection(Collection::Principal)
                 .assert_value(name_key.clone(), ())
-                .create_document(principal_id);
+                .with_document(principal_id);
             build_search_index(&mut batch, principal_id, None, Some(&principal));
             principal.sort();
             batch
@@ -592,7 +601,7 @@ impl ManageDirectory for Store {
         batch
             .with_account_id(u32::MAX)
             .with_collection(Collection::Principal)
-            .create_document(principal_id)
+            .with_document(principal_id)
             .assert_value(
                 ValueClass::Directory(DirectoryClass::NameToId(
                     create_principal.name().as_bytes().to_vec(),
@@ -687,7 +696,9 @@ impl ManageDirectory for Store {
         let typ = Type::from(&principal.typ);
 
         let mut batch = BatchBuilder::new();
-        batch.with_account_id(u32::MAX);
+        batch
+            .with_account_id(u32::MAX)
+            .with_collection(Collection::Principal);
 
         let tenant = principal.data.iter().find_map(|data| {
             if let ArchivedPrincipalData::Tenant(tenant_id) = data {
@@ -818,11 +829,6 @@ impl ManageDirectory for Store {
         }
         // SPDX-SnippetEnd
 
-        // Unlink all principal's blobs
-        self.blob_hash_unlink_account(principal_id)
-            .await
-            .caused_by(trc::location!())?;
-
         // Revoke ACLs, obtain all changed principals
         let mut changed_principals = ChangedPrincipals::default();
 
@@ -838,14 +844,9 @@ impl ManageDirectory for Store {
             );
         }
 
-        // Delete principal data
-        self.danger_destroy_account(principal_id)
-            .await
-            .caused_by(trc::location!())?;
-
         // Delete principal
         batch
-            .delete_document(principal_id)
+            .with_document(principal_id)
             .clear(DirectoryClass::NameToId(principal.name.as_bytes().to_vec()))
             .clear(DirectoryClass::Principal(principal_id))
             .clear(DirectoryClass::UsedQuota(principal_id));
@@ -911,9 +912,7 @@ impl ManageDirectory for Store {
 
         // Delete push subscriptions
         if matches!(typ, Type::Individual) {
-            batch
-                .with_collection(Collection::PushSubscription)
-                .delete_document(principal_id);
+            batch.untag(field::PrincipalField::PushSubscriptions);
         }
 
         self.write(batch.build_all())
@@ -2216,6 +2215,34 @@ impl ManageDirectory for Store {
         .await
         .caused_by(trc::location!())
         .map(|_| count)
+    }
+
+    async fn principal_ids(
+        &self,
+        typ: Option<Type>,
+        tenant_id: Option<u32>,
+    ) -> trc::Result<RoaringBitmap> {
+        let mut results = RoaringBitmap::new();
+        self.iterate(
+            IterateParams::new(
+                ValueKey::from(ValueClass::Directory(DirectoryClass::NameToId(vec![0u8]))),
+                ValueKey::from(ValueClass::Directory(DirectoryClass::NameToId(vec![
+                    u8::MAX;
+                    10
+                ]))),
+            ),
+            |_, value| {
+                let pt = PrincipalInfo::deserialize(value).caused_by(trc::location!())?;
+                if typ.is_none_or(|t| pt.typ == t) && pt.has_tenant_access(tenant_id) {
+                    results.insert(pt.id);
+                }
+
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())
+        .map(|_| results)
     }
 
     async fn get_member_of(&self, principal_id: u32) -> trc::Result<Vec<MemberOf>> {

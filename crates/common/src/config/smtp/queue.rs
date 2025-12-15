@@ -933,6 +933,10 @@ impl QueueName {
     pub fn into_inner(self) -> [u8; 8] {
         self.0
     }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl ArchivedQueueName {
@@ -940,6 +944,10 @@ impl ArchivedQueueName {
         std::str::from_utf8(self.0.as_ref())
             .unwrap_or_default()
             .trim_end_matches('\0')
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 

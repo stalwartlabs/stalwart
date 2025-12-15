@@ -5,18 +5,22 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, wait_for_index},
+    jmap::{Account, JMAPTest, wait_for_index},
     store::{deflate_test_resource, query::FIELDS},
 };
 use ::email::{cache::MessageCacheFetch, mailbox::Mailbox};
 use ahash::AHashSet;
-use common::storage::index::ObjectIndexBuilder;
+use common::{Server, storage::index::ObjectIndexBuilder};
 use jmap_client::{
     client::Client,
     core::query::{Comparator, Filter},
     email,
 };
-use mail_parser::{DateTime, HeaderName};
+use mail_builder::{
+    MessageBuilder,
+    headers::{date::Date, message_id::MessageId, text::Text},
+};
+use mail_parser::HeaderName;
 use std::{collections::hash_map::Entry, str::FromStr, time::Instant};
 use store::{
     ahash::AHashMap,
@@ -45,7 +49,7 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
             .with_collection(Collection::Mailbox);
         for mailbox_id in 1545..3010 {
             batch
-                .create_document(mailbox_id)
+                .with_document(mailbox_id)
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(Mailbox {
                     name: format!("Mailbox {mailbox_id}"),
                     role: SpecialUse::None,
@@ -67,7 +71,7 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
 
         // Create test messages
         println!("Inserting JMAP Mail query test messages...");
-        create(client).await;
+        create(&server, account).await;
 
         assert_eq!(
             params
@@ -88,8 +92,10 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
         wait_for_index(&server).await;
     }
 
+    let can_stem = !params.server.search_store().is_mysql();
+
     println!("Running JMAP Mail query tests...");
-    query(client).await;
+    query(client, can_stem).await;
 
     println!("Running JMAP Mail query options tests...");
     query_options(client).await;
@@ -110,7 +116,7 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
     params.assert_is_empty().await;
 }
 
-pub async fn query(client: &Client) {
+pub async fn query(client: &Client, can_stem: bool) {
     for (filter, sort, expected_results) in [
         (
             Filter::and(vec![
@@ -140,7 +146,7 @@ pub async fn query(client: &Client) {
         ),
         (
             Filter::and(vec![
-                (email::query::Filter::subject("study")),
+                (email::query::Filter::text(if can_stem { "study" } else { "studies" })),
                 (email::query::Filter::in_mailbox_other_than(vec![
                     Id::new(1991).to_string(),
                     Id::new(1870).to_string(),
@@ -155,10 +161,14 @@ pub async fn query(client: &Client) {
                 email::query::Comparator::subject(),
                 email::query::Comparator::sent_at(),
             ],
-            vec![
-                "T10330", "N01744", "N01743", "N04885", "N02688", "N02122", "A00059", "A00058",
-                "N02123", "T00651", "T09439", "N05001", "T05848", "T05508",
-            ],
+            if can_stem {
+                vec![
+                    "T10330", "N01744", "N01743", "N04885", "N02688", "N02122", "A00059", "A00058",
+                    "N02123", "T00651", "T09439", "N05001", "T05848", "T05508",
+                ]
+            } else {
+                vec!["T10330", "N02122", "N02123", "T09439"]
+            },
         ),
         (
             Filter::and(vec![
@@ -699,7 +709,7 @@ pub async fn query_options(client: &Client) {
     }
 }
 
-pub async fn create(client: &Client) {
+pub async fn create(server: &Server, account: &Account) {
     let sent_at = now();
     let now = Instant::now();
     let mut fields = AHashMap::default();
@@ -711,6 +721,9 @@ pub async fn create(client: &Client) {
     let mut total_threads = 0;
     let mut thread_count = AHashMap::default();
     let mut artist_count = AHashMap::default();
+
+    let mut messages = Vec::new();
+    let mut chunks = Vec::new();
 
     'outer: for (idx, record) in csv::ReaderBuilder::new()
         .has_headers(true)
@@ -797,41 +810,65 @@ pub async fn create(client: &Client) {
             }
         }
 
-        client
-            .email_import(
-                format!(
-                    concat!(
-                        "Date: {}\nFrom: \"{}\" <artist@domain.com>\nCc: \"{}\" <cc@domain.com>\nMessage-ID: <{}>\n",
-                        "References: <{}>\nComments: {}\nSubject: [{}]",
-                        " Year {}\n\n{}\n{}\n"
-                    ),
-                    DateTime::from_timestamp(sent_at as i64 + idx as i64).to_rfc822(),
-                    values_str["artist"],
-                    values_str["medium"],
-                    values_str["accession_number"],
-                    values_int["year"],
-                    values_str["artistRole"],
-                    values_str["title"],
-                    values_int["year"],
-                    values_str["creditLine"],
-                    values_str["inscription"]
-                )
-                .into_bytes(),
-                [
-                    Id::new(values_int["year"] as u64).to_string(),
-                    Id::new((values_int["acquisitionYear"] + 1000) as u64).to_string(),
-                ],
-                keywords
-                .into(),
-                Some(values_int["year"] as i64),
-            )
-            .await
+        let message = MessageBuilder::new()
+            .from((values_str["artist"].as_str(), "artist@domain.com"))
+            .cc((values_str["medium"].as_str(), "cc@domain.com"))
+            .subject(format!("Year {}", values_int["year"]))
+            .date(Date::new(sent_at as i64 + idx as i64))
+            .message_id(values_str["accession_number"].as_str())
+            .header("References", MessageId::new(values_int["year"].to_string()))
+            .header("Comments", Text::new(values_str["artistRole"].as_str()))
+            .text_body(format!(
+                "{}\n{}\n",
+                values_str["creditLine"], values_str["inscription"]
+            ))
+            .attachment("text/plain", "details.txt", values_str["title"].as_bytes())
+            .write_to_vec()
             .unwrap();
+
+        messages.push((
+            message,
+            [
+                Id::new(values_int["year"] as u64).to_string(),
+                Id::new((values_int["acquisitionYear"] + 1000) as u64).to_string(),
+            ],
+            keywords,
+            values_int["year"] as i64,
+        ));
+
+        if messages.len() == 100 {
+            chunks.push(messages);
+            messages = Vec::new();
+        }
 
         if total_messages == MAX_MESSAGES {
             break;
         }
     }
+
+    if !messages.is_empty() {
+        chunks.push(messages);
+    }
+
+    let mut tasks = Vec::new();
+    for chunk in chunks {
+        let client = account.client_owned().await;
+        tasks.push(tokio::spawn(async move {
+            for (raw_message, mailbox_ids, keywords, sent_at) in chunk {
+                client
+                    .email_import(raw_message, mailbox_ids, keywords.into(), Some(sent_at))
+                    .await
+                    .unwrap();
+            }
+        }));
+    }
+
+    for task in tasks {
+        task.await.unwrap();
+    }
+
+    wait_for_index(server).await;
+
     println!(
         "Imported {} messages in {} ms (single thread).",
         total_messages,

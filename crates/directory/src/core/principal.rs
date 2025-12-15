@@ -1577,8 +1577,6 @@ impl Permission {
                 | Permission::SieveRenameScript
                 | Permission::SieveCheckScript
                 | Permission::SieveHaveSpace
-                | Permission::SpamFilterClassify
-                | Permission::SpamFilterTrain
                 | Permission::DavSyncCollection
                 | Permission::DavExpandProperty
                 | Permission::DavPrincipalAcl
@@ -1731,6 +1729,8 @@ impl Permission {
                 | Permission::ApiKeyCreate
                 | Permission::ApiKeyUpdate
                 | Permission::ApiKeyDelete
+                | Permission::SpamFilterTrain
+                | Permission::SpamFilterTest
         ) || self.is_user_permission()
     }
 

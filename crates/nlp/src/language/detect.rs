@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::Language;
 use ahash::AHashMap;
 use whatlang::{Lang, detect};
 
-use super::Language;
-
-pub const MIN_LANGUAGE_SCORE: f64 = 0.5;
+pub const MIN_LANGUAGE_SCORE: f64 = 0.6;
 
 #[derive(Debug)]
 struct WeightedAverage {
@@ -62,6 +61,7 @@ impl LanguageDetector {
     pub fn most_frequent_language(&self) -> Option<Language> {
         self.lang_detected
             .iter()
+            .filter(|(l, _)| !matches!(l, Language::None))
             .max_by(|(_, a), (_, b)| {
                 ((a.confidence / a.weight as f64) * a.occurrences as f64)
                     .partial_cmp(&((b.confidence / b.weight as f64) * b.occurrences as f64))

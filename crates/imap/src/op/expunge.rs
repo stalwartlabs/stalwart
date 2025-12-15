@@ -11,7 +11,6 @@ use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
 use directory::Permission;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    mailbox::TOMBSTONE_ID,
     message::metadata::MessageData,
 };
 use imap_proto::{
@@ -21,14 +20,14 @@ use imap_proto::{
 };
 use std::{sync::Arc, time::Instant};
 use store::{
+    SerializeInfallible,
     roaring::RoaringBitmap,
-    write::{BatchBuilder, TagValue},
+    write::{BatchBuilder, SearchIndex, TaskEpoch, TaskQueueClass, ValueClass},
 };
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, VanishedCollection},
-    field::EmailField,
     keyword::Keyword,
 };
 
@@ -155,6 +154,7 @@ impl<T: SessionStream> SessionData<T> {
                 .commit_batch(batch)
                 .await
                 .caused_by(trc::location!())?;
+            self.server.notify_task_queue();
         }
 
         Ok(())
@@ -172,7 +172,7 @@ impl<T: SessionStream> SessionData<T> {
             .with_collection(Collection::Email);
 
         self.server
-            .get_archives(
+            .archives(
                 account_id,
                 Collection::Email,
                 deleted_ids,
@@ -183,24 +183,33 @@ impl<T: SessionStream> SessionData<T> {
 
                     if let Some(message_uid) = metadata.inner.message_uid(mailbox_id) {
                         // Add vanished items
-                        batch.update_document(document_id);
+                        batch.with_document(document_id);
                         batch.log_vanished_item(
                             VanishedCollection::Email,
                             (mailbox_id, message_uid),
                         );
 
                         if metadata.inner.mailboxes.len() == 1 {
-                            // Tombstone message
+                            // Delete message
                             batch
-                                .custom(ObjectIndexBuilder::<_, ()>::new().with_current(metadata))
+                                .custom(
+                                    ObjectIndexBuilder::<_, ()>::new()
+                                        .with_access_token(&self.access_token)
+                                        .with_current(metadata),
+                                )
                                 .caused_by(trc::location!())?
-                                .tag(EmailField::MailboxIds, TagValue::Id(TOMBSTONE_ID))
+                                .set(
+                                    ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                                        index: SearchIndex::Email,
+                                        due: TaskEpoch::now(),
+                                        is_insert: false,
+                                    }),
+                                    0u64.serialize(),
+                                )
                                 .commit_point();
                         } else {
                             // Untag message from this mailbox and remove Deleted flag
-                            let mut new_metadata = metadata
-                                .deserialize::<MessageData>()
-                                .caused_by(trc::location!())?;
+                            let mut new_metadata = metadata.inner.to_builder();
                             new_metadata.remove_mailbox(mailbox_id);
                             new_metadata.remove_keyword(&Keyword::Deleted);
 
@@ -209,7 +218,7 @@ impl<T: SessionStream> SessionData<T> {
                                 .custom(
                                     ObjectIndexBuilder::new()
                                         .with_current(metadata)
-                                        .with_changes(new_metadata),
+                                        .with_changes(new_metadata.seal()),
                                 )
                                 .caused_by(trc::location!())?
                                 .commit_point();

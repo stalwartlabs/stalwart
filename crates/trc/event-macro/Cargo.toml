@@ -1,6 +1,6 @@
 [package]
 name = "event_macro"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
 
 [lib]

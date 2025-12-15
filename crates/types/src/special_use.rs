@@ -31,6 +31,9 @@ pub enum SpecialUse {
     Shared,
     Important,
     None,
+    Memos,
+    Scheduled,
+    Snoozed,
 }
 
 impl SpecialUse {
@@ -44,6 +47,9 @@ impl SpecialUse {
             b"sent" => SpecialUse::Sent,
             b"shared" => SpecialUse::Shared,
             b"important" => SpecialUse::Important,
+            b"memos" => SpecialUse::Memos,
+            b"scheduled" => SpecialUse::Scheduled,
+            b"snoozed" => SpecialUse::Snoozed,
         )
     }
 
@@ -57,6 +63,9 @@ impl SpecialUse {
             SpecialUse::Sent => Some("sent"),
             SpecialUse::Shared => Some("shared"),
             SpecialUse::Important => Some("important"),
+            SpecialUse::Memos => Some("memos"),
+            SpecialUse::Scheduled => Some("scheduled"),
+            SpecialUse::Snoozed => Some("snoozed"),
             SpecialUse::None => None,
         }
     }
@@ -73,6 +82,9 @@ impl ArchivedSpecialUse {
             ArchivedSpecialUse::Sent => Some("sent"),
             ArchivedSpecialUse::Shared => Some("shared"),
             ArchivedSpecialUse::Important => Some("important"),
+            ArchivedSpecialUse::Memos => Some("memos"),
+            ArchivedSpecialUse::Scheduled => Some("scheduled"),
+            ArchivedSpecialUse::Snoozed => Some("snoozed"),
             ArchivedSpecialUse::None => None,
         }
     }
@@ -89,6 +101,9 @@ impl From<&ArchivedSpecialUse> for SpecialUse {
             ArchivedSpecialUse::Sent => SpecialUse::Sent,
             ArchivedSpecialUse::Shared => SpecialUse::Shared,
             ArchivedSpecialUse::Important => SpecialUse::Important,
+            ArchivedSpecialUse::Memos => SpecialUse::Memos,
+            ArchivedSpecialUse::Scheduled => SpecialUse::Scheduled,
+            ArchivedSpecialUse::Snoozed => SpecialUse::Snoozed,
             ArchivedSpecialUse::None => SpecialUse::None,
         }
     }

@@ -10,7 +10,6 @@ use common::{
     listener::{SessionResult, SessionStream},
 };
 use imap_proto::receiver::{self, Request};
-use store::query::Filter;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use trc::{AddContext, SecurityEvent};
 use types::{collection::Collection, field::SieveField};
@@ -271,21 +270,16 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
 impl<T: AsyncWrite + AsyncRead> Session<T> {
     pub async fn get_script_id(&self, account_id: u32, name: &str) -> trc::Result<u32> {
         self.server
-            .core
-            .storage
-            .data
-            .filter(
+            .document_ids_matching(
                 account_id,
                 Collection::SieveScript,
-                vec![Filter::eq(
-                    SieveField::Name,
-                    name.to_lowercase().into_bytes(),
-                )],
+                SieveField::Name,
+                name.to_lowercase().as_bytes(),
             )
             .await
             .caused_by(trc::location!())
             .and_then(|results| {
-                results.results.min().ok_or_else(|| {
+                results.min().ok_or_else(|| {
                     trc::ManageSieveEvent::Error
                         .into_err()
                         .code(ResponseCode::NonExistent)

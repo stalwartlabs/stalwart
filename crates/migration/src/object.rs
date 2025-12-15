@@ -332,7 +332,9 @@ impl DeserializeFrom for Keyword {
                 for _ in 0..len {
                     keyword.push(*bytes.next()?);
                 }
-                Some(Keyword::Other(String::from_utf8(keyword).ok()?))
+                Some(Keyword::Other(
+                    String::from_utf8(keyword).ok()?.into_boxed_str(),
+                ))
             }
         }
     }

@@ -6,16 +6,17 @@
 
 use common::Server;
 use store::{
-    SUBSPACE_BITMAP_ID, U64_LEN,
+    U64_LEN,
     write::{AnyKey, key::KeySerializer},
 };
 use trc::AddContext;
 use types::collection::Collection;
 
+use crate::{get_document_ids, v014::SUBSPACE_BITMAP_ID};
+
 pub(crate) async fn migrate_threads(server: &Server, account_id: u32) -> trc::Result<u64> {
     // Obtain email ids
-    let thread_ids = server
-        .get_document_ids(account_id, Collection::Thread)
+    let thread_ids = get_document_ids(server, account_id, Collection::Thread)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();

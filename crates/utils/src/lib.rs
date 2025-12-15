@@ -6,6 +6,8 @@
 
 pub mod bimap;
 pub mod cache;
+pub mod chained_bytes;
+pub mod cheeky_hash;
 pub mod codec;
 pub mod config;
 pub mod glob;

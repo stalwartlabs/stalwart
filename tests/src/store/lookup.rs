@@ -11,7 +11,10 @@ use utils::config::{Config, Rate};
 
 use crate::{
     AssertConfig,
-    store::{CONFIG, TempDir},
+    store::{
+        CONFIG, TempDir,
+        cleanup::{store_assert_is_empty, store_destroy},
+    },
 };
 
 #[tokio::test]
@@ -30,7 +33,7 @@ pub async fn lookup_tests() {
     for (store_id, store) in stores.in_memory_stores {
         println!("Testing in-memory store {}...", store_id);
         if let InMemoryStore::Store(store) = &store {
-            store.destroy().await;
+            store_destroy(store).await;
         } else {
             // Reset redis counter
             store
@@ -65,7 +68,7 @@ pub async fn lookup_tests() {
 
         store.purge_in_memory_store().await.unwrap();
         if let InMemoryStore::Store(store) = &store {
-            store.assert_is_empty(store.clone().into()).await;
+            store_assert_is_empty(store, store.clone().into(), false).await;
         }
 
         // Test counter
@@ -123,7 +126,7 @@ pub async fn lookup_tests() {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         store.purge_in_memory_store().await.unwrap();
         if let InMemoryStore::Store(store) = &store {
-            store.assert_is_empty(store.clone().into()).await;
+            store_assert_is_empty(store, store.clone().into(), false).await;
         }
 
         // Test locking
@@ -149,7 +152,7 @@ pub async fn lookup_tests() {
         }
         store.purge_in_memory_store().await.unwrap();
         if let InMemoryStore::Store(store) = &store {
-            store.assert_is_empty(store.clone().into()).await;
+            store_assert_is_empty(store, store.clone().into(), false).await;
         }
 
         // Test prefix delete
@@ -281,7 +284,7 @@ pub async fn lookup_tests() {
         );
 
         if let InMemoryStore::Store(store) = &store {
-            store.assert_is_empty(store.clone().into()).await;
+            store_assert_is_empty(store, store.clone().into(), false).await;
         }
     }
 }

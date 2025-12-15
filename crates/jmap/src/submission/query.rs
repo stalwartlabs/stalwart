@@ -4,19 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{JmapMethods, changes::state::StateManager};
+use crate::{api::query::QueryResponseBuilder, changes::state::StateManager};
 use common::Server;
 use email::submission::UndoStatus;
 use jmap_proto::{
-    method::query::{Comparator, Filter, QueryRequest, QueryResponse},
+    method::query::{Filter, QueryRequest, QueryResponse},
     object::email_submission::{self, EmailSubmissionComparator, EmailSubmissionFilter},
     request::IntoValid,
 };
 use std::future::Future;
 use store::{
-    SerializeInfallible,
-    query::{self},
+    IterateParams, U32_LEN, U64_LEN, ValueKey,
+    ahash::AHashSet,
+    roaring::RoaringBitmap,
+    search::{SearchFilter, SearchQuery},
+    write::{IndexPropertyClass, SearchIndex, ValueClass, key::DeserializeBigEndian, now},
 };
+use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
     field::EmailSubmissionField,
@@ -29,123 +33,217 @@ pub trait EmailSubmissionQuery: Sync + Send {
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
+struct Submission {
+    document_id: u32,
+    send_at: u64,
+    email_id: u32,
+    thread_id: u32,
+    identity_id: u32,
+    undo_status: u8,
+}
+
 impl EmailSubmissionQuery for Server {
     async fn email_submission_query(
         &self,
         mut request: QueryRequest<email_submission::EmailSubmission>,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
-        let mut filters = Vec::with_capacity(request.filter.len());
 
+        let mut submissions = Vec::with_capacity(16);
+        let mut document_ids = RoaringBitmap::new();
+
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    ValueKey {
+                        account_id,
+                        collection: Collection::EmailSubmission.into(),
+                        document_id: 0,
+                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                            property: EmailSubmissionField::Metadata.into(),
+                            value: now() - (3 * 86400),
+                        }),
+                    },
+                    ValueKey {
+                        account_id,
+                        collection: Collection::EmailSubmission.into(),
+                        document_id: 0,
+                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                            property: EmailSubmissionField::Metadata.into(),
+                            value: u64::MAX,
+                        }),
+                    },
+                )
+                .ascending(),
+                |key, value| {
+                    let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
+
+                    submissions.push(Submission {
+                        document_id,
+                        send_at: key.deserialize_be_u64(key.len() - U32_LEN - U64_LEN)?,
+                        email_id: value.deserialize_be_u32(0)?,
+                        thread_id: value.deserialize_be_u32(U32_LEN)?,
+                        identity_id: value.deserialize_be_u32(U32_LEN + U32_LEN)?,
+                        undo_status: value.last().copied().unwrap(),
+                    });
+
+                    document_ids.insert(document_id);
+
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        let mut filters = Vec::with_capacity(request.filter.len());
         for cond in std::mem::take(&mut request.filter) {
             match cond {
                 Filter::Property(cond) => match cond {
                     EmailSubmissionFilter::IdentityIds(ids) => {
-                        filters.push(query::Filter::Or);
-                        for id in ids.into_valid() {
-                            filters.push(query::Filter::eq(
-                                EmailSubmissionField::IdentityId,
-                                id.document_id().serialize(),
-                            ));
-                        }
-                        filters.push(query::Filter::End);
+                        let ids = ids
+                            .into_valid()
+                            .map(|id| id.document_id())
+                            .collect::<AHashSet<_>>();
+
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            submissions
+                                .iter()
+                                .filter(|s| ids.contains(&s.identity_id))
+                                .map(|s| s.document_id),
+                        )));
                     }
                     EmailSubmissionFilter::EmailIds(ids) => {
-                        filters.push(query::Filter::Or);
-                        for id in ids.into_valid() {
-                            filters.push(query::Filter::eq(
-                                EmailSubmissionField::EmailId,
-                                id.id().serialize(),
-                            ));
-                        }
-                        filters.push(query::Filter::End);
+                        let ids = ids
+                            .into_valid()
+                            .map(|id| id.document_id())
+                            .collect::<AHashSet<_>>();
+
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            submissions
+                                .iter()
+                                .filter(|s| ids.contains(&s.email_id))
+                                .map(|s| s.document_id),
+                        )));
                     }
                     EmailSubmissionFilter::ThreadIds(ids) => {
-                        filters.push(query::Filter::Or);
-                        for id in ids.into_valid() {
-                            filters.push(query::Filter::eq(
-                                EmailSubmissionField::ThreadId,
-                                id.document_id().serialize(),
-                            ));
-                        }
-                        filters.push(query::Filter::End);
+                        let ids = ids
+                            .into_valid()
+                            .map(|id| id.document_id())
+                            .collect::<AHashSet<_>>();
+
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            submissions
+                                .iter()
+                                .filter(|s| ids.contains(&s.thread_id))
+                                .map(|s| s.document_id),
+                        )));
                     }
                     EmailSubmissionFilter::UndoStatus(undo_status) => {
-                        filters.push(query::Filter::eq(
-                            EmailSubmissionField::UndoStatus,
-                            match undo_status {
-                                email_submission::UndoStatus::Pending => UndoStatus::Pending,
-                                email_submission::UndoStatus::Final => UndoStatus::Final,
-                                email_submission::UndoStatus::Canceled => UndoStatus::Canceled,
-                            }
-                            .as_index()
-                            .serialize(),
-                        ))
+                        let undo_status = match undo_status {
+                            email_submission::UndoStatus::Pending => UndoStatus::Pending,
+                            email_submission::UndoStatus::Final => UndoStatus::Final,
+                            email_submission::UndoStatus::Canceled => UndoStatus::Canceled,
+                        }
+                        .as_index();
+
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            submissions
+                                .iter()
+                                .filter(|s| s.undo_status == undo_status)
+                                .map(|s| s.document_id),
+                        )));
                     }
-                    EmailSubmissionFilter::Before(before) => filters.push(query::Filter::lt(
-                        EmailSubmissionField::SendAt,
-                        (before.timestamp() as u64).serialize(),
-                    )),
-                    EmailSubmissionFilter::After(after) => filters.push(query::Filter::gt(
-                        EmailSubmissionField::SendAt,
-                        (after.timestamp() as u64).serialize(),
-                    )),
+                    EmailSubmissionFilter::Before(before) => {
+                        let before = before.timestamp() as u64;
+
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            submissions
+                                .iter()
+                                .filter(|s| s.send_at < before)
+                                .map(|s| s.document_id),
+                        )));
+                    }
+                    EmailSubmissionFilter::After(after) => {
+                        let after = after.timestamp() as u64;
+
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            submissions
+                                .iter()
+                                .filter(|s| s.send_at > after)
+                                .map(|s| s.document_id),
+                        )));
+                    }
 
                     EmailSubmissionFilter::_T(other) => {
                         return Err(trc::JmapEvent::UnsupportedFilter.into_err().details(other));
                     }
                 },
-
-                Filter::And | Filter::Or | Filter::Not | Filter::Close => {
-                    filters.push(cond.into());
+                Filter::And => {
+                    filters.push(SearchFilter::And);
+                }
+                Filter::Or => {
+                    filters.push(SearchFilter::Or);
+                }
+                Filter::Not => {
+                    filters.push(SearchFilter::Not);
+                }
+                Filter::Close => {
+                    filters.push(SearchFilter::End);
                 }
             }
         }
 
-        let result_set = self
-            .filter(account_id, Collection::EmailSubmission, filters)
-            .await?;
+        let results = SearchQuery::new(SearchIndex::InMemory)
+            .with_filters(filters)
+            .with_mask(document_ids)
+            .filter()
+            .into_bitmap();
 
-        let (response, paginate) = self
-            .build_query_response(
-                result_set.results.len() as usize,
-                self.get_state(account_id, SyncCollection::EmailSubmission)
-                    .await?,
-                &request,
-            )
-            .await?;
+        let mut response = QueryResponseBuilder::new(
+            results.len() as usize,
+            self.core.jmap.query_max_results,
+            self.get_state(account_id, SyncCollection::EmailSubmission)
+                .await?,
+            &request,
+        );
 
-        if let Some(paginate) = paginate {
-            // Parse sort criteria
-            let mut comparators = Vec::with_capacity(request.sort.as_ref().map_or(1, |s| s.len()));
-            for comparator in request
-                .sort
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| vec![Comparator::descending(EmailSubmissionComparator::SentAt)])
-            {
-                comparators.push(match comparator.property {
-                    EmailSubmissionComparator::EmailId => query::Comparator::field(
-                        EmailSubmissionField::EmailId,
-                        comparator.is_ascending,
-                    ),
-                    EmailSubmissionComparator::ThreadId => query::Comparator::field(
-                        EmailSubmissionField::ThreadId,
-                        comparator.is_ascending,
-                    ),
-                    EmailSubmissionComparator::SentAt => query::Comparator::field(
-                        EmailSubmissionField::SendAt,
-                        comparator.is_ascending,
-                    ),
+        if !results.is_empty() {
+            if let Some(comparator) = request.sort.take().unwrap_or_default().into_iter().next() {
+                match comparator.property {
+                    EmailSubmissionComparator::EmailId => {
+                        if comparator.is_ascending {
+                            submissions.sort_by_key(|s| s.email_id);
+                        } else {
+                            submissions.sort_by_key(|s| u32::MAX - s.email_id);
+                        }
+                    }
+                    EmailSubmissionComparator::ThreadId => {
+                        if comparator.is_ascending {
+                            submissions.sort_by_key(|s| s.thread_id);
+                        } else {
+                            submissions.sort_by_key(|s| u32::MAX - s.thread_id);
+                        }
+                    }
+                    EmailSubmissionComparator::SentAt => {
+                        if !comparator.is_ascending {
+                            submissions.reverse();
+                        }
+                    }
                     EmailSubmissionComparator::_T(other) => {
                         return Err(trc::JmapEvent::UnsupportedSort.into_err().details(other));
                     }
-                });
+                }
             }
 
-            // Sort results
-            self.sort(result_set, comparators, paginate, response).await
-        } else {
-            Ok(response)
+            for submission in submissions {
+                if results.contains(submission.document_id)
+                    && !response.add(0, submission.document_id)
+                {
+                    break;
+                }
+            }
         }
+
+        response.build()
     }
 }

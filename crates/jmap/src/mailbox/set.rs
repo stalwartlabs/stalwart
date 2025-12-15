@@ -5,7 +5,6 @@
  */
 
 use crate::{
-    JmapMethods,
     api::acl::{JmapAcl, JmapRights},
     changes::state::JmapCacheState,
 };
@@ -32,8 +31,9 @@ use jmap_proto::{
 use jmap_tools::{JsonPointerItem, Key, Map, Value};
 use std::future::Future;
 use store::{
+    ValueKey,
     roaring::RoaringBitmap,
-    write::{Archive, BatchBuilder, assert::AssertValue},
+    write::{AlignedBytes, Archive, BatchBuilder, assert::AssertValue},
 };
 use trc::AddContext;
 use types::{
@@ -83,9 +83,8 @@ impl MailboxSet for Server {
             account_id,
             is_shared: access_token.is_shared(account_id),
             access_token,
-            response: self
-                .prepare_set_response(&request, cache.assert_state(true, &request.if_in_state)?)
-                .await?,
+            response: SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+                .with_state(cache.assert_state(true, &request.if_in_state)?),
             mailbox_ids: RoaringBitmap::from_iter(cache.mailboxes.index.keys()),
             will_destroy: request.unwrap_destroy().into_valid().collect(),
         };
@@ -119,7 +118,7 @@ impl MailboxSet for Server {
                     let parent_id = builder.changes().unwrap().parent_id;
                     if parent_id > 0 {
                         batch
-                            .update_document(parent_id - 1)
+                            .with_document(parent_id - 1)
                             .assert_value(MailboxField::Archive, AssertValue::Some);
                     }
 
@@ -130,7 +129,7 @@ impl MailboxSet for Server {
                         .caused_by(trc::location!())?;
 
                     batch
-                        .create_document(document_id)
+                        .with_document(document_id)
                         .custom(builder)
                         .caused_by(trc::location!())?
                         .commit_point();
@@ -172,7 +171,12 @@ impl MailboxSet for Server {
             // Obtain mailbox
             let document_id = id.document_id();
             if let Some(mailbox) = self
-                .get_archive(account_id, Collection::Mailbox, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Mailbox,
+                    document_id,
+                ))
                 .await?
             {
                 // Validate ACL
@@ -213,12 +217,12 @@ impl MailboxSet for Server {
                         let parent_id = builder.changes().unwrap().parent_id;
                         if parent_id > 0 {
                             batch
-                                .update_document(parent_id - 1)
+                                .with_document(parent_id - 1)
                                 .assert_value(MailboxField::Archive, AssertValue::Some);
                         }
 
                         batch
-                            .update_document(document_id)
+                            .with_document(document_id)
                             .custom(builder)
                             .caused_by(trc::location!())?
                             .commit_point();
@@ -460,7 +464,12 @@ impl MailboxSet for Server {
                 let parent_document_id = mailbox_parent_id - 1;
 
                 if let Some(mailbox_) = self
-                    .get_archive(ctx.account_id, Collection::Mailbox, parent_document_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        ctx.account_id,
+                        Collection::Mailbox,
+                        parent_document_id,
+                    ))
                     .await?
                 {
                     let mailbox = mailbox_
@@ -519,12 +528,12 @@ impl MailboxSet for Server {
 
             // Role of internal folders cannot be modified
             if update.as_ref().is_some_and(|(document_id, _)| {
-                *document_id == INBOX_ID || *document_id == TRASH_ID
+                *document_id == INBOX_ID || *document_id == TRASH_ID || *document_id == JUNK_ID
             }) {
                 return Ok(Err(SetError::invalid_properties()
                     .with_property(MailboxProperty::Role)
                     .with_description(
-                        "You are not allowed to change the role of Inbox or Trash folders.",
+                        "You are not allowed to change the role of Inbox, Junk or Trash folders.",
                     )));
             }
         }

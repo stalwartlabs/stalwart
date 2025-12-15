@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::queue::{Error, ErrorDetails, HostResponse, Status, UnexpectedResponse};
+use crate::{
+    outbound::client::BoxResponse,
+    queue::{Error, ErrorDetails, HostResponse, Status, UnexpectedResponse},
+};
 use common::config::{
     server::ServerProtocol,
     smtp::queue::{MxConfig, RelayConfig},
@@ -24,11 +27,11 @@ pub mod session;
 
 pub(super) enum DeliveryResult {
     Domain {
-        status: Status<HostResponse<String>, ErrorDetails>,
+        status: Status<HostResponse<Box<str>>, ErrorDetails>,
         rcpt_idxs: Vec<usize>,
     },
     Account {
-        status: Status<HostResponse<String>, ErrorDetails>,
+        status: Status<HostResponse<Box<str>>, ErrorDetails>,
         rcpt_idx: usize,
     },
     RateLimited {
@@ -37,7 +40,7 @@ pub(super) enum DeliveryResult {
     },
 }
 
-impl Status<HostResponse<String>, ErrorDetails> {
+impl Status<HostResponse<Box<str>>, ErrorDetails> {
     pub fn from_smtp_error(hostname: &str, command: &str, err: mail_send::Error) -> Self {
         match err {
             mail_send::Error::Io(_)
@@ -50,7 +53,7 @@ impl Status<HostResponse<String>, ErrorDetails> {
             | mail_send::Error::MissingRcptTo
             | mail_send::Error::Timeout => Status::TemporaryFailure(ErrorDetails {
                 entity: hostname.into(),
-                details: Error::ConnectionError(err.to_string()),
+                details: Error::ConnectionError(err.to_string().into_boxed_str()),
             }),
 
             mail_send::Error::UnexpectedReply(response) => {
@@ -59,7 +62,7 @@ impl Status<HostResponse<String>, ErrorDetails> {
                         entity: hostname.into(),
                         details: Error::UnexpectedResponse(UnexpectedResponse {
                             command: command.trim().into(),
-                            response,
+                            response: response.into_box(),
                         }),
                     })
                 } else {
@@ -67,7 +70,7 @@ impl Status<HostResponse<String>, ErrorDetails> {
                         entity: hostname.into(),
                         details: Error::UnexpectedResponse(UnexpectedResponse {
                             command: command.trim().into(),
-                            response,
+                            response: response.into_box(),
                         }),
                     })
                 }
@@ -78,12 +81,12 @@ impl Status<HostResponse<String>, ErrorDetails> {
             | mail_send::Error::InvalidTLSName
             | mail_send::Error::MissingStartTls => Status::PermanentFailure(ErrorDetails {
                 entity: hostname.into(),
-                details: Error::ConnectionError(err.to_string()),
+                details: Error::ConnectionError(err.to_string().into_boxed_str()),
             }),
         }
     }
 
-    pub fn from_starttls_error(hostname: &str, response: Option<Response<String>>) -> Self {
+    pub fn from_starttls_error(hostname: &str, response: Option<Response<Box<str>>>) -> Self {
         let entity = hostname.into();
         if let Some(response) = response {
             if response.severity() == Severity::PermanentNegativeCompletion {
@@ -123,11 +126,11 @@ impl Status<HostResponse<String>, ErrorDetails> {
             }),
             mail_send::Error::Tls(err) => Status::TemporaryFailure(ErrorDetails {
                 entity: hostname.into(),
-                details: Error::TlsError(format!("Handshake failed: {err}")),
+                details: Error::TlsError(format!("Handshake failed: {err}").into_boxed_str()),
             }),
             mail_send::Error::Io(err) => Status::TemporaryFailure(ErrorDetails {
                 entity: hostname.into(),
-                details: Error::TlsError(format!("I/O error: {err}")),
+                details: Error::TlsError(format!("I/O error: {err}").into_boxed_str()),
             }),
             _ => Status::PermanentFailure(ErrorDetails {
                 entity: hostname.into(),
@@ -139,7 +142,7 @@ impl Status<HostResponse<String>, ErrorDetails> {
     pub fn timeout(hostname: &str, stage: &str) -> Self {
         Status::TemporaryFailure(ErrorDetails {
             entity: hostname.into(),
-            details: Error::ConnectionError(format!("Timeout while {stage}")),
+            details: Error::ConnectionError(format!("Timeout while {stage}").into_boxed_str()),
         })
     }
 
@@ -153,12 +156,12 @@ impl Status<HostResponse<String>, ErrorDetails> {
     pub fn from_mail_auth_error(entity: &str, err: mail_auth::Error) -> Self {
         match &err {
             mail_auth::Error::DnsRecordNotFound(code) => Status::PermanentFailure(ErrorDetails {
-                entity: entity.to_string(),
-                details: Error::DnsError(format!("Domain not found: {code:?}")),
+                entity: entity.into(),
+                details: Error::DnsError(format!("Domain not found: {code:?}").into_boxed_str()),
             }),
             _ => Status::TemporaryFailure(ErrorDetails {
-                entity: entity.to_string(),
-                details: Error::DnsError(err.to_string()),
+                entity: entity.into(),
+                details: Error::DnsError(err.to_string().into_boxed_str()),
             }),
         }
     }
@@ -168,28 +171,32 @@ impl Status<HostResponse<String>, ErrorDetails> {
             mta_sts::Error::Dns(err) => match err {
                 mail_auth::Error::DnsRecordNotFound(code) => {
                     Status::PermanentFailure(ErrorDetails {
-                        entity: entity.to_string(),
-                        details: Error::MtaStsError(format!("Record not found: {code:?}")),
+                        entity: entity.into(),
+                        details: Error::MtaStsError(
+                            format!("Record not found: {code:?}").into_boxed_str(),
+                        ),
                     })
                 }
                 mail_auth::Error::InvalidRecordType => Status::PermanentFailure(ErrorDetails {
-                    entity: entity.to_string(),
+                    entity: entity.into(),
                     details: Error::MtaStsError("Failed to parse MTA-STS DNS record.".into()),
                 }),
                 _ => Status::TemporaryFailure(ErrorDetails {
-                    entity: entity.to_string(),
-                    details: Error::MtaStsError(format!("DNS lookup error: {err}")),
+                    entity: entity.into(),
+                    details: Error::MtaStsError(
+                        format!("DNS lookup error: {err}").into_boxed_str(),
+                    ),
                 }),
             },
             mta_sts::Error::Http(err) => {
                 if err.is_timeout() {
                     Status::TemporaryFailure(ErrorDetails {
-                        entity: entity.to_string(),
+                        entity: entity.into(),
                         details: Error::MtaStsError("Timeout fetching policy.".into()),
                     })
                 } else if err.is_connect() {
                     Status::TemporaryFailure(ErrorDetails {
-                        entity: entity.to_string(),
+                        entity: entity.into(),
                         details: Error::MtaStsError("Could not reach policy host.".into()),
                     })
                 } else if err.is_status()
@@ -198,19 +205,21 @@ impl Status<HostResponse<String>, ErrorDetails> {
                         .is_some_and(|s| s == reqwest::StatusCode::NOT_FOUND)
                 {
                     Status::PermanentFailure(ErrorDetails {
-                        entity: entity.to_string(),
+                        entity: entity.into(),
                         details: Error::MtaStsError("Policy not found.".into()),
                     })
                 } else {
                     Status::TemporaryFailure(ErrorDetails {
-                        entity: entity.to_string(),
+                        entity: entity.into(),
                         details: Error::MtaStsError("Failed to fetch policy.".into()),
                     })
                 }
             }
             mta_sts::Error::InvalidPolicy(err) => Status::PermanentFailure(ErrorDetails {
-                entity: entity.to_string(),
-                details: Error::MtaStsError(format!("Failed to parse policy: {err}")),
+                entity: entity.into(),
+                details: Error::MtaStsError(
+                    format!("Failed to parse policy: {err}").into_boxed_str(),
+                ),
             }),
         }
     }
@@ -322,7 +331,7 @@ impl NextHop<'_> {
 
 impl DeliveryResult {
     pub fn domain(
-        status: Status<HostResponse<String>, ErrorDetails>,
+        status: Status<HostResponse<Box<str>>, ErrorDetails>,
         rcpt_idxs: Vec<usize>,
     ) -> Self {
         DeliveryResult::Domain { status, rcpt_idxs }
@@ -335,7 +344,7 @@ impl DeliveryResult {
         }
     }
 
-    pub fn account(status: Status<HostResponse<String>, ErrorDetails>, rcpt_idx: usize) -> Self {
+    pub fn account(status: Status<HostResponse<Box<str>>, ErrorDetails>, rcpt_idx: usize) -> Self {
         DeliveryResult::Account { status, rcpt_idx }
     }
 }

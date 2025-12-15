@@ -5,14 +5,28 @@
  */
 
 use super::{
-    index::{MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, TrimTextValue, VisitText},
-    ingest::{EmailIngest, IngestedEmail, ThreadResult},
+    ingest::{EmailIngest, IngestedEmail},
     metadata::{MessageData, MessageMetadata},
 };
-use crate::mailbox::UidMailbox;
+use crate::{
+    mailbox::UidMailbox,
+    message::{
+        index::extractors::VisitTextArchived,
+        ingest::{MergeThreadIds, ThreadInfo},
+        metadata::{
+            MESSAGE_HAS_ATTACHMENT, MESSAGE_RECEIVED_MASK, MetadataHeaderName, MetadataHeaderValue,
+        },
+    },
+};
 use common::{Server, auth::ResourceToken, storage::index::ObjectIndexBuilder};
-use mail_parser::{HeaderName, HeaderValue, parsers::fields::thread::thread_name};
-use store::write::{BatchBuilder, TaskQueueClass, ValueClass, now};
+use mail_parser::parsers::fields::thread::thread_name;
+use store::write::{
+    BatchBuilder, IndexPropertyClass, SearchIndex, TaskEpoch, TaskQueueClass, ValueClass,
+};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId},
@@ -20,6 +34,7 @@ use types::{
     field::EmailField,
     keyword::Keyword,
 };
+use utils::cheeky_hash::CheekyHash;
 
 pub enum CopyMessageError {
     NotFound,
@@ -55,12 +70,13 @@ impl EmailCopy for Server {
         // Obtain metadata
         let account_id = resource_token.account_id;
         let mut metadata = if let Some(metadata) = self
-            .get_archive_by_property(
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                 from_account_id,
                 Collection::Email,
                 from_message_id,
-                EmailField::Metadata.into(),
-            )
+                EmailField::Metadata,
+            ))
             .await?
         {
             metadata
@@ -71,10 +87,8 @@ impl EmailCopy for Server {
         };
 
         // Check quota
-        match self
-            .has_available_quota(resource_token, metadata.size as u64)
-            .await
-        {
+        let size = metadata.root_part().offset_end;
+        match self.has_available_quota(resource_token, size as u64).await {
             Ok(_) => (),
             Err(err) => {
                 if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota))
@@ -90,64 +104,53 @@ impl EmailCopy for Server {
 
         // Set receivedAt
         if let Some(received_at) = received_at {
-            metadata.received_at = received_at;
+            metadata.rcvd_attach = (metadata.rcvd_attach & MESSAGE_HAS_ATTACHMENT)
+                | (received_at & MESSAGE_RECEIVED_MASK);
         }
 
         // Obtain threadId
-        let mut references = Vec::with_capacity(5);
+        let mut message_ids = Vec::new();
         let mut subject = "";
-        let mut message_id = "";
         for header in &metadata.contents[0].parts[0].headers {
             match &header.name {
-                HeaderName::MessageId => {
+                MetadataHeaderName::MessageId => {
                     header.value.visit_text(|id| {
-                        if !id.is_empty() && id.len() < MAX_ID_LENGTH {
-                            references.push(id.as_bytes());
-                            message_id = id;
+                        if !id.is_empty() {
+                            message_ids.push(CheekyHash::new(id.as_bytes()));
                         }
                     });
                 }
-                HeaderName::InReplyTo | HeaderName::References | HeaderName::ResentMessageId => {
+                MetadataHeaderName::InReplyTo
+                | MetadataHeaderName::References
+                | MetadataHeaderName::ResentMessageId => {
                     header.value.visit_text(|id| {
-                        if !id.is_empty() && id.len() < MAX_ID_LENGTH {
-                            references.push(id.as_bytes());
+                        if !id.is_empty() {
+                            message_ids.push(CheekyHash::new(id.as_bytes()));
                         }
                     });
                 }
-                HeaderName::Subject if subject.is_empty() => {
+                MetadataHeaderName::Subject if subject.is_empty() => {
                     subject = thread_name(match &header.value {
-                        HeaderValue::Text(text) => text.as_ref(),
-                        HeaderValue::TextList(list) if !list.is_empty() => {
+                        MetadataHeaderValue::Text(text) => text.as_ref(),
+                        MetadataHeaderValue::TextList(list) if !list.is_empty() => {
                             list.first().unwrap().as_ref()
                         }
                         _ => "",
-                    })
-                    .trim_text(MAX_SORT_FIELD_LENGTH);
+                    });
                 }
                 _ => (),
             }
         }
 
         // Obtain threadId
-        let (is_new_thread, thread_id) = match self
-            .find_or_merge_thread(account_id, subject, references, None)
+        let thread_result = self
+            .find_thread_id(account_id, subject, &message_ids)
             .await
-            .caused_by(trc::location!())?
-        {
-            ThreadResult::Id(thread_id) => (false, thread_id),
-            ThreadResult::Create => (
-                true,
-                self.store()
-                    .assign_document_ids(account_id, Collection::Thread, 1)
-                    .await
-                    .caused_by(trc::location!())?,
-            ),
-            ThreadResult::Skip => unreachable!(),
-        };
+            .caused_by(trc::location!())?;
 
         // Assign id
         let mut email = IngestedEmail {
-            size: metadata.size as usize,
+            size: size as usize,
             ..Default::default()
         };
         let blob_hash = metadata.blob_hash.clone();
@@ -155,12 +158,13 @@ impl EmailCopy for Server {
         // Assign IMAP UIDs
         let mut mailbox_ids = Vec::with_capacity(mailboxes.len());
         email.imap_uids = Vec::with_capacity(mailboxes.len());
-        for mailbox_id in &mailboxes {
-            let uid = self
-                .assign_imap_uid(account_id, *mailbox_id)
-                .await
-                .caused_by(trc::location!())?;
-            mailbox_ids.push(UidMailbox::new(*mailbox_id, uid));
+        let mut ids = self
+            .assign_email_ids(account_id, mailboxes.iter().copied(), true)
+            .await
+            .caused_by(trc::location!())?;
+        let document_id = ids.next().unwrap();
+        for (uid, mailbox_id) in ids.zip(mailboxes.iter().copied()) {
+            mailbox_ids.push(UidMailbox::new(mailbox_id, uid));
             email.imap_uids.push(uid);
         }
 
@@ -168,44 +172,58 @@ impl EmailCopy for Server {
         let mut batch = BatchBuilder::new();
         batch.with_account_id(account_id);
 
-        if is_new_thread {
+        // Determine thread id
+        let thread_id = if let Some(thread_id) = thread_result.thread_id {
+            thread_id
+        } else {
             batch
                 .with_collection(Collection::Thread)
-                .update_document(thread_id)
+                .with_document(document_id)
                 .log_container_insert(SyncCollection::Thread);
-        }
-
-        let document_id = self
-            .store()
-            .assign_document_ids(account_id, Collection::Email, 1)
-            .await
-            .caused_by(trc::location!())?;
-
+            document_id
+        };
         batch
             .with_collection(Collection::Email)
-            .create_document(document_id)
+            .with_document(document_id)
             .custom(
-                ObjectIndexBuilder::<(), _>::new().with_changes(MessageData {
-                    mailboxes: mailbox_ids,
-                    keywords,
-                    thread_id,
-                }),
+                ObjectIndexBuilder::<(), _>::new()
+                    .with_tenant_id(resource_token.tenant.map(|t| t.id))
+                    .with_changes(MessageData {
+                        mailboxes: mailbox_ids.into_boxed_slice(),
+                        keywords: keywords.into_boxed_slice(),
+                        thread_id,
+                        size,
+                    }),
             )
             .caused_by(trc::location!())?
             .set(
-                ValueClass::TaskQueue(TaskQueueClass::IndexEmail {
-                    due: now(),
-                    hash: metadata.blob_hash.clone(),
+                ValueClass::IndexProperty(IndexPropertyClass::Hash {
+                    property: EmailField::Threading.into(),
+                    hash: thread_result.thread_hash,
+                }),
+                ThreadInfo::serialize(thread_id, &message_ids),
+            )
+            .set(
+                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                    index: SearchIndex::Email,
+                    due: TaskEpoch::now(),
+                    is_insert: true,
                 }),
                 vec![],
             );
+
+        // Merge threads if necessary
+        if let Some(merge_threads) = MergeThreadIds::new(thread_result).serialize() {
+            batch.set(
+                ValueClass::TaskQueue(TaskQueueClass::MergeThreads {
+                    due: TaskEpoch::now(),
+                }),
+                merge_threads,
+            );
+        }
+
         metadata
-            .index(
-                &mut batch,
-                account_id,
-                resource_token.tenant.map(|t| t.id),
-                true,
-            )
+            .index(&mut batch, true)
             .caused_by(trc::location!())?;
 
         // Insert and obtain ids
@@ -216,7 +234,7 @@ impl EmailCopy for Server {
             .caused_by(trc::location!())?
             .last_change_id(account_id)?;
 
-        // Request FTS index
+        // Request indexing
         self.notify_task_queue();
 
         // Update response

@@ -130,7 +130,7 @@ impl Store {
                 last_collection = acl_item.to_collection;
             }
             batch
-                .update_document(acl_item.to_document_id)
+                .with_document(acl_item.to_document_id)
                 .acl_revoke(revoke_account_id);
         }
         if !batch.is_empty() {

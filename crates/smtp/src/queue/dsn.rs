@@ -7,7 +7,7 @@
 use super::spool::SmtpSpool;
 use super::{
     Error, ErrorDetails, HostResponse, Message, MessageSource, QueueEnvelope, RCPT_DSN_SENT,
-    RCPT_STATUS_CHANGED, Recipient, Status,
+    Recipient, Status,
 };
 use crate::queue::{MessageWrapper, UnexpectedResponse};
 use crate::reporting::SmtpReporting;
@@ -39,7 +39,7 @@ impl SendDsn for Server {
             if let Some(dsn) = message.build_dsn(self).await {
                 let mut dsn_message = self.new_message("", message.span_id);
                 dsn_message
-                    .add_recipient(message.message.return_path.as_str(), self)
+                    .add_recipient(message.message.return_path.as_ref(), self)
                     .await;
 
                 // Sign message
@@ -126,6 +126,8 @@ impl SendDsn for Server {
     }
 }
 
+const MAX_HEADER_SIZE: usize = 4096;
+
 impl MessageWrapper {
     pub async fn build_dsn(&mut self, server: &Server) -> Option<Vec<u8>> {
         let config = &server.core.smtp.queue;
@@ -142,7 +144,7 @@ impl MessageWrapper {
             }
             match &rcpt.status {
                 Status::Completed(response) => {
-                    rcpt.flags |= RCPT_DSN_SENT | RCPT_STATUS_CHANGED;
+                    rcpt.flags |= RCPT_DSN_SENT;
                     if !rcpt.has_flag(RCPT_NOTIFY_SUCCESS) {
                         continue;
                     }
@@ -159,7 +161,7 @@ impl MessageWrapper {
                     response.write_dsn_text(&rcpt.address, &mut txt_delay);
                 }
                 Status::PermanentFailure(response) => {
-                    rcpt.flags |= RCPT_DSN_SENT | RCPT_STATUS_CHANGED;
+                    rcpt.flags |= RCPT_DSN_SENT;
                     if !rcpt.has_flag(RCPT_NOTIFY_FAILURE) {
                         continue;
                     }
@@ -310,10 +312,10 @@ impl MessageWrapper {
             .write_dsn_headers(&mut dsn_header, &reporting_mta);
         let dsn = dsn_header + dsn.as_str();
 
-        // Fetch up to 1024 bytes of message headers
+        // Fetch up to MAX_HEADER_SIZE bytes of message headers
         let headers = match server
             .blob_store()
-            .get_blob(self.message.blob_hash.as_slice(), 0..1024)
+            .get_blob(self.message.blob_hash.as_slice(), 0..MAX_HEADER_SIZE)
             .await
         {
             Ok(Some(mut buf)) => {
@@ -336,7 +338,7 @@ impl MessageWrapper {
                         }
                     }
                 }
-                if last_lf < 1024 {
+                if last_lf < MAX_HEADER_SIZE {
                     buf.truncate(last_lf);
                 }
                 String::from_utf8(buf).unwrap_or_default()
@@ -367,7 +369,7 @@ impl MessageWrapper {
             .from((from_name.as_str(), from_addr.as_str()))
             .header(
                 "To",
-                HeaderType::Text(self.message.return_path.as_str().into()),
+                HeaderType::Text(self.message.return_path.as_ref().into()),
             )
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
             .message_id(format!("<{}@{}>", make_boundary("."), reporting_mta))
@@ -423,7 +425,7 @@ impl MessageWrapper {
     }
 }
 
-impl HostResponse<String> {
+impl HostResponse<Box<str>> {
     fn write_dsn_text(&self, addr: &str, dsn: &mut String) {
         let _ = write!(
             dsn,
@@ -462,7 +464,7 @@ impl UnexpectedResponse {
 
 impl ErrorDetails {
     fn write_dsn_text(&self, addr: &str, dsn: &mut String) {
-        let entity = self.entity.as_str();
+        let entity = self.entity.as_ref();
         match &self.details {
             Error::UnexpectedResponse(response) => {
                 response.write_dsn_text(entity, addr, dsn);
@@ -569,7 +571,7 @@ impl<T, E> Status<T, E> {
     }
 }
 
-impl Status<HostResponse<String>, ErrorDetails> {
+impl Status<HostResponse<Box<str>>, ErrorDetails> {
     fn write_dsn(&self, dsn: &mut String) {
         self.write_dsn_action(dsn);
         self.write_dsn_status(dsn);
@@ -632,7 +634,7 @@ impl Status<HostResponse<String>, ErrorDetails> {
     }
 }
 
-impl WriteDsn for Response<String> {
+impl WriteDsn for Response<Box<str>> {
     fn write_dsn_status(&self, dsn: &mut String) {
         if self.esc[0] > 0 {
             let _ = write!(dsn, "{}.{}.{}", self.esc[0], self.esc[1], self.esc[2]);

@@ -10,6 +10,7 @@ use crate::{
 use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
+    mailbox::JUNK_ID,
     message::ingest::{EmailIngest, IngestEmail, IngestSource},
 };
 use http_proto::HttpSessionData;
@@ -22,7 +23,7 @@ use jmap_proto::{
 };
 use mail_parser::MessageParser;
 use std::future::Future;
-use types::{acl::Acl, id::Id};
+use types::{acl::Acl, id::Id, keyword::Keyword};
 use utils::map::vec_map::VecMap;
 
 pub trait EmailImport: Sync + Send {
@@ -77,7 +78,6 @@ impl EmailImport for Server {
             created: VecMap::with_capacity(request.emails.len()),
             not_created: VecMap::new(),
         };
-        let can_train_spam = self.email_bayes_can_train(access_token);
 
         'outer: for (id, email) in request.emails {
             // Validate mailboxIds
@@ -148,13 +148,18 @@ impl EmailImport for Server {
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
                     message: MessageParser::new().parse(&raw_message),
+                    blob_hash: Some(&blob_id.hash),
                     access_token: import_access_token.as_deref().unwrap_or(access_token),
+                    source: IngestSource::Jmap {
+                        train_classifier: email
+                            .keywords
+                            .iter()
+                            .any(|k| matches!(k, Keyword::Junk | Keyword::NotJunk))
+                            || mailbox_ids.contains(&JUNK_ID),
+                    },
                     mailbox_ids,
                     keywords: email.keywords,
                     received_at: email.received_at.map(|r| r.into()),
-                    source: IngestSource::Jmap,
-                    spam_classify: false,
-                    spam_train: can_train_spam,
                     session_id: session.session_id,
                 })
                 .await

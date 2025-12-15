@@ -301,6 +301,18 @@ pub async fn test(params: &mut JMAPTest) {
         account
             .jmap_destroy(
                 MethodObject::FileNode,
+                [&file_id],
+                [("onDestroyRemoveChildren", true)],
+            )
+            .await
+            .destroyed()
+            .collect::<AHashSet<_>>(),
+        [file_id.as_str(),].into_iter().collect::<AHashSet<_>>()
+    );
+    assert_eq!(
+        account
+            .jmap_destroy(
+                MethodObject::FileNode,
                 [&root_folder_id],
                 [("onDestroyRemoveChildren", true)],
             )
@@ -308,7 +320,6 @@ pub async fn test(params: &mut JMAPTest) {
             .destroyed()
             .collect::<AHashSet<_>>(),
         [
-            file_id.as_str(),
             sub_sub_folder_id.as_str(),
             sub_folder_id.as_str(),
             root_folder_id.as_str()

@@ -86,11 +86,11 @@ impl UndoStatus {
         }
     }
 
-    pub fn as_index(&self) -> &'static str {
+    pub fn as_index(&self) -> u8 {
         match self {
-            UndoStatus::Pending => "p",
-            UndoStatus::Final => "f",
-            UndoStatus::Canceled => "c",
+            UndoStatus::Pending => b'p',
+            UndoStatus::Final => b'f',
+            UndoStatus::Canceled => b'c',
         }
     }
 }
@@ -104,11 +104,11 @@ impl ArchivedUndoStatus {
         }
     }
 
-    pub fn as_index(&self) -> &'static str {
+    pub fn as_index(&self) -> u8 {
         match self {
-            ArchivedUndoStatus::Pending => "p",
-            ArchivedUndoStatus::Final => "f",
-            ArchivedUndoStatus::Canceled => "c",
+            ArchivedUndoStatus::Pending => b'p',
+            ArchivedUndoStatus::Final => b'f',
+            ArchivedUndoStatus::Canceled => b'c',
         }
     }
 }

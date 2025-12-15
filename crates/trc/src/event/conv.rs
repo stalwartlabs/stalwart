@@ -35,6 +35,12 @@ impl From<CompactString> for Value {
     }
 }
 
+impl From<Box<str>> for Value {
+    fn from(value: Box<str>) -> Self {
+        Self::String(CompactString::from(value))
+    }
+}
+
 impl From<u64> for Value {
     fn from(value: u64) -> Self {
         Self::UInt(value)
@@ -50,6 +56,12 @@ impl From<i64> for Value {
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Self::Float(value)
+    }
+}
+
+impl From<f32> for Value {
+    fn from(value: f32) -> Self {
+        Self::Float(value.into())
     }
 }
 

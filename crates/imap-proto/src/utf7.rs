@@ -158,6 +158,7 @@ mod tests {
                 ),
             ),
             ("Test-ąęć-Test", "Test-ąęć-Test"),
+            (r#"&A8g- "&A9QD1APUA9gD3APcA-+""#, "ψ \"ϔϔϔϘϜϜ+\""),
         ] {
             assert_eq!(
                 super::utf7_decode(input).expect(input),

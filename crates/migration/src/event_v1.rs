@@ -7,14 +7,14 @@
 use common::{DavName, Server};
 use groupware::calendar::{AlarmDelta, CalendarEvent, CalendarEventData, ComponentTimeRange};
 use store::{
-    Serialize,
+    Serialize, ValueKey,
     rand::{self, seq::SliceRandom},
-    write::{Archiver, BatchBuilder, serialize::rkyv_deserialize},
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
 use types::{collection::Collection, dead_property::DeadProperty, field::Field};
 
-use crate::event_v2::migrate_icalendar_v02;
+use crate::{event_v2::migrate_icalendar_v02, get_document_ids};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -62,8 +62,7 @@ pub struct AlarmV1 {
 
 pub(crate) async fn migrate_calendar_events_v012(server: &Server) -> trc::Result<()> {
     // Obtain email ids
-    let account_ids = server
-        .get_document_ids(u32::MAX, Collection::Principal)
+    let account_ids = get_document_ids(server, u32::MAX, Collection::Principal)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -77,8 +76,7 @@ pub(crate) async fn migrate_calendar_events_v012(server: &Server) -> trc::Result
     account_ids.shuffle(&mut rand::rng());
 
     for account_id in account_ids {
-        let document_ids = server
-            .get_document_ids(account_id, Collection::CalendarEvent)
+        let document_ids = get_document_ids(server, account_id, Collection::CalendarEvent)
             .await
             .caused_by(trc::location!())?
             .unwrap_or_default();
@@ -89,7 +87,12 @@ pub(crate) async fn migrate_calendar_events_v012(server: &Server) -> trc::Result
 
         for document_id in document_ids.iter() {
             let Some(archive) = server
-                .get_archive(account_id, Collection::CalendarEvent, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
             else {
@@ -121,7 +124,7 @@ pub(crate) async fn migrate_calendar_events_v012(server: &Server) -> trc::Result
                     batch
                         .with_account_id(account_id)
                         .with_collection(Collection::CalendarEvent)
-                        .update_document(document_id)
+                        .with_document(document_id)
                         .set(
                             Field::ARCHIVE,
                             Archiver::new(new_event)

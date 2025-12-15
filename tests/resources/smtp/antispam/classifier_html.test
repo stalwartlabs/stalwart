@@ -1,0 +1,695 @@
+<html>hello<br/>world<br/></html>
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 1819112552,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "hello"
+  },
+  {
+    "type": "StartTag",
+    "name": 29282,
+    "attributes": [],
+    "is_self_closing": true
+  },
+  {
+    "type": "Text",
+    "text": "world"
+  },
+  {
+    "type": "StartTag",
+    "name": 29282,
+    "attributes": [],
+    "is_self_closing": true
+  },
+  {
+    "type": "EndTag",
+    "name": 1819112552
+  }
+]
+<!-- NEXT TEST -->
+<html>using &lt;><br/></html>
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 1819112552,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "using <>"
+  },
+  {
+    "type": "StartTag",
+    "name": 29282,
+    "attributes": [],
+    "is_self_closing": true
+  },
+  {
+    "type": "EndTag",
+    "name": 1819112552
+  }
+]
+<!-- NEXT TEST -->
+test <not br/>tag<br />
+<!-- EXPECT -->
+[
+  {
+    "type": "Text",
+    "text": "test"
+  },
+  {
+    "type": "StartTag",
+    "name": 7630702,
+    "attributes": [
+      [
+        29282,
+        null
+      ]
+    ],
+    "is_self_closing": true
+  },
+  {
+    "type": "Text",
+    "text": " tag"
+  },
+  {
+    "type": "StartTag",
+    "name": 29282,
+    "attributes": [],
+    "is_self_closing": true
+  }
+]
+<!-- NEXT TEST -->
+<>< ><tag
+/>>hello    world< br 
+ />
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 6775156,
+    "attributes": [],
+    "is_self_closing": true
+  },
+  {
+    "type": "Text",
+    "text": ">hello world"
+  },
+  {
+    "type": "StartTag",
+    "name": 29282,
+    "attributes": [],
+    "is_self_closing": true
+  }
+]
+<!-- NEXT TEST -->
+<head><title>ignore head</title><not head>xyz</not head></head><h1>&lt;body&gt;</h1>
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 1684104552,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "StartTag",
+    "name": 435611265396,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "ignore head"
+  },
+  {
+    "type": "EndTag",
+    "name": 435611265396
+  },
+  {
+    "type": "StartTag",
+    "name": 7630702,
+    "attributes": [
+      [
+        1684104552,
+        null
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "xyz"
+  },
+  {
+    "type": "EndTag",
+    "name": 7630702
+  },
+  {
+    "type": "EndTag",
+    "name": 1684104552
+  },
+  {
+    "type": "StartTag",
+    "name": 12648,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "<body>"
+  },
+  {
+    "type": "EndTag",
+    "name": 12648
+  }
+]
+<!-- NEXT TEST -->
+<p>what is &heartsuit;?</p><p>&#x000DF;&Abreve;&#914;&gamma; don&apos;t hurt me.</p>
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 112,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "what is ♥?"
+  },
+  {
+    "type": "EndTag",
+    "name": 112
+  },
+  {
+    "type": "StartTag",
+    "name": 112,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "ßĂΒγ don't hurt me."
+  },
+  {
+    "type": "EndTag",
+    "name": 112
+  }
+]
+<!-- NEXT TEST -->
+<!--[if mso]><style type="text/css">body, table, td, a, p, span, ul, li {font-family: Arial, sans-serif!important;}</style><![endif]-->this is <!-- <> < < < < ignore  > -> here -->the actual<!--> text
+<!-- EXPECT -->
+[
+  {
+    "type": "Comment",
+    "text": "!--[if mso]><style type=\"text/css\">body, table, td, a, p, span, ul, li {font-family: Arial, sans-serif!important;}</style><![endif]--"
+  },
+  {
+    "type": "Text",
+    "text": "this is"
+  },
+  {
+    "type": "Comment",
+    "text": "!-- <> < < < < ignore  > -> here --"
+  },
+  {
+    "type": "Text",
+    "text": " the actual"
+  },
+  {
+    "type": "Comment",
+    "text": "!--"
+  },
+  {
+    "type": "Text",
+    "text": " text"
+  }
+]
+<!-- NEXT TEST -->
+   < p >  hello < / p > < p > world < / p >   !!! < br > 
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 112,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "hello"
+  },
+  {
+    "type": "EndTag",
+    "name": 112
+  },
+  {
+    "type": "StartTag",
+    "name": 112,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": " world"
+  },
+  {
+    "type": "EndTag",
+    "name": 112
+  },
+  {
+    "type": "Text",
+    "text": " !!!"
+  },
+  {
+    "type": "StartTag",
+    "name": 29282,
+    "attributes": [],
+    "is_self_closing": false
+  }
+]
+<!-- NEXT TEST -->
+ <p>please unsubscribe <a href=#>here</a>.</p> 
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 112,
+    "attributes": [],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "please unsubscribe"
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "#"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": " here"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "Text",
+    "text": "."
+  },
+  {
+    "type": "EndTag",
+    "name": 112
+  }
+]
+<!-- NEXT TEST -->
+<a href="a">text</a><a href ="b">text</a><a href= "c">text</a><a href = "d">text</a><  a href = "e" >text</a><a hrefer = "ignore" >text</a>< anchor href = "x">text</a>
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "a"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "b"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "c"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "d"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "e"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        125779835187816,
+        "ignore"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 125822818283105,
+    "attributes": [
+      [
+        1717924456,
+        "x"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  }
+]
+<!-- NEXT TEST -->
+<a href=a>text</a><a href =b>text</a><a href= c>text</a><a href = d>text</a>< a href  =  e >text</a><a hrefer = ignore>text</a><anchor href=x>text</a>
+<!-- EXPECT -->
+[
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "a"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "b"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "c"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "d"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "e"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        125779835187816,
+        "ignore"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 125822818283105,
+    "attributes": [
+      [
+        1717924456,
+        "x"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  }
+]
+<!-- NEXT TEST -->
+<!-- <a href=a>text</a><a href =b>text</a><a href= c>--text</a>--><a href = "hello world">text</a>< a href  =  test ignore>text</a>< a href  =  fudge href ignore>text</a><a href=foobar> a href = "unknown" </a>
+<!-- EXPECT -->
+[
+  {
+    "type": "Comment",
+    "text": "!-- <a href=a>text</a><a href =b>text</a><a href= c>--text</a>--"
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "hello world"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "test"
+      ],
+      [
+        111542170183529,
+        null
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "fudge"
+      ],
+      [
+        1717924456,
+        null
+      ],
+      [
+        111542170183529,
+        null
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "text"
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  },
+  {
+    "type": "StartTag",
+    "name": 97,
+    "attributes": [
+      [
+        1717924456,
+        "foobar"
+      ]
+    ],
+    "is_self_closing": false
+  },
+  {
+    "type": "Text",
+    "text": "a href = \"unknown\""
+  },
+  {
+    "type": "EndTag",
+    "name": 97
+  }
+]
+<!-- NEXT TEST -->

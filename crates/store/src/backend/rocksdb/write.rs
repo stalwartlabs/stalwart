@@ -7,10 +7,11 @@
 use super::{CF_INDEXES, CF_LOGS, CfHandle, RocksDbStore, into_error};
 use crate::{
     Deserialize, IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER,
-    SUBSPACE_QUOTA, U64_LEN,
+    SUBSPACE_QUOTA,
     backend::deserialize_i64_le,
     write::{
-        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, Operation, ValueClass, ValueOp,
+        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
+        ValueClass, ValueOp,
     },
 };
 use rand::Rng;
@@ -173,7 +174,7 @@ impl RocksDBTransaction<'_, '_> {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.last_change_id(account_id)?;
+                        change_id = result.set_current_change_id(account_id)?;
                     }
                 }
                 Operation::Collection {
@@ -191,16 +192,30 @@ impl RocksDBTransaction<'_, '_> {
                     let cf = self.db.subspace_handle(class.subspace(collection));
 
                     match op {
-                        ValueOp::Set {
-                            value,
-                            version_offset,
-                        } => {
-                            if let Some(offset) = version_offset {
-                                value[*offset..*offset + U64_LEN]
-                                    .copy_from_slice(&change_id.to_be_bytes());
-                            }
+                        ValueOp::Set(value) => {
+                            txn.put_cf(&cf, &key, value)?;
+                        }
+                        ValueOp::SetFnc(set_op) => {
+                            let value = (set_op.fnc)(&set_op.params, &result)?;
 
                             txn.put_cf(&cf, &key, value)?;
+                        }
+                        ValueOp::MergeFnc(merge_op) => {
+                            let merge_result = (merge_op.fnc)(
+                                &merge_op.params,
+                                &result,
+                                txn.get_pinned_for_update_cf(&cf, &key, true)?.as_deref(),
+                            )?;
+
+                            match merge_result {
+                                MergeResult::Update(value) => {
+                                    txn.put_cf(&cf, &key, value)?;
+                                }
+                                MergeResult::Delete => {
+                                    txn.delete_cf(&cf, &key)?;
+                                }
+                                MergeResult::Skip => (),
+                            }
                         }
                         ValueOp::AtomicAdd(by) => {
                             txn.merge_cf(&cf, &key, &by.to_le_bytes()[..])?;
@@ -221,12 +236,6 @@ impl RocksDBTransaction<'_, '_> {
                             txn.put_cf(&cf, &key, &num.to_le_bytes()[..])?;
                             result.push_counter_id(num);
                         }
-                        ValueOp::Merge(merge) => {
-                            let value = (merge.fnc)(
-                                txn.get_pinned_for_update_cf(&cf, &key, true)?.as_deref(),
-                            )?;
-                            txn.put_cf(&cf, &key, value)?;
-                        }
                         ValueOp::Clear => {
                             txn.delete_cf(&cf, &key)?;
                         }
@@ -246,16 +255,6 @@ impl RocksDBTransaction<'_, '_> {
                         txn.put_cf(&self.cf_indexes, &key, [])?;
                     } else {
                         txn.delete_cf(&self.cf_indexes, &key)?;
-                    }
-                }
-                Operation::Bitmap { class, set } => {
-                    let cf = self.db.subspace_handle(class.subspace());
-                    let key = class.serialize(account_id, collection, document_id, 0);
-
-                    if *set {
-                        txn.put_cf(&cf, &key, [])?;
-                    } else {
-                        txn.delete_cf(&cf, &key)?;
                     }
                 }
                 Operation::Log { collection, set } => {

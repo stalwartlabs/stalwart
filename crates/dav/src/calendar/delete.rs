@@ -22,11 +22,16 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use store::write::BatchBuilder;
+use store::write::{BatchBuilder, ValueClass};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::PrincipalField,
 };
 
 pub(crate) trait CalendarDeleteRequestHandler: Sync + Send {
@@ -87,7 +92,12 @@ impl CalendarDeleteRequestHandler for Server {
             }
 
             let calendar_ = self
-                .get_archive(account_id, Collection::Calendar, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Calendar,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -124,7 +134,7 @@ impl CalendarDeleteRequestHandler for Server {
             )
             .await?;
 
-            // Delete addresscalendar and events
+            // Delete calendar and events
             DestroyArchive(calendar)
                 .delete_with_events(
                     self,
@@ -142,6 +152,25 @@ impl CalendarDeleteRequestHandler for Server {
                 )
                 .await
                 .caused_by(trc::location!())?;
+
+            // Reset default calendar id
+            let default_calendar_id = self
+                .store()
+                .get_value::<u32>(ValueKey {
+                    account_id,
+                    collection: Collection::Principal.into(),
+                    document_id: 0,
+                    class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+                })
+                .await
+                .caused_by(trc::location!())?;
+            if default_calendar_id.is_some_and(|id| id == document_id) {
+                batch
+                    .with_account_id(account_id)
+                    .with_collection(Collection::Principal)
+                    .with_document(0)
+                    .clear(PrincipalField::DefaultCalendarId);
+            }
         } else {
             // Validate ACL
             let calendar_id = delete_resource.parent_id().unwrap();
@@ -152,7 +181,12 @@ impl CalendarDeleteRequestHandler for Server {
             }
 
             let event_ = self
-                .get_archive(account_id, Collection::CalendarEvent, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -200,10 +234,7 @@ impl CalendarDeleteRequestHandler for Server {
         }
 
         self.commit_batch(batch).await.caused_by(trc::location!())?;
-
-        if send_itip {
-            self.notify_task_queue();
-        }
+        self.notify_task_queue();
 
         Ok(HttpResponse::new(StatusCode::NO_CONTENT))
     }

@@ -15,6 +15,7 @@ use crate::{
         inbound::TestMessage,
         session::{TestSession, VerifyResponse, load_test_message},
     },
+    store::cleanup::store_assert_is_empty,
 };
 use smtp::core::Session;
 
@@ -233,8 +234,5 @@ async fn data() {
 
     // Make sure store is empty
     qr.clear_queue(&test.server).await;
-    test.server
-        .store()
-        .assert_is_empty(test.server.blob_store().clone())
-        .await;
+    store_assert_is_empty(test.server.store(), test.server.blob_store().clone(), false).await;
 }

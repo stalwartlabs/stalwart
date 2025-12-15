@@ -55,7 +55,9 @@ pub async fn test(params: &mut JMAPTest) {
     let (stream_tx, mut stream_rx) = mpsc::channel::<WebSocketMessage>(100);
     tokio::spawn(async move {
         while let Some(change) = ws_stream.next().await {
-            stream_tx.send(change.unwrap()).await.unwrap();
+            if stream_tx.send(change.unwrap()).await.is_err() {
+                break;
+            }
         }
     });
     client_ws

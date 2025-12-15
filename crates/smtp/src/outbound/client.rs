@@ -128,7 +128,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
     pub async fn read_greeting(
         &mut self,
         hostname: &str,
-    ) -> Result<(), Status<HostResponse<String>, ErrorDetails>> {
+    ) -> Result<(), Status<HostResponse<Box<str>>, ErrorDetails>> {
         tokio::time::timeout(self.timeout, self.read())
             .await
             .map_err(|_| Status::timeout(hostname, "reading greeting"))?
@@ -140,7 +140,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         &mut self,
         hostname: &str,
         bdat_cmd: &Option<String>,
-    ) -> Result<Response<String>, Status<HostResponse<String>, ErrorDetails>> {
+    ) -> Result<Response<String>, Status<HostResponse<Box<str>>, ErrorDetails>> {
         tokio::time::timeout(self.timeout, self.read())
             .await
             .map_err(|_| Status::timeout(hostname, "reading SMTP DATA response"))?
@@ -153,7 +153,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         &mut self,
         hostname: &str,
         num_responses: usize,
-    ) -> Result<Vec<Response<String>>, Status<HostResponse<String>, ErrorDetails>> {
+    ) -> Result<Vec<Response<Box<str>>>, Status<HostResponse<Box<str>>, ErrorDetails>> {
         tokio::time::timeout(self.timeout, async { self.read_many(num_responses).await })
             .await
             .map_err(|_| Status::timeout(hostname, "reading LMTP DATA responses"))?
@@ -175,7 +175,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         message: &MessageWrapper,
         bdat_cmd: &Option<String>,
         params: &SessionParams<'_>,
-    ) -> Result<(), Status<HostResponse<String>, ErrorDetails>> {
+    ) -> Result<(), Status<HostResponse<Box<str>>, ErrorDetails>> {
         match params
             .server
             .blob_store()
@@ -227,7 +227,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                     CausedBy = trc::location!()
                 );
                 Err(Status::TemporaryFailure(ErrorDetails {
-                    entity: "localhost".to_string(),
+                    entity: "localhost".into(),
                     details: Error::Io("Queue system error.".into()),
                 }))
             }
@@ -239,7 +239,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                 );
 
                 Err(Status::TemporaryFailure(ErrorDetails {
-                    entity: "localhost".to_string(),
+                    entity: "localhost".into(),
                     details: Error::Io("Queue system error.".into()),
                 }))
             }
@@ -249,7 +249,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
     pub async fn say_helo(
         &mut self,
         params: &SessionParams<'_>,
-    ) -> Result<EhloResponse<String>, Status<HostResponse<String>, ErrorDetails>> {
+    ) -> Result<EhloResponse<String>, Status<HostResponse<Box<str>>, ErrorDetails>> {
         let cmd = if params.is_smtp {
             format!("EHLO {}\r\n", params.local_hostname)
         } else {
@@ -377,7 +377,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         }
     }
 
-    pub async fn read_many(&mut self, num: usize) -> mail_send::Result<Vec<Response<String>>> {
+    pub async fn read_many(&mut self, num: usize) -> mail_send::Result<Vec<Response<Box<str>>>> {
         let mut buf = vec![0u8; 1024];
         let mut response = Vec::with_capacity(num);
         let mut parser = ResponseReceiver::default();
@@ -398,7 +398,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                 loop {
                     match parser.parse(&mut iter) {
                         Ok(reply) => {
-                            response.push(reply);
+                            response.push(reply.into_box());
                             if response.len() != num {
                                 parser.reset();
                             } else {
@@ -590,7 +590,7 @@ impl SmtpClient<TcpStream> {
                         }
                     } else {
                         StartTlsResult::Unavailable {
-                            response: response.into(),
+                            response: response.into_box().into(),
                             smtp_client: self,
                         }
                     }
@@ -621,9 +621,23 @@ pub enum StartTlsResult {
         error: mail_send::Error,
     },
     Unavailable {
-        response: Option<Response<String>>,
+        response: Option<Response<Box<str>>>,
         smtp_client: SmtpClient<TcpStream>,
     },
+}
+
+pub(crate) trait BoxResponse {
+    fn into_box(self) -> Response<Box<str>>;
+}
+
+impl BoxResponse for Response<String> {
+    fn into_box(self) -> Response<Box<str>> {
+        Response {
+            code: self.code,
+            esc: self.esc,
+            message: self.message.into_boxed_str(),
+        }
+    }
 }
 
 pub(crate) fn from_mail_send_error(error: &mail_send::Error) -> trc::Error {
@@ -654,7 +668,7 @@ pub(crate) fn from_mail_send_error(error: &mail_send::Error) -> trc::Error {
     }
 }
 
-pub(crate) fn from_error_status(err: &Status<HostResponse<String>, ErrorDetails>) -> trc::Error {
+pub(crate) fn from_error_status(err: &Status<HostResponse<Box<str>>, ErrorDetails>) -> trc::Error {
     match err {
         Status::Scheduled | Status::Completed(_) => {
             trc::EventType::Smtp(trc::SmtpEvent::Error).into_err()

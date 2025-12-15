@@ -47,7 +47,11 @@ impl MailboxFnc for Server {
                 SpecialUse::Drafts => DRAFTS_ID,
                 SpecialUse::Sent => SENT_ID,
                 SpecialUse::Archive => ARCHIVE_ID,
-                SpecialUse::None | SpecialUse::Important => {
+                SpecialUse::None
+                | SpecialUse::Important
+                | SpecialUse::Memos
+                | SpecialUse::Scheduled
+                | SpecialUse::Snoozed => {
                     last_document_id += 1;
                     last_document_id
                 }
@@ -59,7 +63,7 @@ impl MailboxFnc for Server {
                 object.add_subscriber(account_id);
             }
             batch
-                .create_document(document_id)
+                .with_document(document_id)
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(object))
                 .caused_by(trc::location!())?;
         }
@@ -137,7 +141,7 @@ impl MailboxFnc for Server {
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::Mailbox)
-                    .create_document(document_id)
+                    .with_document(document_id)
                     .custom(
                         ObjectIndexBuilder::<(), _>::new()
                             .with_changes(Mailbox::new(name).with_parent_id(next_parent_id)),

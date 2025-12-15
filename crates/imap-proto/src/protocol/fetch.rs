@@ -7,6 +7,9 @@
 use std::borrow::Cow;
 
 use mail_parser::DateTime;
+use utils::chained_bytes::SliceRange;
+
+use crate::protocol::literal_string_slice;
 
 use super::{
     Flag, ImapResponse, Sequence, literal_string, quoted_or_literal_string,
@@ -110,16 +113,16 @@ pub enum DataItem<'x> {
         uid: u32,
     },
     Rfc822 {
-        contents: Cow<'x, [u8]>,
+        contents: SliceRange<'x>,
     },
     Rfc822Header {
-        contents: Cow<'x, [u8]>,
+        contents: SliceRange<'x>,
     },
     Rfc822Size {
         size: usize,
     },
     Rfc822Text {
-        contents: Cow<'x, [u8]>,
+        contents: SliceRange<'x>,
     },
     Preview {
         contents: Option<Cow<'x, [u8]>>,
@@ -807,11 +810,11 @@ impl DataItem<'_> {
             }
             DataItem::Rfc822 { contents } => {
                 buf.extend_from_slice(b"RFC822 ");
-                literal_string(buf, contents);
+                literal_string_slice(buf, contents);
             }
             DataItem::Rfc822Header { contents } => {
                 buf.extend_from_slice(b"RFC822.HEADER ");
-                literal_string(buf, contents);
+                literal_string_slice(buf, contents);
             }
             DataItem::Rfc822Size { size } => {
                 buf.extend_from_slice(b"RFC822.SIZE ");
@@ -819,7 +822,7 @@ impl DataItem<'_> {
             }
             DataItem::Rfc822Text { contents } => {
                 buf.extend_from_slice(b"RFC822.TEXT ");
-                literal_string(buf, contents);
+                literal_string_slice(buf, contents);
             }
             DataItem::Preview { contents } => {
                 buf.extend_from_slice(b"PREVIEW ");
@@ -917,6 +920,7 @@ impl ImapResponse for Response<'_> {
 mod tests {
 
     use mail_parser::DateTime;
+    use utils::chained_bytes::SliceRange;
 
     use crate::protocol::{Flag, ImapResponse};
 
@@ -1382,10 +1386,10 @@ mod tests {
                             super::DataItem::Uid { uid: 983 },
                             super::DataItem::Rfc822Size { size: 443 },
                             super::DataItem::Rfc822Text {
-                                contents: b"hi"[..].into()
+                                contents: SliceRange::Single(&b"hi"[..]),
                             },
                             super::DataItem::Rfc822Header {
-                                contents: b"header"[..].into()
+                                contents: SliceRange::Single(&b"header"[..]),
                             },
                         ],
                     }],

@@ -59,7 +59,7 @@ impl QueuedMessage {
                         QueueId = message.queue_id,
                         QueueName = message.queue_name.to_string(),
                         From = if !message.message.return_path.is_empty() {
-                            trc::Value::String(message.message.return_path.as_str().into())
+                            trc::Value::String(message.message.return_path.as_ref().into())
                         } else {
                             trc::Value::String("<>".into())
                         },
@@ -202,7 +202,7 @@ impl QueuedMessage {
                     {
                         rcpt.retry.due = retry_at;
                         rcpt.status = Status::TemporaryFailure(ErrorDetails {
-                            entity: "localhost".to_string(),
+                            entity: "localhost".into(),
                             details: Error::RateLimited,
                         });
                     }
@@ -553,7 +553,7 @@ impl QueuedMessage {
 
                     delivery_results.push(DeliveryResult::domain(
                         Status::PermanentFailure(ErrorDetails {
-                            entity: domain.to_string(),
+                            entity: domain.into(),
                             details: Error::DnsError(
                                 "Domain does not accept messages (null MX)".into(),
                             ),
@@ -565,7 +565,7 @@ impl QueuedMessage {
             }
 
             // Try delivering message
-            let mut last_status: Status<HostResponse<String>, ErrorDetails> = Status::Scheduled;
+            let mut last_status: Status<HostResponse<Box<str>>, ErrorDetails> = Status::Scheduled;
             'next_host: for remote_host in &remote_hosts {
                 // Validate MTA-STS
                 envelope.mx = remote_host.hostname();
@@ -603,11 +603,11 @@ impl QueuedMessage {
 
                         if strict {
                             last_status = Status::PermanentFailure(ErrorDetails {
-                                entity: envelope.mx.to_string(),
-                                details: Error::MtaStsError(format!(
-                                    "MX {:?} not authorized by policy.",
-                                    envelope.mx
-                                )),
+                                entity: envelope.mx.into(),
+                                details: Error::MtaStsError(
+                                    format!("MX {:?} not authorized by policy.", envelope.mx)
+                                        .into_boxed_str(),
+                                ),
                             });
                             continue 'next_host;
                         }
@@ -721,7 +721,7 @@ impl QueuedMessage {
 
                                 if strict {
                                     last_status = Status::PermanentFailure(ErrorDetails {
-                                        entity: envelope.mx.to_string(),
+                                        entity: envelope.mx.into(),
                                         details: Error::DaneError(
                                             "No valid TLSA records were found".into(),
                                         ),
@@ -1103,7 +1103,7 @@ impl QueuedMessage {
                                         Code = response.as_ref().map(|r| r.code()),
                                         Details = response
                                             .as_ref()
-                                            .map(|r| r.message().as_str())
+                                            .map(|r| r.message().as_ref())
                                             .unwrap_or("STARTTLS was not advertised by host")
                                             .to_string(),
                                         Elapsed = time.elapsed(),
@@ -1356,7 +1356,7 @@ impl MessageWrapper {
                     );
 
                     rcpt.status = Status::PermanentFailure(ErrorDetails {
-                        entity: rcpt.domain_part().to_string(),
+                        entity: rcpt.domain_part().into(),
                         details: Error::Io(
                             "Message expired without any delivery attempts made.".into(),
                         ),
@@ -1379,7 +1379,7 @@ impl MessageWrapper {
 
     pub async fn set_rcpt_status(
         &mut self,
-        status: Status<HostResponse<String>, ErrorDetails>,
+        status: Status<HostResponse<Box<str>>, ErrorDetails>,
         rcpt_idx: usize,
         server: &Server,
     ) {
@@ -1408,7 +1408,7 @@ impl MessageWrapper {
         let rcpt = &mut self.message.recipients[rcpt_idx];
         rcpt.retry.due = retry_at;
         rcpt.status = Status::TemporaryFailure(ErrorDetails {
-            entity: "localhost".to_string(),
+            entity: "localhost".into(),
             details: Error::RateLimited,
         });
     }

@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use std::{cmp::Ordering, fmt::Display};
 use types::keyword::{ArchivedKeyword, Keyword};
+use utils::chained_bytes::SliceRange;
 
 pub mod acl;
 pub mod append;
@@ -198,6 +199,13 @@ pub fn literal_string(buf: &mut Vec<u8>, text: &[u8]) {
     buf.extend_from_slice(text);
 }
 
+pub fn literal_string_slice(buf: &mut Vec<u8>, text: &SliceRange<'_>) {
+    buf.push(b'{');
+    buf.extend_from_slice(text.len().to_string().as_bytes());
+    buf.extend_from_slice(b"}\r\n");
+    buf.extend(*text);
+}
+
 pub fn quoted_timestamp(buf: &mut Vec<u8>, timestamp: i64) {
     buf.push(b'"');
     buf.extend_from_slice(
@@ -238,7 +246,24 @@ pub enum Flag {
     Deleted,
     Forwarded,
     MDNSent,
-    Keyword(String),
+    Autosent,
+    CanUnsubscribe,
+    Followed,
+    HasAttachment,
+    HasMemo,
+    HasNoAttachment,
+    Imported,
+    IsTrusted,
+    MailFlagBit0,
+    MailFlagBit1,
+    MailFlagBit2,
+    MaskedEmail,
+    Memo,
+    Muted,
+    New,
+    Notify,
+    Unsubscribed,
+    Keyword(Box<str>),
 }
 
 impl Flag {
@@ -256,6 +281,23 @@ impl Flag {
             Flag::Deleted => b"\\Deleted",
             Flag::Forwarded => b"$Forwarded",
             Flag::MDNSent => b"$MDNSent",
+            Flag::Autosent => b"$autosent",
+            Flag::CanUnsubscribe => b"$canunsubscribe",
+            Flag::Followed => b"$followed",
+            Flag::HasAttachment => b"$hasattachment",
+            Flag::HasMemo => b"$hasmemo",
+            Flag::HasNoAttachment => b"$hasnoattachment",
+            Flag::Imported => b"$imported",
+            Flag::IsTrusted => b"$istrusted",
+            Flag::MailFlagBit0 => b"$MailFlagBit0",
+            Flag::MailFlagBit1 => b"$MailFlagBit1",
+            Flag::MailFlagBit2 => b"$MailFlagBit2",
+            Flag::MaskedEmail => b"$maskedemail",
+            Flag::Memo => b"$memo",
+            Flag::Muted => b"$muted",
+            Flag::New => b"$new",
+            Flag::Notify => b"$notify",
+            Flag::Unsubscribed => b"$unsubscribed",
             Flag::Keyword(keyword) => keyword.as_bytes(),
         });
     }
@@ -276,6 +318,23 @@ impl From<Keyword> for Flag {
             Keyword::Deleted => Flag::Deleted,
             Keyword::Forwarded => Flag::Forwarded,
             Keyword::MdnSent => Flag::MDNSent,
+            Keyword::Autosent => Flag::Autosent,
+            Keyword::CanUnsubscribe => Flag::CanUnsubscribe,
+            Keyword::Followed => Flag::Followed,
+            Keyword::HasAttachment => Flag::HasAttachment,
+            Keyword::HasMemo => Flag::HasMemo,
+            Keyword::HasNoAttachment => Flag::HasNoAttachment,
+            Keyword::Imported => Flag::Imported,
+            Keyword::IsTrusted => Flag::IsTrusted,
+            Keyword::MailFlagBit0 => Flag::MailFlagBit0,
+            Keyword::MailFlagBit1 => Flag::MailFlagBit1,
+            Keyword::MailFlagBit2 => Flag::MailFlagBit2,
+            Keyword::MaskedEmail => Flag::MaskedEmail,
+            Keyword::Memo => Flag::Memo,
+            Keyword::Muted => Flag::Muted,
+            Keyword::New => Flag::New,
+            Keyword::Notify => Flag::Notify,
+            Keyword::Unsubscribed => Flag::Unsubscribed,
             Keyword::Other(value) => Flag::Keyword(value),
         }
     }
@@ -296,7 +355,24 @@ impl From<&ArchivedKeyword> for Flag {
             ArchivedKeyword::Deleted => Flag::Deleted,
             ArchivedKeyword::Forwarded => Flag::Forwarded,
             ArchivedKeyword::MdnSent => Flag::MDNSent,
-            ArchivedKeyword::Other(value) => Flag::Keyword(value.as_str().into()),
+            ArchivedKeyword::Autosent => Flag::Autosent,
+            ArchivedKeyword::CanUnsubscribe => Flag::CanUnsubscribe,
+            ArchivedKeyword::Followed => Flag::Followed,
+            ArchivedKeyword::HasAttachment => Flag::HasAttachment,
+            ArchivedKeyword::HasMemo => Flag::HasMemo,
+            ArchivedKeyword::HasNoAttachment => Flag::HasNoAttachment,
+            ArchivedKeyword::Imported => Flag::Imported,
+            ArchivedKeyword::IsTrusted => Flag::IsTrusted,
+            ArchivedKeyword::MailFlagBit0 => Flag::MailFlagBit0,
+            ArchivedKeyword::MailFlagBit1 => Flag::MailFlagBit1,
+            ArchivedKeyword::MailFlagBit2 => Flag::MailFlagBit2,
+            ArchivedKeyword::MaskedEmail => Flag::MaskedEmail,
+            ArchivedKeyword::Memo => Flag::Memo,
+            ArchivedKeyword::Muted => Flag::Muted,
+            ArchivedKeyword::New => Flag::New,
+            ArchivedKeyword::Notify => Flag::Notify,
+            ArchivedKeyword::Unsubscribed => Flag::Unsubscribed,
+            ArchivedKeyword::Other(value) => Flag::Keyword(value.as_ref().into()),
         }
     }
 }
@@ -316,7 +392,24 @@ impl From<Flag> for Keyword {
             Flag::Deleted => Keyword::Deleted,
             Flag::Forwarded => Keyword::Forwarded,
             Flag::MDNSent => Keyword::MdnSent,
-            Flag::Keyword(value) => Keyword::from_other(value),
+            Flag::Autosent => Keyword::Autosent,
+            Flag::CanUnsubscribe => Keyword::CanUnsubscribe,
+            Flag::Followed => Keyword::Followed,
+            Flag::HasAttachment => Keyword::HasAttachment,
+            Flag::HasMemo => Keyword::HasMemo,
+            Flag::HasNoAttachment => Keyword::HasNoAttachment,
+            Flag::Imported => Keyword::Imported,
+            Flag::IsTrusted => Keyword::IsTrusted,
+            Flag::MailFlagBit0 => Keyword::MailFlagBit0,
+            Flag::MailFlagBit1 => Keyword::MailFlagBit1,
+            Flag::MailFlagBit2 => Keyword::MailFlagBit2,
+            Flag::MaskedEmail => Keyword::MaskedEmail,
+            Flag::Memo => Keyword::Memo,
+            Flag::Muted => Keyword::Muted,
+            Flag::New => Keyword::New,
+            Flag::Notify => Keyword::Notify,
+            Flag::Unsubscribed => Keyword::Unsubscribed,
+            Flag::Keyword(value) => Keyword::from_boxed_other(value),
         }
     }
 }

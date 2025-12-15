@@ -11,7 +11,6 @@ use dav_proto::schema::{
     response::CardCondition,
 };
 use hyper::StatusCode;
-use store::query::Filter;
 use trc::AddContext;
 use types::{collection::Collection, field::ContactField};
 
@@ -81,17 +80,17 @@ pub(crate) async fn assert_is_unique_uid(
 ) -> crate::Result<()> {
     if let Some(uid) = uid {
         let hits = server
-            .store()
-            .filter(
+            .document_ids_matching(
                 account_id,
                 Collection::ContactCard,
-                vec![Filter::eq(ContactField::Uid, uid.as_bytes().to_vec())],
+                ContactField::Uid,
+                uid.as_bytes(),
             )
             .await
             .caused_by(trc::location!())?;
-        if !hits.results.is_empty() {
+        if !hits.is_empty() {
             for path in resources.children(addressbook_id) {
-                if hits.results.contains(path.document_id()) {
+                if hits.contains(path.document_id()) {
                     return Err(DavError::Condition(DavErrorCondition::new(
                         StatusCode::PRECONDITION_FAILED,
                         CardCondition::NoUidConflict(resources.format_resource(path).into()),

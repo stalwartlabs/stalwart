@@ -5,9 +5,10 @@
  */
 
 use crate::{
-    email::migrate_emails, encryption::migrate_encryption_params, identity::migrate_identities,
-    mailbox::migrate_mailboxes, push_v1::migrate_push_subscriptions_v011,
-    sieve_v1::migrate_sieve_v011, submission::migrate_email_submissions, threads::migrate_threads,
+    email_v1::migrate_emails_v011, encryption_v1::migrate_encryption_params_v011, get_document_ids,
+    identity_v1::migrate_identities_v011, mailbox::migrate_mailboxes,
+    push_v1::migrate_push_subscriptions_v011, sieve_v1::migrate_sieve_v011,
+    submission::migrate_email_submissions, threads::migrate_threads,
 };
 use common::Server;
 use directory::{
@@ -29,8 +30,7 @@ use utils::codec::leb128::Leb128Iterator;
 
 pub(crate) async fn migrate_principals_v0_11(server: &Server) -> trc::Result<RoaringBitmap> {
     // Obtain email ids
-    let principal_ids = server
-        .get_document_ids(u32::MAX, Collection::Principal)
+    let principal_ids = get_document_ids(server, u32::MAX, Collection::Principal)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -58,7 +58,7 @@ pub(crate) async fn migrate_principals_v0_11(server: &Server) -> trc::Result<Roa
                 batch
                     .with_account_id(u32::MAX)
                     .with_collection(Collection::Principal)
-                    .update_document(principal_id);
+                    .with_document(principal_id);
 
                 build_search_index(&mut batch, principal_id, &principal);
 
@@ -122,13 +122,13 @@ pub(crate) async fn migrate_principals_v0_11(server: &Server) -> trc::Result<Roa
 
 pub(crate) async fn migrate_principal_v0_11(server: &Server, account_id: u32) -> trc::Result<()> {
     let start_time = Instant::now();
-    let num_emails = migrate_emails(server, account_id)
+    let num_emails = migrate_emails_v011(server, account_id)
         .await
         .caused_by(trc::location!())?;
     let num_mailboxes = migrate_mailboxes(server, account_id)
         .await
         .caused_by(trc::location!())?;
-    let num_params = migrate_encryption_params(server, account_id)
+    let num_params = migrate_encryption_params_v011(server, account_id)
         .await
         .caused_by(trc::location!())?;
     let num_subscriptions = migrate_push_subscriptions_v011(server, account_id)
@@ -143,7 +143,7 @@ pub(crate) async fn migrate_principal_v0_11(server: &Server, account_id: u32) ->
     let num_threads = migrate_threads(server, account_id)
         .await
         .caused_by(trc::location!())?;
-    let num_identities = migrate_identities(server, account_id)
+    let num_identities = migrate_identities_v011(server, account_id)
         .await
         .caused_by(trc::location!())?;
 
