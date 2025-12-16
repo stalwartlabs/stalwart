@@ -337,6 +337,8 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
     imap_group.send("CREATE \"Shared Folders/support@example.com/Test\"").await;
     imap_group.assert_read(Type::Tagged, ResponseType::Ok).await;
 
+    imap_group.send("CREATE \"Shared Folders/support@example.com/Test/TestSubfolder\"").await;
+    imap_group.assert_read(Type::Tagged, ResponseType::Ok).await;
     // Uncomment to list folders to stdout
     /*imap_group.send("LIST \"\" \"*\"").await;
     let res = imap_group.read(Type::Tagged).await;
@@ -361,6 +363,7 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
                 ("Shared Folders/support@example.com/Junk Mail", [""]),
                 ("Shared Folders/support@example.com/Sent Items", [""]),
                 ("Shared Folders/support@example.com/Test", [""]), // This folder should have been created
+                ("Shared Folders/support@example.com/Test/TestSubfolder", [""]),
                 //("Shared Folders/support@example.com/Shared Folders", [""]),
                 //("Shared Folders/support@example.com/Shared Folders/support@example.com", [""]),
                 //("Shared Folders/support@example.com/Shared Folders/support@example.com/Test", [""]),
