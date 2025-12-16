@@ -234,9 +234,23 @@ impl<T: SessionStream> SessionData<T> {
             (
                 account.account_id,
                 if path.len() > 1 {
+                    if let Some(mailbox_prefix) = account.prefix.as_ref() {
+                        // Strip mailbox prefix from path to create
+                        path.reverse();
+                        for prefix in mailbox_prefix.split("/") {
+                            if let None = path.pop() {
+                                return Err(trc::ImapEvent::Error.into_err()
+                                    .details(format!("Could not strip prefix from mailbox '{}'", full_path)));
+                            }
+                        }
+                        path.reverse();
+                    }
                     let mut create_path = Vec::with_capacity(path.len());
                     while !path.is_empty() {
-                        let mailbox_name: String = path.join("/");
+                        // if account has prefix prepend it to path to create to find parent mailbox
+                        let mailbox_name: String = if let Some(prefix) = account.prefix.as_ref() {
+                            format!("{}/{}", prefix, path.join("/"))
+                        } else {path.join("/")};
                         if let Some(&mailbox_id) = account.mailbox_names.get(&mailbox_name) {
                             parent_mailbox_id = mailbox_id.into();
                             parent_mailbox_name = mailbox_name.into();
