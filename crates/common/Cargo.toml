@@ -45,7 +45,7 @@ hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
 opentelemetry = { version = "0.29" }
 opentelemetry_sdk = { version = "0.29" }
 opentelemetry-otlp = { version = "0.29", default-features = false, features = ["reqwest-client", "http-proto", "trace", "metrics", "logs", "internal-logs", "grpc-tonic", "tls-webpki-roots", "reqwest-rustls-webpki-roots"] }
-opentelemetry-semantic-conventions = { version = "0.29.0" }
+opentelemetry-semantic-conventions = { version = "0.31.0" }
 prometheus = { version = "0.14", default-features = false }
 imagesize = "0.14"
 sha1 = "0.10"
