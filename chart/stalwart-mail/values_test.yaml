@@ -1,0 +1,115 @@
+#
+# NiV+sr5KKPeFvbQtstRfpFYhka7vzlmIkGLd06Mae3s=
+# MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwVVJ/Tb0GI1K5IqNHGkRediekYiOk3yQio1EGdzYdBVmj8L278G+eXUacDvuEDXJr8wmViSvtSsteBAd01NTn9swQEqK+hXoBoQ5TxyieiA9gtU95i6/mm4Z9HZp8lipDnFFu9WwZwa+koaATCpnEYMceTtDQn+HuBjEqt/kiOBcNLywQ+K/ugPIh+Tmht+aCia6a1yfoHrOh8XRVPKSmndJPfMPPB+LVAco+mCRJzUvil5+g4NtexGsWOcWwupQ8ECeb7d58bQkmXgPcZdzkuZgRKiESqlRYBH3KSUhqEQn/O462x0YCxeZvLzsqIVtMusDuOVJHaGlJ61dIZ2A5QIDAQAB
+
+config:
+  lookup:
+    default:
+      hostname: "mail.dev.wrenix.eu"
+
+  server:
+    listener:
+      submissions:
+        proxy:
+          trusted-networks:
+            - "127.0.0.0/8"
+            - "::1"
+            - "10.0.0.0/8"
+            - "2a01:4f8:161:91d1::/64"
+      imaptls:
+        proxy:
+          trusted-networks:
+            - "127.0.0.0/8"
+            - "::1"
+            - "10.0.0.0/8"
+            - "2a01:4f8:161:91d1::/64"
+      sieve:
+        proxy:
+          trusted-networks:
+            - "127.0.0.0/8"
+            - "::1"
+            - "10.0.0.0/8"
+            - "2a01:4f8:161:91d1::/64"
+      https:
+        url: "https://mail.dev.wrenix.eu"
+        proxy:
+          trusted-networks:
+            - "127.0.0.0/8"
+            - "::1"
+            - "10.0.0.0/8"
+            - "2a01:4f8:161:91d1::/64"
+        tls:
+          implicit: true
+
+    run-as:
+      user: null
+      group: null
+
+  storage:
+    data: "sqlite"
+    fts: "sqlite"
+    full-text:
+      default-language: "en"
+    blob: "filesystem"
+    lookup: "sqlite"
+    directory: "internal"
+
+
+  store:
+    rocksdb: null
+    sqlite:
+      type: "sqlite"
+      path: "/data/index.sqlite3"
+    filesystem:
+      type: "fs"
+      path: "/data/blobs"
+      depth: 2
+      
+
+  directory:
+    internal:
+      type: "internal"
+      store: "sqlite"
+
+  tracer:
+    stdout:
+      level: trace
+
+  certificate:
+    default:
+      cert: "%{file:/opt/stalwart/etc/certs/tls.crt}%"
+      private-key: "%{file:/opt/stalwart/etc/certs/tls.key}%"
+
+secrets:
+  env:
+    FALLBACK_ADMIN_SECRET: "ZuaMo5oi2aer"
+
+service:
+  ipFamilies: [ "IPv6", "IPv4" ]
+  ipFamilyPolicy: "RequireDualStack"
+  annotations:
+    traefik.ingress.kubernetes.io/service.passhostheader: "true"
+
+traefik:
+  enabled: true
+  host: mail.dev.wrenix.eu
+
+ingress:
+  enabled: false
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: ingress-redirect-https@kubernetescrd
+  hosts:
+    - host: mail.dev.wrenix.eu
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: stalwart-mail-cert
+      hosts:
+        - mail.dev.wrenix.eu
+
+certificate:
+  certmanager:
+    dnsNames:
+      - mail.dev.wrenix.eu
+

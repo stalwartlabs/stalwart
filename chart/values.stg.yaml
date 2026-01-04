@@ -1,0 +1,38 @@
+# ingress:
+#   annotations:
+#     cert-manager.io/cluster-issuer: ghn-tech-cluster-issuer
+#     external-dns.alpha.kubernetes.io/hostname: stg.backstage.ghn.tech
+#     kubernetes.io/tls-acme: 'true'
+#     external-dns.alpha.kubernetes.io/target: 34.87.38.50
+#     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+#   host: 'stg.backstage.ghn.tech'
+
+#   tls:
+#     secretName: 'stgbackstage-letencrypt-tls'
+
+# backstage:
+#   replicas: 1
+
+#   resources:
+#     limits:
+#       memory: 1Gi
+#       cpu: 1000m
+#     requests:
+#       memory: 250Mi
+#       cpu: 100m
+
+#   appConfig:
+#     app:
+#       title: '[Stg] Developers Portal'
+#       baseUrl: 'https://stg.backstage.ghn.tech'
+#     backend:
+#       baseUrl: 'https://stg.backstage.ghn.tech'
+#       auth:
+#         keys:
+#           - secret: ${BACKEND_SECRET}
+#     cors:
+#       origin: 'https://stg.backstage.ghn.tech'
+#       methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+#       credentials: true
+#     organization:
+#       name: Giao Hang Nhanh

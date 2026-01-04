@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  {{- include "nats.metadataNamespace" $ | nindent 2 }}
+  name: {{ .Values.statefulSet.name }}
+  labels:
+    {{- include "nats.labels" $ | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "nats.selectorLabels" $ | nindent 6 }}
+  {{- if .Values.config.cluster.enabled }}
+  replicas: {{ .Values.config.cluster.replicas }}
+  {{- else }}
+  replicas: 1
+  {{- end }}
+  serviceName: {{ .Values.headlessService.name }}
+  podManagementPolicy: Parallel
+  template:
+    {{- with .Values.podTemplate }}
+    {{ include "nats.loadMergePatch" (merge (dict "file" "stateful-set/pod-template.yaml" "ctx" $) .) | nindent 4 }}
+    {{- end }}
+  volumeClaimTemplates:
+  {{- with .Values.config.jetstream }}
+  {{- if and .enabled .fileStore.enabled .fileStore.pvc.enabled }}
+  {{- with .fileStore.pvc }}
+  - {{ include "nats.loadMergePatch" (merge (dict "file" "stateful-set/jetstream-pvc.yaml" "ctx" $) .) | nindent 4 }}
+  {{- end }}
+  {{- end }}
+    {{- end }}
+  {{- with .Values.config.resolver }}
+  {{- if and .enabled .pvc.enabled }}
+  {{- with .pvc }}
+  - {{ include "nats.loadMergePatch" (merge (dict "file" "stateful-set/resolver-pvc.yaml" "ctx" $) .) | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- end }}

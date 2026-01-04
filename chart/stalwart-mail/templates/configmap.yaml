@@ -1,0 +1,27 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stalwart-mail.fullname" . }}
+  labels:
+    {{- include "stalwart-mail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: main
+data:
+  {{- $config := mustDeepCopy .Values.config }}
+  {{- if .Values.nats.enabled }}
+  {{- $natsAddr := list (printf "%s-nats:4222" .Release.Name) }}
+  {{- $patch :=  (dict
+    "cluster" (dict
+      "coordinator" "nats"
+    )
+    "store" (dict
+      "nats" (dict
+        "type" "nats"
+        "address" $natsAddr
+      )
+    )
+  ) }}
+  {{- $config = merge $config $patch }}
+  {{- end }}
+  "config.toml": |
+    {{- $config | toToml | replace ".0\n" "\n" | nindent 4 }}

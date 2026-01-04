@@ -1,0 +1,11 @@
+{{- with .Values.config.gateway }}
+name: {{ $.Values.statefulSet.name }}
+port: {{ .port }}
+
+{{- with .tls }}
+{{- if .enabled }}
+tls:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/tls.yaml" "ctx" (merge (dict "tls" .) $)) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

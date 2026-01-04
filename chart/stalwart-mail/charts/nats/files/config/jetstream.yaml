@@ -1,0 +1,23 @@
+{{- with .Values.config.jetstream }}
+{{- with .memoryStore }}
+{{- if .enabled }}
+{{- with .maxSize }}
+max_memory_store: << {{ . }} >>
+{{- end }}
+{{- else }}
+max_memory_store: 0
+{{- end }}
+{{- end }}
+{{- with .fileStore }}
+{{- if .enabled }}
+store_dir: {{ .dir }}
+{{- if .maxSize }}
+max_file_store: << {{ .maxSize }} >>
+{{- else if .pvc.enabled }}
+max_file_store: << {{ .pvc.size }} >>
+{{- end }}
+{{- else }}
+max_file_store: 0
+{{- end }}
+{{- end }}
+{{- end }}

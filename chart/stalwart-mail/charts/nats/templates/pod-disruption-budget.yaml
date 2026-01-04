@@ -1,0 +1,6 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.podDisruptionBudget }}
+{{- if .enabled }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "pod-disruption-budget.yaml" "ctx" $) .) }}
+{{- end }}
+{{- end }}

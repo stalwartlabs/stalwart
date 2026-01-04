@@ -1,0 +1,239 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "stalwart-mail.fullname" . }}
+  labels:
+    {{- include "stalwart-mail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: main
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  {{- with .Values.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  # OrderedReady start at last container and not first
+  # https://github.com/kubernetes/kubernetes/issues/128315
+  podManagementPolicy: Parallel
+  ordinals:
+    start: 1
+  selector:
+    matchLabels:
+      {{- include "stalwart-mail.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: main
+  template:
+    metadata:
+      annotations:
+        config-hash: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        secret-env-hash: {{ include (print $.Template.BasePath "/secrets-env.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "stalwart-mail.labels" . | nindent 8 }}
+        app.kubernetes.io/component: main
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "stalwart-mail.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.backup.enabled }}
+      initContainers:
+        - name: "stalwart-backup"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.image }}
+          image: "{{ coalesce $.Values.global.image.registry .registry }}/{{ .repository }}:{{ .tag | default (printf "v%s" $.Chart.AppVersion) }}"
+          imagePullPolicy: {{ coalesce $.Values.global.image.pullPolicy .pullPolicy }}
+          {{- end }}
+          env:
+            - name: POD_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: URL
+              value: "http://localhost:{{ .Values.service.ports.http }}"
+            - name: CREDENTIALS
+              value: "{{ (get .Values.config.authentication "fallback-admin").user }}:$(FALLBACK_ADMIN_SECRET)"
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          command:
+            - sh
+            - -c
+            {{- $version := semver .Chart.AppVersion }}
+            - |
+              B_PATH="/data/backup/{{ printf "v%d.%d" $version.Major $version.Minor }}"
+              mkdir -p "${B_PATH}";
+              if \
+                [ "${POD_INDEX}" -eq "1" ] && \
+                [ ! -f "${B_PATH}/complete" ];
+              then
+                /usr/local/bin/stalwart --config /opt/stalwart/etc/config.toml --export "${B_PATH}" && \
+                touch "${B_PATH}/complete";
+              fi
+              while [ ! -f "${B_PATH}/complete" ]; do
+                echo "Waiting for complete backup on first pod.."
+                sleep 5;
+              done
+          envFrom:
+            {{- if .Values.secrets.create }}
+            - secretRef:
+                name: {{ include "stalwart-mail.fullname" . }}-env
+            {{- end }}
+            {{- with .Values.envFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: "/data"
+            - name: data
+              mountPath: "/data/blobs"
+              subPath: "blobs"
+            - name: data
+              mountPath: "/data/queue"
+              subPath: "queue"
+            - name: data
+              mountPath: "/data/reports"
+              subPath: reports
+            - name: config
+              mountPath: "/opt/stalwart/etc/config.toml"
+              subPath: "config.toml"
+              readOnly: true
+            {{- if or .Values.certificate.secretName .Values.certificate.certmanager.enabled }}
+            - name: certificate
+              mountPath: "/opt/stalwart/etc/certs"
+            {{- end }}
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.image }}
+          image: "{{ coalesce $.Values.global.image.registry .registry }}/{{ .repository }}:{{ .tag | default (printf "v%s" $.Chart.AppVersion) }}"
+          imagePullPolicy: {{ coalesce $.Values.global.image.pullPolicy .pullPolicy }}
+          {{- end }}
+          env:
+            - name: POD_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: URL
+              value: "http://localhost:{{ .Values.service.ports.http }}"
+            - name: CREDENTIALS
+              value: "{{ (get .Values.config.authentication "fallback-admin").user }}:$(FALLBACK_ADMIN_SECRET)"
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            {{- if .Values.secrets.create }}
+            - secretRef:
+                name: {{ include "stalwart-mail.fullname" . }}-env
+            {{- end }}
+            {{- with .Values.envFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- range $name, $port := .Values.service.ports }}
+            - name: {{ $name }}
+              containerPort: {{ $port }}
+              protocol: TCP
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: "/data"
+            - name: data
+              mountPath: "/data/blobs"
+              subPath: "blobs"
+            - name: data
+              mountPath: "/data/queue"
+              subPath: "queue"
+            - name: data
+              mountPath: "/data/reports"
+              subPath: reports
+            - name: config
+              mountPath: "/opt/stalwart/etc/config.toml"
+              subPath: "config.toml"
+              readOnly: true
+            {{- if or .Values.certificate.secretName .Values.certificate.certmanager.enabled }}
+            - name: certificate
+              mountPath: "/opt/stalwart/etc/certs"
+            {{- end }}
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: "config"
+          configMap:
+            name: {{ include "stalwart-mail.fullname" . }}
+        {{- if or .Values.certificate.secretName .Values.certificate.certmanager.enabled }}
+        - name: certificate
+          secret:
+            secretName: {{ .Values.certificate.secretName | default (printf "%s-cert" (include "stalwart-mail.fullname" .)) }}
+        {{- end }}
+        - name: "data"
+          {{- if .Values.persistence.enabled }}
+          {{- if .Values.persistence.hostPath }}
+          hostPath:
+            type: Directory
+            path: {{ .Values.persistence.hostPath | quote }}
+          {{- else }}{{/* else .persistence.hostPath */}}
+          persistentVolumeClaim:
+            claimName: {{ coalesce .Values.persistence.existingClaim (include "stalwart-mail.fullname" .) }}
+          {{- end }}{{/* end-else .persistence.hostPath */}}
+          {{- else }}{{/* else .persistence.enabled */}}
+          emptyDir: {}
+          {{- end }}{{/* end-else .persistence.enabled */}}
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

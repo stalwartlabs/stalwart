@@ -1,0 +1,31 @@
+name: prom-exporter
+{{ include "nats.image" (merge (pick $.Values "global") .Values.promExporter.image) }}
+
+ports:
+- name: prom-metrics
+  containerPort: {{ .Values.promExporter.port }}
+
+{{- with .Values.promExporter.env }}
+env:
+{{- include "nats.env" . }}
+{{- end }}
+
+args:
+- -port={{ .Values.promExporter.port }}
+- -connz
+- -routez
+- -subz
+- -varz
+- -prefix=nats
+- -use_internal_server_id
+{{- if .Values.config.jetstream.enabled }}
+- -jsz=all
+{{- end }}
+{{- if .Values.config.leafnodes.enabled }}
+- -leafz
+{{- end }}
+{{- if .Values.config.gateway.enabled }}
+- -gatewayz
+{{- end }}
+{{- $monitorProto := ternary "https" "http" .Values.config.monitor.tls.enabled }}
+- {{ $monitorProto }}://{{ .Values.promExporter.monitorDomain }}:{{ .Values.config.monitor.port }}/

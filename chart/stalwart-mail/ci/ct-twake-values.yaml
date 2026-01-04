@@ -1,0 +1,8 @@
+service:
+  ipFamilies:
+    - IPv6
+
+twake:
+  enabled: true
+  ingress:
+    enabled: true

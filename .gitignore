@@ -6,3 +6,4 @@
 run.sh
 _ignore
 .DS_Store
+.devspace

@@ -1,0 +1,71 @@
+config:
+  lookup:
+    default:
+      hostname: mail.example.org
+
+  server:
+    listener:
+      smtp:
+        proxy:
+          trusted-networks: ["10.0.0.0/8"]
+      submission:
+      submissions:
+        proxy:
+          trusted-networks: ["10.0.0.0/8"]
+
+      imap:
+      imaptls:
+        proxy:
+          trusted-networks: ["10.0.0.0/8"]
+
+      pop3:
+      pop3s:
+        proxy:
+          trusted-networks: ["10.0.0.0/8"]
+
+      sieve:
+        proxy:
+          trusted-networks: ["10.0.0.0/8"]
+
+      # without proxy and tls for ingress (well-known)
+      http:
+        protocol: "http"
+        bind: ["[::]:8080"]
+
+      https:
+        url: "https://mail.example.org"
+        proxy:
+          trusted-networks: ["10.0.0.0/8"]
+
+service:
+  ports:
+    submission:
+    imap:
+    pop3:
+    http: 8080
+
+traefik:
+  enabled: true
+  host: mail.example.org
+  ports:
+    submission:
+    imap:
+    pop3:
+    # not exists
+    blub:
+
+ingress:
+  enabled: true
+  hosts:
+    - host: "example.org"
+      paths:
+        - path: /.well-known/jmap
+          pathType: Prefix
+        - path: /.well-known/mta-sts.txt
+          pathType: Exact
+        - path: /.well-known/mail-v1.xml
+          pathType: Exact
+        - path: /.well-known/autoconfig
+          pathType: Prefix
+        - path: /autodiscover
+          pathType: Prefix

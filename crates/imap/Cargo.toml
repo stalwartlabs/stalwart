@@ -1,30 +1,77 @@
 [package]
 name = "imap"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-imap_proto = { path = "../imap-proto" }
-types = { path = "../types" }
-directory = { path = "../directory" }
-trc = { path = "../trc" }
-store = { path = "../store" }
-common = { path = "../common" }
-email = { path = "../email" }
-nlp = { path = "../nlp" }
-utils = { path = "../utils" }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
-rustls-pemfile = "2.0"
-tokio = { version = "1.47", features = ["full"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-parking_lot = "0.12"
-ahash = { version = "0.8" }
-md5 = "0.8.0"
-rand = "0.9.0"
-indexmap = "2.7.1"
 compact_str = "0.9.0"
+indexmap = "2.7.1"
+md5 = "0.8.0"
+parking_lot = "0.12"
+rand = "0.9.0"
+rustls-pemfile = "2.0"
+
+[dependencies.ahash]
+version = "0.8"
+
+[dependencies.common]
+path = "../common"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.email]
+path = "../email"
+
+[dependencies.imap_proto]
+path = "../imap-proto"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding"]
+
+[dependencies.mail-send]
+version = "0.5"
+features = ["cram-md5", "ring", "tls12"]
+default-features = false
+
+[dependencies.nlp]
+path = "../nlp"
+
+[dependencies.rustls]
+version = "0.23.5"
+features = ["std", "ring", "tls12"]
+default-features = false
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["full"]
+
+[dependencies.tokio-rustls]
+version = "0.26"
+features = ["ring", "tls12"]
+default-features = false
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
 
 [features]
 test_mode = []
+
+[lib]
+path = "src/lib.rs"
+name = "imap"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

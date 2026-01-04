@@ -1,22 +1,63 @@
 [package]
 name = "pop3"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
-[dependencies]
-store = { path = "../store" }
-common = { path = "../common" }
-directory = { path = "../directory" }
-imap = { path = "../imap" }
-utils = { path = "../utils" }
-trc = { path = "../trc" }
-types = { path = "../types" }
-email = { path = "../email" }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
-tokio = { version = "1.47", features = ["full"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+[dependencies.common]
+path = "../common"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.email]
+path = "../email"
+
+[dependencies.imap]
+path = "../imap"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding"]
+
+[dependencies.mail-send]
+version = "0.5"
+features = ["cram-md5", "ring", "tls12"]
+default-features = false
+
+[dependencies.rustls]
+version = "0.23.5"
+features = ["std", "ring", "tls12"]
+default-features = false
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["full"]
+
+[dependencies.tokio-rustls]
+version = "0.26"
+features = ["ring", "tls12"]
+default-features = false
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
 
 [features]
 test_mode = []
+
+[lib]
+path = "src/lib.rs"
+name = "pop3"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

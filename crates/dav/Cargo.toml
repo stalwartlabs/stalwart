@@ -1,28 +1,66 @@
 [package]
 name = "dav"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-dav-proto = { path =  "../dav-proto" }
-common = { path = "../common" }
-store = { path = "../store" }
-utils = { path = "../utils" }
-groupware = { path = "../groupware" }
-directory = { path = "../directory" }
-http_proto = { path = "../http-proto" }
-types = { path = "../types" }
-trc = { path = "../trc" }
-calcard = { version = "0.3", features = ["rkyv"] }
-hashify = { version = "0.2" }
-hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
-percent-encoding = "2.3.1"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
-compact_str = "0.9.0"
 chrono = "0.4.40"
+compact_str = "0.9.0"
+percent-encoding = "2.3.1"
+
+[dependencies.calcard]
+version = "0.3"
+features = ["rkyv"]
+
+[dependencies.common]
+path = "../common"
+
+[dependencies.dav-proto]
+path = "../dav-proto"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.groupware]
+path = "../groupware"
+
+[dependencies.hashify]
+version = "0.2"
+
+[dependencies.http_proto]
+path = "../http-proto"
+
+[dependencies.hyper]
+version = "1.0.1"
+features = ["server", "http1", "http2"]
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
 
 [dev-dependencies]
 
 [features]
-test_mode = []
 enterprise = []
+test_mode = []
+
+[lib]
+path = "src/lib.rs"
+name = "dav"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

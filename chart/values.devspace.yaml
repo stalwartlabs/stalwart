@@ -1,0 +1,63 @@
+nodeSelector:
+  nodepool: mail
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: mail
+    effect: NoSchedule
+
+certificate:
+  certmanager:
+    enabled: false
+
+# ingress:
+#   enabled: false
+# backstage:
+#   resources:
+#     limits:
+#       memory: 8Gi
+#       cpu: 2000m
+#     requests:
+#       memory: 250Mi
+#       cpu: 100m
+#   initContainers:
+#     - name: sysctl-buddy
+#       image: busybox:1.31.1
+#       securityContext:
+#         privileged: true
+#       command: ["/bin/sh"]
+#       args: ["-c", "sysctl -w fs.inotify.max_user_watches=524288"]
+#       resources:
+#         limits:
+#           memory: 100Mi
+#           cpu: 1m
+#         requests:
+#           memory: 10Mi
+#           cpu: 1m
+#   appConfig:
+#     app:
+#       baseUrl: http://localhost:3001
+#       title: "[Devspace] Developers Portal"
+#     backend:
+#       auth:
+#         keys:
+#           - secret: ${BACKEND_SECRET}
+#       baseUrl: http://localhost:7007
+#       database:
+#         client: pg
+#         connection:
+#           host: ${POSTGRES_HOST}
+#           port: ${POSTGRES_PORT}
+#           user: ${POSTGRES_USER}
+#           password: ${POSTGRES_PASSWORD}
+#     cors:
+#       credentials: true
+#       methods:
+#         - GET
+#         - HEAD
+#         - PATCH
+#         - POST
+#         - PUT
+#         - DELETE
+#       origin: http://localhost:3001

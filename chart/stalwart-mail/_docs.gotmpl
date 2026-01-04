@@ -1,0 +1,10 @@
+{{ define "chart.prerequirements" -}}
+## Alpha
+{{`{{< callout type="warning" >}}`}}
+Current stalwart is not stable and we are also not stable.
+
+We have current known issues:
+* cluster setup is not fully supported (so please keep replicas=1), see more in [issue for cluster](https://codeberg.org/wrenix/helm-charts/issues/294)
+* toml interpreter of stalwart and golang (helm) are different, so we remove all `.0` in the rendering to be compatible with stalwart-toml
+{{`{{< /callout >}}`}}
+{{ end }}

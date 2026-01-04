@@ -1,83 +1,218 @@
 [package]
 name = "tests"
-version = "0.15.3"
 edition = "2024"
-
-[features]
-#default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "nats", "azure", "foundationdb"]
-default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "foundationdb"]
-#default = ["rocks", "foundationdb"]
-sqlite = ["store/sqlite"]
-foundationdb = ["store/foundation", "common/foundation"]
-postgres = ["store/postgres"]
-mysql = ["store/mysql"]
-rocks = ["store/rocks"]
-s3 = ["store/s3"]
-redis = ["store/redis"]
-nats = ["store/nats"]
-azure = ["store/azure"]
+version = "0.0.1"
 
 [dev-dependencies]
-store = { path = "../crates/store", features = ["test_mode", "enterprise"] }
-nlp = { path = "../crates/nlp" }
-directory = { path = "../crates/directory", features = ["test_mode", "enterprise"] }
-jmap = { path = "../crates/jmap", features = ["test_mode", "enterprise"] }
-jmap_proto = { path = "../crates/jmap-proto" }
-imap = { path = "../crates/imap", features = ["test_mode"] }
-imap_proto = { path = "../crates/imap-proto" }
-types = { path = "../crates/types" }
-dav = { path = "../crates/dav", features = ["test_mode"] }
-dav-proto = { path = "../crates/dav-proto", features = ["test_mode"] }
-calcard = { version = "0.3", features = ["rkyv"] }
-groupware = { path = "../crates/groupware", features = ["test_mode"] }
-http = { path = "../crates/http", features = ["test_mode", "enterprise"] }
-http_proto = { path = "../crates/http-proto" }
-services = { path = "../crates/services", features = ["test_mode", "enterprise"] }
-pop3 = { path = "../crates/pop3", features = ["test_mode"] }
-smtp = { path = "../crates/smtp", features = ["test_mode", "enterprise"] }
-common = { path = "../crates/common", features = ["test_mode", "enterprise"] }
-email = { path = "../crates/email", features = ["test_mode", "enterprise"] }
-spam-filter = { path = "../crates/spam-filter", features = ["test_mode", "enterprise"] }
-migration = { path = "../crates/migration", features = ["test_mode", "enterprise"] }
-trc = { path = "../crates/trc", features = ["enterprise"] }
-managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterprise"] }
-smtp-proto = { version = "0.2" }
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-mail-auth = { version = "0.7.1", features = ["test"] }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-mail-builder = "0.4.4"
-sieve-rs = { version = "0.7", features = ["rkyv"] } 
-utils = { path = "../crates/utils", features = ["test_mode"] }
-jmap-client = { version = "0.4", features = ["websockets", "debug", "async"] } 
-tokio = { version = "1.47", features = ["full"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
-rustls-pemfile = "2.0"
-rustls-pki-types = { version = "1" }
-csv = "1.1"
-rayon = { version = "1.5.1" }
-flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "multipart", "http2"]}
-bytes = "1.4.0"
-futures = "0.3"
-ece = "2.2"
-hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
-hyper-util = { version = "0.1.1", features = ["tokio"] }
-http-body-util = "0.1.0"
-base64 = "0.22"
-ahash = { version = "0.8" }
-serial_test = "3.0.0"
-num_cpus = "1.15.0"
 async-trait = "0.1.68"
-chrono = "0.4"
-ring = { version = "0.17" }
+base64 = "0.22"
 biscuit = "0.7.0"
-form_urlencoded = "1.1.0"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
+bytes = "1.4.0"
+chrono = "0.4"
 compact_str = "0.9.0"
+csv = "1.1"
+ece = "2.2"
+form_urlencoded = "1.1.0"
+futures = "0.3"
+http-body-util = "0.1.0"
+mail-builder = "0.4.4"
+num_cpus = "1.15.0"
 quick-xml = "0.38"
+rustls-pemfile = "2.0"
+serde_json = "1.0"
+serial_test = "3.0.0"
+
+[dev-dependencies.ahash]
+version = "0.8"
+
+[dev-dependencies.calcard]
+version = "0.3"
+features = ["rkyv"]
+
+[dev-dependencies.common]
+path = "../crates/common"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.dav]
+path = "../crates/dav"
+features = ["test_mode"]
+
+[dev-dependencies.dav-proto]
+path = "../crates/dav-proto"
+features = ["test_mode"]
+
+[dev-dependencies.directory]
+path = "../crates/directory"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.email]
+path = "../crates/email"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.flate2]
+version = "1.0.17"
+features = ["zlib"]
+default-features = false
+
+[dev-dependencies.groupware]
+path = "../crates/groupware"
+features = ["test_mode"]
+
+[dev-dependencies.http]
+path = "../crates/http"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.http_proto]
+path = "../crates/http-proto"
+
+[dev-dependencies.hyper]
+version = "1.0.1"
+features = ["server", "http1", "http2"]
+
+[dev-dependencies.hyper-util]
+version = "0.1.1"
+features = ["tokio"]
+
+[dev-dependencies.imap]
+path = "../crates/imap"
+features = ["test_mode"]
+
+[dev-dependencies.imap_proto]
+path = "../crates/imap-proto"
+
+[dev-dependencies.jmap]
+path = "../crates/jmap"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.jmap-client]
+version = "0.4"
+features = ["websockets", "debug", "async"]
+
+[dev-dependencies.jmap_proto]
+path = "../crates/jmap-proto"
+
+[dev-dependencies.mail-auth]
+version = "0.7.1"
+features = ["test"]
+
+[dev-dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding", "rkyv"]
+
+[dev-dependencies.mail-send]
+version = "0.5"
+features = ["cram-md5", "ring", "tls12"]
+default-features = false
+
+[dev-dependencies.managesieve]
+path = "../crates/managesieve"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.migration]
+path = "../crates/migration"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.nlp]
+path = "../crates/nlp"
+
+[dev-dependencies.pop3]
+path = "../crates/pop3"
+features = ["test_mode"]
+
+[dev-dependencies.rayon]
+version = "1.5.1"
+
+[dev-dependencies.reqwest]
+version = "0.12"
+features = ["rustls-tls-webpki-roots", "multipart", "http2"]
+default-features = false
+
+[dev-dependencies.ring]
+version = "0.17"
+
+[dev-dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dev-dependencies.rustls]
+version = "0.23.5"
+features = ["std", "ring", "tls12"]
+default-features = false
+
+[dev-dependencies.rustls-pki-types]
+version = "1"
+
+[dev-dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dev-dependencies.services]
+path = "../crates/services"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.sieve-rs]
+version = "0.7"
+features = ["rkyv"]
+
+[dev-dependencies.smtp]
+path = "../crates/smtp"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.smtp-proto]
+version = "0.2"
+
+[dev-dependencies.spam-filter]
+path = "../crates/spam-filter"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.store]
+path = "../crates/store"
+features = ["test_mode", "enterprise"]
+
+[dev-dependencies.tokio]
+version = "1.47"
+features = ["full"]
+
+[dev-dependencies.tokio-rustls]
+version = "0.26"
+features = ["ring", "tls12"]
+default-features = false
+
+[dev-dependencies.trc]
+path = "../crates/trc"
+features = ["enterprise"]
+
+[dev-dependencies.types]
+path = "../crates/types"
+
+[dev-dependencies.utils]
+path = "../crates/utils"
+features = ["test_mode"]
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.5.0"
+
+[target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
+
+[target.'cfg(not(target_env = "msvc"))'.build-dependencies]
+
+[features]
+azure = ["store/azure"]
+default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "foundationdb"]
+foundationdb = ["store/foundation", "common/foundation"]
+mysql = ["store/mysql"]
+nats = ["store/nats"]
+postgres = ["store/postgres"]
+redis = ["store/redis"]
+rocks = ["store/rocks"]
+s3 = ["store/s3"]
+sqlite = ["store/sqlite"]
+
+[lib]
+path = "src/lib.rs"
+name = "tests"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

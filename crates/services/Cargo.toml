@@ -1,41 +1,99 @@
 [package]
 name = "services"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-store = { path = "../store" }
-common = { path =  "../common" }
-utils = { path =  "../utils" }
-trc = { path = "../trc" }
-email = { path = "../email" }
-smtp = { path = "../smtp" }
-groupware = { path = "../groupware" }
-spam-filter = { path = "../spam-filter" }
-types = { path = "../types" }
-jmap_proto = { path = "../jmap-proto" }
-directory = { path =  "../directory" }
-smtp-proto = { version = "0.2", features = ["rkyv", "serde"] }
-tokio = { version = "1.47", features = ["rt"] }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
-mail-builder = { version = "0.4" } 
-calcard = { version = "0.3", features = ["rkyv"] }
-chrono = { version = "0.4", features = ["unstable-locales"] }
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
-memory-stats = "1.2.0"
 aes-gcm = "0.10.1"
 aes-gcm-siv = "0.11.1"
-rsa = "0.9.2"
-p256 = { version = "0.13", features = ["ecdh"] }
-hkdf = "0.12.3"
-sha2 = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"]}
 base64 = "0.22"
 compact_str = "0.9.0"
+hkdf = "0.12.3"
+memory-stats = "1.2.0"
+rsa = "0.9.2"
+serde_json = "1.0"
+sha2 = "0.10"
+
+[dependencies.calcard]
+version = "0.3"
+features = ["rkyv"]
+
+[dependencies.chrono]
+version = "0.4"
+features = ["unstable-locales"]
+
+[dependencies.common]
+path = "../common"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.email]
+path = "../email"
+
+[dependencies.groupware]
+path = "../groupware"
+
+[dependencies.jmap_proto]
+path = "../jmap-proto"
+
+[dependencies.mail-builder]
+version = "0.4"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding", "rkyv"]
+
+[dependencies.p256]
+version = "0.13"
+features = ["ecdh"]
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["rustls-tls-webpki-roots", "http2"]
+default-features = false
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.smtp]
+path = "../smtp"
+
+[dependencies.smtp-proto]
+version = "0.2"
+features = ["rkyv", "serde"]
+
+[dependencies.spam-filter]
+path = "../spam-filter"
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["rt"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
 
 [dev-dependencies]
 
 [features]
-test_mode = []
 enterprise = []
+test_mode = []
+
+[lib]
+path = "src/lib.rs"
+name = "services"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

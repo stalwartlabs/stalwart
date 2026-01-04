@@ -1,0 +1,37 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.natsBox | deepCopy }}
+{{- $natsBox := . }}
+{{- if .enabled -}}
+apiVersion: v1
+kind: Pod
+{{- with .container }}
+{{- $_ := set . "merge" (dict
+  "args" (list
+    "sh"
+    "-ec"
+    "nats reply --echo echo & pid=\"$!\"; sleep 1; nats request echo hi > /tmp/resp; kill \"$pid\"; wait; grep -qF hi /tmp/resp"
+  )
+) }}
+{{- $_ := set . "patch" list }}
+{{- end }}
+{{- with .podTemplate }}
+{{- $_ := set . "merge" (dict
+  "metadata" (dict
+    "name" (printf "%s-test-request-reply" $.Values.statefulSet.name)
+    "labels" (dict
+      "app.kubernetes.io/component" "test-request-reply"
+    )
+    "annotations" (dict
+      "helm.sh/hook" "test"
+      "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded"
+    )
+  )
+  "spec" (dict
+    "restartPolicy" "Never"
+  )
+) }}
+{{- $_ := set . "patch" list }}
+{{ include "nats.loadMergePatch" (merge (dict "file" "nats-box/deployment/pod-template.yaml" "ctx" (merge (dict "Values" (dict "natsBox" $natsBox)) $)) .) }}
+{{- end }}
+{{- end }}
+{{- end }}

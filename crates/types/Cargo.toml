@@ -1,19 +1,41 @@
 [package]
 name = "types"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-utils = { path = "../utils" }
-trc = { path = "../trc" }
-jmap-tools = { version = "0.1" }
-hashify = "0.2"
-serde = { version = "1.0", features = ["derive"]}
-rkyv = { version = "0.8.10", features = ["little_endian"] }
-compact_str = { version = "0.9.0", features = ["rkyv", "serde"] }
 blake3 = "1.3.3"
+hashify = "0.2"
 
+[dependencies.compact_str]
+version = "0.9.0"
+features = ["rkyv", "serde"]
+
+[dependencies.jmap-tools]
+version = "0.1"
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.utils]
+path = "../utils"
 
 [features]
 test_mode = []
 
+[lib]
+path = "src/lib.rs"
+name = "types"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

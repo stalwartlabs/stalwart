@@ -1,39 +1,91 @@
 [package]
 name = "spam-filter"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-utils = { path = "../utils" }
-types = { path = "../types" }
-nlp = { path = "../nlp" }
-store = { path = "../store" }
-trc = { path = "../trc" }
-common = { path =  "../common" }
-smtp-proto = { version = "0.2", features = ["rkyv"] }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-builder = { version = "0.4" }
-mail-auth = { version = "0.7.1" }
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-tokio = { version = "1.47", features = ["net", "macros"] }
-psl = "2"
-hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
-idna = "1.0"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2", "stream"]}
+compact_str = "0.9.0"
 decancer = "3.0.1"
-unicode-security = "0.1.0"
+idna = "1.0"
 infer = "0.19"
+psl = "2"
 sha1 = "0.10"
 sha2 = "0.10.6"
-compact_str = "0.9.0"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
-serde = { version = "1.0", features = ["derive"]}
 unicode-general-category = "1.1.0"
 unicode-normalization = "0.1.25"
+unicode-security = "0.1.0"
+
+[dependencies.common]
+path = "../common"
+
+[dependencies.hyper]
+version = "1.0.1"
+features = ["server", "http1", "http2"]
+
+[dependencies.mail-auth]
+version = "0.7.1"
+
+[dependencies.mail-builder]
+version = "0.4"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding"]
+
+[dependencies.mail-send]
+version = "0.5"
+features = ["cram-md5", "ring", "tls12"]
+default-features = false
+
+[dependencies.nlp]
+path = "../nlp"
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["rustls-tls-webpki-roots", "http2", "stream"]
+default-features = false
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.smtp-proto]
+version = "0.2"
+features = ["rkyv"]
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["net", "macros"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
+
+[dev-dependencies.tokio]
+version = "1.47"
+features = ["full"]
 
 [features]
-test_mode = []
 enterprise = []
+test_mode = []
 
-[dev-dependencies]
-tokio = { version = "1.47", features = ["full"] }
+[lib]
+path = "src/lib.rs"
+name = "spam_filter"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

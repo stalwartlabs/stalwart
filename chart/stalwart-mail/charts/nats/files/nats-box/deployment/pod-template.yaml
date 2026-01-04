@@ -1,0 +1,44 @@
+metadata:
+  labels:
+    {{- include "natsBox.labels" $ | nindent 4 }}
+spec:
+  containers:
+  {{- with .Values.natsBox.container }}
+  - {{ include "nats.loadMergePatch" (merge (dict "file" "nats-box/deployment/container.yaml" "ctx" $) .) | nindent 4 }}
+  {{- end }}
+
+  # service discovery uses DNS; don't need service env vars
+  enableServiceLinks: false
+  
+  {{- with .Values.global.image.pullSecretNames }}
+  imagePullSecrets:
+  {{- range . }}
+  - name: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+
+  {{- with .Values.natsBox.serviceAccount }}
+  {{- if .enabled }}
+  serviceAccountName: {{ .name | quote }}
+  {{- end }}
+  {{- end }}
+
+  volumes:
+  # contexts secret
+  - name: contexts
+    secret:
+      secretName: {{ .Values.natsBox.contextsSecret.name }}
+  # contents secret
+  {{- if .hasContentsSecret }}
+  - name: contents
+    secret:
+      secretName: {{ .Values.natsBox.contentsSecret.name }}
+  {{- end }}
+  # tlsCA
+  {{- include "nats.tlsCAVolume" $ | nindent 2 }}
+  # secrets
+  {{- range (include "natsBox.secretNames" $ | fromJson).secretNames }}
+  - name: {{ .name | quote }}
+    secret:
+      secretName: {{ .secretName | quote }}
+  {{- end }}

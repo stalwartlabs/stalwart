@@ -1,0 +1,11 @@
+{{- with .Values.config.leafnodes }}
+port: {{ .port }}
+no_advertise: true
+
+{{- with .tls }}
+{{- if .enabled }}
+tls:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/tls.yaml" "ctx" (merge (dict "tls" .) $)) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

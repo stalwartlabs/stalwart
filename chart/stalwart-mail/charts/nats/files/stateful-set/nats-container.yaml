@@ -1,0 +1,109 @@
+name: nats
+{{ include "nats.image" (merge (pick $.Values "global") .Values.container.image) }}
+
+ports:
+{{- range $protocol := list "nats" "leafnodes" "websocket" "mqtt" "cluster" "gateway" "monitor" "profiling" }}
+{{- $configProtocol := get $.Values.config $protocol }}
+{{- $containerPort := get $.Values.container.ports $protocol }}
+{{- if or (eq $protocol "nats") $configProtocol.enabled }}
+- {{ merge (dict "name" $protocol "containerPort" $configProtocol.port) $containerPort | toYaml | nindent 2 }}
+{{- end }}
+{{- end }}
+
+args:
+- --config
+- /etc/nats-config/nats.conf
+
+env:
+- name: POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: SERVER_NAME
+  value: {{ printf "%s$(POD_NAME)" .Values.config.serverNamePrefix | quote }}
+{{- with .Values.container.env }}
+{{- include "nats.env" . }}
+{{- end }}
+
+lifecycle:
+  preStop:
+    exec:
+      # send the lame duck shutdown signal to trigger a graceful shutdown
+      command:
+      - nats-server
+      - -sl=ldm=/var/run/nats/nats.pid
+
+{{- with .Values.config.monitor }}
+{{- if .enabled }}
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: monitor
+    {{- if .tls.enabled }}
+    scheme: HTTPS
+    {{- end}}
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 10
+  successThreshold: 1
+  failureThreshold: 90
+readinessProbe:
+  httpGet:
+    path: /healthz?js-server-only=true
+    port: monitor
+    {{- if .tls.enabled }}
+    scheme: HTTPS
+    {{- end}}
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
+livenessProbe:
+  httpGet:
+    path: /healthz?js-enabled-only=true
+    port: monitor
+    {{- if .tls.enabled }}
+    scheme: HTTPS
+    {{- end}}
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 30
+  successThreshold: 1
+  failureThreshold: 3
+{{- end }}
+{{- end }}
+
+volumeMounts:
+# nats config
+- name: config
+  mountPath: /etc/nats-config
+# PID volume
+- name: pid
+  mountPath: /var/run/nats
+# JetStream PVC
+{{- with .Values.config.jetstream }}
+{{- if and .enabled .fileStore.enabled .fileStore.pvc.enabled }}
+{{- with .fileStore }}
+- name: {{ .pvc.name }}
+  mountPath: {{ .dir | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+# resolver PVC
+{{- with .Values.config.resolver }}
+{{- if and .enabled .pvc.enabled }}
+- name: {{ .pvc.name }}
+  mountPath: {{ .dir | quote }}
+{{- end }}
+{{- end }}
+# tlsCA
+{{- include "nats.tlsCAVolumeMount" $ }}
+# secrets
+{{- range (include "nats.secretNames" $ | fromJson).secretNames }}
+- name: {{ .name | quote }}
+  mountPath: {{ .dir | quote }}
+{{- end }}
+
+resources:
+  {{- toYaml .Values.container.resources | nindent 2 }}

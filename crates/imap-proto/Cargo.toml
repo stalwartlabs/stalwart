@@ -1,17 +1,42 @@
 [package]
 name = "imap_proto"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-types = { path = "../types" }
-utils = { path = "../utils" }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-ahash = { version = "0.8" }
-chrono = { version = "0.4"}
-trc = { path = "../trc" }
-hashify = { version = "0.2" }
 compact_str = "0.9.0"
 
-[dev-dependencies]
-tokio = { version = "1.47", features = ["full"] }
+[dependencies.ahash]
+version = "0.8"
+
+[dependencies.chrono]
+version = "0.4"
+
+[dependencies.hashify]
+version = "0.2"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding", "rkyv"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
+
+[dev-dependencies.tokio]
+version = "1.47"
+features = ["full"]
+
+[lib]
+path = "src/lib.rs"
+name = "imap_proto"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

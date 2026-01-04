@@ -1,0 +1,28 @@
+{{- with .Values.persistence }}
+{{- if and .enabled (not .existingClaim) (not .hostPath) }}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ template "stalwart-mail.fullname" $ }}
+  labels:
+    {{- include "stalwart-mail.labels" $ | nindent 4 }}
+  {{- with .annotations }}
+  annotations:
+    {{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    - {{ .accessMode | quote }}
+  resources:
+    requests:
+      storage: {{ .size | quote }}
+  {{- with .storageClass }}
+  {{-  if (eq "-" .) }}
+  storageClassName: ""
+  {{-  else }}
+  storageClassName: {{ . | quote }}
+  {{-  end }}
+  {{- end }}
+{{- end }}{{/* end-if .enabled */}}
+{{- end }}{{/* end-with .persistence */}}

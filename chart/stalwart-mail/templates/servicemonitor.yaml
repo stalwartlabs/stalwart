@@ -1,0 +1,27 @@
+{{- if and .Values.config.metrics.prometheus.enable .Values.prometheus.servicemonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "stalwart-mail.fullname" . }}
+  labels:
+    {{- include "stalwart-mail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: main
+    {{- with .Values.prometheus.servicemonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "stalwart-mail.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: main
+  endpoints:
+    - port: http
+      path: "/metrics/prometheus"
+      basicAuth:
+        username:
+          name: {{ include "stalwart-mail.fullname" . }}-env
+          key: METRICS_USERNAME
+        password:
+          name: {{ include "stalwart-mail.fullname" . }}-env
+          key: METRICS_SECRET
+{{- end }}

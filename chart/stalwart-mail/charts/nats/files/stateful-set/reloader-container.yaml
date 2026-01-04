@@ -1,0 +1,27 @@
+name: reloader
+{{ include "nats.image" (merge (pick $.Values "global") .Values.reloader.image) }}
+
+{{- with .Values.reloader.env }}
+env:
+{{- include "nats.env" . }}
+{{- end }}
+
+args:
+- -pid
+- /var/run/nats/nats.pid
+- -config
+- /etc/nats-config/nats.conf
+{{ include "nats.reloaderConfig" (dict "config" .config "dir" "/etc/nats-config") }}
+
+volumeMounts:
+- name: pid
+  mountPath: /var/run/nats
+{{- range $mnt := .natsVolumeMounts }}
+{{- $found := false }}
+{{- range $.Values.reloader.natsVolumeMountPrefixes }}
+{{- if and (not $found) (hasPrefix . $mnt.mountPath) }}
+{{- $found = true }}
+- {{ toYaml $mnt | nindent 2}}
+{{- end }}
+{{- end }}
+{{- end }}

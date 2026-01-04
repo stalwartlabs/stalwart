@@ -1,0 +1,13 @@
+{{- with .Values.config.resolver.pvc }}
+metadata:
+  name: {{ .name }}
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .size | quote }}
+  {{- with .storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

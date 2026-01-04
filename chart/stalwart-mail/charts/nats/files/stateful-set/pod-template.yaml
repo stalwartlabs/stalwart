@@ -1,0 +1,75 @@
+metadata:
+  labels:
+    {{- include "nats.labels" $ | nindent 4 }}
+  annotations:
+    {{- if .Values.podTemplate.configChecksumAnnotation }}
+    {{- $configMap := include "nats.loadMergePatch" (merge (dict "file" "config-map.yaml" "ctx" $) $.Values.configMap) }}
+    checksum/config: {{ sha256sum $configMap }}
+    {{- end }}
+spec:
+  containers:
+  # nats
+  {{- $nats := dict }}
+  {{- with .Values.container }}
+  {{- $nats = include "nats.loadMergePatch" (merge (dict "file" "stateful-set/nats-container.yaml" "ctx" $) .) | fromYaml }}
+  - {{ toYaml $nats | nindent 4 }}
+  {{- end }}
+  # reloader
+  {{- with .Values.reloader }}
+  {{- if .enabled }}
+  - {{ include "nats.loadMergePatch" (merge (dict "file" "stateful-set/reloader-container.yaml" "ctx" (merge (dict "natsVolumeMounts" $nats.volumeMounts) $)) .) | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- with .Values.promExporter }}
+  {{- if .enabled }}
+  - {{ include "nats.loadMergePatch" (merge (dict "file" "stateful-set/prom-exporter-container.yaml" "ctx" $) .) | nindent 4 }}
+  {{- end }}
+  {{- end }}
+
+  # service discovery uses DNS; don't need service env vars
+  enableServiceLinks: false
+  
+  {{- with .Values.global.image.pullSecretNames }}
+  imagePullSecrets:
+  {{- range . }}
+  - name: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+
+  {{- with .Values.serviceAccount }}
+  {{- if .enabled }}
+  serviceAccountName: {{ .name | quote }}
+  {{- end }}
+  {{- end }}
+
+  {{- if .Values.reloader.enabled }}
+  shareProcessNamespace: true
+  {{- end }}
+
+  volumes:
+  # nats config
+  - name: config
+    configMap:
+      name: {{ .Values.configMap.name }}
+  # PID volume
+  - name: pid
+    emptyDir: {}
+  # tlsCA
+  {{- include "nats.tlsCAVolume" $ | nindent 2 }}
+  # secrets
+  {{- range (include "nats.secretNames" $ | fromJson).secretNames }}
+  - name: {{ .name | quote }}
+    secret:
+      secretName: {{ .secretName | quote }}
+  {{- end }}
+
+  {{- with .Values.podTemplate.topologySpreadConstraints }}
+  topologySpreadConstraints:
+  {{- range $k, $v := . }}
+  - {{ merge (dict "topologyKey" $k "labelSelector" (dict "matchLabels" (include "nats.selectorLabels" $ | fromYaml))) $v | toYaml | nindent 4 }}
+  {{- end }}
+  {{- end}}
+  
+  # terminationGracePeriodSeconds determines how long to wait for graceful shutdown
+  # this should be at least `lameDuckGracePeriod` + 20s shutdown overhead
+  terminationGracePeriodSeconds: 60

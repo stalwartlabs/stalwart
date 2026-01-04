@@ -1,58 +1,145 @@
 [package]
 name = "jmap"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-store = { path = "../store" }
-nlp = { path = "../nlp" }
-http_proto = { path = "../http-proto" }
-jmap_proto = { path = "../jmap-proto" }
-types = { path = "../types" }
-smtp = { path =  "../smtp" }
-utils = { path =  "../utils" }
-common = { path =  "../common" }
-services = { path =  "../services" }
-directory = { path =  "../directory" }
-trc = { path = "../trc" }
-spam-filter = { path = "../spam-filter" }
-email = { path = "../email" }
-groupware = { path = "../groupware" }
-calcard = { version = "0.3" }
-smtp-proto = { version = "0.2" }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-mail-builder = { version = "0.4" }
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-mail-auth = { version = "0.7.1", features = ["generate"] }
-sieve-rs = { version = "0.7", features = ["rkyv"] } 
-jmap-tools = { version = "0.1", features = ["rkyv"] }
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
-hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
-hyper-util = { version = "0.1.1", features = ["tokio"] }
-http-body-util = "0.1.0"
-tokio = { version = "1.47", features = ["rt"] }
-futures-util = "0.3.28"
-async-stream = "0.3.5"
-base64 = "0.22"
-p256 = { version = "0.13", features = ["ecdh"] }
-hkdf = "0.12.3"
-sha1 = "0.10"
-sha2 = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"]}
-tokio-tungstenite = "0.28"
-tungstenite = "0.28"
-chrono = "0.4"
-rand = "0.9.0"
-pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
-lz4_flex = { version = "0.12", default-features = false }
 aes-gcm = "0.10.1"
 aes-gcm-siv = "0.11.1"
-rsa = "0.9.2"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
+async-stream = "0.3.5"
+base64 = "0.22"
+chrono = "0.4"
 compact_str = "0.9.0"
+futures-util = "0.3.28"
 hashify = "0.2"
+hkdf = "0.12.3"
+http-body-util = "0.1.0"
+rand = "0.9.0"
+rsa = "0.9.2"
+serde_json = "1.0"
+sha1 = "0.10"
+sha2 = "0.10"
+tokio-tungstenite = "0.28"
+tungstenite = "0.28"
+
+[dependencies.calcard]
+version = "0.3"
+
+[dependencies.common]
+path = "../common"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.email]
+path = "../email"
+
+[dependencies.groupware]
+path = "../groupware"
+
+[dependencies.http_proto]
+path = "../http-proto"
+
+[dependencies.hyper]
+version = "1.0.1"
+features = ["server", "http1", "http2"]
+
+[dependencies.hyper-util]
+version = "0.1.1"
+features = ["tokio"]
+
+[dependencies.jmap-tools]
+version = "0.1"
+features = ["rkyv"]
+
+[dependencies.jmap_proto]
+path = "../jmap-proto"
+
+[dependencies.lz4_flex]
+version = "0.12"
+default-features = false
+
+[dependencies.mail-auth]
+version = "0.7.1"
+features = ["generate"]
+
+[dependencies.mail-builder]
+version = "0.4"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding", "rkyv"]
+
+[dependencies.mail-send]
+version = "0.5"
+features = ["cram-md5", "ring", "tls12"]
+default-features = false
+
+[dependencies.nlp]
+path = "../nlp"
+
+[dependencies.p256]
+version = "0.13"
+features = ["ecdh"]
+
+[dependencies.pkcs8]
+version = "0.10.2"
+features = ["alloc", "std"]
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["rustls-tls-webpki-roots", "http2"]
+default-features = false
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.services]
+path = "../services"
+
+[dependencies.sieve-rs]
+version = "0.7"
+features = ["rkyv"]
+
+[dependencies.smtp]
+path = "../smtp"
+
+[dependencies.smtp-proto]
+version = "0.2"
+
+[dependencies.spam-filter]
+path = "../spam-filter"
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["rt"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
 
 [features]
-test_mode = []
 enterprise = []
+test_mode = []
+
+[lib]
+path = "src/lib.rs"
+name = "jmap"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

@@ -1,0 +1,6 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.config.websocket.ingress }}
+{{- if and .enabled .hosts $.Values.config.websocket.enabled $.Values.service.enabled $.Values.service.ports.websocket.enabled }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "ingress.yaml" "ctx" $) .) }}
+{{- end }}
+{{- end }}

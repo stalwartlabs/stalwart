@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  {{- include "nats.metadataNamespace" $ | nindent 2 }}
+  name: {{ .Values.natsBox.deployment.name }}
+  labels:
+    {{- include "natsBox.labels" $ | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "natsBox.selectorLabels" $ | nindent 6 }}
+  replicas: 1
+  template:
+    {{- with .Values.natsBox.podTemplate }}
+    {{ include "nats.loadMergePatch" (merge (dict "file" "nats-box/deployment/pod-template.yaml" "ctx" $) .) | nindent 4 }}
+    {{- end }}

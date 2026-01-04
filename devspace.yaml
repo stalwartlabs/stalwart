@@ -1,0 +1,225 @@
+version: v2beta1
+name: stalwart-mail
+
+require:
+  devspace: ">=6.0, <7.0"
+
+vars:
+  DEVSPACE_ENV_FILE: ".env"
+  ENV: 'devspace'
+#   ENV:
+#     question: Which environment?
+#     default: "devspace"
+#     options:
+#       - devspace
+#       - test
+#       - stg
+#       - production
+#     noCache: true
+  GIT_SHORT_HASH: $(git describe --always)
+  ARCH:
+    source: env
+    default: "linux/amd64"
+#   TARGET:
+#     source: env
+#     default: "x86_64-unknown-linux-gnu"
+#   BUILD_ENV:
+#     source: env
+#     default: ""
+  DOCKER_REGISTRY:
+    source: env
+    default: "ghcr.io"
+  DOCKER_IMAGE:
+    source: env
+    default: "stalwartlabs/stalwart"
+  HELM_CHART_GIT_URL:
+    source: env
+    default: "https://git.chaos.fyi/wrenix/helm-charts.git"
+  HELM_CHART_GIT_BRANCH:
+    source: env
+    default: "main"
+  HELM_CHART_GIT_SUBPATH:
+    source: env
+    default: "stalwart-mail"
+  DEV_IMAGE:
+    source: env
+    default: "rust:slim-trixie"
+  PERSISTENCE_VOLUME_SIZE:
+    source: env
+    default: "20Gi"
+
+localRegistry:
+  enabled: false
+
+profiles:
+  - name: remote-helm-chart
+    patches:
+      - op: replace
+        path: deployments.app.helm.chart
+        value:
+          git: "${HELM_CHART_GIT_URL}"
+          branch: "${HELM_CHART_GIT_BRANCH}"
+          subPath: "${HELM_CHART_GIT_SUBPATH}"
+
+  - name: devspace
+    activation:
+      - vars:
+          ENV: "devspace"
+    patches:
+      - op: add
+        path: deployments.app.helm.valuesFiles
+        value: "./chart/values.devspace.yaml"
+
+  - name: test
+    activation:
+      - vars:
+          ENV: "test"
+    patches:
+      - op: add
+        path: deployments.app.helm.valuesFiles
+        value: "./chart/values.test.yaml"
+
+  - name: stg
+    activation:
+      - vars:
+          ENV: "stg"
+    patches:
+      - op: add
+        path: deployments.app.helm.valuesFiles
+        value: "./chart/values.stg.yaml"
+
+# Build stalwart image
+images:
+  stalwart-mail:
+    image: "${DOCKER_REGISTRY}/${DOCKER_IMAGE}"
+    dockerfile: ./Dockerfile
+    context: ./
+    tags:
+      - "${GIT_SHORT_HASH}"
+      - latest
+    buildKit:
+      args:
+        - "--platform"
+        - "${ARCH}"
+    buildArgs:
+      TARGETPLATFORM: "${ARCH}"
+
+# This is a list of `pipelines` that DevSpace can execute (you can define your own)
+pipelines:
+  # You can run this pipeline via `devspace run-pipeline deploy-test-env`
+  deploy:
+    run: |-
+      run_dependencies --all                            # 1. Deploy any projects this project needs (see "dependencies")
+      ensure_pull_secrets --all                         # 2. Ensure pull secrets
+      build_images --all                                # 3. Build, tag (git commit hash) and push images (see "images")
+      create_deployments --all                          # 4. Deploy Helm charts and manifests specfied as "deployments"
+
+  dev:
+    run: |-
+      if [[ "${ENV}" == 'devspace' ]]; then
+        run_dependencies --all                            # 1. Deploy any projects this project needs (see "dependencies")
+        ensure_pull_secrets --all                         # 2. Ensure pull secrets
+        create_deployments --all                          # 3. Deploy Helm charts and manifests specfied as "deployments"
+        start_dev app                                     # 4. Start dev mode "app" (see "dev" section)
+      else
+        echo "Dev mode is only available for devspace environment"
+      fi
+
+# This is a list of `deployments` that DevSpace can create for this project
+deployments:
+  app:
+    namespace: "stalwart-mail-${ENV}"
+    # This deployment uses `helm` but you can also define `kubectl` deployments or kustomizations
+    helm:
+      releaseName: "stalwart-mail-${ENV}"
+      # We are deploying this project with the Helm chart you provided
+      chart:
+        path: ./chart/stalwart-mail
+      # Under `values` we can define the values for this Helm chart used during `helm install/upgrade`
+      values: {}
+        # image:
+        #   registry: "${DOCKER_REGISTRY}"
+        #   repository: "${DOCKER_IMAGE}"
+        #   tag: "${runtime.images.stalwart-mail.tag}"
+      valuesFiles:
+        - ./chart/values.yaml
+      displayOutput: true
+
+# This is a list of `dev` containers that are based on the containers created by your deployments
+dev:
+  app:
+    # Replace the container image with this dev-optimized image (allows to skip image building during development)
+    devImage: "${DEV_IMAGE}"
+    imageSelector: "ghcr.io/stalwartlabs/stalwart"
+    namespace: "stalwart-mail-${ENV}"
+    # Sync files between the local filesystem and the development container
+    workingDir: /app
+    sync:
+      - path: ./
+        uploadExcludePaths:
+          - .devspace
+          - chart
+          - target
+        # uploadExcludeFile: .dockerignore
+    persistPaths:
+      - path: /app
+        volumePath: app
+    persistenceOptions:
+      name: stalwart-mail-devspace-pvc
+      size: "${PERSISTENCE_VOLUME_SIZE}"
+      storageClassName: premium-ssd
+    # Open a terminal and use the following command to start it
+    terminal:
+      enabled: true
+      command: ./devspace_start.sh
+    attach:
+      enabled: true
+    # Inject a lightweight SSH server into the container (so your IDE can connect to the remote dev env)
+    ssh:
+      enabled: true
+    # Make the following commands from my local machine available inside the dev container
+    proxyCommands:
+      - command: devspace
+      - command: kubectl
+      - command: helm
+      - gitCredentials: true
+    # Forward the following ports to be able access your application via localhost
+    ports:
+      - port: "8025:25"
+      - port: "5587:587"
+      - port: "4465:465"
+      - port: "1143:143"
+      - port: "9993:993"
+      - port: "1110:110"
+      - port: "9995:995"
+      - port: "8190:4190"
+      - port: "8000:80"
+      - port: "8443:443"
+    open:
+      # Open the following URLs once they return an HTTP status code other than 502 or 503
+      - url: http://localhost:8000
+    resources:
+      limits:
+        memory: 4Gi
+        cpu: 2500m
+      requests:
+        memory: 2Gi
+        cpu: 1000m
+# Use the `commands` section to define repeatable dev workflows for this project
+# commands:
+#   migrate-db:
+#     command: |-
+#       echo 'This is a cross-platform, shared command that can be used to codify any kind of dev task.'
+#       echo 'Anyone using this project can invoke it via "devspace run migrate-db"'
+
+# hooks:
+#   - events:
+#       - before:deploy
+#     command: if [ -d '.devspace/chart-repo/.git' ]; then cd ".devspace/chart-repo" && git pull origin master; else mkdir -p .devspace/chart-repo; git clone --single-branch --branch master git@gitlab.ghn.vn:platform-engineer/ghn-iac.git .devspace/chart-repo; fi
+# Define dependencies to other projects with a devspace.yaml
+# dependencies:
+#   api:
+#     git: https://...  # Git-based dependencies
+#     tag: v1.0.0
+#   ui:
+#     path: ./ui        # Path-based dependencies (for monorepos)

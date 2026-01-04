@@ -1150,7 +1150,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "aes-gcm-siv",
  "ahash",
@@ -1640,7 +1640,7 @@ checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "dav"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "calcard 0.3.2",
  "chrono",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "dav-proto"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "calcard 0.3.2",
  "chrono",
@@ -1828,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "directory"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "argon2",
@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "email"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "event_macro"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2689,7 +2689,7 @@ dependencies = [
 
 [[package]]
 name = "groupware"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "calcard 0.3.2",
@@ -2983,18 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
-dependencies = [
- "bytes",
- "fnv",
- "itoa",
-]
-
-[[package]]
-name = "http"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "async-stream",
  "base64 0.22.1",
@@ -3036,6 +3025,17 @@ dependencies = [
  "types",
  "utils",
  "x509-parser",
+]
+
+[[package]]
+name = "http"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
 ]
 
 [[package]]
@@ -3104,7 +3104,7 @@ dependencies = [
 
 [[package]]
 name = "http_proto"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "common",
  "compact_str",
@@ -3405,7 +3405,7 @@ checksum = "09e54e57b4c48b40f7aec75635392b12b3421fa26fe8b4332e63138ed278459c"
 
 [[package]]
 name = "imap"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "common",
@@ -3432,7 +3432,7 @@ dependencies = [
 
 [[package]]
 name = "imap_proto"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "chrono",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "jmap"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "aes-gcm",
  "aes-gcm-siv",
@@ -3803,7 +3803,7 @@ dependencies = [
 
 [[package]]
 name = "jmap_proto"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "calcard 0.3.2",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "managesieve"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "common",
@@ -4372,7 +4372,7 @@ checksum = "c797b9d6bb23aab2fc369c65f871be49214f5c759af65bde26ffaaa2b646b492"
 
 [[package]]
 name = "migration"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "bincode 1.3.3",
@@ -4614,7 +4614,7 @@ dependencies = [
 
 [[package]]
 name = "nlp"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "bincode 1.3.3",
@@ -5357,7 +5357,7 @@ dependencies = [
 
 [[package]]
 name = "pop3"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "common",
  "directory",
@@ -5556,7 +5556,7 @@ dependencies = [
 
 [[package]]
 name = "proc_macros"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7104,7 +7104,7 @@ dependencies = [
 
 [[package]]
 name = "services"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "aes-gcm",
  "aes-gcm-siv",
@@ -7321,7 +7321,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smtp"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "blake3",
@@ -7423,7 +7423,7 @@ dependencies = [
 
 [[package]]
 name = "spam-filter"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "common",
  "compact_str",
@@ -7521,14 +7521,14 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stalwart"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "common",
  "dav",
  "directory",
  "email",
  "groupware",
- "http 0.15.3",
+ "http 0.0.1",
  "imap",
  "jemallocator",
  "jmap",
@@ -7547,7 +7547,7 @@ dependencies = [
 
 [[package]]
 name = "stalwart-cli"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "clap",
  "console",
@@ -7578,7 +7578,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -7742,7 +7742,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "async-trait",
@@ -7763,7 +7763,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "groupware",
- "http 0.15.3",
+ "http 0.0.1",
  "http-body-util",
  "http_proto",
  "hyper 1.8.1",
@@ -8298,7 +8298,7 @@ dependencies = [
 
 [[package]]
 name = "trc"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "base64 0.22.1",
@@ -8385,7 +8385,7 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "types"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "blake3",
  "compact_str",
@@ -8582,7 +8582,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utils"
-version = "0.15.3"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "base64 0.22.1",

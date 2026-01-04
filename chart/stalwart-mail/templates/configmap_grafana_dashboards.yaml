@@ -1,0 +1,15 @@
+{{- if .Values.grafana.dashboards.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stalwart-mail.fullname" . }}-grafana-dashboards
+  labels:
+    {{- include "stalwart-mail.labels" . | nindent 4 }}
+    {{- toYaml .Values.grafana.dashboards.labels | nindent 4 }}
+  annotations:
+    {{- toYaml .Values.grafana.dashboards.annotations | nindent 4 }}
+data:
+  {{- (.Files.Glob "grafana_dashboards/*.json" ).AsConfig | nindent 2 }}
+{{- end }}
+

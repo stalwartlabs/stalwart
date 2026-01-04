@@ -1,0 +1,49 @@
+name: nats-box
+{{ include "nats.image" (merge (pick $.Values "global") .Values.natsBox.container.image) }}
+
+{{- with .Values.natsBox.container.env }}
+env:
+{{- include "nats.env" . }}
+{{- end }}
+
+command:
+- sh
+- -ec
+- |
+  work_dir="$(pwd)"
+  mkdir -p "$XDG_CONFIG_HOME/nats"
+  cd "$XDG_CONFIG_HOME/nats"
+  if ! [ -s context ]; then
+    ln -s /etc/nats-contexts context
+  fi
+  {{- if .Values.natsBox.defaultContextName }}
+  if ! [ -f context.txt ]; then
+    echo -n {{ .Values.natsBox.defaultContextName | quote }} > context.txt
+  fi
+  {{- end }}
+  cd "$work_dir"
+  exec /entrypoint.sh "$@"
+- --
+args:
+- sh
+- -ec
+- trap true INT TERM; sleep infinity & wait
+volumeMounts:
+# contexts secret
+- name: contexts
+  mountPath: /etc/nats-contexts
+# contents secret
+{{- if .hasContentsSecret }}
+- name: contents
+  mountPath: /etc/nats-contents
+{{- end }}
+# tlsCA
+{{- include "nats.tlsCAVolumeMount" $ }}
+# secrets
+{{- range (include "natsBox.secretNames" $ | fromJson).secretNames }}
+- name: {{ .name | quote }}
+  mountPath: {{ .dir | quote }}
+{{- end }}
+
+resources:
+  {{- toYaml .Values.natsBox.container.resources | nindent 2 }}

@@ -1,0 +1,13 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  {{- include "nats.metadataNamespace" $ | nindent 2 }}
+  name: {{ .Values.promExporter.podMonitor.name }}
+  labels:
+    {{- include "nats.labels" $ | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "nats.selectorLabels" $ | nindent 6 }}
+  podMetricsEndpoints:
+  - port: prom-metrics

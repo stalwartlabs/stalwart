@@ -1,31 +1,64 @@
+[[bin]]
+path = "src/main.rs"
+name = "stalwart-cli"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+
 [package]
 name = "stalwart-cli"
-description = "Stalwart Server CLI"
+edition = "2024"
+version = "0.0.1"
 authors = ["Stalwart Labs LLC <hello@stalw.art>"]
+description = "Stalwart Server CLI"
+homepage = "https://github.com/stalwartlabs/cli"
+readme = "README.md"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 repository = "https://github.com/stalwartlabs/cli"
-homepage = "https://github.com/stalwartlabs/cli"
-version = "0.15.3"
-edition = "2024"
-readme = "README.md"
 
 [dependencies]
-jmap-client = { version = "0.3", features = ["async"] } 
-mail-parser = { version = "0.11", features = ["full_encoding", "serde"] } 
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"]}
-tokio = { version = "1.47", features = ["full"] }
-num_cpus = "1.13.1"
-clap = { version = "4.1.6", features = ["derive"] }
-prettytable-rs = "0.10.0"
-rpassword = "7.0"
-indicatif = "0.17.0"
-console = { version = "0.15", default-features = false, features = ["ansi-parsing"] }
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
 csv = "1.1"
 form_urlencoded = "1.1.0"
-human-size = "0.4.2"
 futures = "0.3.28"
+human-size = "0.4.2"
+indicatif = "0.17.0"
+num_cpus = "1.13.1"
+prettytable-rs = "0.10.0"
 pwhash = "1.0.0"
 rand = "0.9.0"
-mail-auth = { version = "0.7.1" }
+rpassword = "7.0"
+serde_json = "1.0"
+
+[dependencies.clap]
+version = "4.1.6"
+features = ["derive"]
+
+[dependencies.console]
+version = "0.15"
+features = ["ansi-parsing"]
+default-features = false
+
+[dependencies.jmap-client]
+version = "0.3"
+features = ["async"]
+
+[dependencies.mail-auth]
+version = "0.7.1"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding", "serde"]
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["rustls-tls-webpki-roots", "http2"]
+default-features = false
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.tokio]
+version = "1.47"
+features = ["full"]

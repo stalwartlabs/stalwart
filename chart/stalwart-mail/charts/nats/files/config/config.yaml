@@ -1,0 +1,114 @@
+{{- with .Values.config }}
+
+server_name: << $SERVER_NAME >>
+lame_duck_grace_period: 10s
+lame_duck_duration: 30s
+pid_file: /var/run/nats/nats.pid
+
+########################################
+# NATS
+########################################
+{{- with .nats }}
+port: {{ .port }}
+
+{{- with .tls }}
+{{- if .enabled }}
+tls:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/tls.yaml" "ctx" (merge (dict "tls" .) $)) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+########################################
+# leafnodes
+########################################
+{{- with .leafnodes }}
+{{- if .enabled }}
+leafnodes:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/leafnodes.yaml" "ctx" $) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+
+########################################
+# websocket
+########################################
+{{- with .websocket }}
+{{- if .enabled }}
+websocket:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/websocket.yaml" "ctx" $) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+
+########################################
+# MQTT
+########################################
+{{- with .mqtt }}
+{{- if .enabled }}
+mqtt:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/mqtt.yaml" "ctx" $) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+
+########################################
+# cluster
+########################################
+{{- with .cluster }}
+{{- if .enabled }}
+cluster:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/cluster.yaml" "ctx" $) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+
+########################################
+# gateway
+########################################
+{{- with .gateway }}
+{{- if .enabled }}
+gateway:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/gateway.yaml" "ctx" $) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+
+########################################
+# monitor
+########################################
+{{- with .monitor }}
+{{- if .enabled }}
+{{- if .tls.enabled }}
+https_port: {{ .port }}
+{{- else }}
+http_port: {{ .port }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+########################################
+# profiling
+########################################
+{{- with .profiling }}
+{{- if .enabled }}
+prof_port: {{ .port }}
+{{- end }}
+{{- end }}
+
+########################################
+# jetstream
+########################################
+{{- with $.Values.config.jetstream -}}
+{{- if .enabled }}
+jetstream:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/jetstream.yaml" "ctx" $) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+
+########################################
+# resolver
+########################################
+{{- with $.Values.config.resolver -}}
+{{- if .enabled }}
+resolver:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/resolver.yaml" "ctx" $) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{- end }}

@@ -1,48 +1,122 @@
 [package]
 name = "directory"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-utils = { path =  "../utils" }
-proc_macros = { path =  "../utils/proc-macros" }
-store = { path =  "../store" }
-trc = { path = "../trc" }
-nlp = { path = "../nlp" }
-types = { path = "../types" }
-smtp-proto = { version = "0.2" }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-mail-builder = { version = "0.4" }
-tokio = { version = "1.47", features = ["net"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
-rustls-pki-types = { version = "1" }
-ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-ring"] }
-deadpool = { version = "0.10", features = ["managed", "rt_tokio_1"] }
-async-trait = "0.1.68"
-ahash = { version = "0.8" }
-pwhash = "1"
-password-hash = "0.5.0"
 argon2 = "0.5.0"
-pbkdf2 = {version = "0.12.1", features = ["simple"] }
+async-trait = "0.1.68"
+base64 = "0.22"
+futures = "0.3"
+md5 = "0.8.0"
+password-hash = "0.5.0"
+pwhash = "1"
+regex = "1.7.0"
 scrypt = "0.11.0"
+serde_json = "1.0"
 sha1 = "0.10.5"
 sha2 = "0.10.6"
-md5 = "0.8.0"
-futures = "0.3"
-regex = "1.7.0"
-serde = { version = "1.0", features = ["derive"]}
-totp-rs = { version = "5.5.1", features = ["otpauth"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"] }
-serde_json = "1.0"
-base64 = "0.22"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
-compact_str = { version = "0.9.0", features = ["rkyv", "serde"] }
 
-[dev-dependencies]
-tokio = { version = "1.47", features = ["full"] }
+[dependencies.ahash]
+version = "0.8"
+
+[dependencies.compact_str]
+version = "0.9.0"
+features = ["rkyv", "serde"]
+
+[dependencies.deadpool]
+version = "0.10"
+features = ["managed", "rt_tokio_1"]
+
+[dependencies.ldap3]
+version = "0.12"
+features = ["tls-rustls-ring"]
+default-features = false
+
+[dependencies.mail-builder]
+version = "0.4"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding", "rkyv"]
+
+[dependencies.mail-send]
+version = "0.5"
+features = ["cram-md5", "ring", "tls12"]
+default-features = false
+
+[dependencies.nlp]
+path = "../nlp"
+
+[dependencies.pbkdf2]
+version = "0.12.1"
+features = ["simple"]
+
+[dependencies.proc_macros]
+path = "../utils/proc-macros"
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["rustls-tls-webpki-roots", "http2"]
+default-features = false
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.rustls]
+version = "0.23.5"
+features = ["std", "ring", "tls12"]
+default-features = false
+
+[dependencies.rustls-pki-types]
+version = "1"
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.smtp-proto]
+version = "0.2"
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["net"]
+
+[dependencies.tokio-rustls]
+version = "0.26"
+features = ["ring", "tls12"]
+default-features = false
+
+[dependencies.totp-rs]
+version = "5.5.1"
+features = ["otpauth"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
+
+[dev-dependencies.tokio]
+version = "1.47"
+features = ["full"]
 
 [features]
-test_mode = []
 enterprise = []
+test_mode = []
+
+[lib]
+path = "src/lib.rs"
+name = "directory"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

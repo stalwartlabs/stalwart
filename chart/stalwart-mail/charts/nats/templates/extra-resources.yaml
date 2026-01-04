@@ -1,0 +1,5 @@
+{{- include "nats.defaultValues" . }}
+{{- range .Values.extraResources }}
+---
+{{ . | toYaml }}
+{{- end }}

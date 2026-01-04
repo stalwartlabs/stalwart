@@ -1,0 +1,8 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.natsBox }}
+{{- if .enabled }}
+{{- with .deployment }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "nats-box/deployment/deployment.yaml" "ctx" $) .) }}
+{{- end }}
+{{- end }}
+{{- end }}

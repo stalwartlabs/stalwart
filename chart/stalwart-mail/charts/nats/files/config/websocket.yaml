@@ -1,0 +1,12 @@
+{{- with .Values.config.websocket }}
+port: {{ .port }}
+
+{{- if .tls.enabled }}
+{{- with .tls }}
+tls:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/tls.yaml" "ctx" (merge (dict "tls" .) $)) .) | nindent 2 }}
+{{- end }}
+{{- else }}
+no_tls: true
+{{- end }}
+{{- end }}

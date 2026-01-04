@@ -1,0 +1,51 @@
+{{- $contextName := .contextName }}
+
+# url
+{{- if .Values.service.enabled }}
+url: nats://{{ .Values.service.name }}
+{{- else }}
+url: nats://{{ .Values.headlessService.name }}
+{{- end }}
+
+{{- with .context }}
+
+# creds
+{{- with .creds}}
+{{- if .contents }}
+creds: /etc/nats-contents/{{ $contextName }}.creds
+{{- else if .secretName }}
+{{- $dir := trimSuffix "/" .dir }}
+creds: {{ printf "%s/%s" $dir (.key | default "nats.creds") | quote }}
+{{- end }}
+{{- end }}
+
+# nkey
+{{- with .nkey}}
+{{- if .contents }}
+nkey: /etc/nats-contents/{{ $contextName }}.nk
+{{- else if .secretName }}
+{{- $dir := trimSuffix "/" .dir }}
+nkey: {{ printf "%s/%s" $dir (.key | default "nats.nk") | quote }}
+{{- end }}
+{{- end }}
+
+# tls
+{{- with .tls }}
+{{- if .secretName }}
+{{- $dir := trimSuffix "/" .dir }}
+cert: {{ printf "%s/%s" $dir (.cert | default "tls.crt") | quote }}
+key: {{ printf "%s/%s" $dir (.key | default "tls.key") | quote }}
+{{- end }}
+{{- end }}
+
+# tlsCA
+{{- if $.Values.config.nats.tls.enabled }}
+{{- with $.Values.tlsCA }}
+{{- if and .enabled (or .configMapName .secretName) }}
+{{- $dir := trimSuffix "/" .dir }}
+ca: {{ printf "%s/%s" $dir (.key | default "ca.crt") | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- end }}

@@ -1,0 +1,16 @@
+apiVersion: v2
+appVersion: 0.14.1
+dependencies:
+- condition: nats.enabled
+  name: nats
+  repository: https://nats-io.github.io/k8s/helm/charts/
+  version: 2.12.2
+description: Helm Chart for Stalwart Mail Server - Secure & Modern All-in-One Mail
+  Server (IMAP, JMAP, SMTP)
+icon: https://cdn.ghn.vn/online-static/internal/1.0.1/media/Giao_Hang_Nhanh_Toan_Quoc_color.7d901c9c.png
+maintainers:
+- name: WrenIX
+  url: https://wrenix.eu
+name: stalwart-mail
+type: application
+version: 0.4.3

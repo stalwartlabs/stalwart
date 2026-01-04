@@ -1,73 +1,52 @@
 [workspace]
+members = ["crates/main", "crates/types", "crates/http", "crates/http-proto", "crates/jmap", "crates/jmap-proto", "crates/email", "crates/imap", "crates/imap-proto", "crates/smtp", "crates/managesieve", "crates/pop3", "crates/dav-proto", "crates/dav", "crates/groupware", "crates/spam-filter", "crates/nlp", "crates/store", "crates/directory", "crates/services", "crates/utils", "crates/common", "crates/trc", "crates/migration", "crates/cli", "tests"]
 resolver = "2"
-members = [
-    "crates/main",
-    "crates/types",
-    "crates/http",
-    "crates/http-proto",
-    "crates/jmap",
-    "crates/jmap-proto",
-    "crates/email",
-    "crates/imap",
-    "crates/imap-proto",
-    "crates/smtp",
-    "crates/managesieve",
-    "crates/pop3",
-    "crates/dav-proto",
-    "crates/dav",
-    "crates/groupware",
-    "crates/spam-filter",
-    "crates/nlp",
-    "crates/store",
-    "crates/directory",
-    "crates/services",
-    "crates/utils",
-    "crates/common",
-    "crates/trc",
-    "crates/migration",
-    "crates/cli",
-    "tests",
-]
-
-[profile.dev]
-opt-level = 0
-debug = 1
-#codegen-units = 4
-lto = false
-incremental = true
-panic = 'unwind'
-debug-assertions = true
-overflow-checks = false
-rpath = false
 
 [profile.release]
 opt-level = 3
 debug = false
-codegen-units = 1
-lto = true
-incremental = false
-panic = 'unwind'
-debug-assertions = false
-overflow-checks = false
 rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = "unwind"
+incremental = false
+overflow-checks = false
 strip = true
+
+[profile.release.package]
+
+[profile.dev]
+opt-level = 0
+debug = 1
+rpath = false
+lto = false
+debug-assertions = true
+panic = "unwind"
+incremental = true
+overflow-checks = false
+
+[profile.dev.package]
 
 [profile.test]
 opt-level = 0
 debug = 1
-#codegen-units = 16
-lto = false
-incremental = true
-debug-assertions = true
-overflow-checks = true
 rpath = false
+lto = false
+debug-assertions = true
+incremental = true
+overflow-checks = true
+
+[profile.test.package]
 
 [profile.bench]
 opt-level = 3
 debug = false
-codegen-units = 1
-lto = true
-incremental = false
-debug-assertions = false
-overflow-checks = false
 rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+incremental = false
+overflow-checks = false
+
+[profile.bench.package]

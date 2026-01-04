@@ -1,0 +1,6 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.service }}
+{{- if .enabled }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "service.yaml" "ctx" $) .) }}
+{{- end }}
+{{- end }}

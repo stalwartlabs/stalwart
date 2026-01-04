@@ -1,0 +1,16 @@
+# tls
+{{- with .tls }}
+{{- if .secretName }}
+{{- $dir := trimSuffix "/" .dir }}
+cert_file: {{ printf "%s/%s" $dir (.cert | default "tls.crt") | quote }}
+key_file: {{ printf "%s/%s" $dir (.key | default "tls.key") | quote }}
+{{- end }}
+{{- end }}
+
+# tlsCA
+{{- with $.Values.tlsCA }}
+{{- if and .enabled (or .configMapName .secretName) }}
+{{- $dir := trimSuffix "/" .dir }}
+ca_file: {{ printf "%s/%s" $dir (.key | default "ca.crt") | quote }}
+{{- end }}
+{{- end }}

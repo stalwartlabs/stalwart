@@ -1,0 +1,29 @@
+{{- with .Values.twake }}
+{{- if .enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "stalwart-mail.fullname" $ }}-twake
+  labels:
+    {{- include "stalwart-mail.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: twake
+  {{- with .service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .service.type }}
+  ipFamilyPolicy: {{ .service.ipFamilyPolicy }}
+  ipFamilies:
+    {{- toYaml .service.ipFamilies | nindent 4 }}
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "stalwart-mail.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: twake
+{{- end }}
+{{- end }}{{/* end-with .Values.twake */}}

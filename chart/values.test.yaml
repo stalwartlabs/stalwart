@@ -1,0 +1,38 @@
+# ingress:
+#   annotations:
+#     cert-manager.io/cluster-issuer: ghn-tech-cluster-issuer
+#     external-dns.alpha.kubernetes.io/hostname: test.backstage.ghn.tech
+#     kubernetes.io/tls-acme: 'true'
+#     external-dns.alpha.kubernetes.io/target: 10.113.0.58
+#     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+#   host: 'test.backstage.ghn.tech'
+
+#   tls:
+#     secretName: 'testbackstage-letencrypt-tls'
+
+# backstage:
+#   replicas: 1
+
+#   resources:
+#     limits:
+#       memory: 1Gi
+#       cpu: 1000m
+#     requests:
+#       memory: 250Mi
+#       cpu: 100m
+
+#   appConfig:
+#     app:
+#       title: '[Test] Developers Portal'
+#       baseUrl: 'https://test.backstage.ghn.tech'
+#     backend:
+#       baseUrl: 'https://test.backstage.ghn.tech'
+#       auth:
+#         keys:
+#           - secret: ${BACKEND_SECRET}
+#     cors:
+#       origin: 'https://test.backstage.ghn.tech'
+#       methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+#       credentials: true
+#     organization:
+#       name: Giao Hang Nhanh

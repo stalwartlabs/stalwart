@@ -1,68 +1,99 @@
+[[bin]]
+path = "src/main.rs"
+name = "stalwart"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+
 [package]
 name = "stalwart"
+edition = "2024"
+version = "0.0.1"
+authors = ["Stalwart Labs LLC <hello@stalw.art>"]
 description = "Stalwart Mail and Collaboration Server"
-authors = [ "Stalwart Labs LLC <hello@stalw.art>"]
-repository = "https://github.com/stalwartlabs/stalwart"
 homepage = "https://stalw.art"
 keywords = ["imap", "jmap", "smtp", "email", "mail", "webdav", "server"]
 categories = ["email"]
 license = "AGPL-3.0-only OR LicenseRef-SEL"
-version = "0.15.3"
-edition = "2024"
+repository = "https://github.com/stalwartlabs/stalwart"
 
-[[bin]]
-name = "stalwart"
-path = "src/main.rs"
+[dependencies.common]
+path = "../common"
 
-[dependencies]
-store = { path = "../store" }
-jmap = { path = "../jmap" }
-types = { path = "../types" }
-smtp = { path = "../smtp" }
-imap = { path = "../imap" }
-pop3 = { path = "../pop3" }
-spam-filter = { path = "../spam-filter" }
-managesieve = { path = "../managesieve" }
-common = { path = "../common" }
-email = { path = "../email" }
-directory = { path = "../directory" }
-http = { path = "../http" }
-dav = { path = "../dav" }
-groupware = { path = "../groupware" }
-services = { path = "../services" }
-trc = { path = "../trc" }
-utils = { path = "../utils" }
-migration = { path = "../migration" }
-tokio = { version = "1.47", features = ["full"] }
+[dependencies.dav]
+path = "../dav"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.email]
+path = "../email"
+
+[dependencies.groupware]
+path = "../groupware"
+
+[dependencies.http]
+path = "../http"
+
+[dependencies.imap]
+path = "../imap"
+
+[dependencies.jmap]
+path = "../jmap"
+
+[dependencies.managesieve]
+path = "../managesieve"
+
+[dependencies.migration]
+path = "../migration"
+
+[dependencies.pop3]
+path = "../pop3"
+
+[dependencies.services]
+path = "../services"
+
+[dependencies.smtp]
+path = "../smtp"
+
+[dependencies.spam-filter]
+path = "../spam-filter"
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["full"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.5.0"
 
+[target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
+
+[target.'cfg(not(target_env = "msvc"))'.build-dependencies]
+
 [features]
-#default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "azure", "nats", "enterprise"]
+azure = ["store/azure"]
 default = ["rocks", "enterprise"]
-sqlite = ["store/sqlite"]
+enterprise = ["jmap/enterprise", "smtp/enterprise", "common/enterprise", "store/enterprise", "managesieve/enterprise", "directory/enterprise", "email/enterprise", "spam-filter/enterprise", "http/enterprise", "dav/enterprise", "groupware/enterprise", "trc/enterprise", "services/enterprise", "migration/enterprise"]
 foundationdb = ["store/foundation", "common/foundation"]
-postgres = ["store/postgres"]
+kafka = ["store/kafka"]
 mysql = ["store/mysql"]
+nats = ["store/nats"]
+postgres = ["store/postgres"]
+redis = ["store/redis"]
 rocks = ["store/rocks"]
 s3 = ["store/s3"]
-redis = ["store/redis"]
-nats = ["store/nats"]
-azure = ["store/azure"]
+sqlite = ["store/sqlite"]
 zenoh = ["store/zenoh"]
-kafka = ["store/kafka"]
-enterprise = [ "jmap/enterprise", 
-               "smtp/enterprise", 
-               "common/enterprise", 
-               "store/enterprise", 
-               "managesieve/enterprise", 
-               "directory/enterprise", 
-               "email/enterprise",
-               "spam-filter/enterprise",
-               "http/enterprise",
-               "dav/enterprise",
-               "groupware/enterprise",
-               "trc/enterprise",
-               "services/enterprise",
-               "migration/enterprise" ]

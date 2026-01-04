@@ -1,0 +1,21 @@
+{{- if .Values.twake.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stalwart-mail.fullname" . }}-twake
+  labels:
+    {{- include "stalwart-mail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: twake
+data:
+  "env.file": |
+    {{- range $key,$value := .Values.twake.config.env }}
+    {{- if (kindIs "slice" $value) }}
+    {{ $key }}={{ join "," $value | quote }}
+    {{- else }}
+    {{ $key }}={{ tpl (toString $value) $ | quote }}
+    {{- end }}
+    {{- end }}
+  "app_dashboard.json": |
+    {{- tpl (toJson .Values.twake.config.dashboard) . | nindent 4 }}
+{{- end }}

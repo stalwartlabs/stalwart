@@ -1,0 +1,3 @@
+{{- with .Values.config.resolver }}
+dir: {{ .dir }}
+{{- end }}

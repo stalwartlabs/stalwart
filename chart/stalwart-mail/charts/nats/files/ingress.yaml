@@ -1,0 +1,34 @@
+{{- with .Values.config.websocket.ingress }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  {{- include "nats.metadataNamespace" $ | nindent 2 }}
+  name: {{ .name }}
+  labels:
+    {{- include "nats.labels" $ | nindent 4 }}
+spec:
+  {{- with .className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  rules:
+  {{- $path := .path }}
+  {{- $pathType := .pathType }}
+  {{- range .hosts }}
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: {{ $path | quote }}
+        pathType: {{ $pathType | quote }}
+        backend:
+          service:
+            name: {{ $.Values.service.name }}
+            port:
+              name: websocket
+  {{- end }}
+  {{- if .tlsSecretName }}
+  tls:
+  - secretName: {{ .tlsSecretName | quote }}
+    hosts:
+    {{- toYaml .hosts | nindent 4 }}
+  {{- end }}
+{{- end }}

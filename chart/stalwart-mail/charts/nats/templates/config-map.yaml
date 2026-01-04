@@ -1,0 +1,4 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.configMap }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "config-map.yaml" "ctx" $) .) }}
+{{- end }}

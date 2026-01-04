@@ -1,28 +1,63 @@
 [package]
 name = "groupware"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-utils = { path = "../utils" }
-store = { path = "../store" }
-common = { path =  "../common" }
-types = { path = "../types" }
-trc = { path = "../trc" }
-nlp = { path = "../nlp" }
-directory = { path =  "../directory" }
-calcard = { version = "0.3", features = ["rkyv"] }
-hashify = "0.2"
-tokio = { version = "1.47", features = ["net", "macros"] }
-rkyv = { version = "0.8.10", features = ["little_endian"] }
-percent-encoding = "2.3.1"
-compact_str = "0.9.0"
-ahash = { version = "0.8" }
 chrono = "0.4.40"
+compact_str = "0.9.0"
+hashify = "0.2"
+percent-encoding = "2.3.1"
+
+[dependencies.ahash]
+version = "0.8"
+
+[dependencies.calcard]
+version = "0.3"
+features = ["rkyv"]
+
+[dependencies.common]
+path = "../common"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.nlp]
+path = "../nlp"
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["net", "macros"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
+
+[dev-dependencies.tokio]
+version = "1.47"
+features = ["full"]
 
 [features]
-test_mode = []
 enterprise = []
+test_mode = []
 
-[dev-dependencies]
-tokio = { version = "1.47", features = ["full"] }
+[lib]
+path = "src/lib.rs"
+name = "groupware"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

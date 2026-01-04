@@ -1,27 +1,67 @@
 [package]
 name = "dav-proto"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-trc = { path = "../trc" }
-types = { path = "../types" }
-hashify = "0.2.6"
-quick-xml = { version = "0.38" }
-calcard = { version = "0.3", features = ["rkyv"] }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
-hyper = "1.6.0"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
-chrono = { version = "0.4.40", features = ["serde"], optional = true }
 compact_str = "0.9.0"
+hashify = "0.2.6"
+hyper = "1.6.0"
+
+[dependencies.calcard]
+version = "0.3"
+features = ["rkyv"]
+
+[dependencies.chrono]
+version = "0.4.40"
+features = ["serde"]
+optional = true
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding", "rkyv"]
+
+[dependencies.quick-xml]
+version = "0.38"
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
 
 [dev-dependencies]
-calcard = { version = "0.3", features = ["serde", "rkyv"] }
-types = { path = "../types", features = ["test_mode"] }
-serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
-chrono = { version = "0.4.40", features = ["serde"] }
+
+[dev-dependencies.calcard]
+version = "0.3"
+features = ["serde", "rkyv"]
+
+[dev-dependencies.chrono]
+version = "0.4.40"
+features = ["serde"]
+
+[dev-dependencies.serde]
+version = "1.0.217"
+features = ["derive"]
+
+[dev-dependencies.types]
+path = "../types"
+features = ["test_mode"]
 
 [features]
-test_mode = ["chrono"]
 enterprise = []
+test_mode = ["chrono"]
+
+[lib]
+path = "src/lib.rs"
+name = "dav_proto"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

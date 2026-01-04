@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  {{- include "nats.metadataNamespace" $ | nindent 2 }}
+  name: {{ .Values.configMap.name }}
+  labels:
+    {{- include "nats.labels" $ | nindent 4 }}
+data:
+  nats.conf: |
+    {{- include "nats.formatConfig" .config | nindent 4 }}

@@ -1,0 +1,4 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.headlessService }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "headless-service.yaml" "ctx" $) .) }}
+{{- end }}

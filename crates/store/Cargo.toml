@@ -1,83 +1,222 @@
 [package]
 name = "store"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-utils = { path = "../utils" }
-types = { path = "../types" }
-nlp = { path = "../nlp" }
-trc = { path = "../trc" }
-rocksdb = { version = "0.24", optional = true, features = ["multi-threaded-cf"] }
-foundationdb = { version = "0.9.2", features = ["embedded-fdb-include", "fdb-7_3"], optional = true }
-rusqlite = { version = "0.37", features = ["bundled"], optional = true }
-#rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"], optional = true }
-rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustls-tls", "no-verify-ssl"], optional = true }
-async-nats = { version = "0.44", default-features = false, features = ["server_2_10", "server_2_11", "ring"], optional = true }
-azure_core = { version = "0.21.0", optional = true }
-azure_storage = { version = "0.21.0", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"], optional = true }
-azure_storage_blobs = { version = "0.21.0", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"], optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2", "stream"]}
-tokio = { version = "1.47", features = ["sync", "fs", "io-util"] }
-r2d2 = { version = "0.8.10", optional = true }
-futures = { version = "0.3", optional = true }
-rand = "0.9.0"
-roaring = "0.11"
-rayon = { version = "1.11", optional = true }
-serde = { version = "1.0", features = ["derive"]}
-ahash = { version = "0.8.2", features = ["serde"] }
-xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
-farmhash = "1.1.5"
-parking_lot = "0.12"
-lru-cache = { version = "0.1.2", optional = true }
-num_cpus = { version = "1.17", optional = true }
-blake3 = "1.8"
-lz4_flex = { version = "0.12", default-features = false }
-deadpool-postgres = { version = "0.14", optional = true }
-tokio-postgres = { version = "0.7.10", features = ["with-serde_json-1"], optional = true }
-tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["ring", "tls12"] }
-rustls = { version = "0.23.5", optional = true, default-features = false, features = ["std", "ring", "tls12"] }
-rustls-pki-types = { version = "1", optional = true }
-ring = { version = "0.17", optional = true }
-bytes = { version = "1.10", optional = true }
-mysql_async = { version = "0.36", default-features = false, features = ["default-rustls-ring", "minimal"], optional = true }
-serde_json = { version = "1.0.64" }
-regex = "1.12"
-flate2 = "1.1"
-redis = { version = "0.32", features = [ "tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls-webpki-roots", "cluster-async"], optional = true }
-deadpool = { version = "0.12", features = ["managed"], optional = true }
 arc-swap = "1.6.0"
 bitpacking = "0.9.2"
-memchr = { version = "2.7" }
-rkyv = { version = "0.8.10", features = ["little_endian"] }
+blake3 = "1.8"
 compact_str = "0.9.0"
-zenoh = { version = "1.3.4", default-features = false, features = ["auth_pubkey", "transport_multilink", "transport_compression", "transport_quic", "transport_tcp", "transport_tls", "transport_udp"], optional = true }
-rdkafka = { version = "0.38", features = ["cmake-build"], optional = true }
-rustls_021 = { package = "rustls", version = "0.21", default-features = false, features = ["dangerous_configuration"], optional = true }
+farmhash = "1.1.5"
+flate2 = "1.1"
+parking_lot = "0.12"
+rand = "0.9.0"
+regex = "1.12"
+roaring = "0.11"
 
-[dev-dependencies]
-tokio = { version = "1.47", features = ["full"] }
+[dependencies.ahash]
+version = "0.8.2"
+features = ["serde"]
+
+[dependencies.async-nats]
+version = "0.44"
+features = ["server_2_10", "server_2_11", "ring"]
+optional = true
+default-features = false
+
+[dependencies.azure_core]
+version = "0.21.0"
+optional = true
+
+[dependencies.azure_storage]
+version = "0.21.0"
+features = ["enable_reqwest_rustls", "hmac_rust"]
+optional = true
+default-features = false
+
+[dependencies.azure_storage_blobs]
+version = "0.21.0"
+features = ["enable_reqwest_rustls", "hmac_rust"]
+optional = true
+default-features = false
+
+[dependencies.bytes]
+version = "1.10"
+optional = true
+
+[dependencies.deadpool]
+version = "0.12"
+features = ["managed"]
+optional = true
+
+[dependencies.deadpool-postgres]
+version = "0.14"
+optional = true
+
+[dependencies.foundationdb]
+version = "0.9.2"
+features = ["embedded-fdb-include", "fdb-7_3"]
+optional = true
+
+[dependencies.futures]
+version = "0.3"
+optional = true
+
+[dependencies.lru-cache]
+version = "0.1.2"
+optional = true
+
+[dependencies.lz4_flex]
+version = "0.12"
+default-features = false
+
+[dependencies.memchr]
+version = "2.7"
+
+[dependencies.mysql_async]
+version = "0.36"
+features = ["default-rustls-ring", "minimal"]
+optional = true
+default-features = false
+
+[dependencies.nlp]
+path = "../nlp"
+
+[dependencies.num_cpus]
+version = "1.17"
+optional = true
+
+[dependencies.r2d2]
+version = "0.8.10"
+optional = true
+
+[dependencies.rayon]
+version = "1.11"
+optional = true
+
+[dependencies.rdkafka]
+version = "0.38"
+features = ["cmake-build"]
+optional = true
+
+[dependencies.redis]
+version = "0.32"
+features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls-webpki-roots", "cluster-async"]
+optional = true
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["rustls-tls-webpki-roots", "http2", "stream"]
+default-features = false
+
+[dependencies.ring]
+version = "0.17"
+optional = true
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.rocksdb]
+version = "0.24"
+features = ["multi-threaded-cf"]
+optional = true
+
+[dependencies.rusqlite]
+version = "0.37"
+features = ["bundled"]
+optional = true
+
+[dependencies.rust-s3]
+version = "0.35"
+features = ["tokio-rustls-tls", "no-verify-ssl"]
+optional = true
+default-features = false
+
+[dependencies.rustls]
+version = "0.23.5"
+features = ["std", "ring", "tls12"]
+optional = true
+default-features = false
+
+[dependencies.rustls-pki-types]
+version = "1"
+optional = true
+
+[dependencies.rustls_021]
+version = "0.21"
+features = ["dangerous_configuration"]
+optional = true
+default-features = false
+package = "rustls"
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1.0.64"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["sync", "fs", "io-util"]
+
+[dependencies.tokio-postgres]
+version = "0.7.10"
+features = ["with-serde_json-1"]
+optional = true
+
+[dependencies.tokio-rustls]
+version = "0.26"
+features = ["ring", "tls12"]
+optional = true
+default-features = false
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
+
+[dependencies.xxhash-rust]
+version = "0.8.5"
+features = ["xxh3"]
+
+[dependencies.zenoh]
+version = "1.3.4"
+features = ["auth_pubkey", "transport_multilink", "transport_compression", "transport_quic", "transport_tcp", "transport_tls", "transport_udp"]
+optional = true
+default-features = false
+
+[dev-dependencies.tokio]
+version = "1.47"
+features = ["full"]
 
 [features]
-# Data Stores
-rocks = ["rocksdb", "rayon", "num_cpus"]
-sqlite = ["rusqlite", "rayon", "r2d2", "num_cpus", "lru-cache"]
-postgres = ["tokio-postgres", "deadpool", "deadpool-postgres", "tokio-rustls", "rustls", "ring", "rustls-pki-types", "futures", "bytes"]
-mysql = ["mysql_async", "futures"]
-foundation = ["foundationdb", "futures"]
-fdb-chunked-bm = []
-
-# Blob stores
-s3 = ["rust-s3", "rustls_021"]
 azure = ["azure_core", "azure_storage", "azure_storage_blobs"]
-
-# In-memory stores
-redis = ["dep:redis", "deadpool", "futures"]
-
-# Pubsub
-nats = ["async-nats"]
-zenoh = ["dep:zenoh"]
-kafka = ["rdkafka"]
-
 enterprise = []
+fdb-chunked-bm = []
+foundation = ["foundationdb", "futures"]
+kafka = ["rdkafka"]
+mysql = ["mysql_async", "futures"]
+nats = ["async-nats"]
+postgres = ["tokio-postgres", "deadpool", "deadpool-postgres", "tokio-rustls", "rustls", "ring", "rustls-pki-types", "futures", "bytes"]
+redis = ["dep:redis", "deadpool", "futures"]
+rocks = ["rocksdb", "rayon", "num_cpus"]
+s3 = ["rust-s3", "rustls_021"]
+sqlite = ["rusqlite", "rayon", "r2d2", "num_cpus", "lru-cache"]
 test_mode = []
+zenoh = ["dep:zenoh"]
+
+[lib]
+path = "src/lib.rs"
+name = "store"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

@@ -1,0 +1,8 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.promExporter }}
+{{- if and .enabled .podMonitor.enabled }}
+{{- with .podMonitor }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "pod-monitor.yaml" "ctx" $) .) }}
+{{- end }}
+{{- end }}
+{{- end }}

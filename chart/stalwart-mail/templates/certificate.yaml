@@ -1,0 +1,15 @@
+{{- with .Values.certificate.certmanager }}
+{{- if and .enabled (not $.Values.certificate.secretName) ($.Capabilities.APIVersions.Has "cert-manager.io/v1/Certificate") }}
+---
+apiVersion: "cert-manager.io/v1"
+kind: Certificate
+metadata:
+  name: {{ include "stalwart-mail.fullname" $ }}
+spec:
+  secretName: {{ include "stalwart-mail.fullname" $ }}-cert
+  issuerRef:
+    {{- toYaml .issuerRef | nindent 4 }}
+  dnsNames:
+    {{- toYaml .dnsNames | nindent 4 }}
+{{- end }}{{/* end-if .enabled */}}
+{{- end }}{{/* end-with .certificates */}}

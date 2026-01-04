@@ -1,0 +1,32 @@
+{{- with .Values.config.cluster }}
+name: {{ $.Values.statefulSet.name }}
+port: {{ .port }}
+no_advertise: true
+routes:
+{{- $proto := ternary "tls" "nats" .tls.enabled }}
+{{- $auth := "" }}
+{{- if and .routeURLs.user .routeURLs.password }}
+  {{- $auth = printf "%s:%s@" (urlquery .routeURLs.user) (urlquery .routeURLs.password) -}}
+{{- end }}
+{{- $domain := $.Values.headlessService.name  }}
+{{- if .routeURLs.useFQDN }}
+  {{- $domain = printf "%s.%s.svc.%s" $domain (include "nats.namespace" $) .routeURLs.k8sClusterDomain }}
+{{- end }}
+{{- $port := (int .port) }}
+{{- range $i, $_ := until (int .replicas) }}
+- {{ printf "%s://%s%s-%d.%s:%d" $proto $auth $.Values.statefulSet.name $i $domain $port }}
+{{- end }}
+
+{{- if and .routeURLs.user .routeURLs.password }}
+authorization:
+  user: {{ .routeURLs.user | quote }}
+  password: {{ .routeURLs.password | quote }}
+{{- end }}
+
+{{- with .tls }}
+{{- if .enabled }}
+tls:
+  {{- include "nats.loadMergePatch" (merge (dict "file" "config/tls.yaml" "ctx" (merge (dict "tls" .) $)) .) | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,32 +1,87 @@
 [package]
 name = "managesieve"
-version = "0.15.3"
 edition = "2024"
+version = "0.0.1"
 
 [dependencies]
-imap_proto = { path = "../imap-proto" }
-imap = { path = "../imap" }
-types = { path = "../types" }
-jmap_proto = { path = "../jmap-proto" }
-directory = { path = "../directory" }
-common = { path = "../common" }
-store = { path = "../store" }
-utils = { path = "../utils" }
-email = { path = "../email" }
-trc = { path = "../trc" }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-sieve-rs = { version = "0.7", features = ["rkyv"] } 
-rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
-rustls-pemfile = "2.0"
-tokio = { version = "1.47", features = ["full"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-parking_lot = "0.12"
-ahash = { version = "0.8" }
-md5 = "0.8.0"
 compact_str = "0.9.0"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
+md5 = "0.8.0"
+parking_lot = "0.12"
+rustls-pemfile = "2.0"
+
+[dependencies.ahash]
+version = "0.8"
+
+[dependencies.common]
+path = "../common"
+
+[dependencies.directory]
+path = "../directory"
+
+[dependencies.email]
+path = "../email"
+
+[dependencies.imap]
+path = "../imap"
+
+[dependencies.imap_proto]
+path = "../imap-proto"
+
+[dependencies.jmap_proto]
+path = "../jmap-proto"
+
+[dependencies.mail-parser]
+version = "0.11"
+features = ["full_encoding"]
+
+[dependencies.mail-send]
+version = "0.5"
+features = ["cram-md5", "ring", "tls12"]
+default-features = false
+
+[dependencies.rkyv]
+version = "0.8.10"
+features = ["little_endian"]
+
+[dependencies.rustls]
+version = "0.23.5"
+features = ["std", "ring", "tls12"]
+default-features = false
+
+[dependencies.sieve-rs]
+version = "0.7"
+features = ["rkyv"]
+
+[dependencies.store]
+path = "../store"
+
+[dependencies.tokio]
+version = "1.47"
+features = ["full"]
+
+[dependencies.tokio-rustls]
+version = "0.26"
+features = ["ring", "tls12"]
+default-features = false
+
+[dependencies.trc]
+path = "../trc"
+
+[dependencies.types]
+path = "../types"
+
+[dependencies.utils]
+path = "../utils"
 
 [features]
-test_mode = []
 enterprise = []
+test_mode = []
+
+[lib]
+path = "src/lib.rs"
+name = "managesieve"
+plugin = false
+proc-macro = false
+edition = "2024"
+required-features = []
+crate-type = ["lib"]

@@ -1,0 +1,4 @@
+{{- include "nats.defaultValues" . }}
+{{- with .Values.statefulSet }}
+{{- include "nats.loadMergePatch" (merge (dict "file" "stateful-set/stateful-set.yaml" "ctx" $) .) }}
+{{- end }}
