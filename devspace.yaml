@@ -6,26 +6,26 @@ require:
 
 vars:
   DEVSPACE_ENV_FILE: ".env"
-  ENV: 'devspace'
-#   ENV:
-#     question: Which environment?
-#     default: "devspace"
-#     options:
-#       - devspace
-#       - test
-#       - stg
-#       - production
-#     noCache: true
+  ENV: "devspace"
+  #   ENV:
+  #     question: Which environment?
+  #     default: "devspace"
+  #     options:
+  #       - devspace
+  #       - test
+  #       - stg
+  #       - production
+  #     noCache: true
   GIT_SHORT_HASH: $(git describe --always)
   ARCH:
     source: env
     default: "linux/amd64"
-#   TARGET:
-#     source: env
-#     default: "x86_64-unknown-linux-gnu"
-#   BUILD_ENV:
-#     source: env
-#     default: ""
+  #   TARGET:
+  #     source: env
+  #     default: "x86_64-unknown-linux-gnu"
+  #   BUILD_ENV:
+  #     source: env
+  #     default: ""
   DOCKER_REGISTRY:
     source: env
     default: "ghcr.io"
@@ -136,11 +136,11 @@ deployments:
       chart:
         path: ./chart/stalwart-mail
       # Under `values` we can define the values for this Helm chart used during `helm install/upgrade`
-      values: {}
-        # image:
-        #   registry: "${DOCKER_REGISTRY}"
-        #   repository: "${DOCKER_IMAGE}"
-        #   tag: "${runtime.images.stalwart-mail.tag}"
+      values:
+        image:
+          registry: "${DOCKER_REGISTRY}"
+          repository: "${DOCKER_IMAGE}"
+          tag: "${runtime.images.stalwart-mail.tag}"
       valuesFiles:
         - ./chart/values.yaml
       displayOutput: true
@@ -150,7 +150,7 @@ dev:
   app:
     # Replace the container image with this dev-optimized image (allows to skip image building during development)
     devImage: "${DEV_IMAGE}"
-    imageSelector: "ghcr.io/stalwartlabs/stalwart"
+    imageSelector: "${DOCKER_REGISTRY}/${DOCKER_IMAGE}"
     namespace: "stalwart-mail-${ENV}"
     # Sync files between the local filesystem and the development container
     workingDir: /app
