@@ -10,5 +10,5 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 max_line_length = 100
 
-[devspace.yaml]
+[*.{yaml,yml}]
 indent_size = 2

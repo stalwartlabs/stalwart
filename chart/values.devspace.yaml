@@ -11,6 +11,9 @@ certificate:
   certmanager:
     enabled: false
 
+imagePullSecrets:
+  - name: image-pull-secret
+
 # ingress:
 #   enabled: false
 # backstage:
