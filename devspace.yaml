@@ -20,12 +20,12 @@ vars:
   ARCH:
     source: env
     default: "linux/amd64"
-  #   TARGET:
-  #     source: env
-  #     default: "x86_64-unknown-linux-gnu"
-  #   BUILD_ENV:
-  #     source: env
-  #     default: ""
+  TARGET:
+    source: env
+    default: "x86_64-unknown-linux-gnu"
+  BUILD_ENV:
+    source: env
+    default: ""
   DOCKER_REGISTRY:
     source: env
     default: "ghcr.io"
@@ -91,8 +91,8 @@ profiles:
 # Build stalwart image
 images:
   stalwart-mail:
-    image: "${DOCKER_REGISTRY}/${DOCKER_IMAGE}"
-    dockerfile: ./Dockerfile
+    image: "${DOCKER_REGISTRY}/${DOCKER_IMAGE}-dev"
+    dockerfile: ./Dockerfile.build.dev
     context: ./
     tags:
       - "${GIT_SHORT_HASH}"
@@ -102,7 +102,9 @@ images:
         - "--platform"
         - "${ARCH}"
     buildArgs:
-      TARGETPLATFORM: "${ARCH}"
+      # TARGETPLATFORM: "${ARCH}"
+      TARGET: "${TARGET}"
+      BUILD_ENV: "${BUILD_ENV}"
 
 # This is a list of `pipelines` that DevSpace can execute (you can define your own)
 pipelines:
@@ -139,7 +141,7 @@ deployments:
       values:
         image:
           registry: "${DOCKER_REGISTRY}"
-          repository: "${DOCKER_IMAGE}"
+          repository: "${DOCKER_IMAGE}-dev"
           tag: "${runtime.images.stalwart-mail.tag}"
       valuesFiles:
         - ./chart/values.yaml
@@ -150,7 +152,7 @@ dev:
   app:
     # Replace the container image with this dev-optimized image (allows to skip image building during development)
     devImage: "${DEV_IMAGE}"
-    imageSelector: "${DOCKER_REGISTRY}/${DOCKER_IMAGE}"
+    imageSelector: "${DOCKER_REGISTRY}/${DOCKER_IMAGE}-dev"
     namespace: "stalwart-mail-${ENV}"
     # Sync files between the local filesystem and the development container
     workingDir: /app
