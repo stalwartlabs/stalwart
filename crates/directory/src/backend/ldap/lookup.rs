@@ -92,6 +92,7 @@ impl LdapDirectory {
                             .success()
                             .is_err()
                         {
+                            ldap.unbind().await.ok();
                             trc::event!(
                                 Store(trc::StoreEvent::LdapWarning),
                                 Reason = "Secret rejected during auth bind using template",
@@ -106,6 +107,8 @@ impl LdapDirectory {
                         } else {
                             self.find_principal(&mut conn, &filter).await
                         };
+
+                        ldap.unbind().await.ok();
 
                         match result {
                             Ok(Some(mut result)) => {
@@ -154,13 +157,16 @@ impl LdapDirectory {
 
                             ldap3::drive!(auth_bind_conn);
 
-                            if ldap
+                            let bind_result = ldap
                                 .simple_bind(&result.dn, secret)
                                 .await
                                 .map_err(|err| err.into_error().caused_by(trc::location!()))?
                                 .success()
-                                .is_ok()
-                            {
+                                .is_ok();
+
+                            ldap.unbind().await.ok();
+
+                            if bind_result {
                                 if result.principal.name.is_empty() {
                                     result.principal.name = username.into();
                                 }

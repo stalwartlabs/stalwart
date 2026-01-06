@@ -317,6 +317,7 @@ impl Server {
             timeout_mail: Duration::from_secs(5 * 60),
             timeout_rcpt: Duration::from_secs(5 * 60),
             timeout_data: Duration::from_secs(10 * 60),
+            use_bdat: true,
         };
 
         self.core

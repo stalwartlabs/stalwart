@@ -245,9 +245,12 @@ impl MessageWrapper {
         // Send message
         if !accepted_rcpts.is_empty() {
             let time = Instant::now();
-            let bdat_cmd = capabilities
-                .has_capability(EXT_CHUNKING)
-                .then(|| format!("BDAT {} LAST\r\n", self.message.size));
+            let is_gmail = params.hostname.ends_with("google.com")
+                || params.hostname.ends_with("gmail.com");
+            let bdat_cmd = (params.conn_strategy.use_bdat
+                && !is_gmail
+                && capabilities.has_capability(EXT_CHUNKING))
+            .then(|| format!("BDAT {} LAST\r\n", self.message.size));
 
             if let Err(status) = smtp_client.send_message(self, &bdat_cmd, &params).await {
                 trc::event!(

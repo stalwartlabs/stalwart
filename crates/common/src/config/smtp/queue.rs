@@ -137,6 +137,7 @@ pub struct ConnectionStrategy {
     pub timeout_mail: Duration,
     pub timeout_rcpt: Duration,
     pub timeout_data: Duration,
+    pub use_bdat: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -555,6 +556,9 @@ fn parse_connection(config: &mut Config, id: &str) -> Option<ConnectionStrategy>
         timeout_data: config
             .property::<Duration>(("queue.connection", id, "timeout.data"))
             .unwrap_or(Duration::from_secs(10 * 60)),
+        use_bdat: config
+            .property::<bool>(("queue.connection", id, "use-bdat"))
+            .unwrap_or(true),
     })
 }
 
