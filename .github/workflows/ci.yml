@@ -56,21 +56,6 @@ jobs:
           username: ${{secrets.DOCKERHUB_USERNAME}}
           password: ${{secrets.DOCKERHUB_TOKEN}}
 
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          token_format: access_token
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Log In to Artifact Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.GCP_REGISTRY }}
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
-
       - name: Download ${{matrix.variant}} meta bake definition
         uses: actions/download-artifact@v7
         with:
@@ -91,8 +76,6 @@ jobs:
             $(printf 'ghcr.io/${{github.repository}}@sha256:%s ' *)
           docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("index.docker.io/${{github.repository}}")) | "-t " + .) | join(" ")' ${{ runner.temp }}/${{matrix.variant}}/bake-meta.json) \
             $(printf 'index.docker.io/${{github.repository}}@sha256:%s ' *)
-          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ secrets.GCP_IMAGE_NAME }}")) | "-t " + .) | join(" ")' ${{ runner.temp }}/${{matrix.variant}}/bake-meta.json) \
-            $(printf '${{ secrets.GCP_IMAGE_NAME }}@sha256:%s ' *)
 
       - name: Inspect ${{matrix.variant}} image
         id: manifest-digest
@@ -103,9 +86,6 @@ jobs:
           echo "DOCKERHUB_DIGEST_SHA=$(cat DOCKERHUB_DIGEST_SHA)" | tee -a "${GITHUB_ENV}"
           cosign sign --yes $(jq --arg GHCR_DIGEST_SHA "$(cat GHCR_DIGEST_SHA)" -cr '.target."docker-metadata-action".tags | map(select(startswith("ghcr.io/${{github.repository}}")) | . + "@" + $GHCR_DIGEST_SHA) | join(" ")' ${{ runner.temp }}/${{matrix.variant}}/bake-meta.json)
           cosign sign --yes $(jq --arg DOCKERHUB_DIGEST_SHA "$(cat DOCKERHUB_DIGEST_SHA)" -cr '.target."docker-metadata-action".tags | map(select(startswith("index.docker.io/${{github.repository}}")) | . + "@" + $DOCKERHUB_DIGEST_SHA) | join(" ")' ${{ runner.temp }}/${{matrix.variant}}/bake-meta.json)
-          docker buildx imagetools inspect --format '{{json .Manifest}}' ${{ secrets.GCP_IMAGE_NAME }}:$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' ${{ runner.temp }}/${{matrix.variant}}/bake-meta.json) | jq -r '.digest' > GCP_DIGEST_SHA
-          echo "GCP_DIGEST_SHA=$(cat GCP_DIGEST_SHA)" | tee -a "${GITHUB_ENV}"
-          cosign sign --yes $(jq --arg GCP_DIGEST_SHA "$(cat GCP_DIGEST_SHA)" -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ secrets.GCP_IMAGE_NAME }}")) | . + "@" + $GCP_DIGEST_SHA) | join(" ")' ${{ runner.temp }}/${{matrix.variant}}/bake-meta.json)
 
       - name: Attest GHCR
         uses: actions/attest-build-provenance@v3
@@ -119,13 +99,6 @@ jobs:
         with:
           subject-name: index.docker.io/${{github.repository}}
           subject-digest: ${{ env.DOCKERHUB_DIGEST_SHA }}
-          push-to-registry: true
-
-      - name: Attest GCP Artifact Registry
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-name: ${{ secrets.GCP_IMAGE_NAME }}
-          subject-digest: ${{ env.GCP_DIGEST_SHA }}
           push-to-registry: true
 
   linux:
@@ -203,21 +176,6 @@ jobs:
           username: ${{secrets.DOCKERHUB_USERNAME}}
           password: ${{secrets.DOCKERHUB_TOKEN}}
 
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          token_format: access_token
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Log In to Artifact Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.GCP_REGISTRY }}
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
-
       - name: Calculate shasum of external deps
         id: cal-dep-shasum
         run: |
@@ -260,7 +218,6 @@ jobs:
           images: |
             index.docker.io/${{github.repository}}
             ghcr.io/${{github.repository}}
-            ${{ secrets.GCP_IMAGE_NAME }}
           flavor: |
             suffix=${{matrix.suffix}},onlatest=true
           tags: |
@@ -283,7 +240,7 @@ jobs:
           source: .
           set: |
             *.tags=
-            image.output=type=image,"name=ghcr.io/${{github.repository}},index.docker.io/${{github.repository}},${{ secrets.GCP_IMAGE_NAME }}",push-by-digest=true,name-canonical=true,push=true,compression=zstd,compression-level=9,force-compression=true,oci-mediatypes=true
+            image.output=type=image,"name=ghcr.io/${{github.repository}},index.docker.io/${{github.repository}}",push-by-digest=true,name-canonical=true,push=true,compression=zstd,compression-level=9,force-compression=true,oci-mediatypes=true
           files: |
             docker-bake.hcl
             ${{ steps.meta.outputs.bake-file }}
