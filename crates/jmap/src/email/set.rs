@@ -6,7 +6,6 @@
 
 use super::headers::{BuildHeader, ValueToHeader};
 use crate::{
-    JmapMethods,
     blob::download::BlobDownload,
     changes::state::JmapCacheState,
     email::{PatchResult, handle_email_patch, ingested_into_object},
@@ -16,7 +15,7 @@ use common::{
 };
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
-    mailbox::UidMailbox,
+    mailbox::{JUNK_ID, TRASH_ID, UidMailbox},
     message::{
         delete::EmailDeletion,
         ingest::{EmailIngest, IngestEmail, IngestSource},
@@ -44,13 +43,18 @@ use mail_builder::{
 use mail_parser::MessageParser;
 use std::future::Future;
 use std::{borrow::Cow, collections::HashMap};
-use store::{ahash::AHashMap, roaring::RoaringBitmap, write::BatchBuilder};
+use store::{
+    ValueKey,
+    ahash::AHashMap,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
     id::Id,
-    keyword::Keyword,
+    keyword::{ArchivedKeyword, Keyword},
     type_state::{DataType, StateChange},
 };
 
@@ -73,10 +77,8 @@ impl EmailSet for Server {
         // Prepare response
         let account_id = request.account_id.document_id();
         let cache = self.get_cached_messages(account_id).await?;
-        let mut response = self
-            .prepare_set_response(&request, cache.assert_state(false, &request.if_in_state)?)
-            .await?;
-        let can_train_spam = self.email_bayes_can_train(access_token);
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(cache.assert_state(false, &request.if_in_state)?);
 
         // Obtain mailboxIds
         let (can_add_mailbox_ids, can_delete_mailbox_ids, can_modify_mailbox_ids) =
@@ -755,13 +757,14 @@ impl EmailSet for Server {
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
                     message: MessageParser::new().parse(&raw_message),
+                    blob_hash: None,
                     access_token: import_access_token.as_deref().unwrap_or(access_token),
                     mailbox_ids: mailboxes,
                     keywords,
                     received_at,
-                    source: IngestSource::Jmap,
-                    spam_classify: false,
-                    spam_train: can_train_spam,
+                    source: IngestSource::Jmap {
+                        train_classifier: true,
+                    },
                     session_id: session.session_id,
                 })
                 .await
@@ -797,7 +800,12 @@ impl EmailSet for Server {
             // Obtain message data
             let document_id = id.document_id();
             let data_ = match self
-                .get_archive(account_id, Collection::Email, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Email,
+                    document_id,
+                ))
                 .await?
             {
                 Some(data) => data,
@@ -809,9 +817,7 @@ impl EmailSet for Server {
             let data = data_
                 .to_unarchived::<MessageData>()
                 .caused_by(trc::location!())?;
-            let mut new_data = data
-                .deserialize::<MessageData>()
-                .caused_by(trc::location!())?;
+            let mut new_data = data.inner.to_builder();
 
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response.resolve_self_references(&mut value) {
@@ -877,6 +883,7 @@ impl EmailSet for Server {
             }
 
             // Process keywords
+            let mut train_spam = None;
             if has_keyword_changes {
                 // Verify permissions on shared accounts
                 if can_modify_mailbox_ids.as_ref().is_some_and(|ids| {
@@ -893,14 +900,36 @@ impl EmailSet for Server {
                     continue 'update;
                 }
 
+                // Process keyword changes
+                let mut changed_seen = false;
+                for keyword in new_data.added_keywords(data.inner) {
+                    match keyword {
+                        Keyword::Seen => {
+                            changed_seen = true;
+                        }
+                        Keyword::Junk => {
+                            train_spam = Some(true);
+                        }
+                        Keyword::NotJunk => {
+                            train_spam = Some(false);
+                        }
+                        _ => {}
+                    }
+                }
+                for keyword in new_data.removed_keywords(data.inner) {
+                    match keyword {
+                        ArchivedKeyword::Seen => {
+                            changed_seen = true;
+                        }
+                        ArchivedKeyword::Junk if train_spam.is_none() => {
+                            train_spam = Some(false);
+                        }
+                        _ => {}
+                    }
+                }
+
                 // Set all current mailboxes as changed if the Seen tag changed
-                if new_data
-                    .added_keywords(data.inner)
-                    .any(|keyword| keyword == &Keyword::Seen)
-                    || new_data
-                        .removed_keywords(data.inner)
-                        .any(|keyword| keyword == &Keyword::Seen)
-                {
+                if changed_seen {
                     for mailbox_id in new_data.mailboxes.iter() {
                         changed_mailboxes.insert(mailbox_id.mailbox_id, Vec::new());
                     }
@@ -928,6 +957,10 @@ impl EmailSet for Server {
                             .as_ref()
                             .is_none_or(|ids| ids.contains(mailbox_id.mailbox_id))
                         {
+                            if mailbox_id.mailbox_id == JUNK_ID {
+                                train_spam = Some(true);
+                            }
+
                             changed_mailboxes.insert(mailbox_id.mailbox_id, Vec::new());
                         } else {
                             response.not_updated.append(
@@ -960,6 +993,15 @@ impl EmailSet for Server {
                         .as_ref()
                         .is_none_or(|ids| ids.contains(u32::from(mailbox_id.mailbox_id)))
                     {
+                        if mailbox_id.mailbox_id == JUNK_ID
+                            && !new_data
+                                .mailboxes
+                                .iter()
+                                .any(|mb| mb.mailbox_id == TRASH_ID)
+                        {
+                            train_spam = Some(false);
+                        }
+
                         changed_mailboxes
                             .entry(mailbox_id.mailbox_id.to_native())
                             .or_default()
@@ -977,13 +1019,25 @@ impl EmailSet for Server {
                 }
 
                 // Obtain IMAP UIDs for added mailboxes
-                for uid_mailbox in &mut new_data.mailboxes {
-                    if uid_mailbox.uid == 0 {
-                        uid_mailbox.uid = self
-                            .assign_imap_uid(account_id, uid_mailbox.mailbox_id)
-                            .await
-                            .caused_by(trc::location!())?;
-                    }
+                let ids = self
+                    .assign_email_ids(
+                        account_id,
+                        new_data
+                            .mailboxes
+                            .iter()
+                            .filter(|m| m.uid == 0)
+                            .map(|m| m.mailbox_id),
+                        false,
+                    )
+                    .await
+                    .caused_by(trc::location!())?;
+                for (uid_mailbox, uid) in new_data
+                    .mailboxes
+                    .iter_mut()
+                    .filter(|m| m.uid == 0)
+                    .zip(ids)
+                {
+                    uid_mailbox.uid = uid;
                 }
             }
 
@@ -991,14 +1045,27 @@ impl EmailSet for Server {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Email)
-                .update_document(document_id)
+                .with_document(document_id)
                 .custom(
                     ObjectIndexBuilder::new()
                         .with_current(data)
-                        .with_changes(new_data),
+                        .with_changes(new_data.seal()),
                 )
-                .caused_by(trc::location!())?
-                .commit_point();
+                .caused_by(trc::location!())?;
+
+            if let Some(train_spam) = train_spam {
+                self.add_account_spam_sample(
+                    &mut batch,
+                    account_id,
+                    document_id,
+                    train_spam,
+                    session.session_id,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            }
+
+            batch.commit_point();
             will_update.push(id);
         }
 
@@ -1072,10 +1139,15 @@ impl EmailSet for Server {
             }
 
             if !destroy_ids.is_empty() {
-                // Batch delete (tombstone) messages
+                // Batch delete messages
                 let mut batch = BatchBuilder::new();
                 let not_destroyed = self
-                    .emails_tombstone(account_id, &mut batch, destroy_ids)
+                    .emails_delete(
+                        account_id,
+                        access_token.tenant_id(),
+                        &mut batch,
+                        destroy_ids,
+                    )
                     .await?;
                 if !batch.is_empty() {
                     last_change_id = self
@@ -1084,6 +1156,7 @@ impl EmailSet for Server {
                         .and_then(|ids| ids.last_change_id(account_id))
                         .caused_by(trc::location!())?
                         .into();
+                    self.notify_task_queue();
                 }
 
                 // Mark messages that were not found as not destroyed (this should not occur in practice)

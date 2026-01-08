@@ -4,11 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use email::message::metadata::{ArchivedMessageMetadataContents, ArchivedMetadataPartType};
+use email::message::metadata::{
+    ArchivedMessageMetadataContents, ArchivedMetadataHeaderValue, ArchivedMetadataPartType,
+    PART_ENCODING_BASE64, PART_ENCODING_QP, PART_SIZE_MASK,
+};
 use jmap_proto::object::email::{EmailProperty, EmailValue};
 use jmap_tools::{Map, Value};
-use mail_parser::{ArchivedHeaderValue, HeaderValue, MessagePart, MimeHeaders, PartType};
+use mail_parser::{HeaderValue, MessagePart, MimeHeaders, PartType};
 use types::blob::BlobId;
+use utils::chained_bytes::ChainedBytes;
 
 use super::headers::HeaderToValue;
 
@@ -17,8 +21,9 @@ pub trait ToBodyPart {
         &self,
         part_id: u32,
         properties: &[EmailProperty],
-        raw_message: &[u8],
+        raw_message: &ChainedBytes<'_>,
         blob_id: &BlobId,
+        blob_body_offset: isize,
     ) -> Value<'static, EmailProperty, EmailValue>;
 }
 
@@ -27,8 +32,9 @@ impl ToBodyPart for Vec<MessagePart<'_>> {
         &self,
         part_id: u32,
         properties: &[EmailProperty],
-        raw_message: &[u8],
+        raw_message: &ChainedBytes<'_>,
         blob_id: &BlobId,
+        blob_body_offset: isize,
     ) -> Value<'static, EmailProperty, EmailValue> {
         let mut parts = vec![part_id].into_iter();
         let mut parts_stack = Vec::new();
@@ -50,12 +56,12 @@ impl ToBodyPart for Vec<MessagePart<'_>> {
                     let value = match property {
                         EmailProperty::PartId if multipart.is_none() => part_id.to_string().into(),
                         EmailProperty::BlobId if multipart.is_none() => {
-                            let base_offset = blob_id.start_offset();
+                            let base_offset = blob_id.start_offset() as isize + blob_body_offset;
                             BlobId::new_section(
                                 blob_id.hash.clone(),
                                 blob_id.class.clone(),
-                                part.offset_body as usize + base_offset,
-                                part.offset_end as usize + base_offset,
+                                (part.offset_body as isize + base_offset) as usize,
+                                (part.offset_end as isize + base_offset) as usize,
                                 part.encoding as u8,
                             )
                             .into()
@@ -148,8 +154,9 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
         &self,
         part_id: u32,
         properties: &[EmailProperty],
-        raw_message: &[u8],
+        raw_message: &ChainedBytes<'_>,
         blob_id: &BlobId,
+        blob_body_offset: isize,
     ) -> Value<'static, EmailProperty, EmailValue> {
         let mut parts = vec![part_id].into_iter();
         let mut parts_stack = Vec::new();
@@ -171,17 +178,27 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
                     let value = match property {
                         EmailProperty::PartId if multipart.is_none() => part_id.to_string().into(),
                         EmailProperty::BlobId if multipart.is_none() => {
-                            let base_offset = blob_id.start_offset();
+                            let base_offset = blob_id.start_offset() as isize + blob_body_offset;
+                            let flags = part.flags.to_native();
+                            let encoding = if flags & PART_ENCODING_BASE64 != 0 {
+                                2
+                            } else if flags & PART_ENCODING_QP != 0 {
+                                1
+                            } else {
+                                0
+                            };
                             BlobId::new_section(
                                 blob_id.hash.clone(),
                                 blob_id.class.clone(),
-                                u32::from(part.offset_body) as usize + base_offset,
-                                u32::from(part.offset_end) as usize + base_offset,
-                                part.encoding.id(),
+                                (u32::from(part.offset_body) as isize + base_offset) as usize,
+                                (u32::from(part.offset_end) as isize + base_offset) as usize,
+                                encoding,
                             )
                             .into()
                         }
-                        EmailProperty::Size if multipart.is_none() => u32::from(part.size).into(),
+                        EmailProperty::Size if multipart.is_none() => {
+                            (part.flags.to_native() & PART_SIZE_MASK).into()
+                        }
                         EmailProperty::Name => part.attachment_name().map(|v| v.to_string()).into(),
                         EmailProperty::Type => part
                             .content_type()
@@ -217,8 +234,10 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
                             .into(),
                         EmailProperty::Cid => part.content_id().map(|v| v.to_string()).into(),
                         EmailProperty::Language => match part.content_language() {
-                            ArchivedHeaderValue::Text(text) => vec![text.to_string()].into(),
-                            ArchivedHeaderValue::TextList(list) => list
+                            ArchivedMetadataHeaderValue::Text(text) => {
+                                vec![text.to_string()].into()
+                            }
+                            ArchivedMetadataHeaderValue::TextList(list) => list
                                 .iter()
                                 .map(|text| text.to_string().into())
                                 .collect::<Vec<Value<'static, EmailProperty, EmailValue>>>()
@@ -228,10 +247,8 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
                         EmailProperty::Location => {
                             part.content_location().map(|v| v.to_string()).into()
                         }
-                        EmailProperty::Header(_) => {
-                            part.headers.header_to_value(property, raw_message)
-                        }
-                        EmailProperty::Headers => part.headers.headers_to_value(raw_message),
+                        EmailProperty::Header(_) => part.header_to_value(property, raw_message),
+                        EmailProperty::Headers => part.headers_to_value(raw_message),
                         EmailProperty::SubParts => continue,
                         _ => Value::Null,
                     };

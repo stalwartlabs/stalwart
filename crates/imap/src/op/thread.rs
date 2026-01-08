@@ -11,7 +11,7 @@ use crate::{
 use ahash::AHashMap;
 use common::listener::SessionStream;
 use directory::Permission;
-use email::cache::MessageCacheFetch;
+use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, StatusResponse,
     protocol::{
@@ -64,10 +64,12 @@ impl<T: SessionStream> SessionData<T> {
         op_start: Instant,
     ) -> trc::Result<Response> {
         // Run query
-        let (result_set, _) = self.query(arguments.filter, &mailbox, &None).await?;
+        let (result_set, _) = self
+            .query(arguments.filter, vec![], &mailbox, &None)
+            .await?;
 
         // Synchronize mailbox
-        if !result_set.results.is_empty() {
+        if !result_set.is_empty() {
             self.synchronize_messages(&mailbox)
                 .await
                 .caused_by(trc::location!())?;
@@ -88,9 +90,9 @@ impl<T: SessionStream> SessionData<T> {
         // Group messages by thread
         let mut threads: AHashMap<u32, Vec<u32>> = AHashMap::new();
         let state = mailbox.state.lock();
-        for item in &cache.emails.items {
-            if result_set.results.contains(item.document_id)
-                && let Some((imap_id, _)) = state.map_result_id(item.document_id, is_uid)
+        for document_id in result_set {
+            if let Some(item) = cache.email_by_id(&document_id)
+                && let Some((imap_id, _)) = state.map_result_id(document_id, is_uid)
             {
                 threads.entry(item.thread_id).or_default().push(imap_id);
             }

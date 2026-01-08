@@ -86,7 +86,7 @@ async fn generate_dsn() {
             env_id: None,
             priority: 0,
             blob_hash: BlobHash::generate(dsn_original.as_bytes()),
-            quota_keys: vec![],
+            quota_keys: Default::default(),
             received_from_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             received_via_port: 0,
         },

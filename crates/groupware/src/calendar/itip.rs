@@ -34,14 +34,13 @@ use common::{
     i18n,
 };
 use store::{
-    query::Filter,
-    rand,
-    write::{BatchBuilder, now},
+    ValueKey, rand,
+    write::{AlignedBytes, Archive, BatchBuilder, now},
 };
 use trc::AddContext;
 use types::{
     collection::Collection,
-    field::{CalendarField, ContactField},
+    field::{CalendarEventField, ContactField},
 };
 use utils::{template::Variables, url_params::UrlParams};
 
@@ -152,24 +151,25 @@ impl ItipIngest for Server {
         // Find event by UID
         let account_id = access_token.primary_id;
         let document_id = self
-            .store()
-            .filter(
+            .document_ids_matching(
                 account_id,
                 Collection::CalendarEvent,
-                vec![Filter::eq(
-                    CalendarField::Uid,
-                    itip_snapshots.uid.as_bytes().to_vec(),
-                )],
+                CalendarEventField::Uid,
+                itip_snapshots.uid.as_bytes(),
             )
             .await
             .caused_by(trc::location!())?
-            .results
             .iter()
             .next();
 
         if let Some(document_id) = document_id {
             if let Some(archive) = self
-                .get_archive(account_id, Collection::CalendarEvent, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
             {
@@ -280,17 +280,15 @@ impl ItipIngest for Server {
             // Verify that auto-adding invitations is allowed
             if !self.core.groupware.itip_auto_add
                 && !matches!(changed_by, ChangedBy::PrincipalId(_))
-                && self
-                    .store()
-                    .filter(
+                && !self
+                    .document_exists(
                         account_id,
                         Collection::ContactCard,
-                        vec![Filter::eq(ContactField::Email, sender.as_bytes().to_vec())],
+                        ContactField::Email,
+                        sender.as_bytes(),
                     )
                     .await
                     .caused_by(trc::location!())?
-                    .results
-                    .is_empty()
             {
                 return Err(ItipIngestError::Message(ItipError::AutoAddDisabled));
             } else if itip_method(&itip)? != &ICalendarMethod::Request {
@@ -312,7 +310,7 @@ impl ItipIngest for Server {
 
             // Obtain parent calendar
             let Some(parent_id) = self
-                .get_or_create_default_calendar(access_token, account_id, &access_token.name)
+                .get_or_create_default_calendar(access_token, account_id)
                 .await
                 .caused_by(trc::location!())?
             else {
@@ -410,7 +408,12 @@ impl ItipIngest for Server {
     async fn http_rsvp_handle(&self, query: &str, language: &str) -> trc::Result<String> {
         let response = if let Some(rsvp) = decode_rsvp_response(self, query).await {
             if let Some(archive) = self
-                .get_archive(rsvp.account_id, Collection::CalendarEvent, rsvp.document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    rsvp.account_id,
+                    Collection::CalendarEvent,
+                    rsvp.document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
             {

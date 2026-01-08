@@ -13,7 +13,7 @@ use jmap_proto::{
     types::date::UTCDate,
 };
 use jmap_tools::{Map, Value};
-use store::{roaring::RoaringBitmap, write::now};
+use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, now}};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
@@ -81,7 +81,12 @@ impl FileNodeGet for Server {
                 continue;
             }
             let _file_node = if let Some(file_node) = self
-                .get_archive(account_id, Collection::FileNode, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::FileNode,
+                    document_id,
+                ))
                 .await?
             {
                 file_node

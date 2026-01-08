@@ -75,9 +75,7 @@ pub fn utf7_encode(text: &str) -> String {
     let mut bits = 0;
     let mut u: u32 = 0;
 
-    for ch_ in text.chars() {
-        let ch = ch_ as u16;
-
+    for ch in text.encode_utf16() {
         if (0x20..0x7f).contains(&ch) {
             if shifted {
                 if bits > 0 {
@@ -91,7 +89,7 @@ pub fn utf7_encode(text: &str) -> String {
             if ch == 0x26 {
                 result.push_str("&-");
             } else {
-                result.push(ch_);
+                result.push((ch as u8) as char);
             }
         } else {
             if !shifted {
@@ -158,6 +156,7 @@ mod tests {
                 ),
             ),
             ("Test-ąęć-Test", "Test-ąęć-Test"),
+            (r#"&A8g- "&A9QD1APUA9gD3APcA-+""#, "ψ \"ϔϔϔϘϜϜ+\""),
         ] {
             assert_eq!(
                 super::utf7_decode(input).expect(input),
@@ -177,6 +176,7 @@ mod tests {
             ("&ZeVnLIqe-", "日本語"),
             ("Item 3 is &AKM-1.", "Item 3 is £1."),
             ("Plus minus &- -&- &--", "Plus minus & -& &-"),
+            ("&VMhUyNg93gQ-", "哈哈😄"),
         ] {
             assert_eq!(
                 super::utf7_encode(input),

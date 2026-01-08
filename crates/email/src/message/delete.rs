@@ -5,29 +5,27 @@
  */
 
 use super::metadata::MessageData;
-use crate::{cache::MessageCacheFetch, mailbox::*, message::metadata::MessageMetadata};
 use common::{KV_LOCK_PURGE_ACCOUNT, Server, storage::index::ObjectIndexBuilder};
+use directory::backend::internal::manage::ManageDirectory;
 use groupware::calendar::storage::ItipAutoExpunge;
 use std::future::Future;
 use store::rand::prelude::SliceRandom;
 use store::write::key::DeserializeBigEndian;
-use store::write::now;
+use store::write::{IndexPropertyClass, SearchIndex, TaskEpoch, TaskQueueClass, now};
+use store::{IterateParams, SerializeInfallible, U32_LEN, U64_LEN, ValueKey};
 use store::{
-    BitmapKey, ValueKey,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder, BitmapClass, TagValue, ValueClass},
+    write::{BatchBuilder, ValueClass},
 };
-use store::{IndexKey, IterateParams, SerializeInfallible, U32_LEN};
 use trc::AddContext;
-#[cfg(feature = "enterprise")]
-use types::blob_hash::BlobHash;
 use types::collection::{Collection, VanishedCollection};
-use types::field::EmailField;
+use types::field::{EmailField, EmailSubmissionField};
 
 pub trait EmailDeletion: Sync + Send {
-    fn emails_tombstone(
+    fn emails_delete(
         &self,
         account_id: u32,
+        tenant_id: Option<u32>,
         batch: &mut BatchBuilder,
         document_ids: RoaringBitmap,
     ) -> impl Future<Output = trc::Result<RoaringBitmap>> + Send;
@@ -36,31 +34,32 @@ pub trait EmailDeletion: Sync + Send {
 
     fn purge_account(&self, account_id: u32) -> impl Future<Output = ()> + Send;
 
-    fn emails_auto_expunge(
+    fn purge_email_submissions(
         &self,
         account_id: u32,
         hold_period: u64,
     ) -> impl Future<Output = trc::Result<()>> + Send;
 
-    fn emails_purge_tombstoned(
+    fn emails_auto_expunge(
         &self,
         account_id: u32,
+        hold_period: u64,
     ) -> impl Future<Output = trc::Result<()>> + Send;
 }
 
 impl EmailDeletion for Server {
-    async fn emails_tombstone(
+    async fn emails_delete(
         &self,
         account_id: u32,
+        tenant_id: Option<u32>,
         batch: &mut BatchBuilder,
         document_ids: RoaringBitmap,
     ) -> trc::Result<RoaringBitmap> {
-        // Tombstone message and untag it from the mailboxes
         let mut deleted_ids = RoaringBitmap::new();
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email);
-        self.get_archives(
+        self.archives(
             account_id,
             Collection::Email,
             &document_ids,
@@ -76,10 +75,21 @@ impl EmailDeletion for Server {
                     );
                 }
                 batch
-                    .update_document(document_id)
-                    .custom(ObjectIndexBuilder::<_, ()>::new().with_current(metadata))
+                    .with_document(document_id)
+                    .custom(
+                        ObjectIndexBuilder::<_, ()>::new()
+                            .with_tenant_id(tenant_id)
+                            .with_current(metadata),
+                    )
                     .caused_by(trc::location!())?
-                    .tag(EmailField::MailboxIds, TagValue::Id(TOMBSTONE_ID))
+                    .set(
+                        ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
+                            index: SearchIndex::Email,
+                            due: TaskEpoch::now(),
+                            is_insert: false,
+                        }),
+                        0u64.serialize(),
+                    )
                     .commit_point();
 
                 deleted_ids.insert(document_id);
@@ -100,8 +110,7 @@ impl EmailDeletion for Server {
     }
 
     async fn purge_accounts(&self, use_roles: bool) {
-        if let Ok(Some(account_ids)) = self.get_document_ids(u32::MAX, Collection::Principal).await
-        {
+        if let Ok(account_ids) = self.store().principal_ids(None, None).await {
             let mut account_ids: Vec<u32> = account_ids
                 .into_iter()
                 .filter(|id| {
@@ -111,7 +120,7 @@ impl EmailDeletion for Server {
                             .network
                             .roles
                             .purge_accounts
-                            .is_enabled_for_account(*id)
+                            .is_enabled_for_integer(*id)
                 })
                 .collect();
 
@@ -167,10 +176,12 @@ impl EmailDeletion for Server {
             );
         }
 
-        // Purge tombstoned messages
-        if let Err(err) = self.emails_purge_tombstoned(account_id).await {
+        // Delete old e-mail submissions
+        if let Some(hold_period) = self.core.jmap.email_submission_autoexpunge_after
+            && let Err(err) = self.purge_email_submissions(account_id, hold_period).await
+        {
             trc::error!(
-                err.details("Failed to purge tombstoned messages.")
+                err.details("Failed to auto-expunge e-mail submissions.")
                     .account_id(account_id)
             );
         }
@@ -201,56 +212,33 @@ impl EmailDeletion for Server {
     }
 
     async fn emails_auto_expunge(&self, account_id: u32, hold_period: u64) -> trc::Result<()> {
-        let trashed_ids = RoaringBitmap::from_iter(
-            self.get_cached_messages(account_id)
-                .await
-                .caused_by(trc::location!())?
-                .emails
-                .items
-                .iter()
-                .filter(|item| {
-                    item.mailboxes
-                        .iter()
-                        .any(|id| id.mailbox_id == TRASH_ID || id.mailbox_id == JUNK_ID)
-                })
-                .map(|item| item.document_id),
-        );
-        if trashed_ids.is_empty() {
-            return Ok(());
-        }
-
         // Filter messages by received date
         let mut destroy_ids = RoaringBitmap::new();
+        let cutoff = now().saturating_sub(hold_period);
         self.store()
             .iterate(
                 IterateParams::new(
-                    IndexKey {
+                    ValueKey {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: 0,
-                        field: EmailField::ReceivedAt.into(),
-                        key: 0u64.serialize(),
+                        class: ValueClass::Property(EmailField::DeletedAt.into()),
                     },
-                    IndexKey {
+                    ValueKey {
                         account_id,
                         collection: Collection::Email.into(),
                         document_id: u32::MAX,
-                        field: EmailField::ReceivedAt.into(),
-                        key: now().saturating_sub(hold_period).serialize(),
+                        class: ValueClass::Property(EmailField::DeletedAt.into()),
                     },
                 )
-                .no_values()
                 .ascending(),
-                |key, _| {
-                    let document_id = key
-                        .deserialize_be_u32(key.len() - U32_LEN)
-                        .caused_by(trc::location!())?;
-
-                    if trashed_ids.contains(document_id) {
-                        destroy_ids.insert(document_id);
+                |key, value| {
+                    let deleted_at = value.deserialize_be_u64(0)?;
+                    if deleted_at <= cutoff {
+                        destroy_ids.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
                     }
 
-                    Ok(trashed_ids.len() != destroy_ids.len())
+                    Ok(true)
                 },
             )
             .await
@@ -267,117 +255,87 @@ impl EmailDeletion for Server {
             Total = destroy_ids.len(),
         );
 
-        // Tombstone messages
+        // Delete messages
         let mut batch = BatchBuilder::new();
-        self.emails_tombstone(account_id, &mut batch, destroy_ids)
+        let tenant_id = self
+            .store()
+            .get_principal(account_id)
+            .await
+            .caused_by(trc::location!())?
+            .and_then(|p| p.tenant());
+        self.emails_delete(account_id, tenant_id, &mut batch, destroy_ids)
             .await?;
         self.commit_batch(batch).await?;
+        self.notify_task_queue();
 
         Ok(())
     }
 
-    async fn emails_purge_tombstoned(&self, account_id: u32) -> trc::Result<()> {
-        // Obtain tombstoned messages
-        let tombstoned_ids = self
-            .core
-            .storage
-            .data
-            .get_bitmap(BitmapKey {
-                account_id,
-                collection: Collection::Email.into(),
-                class: BitmapClass::Tag {
-                    field: EmailField::MailboxIds.into(),
-                    value: TagValue::Id(TOMBSTONE_ID),
-                },
-                document_id: 0,
-            })
-            .await?
-            .unwrap_or_default();
+    async fn purge_email_submissions(&self, account_id: u32, hold_period: u64) -> trc::Result<()> {
+        // Filter messages by received date
+        let mut destroy_ids = Vec::new();
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    ValueKey {
+                        account_id,
+                        collection: Collection::EmailSubmission.into(),
+                        document_id: 0,
+                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                            property: EmailSubmissionField::Metadata.into(),
+                            value: 0,
+                        }),
+                    },
+                    ValueKey {
+                        account_id,
+                        collection: Collection::Email.into(),
+                        document_id: u32::MAX,
+                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                            property: EmailSubmissionField::Metadata.into(),
+                            value: now().saturating_sub(hold_period),
+                        }),
+                    },
+                )
+                .ascending()
+                .no_values(),
+                |key, _| {
+                    destroy_ids.push((
+                        key.deserialize_be_u32(key.len() - U32_LEN)?,
+                        key.deserialize_be_u64(key.len() - U32_LEN - U64_LEN)?,
+                    ));
 
-        if tombstoned_ids.is_empty() {
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        if destroy_ids.is_empty() {
             return Ok(());
         }
 
         trc::event!(
-            Purge(trc::PurgeEvent::TombstoneCleanup),
+            Purge(trc::PurgeEvent::AutoExpunge),
+            Collection = Collection::EmailSubmission.as_str(),
             AccountId = account_id,
-            Total = tombstoned_ids.len(),
+            Total = destroy_ids.len(),
         );
-
-        // Delete full-text index
-        self.core
-            .storage
-            .fts
-            .remove(account_id, Collection::Email, &tombstoned_ids)
-            .await?;
-
-        // Obtain tenant id
-        let tenant_id = self
-            .get_access_token(account_id)
-            .await
-            .caused_by(trc::location!())?
-            .tenant
-            .map(|t| t.id);
 
         // Delete messages
         let mut batch = BatchBuilder::new();
-        batch.with_account_id(account_id);
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::EmailSubmission);
 
-        for document_id in tombstoned_ids {
+        for (document_id, send_at) in destroy_ids {
             batch
-                .with_collection(Collection::Email)
-                .delete_document(document_id)
-                .clear(EmailField::Archive)
-                .untag(EmailField::MailboxIds, TagValue::Id(TOMBSTONE_ID));
-
-            // Remove message metadata
-            if let Some(metadata_) = self
-                .core
-                .storage
-                .data
-                .get_value::<Archive<AlignedBytes>>(ValueKey {
-                    account_id,
-                    collection: Collection::Email.into(),
-                    document_id,
-                    class: ValueClass::Property(EmailField::Metadata.into()),
-                })
-                .await?
-            {
-                let metadata = metadata_
-                    .unarchive::<MessageMetadata>()
-                    .caused_by(trc::location!())?;
-
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-
-                // Hold blob for undeletion
-                #[cfg(feature = "enterprise")]
-                self.core.hold_undelete(
-                    &mut batch,
-                    Collection::Email.into(),
-                    &BlobHash::from(&metadata.blob_hash),
-                    u32::from(metadata.size) as usize,
-                );
-
-                // SPDX-SnippetEnd
-
-                // Delete message
-                metadata
-                    .index(&mut batch, account_id, tenant_id, false)
-                    .caused_by(trc::location!())?;
-
-                // Commit point
-                batch.commit_point();
-            } else {
-                trc::event!(
-                    Purge(trc::PurgeEvent::Error),
-                    AccountId = account_id,
-                    DocumentId = document_id,
-                    Reason = "Failed to fetch message metadata.",
-                    CausedBy = trc::location!(),
-                );
-            }
+                .with_document(document_id)
+                .clear(EmailSubmissionField::Metadata)
+                .clear(ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                    property: EmailSubmissionField::Metadata.into(),
+                    value: send_at,
+                }))
+                .commit_point();
         }
 
         self.commit_batch(batch).await?;

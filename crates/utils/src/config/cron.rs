@@ -59,7 +59,15 @@ impl SimpleCron {
             }
         };
 
-        (next - now).to_std().unwrap()
+        (next - now).to_std().unwrap_or_else(|_| self.as_duration())
+    }
+
+    pub fn as_duration(&self) -> Duration {
+        match self {
+            SimpleCron::Day { .. } => Duration::from_secs(24 * 60 * 60),
+            SimpleCron::Week { .. } => Duration::from_secs(7 * 24 * 60 * 60),
+            SimpleCron::Hour { .. } => Duration::from_secs(60 * 60),
+        }
     }
 }
 

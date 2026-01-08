@@ -124,7 +124,7 @@ impl<T: SessionStream> SessionData<T> {
         let mut filter_subscribed = false;
         let mut filter_special_use = false;
         let mut recursive_match = false;
-        let mut include_special_use = version.is_rev2();
+        let mut include_special_use = true;
         let mut include_subscribed = false;
         let mut include_children = false;
         let mut include_status = None;

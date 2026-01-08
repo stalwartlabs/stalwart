@@ -7,14 +7,18 @@
 use crate::{
     Inner, Server,
     auth::{AccessToken, ResourceToken, TenantInfo},
-    config::smtp::{
-        auth::{ArcSealer, DkimSigner, LazySignature, ResolvedSignature, build_signature},
-        queue::{
-            ConnectionStrategy, DEFAULT_QUEUE_NAME, MxConfig, QueueExpiry, QueueName,
-            QueueStrategy, RequireOptional, RoutingStrategy, TlsStrategy, VirtualQueue,
+    config::{
+        smtp::{
+            auth::{ArcSealer, DkimSigner, LazySignature, ResolvedSignature, build_signature},
+            queue::{
+                ConnectionStrategy, DEFAULT_QUEUE_NAME, MxConfig, QueueExpiry, QueueName,
+                QueueStrategy, RequireOptional, RoutingStrategy, TlsStrategy, VirtualQueue,
+            },
         },
+        spamfilter::SpamClassifier,
     },
     ipc::{BroadcastEvent, PushEvent, PushNotification},
+    manager::SPAM_CLASSIFIER_KEY,
 };
 use directory::{Directory, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use mail_auth::IpLookupStrategy;
@@ -24,21 +28,21 @@ use std::{
     time::Duration,
 };
 use store::{
-    BitmapKey, BlobStore, Deserialize, FtsStore, InMemoryStore, IndexKey, IterateParams, Key,
-    LogKey, SUBSPACE_LOGS, SerializeInfallible, Store, U32_LEN, U64_LEN, ValueKey,
+    BlobStore, Deserialize, InMemoryStore, IndexKey, IndexKeyPrefix, IterateParams, Key, LogKey,
+    SUBSPACE_LOGS, SearchStore, SerializeInfallible, Store, U32_LEN, U64_LEN, ValueKey,
     dispatch::DocumentSet,
     roaring::RoaringBitmap,
     write::{
-        AlignedBytes, AnyClass, Archive, AssignedIds, BatchBuilder, BlobOp, DirectoryClass,
-        QueueClass, ValueClass, key::DeserializeBigEndian, now,
+        AlignedBytes, AnyClass, Archive, AssignedIds, BatchBuilder, BlobLink, BlobOp,
+        DirectoryClass, QueueClass, ValueClass, key::DeserializeBigEndian, now,
     },
 };
-use trc::AddContext;
+use trc::{AddContext, SpamEvent};
 use types::{
     blob::{BlobClass, BlobId},
     blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
-    field::{EmailField, Field},
+    field::Field,
     type_state::{DataType, StateChange},
 };
 use utils::{map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
@@ -55,7 +59,7 @@ impl Server {
     }
 
     #[inline(always)]
-    pub fn fts_store(&self) -> &FtsStore {
+    pub fn search_store(&self) -> &SearchStore {
         &self.core.storage.fts
     }
 
@@ -343,54 +347,6 @@ impl Server {
             .add_context(|err| err.caused_by(trc::location!()).account_id(account_id))
     }
 
-    pub async fn recalculate_quota(&self, account_id: u32) -> trc::Result<()> {
-        let mut quota = 0i64;
-
-        self.store()
-            .iterate(
-                IterateParams::new(
-                    IndexKey {
-                        account_id,
-                        collection: Collection::Email.into(),
-                        document_id: 0,
-                        field: EmailField::Size.into(),
-                        key: 0u32.serialize(),
-                    },
-                    IndexKey {
-                        account_id,
-                        collection: Collection::Email.into(),
-                        document_id: u32::MAX,
-                        field: EmailField::Size.into(),
-                        key: u32::MAX.serialize(),
-                    },
-                )
-                .no_values()
-                .ascending(),
-                |key, _| {
-                    let value = key
-                        .get(key.len() - (U32_LEN * 2)..key.len() - U32_LEN)
-                        .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))
-                        .and_then(u32::deserialize)?;
-
-                    quota += value as i64;
-
-                    Ok(true)
-                },
-            )
-            .await
-            .caused_by(trc::location!())?;
-
-        let mut batch = BatchBuilder::new();
-        batch
-            .clear(DirectoryClass::UsedQuota(account_id))
-            .add(DirectoryClass::UsedQuota(account_id), quota);
-        self.store()
-            .write(batch.build_all())
-            .await
-            .caused_by(trc::location!())
-            .map(|_| ())
-    }
-
     pub async fn has_available_quota(
         &self,
         quotas: &ResourceToken,
@@ -489,58 +445,7 @@ impl Server {
         })
     }
 
-    #[inline(always)]
-    pub async fn get_archive(
-        &self,
-        account_id: u32,
-        collection: Collection,
-        document_id: u32,
-    ) -> trc::Result<Option<Archive<AlignedBytes>>> {
-        self.core
-            .storage
-            .data
-            .get_value(ValueKey {
-                account_id,
-                collection: collection.into(),
-                document_id,
-                class: ValueClass::Property(Field::ARCHIVE.into()),
-            })
-            .await
-            .add_context(|err| {
-                err.caused_by(trc::location!())
-                    .account_id(account_id)
-                    .collection(collection)
-                    .document_id(document_id)
-            })
-    }
-
-    #[inline(always)]
-    pub async fn get_archive_by_property(
-        &self,
-        account_id: u32,
-        collection: Collection,
-        document_id: u32,
-        property: Field,
-    ) -> trc::Result<Option<Archive<AlignedBytes>>> {
-        self.core
-            .storage
-            .data
-            .get_value(ValueKey {
-                account_id,
-                collection: collection.into(),
-                document_id,
-                class: ValueClass::Property(property.into()),
-            })
-            .await
-            .add_context(|err| {
-                err.caused_by(trc::location!())
-                    .account_id(account_id)
-                    .collection(collection)
-                    .document_id(document_id)
-            })
-    }
-
-    pub async fn get_archives<I, CB>(
+    pub async fn archives<I, CB>(
         &self,
         account_id: u32,
         collection: Collection,
@@ -589,22 +494,170 @@ impl Server {
             })
     }
 
-    #[inline(always)]
-    pub async fn get_document_ids(
+    pub async fn all_archives<CB>(
         &self,
         account_id: u32,
         collection: Collection,
-    ) -> trc::Result<Option<RoaringBitmap>> {
+        field: u8,
+        mut cb: CB,
+    ) -> trc::Result<()>
+    where
+        CB: FnMut(u32, Archive<AlignedBytes>) -> trc::Result<()> + Send + Sync,
+    {
+        let collection: u8 = collection.into();
+
         self.core
             .storage
             .data
-            .get_bitmap(BitmapKey::document_ids(account_id, collection))
+            .iterate(
+                IterateParams::new(
+                    ValueKey {
+                        account_id,
+                        collection,
+                        document_id: 0,
+                        class: ValueClass::Property(field),
+                    },
+                    ValueKey {
+                        account_id,
+                        collection,
+                        document_id: u32::MAX,
+                        class: ValueClass::Property(field),
+                    },
+                ),
+                |key, value| {
+                    let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
+                    let archive = <Archive<AlignedBytes> as Deserialize>::deserialize(value)?;
+                    cb(document_id, archive)?;
+
+                    Ok(true)
+                },
+            )
             .await
             .add_context(|err| {
                 err.caused_by(trc::location!())
                     .account_id(account_id)
                     .collection(collection)
             })
+    }
+
+    pub async fn document_ids(
+        &self,
+        account_id: u32,
+        collection: Collection,
+        field: impl Into<u8>,
+    ) -> trc::Result<RoaringBitmap> {
+        let field = field.into();
+        let mut results = RoaringBitmap::new();
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    IndexKeyPrefix {
+                        account_id,
+                        collection: collection.into(),
+                        field,
+                    },
+                    IndexKeyPrefix {
+                        account_id,
+                        collection: collection.into(),
+                        field: field + 1,
+                    },
+                )
+                .no_values(),
+                |key, _| {
+                    results.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
+
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())
+            .map(|_| results)
+    }
+
+    pub async fn document_exists(
+        &self,
+        account_id: u32,
+        collection: Collection,
+        field: impl Into<u8>,
+        filter: impl AsRef<[u8]>,
+    ) -> trc::Result<bool> {
+        let field = field.into();
+        let mut exists = false;
+        let filter = filter.as_ref();
+        let key_len = IndexKeyPrefix::len() + filter.len() + U32_LEN;
+
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    IndexKey {
+                        account_id,
+                        collection: collection.into(),
+                        document_id: 0,
+                        field,
+                        key: filter,
+                    },
+                    IndexKey {
+                        account_id,
+                        collection: collection.into(),
+                        document_id: u32::MAX,
+                        field,
+                        key: filter,
+                    },
+                )
+                .no_values(),
+                |key, _| {
+                    exists = key.len() == key_len;
+
+                    Ok(!exists)
+                },
+            )
+            .await
+            .caused_by(trc::location!())
+            .map(|_| exists)
+    }
+
+    pub async fn document_ids_matching(
+        &self,
+        account_id: u32,
+        collection: Collection,
+        field: impl Into<u8>,
+        filter: impl AsRef<[u8]>,
+    ) -> trc::Result<RoaringBitmap> {
+        let field = field.into();
+        let filter = filter.as_ref();
+        let key_len = IndexKeyPrefix::len() + filter.len() + U32_LEN;
+        let mut results = RoaringBitmap::new();
+
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    IndexKey {
+                        account_id,
+                        collection: collection.into(),
+                        document_id: 0,
+                        field,
+                        key: filter,
+                    },
+                    IndexKey {
+                        account_id,
+                        collection: collection.into(),
+                        document_id: u32::MAX,
+                        field,
+                        key: filter,
+                    },
+                )
+                .no_values(),
+                |key, _| {
+                    if key.len() == key_len {
+                        results.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
+                    }
+
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())
+            .map(|_| results)
     }
 
     #[inline(always)]
@@ -697,6 +750,7 @@ impl Server {
                 SyncCollection::FileNode,
                 SyncCollection::AddressBook,
                 SyncCollection::Calendar,
+                SyncCollection::CalendarEventNotification,
             ] {
                 let collection = sync_collection.into();
                 let from_key = LogKey {
@@ -847,24 +901,29 @@ impl Server {
     }
 
     #[allow(clippy::blocks_in_conditions)]
-    pub async fn put_blob(
-        &self,
-        account_id: u32,
-        data: &[u8],
-        set_quota: bool,
-    ) -> trc::Result<BlobId> {
+    pub async fn put_jmap_blob(&self, account_id: u32, data: &[u8]) -> trc::Result<BlobId> {
         // First reserve the hash
         let hash = BlobHash::generate(data);
         let mut batch = BatchBuilder::new();
         let until = now() + self.core.jmap.upload_tmp_ttl;
 
-        batch.with_account_id(account_id).set(
-            BlobOp::Reserve {
-                hash: hash.clone(),
-                until,
-            },
-            (if set_quota { data.len() as u32 } else { 0u32 }).serialize(),
-        );
+        batch
+            .with_account_id(account_id)
+            .set(
+                BlobOp::Link {
+                    hash: hash.clone(),
+                    to: BlobLink::Temporary { until },
+                },
+                vec![BlobLink::QUOTA_LINK],
+            )
+            .set(
+                BlobOp::Quota {
+                    hash: hash.clone(),
+                    until,
+                },
+                (data.len() as u32).serialize(),
+            );
+
         self.core
             .storage
             .data
@@ -909,6 +968,68 @@ impl Server {
         })
     }
 
+    pub async fn put_temporary_blob(
+        &self,
+        account_id: u32,
+        data: &[u8],
+        hold_for: u64,
+    ) -> trc::Result<(BlobHash, BlobOp)> {
+        // First reserve the hash
+        let hash = BlobHash::generate(data);
+        let mut batch = BatchBuilder::new();
+        let until = now() + hold_for;
+
+        batch.with_account_id(account_id).set(
+            BlobOp::Link {
+                hash: hash.clone(),
+                to: BlobLink::Temporary { until },
+            },
+            vec![],
+        );
+
+        self.core
+            .storage
+            .data
+            .write(batch.build_all())
+            .await
+            .caused_by(trc::location!())?;
+
+        if !self
+            .core
+            .storage
+            .data
+            .blob_exists(&hash)
+            .await
+            .caused_by(trc::location!())?
+        {
+            // Upload blob to store
+            self.core
+                .storage
+                .blob
+                .put_blob(hash.as_ref(), data)
+                .await
+                .caused_by(trc::location!())?;
+
+            // Commit blob
+            let mut batch = BatchBuilder::new();
+            batch.set(BlobOp::Commit { hash: hash.clone() }, Vec::new());
+            self.core
+                .storage
+                .data
+                .write(batch.build_all())
+                .await
+                .caused_by(trc::location!())?;
+        }
+
+        Ok((
+            hash.clone(),
+            BlobOp::Link {
+                hash,
+                to: BlobLink::Temporary { until },
+            },
+        ))
+    }
+
     pub async fn total_accounts(&self) -> trc::Result<u64> {
         self.store()
             .count_principals(None, Type::Individual.into(), None)
@@ -921,6 +1042,29 @@ impl Server {
             .count_principals(None, Type::Domain.into(), None)
             .await
             .caused_by(trc::location!())
+    }
+
+    pub async fn spam_model_reload(&self) -> trc::Result<()> {
+        if self.core.spam.classifier.is_some() {
+            if let Some(model) = self
+                .blob_store()
+                .get_blob(SPAM_CLASSIFIER_KEY, 0..usize::MAX)
+                .await
+                .and_then(|archive| match archive {
+                    Some(archive) => <Archive<AlignedBytes> as Deserialize>::deserialize(&archive)
+                        .and_then(|archive| archive.deserialize_untrusted::<SpamClassifier>())
+                        .map(Some),
+                    None => Ok(None),
+                })
+                .caused_by(trc::location!())?
+            {
+                self.inner.data.spam_classifier.store(Arc::new(model));
+            } else {
+                trc::event!(Spam(SpamEvent::ModelNotFound));
+            }
+        }
+
+        Ok(())
     }
 
     #[cfg(not(feature = "enterprise"))]

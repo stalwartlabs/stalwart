@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 use common::{config::server::ServerProtocol, core::BuildServer, ipc::QueueEvent};
 use mail_auth::MX;
 
-use crate::smtp::{DnsCache, TestSMTP, session::TestSession};
+use crate::{
+    smtp::{DnsCache, TestSMTP, session::TestSession},
+    store::cleanup::store_assert_is_empty,
+};
 use smtp::queue::manager::Queue;
 
 const LOCAL: &str = r#"
@@ -149,9 +152,10 @@ async fn concurrent_queue() {
     assert_eq!(remote_messages.len(), NUM_MESSAGES);
 
     // Make sure local store is queue
-    core.core
-        .storage
-        .data
-        .assert_is_empty(core.core.storage.blob.clone())
-        .await;
+    store_assert_is_empty(
+        &core.core.storage.data,
+        core.core.storage.blob.clone(),
+        false,
+    )
+    .await;
 }

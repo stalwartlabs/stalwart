@@ -11,7 +11,7 @@ use crate::{IntoRows, QueryResult, QueryType, Value};
 use super::{SqliteStore, into_error};
 
 impl SqliteStore {
-    pub(crate) async fn query<T: QueryResult>(
+    pub(crate) async fn sql_query<T: QueryResult>(
         &self,
         query: &str,
         params_: &[Value<'_>],

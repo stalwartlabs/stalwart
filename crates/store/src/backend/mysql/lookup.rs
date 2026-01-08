@@ -11,7 +11,7 @@ use crate::{IntoRows, QueryResult, QueryType, Value};
 use super::{MysqlStore, into_error};
 
 impl MysqlStore {
-    pub(crate) async fn query<T: QueryResult>(
+    pub(crate) async fn sql_query<T: QueryResult>(
         &self,
         query: &str,
         params: &[Value<'_>],

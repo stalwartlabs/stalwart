@@ -23,6 +23,10 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::sync::Arc;
 use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
+use store::{
     ahash::AHashMap,
     write::{BatchBuilder, now},
 };
@@ -358,7 +362,12 @@ async fn move_container(
 
     if from_account_id == to_account_id {
         let node_ = server
-            .get_archive(from_account_id, Collection::FileNode, from_document_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                from_account_id,
+                Collection::FileNode,
+                from_document_id,
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -459,7 +468,12 @@ async fn copy_container(
         .caused_by(trc::location!())?;
     for (document_id, _) in copy_files.into_iter() {
         let node_ = server
-            .get_archive(from_account_id, Collection::FileNode, document_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                from_account_id,
+                Collection::FileNode,
+                document_id,
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?
@@ -491,7 +505,7 @@ async fn copy_container(
         batch
             .with_account_id(to_account_id)
             .with_collection(Collection::FileNode)
-            .create_document(new_document_id)
+            .with_document(new_document_id)
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
@@ -509,7 +523,7 @@ async fn copy_container(
             batch
                 .with_account_id(from_account_id)
                 .with_collection(Collection::FileNode)
-                .delete_document(document_id)
+                .with_document(document_id)
                 .custom(
                     ObjectIndexBuilder::<_, ()>::new()
                         .with_access_token(access_token)
@@ -550,7 +564,12 @@ async fn overwrite_and_delete_item(
 
     // dest_node is the current file at the destination
     let dest_node_ = server
-        .get_archive(to_account_id, Collection::FileNode, to_document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            to_account_id,
+            Collection::FileNode,
+            to_document_id,
+        ))
         .await
         .caused_by(trc::location!())?
         .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -561,7 +580,12 @@ async fn overwrite_and_delete_item(
 
     // source_node is the file to be copied
     let source_node__ = server
-        .get_archive(from_account_id, Collection::FileNode, from_document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            from_account_id,
+            Collection::FileNode,
+            from_document_id,
+        ))
         .await
         .caused_by(trc::location!())?
         .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -620,7 +644,12 @@ async fn overwrite_item(
 
     // dest_node is the current file at the destination
     let dest_node_ = server
-        .get_archive(to_account_id, Collection::FileNode, to_document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            to_account_id,
+            Collection::FileNode,
+            to_document_id,
+        ))
         .await
         .caused_by(trc::location!())?
         .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -631,7 +660,12 @@ async fn overwrite_item(
 
     // source_node is the file to be copied
     let mut source_node = server
-        .get_archive(from_account_id, Collection::FileNode, from_document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            from_account_id,
+            Collection::FileNode,
+            from_document_id,
+        ))
         .await
         .caused_by(trc::location!())?
         .ok_or(DavError::Code(StatusCode::NOT_FOUND))?
@@ -676,7 +710,12 @@ async fn move_item(
     let parent_id = destination.document_id.map(|id| id + 1).unwrap_or(0);
 
     let node_ = server
-        .get_archive(from_account_id, Collection::FileNode, from_document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            from_account_id,
+            Collection::FileNode,
+            from_document_id,
+        ))
         .await
         .caused_by(trc::location!())?
         .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -746,7 +785,12 @@ async fn copy_item(
     let parent_id = destination.document_id.map(|id| id + 1).unwrap_or(0);
 
     let mut node = server
-        .get_archive(from_account_id, Collection::FileNode, from_document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            from_account_id,
+            Collection::FileNode,
+            from_document_id,
+        ))
         .await
         .caused_by(trc::location!())?
         .ok_or(DavError::Code(StatusCode::NOT_FOUND))?
@@ -786,7 +830,12 @@ async fn rename_item(
     let from_document_id = from_resource.resource.document_id;
 
     let node_ = server
-        .get_archive(from_account_id, Collection::FileNode, from_document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            from_account_id,
+            Collection::FileNode,
+            from_document_id,
+        ))
         .await
         .caused_by(trc::location!())?
         .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;

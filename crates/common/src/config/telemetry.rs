@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::parse_http_headers;
 use ahash::{AHashMap, AHashSet};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::{HeaderMap, header::CONTENT_TYPE};
@@ -21,7 +20,7 @@ use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use store::Stores;
 use trc::{EventType, Level, TelemetryEvent, ipc::subscriber::Interests};
-use utils::config::{Config, utils::ParseValue};
+use utils::config::{Config, http::parse_http_headers, utils::ParseValue};
 
 #[derive(Debug)]
 pub struct TelemetrySubscriber {

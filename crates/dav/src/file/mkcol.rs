@@ -121,7 +121,7 @@ impl FileMkColRequestHandler for Server {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)
-            .create_document(document_id)
+            .with_document(document_id)
             .custom(ObjectIndexBuilder::<(), _>::new().with_changes(node))
             .caused_by(trc::location!())?;
         let etag = batch.etag();

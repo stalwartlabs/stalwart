@@ -9,13 +9,13 @@ pub mod search_snippet;
 pub mod stemmer;
 pub mod stopwords;
 
-use std::borrow::Cow;
-
-use crate::tokenizers::{
-    Token, chinese::ChineseTokenizer, japanese::JapaneseTokenizer, word::WordTokenizer,
-};
-
 use self::detect::LanguageDetector;
+use crate::tokenizers::{
+    Token, chinese::ChineseTokenizer, japanese::JapaneseTokenizer, space::SpaceTokenizer,
+    word::WordTokenizer,
+};
+use std::borrow::Cow;
+use utils::config::utils::ParseValue;
 
 pub type LanguageTokenizer<'x> = Box<dyn Iterator<Item = Token<Cow<'x, str>>> + 'x + Sync + Send>;
 
@@ -34,6 +34,15 @@ impl Language {
                 ChineseTokenizer::new(WordTokenizer::new(text, usize::MAX))
                     .filter(move |t| t.word.len() <= max_token_length),
             ),
+            Language::None => {
+                Box::new(
+                    SpaceTokenizer::new(text, max_token_length).map(|word| Token {
+                        word: word.into(),
+                        from: 0,
+                        to: 0,
+                    }),
+                )
+            }
             _ => Box::new(WordTokenizer::new(text, max_token_length)),
         }
     }
@@ -118,6 +127,10 @@ pub enum Language {
 }
 
 impl Language {
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Language::Unknown)
+    }
+
     pub fn from_iso_639(code: &str) -> Option<Self> {
         hashify::map!(
             code.split_once('-').map(|c| c.0).unwrap_or(code).as_bytes(),
@@ -173,6 +186,7 @@ impl Language {
             "ca" => Language::Catalan,
             "el" => Language::Greek,
             "sv" => Language::Swedish,
+            "pl" => Language::Polish
         )
         .copied()
     }
@@ -191,5 +205,11 @@ impl Language {
                 .unwrap_or(default);
             (text, l)
         }
+    }
+}
+
+impl ParseValue for Language {
+    fn parse_value(value: &str) -> utils::config::Result<Self> {
+        Language::from_iso_639(value).ok_or_else(|| format!("Invalid language code: {}", value))
     }
 }

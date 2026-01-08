@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    LOCK_RETRY_TIME, LOCK_WAIT_TIME_ACCOUNT, LOCK_WAIT_TIME_CORE,
+    LOCK_RETRY_TIME, LOCK_WAIT_TIME_ACCOUNT, LOCK_WAIT_TIME_CORE, get_document_ids,
     principal_v2::{migrate_principal_v0_13, migrate_principals_v0_13},
 };
 use common::{KV_LOCK_HOUSEKEEPER, Server};
@@ -56,8 +56,7 @@ pub(crate) async fn migrate_v0_13(server: &Server) -> trc::Result<()> {
                     .await
                     .caused_by(trc::location!())?;
             } else {
-                principal_ids = server
-                    .get_document_ids(u32::MAX, Collection::Principal)
+                principal_ids = get_document_ids(server, u32::MAX, Collection::Principal)
                     .await
                     .caused_by(trc::location!())?
                     .unwrap_or_default();

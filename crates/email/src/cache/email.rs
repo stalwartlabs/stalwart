@@ -9,7 +9,8 @@ use common::{
     MessageCache, MessageStoreCache, MessageUidCache, MessagesCache, Server, auth::AccessToken,
     sharing::EffectiveAcl,
 };
-use store::{ahash::AHashMap, roaring::RoaringBitmap, write::Archive};
+use store::write::{AlignedBytes, Archive};
+use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -18,24 +19,37 @@ use types::{
 };
 use utils::map::bitmap::Bitmap;
 
+struct MessagesCacheBuilder {
+    pub change_id: u64,
+    pub items: Vec<MessageCache>,
+    pub index: AHashMap<u32, u32>,
+    pub keywords: Vec<Box<str>>,
+    pub size: u64,
+}
+
 pub(crate) async fn update_email_cache(
     server: &Server,
     account_id: u32,
     changed_ids: &AHashMap<u32, bool>,
     store_cache: &MessageStoreCache,
 ) -> trc::Result<MessagesCache> {
-    let mut new_cache = MessagesCache {
+    let mut new_cache = MessagesCacheBuilder {
         index: AHashMap::with_capacity(store_cache.emails.items.len()),
         items: Vec::with_capacity(store_cache.emails.items.len()),
         size: 0,
         change_id: 0,
-        keywords: store_cache.emails.keywords.clone(),
+        keywords: store_cache.emails.keywords.to_vec(),
     };
 
     for (document_id, is_update) in changed_ids {
         if *is_update
             && let Some(archive) = server
-                .get_archive(account_id, Collection::Email, *document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Email,
+                    *document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
         {
@@ -53,15 +67,7 @@ pub(crate) async fn update_email_cache(
         }
     }
 
-    if store_cache.emails.items.len() > new_cache.items.len() {
-        new_cache.items.shrink_to_fit();
-        new_cache.index.shrink_to_fit();
-    }
-    if store_cache.emails.keywords.len() > new_cache.keywords.len() {
-        new_cache.keywords.shrink_to_fit();
-    }
-
-    Ok(new_cache)
+    Ok(new_cache.build())
 }
 
 pub(crate) async fn full_email_cache_build(
@@ -69,7 +75,7 @@ pub(crate) async fn full_email_cache_build(
     account_id: u32,
 ) -> trc::Result<MessagesCache> {
     // Build cache
-    let mut cache = MessagesCache {
+    let mut cache = MessagesCacheBuilder {
         items: Vec::with_capacity(16),
         index: AHashMap::with_capacity(16),
         keywords: Vec::new(),
@@ -78,7 +84,7 @@ pub(crate) async fn full_email_cache_build(
     };
 
     server
-        .get_archives(
+        .archives(
             account_id,
             Collection::Email,
             &(),
@@ -94,14 +100,11 @@ pub(crate) async fn full_email_cache_build(
         .await
         .caused_by(trc::location!())?;
 
-    cache.items.shrink_to_fit();
-    cache.index.shrink_to_fit();
-
-    Ok(cache)
+    Ok(cache.build())
 }
 
 fn insert_item(
-    cache: &mut MessagesCache,
+    cache: &mut MessagesCacheBuilder,
     document_id: u32,
     archive: Archive<&ArchivedMessageData>,
 ) {
@@ -119,6 +122,7 @@ fn insert_item(
         thread_id: message.thread_id.to_native(),
         change_id: archive.version.change_id().unwrap_or_default(),
         document_id,
+        size: message.size.to_native(),
     };
     for keyword in message.keywords.iter() {
         match keyword.id() {
@@ -126,10 +130,10 @@ fn insert_item(
                 item.keywords |= 1 << id;
             }
             Err(custom) => {
-                if let Some(idx) = cache.keywords.iter().position(|k| k == custom) {
+                if let Some(idx) = cache.keywords.iter().position(|k| **k == *custom) {
                     item.keywords |= 1 << (OTHER + idx);
                 } else if cache.keywords.len() < (128 - OTHER) {
-                    cache.keywords.push(String::from(custom));
+                    cache.keywords.push(custom.into());
                     item.keywords |= 1 << (OTHER + cache.keywords.len() - 1);
                 }
             }
@@ -139,12 +143,27 @@ fn insert_item(
     email_insert(cache, item);
 }
 
+impl MessagesCacheBuilder {
+    pub fn build(mut self) -> MessagesCache {
+        self.index.shrink_to_fit();
+        MessagesCache {
+            change_id: self.change_id,
+            items: self.items.into_boxed_slice(),
+            index: self.index,
+            keywords: self.keywords.into_boxed_slice(),
+            size: self.size,
+        }
+    }
+}
+
 pub trait MessageCacheAccess {
     fn email_by_id(&self, id: &u32) -> Option<&MessageCache>;
 
     fn has_email_id(&self, id: &u32) -> bool;
 
     fn in_mailbox(&self, mailbox_id: u32) -> impl Iterator<Item = &MessageCache>;
+
+    fn in_mailboxes(&self, mailbox_ids: &[u32]) -> impl Iterator<Item = &MessageCache>;
 
     fn in_thread(&self, thread_id: u32) -> impl Iterator<Item = &MessageCache>;
 
@@ -183,6 +202,14 @@ impl MessageCacheAccess for MessageStoreCache {
             .items
             .iter()
             .filter(move |m| m.mailboxes.iter().any(|m| m.mailbox_id == mailbox_id))
+    }
+
+    fn in_mailboxes(&self, mailbox_ids: &[u32]) -> impl Iterator<Item = &MessageCache> {
+        self.emails.items.iter().filter(move |m| {
+            m.mailboxes
+                .iter()
+                .any(|mb| mailbox_ids.contains(&mb.mailbox_id))
+        })
     }
 
     fn in_thread(&self, thread_id: u32) -> impl Iterator<Item = &MessageCache> {
@@ -282,7 +309,7 @@ impl MessageCacheAccess for MessageStoreCache {
     }
 }
 
-fn email_insert(cache: &mut MessagesCache, item: MessageCache) {
+fn email_insert(cache: &mut MessagesCacheBuilder, item: MessageCache) {
     let id = item.document_id;
     if let Some(idx) = cache.index.get(&id) {
         cache.items[*idx as usize] = item;
@@ -306,7 +333,7 @@ fn keyword_to_id(cache: &MessageStoreCache, keyword: &Keyword) -> Option<u32> {
             .emails
             .keywords
             .iter()
-            .position(|k| k == name)
+            .position(|k| **k == *name)
             .map(|idx| (OTHER + idx) as u32),
     }
 }

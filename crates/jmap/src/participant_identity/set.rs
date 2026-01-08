@@ -176,7 +176,7 @@ impl ParticipantIdentitySet for Server {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Principal)
-                .update_document(0);
+                .with_document(0);
             if let Some(archive) = identity_archive {
                 batch.assert_value(PrincipalField::ParticipantIdentities, archive);
             }

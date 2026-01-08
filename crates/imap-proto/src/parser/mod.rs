@@ -106,6 +106,23 @@ impl Flag {
                 "$NotJunk" => Flag::NotJunk,
                 "$Phishing" => Flag::Phishing,
                 "$Important" => Flag::Important,
+                "$autosent" => Flag::Autosent,
+                "$canunsubscribe" => Flag::CanUnsubscribe,
+                "$followed" => Flag::Followed,
+                "$hasattachment" => Flag::HasAttachment,
+                "$hasmemo" => Flag::HasMemo,
+                "$hasnoattachment" => Flag::HasNoAttachment,
+                "$imported" => Flag::Imported,
+                "$istrusted" => Flag::IsTrusted,
+                "$MailFlagBit0" => Flag::MailFlagBit0,
+                "$MailFlagBit1" => Flag::MailFlagBit1,
+                "$MailFlagBit2" => Flag::MailFlagBit2,
+                "$maskedemail" => Flag::MaskedEmail,
+                "$memo" => Flag::Memo,
+                "$muted" => Flag::Muted,
+                "$new" => Flag::New,
+                "$notify" => Flag::Notify,
+                "$unsubscribed" => Flag::Unsubscribed,
             );
 
             if let Some(flag) = flag {
@@ -113,7 +130,7 @@ impl Flag {
             } else {
                 String::from_utf8(value)
                     .map_err(|_| Cow::from("Invalid UTF-8."))
-                    .map(Flag::Keyword)
+                    .map(|v| Flag::Keyword(v.into_boxed_str()))
             }
         } else {
             Err(Cow::from("Null flags are not allowed."))
@@ -135,8 +152,25 @@ impl Flag {
                 "$deleted" => Flag::Deleted,
                 "$forwarded" => Flag::Forwarded,
                 "$mdnsent" => Flag::MDNSent,
+                "$autosent" => Flag::Autosent,
+                "$canunsubscribe" => Flag::CanUnsubscribe,
+                "$followed" => Flag::Followed,
+                "$hasattachment" => Flag::HasAttachment,
+                "$hasmemo" => Flag::HasMemo,
+                "$hasnoattachment" => Flag::HasNoAttachment,
+                "$imported" => Flag::Imported,
+                "$istrusted" => Flag::IsTrusted,
+                "$MailFlagBit0" => Flag::MailFlagBit0,
+                "$MailFlagBit1" => Flag::MailFlagBit1,
+                "$MailFlagBit2" => Flag::MailFlagBit2,
+                "$maskedemail" => Flag::MaskedEmail,
+                "$memo" => Flag::Memo,
+                "$muted" => Flag::Muted,
+                "$new" => Flag::New,
+                "$notify" => Flag::Notify,
+                "$unsubscribed" => Flag::Unsubscribed,
             )
-            .unwrap_or_else(|| Flag::Keyword(value))
+            .unwrap_or_else(|| Flag::Keyword(value.into_boxed_str()))
         } else {
             let mut keyword = String::with_capacity(value.len());
             for c in value.chars() {
@@ -146,7 +180,7 @@ impl Flag {
                     keyword.push('_');
                 }
             }
-            Flag::Keyword(keyword)
+            Flag::Keyword(keyword.into_boxed_str())
         }
     }
 }

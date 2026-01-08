@@ -4,22 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use futures::{TryStreamExt, pin_mut};
-use roaring::RoaringBitmap;
-
-use crate::{
-    BitmapKey, Deserialize, IterateParams, Key, U32_LEN, ValueKey,
-    write::{BitmapClass, ValueClass, key::DeserializeBigEndian},
-};
-
 use super::{PostgresStore, into_error};
+use crate::{
+    Deserialize, IterateParams, Key, ValueKey, backend::postgres::into_pool_error,
+    write::ValueClass,
+};
+use futures::{TryStreamExt, pin_mut};
 
 impl PostgresStore {
     pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
     where
         U: Deserialize + 'static,
     {
-        let conn = self.conn_pool.get().await.map_err(into_error)?;
+        let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let s = conn
             .prepare_cached(&format!(
                 "SELECT v FROM {} WHERE k = $1",
@@ -40,44 +37,12 @@ impl PostgresStore {
             })
     }
 
-    pub(crate) async fn get_bitmap(
-        &self,
-        mut key: BitmapKey<BitmapClass>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        let begin = key.serialize(0);
-        key.document_id = u32::MAX;
-        let key_len = begin.len();
-        let end = key.serialize(0);
-        let conn = self.conn_pool.get().await.map_err(into_error)?;
-        let table = char::from(key.subspace());
-
-        let mut bm = RoaringBitmap::new();
-        let s = conn
-            .prepare_cached(&format!("SELECT k FROM {table} WHERE k >= $1 AND k <= $2"))
-            .await
-            .map_err(into_error)?;
-        let rows = conn
-            .query_raw(&s, &[&begin, &end])
-            .await
-            .map_err(into_error)?;
-
-        pin_mut!(rows);
-
-        while let Some(row) = rows.try_next().await.map_err(into_error)? {
-            let key: &[u8] = row.try_get(0).map_err(into_error)?;
-            if key.len() == key_len {
-                bm.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
-            }
-        }
-        Ok(if !bm.is_empty() { Some(bm) } else { None })
-    }
-
     pub(crate) async fn iterate<T: Key>(
         &self,
         params: IterateParams<T>,
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
-        let conn = self.conn_pool.get().await.map_err(into_error)?;
+        let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let table = char::from(params.begin.subspace());
         let begin = params.begin.serialize(0);
         let end = params.end.serialize(0);
@@ -138,7 +103,7 @@ impl PostgresStore {
         let table = char::from(key.subspace());
         let key = key.serialize(0);
 
-        let conn = self.conn_pool.get().await.map_err(into_error)?;
+        let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let s = conn
             .prepare_cached(&format!("SELECT v FROM {table} WHERE k = $1"))
             .await

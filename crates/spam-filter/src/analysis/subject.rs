@@ -84,6 +84,10 @@ impl SpamFilterAnalyzeSubject for Server {
         } else if ctx.output.subject.ends_with(' ') {
             // Subject ends with whitespace
             ctx.result.add_tag("SUBJECT_ENDS_SPACES");
+        } else if ctx.output.subject
+            == "XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X"
+        {
+            ctx.result.add_tag("GTUBE_TEST");
         }
 
         if ctx.output.subject_thread.len() >= 10

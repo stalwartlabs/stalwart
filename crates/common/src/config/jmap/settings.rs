@@ -5,9 +5,11 @@
  */
 
 use crate::config::groupware::GroupwareConfig;
+use ahash::{AHashMap, AHashSet};
 use jmap_proto::request::capability::BaseCapabilities;
 use nlp::language::Language;
 use std::{str::FromStr, time::Duration};
+use store::{search::SearchField, write::SearchIndex};
 use types::{collection::Collection, special_use::SpecialUse};
 use utils::{
     config::{Config, Rate, cron::SimpleCron, utils::ParseValue},
@@ -44,6 +46,7 @@ pub struct JmapConfig {
     pub mail_parse_max_items: usize,
     pub mail_max_size: usize,
     pub mail_autoexpunge_after: Option<u64>,
+    pub email_submission_autoexpunge_after: Option<u64>,
 
     pub contact_parse_max_items: usize,
     pub calendar_parse_max_items: usize,
@@ -77,6 +80,9 @@ pub struct JmapConfig {
 
     pub encrypt: bool,
     pub encrypt_append: bool,
+
+    pub index_batch_size: usize,
+    pub index_fields: AHashMap<SearchIndex, AHashSet<SearchField>>,
 
     pub capabilities: BaseCapabilities,
     pub account_purge_frequency: SimpleCron,
@@ -213,7 +219,7 @@ impl JmapConfig {
         let mut jmap = JmapConfig {
             default_language: Language::from_iso_639(
                 config
-                    .value("storage.full-text.default-language")
+                    .value("storage.search-index.default-language")
                     .unwrap_or("en"),
             )
             .unwrap_or(Language::English),
@@ -274,6 +280,10 @@ impl JmapConfig {
             mail_parse_max_items: config.property("jmap.email.parse.max-items").unwrap_or(10),
             mail_autoexpunge_after: config
                 .property_or_default::<Option<Duration>>("email.auto-expunge", "30d")
+                .map(|d| d.map(|d| d.as_secs()))
+                .unwrap_or_default(),
+            email_submission_autoexpunge_after: config
+                .property_or_default::<Option<Duration>>("email-submission.auto-expunge", "3d")
                 .map(|d| d.map(|d| d.as_secs()))
                 .unwrap_or_default(),
             sieve_max_script_name: config
@@ -346,9 +356,47 @@ impl JmapConfig {
             calendar_parse_max_items: config
                 .property("jmap.calendar.parse.max-items")
                 .unwrap_or(10),
+            index_batch_size: config
+                .property("storage.search-index.batch-size")
+                .unwrap_or(100),
+            index_fields: AHashMap::new(),
             default_folders,
             shared_folder,
         };
+
+        // Parse index fields
+        for index in [
+            SearchIndex::Email,
+            SearchIndex::Contacts,
+            SearchIndex::Calendar,
+            SearchIndex::Tracing,
+        ] {
+            let mut fields = AHashSet::new();
+            let index_name = match index {
+                SearchIndex::Email => "email",
+                SearchIndex::Contacts => "contacts",
+                SearchIndex::Calendar => "calendar",
+                SearchIndex::Tracing => "tracing",
+                _ => unreachable!(),
+            };
+
+            if !config
+                .property_or_default::<bool>(
+                    &format!("storage.search-index.{index_name}.enabled"),
+                    "true",
+                )
+                .unwrap_or(true)
+            {
+                continue;
+            }
+
+            for (_, field) in config
+                .properties::<SearchField>(&format!("storage.search-index.{index_name}.fields"))
+            {
+                fields.insert(field);
+            }
+            jmap.index_fields.insert(index, fields);
+        }
 
         for collection in Bitmap::<Collection>::all() {
             let key = format!("object-quota.{}", collection.as_config_case());

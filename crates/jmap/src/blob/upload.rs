@@ -195,7 +195,7 @@ impl BlobUpload for Server {
             response.created.insert(
                 create_id,
                 BlobUploadResponseObject {
-                    id: self.put_blob(account_id, &data, true).await?,
+                    id: self.put_jmap_blob(account_id, &data).await?,
                     type_: upload_object.type_,
                     size: data.len(),
                 },
@@ -257,7 +257,7 @@ impl BlobUpload for Server {
         Ok(UploadResponse {
             account_id,
             blob_id: self
-                .put_blob(account_id.document_id(), data, true)
+                .put_jmap_blob(account_id.document_id(), data)
                 .await
                 .caused_by(trc::location!())?,
             c_type: content_type.to_string(),

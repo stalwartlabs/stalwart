@@ -20,7 +20,9 @@ impl IndexableObject for FileNode {
                 prefix: None,
                 sync_collection: SyncCollection::FileNode,
             },
-            IndexValue::Quota { used: self.size() },
+            IndexValue::Quota {
+                used: self.size() as u32,
+            },
         ]);
 
         if let Some(file) = &self.file {
@@ -50,7 +52,9 @@ impl IndexableObject for &ArchivedFileNode {
                 prefix: None,
                 sync_collection: SyncCollection::FileNode,
             },
-            IndexValue::Quota { used: self.size() },
+            IndexValue::Quota {
+                used: self.size() as u32,
+            },
         ]);
 
         if let Some(file) = self.file.as_ref() {
@@ -69,24 +73,25 @@ impl IndexableAndSerializableObject for FileNode {
     }
 }
 
-pub trait NodeSize {
-    fn size(&self) -> u32;
-}
-
-impl NodeSize for ArchivedFileNode {
-    fn size(&self) -> u32 {
-        self.dead_properties.size() as u32
-            + self.display_name.as_ref().map_or(0, |n| n.len() as u32)
-            + self.name.len() as u32
-            + self.file.as_ref().map_or(0, |f| u32::from(f.size))
+impl FileNode {
+    pub fn size(&self) -> usize {
+        self.dead_properties.size()
+            + self.display_name.as_ref().map_or(0, |n| n.len())
+            + self.name.len()
+            + self.file.as_ref().map_or(0, |f| f.size as usize)
+            + std::mem::size_of::<FileNode>()
     }
 }
 
-impl NodeSize for FileNode {
-    fn size(&self) -> u32 {
-        self.dead_properties.size() as u32
-            + self.display_name.as_ref().map_or(0, |n| n.len() as u32)
-            + self.name.len() as u32
-            + self.file.as_ref().map_or(0, |f| f.size)
+impl ArchivedFileNode {
+    pub fn size(&self) -> usize {
+        self.dead_properties.size()
+            + self.display_name.as_ref().map_or(0, |n| n.len())
+            + self.name.len()
+            + self
+                .file
+                .as_ref()
+                .map_or(0, |f| f.size.to_native() as usize)
+            + std::mem::size_of::<FileNode>()
     }
 }

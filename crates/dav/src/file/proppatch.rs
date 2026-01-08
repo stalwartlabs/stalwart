@@ -26,6 +26,10 @@ use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::BatchBuilder;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -75,7 +79,12 @@ impl FilePropPatchRequestHandler for Server {
 
         // Fetch node
         let node_ = self
-            .get_archive(account_id, Collection::FileNode, resource.resource)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::FileNode,
+                resource.resource,
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;

@@ -12,6 +12,9 @@ use super::{AssertResult, ImapConnection, Type};
 pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnection) {
     println!("Running mailbox tests...");
 
+    // Pattern matching tests
+    mailbox_matches_pattern();
+
     // Create third connection for testing
     let mut other_conn = ImapConnection::connect(b"_z ").await;
     other_conn
@@ -321,9 +324,55 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
     // Restore Trash folder's original name
     imap.send("RENAME \"Recycle Bin\" \"Deleted Items\"").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    // Shared folder creation tests
+    let mut imap_jane = ImapConnection::connect(b"_z ").await;
+    imap_jane
+        .authenticate("jane.smith@example.com", "secret")
+        .await;
+    imap_jane
+        .send("CREATE \"Shared Folders/support@example.com/INBOX/Test\"")
+        .await;
+    imap_jane.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    imap_jane
+        .send("CREATE \"Shared Folders/support@example.com/Test\"")
+        .await;
+    imap_jane.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    imap_jane
+        .send("CREATE \"Shared Folders/support@example.com/Test/TestSubfolder\"")
+        .await;
+    imap_jane.assert_read(Type::Tagged, ResponseType::Ok).await;
+    imap_jane.send("LIST \"\" \"*\"").await;
+    imap_jane
+        .assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_folders(
+            [
+                ("INBOX", [""]),
+                ("Deleted Items", [""]),
+                ("Drafts", [""]),
+                ("Junk Mail", [""]),
+                ("Sent Items", [""]),
+                ("Shared Folders", [""]),
+                ("Shared Folders/support@example.com", [""]),
+                ("Shared Folders/support@example.com/Deleted Items", [""]),
+                ("Shared Folders/support@example.com/Drafts", [""]),
+                ("Shared Folders/support@example.com/INBOX", [""]),
+                ("Shared Folders/support@example.com/INBOX/Test", [""]),
+                ("Shared Folders/support@example.com/Junk Mail", [""]),
+                ("Shared Folders/support@example.com/Sent Items", [""]),
+                ("Shared Folders/support@example.com/Test", [""]),
+                (
+                    "Shared Folders/support@example.com/Test/TestSubfolder",
+                    [""],
+                ),
+            ],
+            true,
+        );
 }
 
-#[test]
 fn mailbox_matches_pattern() {
     let mailboxes = [
         "imaptest",

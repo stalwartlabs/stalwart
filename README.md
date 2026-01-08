@@ -68,7 +68,7 @@ Key features:
 - **Spam** and **Phishing** built-in filter:
   - Comprehensive set of filtering **rules** on par with popular solutions.
   - LLM-driven spam filtering and message analysis.
-  - Statistical **spam classifier** with automatic training capabilities and address book integration.
+  - Statistical **spam classifier** with collaborative filtering, automatic training capabilities and address book integration.
   - DNS Blocklists (**DNSBLs**) checking of IP addresses, domains, and hashes.
   - Collaborative digest-based spam filtering with **Pyzor**.
   - **Phishing** protection against homographic URL attacks, sender spoofing and other techniques.
@@ -77,8 +77,8 @@ Key features:
   - **Greylisting** to temporarily defer unknown senders.
   - **Spam traps** to set up decoy email addresses that catch and analyze spam.
 - **Flexible**:
-  - Pluggable storage backends with **RocksDB**, **FoundationDB**, **PostgreSQL**, **mySQL**, **SQLite**, **S3-Compatible**, **Azure**, **Redis** and **ElasticSearch** support.
-  - Full-text search available in 17 languages.
+  - Pluggable storage backends with **RocksDB**, **FoundationDB**, **PostgreSQL**, **mySQL**, **SQLite**, **S3-Compatible**, **Azure** and **Redis** support.
+  - Full-text search available in 17 languages using the built-in search engine or via **Meilisearch**, **ElasticSearch**, **OpenSearch**, **PostgreSQL** or **mySQL** backends.
   - Sieve scripting language with support for all [registered extensions](https://www.iana.org/assignments/sieve-extensions/sieve-extensions.xhtml).
   - Email aliases, mailing lists, subaddressing and catch-all addresses support.
   - Automatic account configuration and discovery with [autoconfig](https://www.ietf.org/id/draft-bucksch-autoconfig-02.html) and [autodiscover](https://learn.microsoft.com/en-us/exchange/architecture/client-access/autodiscover?view=exchserver-2019). 
@@ -157,7 +157,7 @@ Your support is crucial in helping us continue to improve the project, add new f
 
 These are some of our open-source sponsors:
 
-<!-- sponsors --><a href="https://github.com/kbjr"><img src="https:&#x2F;&#x2F;github.com&#x2F;kbjr.png" width="60px" alt="User avatar: James Brumond" /></a><a href="https://github.com/MailRoute"><img src="https:&#x2F;&#x2F;github.com&#x2F;MailRoute.png" width="60px" alt="User avatar: MailRoute, Inc." /></a><a href="https://github.com/starsong-consulting"><img src="https:&#x2F;&#x2F;github.com&#x2F;starsong-consulting.png" width="60px" alt="User avatar: Starsong GmbH" /></a><a href="https://github.com/mingfu-design"><img src="https:&#x2F;&#x2F;github.com&#x2F;mingfu-design.png" width="60px" alt="User avatar: Ming Fu Design Ltd. 明孚設計有限公司" /></a><a href="https://github.com/tamwuff"><img src="https:&#x2F;&#x2F;github.com&#x2F;tamwuff.png" width="60px" alt="User avatar: Tamino" /></a><a href="https://github.com/panascais"><img src="https:&#x2F;&#x2F;github.com&#x2F;panascais.png" width="60px" alt="User avatar: panascais" /></a><a href="https://github.com/ToxicMushroom"><img src="https:&#x2F;&#x2F;github.com&#x2F;ToxicMushroom.png" width="60px" alt="User avatar: Merlijn" /></a><!-- sponsors -->
+<!-- sponsors --><a href="https://github.com/kbjr"><img src="https:&#x2F;&#x2F;github.com&#x2F;kbjr.png" width="60px" alt="User avatar: James Brumond" /></a><a href="https://github.com/MailRoute"><img src="https:&#x2F;&#x2F;github.com&#x2F;MailRoute.png" width="60px" alt="User avatar: MailRoute, Inc." /></a><a href="https://github.com/starsong-consulting"><img src="https:&#x2F;&#x2F;github.com&#x2F;starsong-consulting.png" width="60px" alt="User avatar: Starsong GmbH" /></a><a href="https://github.com/mingfu-design"><img src="https:&#x2F;&#x2F;github.com&#x2F;mingfu-design.png" width="60px" alt="User avatar: Ming Fu Design Ltd. 明孚設計有限公司" /></a><a href="https://github.com/tamwuff"><img src="https:&#x2F;&#x2F;github.com&#x2F;tamwuff.png" width="60px" alt="User avatar: Tamino" /></a><a href="https://github.com/panascais"><img src="https:&#x2F;&#x2F;github.com&#x2F;panascais.png" width="60px" alt="User avatar: panascais" /></a><a href="https://github.com/JanAxelJonsson"><img src="https:&#x2F;&#x2F;github.com&#x2F;JanAxelJonsson.png" width="60px" alt="User avatar: Jan Jonsson" /></a><a href="https://github.com/GitHub-SecureOSS-Fund"><img src="https:&#x2F;&#x2F;github.com&#x2F;GitHub-SecureOSS-Fund.png" width="60px" alt="User avatar: GitHub SecureOSS Fund " /></a><a href="https://github.com/veyacloud"><img src="https:&#x2F;&#x2F;github.com&#x2F;veyacloud.png" width="60px" alt="User avatar: Veya Cloud" /></a><!-- sponsors -->
 
 <br/>If you would like to support our work, please consider [becoming a sponsor](https://opencollective.com/stalwart).
 

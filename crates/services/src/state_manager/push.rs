@@ -18,8 +18,9 @@ use std::{
     time::{Duration, Instant},
 };
 use store::{
+    ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::now,
+    write::{AlignedBytes, Archive, now},
 };
 use tokio::sync::mpsc;
 use trc::{AddContext, PushSubscriptionEvent, ServerEvent};
@@ -42,18 +43,23 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
         // Load active subscriptions on startup
         {
             let server = inner.build_server();
+
             match server
-                .get_document_ids(u32::MAX, Collection::PushSubscription)
+                .document_ids(
+                    u32::MAX,
+                    Collection::Principal,
+                    PrincipalField::PushSubscriptions,
+                )
                 .await
             {
-                Ok(Some(account_ids)) => {
+                Ok(account_ids) => {
                     for account_id in account_ids {
                         if server
                             .core
                             .network
                             .roles
                             .push_notifications
-                            .is_enabled_for_account(account_id)
+                            .is_enabled_for_integer(account_id)
                         {
                             // Load push subscriptions for account
                             let (subscriptions, member_account_ids) =
@@ -93,7 +99,6 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                         }
                     }
                 }
-                Ok(None) => {}
                 Err(err) => {
                     trc::error!(err.caused_by(trc::location!()));
                 }
@@ -142,7 +147,7 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                             .network
                             .roles
                             .push_notifications
-                            .is_enabled_for_account(account_id)
+                            .is_enabled_for_integer(account_id)
                         {
                             continue;
                         }
@@ -484,12 +489,13 @@ async fn load_push_subscriptions(
         .collect::<Vec<_>>();
 
     if let Some(push_subscriptions) = server
-        .get_archive_by_property(
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::property(
             account_id,
             Collection::Principal,
             0,
-            PrincipalField::PushSubscriptions.into(),
-        )
+            PrincipalField::PushSubscriptions,
+        ))
         .await?
     {
         push_subscriptions

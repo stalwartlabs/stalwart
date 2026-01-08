@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{QueryResult, QueryType};
+use crate::{QueryResult, QueryType, backend::postgres::into_pool_error};
 
 use bytes::BytesMut;
 use futures::{TryStreamExt, pin_mut};
@@ -15,12 +15,12 @@ use crate::IntoRows;
 use super::{PostgresStore, into_error};
 
 impl PostgresStore {
-    pub(crate) async fn query<T: QueryResult>(
+    pub(crate) async fn sql_query<T: QueryResult>(
         &self,
         query: &str,
         params_: &[crate::Value<'_>],
     ) -> trc::Result<T> {
-        let conn = self.conn_pool.get().await.map_err(into_error)?;
+        let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let s = conn.prepare_cached(query).await.map_err(into_error)?;
         let params = params_
             .iter()

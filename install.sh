@@ -124,7 +124,12 @@ main() {
     # Create service file
     say "🚀 Starting service..."
     if [ "${_os}" = "linux" ]; then
-        create_service_linux "$_dir"
+        local _issystemdlinux=$(command -v systemctl)
+        if [ -n "$_issystemdlinux" ]; then
+            create_service_linux_systemd "$_dir"
+        else
+            create_service_linux_initd "$_dir"
+        fi
     elif [ "${_os}" = "macos" ]; then
         create_service_macos "$_dir"
     fi
@@ -137,7 +142,7 @@ main() {
 }
 
 # Functions to create service files
-create_service_linux() {
+create_service_linux_systemd() {
     local _dir="$1"
     cat <<EOF | sed "s|__PATH__|$_dir|g" > /etc/systemd/system/stalwart.service
 [Unit]
@@ -165,6 +170,136 @@ EOF
     systemctl daemon-reload
     systemctl enable stalwart.service
     systemctl restart stalwart.service
+}
+
+create_service_linux_initd() {
+    local _dir="$1"
+    cat <<"EOF" | sed "s|__PATH__|$_dir|g" > /etc/init.d/stalwart
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          stalwart
+# Required-Start:    $network
+# Required-Stop:     $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Stalwart Server
+# Description:       Starts and stops the Stalwart Server
+# Conflicts:         postfix sendmail
+### END INIT INFO
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+. /lib/init/vars.sh
+. /lib/lsb/init-functions
+
+# Service Config
+DAEMON=__PATH__/bin/stalwart
+DAEMON_ARGS="--config=__PATH__/etc/config.toml"
+PIDFILE=/var/run/stalwart.pid
+ULIMIT_NOFILE=65536
+
+# Exit if the package is not installed
+[ -x "$DAEMON" ] || exit 0
+
+# Exit if config file doesn't exist
+[ -f "__PATH__/etc/config.toml" ] || exit 0
+
+# Read configuration variable file if it is present
+[ -r /etc/default/stalwart ] && . /etc/default/stalwart
+
+# Increase file descriptor limit
+ulimit -n $ULIMIT_NOFILE
+
+do_start()
+{
+    # Return
+    #   0 if daemon has been started
+    #   1 if daemon was already running
+    #   2 if daemon could not be started
+    start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON --test > /dev/null \
+        || return 1
+    start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON \
+        --background --make-pidfile --chuid stalwart:stalwart \
+        -- $DAEMON_ARGS \
+        || return 2
+}
+
+do_stop()
+{
+    # Return
+    #   0 if daemon has been stopped
+    #   1 if daemon was already stopped
+    #   2 if daemon could not be stopped
+    #   other if a failure occurred
+    start-stop-daemon --stop --quiet --retry=INT/30/KILL/5 --pidfile $PIDFILE --name stalwart
+    RETVAL="$?"
+    [ "$RETVAL" = 2 ] && return 2
+    # Wait for children to finish too if this is a daemon that forks
+    # and if the daemon is only ever run from this initscript.
+    start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec $DAEMON
+    [ "$?" = 2 ] && return 2
+    # Many daemons don't delete their pidfiles when they exit.
+    rm -f $PIDFILE
+    return "$RETVAL"
+}
+
+case "$1" in
+  start)
+    [ "$VERBOSE" != no ] && log_daemon_msg "Starting Stalwart Server" "stalwart"
+    do_start
+    case "$?" in
+        0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+        2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+    esac
+    ;;
+  stop)
+    [ "$VERBOSE" != no ] && log_daemon_msg "Stopping Stalwart Server" "stalwart"
+    do_stop
+    case "$?" in
+        0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+        2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+    esac
+    ;;
+  status)
+    status_of_proc "$DAEMON" "stalwart" && exit 0 || exit $?
+    ;;
+  restart)
+    log_daemon_msg "Restarting Stalwart Server" "stalwart"
+    do_stop
+    case "$?" in
+      0|1)
+        do_start
+        case "$?" in
+            0) log_end_msg 0 ;;
+            1) log_end_msg 1 ;; # Old process is still running
+            *) log_end_msg 1 ;; # Failed to start
+        esac
+        ;;
+      *)
+        # Failed to stop
+        log_end_msg 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "Usage: /etc/init.d/stalwart {start|stop|status|restart}" >&2
+    exit 3
+    ;;
+esac
+
+exit 0
+EOF
+    chmod +x /etc/init.d/stalwart
+
+    cat <<EOF > /etc/default/stalwart
+# Configuration for Stalwart init script being run during
+# the boot sequence
+
+# Set to 'yes' to enable additional verbosity
+#VERBOSE=no
+EOF
+    update-rc.d stalwart defaults
+    service stalwart start
 }
 
 create_service_macos() {

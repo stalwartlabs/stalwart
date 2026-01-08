@@ -5,15 +5,15 @@
  */
 
 pub mod cron;
+pub mod http;
 pub mod ipmask;
 pub mod parser;
 pub mod utils;
 
-use std::{collections::BTreeMap, time::Duration};
-
 use ahash::AHashMap;
 use compact_str::CompactString;
 use serde::Serialize;
+use std::{collections::BTreeMap, time::Duration};
 
 #[derive(Debug, Default, Serialize)]
 pub struct Config {

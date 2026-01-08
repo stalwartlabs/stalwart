@@ -16,20 +16,37 @@ use directory::{
     Permission,
     backend::internal::manage::{self, ManageDirectory},
 };
-use email::message::{ingest::EmailIngest, metadata::MessageData};
+use email::{
+    cache::MessageCacheFetch,
+    message::{
+        ingest::EmailIngest,
+        metadata::{MessageData, MessageMetadata},
+    },
+    sieve::SieveScript,
+};
+use groupware::{
+    calendar::{Calendar, CalendarEvent, CalendarEventNotification},
+    contact::{AddressBook, ContactCard},
+    file::FileNode,
+};
 use http_proto::{request::decode_path_element, *};
 use hyper::Method;
 use serde_json::json;
-use services::task_manager::fts::FtsIndexTask;
+use services::task_manager::index::ReindexIndexTask;
 use std::future::Future;
 use store::{
-    Serialize, rand,
-    write::{Archiver, BatchBuilder, ValueClass},
+    Serialize, ValueKey, rand,
+    search::SearchQuery,
+    write::{
+        AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, DirectoryClass,
+        SearchIndex, ValueClass,
+    },
 };
 use trc::AddContext;
 use types::{
+    blob_hash::BlobHash,
     collection::Collection,
-    field::{EmailField, MailboxField},
+    field::{EmailField, Field, MailboxField},
 };
 use utils::url_params::UrlParams;
 
@@ -157,31 +174,7 @@ impl ManageStore for Server {
                     }
                     Some("rate-http-anonymous") => vec![KV_RATE_LIMIT_HTTP_ANONYMOUS].into(),
                     Some("rate-imap") => vec![KV_RATE_LIMIT_IMAP].into(),
-                    Some("reputation-ip") => vec![KV_REPUTATION_IP].into(),
-                    Some("reputation-from") => vec![KV_REPUTATION_FROM].into(),
-                    Some("reputation-domain") => vec![KV_REPUTATION_DOMAIN].into(),
-                    Some("reputation-asn") => vec![KV_REPUTATION_ASN].into(),
                     Some("greylist") => vec![KV_GREYLIST].into(),
-                    Some("bayes-account") => {
-                        if let Some(account) = path.get(5).copied() {
-                            let account_id = self
-                                .core
-                                .storage
-                                .data
-                                .get_principal_id(decode_path_element(account).as_ref())
-                                .await?
-                                .ok_or_else(|| trc::ManageEvent::NotFound.into_err())?;
-
-                            let mut key = Vec::with_capacity(std::mem::size_of::<u32>() + 1);
-                            key.push(KV_BAYES_MODEL_USER);
-                            key.extend_from_slice(&account_id.to_be_bytes());
-                            key.into()
-                        } else {
-                            vec![KV_BAYES_MODEL_USER].into()
-                        }
-                    }
-                    Some("bayes-global") => vec![KV_BAYES_MODEL_GLOBAL].into(),
-                    Some("trusted-reply") => vec![KV_TRUSTED_REPLY].into(),
                     Some("lock-purge-account") => vec![KV_LOCK_PURGE_ACCOUNT].into(),
                     Some("lock-queue-message") => vec![KV_LOCK_QUEUE_MESSAGE].into(),
                     Some("lock-queue-report") => vec![KV_LOCK_QUEUE_REPORT].into(),
@@ -218,7 +211,7 @@ impl ManageStore for Server {
                 }))
                 .await
             }
-            (Some("reindex"), id, None, &Method::GET) => {
+            (Some("reindex"), Some(index), id, &Method::GET) => {
                 // Validate the access token
                 access_token.assert_has_permission(Permission::FtsReindex)?;
 
@@ -234,10 +227,13 @@ impl ManageStore for Server {
                     None
                 };
                 let tenant_id = access_token.tenant.map(|t| t.id);
+                let index = SearchIndex::try_from_str(index).ok_or_else(|| {
+                    trc::ResourceEvent::BadParameters.reason("Invalid search index specified")
+                })?;
 
                 let jmap = self.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = jmap.fts_reindex(account_id, tenant_id).await {
+                    if let Err(err) = jmap.reindex(index, account_id, tenant_id).await {
                         trc::error!(err.details("Failed to reindex FTS"));
                     }
                 });
@@ -298,7 +294,7 @@ impl ManageStore for Server {
                     .ok_or_else(|| trc::ManageEvent::NotFound.into_err())?;
 
                 if method == Method::DELETE {
-                    self.recalculate_quota(account_id).await?;
+                    recalculate_quota(self, account_id).await?;
                 }
 
                 let result = self.get_used_quota(account_id).await?;
@@ -331,17 +327,194 @@ impl ManageStore for Server {
     }
 }
 
+pub async fn recalculate_quota(server: &Server, account_id: u32) -> trc::Result<()> {
+    let mut quota = 0;
+
+    for collection in [
+        Collection::Email,
+        Collection::Calendar,
+        Collection::CalendarEvent,
+        Collection::CalendarEventNotification,
+        Collection::AddressBook,
+        Collection::ContactCard,
+        Collection::FileNode,
+    ] {
+        server
+            .archives(account_id, collection, &(), |_, archive| {
+                match collection {
+                    Collection::Email => {
+                        quota += archive.unarchive::<MessageData>()?.size.to_native() as i64;
+                    }
+                    Collection::Calendar => {
+                        quota += archive.unarchive::<Calendar>()?.size() as i64;
+                    }
+                    Collection::CalendarEvent => {
+                        quota += archive.unarchive::<CalendarEvent>()?.size() as i64;
+                    }
+                    Collection::CalendarEventNotification => {
+                        quota += archive.unarchive::<CalendarEventNotification>()?.size() as i64;
+                    }
+                    Collection::AddressBook => {
+                        quota += archive.unarchive::<AddressBook>()?.size() as i64;
+                    }
+                    Collection::ContactCard => {
+                        quota += archive.unarchive::<ContactCard>()?.size() as i64;
+                    }
+                    Collection::FileNode => {
+                        quota += archive.unarchive::<FileNode>()?.size() as i64;
+                    }
+                    _ => {}
+                }
+                Ok(true)
+            })
+            .await
+            .caused_by(trc::location!())?;
+    }
+
+    let mut batch = BatchBuilder::new();
+    batch
+        .clear(DirectoryClass::UsedQuota(account_id))
+        .add(DirectoryClass::UsedQuota(account_id), quota);
+    server
+        .store()
+        .write(batch.build_all())
+        .await
+        .caused_by(trc::location!())
+        .map(|_| ())
+}
+
+pub async fn destroy_account_blobs(server: &Server, account_id: u32) -> trc::Result<()> {
+    let mut delete_keys = Vec::new();
+    for (collection, field) in [
+        (Collection::Email, u8::from(EmailField::Metadata)),
+        (Collection::FileNode, u8::from(Field::ARCHIVE)),
+        (Collection::SieveScript, u8::from(Field::ARCHIVE)),
+    ] {
+        server
+            .all_archives(account_id, collection, field, |document_id, archive| {
+                match collection {
+                    Collection::Email => {
+                        let message = archive.unarchive::<MessageMetadata>()?;
+                        delete_keys.push((
+                            collection,
+                            document_id,
+                            BlobHash::from(&message.blob_hash),
+                        ));
+                    }
+                    Collection::FileNode => {
+                        if let Some(file) = archive.unarchive::<FileNode>()?.file.as_ref() {
+                            delete_keys.push((
+                                collection,
+                                document_id,
+                                BlobHash::from(&file.blob_hash),
+                            ));
+                        }
+                    }
+                    Collection::SieveScript => {
+                        let sieve = archive.unarchive::<SieveScript>()?;
+                        delete_keys.push((
+                            collection,
+                            document_id,
+                            BlobHash::from(&sieve.blob_hash),
+                        ));
+                    }
+                    _ => {}
+                }
+                Ok(())
+            })
+            .await
+            .caused_by(trc::location!())?;
+    }
+
+    let mut batch = BatchBuilder::new();
+    batch.with_account_id(account_id);
+
+    for (collection, document_id, hash) in delete_keys {
+        if batch.is_large_batch() {
+            server
+                .store()
+                .write(batch.build_all())
+                .await
+                .caused_by(trc::location!())?;
+            batch = BatchBuilder::new();
+            batch.with_account_id(account_id);
+        }
+        batch
+            .with_collection(collection)
+            .with_document(document_id)
+            .clear(ValueClass::Blob(BlobOp::Link {
+                hash,
+                to: BlobLink::Document,
+            }));
+    }
+
+    if !batch.is_empty() {
+        server
+            .store()
+            .write(batch.build_all())
+            .await
+            .caused_by(trc::location!())?;
+    }
+
+    Ok(())
+}
+
+pub async fn destroy_account_data(
+    server: &Server,
+    account_id: u32,
+    has_data: bool,
+) -> trc::Result<()> {
+    // Unlink all accounts's blobs
+    if has_data {
+        destroy_account_blobs(server, account_id).await?;
+    }
+
+    // Destroy account data
+    server
+        .store()
+        .danger_destroy_account(account_id)
+        .await
+        .caused_by(trc::location!())?;
+
+    if has_data {
+        // Remove search index
+        for index in [
+            SearchIndex::Email,
+            SearchIndex::Contacts,
+            SearchIndex::Calendar,
+        ] {
+            if let Err(err) = server
+                .core
+                .storage
+                .fts
+                .unindex(SearchQuery::new(index).with_account_id(account_id))
+                .await
+            {
+                trc::error!(err.details("Failed to delete FTS index"));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, u32)> {
     let mut mailbox_count = 0;
     let mut email_count = 0;
 
-    for mailbox_id in server
-        .get_document_ids(account_id, Collection::Mailbox)
-        .await?
-        .unwrap_or_default()
-    {
+    let cache = server
+        .get_cached_messages(account_id)
+        .await
+        .caused_by(trc::location!())?;
+
+    for &mailbox_id in cache.mailboxes.index.keys() {
         let mailbox = server
-            .get_archive(account_id, Collection::Mailbox, mailbox_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::Mailbox,
+                mailbox_id,
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or_else(|| trc::ImapEvent::Error.into_err().caused_by(trc::location!()))?
@@ -353,7 +526,7 @@ pub async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Mailbox)
-            .update_document(mailbox_id)
+            .with_document(mailbox_id)
             .custom(
                 ObjectIndexBuilder::new()
                     .with_current(mailbox)
@@ -370,14 +543,14 @@ pub async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u
     }
 
     // Reset all UIDs
-    for message_id in server
-        .get_document_ids(account_id, Collection::Email)
-        .await
-        .caused_by(trc::location!())?
-        .unwrap_or_default()
-    {
+    for message_id in cache.emails.items.iter().map(|i| i.document_id) {
         let data = server
-            .get_archive(account_id, Collection::Email, message_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::Email,
+                message_id,
+            ))
             .await
             .caused_by(trc::location!())?;
         let data_ = if let Some(data) = data {
@@ -392,11 +565,17 @@ pub async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u
             .deserialize::<MessageData>()
             .caused_by(trc::location!())?;
 
-        for uid_mailbox in &mut new_data.mailboxes {
-            uid_mailbox.uid = server
-                .assign_imap_uid(account_id, uid_mailbox.mailbox_id)
-                .await
-                .caused_by(trc::location!())?;
+        let ids = server
+            .assign_email_ids(
+                account_id,
+                new_data.mailboxes.iter().map(|m| m.mailbox_id),
+                false,
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        for (uid_mailbox, uid) in new_data.mailboxes.iter_mut().zip(ids) {
+            uid_mailbox.uid = uid;
         }
 
         // Prepare write batch
@@ -404,7 +583,7 @@ pub async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email)
-            .update_document(message_id)
+            .with_document(message_id)
             .assert_value(ValueClass::Property(EmailField::Archive.into()), &data)
             .set(
                 EmailField::Archive,

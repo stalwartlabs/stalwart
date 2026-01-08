@@ -259,6 +259,8 @@ pub async fn test(test: &WebDavTest) {
     );
 
     // Check that John received the RSVP
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    test.wait_for_index().await;
     let itips = fetch_and_remove_itips(john_client).await;
     assert_eq!(itips.len(), 1);
     assert!(
@@ -448,6 +450,8 @@ pub async fn test(test: &WebDavTest) {
     let main_event_href = cal.href;
 
     // Check that Bill received the update
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    test.wait_for_index().await;
     let mut itips = fetch_and_remove_itips(bill_client).await;
     itips.sort_unstable_by(|a, _| {
         if a.contains("Lunch") {

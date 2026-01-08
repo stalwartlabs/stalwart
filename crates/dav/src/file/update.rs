@@ -25,6 +25,10 @@ use groupware::{
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::{BatchBuilder, now};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -74,7 +78,12 @@ impl FileUpdateRequestHandler for Server {
         {
             // Update
             let node_ = self
-                .get_archive(account_id, Collection::FileNode, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::FileNode,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -161,11 +170,10 @@ impl FileUpdateRequestHandler for Server {
             }
 
             // Write blob
-            let blob_hash = self
-                .put_blob(account_id, &bytes, false)
+            let (blob_hash, blob_hold) = self
+                .put_temporary_blob(account_id, &bytes, 60)
                 .await
-                .caused_by(trc::location!())?
-                .hash;
+                .caused_by(trc::location!())?;
 
             // Build node
             let mut new_node = node.deserialize::<FileNode>().caused_by(trc::location!())?;
@@ -183,7 +191,8 @@ impl FileUpdateRequestHandler for Server {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::FileNode)
-                .update_document(document_id)
+                .with_document(document_id)
+                .clear(blob_hold)
                 .custom(
                     ObjectIndexBuilder::new()
                         .with_current(node)
@@ -241,11 +250,10 @@ impl FileUpdateRequestHandler for Server {
             }
 
             // Write blob
-            let blob_hash = self
-                .put_blob(account_id, &bytes, false)
+            let (blob_hash, blob_hold) = self
+                .put_temporary_blob(account_id, &bytes, 60)
                 .await
-                .caused_by(trc::location!())?
-                .hash;
+                .caused_by(trc::location!())?;
 
             // Build node
             let now = now();
@@ -279,7 +287,8 @@ impl FileUpdateRequestHandler for Server {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::FileNode)
-                .create_document(document_id)
+                .with_document(document_id)
+                .clear(blob_hold)
                 .custom(
                     ObjectIndexBuilder::<(), _>::new()
                         .with_changes(node)

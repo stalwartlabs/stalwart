@@ -13,17 +13,13 @@ use crate::{
     listener::tls::AcmeProviders, manager::config::ConfigManager,
 };
 use arc_swap::ArcSwap;
-use base64::{Engine, engine::general_purpose};
 use directory::{Directories, Directory};
 use groupware::GroupwareConfig;
-use hyper::{
-    HeaderMap,
-    header::{AUTHORIZATION, HeaderName, HeaderValue},
-};
+use hyper::HeaderMap;
 use ring::signature::{EcdsaKeyPair, RsaKeyPair};
 use spamfilter::SpamFilterConfig;
-use std::{str::FromStr, sync::Arc};
-use store::{BlobBackend, BlobStore, FtsStore, InMemoryStore, Store, Stores};
+use std::sync::Arc;
+use store::{BlobBackend, BlobStore, InMemoryStore, SearchStore, Store, Stores};
 use telemetry::Metrics;
 use utils::config::{Config, utils::AsKey};
 
@@ -125,7 +121,7 @@ impl Core {
             .value_require("storage.fts")
             .map(|id| id.to_string())
             .and_then(|id| {
-                if let Some(store) = stores.fts_stores.get(&id) {
+                if let Some(store) = stores.search_stores.get(&id) {
                     store.clone().into()
                 } else {
                     config.new_parse_error(
@@ -176,12 +172,12 @@ impl Core {
         if matches!(data, Store::None)
             || matches!(&blob.backend, BlobBackend::Store(Store::None))
             || matches!(lookup, InMemoryStore::Store(Store::None))
-            || matches!(fts, FtsStore::Store(Store::None))
+            || matches!(fts, SearchStore::Store(Store::None))
         {
             data = Store::default();
             blob = BlobStore::default();
             lookup = InMemoryStore::default();
-            fts = FtsStore::default();
+            fts = SearchStore::default();
             config.new_build_error(
                 "storage.*",
                 "One or more stores are missing, disabling all stores",
@@ -219,7 +215,7 @@ impl Core {
                 stores: stores.stores,
                 lookups: stores.in_memory_stores,
                 blobs: stores.blob_stores,
-                ftss: stores.fts_stores,
+                ftss: stores.search_stores,
             },
         }
     }
@@ -260,53 +256,4 @@ pub fn build_ecdsa_pem(
         Ok(Some(key)) => Err(format!("Unsupported key type: {key:?}")),
         Ok(None) => Err("No ECDSA key found in PEM".to_string()),
     }
-}
-
-pub(crate) fn parse_http_headers(config: &mut Config, prefix: impl AsKey) -> HeaderMap {
-    let prefix = prefix.as_key();
-    let mut headers = HeaderMap::new();
-
-    for (header, value) in config
-        .values((&prefix, "headers"))
-        .map(|(_, v)| {
-            if let Some((k, v)) = v.split_once(':') {
-                Ok((
-                    HeaderName::from_str(k.trim()).map_err(|err| {
-                        format!("Invalid header found in property \"{prefix}.headers\": {err}",)
-                    })?,
-                    HeaderValue::from_str(v.trim()).map_err(|err| {
-                        format!("Invalid header found in property \"{prefix}.headers\": {err}",)
-                    })?,
-                ))
-            } else {
-                Err(format!(
-                    "Invalid header found in property \"{prefix}.headers\": {v}",
-                ))
-            }
-        })
-        .collect::<Result<Vec<(HeaderName, HeaderValue)>, String>>()
-        .map_err(|e| config.new_parse_error((&prefix, "headers"), e))
-        .unwrap_or_default()
-    {
-        headers.insert(header, value);
-    }
-
-    if let (Some(name), Some(secret)) = (
-        config.value((&prefix, "auth.username")),
-        config.value((&prefix, "auth.secret")),
-    ) {
-        headers.insert(
-            AUTHORIZATION,
-            format!(
-                "Basic {}",
-                general_purpose::STANDARD.encode(format!("{}:{}", name, secret))
-            )
-            .parse()
-            .unwrap(),
-        );
-    } else if let Some(token) = config.value((&prefix, "auth.token")) {
-        headers.insert(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap());
-    }
-
-    headers
 }

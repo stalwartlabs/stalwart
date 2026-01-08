@@ -6,14 +6,13 @@
 
 #![warn(clippy::large_futures)]
 
-use std::sync::Arc;
-
 use common::{
     Inner,
     manager::boot::{BootManager, IpcReceivers},
 };
 use queue::manager::SpawnQueue;
 use reporting::scheduler::SpawnReport;
+use std::sync::Arc;
 
 pub mod core;
 pub mod inbound;

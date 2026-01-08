@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{IntoJmapSet, JMAPTest, JmapUtils};
+use crate::jmap::{IntoJmapSet, JMAPTest, JmapUtils, wait_for_index};
 use calcard::jscalendar::JSCalendarProperty;
 use jmap_proto::{
     object::calendar_event_notification::CalendarEventNotificationProperty,
@@ -72,7 +72,8 @@ pub async fn test(params: &mut JMAPTest) {
         .await;
     let john_event_id = response.created(0).id().to_string();
 
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    wait_for_index(&params.server).await;
 
     // Verify Jane and Bill received the share notification
     let mut jane_event_id = String::new();

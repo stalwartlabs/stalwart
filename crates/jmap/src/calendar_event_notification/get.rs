@@ -25,7 +25,7 @@ use jmap_proto::{
     },
     types::date::UTCDate,
 };
-use store::write::serialize::rkyv_deserialize;
+use store::{ValueKey, write::{AlignedBytes, Archive, serialize::rkyv_deserialize}};
 use trc::AddContext;
 use types::{
     blob::BlobId,
@@ -84,11 +84,12 @@ impl CalendarEventNotificationGet for Server {
             // Obtain the event object
             let document_id = id.document_id();
             let _event = if let Some(event) = self
-                .get_archive(
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEventNotification,
                     document_id,
-                )
+                ))
                 .await?
             {
                 event

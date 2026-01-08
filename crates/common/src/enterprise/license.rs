@@ -19,19 +19,16 @@
  * for copyright infringement, breach of contract, and fraud.
  */
 
+use crate::manager::fetch_resource;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use hyper::{HeaderMap, header::AUTHORIZATION};
+use ring::signature::{ED25519, UnparsedPublicKey};
 use std::{
     fmt::{Display, Formatter},
     time::Duration,
 };
-
-use hyper::{HeaderMap, header::AUTHORIZATION};
-use ring::signature::{ED25519, UnparsedPublicKey};
-
-use base64::{Engine, engine::general_purpose::STANDARD};
 use store::write::now;
 use trc::ServerEvent;
-
-use crate::manager::fetch_resource;
 
 //const LICENSING_API: &str = "https://localhost:444/api/license/";
 const LICENSING_API: &str = "https://license.stalw.art/api/license/";
@@ -281,73 +278,3 @@ impl Display for LicenseError {
         }
     }
 }
-
-/*
-
-use rustls::sign::CertifiedKey;
-use webpki::TrustAnchor;
-use x509_parser::{certificate::X509Certificate, prelude::FromDer};
-
-
-fn validate_certificate(key: &CertifiedKey) -> Result<(), Box<dyn std::error::Error>> {
-    let cert_der = key.end_entity_cert()?.as_ref();
-
-    webpki::EndEntityCert::try_from(cert_der)?.verify_is_valid_tls_server_cert(
-        &[
-            &webpki::ECDSA_P256_SHA256,
-            &webpki::ECDSA_P256_SHA384,
-            &webpki::ECDSA_P384_SHA256,
-            &webpki::ECDSA_P384_SHA384,
-            &webpki::ED25519,
-            &webpki::RSA_PKCS1_2048_8192_SHA256,
-            &webpki::RSA_PKCS1_2048_8192_SHA384,
-            &webpki::RSA_PKCS1_2048_8192_SHA512,
-            &webpki::RSA_PKCS1_3072_8192_SHA384,
-            &webpki::RSA_PSS_2048_8192_SHA256_LEGACY_KEY,
-            &webpki::RSA_PSS_2048_8192_SHA384_LEGACY_KEY,
-            &webpki::RSA_PSS_2048_8192_SHA512_LEGACY_KEY,
-        ],
-        &webpki::TlsServerTrustAnchors(
-            webpki_roots::TLS_SERVER_ROOTS
-                .iter()
-                .map(|ta| TrustAnchor {
-                    subject: ta.subject.as_ref(),
-                    spki: ta.subject_public_key_info.as_ref(),
-                    name_constraints: ta.name_constraints.as_ref().map(|nc| nc.as_ref()),
-                })
-                .collect::<Vec<_>>()
-                .as_slice(),
-        ),
-        &key.cert
-            .iter()
-            .skip(1)
-            .map(|der| der.as_ref())
-            .collect::<Vec<_>>(),
-        webpki::Time::try_from(SystemTime::now())?,
-    )?;
-
-    // Additional checks
-    let x509 = X509Certificate::from_der(cert_der)?.1;
-
-    // Check if self-signed
-    if x509.issuer() == x509.subject() {
-        return Err("Certificate is self-signed".into());
-    }
-
-    // Check expiration
-    let not_before = x509.validity().not_before.timestamp();
-    let not_after = x509.validity().not_after.timestamp();
-    let now = SystemTime::UNIX_EPOCH
-        .elapsed()
-        .unwrap_or_default()
-        .as_secs() as i64;
-
-    if now < not_before || now > not_after {
-        Err("Certificate is expired or not yet valid".into())
-    } else {
-        Ok(())
-    }
-}
-
-
-*/

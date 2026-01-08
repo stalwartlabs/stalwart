@@ -50,6 +50,9 @@ default = true
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Push Subscription tests...");
 
+    // ECE roundtrip test
+    ece_roundtrip();
+
     // Create test account
     let account = params.account("jdoe@example.com");
     let client = account.client();
@@ -357,7 +360,6 @@ async fn assert_state(event_rx: &mut mpsc::Receiver<PushMessage>, id: &Id, state
     );
 }
 
-#[test]
 fn ece_roundtrip() {
     for len in [1, 2, 5, 16, 256, 1024, 2048, 4096, 1024 * 1024] {
         let (keypair, auth_secret) = ece::generate_keypair_and_auth_secret().unwrap();

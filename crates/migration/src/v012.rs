@@ -6,7 +6,7 @@
 
 use crate::{
     LOCK_RETRY_TIME, LOCK_WAIT_TIME_CORE, event_v1::migrate_calendar_events_v012,
-    queue::migrate_queue_v012, tasks::migrate_tasks_v011,
+    queue_v1::migrate_queue_v012, tasks_v1::migrate_tasks_v011,
 };
 use common::{KV_LOCK_HOUSEKEEPER, Server};
 use trc::AddContext;

@@ -308,6 +308,8 @@ impl Principal {
         let mut has_role = false;
         let mut has_member_of = false;
         let mut has_quota = false;
+        let mut has_otp_auth = false;
+        let mut has_app_password = false;
 
         for item in external.data {
             match item {
@@ -323,9 +325,15 @@ impl Principal {
                     has_role = true;
                     external_data.insert(item);
                 }
+                PrincipalData::OtpAuth(_) => {
+                    has_otp_auth = true;
+                    external_data.insert(item);
+                }
+                PrincipalData::AppPassword(_) => {
+                    has_app_password = true;
+                    external_data.insert(item);
+                }
                 PrincipalData::Password(_)
-                | PrincipalData::AppPassword(_)
-                | PrincipalData::OtpAuth(_)
                 | PrincipalData::Description(_)
                 | PrincipalData::PrimaryEmail(_)
                 | PrincipalData::EmailAlias(_) => {
@@ -352,6 +360,8 @@ impl Principal {
                     if external_data.remove(&item)
                         || match item {
                             PrincipalData::EmailAlias(_) => true,
+                            PrincipalData::AppPassword(_) => !has_app_password,
+                            PrincipalData::OtpAuth(_) => !has_otp_auth,
                             PrincipalData::Role(_) => !has_role,
                             PrincipalData::MemberOf(_) => !has_member_of,
                             PrincipalData::DiskQuota(_) => !has_quota,
@@ -1567,8 +1577,6 @@ impl Permission {
                 | Permission::SieveRenameScript
                 | Permission::SieveCheckScript
                 | Permission::SieveHaveSpace
-                | Permission::SpamFilterClassify
-                | Permission::SpamFilterTrain
                 | Permission::DavSyncCollection
                 | Permission::DavExpandProperty
                 | Permission::DavPrincipalAcl
@@ -1721,6 +1729,8 @@ impl Permission {
                 | Permission::ApiKeyCreate
                 | Permission::ApiKeyUpdate
                 | Permission::ApiKeyDelete
+                | Permission::SpamFilterTrain
+                | Permission::SpamFilterTest
         ) || self.is_user_permission()
     }
 

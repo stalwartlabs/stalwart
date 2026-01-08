@@ -31,7 +31,10 @@ use mail_parser::decoders::html::html_to_text;
 use smtp::core::{Session, SessionData};
 use smtp_proto::{MailFrom, RcptTo};
 use std::{str::FromStr, sync::Arc, time::Duration};
-use store::write::{BatchBuilder, now};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, BatchBuilder, now},
+};
 use trc::{AddContext, TaskQueueEvent};
 use types::collection::Collection;
 use utils::{sanitize_email, template::Variables};
@@ -121,7 +124,12 @@ async fn send_email_alarm(
 
     // Fetch event
     let Some(event_) = server
-        .get_archive(account_id, Collection::CalendarEvent, document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            account_id,
+            Collection::CalendarEvent,
+            document_id,
+        ))
         .await
         .caused_by(trc::location!())?
     else {
@@ -310,7 +318,12 @@ async fn send_display_alarm(
 ) -> trc::Result<bool> {
     // Fetch event
     let Some(event_) = server
-        .get_archive(account_id, Collection::CalendarEvent, document_id)
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            account_id,
+            Collection::CalendarEvent,
+            document_id,
+        ))
         .await
         .caused_by(trc::location!())?
     else {
@@ -400,7 +413,7 @@ async fn write_next_alarm(
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)
-            .update_document(document_id);
+            .with_document(document_id);
         next_alarm.write_task(&mut batch);
         server
             .store()

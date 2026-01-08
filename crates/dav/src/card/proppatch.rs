@@ -29,6 +29,10 @@ use groupware::{
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::BatchBuilder;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -109,7 +113,12 @@ impl CardPropPatchRequestHandler for Server {
 
         // Fetch archive
         let archive = self
-            .get_archive(account_id, collection, document_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                collection,
+                document_id,
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;

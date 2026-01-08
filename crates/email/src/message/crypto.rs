@@ -79,10 +79,15 @@ pub enum EncryptionMethod {
     serde::Deserialize,
 )]
 pub struct EncryptionParams {
-    pub method: EncryptionMethod,
-    pub algo: Algorithm,
-    pub certs: Vec<Vec<u8>>,
+    pub certs: Box<[Box<[u8]>]>,
+    pub flags: u64,
 }
+
+pub const ENCRYPT_TRAIN_SPAM_FILTER: u64 = 1;
+pub const ENCRYPT_METHOD_SMIME: u64 = 1 << 1;
+pub const ENCRYPT_METHOD_PGP: u64 = 1 << 2;
+pub const ENCRYPT_ALGO_AES256: u64 = 1 << 3;
+pub const ENCRYPT_ALGO_AES128: u64 = 1 << 4;
 
 #[derive(
     rkyv::Serialize,
@@ -99,10 +104,12 @@ pub enum EncryptionType {
     PGP {
         algo: Algorithm,
         certs: String,
+        allow_spam_training: bool,
     },
     SMIME {
         algo: Algorithm,
         certs: String,
+        allow_spam_training: bool,
     },
     #[default]
     Disabled,
@@ -142,8 +149,8 @@ impl EncryptMessage for Message<'_> {
         inner_message.extend_from_slice(&raw_message[root.raw_body_offset() as usize..]);
 
         // Encrypt inner message
-        match params.method {
-            ArchivedEncryptionMethod::PGP => {
+        match params.method() {
+            EncryptionMethod::PGP => {
                 // Prepare encrypted message
                 let boundary = make_boundary("_");
                 outer_message.extend_from_slice(
@@ -193,7 +200,7 @@ impl EncryptMessage for Message<'_> {
                     })?;
 
                 // Encrypt contents (TODO: use rayon)
-                let algo = params.algo;
+                let algo = params.algo();
                 let encrypted_contents = tokio::task::spawn_blocking(move || {
                     // Parse public key
                     let mut keys = Vec::with_capacity(certs.len());
@@ -224,8 +231,8 @@ impl EncryptMessage for Message<'_> {
                         })?;
                     let message = stream::Encryptor::for_recipients(message, keys)
                         .symmetric_algo(match algo {
-                            ArchivedAlgorithm::Aes128 => SymmetricAlgorithm::AES128,
-                            ArchivedAlgorithm::Aes256 => SymmetricAlgorithm::AES256,
+                            Algorithm::Aes128 => SymmetricAlgorithm::AES128,
+                            Algorithm::Aes256 => SymmetricAlgorithm::AES256,
                         })
                         .build()
                         .map_err(|err| {
@@ -269,18 +276,18 @@ impl EncryptMessage for Message<'_> {
                 outer_message.extend_from_slice(boundary.as_bytes());
                 outer_message.extend_from_slice(b"--\r\n");
             }
-            ArchivedEncryptionMethod::SMIME => {
+            EncryptionMethod::SMIME => {
                 // Generate random IV
                 let mut rng = StdRng::from_entropy();
                 let mut iv = vec![0u8; 16];
                 rng.fill_bytes(&mut iv);
 
                 // Generate random key
-                let mut key = vec![0u8; params.algo.key_size()];
+                let mut key = vec![0u8; params.key_size()];
                 rng.fill_bytes(&mut key);
 
                 // Encrypt contents (TODO: use rayon)
-                let algo = params.algo;
+                let algo = params.algo();
                 let (encrypted_contents, key, iv) = tokio::task::spawn_blocking(move || {
                     (algo.encrypt(&key, &iv, &inner_message), key, iv)
                 })
@@ -354,7 +361,7 @@ impl EncryptMessage for Message<'_> {
                             encrypted_content_info: EncryptedContentInfo {
                                 content_type: CONTENT_DATA.into(),
                                 content_encryption_algorithm: AlgorithmIdentifier {
-                                    algorithm: params.algo.to_algorithm_identifier(),
+                                    algorithm: params.to_algorithm_identifier(),
                                     parameters: Some(
                                         rasn::der::encode(&OctetString::from(iv))
                                             .map_err(|err| {
@@ -457,43 +464,74 @@ impl EncryptMessage for Message<'_> {
     }
 }
 
-impl ArchivedAlgorithm {
+impl ArchivedEncryptionParams {
+    pub fn method(&self) -> EncryptionMethod {
+        if self.flags & ENCRYPT_METHOD_PGP != 0 {
+            EncryptionMethod::PGP
+        } else {
+            EncryptionMethod::SMIME
+        }
+    }
+
+    pub fn algo(&self) -> Algorithm {
+        if self.flags & ENCRYPT_ALGO_AES256 != 0 {
+            Algorithm::Aes256
+        } else {
+            Algorithm::Aes128
+        }
+    }
+
     fn key_size(&self) -> usize {
-        match self {
-            ArchivedAlgorithm::Aes128 => 16,
-            ArchivedAlgorithm::Aes256 => 32,
+        if self.flags & ENCRYPT_ALGO_AES256 != 0 {
+            32
+        } else {
+            16
         }
     }
 
-    fn to_algorithm_identifier(self) -> ObjectIdentifier {
-        match self {
-            ArchivedAlgorithm::Aes128 => AES128_CBC.into(),
-            ArchivedAlgorithm::Aes256 => AES256_CBC.into(),
+    fn to_algorithm_identifier(&self) -> ObjectIdentifier {
+        if self.flags & ENCRYPT_ALGO_AES256 != 0 {
+            AES256_CBC.into()
+        } else {
+            AES128_CBC.into()
         }
     }
 
+    pub fn can_train_spam_filter(&self) -> bool {
+        self.flags & ENCRYPT_TRAIN_SPAM_FILTER != 0
+    }
+}
+
+impl Algorithm {
     fn encrypt(&self, key: &[u8], iv: &[u8], contents: &[u8]) -> Vec<u8> {
         match self {
-            ArchivedAlgorithm::Aes128 => cbc::Encryptor::<aes::Aes128>::new(key.into(), iv.into())
+            Algorithm::Aes128 => cbc::Encryptor::<aes::Aes128>::new(key.into(), iv.into())
                 .encrypt_padded_vec_mut::<Pkcs7>(contents),
-            ArchivedAlgorithm::Aes256 => cbc::Encryptor::<aes::Aes256>::new(key.into(), iv.into())
+            Algorithm::Aes256 => cbc::Encryptor::<aes::Aes256>::new(key.into(), iv.into())
                 .encrypt_padded_vec_mut::<Pkcs7>(contents),
         }
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn try_parse_certs(
     expected_method: EncryptionMethod,
     cert: Vec<u8>,
-) -> Result<Vec<Vec<u8>>, Cow<'static, str>> {
+) -> Result<Box<[Box<[u8]>]>, Cow<'static, str>> {
     // Check if it's a PEM file
-    let (method, certs) = if let Some(result) = try_parse_pem(&cert)? {
-        result
+    let (flags, certs) = if let Some(result) = try_parse_pem(&cert)? {
+        (result.flags, result.certs)
     } else if rasn::der::decode::<rasn_pkix::Certificate>(&cert[..]).is_ok() {
-        (EncryptionMethod::SMIME, vec![cert])
+        (
+            ENCRYPT_METHOD_SMIME,
+            Box::from_iter([cert.into_boxed_slice()]),
+        )
     } else if let Ok(cert_) = openpgp::Cert::from_bytes(&cert[..]) {
         if !has_pgp_keys(cert_) {
-            (EncryptionMethod::PGP, vec![cert])
+            (
+                ENCRYPT_METHOD_PGP,
+                Box::from_iter([cert.into_boxed_slice()]),
+            )
         } else {
             return Err("Could not find any suitable keys in certificate".into());
         }
@@ -501,7 +539,7 @@ pub fn try_parse_certs(
         return Err("Could not find any valid certificates".into());
     };
 
-    if method == expected_method {
+    if expected_method.flags() & flags != 0 {
         Ok(certs)
     } else {
         Err("No valid certificates found for the selected encryption".into())
@@ -520,9 +558,7 @@ fn has_pgp_keys(cert: openpgp::Cert) -> bool {
 }
 
 #[allow(clippy::type_complexity)]
-fn try_parse_pem(
-    bytes_: &[u8],
-) -> Result<Option<(EncryptionMethod, Vec<Vec<u8>>)>, Cow<'static, str>> {
+fn try_parse_pem(bytes_: &[u8]) -> Result<Option<EncryptionParams>, Cow<'static, str>> {
     if let Some(internal) = std::str::from_utf8(bytes_)
         .ok()
         .and_then(|cert| cert.strip_prefix("-----STALWART CERTIFICATE-----"))
@@ -534,13 +570,13 @@ fn try_parse_pem(
                     .and_then(|arch| arch.deserialize::<EncryptionParams>())
                     .map_err(|_| Cow::from("Failed to deserialize internal certificate"))
             })
-            .map(|params| Some((params.method, params.certs)));
+            .map(Some);
     }
 
     let mut bytes = bytes_.iter().enumerate();
     let mut buf = vec![];
     let mut method = None;
-    let mut certs = vec![];
+    let mut certs: Vec<Box<[u8]>> = vec![];
 
     loop {
         // Find start of PEM block
@@ -626,8 +662,9 @@ fn try_parse_pem(
         }
 
         // Decode base64
-        let cert =
-            base64_decode(&buf).ok_or_else(|| Cow::from("Failed to decode base64 certificate."))?;
+        let cert = base64_decode(&buf)
+            .ok_or_else(|| Cow::from("Failed to decode base64 certificate."))?
+            .into_boxed_slice();
         match method.unwrap() {
             EncryptionMethod::PGP => match openpgp::Cert::from_bytes(bytes_) {
                 Ok(cert) => {
@@ -638,7 +675,7 @@ fn try_parse_pem(
                         bytes_
                             .get(start_pos..end_pos + 1)
                             .unwrap_or_default()
-                            .to_vec(),
+                            .into(),
                     );
                 }
                 Err(err) => {
@@ -655,7 +692,28 @@ fn try_parse_pem(
         buf.clear();
     }
 
-    Ok(method.map(|method| (method, certs)))
+    Ok(method.map(|method| EncryptionParams {
+        flags: method.flags(),
+        certs: certs.into_boxed_slice(),
+    }))
+}
+
+impl EncryptionMethod {
+    pub fn flags(&self) -> u64 {
+        match self {
+            EncryptionMethod::PGP => ENCRYPT_METHOD_PGP,
+            EncryptionMethod::SMIME => ENCRYPT_METHOD_SMIME,
+        }
+    }
+}
+
+impl Algorithm {
+    pub fn flags(&self) -> u64 {
+        match self {
+            Algorithm::Aes128 => ENCRYPT_ALGO_AES128,
+            Algorithm::Aes256 => ENCRYPT_ALGO_AES256,
+        }
+    }
 }
 
 impl Display for EncryptionMethod {

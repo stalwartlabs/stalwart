@@ -7,7 +7,9 @@
 use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::metadata::{ArchivedMetadataPartType, DecodedPartContent, MessageMetadata},
+    message::metadata::{
+        ArchivedMetadataPartType, DecodedPartContent, MessageMetadata, MetadataHeaderName,
+    },
 };
 use jmap_proto::{
     method::{
@@ -17,14 +19,17 @@ use jmap_proto::{
     object::email::EmailFilter,
     request::IntoValid,
 };
-use mail_parser::{
-    ArchivedHeaderName, core::rkyv::ArchivedGetHeader, decoders::html::html_to_text,
-};
+use mail_parser::decoders::html::html_to_text;
 use nlp::language::{Language, search_snippet::generate_snippet, stemmer::Stemmer};
 use std::future::Future;
-use store::backend::MAX_TOKEN_LENGTH;
+use store::{
+    ValueKey,
+    backend::MAX_TOKEN_LENGTH,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, field::EmailField};
+use utils::chained_bytes::ChainedBytes;
 
 pub trait EmailSearchSnippet: Sync + Send {
     fn email_search_snippet(
@@ -125,12 +130,13 @@ impl EmailSearchSnippet for Server {
                 continue;
             }
             let metadata_ = match self
-                .get_archive_by_property(
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                     account_id,
                     Collection::Email,
                     document_id,
-                    EmailField::Metadata.into(),
-                )
+                    EmailField::Metadata,
+                ))
                 .await?
             {
                 Some(metadata) => metadata,
@@ -147,25 +153,20 @@ impl EmailSearchSnippet for Server {
             let contents = &metadata.contents[0];
             if let Some(subject) = contents
                 .root_part()
-                .headers
-                .header_value(&ArchivedHeaderName::Subject)
+                .header_value(&MetadataHeaderName::Subject)
                 .and_then(|v| v.as_text())
                 .and_then(|v| generate_snippet(v, &terms, language, is_exact))
             {
                 snippet.subject = subject.into();
             }
 
-            // Check if the snippet can be generated from the preview
-            /*if let Some(body) = generate_snippet(&metadata.preview, &terms) {
-                snippet.preview = body.into();
-            } else {*/
             // Download message
-            let raw_message = if let Some(raw_message) = self
+            let raw_body = if let Some(raw_body) = self
                 .blob_store()
                 .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
                 .await?
             {
-                raw_message
+                raw_body
             } else {
                 trc::event!(
                     Store(trc::StoreEvent::NotFound),
@@ -180,6 +181,11 @@ impl EmailSearchSnippet for Server {
                 response.not_found.push(email_id);
                 continue;
             };
+            let raw_message = ChainedBytes::new(metadata.raw_headers.as_ref()).with_last(
+                raw_body
+                    .get(metadata.blob_body_offset.to_native() as usize..)
+                    .unwrap_or_default(),
+            );
 
             // Find a matching part
             'outer: for part in contents.parts.iter() {

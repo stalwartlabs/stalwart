@@ -7,9 +7,9 @@
 use super::{Error, RawElement, Token, UnexpectedToken, XmlValueParser};
 use crate::schema::{Attribute, AttributeValue, Element, NamedElement, Namespace};
 use quick_xml::{
-    events::{attributes::AttrError, Event},
-    name::ResolveResult,
     NsReader,
+    events::{Event, attributes::AttrError},
+    name::ResolveResult,
 };
 
 pub struct Tokenizer<'x> {
@@ -98,7 +98,7 @@ impl<'x> Tokenizer<'x> {
                 ResolveResult::Unknown(p) => {
                     return Err(Error::Xml(Box::new(quick_xml::Error::Namespace(
                         quick_xml::name::NamespaceError::UnknownPrefix(p),
-                    ))))
+                    ))));
                 }
                 _ => {
                     return Ok(Token::UnknownElement(RawElement::new(tag)));
@@ -251,10 +251,10 @@ impl<'x> Tokenizer<'x> {
         loop {
             match self.token()? {
                 Token::ElementStart { name, .. } => {
-                    if depth == 1 {
-                        if let Ok(element) = T::try_from(name) {
-                            elements.push(element);
-                        }
+                    if depth == 1
+                        && let Ok(element) = T::try_from(name)
+                    {
+                        elements.push(element);
                     }
 
                     depth += 1;

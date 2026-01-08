@@ -135,6 +135,14 @@ From: "Hello"<hello@domain.org>
 Test
 <!-- NEXT TEST -->
 envelope_from hello@domain.org
+expect FROM_EQ_ENV_FROM FROM_HAS_DN
+
+From: "Hello"
+	<hello@domain.org>
+
+Test
+<!-- NEXT TEST -->
+envelope_from hello@domain.org
 expect HEADER_RCONFIRM_MISMATCH FROM_EQ_ENV_FROM FROM_HAS_DN
 
 From: "Hello" <hello@domain.org>

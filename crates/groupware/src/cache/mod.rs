@@ -19,13 +19,17 @@ use common::{CacheSwap, DavResource, DavResources, Server, auth::AccessToken};
 use file::{build_file_resources, build_nested_hierarchy, resource_from_file};
 use std::{sync::Arc, time::Instant};
 use store::{
+    SerializeInfallible, ValueKey,
     ahash::AHashMap,
     query::log::{Change, Query},
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::{AlignedBytes, Archive, BatchBuilder, ValueClass},
 };
 use tokio::sync::Semaphore;
 use trc::{AddContext, StoreEvent};
-use types::collection::{Collection, SyncCollection};
+use types::{
+    collection::{Collection, SyncCollection},
+    field::PrincipalField,
+};
 
 pub mod calcard;
 pub mod file;
@@ -56,7 +60,6 @@ pub trait GroupwareCache: Sync + Send {
         &self,
         access_token: &AccessToken,
         account_id: u32,
-        account_name: &str,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
     fn cached_dav_resources(
@@ -380,6 +383,13 @@ impl GroupwareCache for Server {
                 ..Default::default()
             }
             .insert(access_token, account_id, document_id, &mut batch)?;
+
+            // Set default calendar
+            batch
+                .with_collection(Collection::Principal)
+                .with_document(0)
+                .set(PrincipalField::DefaultCalendarId, document_id.serialize());
+
             self.commit_batch(batch).await?;
             Ok(Some(document_id))
         } else {
@@ -391,17 +401,23 @@ impl GroupwareCache for Server {
         &self,
         access_token: &AccessToken,
         account_id: u32,
-        account_name: &str,
     ) -> trc::Result<Option<u32>> {
-        match self
-            .get_document_ids(account_id, Collection::Calendar)
+        let default_calendar_id = self
+            .store()
+            .get_value::<u32>(ValueKey {
+                account_id,
+                collection: Collection::Principal.into(),
+                document_id: 0,
+                class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+            })
             .await
-        {
-            Ok(Some(ids)) if !ids.is_empty() => Ok(ids.iter().next()),
-            _ => {
-                self.create_default_calendar(access_token, account_id, account_name)
-                    .await
-            }
+            .caused_by(trc::location!())?;
+        if default_calendar_id.is_some() {
+            Ok(default_calendar_id)
+        } else {
+            self.fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+                .await
+                .map(|c| c.document_ids(true).next())
         }
     }
 
@@ -434,7 +450,12 @@ async fn process_changes(
             Change::InsertItem(id) | Change::UpdateItem(id) => {
                 let document_id = id as u32;
                 if let Some(archive) = server
-                    .get_archive(account_id, collection.collection(false), document_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        account_id,
+                        collection.collection(false),
+                        document_id,
+                    ))
                     .await
                     .caused_by(trc::location!())?
                 {
@@ -457,7 +478,12 @@ async fn process_changes(
             Change::InsertContainer(id) | Change::UpdateContainer(id) => {
                 let document_id = id as u32;
                 if let Some(archive) = server
-                    .get_archive(account_id, collection.collection(true), document_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        account_id,
+                        collection.collection(true),
+                        document_id,
+                    ))
                     .await
                     .caused_by(trc::location!())?
                 {

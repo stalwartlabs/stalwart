@@ -56,41 +56,41 @@ impl LdapDirectory {
             filter_email: LdapFilter::from_config(config, (&prefix, "filter.email")),
             attr_name: config
                 .values((&prefix, "attributes.name"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_groups: config
                 .values((&prefix, "attributes.groups"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_type: config
                 .values((&prefix, "attributes.class"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_description: config
                 .values((&prefix, "attributes.description"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_secret: config
                 .values((&prefix, "attributes.secret"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_secret_changed: config
                 .values((&prefix, "attributes.secret-changed"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_email_address: config
                 .values((&prefix, "attributes.email"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_quota: config
                 .values((&prefix, "attributes.quota"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
             attr_email_alias: config
                 .values((&prefix, "attributes.email-alias"))
-                .map(|(_, v)| v.to_string())
+                .map(|(_, v)| v.to_lowercase())
                 .collect(),
-            attrs_principal: vec!["objectClass".to_string()],
+            attrs_principal: vec!["objectClass".to_lowercase()],
         };
 
         for attr in [

@@ -11,17 +11,12 @@ use crate::{
 use common::{DavPath, DavResource, DavResourceMetadata, DavResources, Server};
 use directory::backend::internal::manage::ManageDirectory;
 use std::sync::Arc;
-use store::{
-    Deserialize, IterateParams, U32_LEN, ValueKey,
-    ahash::{AHashMap, AHashSet},
-    write::{AlignedBytes, Archive, ValueClass, key::DeserializeBigEndian},
-};
+use store::ahash::{AHashMap, AHashSet};
 use tokio::sync::Semaphore;
 use trc::AddContext;
 use types::{
     acl::AclGrant,
     collection::{Collection, SyncCollection},
-    field::Field,
 };
 use utils::{map::bitmap::Bitmap, topological::TopologicalSort};
 
@@ -44,7 +39,25 @@ pub(super) async fn build_file_resources(
         .await
         .caused_by(trc::location!())?
         .unwrap_or_else(|| format!("_{account_id}"));
-    let resources = fetch_files(server, account_id).await?;
+
+    let mut resources = Vec::with_capacity(16);
+    server
+        .archives(
+            account_id,
+            Collection::FileNode,
+            &(),
+            |document_id, archive| {
+                resources.push(resource_from_file(
+                    archive.unarchive::<FileNode>()?,
+                    document_id,
+                ));
+
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+
     let mut files = DavResources {
         base_path: format!(
             "{}/{}/",
@@ -117,43 +130,6 @@ pub(super) fn build_nested_hierarchy(resources: &mut DavResources) {
                 + v.path.len()) as u64;
         })
         .collect();
-}
-
-async fn fetch_files(server: &Server, account_id: u32) -> trc::Result<Vec<DavResource>> {
-    let mut files = Vec::with_capacity(16);
-
-    server
-        .store()
-        .iterate(
-            IterateParams::new(
-                ValueKey {
-                    account_id,
-                    collection: Collection::FileNode.into(),
-                    document_id: 0,
-                    class: ValueClass::from(Field::ARCHIVE),
-                },
-                ValueKey {
-                    account_id,
-                    collection: Collection::FileNode.into(),
-                    document_id: u32::MAX,
-                    class: ValueClass::from(Field::ARCHIVE),
-                },
-            ),
-            |key, value| {
-                let archive = <Archive<AlignedBytes> as Deserialize>::deserialize(value)?;
-
-                files.push(resource_from_file(
-                    archive.unarchive::<FileNode>()?,
-                    key.deserialize_be_u32(key.len() - U32_LEN)?,
-                ));
-
-                Ok(true)
-            },
-        )
-        .await
-        .caused_by(trc::location!())?;
-
-    Ok(files)
 }
 
 pub(super) fn resource_from_file(node: &ArchivedFileNode, document_id: u32) -> DavResource {

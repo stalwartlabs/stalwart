@@ -6,8 +6,8 @@
 
 pub mod chinese;
 pub mod japanese;
-pub mod osb;
 pub mod space;
+pub mod stream;
 pub mod types;
 pub mod word;
 

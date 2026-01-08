@@ -7,17 +7,16 @@
 use crate::{
     SpamFilterContext,
     analysis::{
-        bayes::SpamFilterAnalyzeBayes, date::SpamFilterAnalyzeDate, dmarc::SpamFilterAnalyzeDmarc,
-        domain::SpamFilterAnalyzeDomain, ehlo::SpamFilterAnalyzeEhlo, from::SpamFilterAnalyzeFrom,
+        classifier::SpamFilterAnalyzeClassify, date::SpamFilterAnalyzeDate,
+        dmarc::SpamFilterAnalyzeDmarc, domain::SpamFilterAnalyzeDomain,
+        ehlo::SpamFilterAnalyzeEhlo, from::SpamFilterAnalyzeFrom,
         headers::SpamFilterAnalyzeHeaders, html::SpamFilterAnalyzeHtml, ip::SpamFilterAnalyzeIp,
         messageid::SpamFilterAnalyzeMid, mime::SpamFilterAnalyzeMime,
         pyzor::SpamFilterAnalyzePyzor, received::SpamFilterAnalyzeReceived,
         recipient::SpamFilterAnalyzeRecipient, replyto::SpamFilterAnalyzeReplyTo,
-        reputation::SpamFilterAnalyzeReputation, rules::SpamFilterAnalyzeRules,
-        subject::SpamFilterAnalyzeSubject, trusted_reply::SpamFilterAnalyzeTrustedReply,
+        rules::SpamFilterAnalyzeRules, subject::SpamFilterAnalyzeSubject,
         url::SpamFilterAnalyzeUrl,
     },
-    modules::bayes::BayesClassifier,
 };
 use common::{Server, config::spamfilter::SpamFilterAction};
 use std::{fmt::Write, future::Future, vec};
@@ -30,26 +29,35 @@ use crate::analysis::llm::SpamFilterAnalyzeLlm;
 // SPDX-SnippetEnd
 
 pub trait SpamFilterAnalyzeScore: Sync + Send {
-    fn spam_filter_score(
-        &self,
-        ctx: &mut SpamFilterContext<'_>,
-    ) -> impl Future<Output = SpamFilterAction<()>> + Send;
-
     fn spam_filter_finalize(
         &self,
         ctx: &mut SpamFilterContext<'_>,
-    ) -> impl Future<Output = SpamFilterAction<String>> + Send;
+    ) -> impl Future<Output = SpamFilterAction<SpamFilterScore>> + Send;
 
     fn spam_filter_classify(
         &self,
         ctx: &mut SpamFilterContext<'_>,
-    ) -> impl Future<Output = SpamFilterAction<String>> + Send;
+    ) -> impl Future<Output = SpamFilterAction<SpamFilterScore>> + Send;
+}
+
+#[derive(Debug, Default)]
+pub struct SpamFilterScore {
+    pub results: Vec<bool>,
+    pub headers: String,
+    pub train_spam: Option<bool>,
+    pub score: f32,
 }
 
 impl SpamFilterAnalyzeScore for Server {
-    async fn spam_filter_score(&self, ctx: &mut SpamFilterContext<'_>) -> SpamFilterAction<()> {
+    async fn spam_filter_finalize(
+        &self,
+        ctx: &mut SpamFilterContext<'_>,
+    ) -> SpamFilterAction<SpamFilterScore> {
+        // Calculate final score
         let mut results = vec![];
         let mut header_len = 60;
+        let mut is_spam_trap = false;
+        let mut rbl_count = 0;
 
         for tag in &ctx.result.tags {
             let score = match self.core.spam.lists.scores.get(tag) {
@@ -60,8 +68,13 @@ impl SpamFilterAnalyzeScore for Server {
                 Some(SpamFilterAction::Reject) => {
                     return SpamFilterAction::Reject;
                 }
-                None => 0.0,
+                None | Some(SpamFilterAction::Disabled) => 0.0,
             };
+            if tag == "SPAM_TRAP" {
+                is_spam_trap = true;
+            } else if score > 1.0 && tag.starts_with("RBL_") {
+                rbl_count += 1;
+            }
             ctx.result.score += score;
             header_len += tag.len() + 10;
             if score != 0.0 || !tag.starts_with("X_") {
@@ -69,85 +82,116 @@ impl SpamFilterAnalyzeScore for Server {
             }
         }
 
-        // Write results header sorted by score
-        if let Some(header_name) = &self.core.spam.headers.result {
-            let mut header = ctx
-                .result
-                .header
-                .get_or_insert_with(|| String::with_capacity(header_name.len() + header_len + 2));
-            results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap().then_with(|| a.0.cmp(b.0)));
-            header.push_str(header_name);
-            header.push_str(": ");
-            for (idx, (tag, score)) in results.into_iter().enumerate() {
-                if idx > 0 {
-                    header.push_str(",\r\n\t");
+        let mut final_score = ctx.result.score;
+        let mut avg_confidence: f32 = 0.0;
+        let mut total_results = 0;
+        let mut user_results = vec![
+            ctx.result.score >= self.core.spam.scores.spam_threshold;
+            ctx.input.env_rcpt_to.len()
+        ];
+        if !ctx.result.classifier_confidence.is_empty() {
+            for (idx, &confidence) in ctx.result.classifier_confidence.iter().enumerate() {
+                if let Some(confidence) = confidence {
+                    avg_confidence += confidence;
+                    total_results += 1;
+
+                    let user_score = self
+                        .core
+                        .spam
+                        .lists
+                        .scores
+                        .get(confidence.spam_tag())
+                        .and_then(|v| v.as_score())
+                        .copied()
+                        .unwrap_or_default();
+
+                    user_results[idx] =
+                        ctx.result.score + user_score >= self.core.spam.scores.spam_threshold;
                 }
-                let _ = write!(&mut header, "{} ({:.2})", tag, score);
             }
-            header.push_str("\r\n");
 
-            SpamFilterAction::Allow(())
-        } else {
-            SpamFilterAction::Allow(())
-        }
-    }
+            if total_results > 0 {
+                avg_confidence /= total_results as f32;
 
-    async fn spam_filter_finalize(
-        &self,
-        ctx: &mut SpamFilterContext<'_>,
-    ) -> SpamFilterAction<String> {
-        // Train Bayes classifier
-        if let Some(config) = self
-            .core
-            .spam
-            .bayes
-            .as_ref()
-            .filter(|c| c.auto_learn && !ctx.input.is_test)
-        {
-            let was_classified =
-                ctx.result.has_tag("BAYES_SPAM") || ctx.result.has_tag("BAYES_HAM");
-            if ctx.result.has_tag("SPAM_TRAP")
-                || (ctx.result.score >= config.auto_learn_spam_threshold && !was_classified)
-            {
-                self.bayes_train_if_balanced(ctx, true).await;
-            } else if ctx.result.has_tag("TRUSTED_REPLY")
-                || (ctx.result.score <= config.auto_learn_ham_threshold && !was_classified)
-            {
-                self.bayes_train_if_balanced(ctx, false).await;
+                let tag = avg_confidence.spam_tag();
+                let score = self
+                    .core
+                    .spam
+                    .lists
+                    .scores
+                    .get(tag)
+                    .and_then(|v| v.as_score())
+                    .copied()
+                    .unwrap_or_default();
+                results.push((tag, score));
+                final_score += score;
             }
         }
 
         if self.core.spam.scores.reject_threshold > 0.0
-            && ctx.result.score >= self.core.spam.scores.reject_threshold
+            && final_score >= self.core.spam.scores.reject_threshold
         {
             SpamFilterAction::Reject
         } else if self.core.spam.scores.discard_threshold > 0.0
-            && ctx.result.score >= self.core.spam.scores.discard_threshold
+            && final_score >= self.core.spam.scores.discard_threshold
         {
             SpamFilterAction::Discard
         } else {
-            let mut header = std::mem::take(&mut ctx.result.header).unwrap_or_default();
-            if let Some(header_name) = &self.core.spam.headers.status {
+            let mut headers = String::with_capacity(header_len + 40);
+            results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap().then_with(|| a.0.cmp(b.0)));
+            headers.push_str("X-Spam-Result: ");
+            for (idx, (tag, score)) in results.into_iter().enumerate() {
+                if idx > 0 {
+                    headers.push_str(",\r\n\t");
+                }
+                let _ = write!(&mut headers, "{} ({:.2})", tag, score);
+            }
+            headers.push_str("\r\n");
+
+            if let Some((category, explanation)) = &ctx.result.llm_result {
+                let _ = write!(&mut headers, "X-Spam-LLM: {category} ({explanation})\r\n",);
+            }
+
+            let is_spam = final_score >= self.core.spam.scores.spam_threshold;
+            let class = if is_spam { "spam" } else { "ham" };
+
+            if avg_confidence != 0.0 {
                 let _ = write!(
-                    &mut header,
-                    "{}: {}, score={:.2}\r\n",
-                    header_name,
-                    if ctx.result.score >= self.core.spam.scores.spam_threshold {
-                        "Yes"
-                    } else {
-                        "No"
-                    },
-                    ctx.result.score
+                    &mut headers,
+                    "X-Spam-Score: {class}, score={final_score:.2}, avg_confidence={avg_confidence:.2}\r\n",
+                );
+            } else {
+                let _ = write!(
+                    &mut headers,
+                    "X-Spam-Score: {class}, score={final_score:.2}\r\n",
                 );
             }
-            SpamFilterAction::Allow(header)
+
+            // Autolearn SPAM
+            let mut train_spam = None;
+            if is_spam
+                && self.core.spam.classifier.as_ref().is_some_and(|c| {
+                    (c.auto_learn_spam_trap && is_spam_trap)
+                        || (c.auto_learn_spam_rbl_count > 0
+                            && rbl_count >= c.auto_learn_spam_rbl_count)
+                })
+            {
+                train_spam = Some(true);
+            }
+
+            SpamFilterAction::Allow(SpamFilterScore {
+                results: user_results,
+                headers,
+                train_spam,
+                score: final_score,
+            })
         }
     }
 
     async fn spam_filter_classify(
         &self,
         ctx: &mut SpamFilterContext<'_>,
-    ) -> SpamFilterAction<String> {
+    ) -> SpamFilterAction<SpamFilterScore> {
         // IP address analysis
         self.spam_filter_analyze_ip(ctx).await;
 
@@ -203,32 +247,43 @@ impl SpamFilterAnalyzeScore for Server {
 
         // SPDX-SnippetEnd
 
-        // Trusted reply analysis
-        self.spam_filter_analyze_reply_in(ctx).await;
-
         // Spam trap
         self.spam_filter_analyze_spam_trap(ctx).await;
 
         // Pyzor checks
         self.spam_filter_analyze_pyzor(ctx).await;
 
-        // Bayes classification
-        self.spam_filter_analyze_bayes_classify(ctx).await;
+        // Model classification
+        self.spam_filter_analyze_classify(ctx).await;
 
         // User-defined rules
         self.spam_filter_analyze_rules(ctx).await;
 
-        // Calculate score
-        match self.spam_filter_score(ctx).await {
-            SpamFilterAction::Allow(_) => (),
-            SpamFilterAction::Discard => return SpamFilterAction::Discard,
-            SpamFilterAction::Reject => return SpamFilterAction::Reject,
-        }
-
-        // Reputation tracking and adjust score
-        self.spam_filter_analyze_reputation(ctx).await;
-
         // Final score calculation
         self.spam_filter_finalize(ctx).await
+    }
+}
+
+pub trait ConfidenceStore {
+    fn spam_tag(&self) -> &'static str;
+}
+
+impl ConfidenceStore for f32 {
+    fn spam_tag(&self) -> &'static str {
+        match *self {
+            p if p < 0.15 => "PROB_HAM_HIGH",
+            p if p < 0.25 => "PROB_HAM_MEDIUM",
+            p if p < 0.40 => "PROB_HAM_LOW",
+            p if p < 0.60 => "PROB_SPAM_UNCERTAIN",
+            p if p < 0.75 => "PROB_SPAM_LOW",
+            p if p < 0.85 => "PROB_SPAM_MEDIUM",
+            p => {
+                if p.is_finite() {
+                    "PROB_SPAM_HIGH"
+                } else {
+                    "PROB_SPAM_UNCERTAIN"
+                }
+            }
+        }
     }
 }

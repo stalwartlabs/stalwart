@@ -18,6 +18,10 @@ use store::{
 pub async fn test(params: &mut JMAPTest) {
     println!("Running Encryption-at-rest tests...");
 
+    // Check encryption
+    check_is_encrypted();
+    import_certs_and_encrypt().await;
+
     // Create test account
     let account = params.account("jdoe@example.com");
     let client = account.client();
@@ -43,10 +47,12 @@ pub async fn test(params: &mut JMAPTest) {
                 EncryptionMethod::PGP => EncryptionType::PGP {
                     algo,
                     certs: certs.clone(),
+                    allow_spam_training: true,
                 },
                 EncryptionMethod::SMIME => EncryptionType::SMIME {
                     algo,
                     certs: certs.clone(),
+                    allow_spam_training: true,
                 },
             };
 
@@ -155,7 +161,6 @@ pub async fn test(params: &mut JMAPTest) {
     }
 }
 
-#[tokio::test]
 pub async fn import_certs_and_encrypt() {
     for (name, method, expected_certs) in [
         ("cert_pgp.pem", EncryptionMethod::PGP, 1),
@@ -179,13 +184,14 @@ pub async fn import_certs_and_encrypt() {
 
         if method == EncryptionMethod::PGP && certs.len() == 2 {
             // PGP library won't encrypt using EC
-            certs.pop();
+            let mut certs_ = certs.to_vec();
+            certs_.pop();
+            certs = certs_.into();
         }
 
         let mut params = EncryptionParams {
-            method,
-            algo: Algorithm::Aes128,
             certs,
+            flags: method.flags(),
         };
 
         for algo in [Algorithm::Aes128, Algorithm::Aes256] {
@@ -193,7 +199,7 @@ pub async fn import_certs_and_encrypt() {
                 .parse(b"Subject: test\r\ntest\r\n")
                 .unwrap();
             assert!(!message.is_encrypted());
-            params.algo = algo;
+            params.flags = algo.flags() | method.flags();
             let arch =
                 Archive::deserialize_owned(Archiver::new(params.clone()).serialize().unwrap())
                     .unwrap();
@@ -220,7 +226,6 @@ pub async fn import_certs_and_encrypt() {
     );
 }
 
-#[test]
 pub fn check_is_encrypted() {
     let messages = std::fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

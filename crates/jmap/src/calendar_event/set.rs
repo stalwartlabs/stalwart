@@ -38,9 +38,10 @@ use jmap_proto::{
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Map, Value};
 use std::{borrow::Cow, str::FromStr};
 use store::{
+    ValueKey,
     ahash::AHashSet,
     roaring::RoaringBitmap,
-    write::{BatchBuilder, now, serialize::rkyv_deserialize},
+    write::{AlignedBytes, Archive, BatchBuilder, now, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
 use types::{
@@ -69,12 +70,7 @@ pub trait CalendarEventSet: Sync + Send {
         can_add_calendars: &Option<RoaringBitmap>,
         js_calendar_event: JSCalendar<'_, Id, BlobId>,
         updates: Value<'_, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
-    ) -> impl Future<Output = trc::Result<Result<CalendarCreateResult, SetError<JSCalendarProperty<Id>>>>>;
-}
-
-pub struct CalendarCreateResult {
-    pub document_id: u32,
-    pub nudge_queue: bool,
+    ) -> impl Future<Output = trc::Result<Result<u32, SetError<JSCalendarProperty<Id>>>>>;
 }
 
 impl CalendarEventSet for Server {
@@ -112,7 +108,6 @@ impl CalendarEventSet for Server {
         // Process creates
         let mut batch = BatchBuilder::new();
         let send_scheduling_messages = request.arguments.send_scheduling_messages.unwrap_or(false);
-        let mut nudge_queue = false;
         'create: for (id, object) in request.unwrap_create() {
             match self
                 .create_calendar_event(
@@ -127,9 +122,8 @@ impl CalendarEventSet for Server {
                 )
                 .await?
             {
-                Ok(result) => {
-                    response.created(id, result.document_id);
-                    nudge_queue |= result.nudge_queue;
+                Ok(document_id) => {
+                    response.created(id, document_id);
                 }
                 Err(err) => {
                     response.not_created.append(id, err);
@@ -157,7 +151,12 @@ impl CalendarEventSet for Server {
             // Obtain calendar_event card
             let document_id = id.document_id();
             let calendar_event_ = if let Some(calendar_event_) = self
-                .get_archive(account_id, Collection::CalendarEvent, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
                 .await?
             {
                 calendar_event_
@@ -377,7 +376,6 @@ impl CalendarEventSet for Server {
                     }
                 }
             }
-            nudge_queue |= next_email_alarm.is_some() || itip_messages.is_some();
 
             // Validate quota
             let extra_bytes = (new_calendar_event.size as u64)
@@ -444,7 +442,12 @@ impl CalendarEventSet for Server {
             }
 
             let Some(calendar_event_) = self
-                .get_archive(account_id, Collection::CalendarEvent, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
             else {
@@ -484,8 +487,6 @@ impl CalendarEventSet for Server {
                 )
                 .caused_by(trc::location!())?;
 
-            nudge_queue |= send_scheduling_messages;
-
             response.destroyed.push(id);
         }
 
@@ -496,10 +497,7 @@ impl CalendarEventSet for Server {
                 .await
                 .and_then(|ids| ids.last_change_id(account_id))
                 .caused_by(trc::location!())?;
-
-            if nudge_queue {
-                self.notify_task_queue();
-            }
+            self.notify_task_queue();
 
             response.new_state = State::Exact(change_id).into();
         }
@@ -517,7 +515,7 @@ impl CalendarEventSet for Server {
         can_add_calendars: &Option<RoaringBitmap>,
         mut js_calendar_group: JSCalendar<'_, Id, BlobId>,
         updates: Value<'_, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
-    ) -> trc::Result<Result<CalendarCreateResult, SetError<JSCalendarProperty<Id>>>> {
+    ) -> trc::Result<Result<u32, SetError<JSCalendarProperty<Id>>>> {
         // Process changes
         let mut event = CalendarEvent::default();
         let use_default_alerts = match update_calendar_event(
@@ -559,7 +557,12 @@ impl CalendarEventSet for Server {
                 ))));
             } else if let Some(show_without_time) = use_default_alerts
                 && let Some(_calendar) = self
-                    .get_archive(account_id, Collection::Calendar, name.parent_id)
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        account_id,
+                        Collection::Calendar,
+                        name.parent_id,
+                    ))
                     .await?
             {
                 ical.components.extend(
@@ -643,7 +646,6 @@ impl CalendarEventSet for Server {
                 }
             }
         }
-        let nudge_queue = next_email_alarm.is_some() || itip_messages.is_some();
 
         // Validate quota
         match self
@@ -680,10 +682,7 @@ impl CalendarEventSet for Server {
             itip_messages.queue(batch).caused_by(trc::location!())?;
         }
 
-        Ok(Ok(CalendarCreateResult {
-            document_id,
-            nudge_queue,
-        }))
+        Ok(Ok(document_id))
     }
 }
 
@@ -805,6 +804,29 @@ fn update_calendar_event<'x>(
                 return Err(SetError::invalid_properties()
                     .with_property(property)
                     .with_description("Invalid value."));
+            }
+            (
+                property @ (JSCalendarProperty::Locations | JSCalendarProperty::Participants),
+                Value::Object(values),
+            ) => {
+                for (_, value) in values.iter() {
+                    if let Some(values) = value
+                        .as_object_and_get(&Key::Property(JSCalendarProperty::Links))
+                        .and_then(|v| v.as_object())
+                    {
+                        for (_, value) in values.iter() {
+                            if value.as_object().is_some_and(|v| {
+                                v.keys()
+                                    .any(|k| matches!(k, Key::Property(JSCalendarProperty::BlobId)))
+                            }) {
+                                return Err(SetError::invalid_properties()
+                                    .with_property(property)
+                                    .with_description("blobIds in links is not supported."));
+                            }
+                        }
+                    }
+                }
+                entries.insert(property, Value::Object(values));
             }
             (property, value) => {
                 if let (JSCalendarProperty::ShowWithoutTime, Value::Bool(set)) = (&property, &value)

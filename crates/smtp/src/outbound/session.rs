@@ -6,7 +6,7 @@
 
 use super::client::SmtpClient;
 use crate::outbound::DeliveryResult;
-use crate::outbound::client::{from_error_status, from_mail_send_error};
+use crate::outbound::client::{BoxResponse, from_error_status, from_mail_send_error};
 use crate::queue::{Error, MessageWrapper, Recipient, Status};
 use crate::queue::{ErrorDetails, HostResponse, UnexpectedResponse};
 use common::Server;
@@ -189,7 +189,7 @@ impl MessageWrapper {
                             rcpt_idx,
                             Status::Completed(HostResponse {
                                 hostname: params.hostname.into(),
-                                response,
+                                response: response.into_box(),
                             }),
                         ));
                     }
@@ -208,7 +208,7 @@ impl MessageWrapper {
                             entity: params.hostname.into(),
                             details: Error::UnexpectedResponse(UnexpectedResponse {
                                 command: cmd.trim().into(),
-                                response,
+                                response: response.into_box(),
                             }),
                         };
                         statuses.push(DeliveryResult::account(
@@ -331,48 +331,54 @@ impl MessageWrapper {
                         for ((rcpt, rcpt_idx, _), response) in
                             accepted_rcpts.into_iter().zip(responses)
                         {
-                            let status = match response.severity() {
-                                Severity::PositiveCompletion => {
-                                    trc::event!(
-                                        Delivery(DeliveryEvent::Delivered),
-                                        SpanId = params.session_id,
-                                        Hostname = params.hostname.to_string(),
-                                        To = rcpt.address().to_string(),
-                                        Code = response.code,
-                                        Details = response.message.to_string(),
-                                        Elapsed = time.elapsed(),
-                                    );
+                            let status: Status<HostResponse<Box<str>>, ErrorDetails> =
+                                match response.severity() {
+                                    Severity::PositiveCompletion => {
+                                        trc::event!(
+                                            Delivery(DeliveryEvent::Delivered),
+                                            SpanId = params.session_id,
+                                            Hostname = params.hostname.to_string(),
+                                            To = rcpt.address().to_string(),
+                                            Code = response.code,
+                                            Details = response.message.to_string(),
+                                            Elapsed = time.elapsed(),
+                                        );
 
-                                    Status::Completed(HostResponse {
-                                        hostname: params.hostname.to_string(),
-                                        response,
-                                    })
-                                }
-                                severity => {
-                                    trc::event!(
-                                        Delivery(DeliveryEvent::RcptToRejected),
-                                        SpanId = params.session_id,
-                                        Hostname = params.hostname.to_string(),
-                                        To = rcpt.address().to_string(),
-                                        Code = response.code,
-                                        Details = response.message.to_string(),
-                                        Elapsed = time.elapsed(),
-                                    );
-
-                                    let response = ErrorDetails {
-                                        entity: params.hostname.into(),
-                                        details: Error::UnexpectedResponse(UnexpectedResponse {
-                                            command: bdat_cmd.as_deref().unwrap_or("DATA").into(),
+                                        Status::Completed(HostResponse {
+                                            hostname: params.hostname.into(),
                                             response,
-                                        }),
-                                    };
-                                    if severity == Severity::PermanentNegativeCompletion {
-                                        Status::PermanentFailure(response)
-                                    } else {
-                                        Status::TemporaryFailure(response)
+                                        })
                                     }
-                                }
-                            };
+                                    severity => {
+                                        trc::event!(
+                                            Delivery(DeliveryEvent::RcptToRejected),
+                                            SpanId = params.session_id,
+                                            Hostname = params.hostname.to_string(),
+                                            To = rcpt.address().to_string(),
+                                            Code = response.code,
+                                            Details = response.message.to_string(),
+                                            Elapsed = time.elapsed(),
+                                        );
+
+                                        let response = ErrorDetails {
+                                            entity: params.hostname.into(),
+                                            details: Error::UnexpectedResponse(
+                                                UnexpectedResponse {
+                                                    command: bdat_cmd
+                                                        .as_deref()
+                                                        .unwrap_or("DATA")
+                                                        .into(),
+                                                    response,
+                                                },
+                                            ),
+                                        };
+                                        if severity == Severity::PermanentNegativeCompletion {
+                                            Status::PermanentFailure(response)
+                                        } else {
+                                            Status::TemporaryFailure(response)
+                                        }
+                                    }
+                                };
 
                             statuses.push(DeliveryResult::account(status, *rcpt_idx));
                         }

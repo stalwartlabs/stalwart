@@ -11,7 +11,7 @@ use common::{
     config::network::{ContactForm, FieldOrDefault},
     ip_to_bytes, psl,
 };
-use email::message::delivery::{IngestMessage, LocalDeliveryStatus, MailDelivery};
+use email::message::delivery::{IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery};
 use http_proto::*;
 use hyper::StatusCode;
 use mail_auth::common::cache::NoCache;
@@ -25,13 +25,8 @@ use mail_builder::{
 };
 use serde_json::json;
 use std::{borrow::Cow, fmt::Write, future::Future};
-use store::{
-    SerializeInfallible,
-    write::{BatchBuilder, BlobOp, now},
-};
+use store::write::BatchBuilder;
 use trc::AddContext;
-use types::blob_hash::BlobHash;
-use x509_parser::nom::AsBytes;
 
 pub trait FormHandler: Sync + Send {
     fn handle_contact_form(
@@ -175,22 +170,8 @@ impl FormHandler for Server {
                 .unwrap_or_default();
 
             // Reserve and write blob
-            let message_blob = BlobHash::generate(message.as_bytes());
-            let message_size = message.len() as u64;
-            let mut batch = BatchBuilder::new();
-            batch.set(
-                BlobOp::Reserve {
-                    hash: message_blob.clone(),
-                    until: now() + 120,
-                },
-                0u32.serialize(),
-            );
-            self.store()
-                .write(batch.build_all())
-                .await
-                .caused_by(trc::location!())?;
-            self.blob_store()
-                .put_blob(message_blob.as_slice(), message.as_ref())
+            let (message_blob, blob_hold) = self
+                .put_temporary_blob(u32::MAX, &message, 60)
                 .await
                 .caused_by(trc::location!())?;
 
@@ -198,9 +179,16 @@ impl FormHandler for Server {
                 .deliver_message(IngestMessage {
                     sender_address: from_email,
                     sender_authenticated: false,
-                    recipients: form.rcpt_to.clone(),
+                    recipients: form
+                        .rcpt_to
+                        .iter()
+                        .map(|address| IngestRecipient {
+                            address: address.clone(),
+                            is_spam: false,
+                        })
+                        .collect(),
                     message_blob,
-                    message_size,
+                    message_size: message.len() as u64,
                     session_id: session.session_id,
                 })
                 .await
@@ -216,6 +204,14 @@ impl FormHandler for Server {
                     }
                 }
             }
+
+            // Remove blob hold
+            let mut batch = BatchBuilder::new();
+            batch.clear(blob_hold);
+            self.store()
+                .write(batch.build_all())
+                .await
+                .caused_by(trc::location!())?;
 
             // Suppress errors if there is at least one success
             if has_success {

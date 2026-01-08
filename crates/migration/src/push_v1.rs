@@ -5,7 +5,10 @@
  */
 
 use super::object::Object;
-use crate::object::{FromLegacy, Property, Value};
+use crate::{
+    get_document_ids,
+    object::{FromLegacy, Property, Value},
+};
 use base64::{Engine, engine::general_purpose};
 use common::Server;
 use email::push::{Keys, PushSubscription, PushSubscriptions};
@@ -25,8 +28,7 @@ pub(crate) async fn migrate_push_subscriptions_v011(
     account_id: u32,
 ) -> trc::Result<u64> {
     // Obtain email ids
-    let push_subscription_ids = server
-        .get_document_ids(account_id, Collection::PushSubscription)
+    let push_subscription_ids = get_document_ids(server, account_id, Collection::PushSubscription)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -69,17 +71,19 @@ pub(crate) async fn migrate_push_subscriptions_v011(
 
         batch
             .with_account_id(u32::MAX)
-            .with_collection(Collection::PushSubscription)
-            .create_document(account_id)
-            .with_account_id(account_id);
+            .with_collection(Collection::Principal)
+            .with_document(account_id)
+            .tag(PrincipalField::PushSubscriptions)
+            .with_account_id(account_id)
+            .with_collection(Collection::PushSubscription);
 
         for subscription in &subscriptions {
-            batch.delete_document(subscription.id).clear(Field::ARCHIVE);
+            batch.with_document(subscription.id).clear(Field::ARCHIVE);
         }
 
         batch
             .with_collection(Collection::Principal)
-            .update_document(0)
+            .with_document(0)
             .set(
                 PrincipalField::PushSubscriptions,
                 Archiver::new(PushSubscriptions { subscriptions })

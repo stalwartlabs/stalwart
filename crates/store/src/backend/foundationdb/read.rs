@@ -6,26 +6,27 @@
 
 use super::{FdbStore, MAX_VALUE_SIZE, ReadVersion, into_error};
 use crate::{
-    BitmapKey, Deserialize, IterateParams, Key, U32_LEN, ValueKey, WITH_SUBSPACE,
+    Deserialize, IterateParams, Key, ValueKey, WITH_SUBSPACE,
     backend::deserialize_i64_le,
-    write::{
-        BitmapClass, ValueClass,
-        key::{DeserializeBigEndian, KeySerializer},
-    },
+    write::{ValueClass, key::KeySerializer},
 };
 use foundationdb::{
     KeySelector, RangeOption, Transaction,
     future::FdbSlice,
-    options::{self, StreamingMode},
+    options::{self},
 };
 use futures::TryStreamExt;
-use roaring::RoaringBitmap;
 
 #[allow(dead_code)]
 pub(crate) enum ChunkedValue {
     Single(FdbSlice),
     Chunked { n_chunks: u8, bytes: Vec<u8> },
     None,
+}
+
+struct ChunkedValueCollector {
+    key: Vec<u8>,
+    bytes: Vec<u8>,
 }
 
 impl FdbStore {
@@ -43,37 +44,6 @@ impl FdbStore {
         }
     }
 
-    pub(crate) async fn get_bitmap(
-        &self,
-        mut key: BitmapKey<BitmapClass>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        let mut bm = RoaringBitmap::new();
-        let begin = key.serialize(WITH_SUBSPACE);
-        key.document_id = u32::MAX;
-        let end = key.serialize(WITH_SUBSPACE);
-        let key_len = begin.len();
-        let trx = self.read_trx().await?;
-        let mut values = trx.get_ranges_keyvalues(
-            RangeOption {
-                begin: KeySelector::first_greater_or_equal(begin),
-                end: KeySelector::first_greater_or_equal(end),
-                mode: StreamingMode::WantAll,
-                reverse: false,
-                ..RangeOption::default()
-            },
-            true,
-        );
-
-        while let Some(value) = values.try_next().await.map_err(into_error)? {
-            let key = value.key();
-            if key.len() == key_len {
-                bm.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
-            }
-        }
-
-        Ok(if !bm.is_empty() { Some(bm) } else { None })
-    }
-
     pub(crate) async fn iterate<T: Key>(
         &self,
         params: IterateParams<T>,
@@ -84,6 +54,7 @@ impl FdbStore {
 
         if !params.first {
             let mut last_key = vec![];
+            let mut chunked_key: Option<ChunkedValueCollector> = None;
 
             'outer: loop {
                 let begin_selector = if last_key.is_empty() {
@@ -111,8 +82,39 @@ impl FdbStore {
                             let mut key = &[] as &[u8];
                             for value in values.iter() {
                                 key = value.key();
-                                if !cb(key.get(1..).unwrap_or_default(), value.value())? {
-                                    return Ok(());
+
+                                // Check whether we are collecting a chunked value
+                                let cb_key = key.get(1..).unwrap_or_default();
+                                let cb_value = value.value();
+
+                                if let Some(chunk) = &mut chunked_key {
+                                    if chunk.key.len() + 1 == cb_key.len()
+                                        && cb_key[..chunk.key.len()] == chunk.key[..]
+                                    {
+                                        // This is a chunk of the current value
+                                        chunk.bytes.extend_from_slice(cb_value);
+                                        continue;
+                                    } else {
+                                        // Return collected chunked value
+                                        if !cb(&chunk.key, &chunk.bytes)? {
+                                            return Ok(());
+                                        }
+
+                                        // Reset collector
+                                        chunked_key = None;
+                                    }
+                                }
+
+                                if cb_value.len() < MAX_VALUE_SIZE {
+                                    if !cb(cb_key, cb_value)? {
+                                        return Ok(());
+                                    }
+                                } else {
+                                    // Start collecting chunked value
+                                    chunked_key = Some(ChunkedValueCollector {
+                                        key: cb_key.to_vec(),
+                                        bytes: cb_value.to_vec(),
+                                    });
                                 }
                             }
                             if values.more() {
@@ -120,6 +122,11 @@ impl FdbStore {
                             }
                         }
                         Ok(None) => {
+                            // Return any chunked value collected
+                            if let Some(chunked_key) = chunked_key.take() {
+                                cb(&chunked_key.key, &chunked_key.bytes)?;
+                            }
+
                             break 'outer;
                         }
                         Err(e) => {

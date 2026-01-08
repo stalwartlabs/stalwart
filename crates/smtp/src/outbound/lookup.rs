@@ -31,7 +31,7 @@ pub trait DnsLookup: Sync + Send {
         &self,
         remote_host: &NextHop<'_>,
         envelope: &impl ResolveVariable,
-    ) -> impl Future<Output = Result<IpLookupResult, Status<HostResponse<String>, ErrorDetails>>> + Send;
+    ) -> impl Future<Output = Result<IpLookupResult, Status<HostResponse<Box<str>>, ErrorDetails>>> + Send;
 }
 
 impl DnsLookup for Server {
@@ -109,7 +109,7 @@ impl DnsLookup for Server {
         &self,
         remote_host: &NextHop<'_>,
         envelope: &impl ResolveVariable,
-    ) -> Result<IpLookupResult, Status<HostResponse<String>, ErrorDetails>> {
+    ) -> Result<IpLookupResult, Status<HostResponse<Box<str>>, ErrorDetails>> {
         let mut remote_ips = self
             .ip_lookup(
                 remote_host.fqdn_hostname().as_ref(),
@@ -139,7 +139,9 @@ impl DnsLookup for Server {
                 } else {
                     Status::TemporaryFailure(ErrorDetails {
                         entity: remote_host.hostname().into(),
-                        details: Error::ConnectionError(format!("lookup error: {err}")),
+                        details: Error::ConnectionError(
+                            format!("lookup error: {err}").into_boxed_str(),
+                        ),
                     })
                 }
             })?;
@@ -160,10 +162,13 @@ impl DnsLookup for Server {
         } else {
             Err(Status::TemporaryFailure(ErrorDetails {
                 entity: remote_host.hostname().into(),
-                details: Error::DnsError(format!(
-                    "No IP addresses found for {:?}.",
-                    envelope.resolve_variable(V_MX).to_string()
-                )),
+                details: Error::DnsError(
+                    format!(
+                        "No IP addresses found for {:?}.",
+                        envelope.resolve_variable(V_MX).to_string()
+                    )
+                    .into_boxed_str(),
+                ),
             }))
         }
     }

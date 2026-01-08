@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, fmt::Display};
-
 use super::Mechanism;
+use std::{borrow::Cow, fmt::Display};
+use utils::chained_bytes::SliceRange;
 
-pub enum Response<T> {
+pub enum Response<'x, T> {
     Ok(Cow<'static, str>),
     Err(Cow<'static, str>),
     List(Vec<T>),
     Message {
-        bytes: Vec<u8>,
+        bytes: SliceRange<'x>,
         lines: u32,
     },
     Capability {
@@ -22,7 +22,7 @@ pub enum Response<T> {
     },
 }
 
-impl<T: Display> Response<T> {
+impl<'x, T: Display> Response<'x, T> {
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             Response::Ok(message) => {
@@ -61,7 +61,7 @@ impl<T: Display> Response<T> {
                 let mut last_byte = 0;
 
                 // Transparency procedure
-                for &byte in bytes {
+                for &byte in bytes.into_iter() {
                     // POP3 requires that lines end with CRLF, do this check to ensure that
                     if byte == b'\n' && last_byte != b'\r' {
                         buf.push(b'\r');
@@ -165,10 +165,9 @@ impl SerializeResponse for trc::Error {
 
 #[cfg(test)]
 mod tests {
-
-    use crate::protocol::Mechanism;
-
     use super::Response;
+    use crate::protocol::Mechanism;
+    use utils::chained_bytes::SliceRange;
 
     #[test]
     fn serialize_response() {
@@ -206,9 +205,7 @@ mod tests {
             ),
             (
                 Response::Message {
-                    bytes: "Subject: test\r\n\r\n.\r\ntest.\r\n.test\r\na"
-                        .as_bytes()
-                        .to_vec(),
+                    bytes: SliceRange::Split(b"Subject: test\r\n\r\n.\r\n", b"test.\r\n.test\r\na"),
                     lines: 0,
                 },
                 "+OK 35 octets\r\nSubject: test\r\n\r\n..\r\ntest.\r\n..test\r\na\r\n.\r\n",

@@ -6,7 +6,6 @@
 
 #[cfg(feature = "azure")]
 pub mod azure;
-#[cfg(feature = "elastic")]
 pub mod elastic;
 #[cfg(feature = "foundation")]
 pub mod foundationdb;
@@ -14,6 +13,7 @@ pub mod fs;
 pub mod http;
 #[cfg(feature = "kafka")]
 pub mod kafka;
+pub mod meili;
 pub mod memory;
 #[cfg(feature = "mysql")]
 pub mod mysql;

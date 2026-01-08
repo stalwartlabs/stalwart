@@ -6,7 +6,7 @@
 
 use crate::{
     imap::{AssertResult, ImapConnection, Type},
-    jmap::{JMAPTest},
+    jmap::{JMAPTest, wait_for_index},
 };
 use ahash::AHashSet;
 use common::Server;
@@ -16,9 +16,10 @@ use email::{
     mailbox::{INBOX_ID, JUNK_ID, TRASH_ID},
     message::delete::EmailDeletion,
 };
+use http::management::stores::destroy_account_data;
 use imap_proto::ResponseType;
 use store::{IterateParams, LogKey, U32_LEN, U64_LEN, write::key::DeserializeBigEndian};
-use types::{collection::Collection, id::Id};
+use types::id::Id;
 
 pub async fn test(params: &mut JMAPTest) {
     println!("Running purge tests...");
@@ -93,10 +94,11 @@ pub async fn test(params: &mut JMAPTest) {
     // Make sure both messages and changes are present
     assert_eq!(
         server
-            .get_document_ids(account.id().document_id(), Collection::Email)
+            .get_cached_messages(account.id().document_id())
             .await
             .unwrap()
-            .unwrap()
+            .emails
+            .items
             .len(),
         6
     );
@@ -111,10 +113,11 @@ pub async fn test(params: &mut JMAPTest) {
     // Only 4 messages should remain
     assert_eq!(
         server
-            .get_document_ids(account.id().document_id(), Collection::Email)
+            .get_cached_messages(account.id().document_id())
             .await
             .unwrap()
-            .unwrap()
+            .emails
+            .items
             .len(),
         4
     );
@@ -146,11 +149,13 @@ pub async fn test(params: &mut JMAPTest) {
     }
 
     // Delete account
+    wait_for_index(&server).await;
     server
-        .core
-        .storage
-        .data
+        .store()
         .delete_principal(QueryBy::Id(account.id().document_id()))
+        .await
+        .unwrap();
+    destroy_account_data(&server, account.id().document_id(), true)
         .await
         .unwrap();
     params.assert_is_empty().await;

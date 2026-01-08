@@ -14,7 +14,7 @@ use jmap_proto::{
     request::reference::MaybeResultReference,
 };
 use jmap_tools::{Map, Value};
-use store::roaring::RoaringBitmap;
+use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive}};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -98,7 +98,12 @@ impl ContactCardGet for Server {
             }
 
             let _contact = if let Some(contact) = self
-                .get_archive(account_id, Collection::ContactCard, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::ContactCard,
+                    document_id,
+                ))
                 .await?
             {
                 contact

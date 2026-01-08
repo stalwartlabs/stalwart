@@ -5,9 +5,9 @@
  */
 
 pub mod acl;
+pub mod antispam;
 pub mod append;
 pub mod basic;
-pub mod bayes;
 pub mod body_structure;
 pub mod condstore;
 pub mod copy_move;
@@ -21,7 +21,12 @@ pub mod store;
 pub mod thread;
 
 use crate::{
-    AssertConfig, add_test_certs, directory::internal::TestInternalDirectory, store::TempDir,
+    AssertConfig, add_test_certs,
+    directory::internal::TestInternalDirectory,
+    store::{
+        TempDir, build_store_config,
+        cleanup::{search_store_destroy, store_destroy},
+    },
 };
 use ::managesieve::core::ManageSieveSessionManager;
 use ::store::Stores;
@@ -59,12 +64,10 @@ pub async fn imap_tests() {
     // Prepare settings
     let start_time = Instant::now();
     let delete = true;
-    let handle = init_imap_tests(
-        &std::env::var("STORE")
-            .expect("Missing store type. Try running `STORE=<store_type> cargo test`"),
-        delete,
-    )
-    .await;
+    let handle = init_imap_tests(delete).await;
+
+    // Body structure tests
+    body_structure::test();
 
     // Connect to IMAP server
     let mut imap_check = ImapConnection::connect(b"_y ").await;
@@ -91,11 +94,11 @@ pub async fn imap_tests() {
 
     mailbox::test(&mut imap, &mut imap_check).await;
     append::test(&mut imap, &mut imap_check, &handle).await;
-    search::test(&mut imap, &mut imap_check).await;
+    search::test(&mut imap, &mut imap_check, &handle).await;
     fetch::test(&mut imap, &mut imap_check).await;
     store::test(&mut imap, &mut imap_check, &handle).await;
     copy_move::test(&mut imap, &mut imap_check).await;
-    thread::test(&mut imap, &mut imap_check).await;
+    thread::test(&mut imap, &mut imap_check, &handle).await;
     idle::test(&mut imap, &mut imap_check, false).await;
     condstore::test(&mut imap, &mut imap_check).await;
     acl::test(&mut imap, &mut imap_check).await;
@@ -109,8 +112,8 @@ pub async fn imap_tests() {
         imap.assert_read(Type::Untagged, ResponseType::Bye).await;
     }
 
-    // Bayes training
-    bayes::test(&handle).await;
+    // Antispam training
+    antispam::test(&handle).await;
 
     // Run ManageSieve tests
     managesieve::test().await;
@@ -139,12 +142,11 @@ pub struct IMAPTest {
     shutdown_tx: watch::Sender<bool>,
 }
 
-async fn init_imap_tests(store_id: &str, delete_if_exists: bool) -> IMAPTest {
+async fn init_imap_tests(delete_if_exists: bool) -> IMAPTest {
     // Load and parse config
     let temp_dir = TempDir::new("imap_tests", delete_if_exists);
     let mut config = Config::new(
-        add_test_certs(SERVER)
-            .replace("{STORE}", store_id)
+        add_test_certs(&(build_store_config(&temp_dir.path.to_string_lossy()) + SERVER))
             .replace("{TMP}", &temp_dir.path.display().to_string())
             .replace(
                 "{LEVEL}",
@@ -170,6 +172,7 @@ async fn init_imap_tests(store_id: &str, delete_if_exists: bool) -> IMAPTest {
     let cache = Caches::parse(&mut config);
 
     let store = core.storage.data.clone();
+    let search_store = core.storage.fts.clone();
     let (ipc, mut ipc_rxs) = build_ipc(false);
     let inner = Arc::new(Inner {
         shared_core: core.into_shared(),
@@ -226,7 +229,8 @@ async fn init_imap_tests(store_id: &str, delete_if_exists: bool) -> IMAPTest {
     });
 
     if delete_if_exists {
-        store.destroy().await;
+        store_destroy(&store).await;
+        search_store_destroy(&search_store).await;
     }
 
     // Create tables and test accounts
@@ -267,10 +271,18 @@ async fn init_imap_tests(store_id: &str, delete_if_exists: bool) -> IMAPTest {
         .await;
     store
         .create_test_user(
-            "bayes@example.com",
+            "sgd@example.com",
             "secret",
-            "Thomas Bayes",
-            &["bayes@example.com"],
+            "Sigmund Gudmund Dudmundsson",
+            &["sgd@example.com"],
+        )
+        .await;
+    store
+        .create_test_user(
+            "spamtrap@example.com",
+            "secret",
+            "Spam Trap",
+            &["spamtrap@example.com"],
         )
         .await;
     store
@@ -649,7 +661,6 @@ reject-non-fqdn = false
 [session.rcpt]
 relay = [ { if = "!is_empty(authenticated_as)", then = true }, 
           { else = false } ]
-directory = "'{STORE}'"
 
 [session.rcpt.errors]
 total = 5
@@ -658,20 +669,15 @@ wait = "1ms"
 [spam-filter]
 enable = true
 
-[spam-filter.bayes.account]
-enable = true
+[spam-filter.list]
+scores = {"PROB_SPAM_LOW" = "10.0", "PROB_SPAM_HIGH" = "10.0", "SPAM_TRAP" = "100.0"}
 
-[spam-filter.bayes.classify]
-balance = "0.0"
-learns = 10
+[spam-filter.classifier.samples]
+min-ham = 10
+min-spam = 10
 
-[queue]
-path = "{TMP}"
-hash = 64
-
-[report]
-path = "{TMP}"
-hash = 64
+[lookup]
+"spam-traps" = {"spamtrap@*"}
 
 [resolver]
 type = "system"
@@ -701,61 +707,12 @@ delivered-to = false
 future-release = [ { if = "!is_empty(authenticated_as)", then = "99999999d"},
                    { else = false } ]
 
-[store."sqlite"]
-type = "sqlite"
-path = "{TMP}/sqlite.db"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/rocks.db"
-
-[store."foundationdb"]
-type = "foundationdb"
-
-[store."postgresql"]
-type = "postgresql"
-host = "localhost"
-port = 5432
-database = "stalwart"
-user = "postgres"
-password = "mysecretpassword"
-
-[store."psql-replica"]
-type = "sql-read-replica"
-primary = "postgresql"
-replicas = "postgresql"
-
-[store."mysql"]
-type = "mysql"
-host = "localhost"
-port = 3307
-database = "stalwart"
-user = "root"
-password = "password"
-
-[store."elastic"]
-type = "elasticsearch"
-url = "https://localhost:9200"
-user = "elastic"
-password = "RtQ-Lu6+o4rxx=XJplVJ"
-disable = true
-
-[store."elastic".tls]
-allow-invalid-certs = true
-
 [certificate.default]
 cert = "%{file:{CERT}}%"
 private-key = "%{file:{PK}}%"
 
 [imap.protocol]
 uidplus = true
-
-[storage]
-data = "{STORE}"
-fts = "{STORE}"
-blob = "{STORE}"
-lookup = "{STORE}"
-directory = "{STORE}"
 
 [jmap.protocol]
 set.max-objects = 100000
@@ -819,10 +776,6 @@ emails = "SELECT address FROM emails WHERE name = ? AND type != 'list' ORDER BY 
 verify = "SELECT address FROM emails WHERE address LIKE '%' || ? || '%' AND type = 'primary' ORDER BY address LIMIT 5"
 expand = "SELECT p.address FROM emails AS p JOIN emails AS l ON p.name = l.name WHERE p.type = 'primary' AND l.address = ? AND l.type = 'list' ORDER BY p.address LIMIT 50"
 domains = "SELECT 1 FROM emails WHERE address LIKE '%@' || ? LIMIT 1"
-
-[directory."{STORE}"]
-type = "internal"
-store = "{STORE}"
 
 [oauth]
 key = "parerga_und_paralipomena"

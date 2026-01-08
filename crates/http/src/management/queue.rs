@@ -384,8 +384,8 @@ impl QueueManagement for Server {
                         for rcpt in &mut message.message.recipients {
                             if rcpt.address().contains(item) {
                                 rcpt.status = Status::PermanentFailure(ErrorDetails {
-                                    entity: "localhost".to_string(),
-                                    details: queue::Error::Io("Delivery canceled.".to_string()),
+                                    entity: "localhost".into(),
+                                    details: queue::Error::Io("Delivery canceled.".into()),
                                 });
                                 found = true;
                             }

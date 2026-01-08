@@ -15,7 +15,10 @@ pub mod llm;
 pub mod undelete;
 
 use ahash::{AHashMap, AHashSet};
-use directory::{QueryParams, Type, backend::internal::lookup::DirectoryStore};
+use directory::{
+    QueryParams, Type,
+    backend::internal::{lookup::DirectoryStore, manage::ManageDirectory},
+};
 use license::LicenseKey;
 use llm::AiApiConfig;
 use mail_parser::DateTime;
@@ -148,6 +151,30 @@ impl Server {
                 ValidTo = DateTime::from_timestamp(enterprise.license.valid_to as i64).to_rfc3339(),
             );
         }
+    }
+
+    pub async fn can_create_account(&self) -> trc::Result<bool> {
+        if let Some(enterprise) = &self.core.enterprise {
+            let total_accounts = self
+                .store()
+                .count_principals(None, Type::Individual.into(), None)
+                .await
+                .caused_by(trc::location!())?;
+
+            if total_accounts + 1 > enterprise.license.accounts as u64 {
+                trc::event!(
+                    Server(trc::ServerEvent::Licensing),
+                    Details = "Account creation not possible: license key account limit reached",
+                    Domain = enterprise.license.domain.clone(),
+                    Total = total_accounts,
+                    Limit = enterprise.license.accounts,
+                );
+
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     pub async fn logo_resource(&self, domain: &str) -> trc::Result<Option<Resource<Vec<u8>>>> {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::JMAPTest;
+use crate::jmap::{JMAPTest, wait_for_index};
 use jmap_client::mailbox::Role;
 
 pub async fn test(params: &mut JMAPTest) {
@@ -34,6 +34,8 @@ pub async fn test(params: &mut JMAPTest) {
         thread_id = email.thread_id().unwrap().to_string();
         expected_result[num - 1] = email.take_id();
     }
+
+    wait_for_index(&params.server).await;
 
     assert_eq!(
         client

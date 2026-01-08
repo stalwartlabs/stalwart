@@ -146,16 +146,16 @@ async fn strategies() {
         blob_hash: Default::default(),
         received_from_ip: "1.2.3.4".parse().unwrap(),
         received_via_port: 7911,
-        return_path: "test@example.com".to_string(),
+        return_path: "test@example.com".into(),
         recipients: vec![Recipient {
-            address: "recipient@foobar.com".to_string(),
+            address: "recipient@foobar.com".into(),
             retry: Schedule::now(),
             notify: Schedule::now(),
             expires: QueueExpiry::Ttl(3600),
             queue: QueueName::new("test").unwrap(),
             status: Status::TemporaryFailure(ErrorDetails {
-                entity: "test.example.com".to_string(),
-                details: Error::TlsError("TLS handshake failed".to_string()),
+                entity: "test.example.com".into(),
+                details: Error::TlsError("TLS handshake failed".into()),
             }),
             flags: 0,
             orcpt: None,
@@ -164,7 +164,7 @@ async fn strategies() {
         env_id: None,
         priority: 0,
         size: 978,
-        quota_keys: vec![],
+        quota_keys: Default::default(),
     };
 
     assert_eq!(

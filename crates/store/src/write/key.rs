@@ -4,25 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::convert::TryInto;
-use types::{blob_hash::BLOB_HASH_LEN, collection::SyncCollection};
-use utils::codec::leb128::Leb128_;
-
-use crate::{
-    BitmapKey, Deserialize, IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL,
-    SUBSPACE_BITMAP_ID, SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT, SUBSPACE_BLOB_LINK,
-    SUBSPACE_BLOB_RESERVE, SUBSPACE_COUNTER, SUBSPACE_DIRECTORY, SUBSPACE_FTS_INDEX,
-    SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS,
-    SUBSPACE_PROPERTY, SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA,
-    SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT, SUBSPACE_SETTINGS, SUBSPACE_TASK_QUEUE,
-    SUBSPACE_TELEMETRY_INDEX, SUBSPACE_TELEMETRY_METRIC, SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN,
-    U64_LEN, ValueKey, WITH_SUBSPACE,
-};
-
 use super::{
-    AnyKey, BitmapClass, BlobOp, DirectoryClass, InMemoryClass, QueueClass, ReportClass,
-    ReportEvent, TagValue, TaskQueueClass, TelemetryClass, ValueClass,
+    AnyKey, BlobOp, DirectoryClass, InMemoryClass, QueueClass, ReportClass, ReportEvent,
+    TaskQueueClass, TelemetryClass, ValueClass,
 };
+use crate::{
+    Deserialize, IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL, SUBSPACE_BLOB_EXTRA,
+    SUBSPACE_BLOB_LINK, SUBSPACE_COUNTER, SUBSPACE_DIRECTORY, SUBSPACE_IN_MEMORY_COUNTER,
+    SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY,
+    SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REPORT_IN,
+    SUBSPACE_REPORT_OUT, SUBSPACE_SEARCH_INDEX, SUBSPACE_SETTINGS, SUBSPACE_TASK_QUEUE,
+    SUBSPACE_TELEMETRY_METRIC, SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey,
+    WITH_SUBSPACE,
+    write::{BlobLink, IndexPropertyClass, SearchIndex, SearchIndexId, SearchIndexType},
+};
+use std::convert::TryInto;
+use types::{blob_hash::BLOB_HASH_LEN, collection::SyncCollection, field::Field};
+use utils::codec::leb128::Leb128_;
 
 pub struct KeySerializer {
     pub buf: Vec<u8>,
@@ -156,6 +154,19 @@ impl DeserializeBigEndian for &[u8] {
 }
 
 impl<T: AsRef<ValueClass>> ValueKey<T> {
+    pub fn with_document_id(self, document_id: u32) -> Self {
+        Self {
+            document_id,
+            ..self
+        }
+    }
+
+    pub fn is_counter(&self) -> bool {
+        self.class.as_ref().is_counter(self.collection)
+    }
+}
+
+impl ValueKey<ValueClass> {
     pub fn property(
         account_id: u32,
         collection: impl Into<u8>,
@@ -170,15 +181,17 @@ impl<T: AsRef<ValueClass>> ValueKey<T> {
         }
     }
 
-    pub fn with_document_id(self, document_id: u32) -> Self {
-        Self {
+    pub fn archive(
+        account_id: u32,
+        collection: impl Into<u8>,
+        document_id: u32,
+    ) -> ValueKey<ValueClass> {
+        ValueKey {
+            account_id,
+            collection: collection.into(),
             document_id,
-            ..self
+            class: ValueClass::Property(Field::ARCHIVE.into()),
         }
-    }
-
-    pub fn is_counter(&self) -> bool {
-        self.class.as_ref().is_counter(self.collection)
     }
 }
 
@@ -256,55 +269,48 @@ impl ValueClass {
         };
 
         match self {
-            ValueClass::Property(field) => serializer
+            ValueClass::Property(property) => serializer
                 .write(account_id)
                 .write(collection)
-                .write(*field)
+                .write(*property)
                 .write(document_id),
-            ValueClass::FtsIndex(hash) => {
-                let serializer = serializer.write(account_id).write(
-                    hash.hash
-                        .get(0..std::cmp::min(hash.len as usize, 8))
-                        .unwrap_or_default(),
-                );
-
-                if hash.len >= 8 {
-                    serializer.write(hash.len)
-                } else {
-                    serializer
-                }
-                .write(collection)
-                .write(document_id)
-            }
+            ValueClass::IndexProperty(property) => match property {
+                IndexPropertyClass::Hash { property, hash } => serializer
+                    .write(account_id)
+                    .write(collection)
+                    .write(*property)
+                    .write(hash.as_bytes())
+                    .write(document_id),
+                IndexPropertyClass::Integer { property, value } => serializer
+                    .write(account_id)
+                    .write(collection)
+                    .write(*property)
+                    .write(*value)
+                    .write(document_id),
+            },
             ValueClass::Acl(grant_account_id) => serializer
                 .write(*grant_account_id)
                 .write(account_id)
                 .write(collection)
                 .write(document_id),
             ValueClass::TaskQueue(task) => match task {
-                TaskQueueClass::IndexEmail { due, hash } => serializer
-                    .write(*due)
-                    .write(account_id)
-                    .write(0u8)
-                    .write(document_id)
-                    .write::<&[u8]>(hash.as_ref()),
-                TaskQueueClass::BayesTrain {
+                TaskQueueClass::UpdateIndex {
+                    index,
+                    is_insert,
                     due,
-                    hash,
-                    learn_spam,
                 } => serializer
-                    .write(*due)
+                    .write(due.inner())
                     .write(account_id)
-                    .write(if *learn_spam { 1u8 } else { 2u8 })
+                    .write(if *is_insert { 7u8 } else { 8u8 })
                     .write(document_id)
-                    .write::<&[u8]>(hash.as_ref()),
+                    .write(index.to_u8()),
                 TaskQueueClass::SendAlarm {
                     due,
                     event_id,
                     alarm_id,
                     is_email_alert,
                 } => serializer
-                    .write(*due)
+                    .write(due.inner())
                     .write(account_id)
                     .write(if *is_email_alert { 3u8 } else { 6u8 })
                     .write(document_id)
@@ -313,7 +319,7 @@ impl ValueClass {
                 TaskQueueClass::SendImip { due, is_payload } => {
                     if !*is_payload {
                         serializer
-                            .write(*due)
+                            .write(due.inner())
                             .write(account_id)
                             .write(4u8)
                             .write(document_id)
@@ -323,30 +329,44 @@ impl ValueClass {
                             .write(account_id)
                             .write(5u8)
                             .write(document_id)
-                            .write(*due)
+                            .write(due.inner())
                     }
                 }
+                TaskQueueClass::MergeThreads { due } => serializer
+                    .write(due.inner())
+                    .write(account_id)
+                    .write(9u8)
+                    .write(document_id),
             },
             ValueClass::Blob(op) => match op {
-                BlobOp::Reserve { hash, until } => serializer
+                BlobOp::Commit { hash } => serializer.write::<&[u8]>(hash.as_ref()),
+                BlobOp::Link { hash, to } => match to {
+                    BlobLink::Id { id } => serializer.write::<&[u8]>(hash.as_ref()).write(*id),
+                    BlobLink::Document => serializer
+                        .write::<&[u8]>(hash.as_ref())
+                        .write(account_id)
+                        .write(collection)
+                        .write(document_id),
+                    BlobLink::Temporary { until } => serializer
+                        .write::<&[u8]>(hash.as_ref())
+                        .write(account_id)
+                        .write(*until),
+                },
+                BlobOp::Quota { hash, until } => serializer
+                    .write(BlobLink::QUOTA_LINK)
                     .write(account_id)
                     .write::<&[u8]>(hash.as_ref())
                     .write(*until),
-                BlobOp::Commit { hash } => serializer
-                    .write::<&[u8]>(hash.as_ref())
-                    .write(u32::MAX)
-                    .write(0u8)
-                    .write(u32::MAX),
-                BlobOp::Link { hash } => serializer
-                    .write::<&[u8]>(hash.as_ref())
+                BlobOp::Undelete { hash, until } => serializer
+                    .write(BlobLink::UNDELETE_LINK)
                     .write(account_id)
-                    .write(collection)
-                    .write(document_id),
-                BlobOp::LinkId { hash, id } => serializer
                     .write::<&[u8]>(hash.as_ref())
-                    .write((*id >> 32) as u32)
-                    .write(u8::MAX)
-                    .write(*id as u32),
+                    .write(*until),
+                BlobOp::SpamSample { hash, until } => serializer
+                    .write(BlobLink::SPAM_SAMPLE_LINK)
+                    .write(*until)
+                    .write(account_id)
+                    .write::<&[u8]>(hash.as_ref()),
             },
             ValueClass::Config(key) => serializer.write(key.as_slice()),
             ValueClass::InMemory(lookup) => match lookup {
@@ -422,9 +442,6 @@ impl ValueClass {
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span { span_id } => serializer.write(*span_id),
-                TelemetryClass::Index { span_id, value } => {
-                    serializer.write(value.as_slice()).write(*span_id)
-                }
                 TelemetryClass::Metric {
                     timestamp,
                     metric_id,
@@ -443,10 +460,71 @@ impl ValueClass {
                 .write(*notify_account_id)
                 .write(u8::from(SyncCollection::ShareNotification))
                 .write(*notification_id),
+            ValueClass::SearchIndex(index) => match &index.typ {
+                SearchIndexType::Term { field, hash } => {
+                    let class = index.index.as_u8();
+                    match &index.id {
+                        SearchIndexId::Account {
+                            account_id,
+                            document_id,
+                        } => serializer
+                            .write(class)
+                            .write(*account_id)
+                            .write(hash.payload())
+                            .write(hash.payload_len())
+                            .write(*field)
+                            .write(*document_id),
+                        SearchIndexId::Global { id } => serializer
+                            .write(class)
+                            .write(hash.payload())
+                            .write(hash.payload_len())
+                            .write(*field)
+                            .write(*id),
+                    }
+                }
+                SearchIndexType::Index { field } => {
+                    let class = index.index.as_u8() | 1 << 6;
+                    match &index.id {
+                        SearchIndexId::Account {
+                            account_id,
+                            document_id,
+                        } => serializer
+                            .write(class)
+                            .write(*account_id)
+                            .write(field.field_id)
+                            .write(field.data.as_slice())
+                            .write(*document_id),
+                        SearchIndexId::Global { id } => serializer
+                            .write(class)
+                            .write(field.field_id)
+                            .write(field.data.as_slice())
+                            .write(*id),
+                    }
+                }
+                SearchIndexType::Document => {
+                    let class = index.index.as_u8() | 2 << 6;
+                    match &index.id {
+                        SearchIndexId::Account {
+                            account_id,
+                            document_id,
+                        } => serializer
+                            .write(class)
+                            .write(*account_id)
+                            .write(*document_id),
+                        SearchIndexId::Global { id } => serializer.write(class).write(*id),
+                    }
+                }
+            },
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
         }
         .finalize()
     }
+}
+
+impl BlobLink {
+    pub const QUOTA_LINK: u8 = 0;
+    pub const UNDELETE_LINK: u8 = 1;
+    pub const SPAM_SAMPLE_LINK: u8 = 2;
 }
 
 impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for IndexKey<T> {
@@ -473,92 +551,6 @@ impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for IndexKey<T> {
     }
 }
 
-impl<T: AsRef<BitmapClass> + Sync + Send + Clone> Key for BitmapKey<T> {
-    fn subspace(&self) -> u8 {
-        self.class.as_ref().subspace()
-    }
-
-    fn serialize(&self, flags: u32) -> Vec<u8> {
-        self.class
-            .as_ref()
-            .serialize(self.account_id, self.collection, self.document_id, flags)
-    }
-}
-
-impl BitmapClass {
-    pub fn subspace(&self) -> u8 {
-        match self {
-            BitmapClass::DocumentIds => SUBSPACE_BITMAP_ID,
-            BitmapClass::Tag { .. } => SUBSPACE_BITMAP_TAG,
-            BitmapClass::Text { .. } => SUBSPACE_BITMAP_TEXT,
-        }
-    }
-
-    pub fn serialize(
-        &self,
-        account_id: u32,
-        collection: u8,
-        document_id: u32,
-        flags: u32,
-    ) -> Vec<u8> {
-        const BM_MARKER: u8 = 1 << 7;
-
-        match self {
-            BitmapClass::DocumentIds => if (flags & WITH_SUBSPACE) != 0 {
-                KeySerializer::new(U32_LEN + 2).write(SUBSPACE_BITMAP_ID)
-            } else {
-                KeySerializer::new(U32_LEN + 1)
-            }
-            .write(account_id)
-            .write(collection),
-            BitmapClass::Tag { field, value } => match value {
-                TagValue::Id(id) => if (flags & WITH_SUBSPACE) != 0 {
-                    KeySerializer::new((U32_LEN * 2) + 4).write(SUBSPACE_BITMAP_TAG)
-                } else {
-                    KeySerializer::new((U32_LEN * 2) + 3)
-                }
-                .write(account_id)
-                .write(collection)
-                .write(*field)
-                .write_leb128(*id),
-                TagValue::Text(text) => if (flags & WITH_SUBSPACE) != 0 {
-                    KeySerializer::new(U32_LEN + 4 + text.len()).write(SUBSPACE_BITMAP_TAG)
-                } else {
-                    KeySerializer::new(U32_LEN + 3 + text.len())
-                }
-                .write(account_id)
-                .write(collection)
-                .write(*field | BM_MARKER)
-                .write(text.as_slice()),
-            },
-            BitmapClass::Text { field, token } => {
-                let serializer = if (flags & WITH_SUBSPACE) != 0 {
-                    KeySerializer::new(U32_LEN + 16 + 3 + 1).write(SUBSPACE_BITMAP_TEXT)
-                } else {
-                    KeySerializer::new(U32_LEN + 16 + 3)
-                }
-                .write(account_id)
-                .write(
-                    token
-                        .hash
-                        .get(0..std::cmp::min(token.len as usize, 8))
-                        .unwrap(),
-                );
-
-                if token.len >= 8 {
-                    serializer.write(token.len)
-                } else {
-                    serializer
-                }
-                .write(collection)
-                .write(*field)
-            }
-        }
-        .write(document_id)
-        .finalize()
-    }
-}
-
 impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for AnyKey<T> {
     fn serialize(&self, flags: u32) -> Vec<u8> {
         let key = self.key.as_ref();
@@ -580,13 +572,10 @@ impl ValueClass {
     pub fn serialized_size(&self) -> usize {
         match self {
             ValueClass::Property(_) => U32_LEN * 2 + 3,
-            ValueClass::FtsIndex(hash) => {
-                if hash.len >= 8 {
-                    U32_LEN * 2 + 10
-                } else {
-                    hash.len as usize + U32_LEN * 2 + 1
-                }
-            }
+            ValueClass::IndexProperty(p) => match p {
+                IndexPropertyClass::Hash { hash, .. } => U32_LEN * 2 + 3 + hash.len(),
+                IndexPropertyClass::Integer { .. } => U32_LEN * 2 + 3 + U64_LEN,
+            },
             ValueClass::Acl(_) => U32_LEN * 3 + 2,
             ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v))
             | ValueClass::Config(v) => v.len(),
@@ -597,16 +586,25 @@ impl ValueClass {
                 DirectoryClass::Index { word, .. } => word.len() + U32_LEN,
             },
             ValueClass::Blob(op) => match op {
-                BlobOp::Reserve { .. } => BLOB_HASH_LEN + U64_LEN + U32_LEN + 1,
-                BlobOp::Commit { .. } | BlobOp::Link { .. } | BlobOp::LinkId { .. } => {
-                    BLOB_HASH_LEN + U32_LEN * 2 + 2
+                BlobOp::Commit { .. } => BLOB_HASH_LEN,
+                BlobOp::Link { to, .. } => {
+                    BLOB_HASH_LEN
+                        + match to {
+                            BlobLink::Id { .. } => U64_LEN,
+                            BlobLink::Document => U32_LEN * 2 + 1,
+                            BlobLink::Temporary { .. } => U32_LEN + U64_LEN,
+                        }
                 }
+                BlobOp::Quota { .. } | BlobOp::Undelete { .. } => {
+                    BLOB_HASH_LEN + U32_LEN + U64_LEN + 1
+                }
+                BlobOp::SpamSample { .. } => BLOB_HASH_LEN + U32_LEN + 2,
             },
             ValueClass::TaskQueue(e) => match e {
-                TaskQueueClass::IndexEmail { .. } | TaskQueueClass::BayesTrain { .. } => {
-                    (BLOB_HASH_LEN + U64_LEN * 2) + 1
+                TaskQueueClass::UpdateIndex { .. } => (U64_LEN * 2) + 2,
+                TaskQueueClass::SendAlarm { .. } | TaskQueueClass::MergeThreads { .. } => {
+                    U64_LEN + (U32_LEN * 3) + 1
                 }
-                TaskQueueClass::SendAlarm { .. } => U64_LEN + (U32_LEN * 3) + 1,
                 TaskQueueClass::SendImip { is_payload, .. } => {
                     if *is_payload {
                         (U64_LEN * 2) + (U32_LEN * 2) + 1
@@ -629,12 +627,19 @@ impl ValueClass {
             ValueClass::Report(_) => U64_LEN * 2 + 1,
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span { .. } => U64_LEN + 1,
-                TelemetryClass::Index { value, .. } => U64_LEN + value.len() + 1,
                 TelemetryClass::Metric { .. } => U64_LEN * 2 + 1,
             },
             ValueClass::DocumentId => U32_LEN + 1,
             ValueClass::ChangeId => U32_LEN,
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
+            ValueClass::SearchIndex(v) => match &v.typ {
+                SearchIndexType::Term { hash, .. } => U64_LEN + hash.len() + 2,
+                SearchIndexType::Index { field, .. } => 1 + field.data.len() + U64_LEN,
+                SearchIndexType::Document => match &v.id {
+                    SearchIndexId::Account { .. } => 1 + U32_LEN * 2,
+                    SearchIndexId::Global { .. } => 1 + U64_LEN,
+                },
+            },
             ValueClass::Any(v) => v.key.len(),
         }
     }
@@ -648,13 +653,13 @@ impl ValueClass {
                     SUBSPACE_PROPERTY
                 }
             }
+            ValueClass::IndexProperty { .. } => SUBSPACE_PROPERTY,
             ValueClass::Acl(_) => SUBSPACE_ACL,
-            ValueClass::FtsIndex(_) => SUBSPACE_FTS_INDEX,
             ValueClass::TaskQueue { .. } => SUBSPACE_TASK_QUEUE,
             ValueClass::Blob(op) => match op {
-                BlobOp::Reserve { .. } => SUBSPACE_BLOB_RESERVE,
-                BlobOp::Commit { .. } | BlobOp::Link { .. } | BlobOp::LinkId { .. } => {
-                    SUBSPACE_BLOB_LINK
+                BlobOp::Commit { .. } | BlobOp::Link { .. } => SUBSPACE_BLOB_LINK,
+                BlobOp::Quota { .. } | BlobOp::Undelete { .. } | BlobOp::SpamSample { .. } => {
+                    SUBSPACE_BLOB_EXTRA
                 }
             },
             ValueClass::Config(_) => SUBSPACE_SETTINGS,
@@ -678,11 +683,11 @@ impl ValueClass {
             ValueClass::Report(_) => SUBSPACE_REPORT_IN,
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span { .. } => SUBSPACE_TELEMETRY_SPAN,
-                TelemetryClass::Index { .. } => SUBSPACE_TELEMETRY_INDEX,
                 TelemetryClass::Metric { .. } => SUBSPACE_TELEMETRY_METRIC,
             },
             ValueClass::DocumentId | ValueClass::ChangeId => SUBSPACE_COUNTER,
             ValueClass::ShareNotification { .. } => SUBSPACE_LOGS,
+            ValueClass::SearchIndex(_) => SUBSPACE_SEARCH_INDEX,
             ValueClass::Any(any) => any.subspace,
         }
     }
@@ -750,5 +755,51 @@ impl Deserialize for ReportEvent {
                         .ctx(trc::Key::Key, key)
                 })?,
         })
+    }
+}
+
+impl SearchIndex {
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            SearchIndex::Email => 0,
+            SearchIndex::Calendar => 1,
+            SearchIndex::Contacts => 2,
+            SearchIndex::File => 3,
+            SearchIndex::Tracing => 4,
+            SearchIndex::InMemory => unreachable!(),
+        }
+    }
+
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(SearchIndex::Email),
+            1 => Some(SearchIndex::Calendar),
+            2 => Some(SearchIndex::Contacts),
+            3 => Some(SearchIndex::File),
+            4 => Some(SearchIndex::Tracing),
+            _ => None,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            SearchIndex::Email => "email",
+            SearchIndex::Calendar => "calendar",
+            SearchIndex::Contacts => "contacts",
+            SearchIndex::File => "file",
+            SearchIndex::Tracing => "tracing",
+            SearchIndex::InMemory => "in_memory",
+        }
+    }
+
+    pub fn try_from_str(value: &str) -> Option<Self> {
+        match value {
+            "email" => Some(SearchIndex::Email),
+            "calendar" => Some(SearchIndex::Calendar),
+            "contacts" => Some(SearchIndex::Contacts),
+            "file" => Some(SearchIndex::File),
+            "tracing" => Some(SearchIndex::Tracing),
+            _ => None,
+        }
     }
 }

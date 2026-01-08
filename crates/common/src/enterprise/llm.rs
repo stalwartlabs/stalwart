@@ -8,13 +8,10 @@
  *
  */
 
-use std::time::Duration;
-
 use hyper::{HeaderMap, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use utils::config::Config;
-
-use crate::config::parse_http_headers;
+use std::time::Duration;
+use utils::config::{Config, http::parse_http_headers};
 
 #[derive(Clone, Debug)]
 pub struct AiApiConfig {

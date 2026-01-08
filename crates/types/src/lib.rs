@@ -27,6 +27,10 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
+    pub fn new(start: i64, end: i64) -> Self {
+        Self { start, end }
+    }
+
     pub fn is_in_range(&self, match_overlap: bool, start: i64, end: i64) -> bool {
         if !match_overlap {
             // RFC4791#9.9: (start <  DTEND AND end > DTSTART)

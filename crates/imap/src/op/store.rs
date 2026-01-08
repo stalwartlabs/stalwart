@@ -12,7 +12,10 @@ use crate::{
 use ahash::AHashSet;
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
 use directory::Permission;
-use email::message::{bayes::EmailBayesTrain, ingest::EmailIngest, metadata::MessageData};
+use email::{
+    mailbox::TRASH_ID,
+    message::{ingest::EmailIngest, metadata::MessageData},
+};
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
     protocol::{
@@ -24,8 +27,9 @@ use imap_proto::{
 };
 use std::{sync::Arc, time::Instant};
 use store::{
+    ValueKey,
     query::log::{Change, Query},
-    write::{BatchBuilder, ValueClass},
+    write::{AlignedBytes, Archive, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -188,21 +192,19 @@ impl<T: SessionStream> SessionData<T> {
             .iter()
             .map(|k| Keyword::from(k.clone()))
             .collect::<Vec<_>>();
-        let access_token = self
-            .server
-            .get_access_token(account_id)
-            .await
-            .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
         let mut changed_mailboxes = AHashSet::new();
-        let can_spam_train = self.server.email_bayes_can_train(&access_token);
-        let mut has_spam_train_tasks = false;
         let mut batch = BatchBuilder::new();
 
         for (id, imap_id) in &ids {
             // Obtain message data
             let data_ = if let Some(data) = self
                 .server
-                .get_archive(account_id, Collection::Email, *id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Email,
+                    *id,
+                ))
                 .await
                 .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?
             {
@@ -215,9 +217,7 @@ impl<T: SessionStream> SessionData<T> {
             let data = data_
                 .to_unarchived::<MessageData>()
                 .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
-            let mut new_data = data
-                .deserialize()
-                .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
+            let mut new_data = data.inner.to_builder();
 
             // Apply changes
             let mut seen_changed = false;
@@ -249,25 +249,26 @@ impl<T: SessionStream> SessionData<T> {
 
             // Train spam filter
             let mut train_spam = None;
-            if can_spam_train {
-                for keyword in new_data.added_keywords(data.inner) {
+            for keyword in new_data.added_keywords(data.inner) {
+                if keyword == &Keyword::Junk {
+                    train_spam = Some(true);
+                    break;
+                } else if keyword == &Keyword::NotJunk && !data.inner.has_mailbox_id(TRASH_ID) {
+                    // Only train as ham if not in Trash (Apple likes to add NotJunk to trashed items, which would be spammy)
+                    train_spam = Some(false);
+                    break;
+                }
+            }
+            if train_spam.is_none() {
+                for keyword in new_data.removed_keywords(data.inner) {
                     if keyword == &Keyword::Junk {
-                        train_spam = Some(true);
-                        break;
-                    } else if keyword == &Keyword::NotJunk {
-                        train_spam = Some(false);
-                        break;
-                    }
-                }
-                if train_spam.is_none() {
-                    for keyword in new_data.removed_keywords(data.inner) {
-                        if keyword == &Keyword::Junk {
+                        if !data.inner.has_mailbox_id(TRASH_ID) {
                             train_spam = Some(false);
-                            break;
                         }
+                        break;
                     }
                 }
-            };
+            }
 
             // Convert keywords to flags
             let flags = if !arguments.is_silent {
@@ -292,26 +293,26 @@ impl<T: SessionStream> SessionData<T> {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Email)
-                .update_document(*id)
+                .with_document(*id)
                 .custom(
                     ObjectIndexBuilder::new()
                         .with_current(data)
-                        .with_changes(new_data),
+                        .with_changes(new_data.seal()),
                 )
                 .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
 
             // Add spam train task
             if let Some(learn_spam) = train_spam {
-                batch.set(
-                    ValueClass::TaskQueue(
-                        self.server
-                            .email_bayes_queue_task_build(account_id, *id, learn_spam)
-                            .await
-                            .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?,
-                    ),
-                    vec![],
-                );
-                has_spam_train_tasks = true;
+                self.server
+                    .add_account_spam_sample(
+                        &mut batch,
+                        account_id,
+                        *id,
+                        learn_spam,
+                        self.session_id,
+                    )
+                    .await
+                    .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
             }
 
             // Set commit point
@@ -344,11 +345,6 @@ impl<T: SessionStream> SessionData<T> {
             for parent_id in changed_mailboxes {
                 batch.log_container_property_change(SyncCollection::Email, parent_id);
             }
-        }
-
-        // Trigger Bayes training
-        if has_spam_train_tasks {
-            self.server.notify_task_queue();
         }
 
         // Write changes

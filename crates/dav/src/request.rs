@@ -68,7 +68,6 @@ pub trait DavRequestHandler: Sync + Send {
 pub(crate) trait DavRequestDispatcher: Sync + Send {
     fn dispatch_dav_request(
         &self,
-        request: &HttpRequest,
         headers: &RequestHeaders<'_>,
         access_token: Arc<AccessToken>,
         resource: DavResourceName,
@@ -80,7 +79,6 @@ pub(crate) trait DavRequestDispatcher: Sync + Send {
 impl DavRequestDispatcher for Server {
     async fn dispatch_dav_request(
         &self,
-        request: &HttpRequest,
         headers: &RequestHeaders<'_>,
         access_token: Arc<AccessToken>,
         resource: DavResourceName,
@@ -122,27 +120,20 @@ impl DavRequestDispatcher for Server {
                     // Validate permissions
                     access_token.assert_has_permission(Permission::DavFileGet)?;
 
-                    #[cfg(debug_assertions)]
-                    {
-                        // Deal with Litmus bug
-                        self.handle_file_get_request(
-                            &access_token,
-                            headers,
-                            matches!(method, DavMethod::HEAD)
-                                && !request.headers().contains_key("x-litmus"),
-                        )
-                        .await
-                    }
-
-                    #[cfg(not(debug_assertions))]
-                    {
-                        self.handle_file_get_request(
-                            &access_token,
-                            headers,
-                            matches!(method, DavMethod::HEAD),
-                        )
-                        .await
-                    }
+                    // Deal with Litmus bug
+                    /*self.handle_file_get_request(
+                        &access_token,
+                        headers,
+                        matches!(method, DavMethod::HEAD)
+                            && !request.headers().contains_key("x-litmus"),
+                    )
+                    .await*/
+                    self.handle_file_get_request(
+                        &access_token,
+                        headers,
+                        matches!(method, DavMethod::HEAD),
+                    )
+                    .await
                 }
                 DavResourceName::Scheduling => {
                     // Validate permissions
@@ -611,9 +602,6 @@ impl DavRequestHandler for Server {
             Vec::new()
         };
 
-        //let c = println!("------------------------------------------");
-        //let std_body = std::str::from_utf8(&body).unwrap_or("[binary]").to_string();
-
         // Parse headers
         let mut headers = RequestHeaders::new(request.uri().path());
         for (key, value) in request.headers() {
@@ -622,7 +610,7 @@ impl DavRequestHandler for Server {
 
         let start_time = Instant::now();
         match self
-            .dispatch_dav_request(&request, &headers, access_token, resource, method, body)
+            .dispatch_dav_request(&headers, access_token, resource, method, body)
             .await
         {
             Ok(response) => {
@@ -742,23 +730,6 @@ impl DavRequestHandler for Server {
                 HttpResponse::new(code)
             }
         }
-
-        /*let c = println!(
-            "{:?} {} -> {:?}\nHeaders: {:?}\nBody: {}\nResponse headers: {:?}\nResponse: {}",
-            method,
-            request.uri().path(),
-            result.status(),
-            request.headers(),
-            std_body,
-            result.headers().unwrap(),
-            match &result.body() {
-                http_proto::HttpResponseBody::Text(t) => dav_proto::xml_pretty_print(t),
-                http_proto::HttpResponseBody::Empty => "[empty]".to_string(),
-                _ => "[binary]".to_string(),
-            }
-        );
-
-        result*/
     }
 }
 

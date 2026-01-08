@@ -13,7 +13,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Map, Value};
 use store::{
-    Serialize,
+    Serialize, ValueKey,
     write::{AlignedBytes, Archive, Archiver, BatchBuilder},
 };
 use trc::AddContext;
@@ -116,12 +116,13 @@ impl ParticipantIdentityGet for Server {
         account_id: u32,
     ) -> trc::Result<Option<Archive<AlignedBytes>>> {
         if let Some(identities) = self
-            .get_archive_by_property(
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                 account_id,
                 Collection::Principal,
                 0,
-                PrincipalField::ParticipantIdentities.into(),
-            )
+                PrincipalField::ParticipantIdentities,
+            ))
             .await?
         {
             return Ok(Some(identities));
@@ -173,7 +174,7 @@ impl ParticipantIdentityGet for Server {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Principal)
-            .update_document(0)
+            .with_document(0)
             .set(
                 PrincipalField::ParticipantIdentities,
                 Archiver::new(identities)
@@ -183,12 +184,13 @@ impl ParticipantIdentityGet for Server {
 
         self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-        self.get_archive_by_property(
-            account_id,
-            Collection::Principal,
-            0,
-            PrincipalField::ParticipantIdentities.into(),
-        )
-        .await
+        self.store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+                account_id,
+                Collection::Principal,
+                0,
+                PrincipalField::ParticipantIdentities,
+            ))
+            .await
     }
 }

@@ -118,9 +118,16 @@ impl ExtractETag for BatchBuilder {
             match op {
                 Operation::Value {
                     class: ValueClass::Property(p_id),
-                    op: ValueOp::Set { value, .. },
+                    op: ValueOp::Set(value),
                 } if *p_id == p_value => {
                     return Archive::<AlignedBytes>::extract_hash(value)
+                        .map(|hash| format!("\"{}\"", hash));
+                }
+                Operation::Value {
+                    class: ValueClass::Property(p_id),
+                    op: ValueOp::SetFnc(set_fnc),
+                } if *p_id == p_value => {
+                    return Archive::<AlignedBytes>::extract_hash(set_fnc.params().bytes(0))
                         .map(|hash| format!("\"{}\"", hash));
                 }
                 _ => {}

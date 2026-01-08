@@ -35,6 +35,11 @@ pub trait BitmapItem: From<u64> + Into<u64> + Sized + Copy {
     fn is_valid(&self) -> bool;
 }
 
+pub trait BitPop {
+    fn bit_push(&mut self, item: u8);
+    fn bit_pop(&mut self) -> Option<u8>;
+}
+
 impl<T: BitmapItem> Bitmap<T> {
     pub fn new() -> Self {
         Self::default()
@@ -144,6 +149,38 @@ impl<T: BitmapItem> Bitmap<T> {
 
     pub fn into_inner(self) -> u64 {
         self.bitmap
+    }
+}
+
+impl BitPop for u32 {
+    fn bit_push(&mut self, item: u8) {
+        *self |= 1 << item;
+    }
+
+    fn bit_pop(&mut self) -> Option<u8> {
+        if *self != 0 {
+            let item = 31 - self.leading_zeros();
+            *self ^= 1 << item;
+            Some(item as u8)
+        } else {
+            None
+        }
+    }
+}
+
+impl BitPop for u64 {
+    fn bit_push(&mut self, item: u8) {
+        *self |= 1 << item;
+    }
+
+    fn bit_pop(&mut self) -> Option<u8> {
+        if *self != 0 {
+            let item = 63 - self.leading_zeros();
+            *self ^= 1 << item;
+            Some(item as u8)
+        } else {
+            None
+        }
     }
 }
 

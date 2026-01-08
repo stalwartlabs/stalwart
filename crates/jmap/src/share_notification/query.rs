@@ -4,18 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use crate::{JmapMethods, UpdateResults};
+use crate::api::query::QueryResponseBuilder;
 use common::{Server, sharing::notification::ShareNotification};
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::share_notification::{self, ShareNotificationFilter},
     types::state::State,
 };
-use store::{
-    Deserialize, IterateParams, LogKey, U64_LEN, query::ResultSet, write::key::DeserializeBigEndian,
-};
+use std::time::Duration;
+use store::{Deserialize, IterateParams, LogKey, U64_LEN, write::key::DeserializeBigEndian};
 use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
@@ -79,12 +76,6 @@ impl ShareNotificationQuery for Server {
         }
 
         let mut results = Vec::new();
-        let mut result_set = ResultSet {
-            account_id,
-            collection: Collection::None,
-            results: Default::default(),
-        };
-
         self.store()
             .iterate(
                 IterateParams::new(
@@ -113,7 +104,6 @@ impl ShareNotificationQuery for Server {
                         }
                     }
 
-                    result_set.results.insert(results.len() as u32);
                     results.push(Id::from(change_id));
 
                     Ok(true)
@@ -122,20 +112,19 @@ impl ShareNotificationQuery for Server {
             .await
             .caused_by(trc::location!())?;
 
-        let (mut response, paginate) = self
-            .build_query_response(result_set.results.len() as usize, State::Initial, &request)
-            .await?;
+        let mut response = QueryResponseBuilder::new(
+            results.len(),
+            self.core.jmap.query_max_results,
+            State::Initial,
+            &request,
+        );
 
-        if let Some(mut paginate) = paginate {
-            for result in results {
-                if !paginate.add_id(result) {
-                    break;
-                }
+        for id in results {
+            if !response.add_id(id) {
+                break;
             }
-
-            response.update_results(paginate.build())?;
         }
 
-        Ok(response)
+        response.build()
     }
 }

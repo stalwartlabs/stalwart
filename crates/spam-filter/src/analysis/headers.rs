@@ -59,8 +59,21 @@ impl SpamFilterAnalyzeHeaders for Server {
                         ctx.result.add_tag("MULTIPLE_UNIQUE_HEADERS");
                     }
 
-                    if !matches!(raw_message.get(header.offset_start as usize), Some(b' ')) {
-                        ctx.result.add_tag("HEADER_EMPTY_DELIMITER");
+                    let mut value = raw_message
+                        .get(header.offset_start as usize..)
+                        .unwrap_or_default()
+                        .iter();
+                    loop {
+                        match value.next() {
+                            Some(b' ' | b'\t') => {
+                                break;
+                            }
+                            Some(b'\r' | b'\n') => {}
+                            _ => {
+                                ctx.result.add_tag("HEADER_EMPTY_DELIMITER");
+                                break;
+                            }
+                        }
                     }
                 }
                 HeaderName::ListArchive

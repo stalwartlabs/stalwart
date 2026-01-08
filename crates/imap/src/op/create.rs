@@ -93,7 +93,7 @@ impl<T: SessionStream> SessionData<T> {
             batch
                 .with_account_id(params.account_id)
                 .with_collection(Collection::Mailbox)
-                .create_document(mailbox_id)
+                .with_document(mailbox_id)
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(mailbox))
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .commit_point();
@@ -177,7 +177,7 @@ impl<T: SessionStream> SessionData<T> {
         let mut parent_mailbox_name = None;
         let (account_id, path) = {
             let mailboxes = self.mailboxes.lock();
-            let (account, full_path) =
+            let (account, full_path, prefix) =
                 if path.first() == Some(&self.server.core.jmap.shared_folder.as_str()) {
                     // Shared Folders/<username>/<folder>
                     if path.len() < 3 {
@@ -201,7 +201,7 @@ impl<T: SessionStream> SessionData<T> {
                         .skip(1)
                         .find(|account| account.prefix == prefix)
                     {
-                        (account, full_path)
+                        (account, full_path, prefix)
                     } else {
                         #[allow(clippy::unnecessary_literal_unwrap)]
                         return Err(trc::ImapEvent::Error.into_err().details(format!(
@@ -215,7 +215,7 @@ impl<T: SessionStream> SessionData<T> {
                         *root = "INBOX";
                     }
 
-                    (account, path.join("/"))
+                    (account, path.join("/"), None)
                 } else {
                     return Err(trc::ImapEvent::Error
                         .into_err()
@@ -240,6 +240,11 @@ impl<T: SessionStream> SessionData<T> {
                         if let Some(&mailbox_id) = account.mailbox_names.get(&mailbox_name) {
                             parent_mailbox_id = mailbox_id.into();
                             parent_mailbox_name = mailbox_name.into();
+                            break;
+                        } else if prefix
+                            .as_ref()
+                            .is_some_and(|prefix| prefix == &mailbox_name)
+                        {
                             break;
                         } else {
                             create_path.push(path.pop().unwrap());
@@ -329,6 +334,9 @@ fn attr_to_role(attr: Attribute) -> SpecialUse {
         Attribute::Sent => SpecialUse::Sent,
         Attribute::Trash => SpecialUse::Trash,
         Attribute::Important => SpecialUse::Important,
+        Attribute::Memos => SpecialUse::Memos,
+        Attribute::Scheduled => SpecialUse::Scheduled,
+        Attribute::Snoozed => SpecialUse::Snoozed,
         _ => SpecialUse::None,
     }
 }

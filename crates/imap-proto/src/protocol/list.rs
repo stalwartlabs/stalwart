@@ -71,6 +71,9 @@ pub enum Attribute {
     Sent,
     Trash,
     Important,
+    Memos,
+    Scheduled,
+    Snoozed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +145,9 @@ impl Attribute {
             Attribute::Sent => b"\\Sent",
             Attribute::Trash => b"\\Trash",
             Attribute::Important => b"\\Important",
+            Attribute::Memos => b"\\Memos",
+            Attribute::Scheduled => b"\\Scheduled",
+            Attribute::Snoozed => b"\\Snoozed",
         });
     }
 }
@@ -157,6 +163,9 @@ impl TryFrom<&str> for Attribute {
             "sent" => Attribute::Sent,
             "trash" => Attribute::Trash,
             "important" => Attribute::Important,
+            "memos" => Attribute::Memos,
+            "scheduled" => Attribute::Scheduled,
+            "snoozed" => Attribute::Snoozed,
         )
         .ok_or(())
     }

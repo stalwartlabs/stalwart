@@ -4,14 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::store::TempDir;
+use crate::store::{
+    TempDir,
+    cleanup::{store_assert_is_empty, store_destroy},
+};
 use ahash::AHashSet;
-use common::{Core, manager::backup::BackupParams};
+use common::{Core, DATABASE_SCHEMA_VERSION, manager::backup::BackupParams};
 use store::{
     rand,
     write::{
-        AnyKey, BatchBuilder, BitmapClass, BitmapHash, BlobOp, DirectoryClass, InMemoryClass,
-        Operation, QueueClass, QueueEvent, TagValue, ValueClass,
+        AnyClass, AnyKey, BatchBuilder, BlobLink, BlobOp, DirectoryClass, Operation, QueueClass,
+        QueueEvent, ValueClass,
     },
     *,
 };
@@ -29,11 +32,18 @@ pub async fn test(db: Store) {
     core.storage.lookup = db.clone().into();
 
     // Make sure the store is empty
-    db.assert_is_empty(db.clone().into()).await;
+    store_assert_is_empty(&db, db.clone().into(), true).await;
 
     // Create blobs
     println!("Creating blobs...");
     let mut batch = BatchBuilder::new();
+    batch.set(
+        ValueClass::Any(AnyClass {
+            subspace: SUBSPACE_PROPERTY,
+            key: vec![0u8],
+        }),
+        DATABASE_SCHEMA_VERSION.serialize(),
+    );
     let mut blob_hashes = Vec::new();
     for blob_size in [16, 128, 1024, 2056, 102400] {
         let data = random_bytes(blob_size);
@@ -64,7 +74,7 @@ pub async fn test(db: Store) {
             batch.with_collection(collection);
 
             for document_id in [0, 10, 20, 30, 40] {
-                batch.create_document(document_id);
+                batch.with_document(document_id);
 
                 if collection == Collection::Mailbox {
                     batch
@@ -82,13 +92,6 @@ pub async fn test(db: Store) {
                     batch.set(ValueClass::Property(idx as u8), random_bytes(value_size));
                 }
 
-                for value_size in [1, 4, 7, 8, 9, 16] {
-                    batch.set(
-                        ValueClass::FtsIndex(BitmapHash::new(random_bytes(value_size))),
-                        random_bytes(value_size * 2),
-                    );
-                }
-
                 for grant_account_id in 0u32..10u32 {
                     if account_id != grant_account_id {
                         batch.set(
@@ -100,50 +103,17 @@ pub async fn test(db: Store) {
 
                 for hash in &blob_hashes {
                     batch.set(
-                        ValueClass::Blob(BlobOp::Link { hash: hash.clone() }),
+                        ValueClass::Blob(BlobOp::Link {
+                            hash: hash.clone(),
+                            to: BlobLink::Document,
+                        }),
                         vec![],
                     );
                 }
 
                 batch.log_item_insert(SyncCollection::from(collection), None);
 
-                /*batch.any_op(Operation::ChangeId {
-                    change_id: document_id as u64 + account_id as u64 + collection as u64,
-                });
-
-                batch.any_op(Operation::Log {
-                    set: MaybeDynamicValue::Static(vec![
-                        account_id as u8,
-                        collection,
-                        document_id as u8,
-                    ]),
-                });*/
-
                 for field in 0..5 {
-                    batch.any_op(Operation::Bitmap {
-                        class: BitmapClass::Tag {
-                            field,
-                            value: TagValue::Id(rand::random()),
-                        },
-                        set: true,
-                    });
-
-                    batch.any_op(Operation::Bitmap {
-                        class: BitmapClass::Tag {
-                            field,
-                            value: TagValue::Text(random_bytes(field as usize + 2)),
-                        },
-                        set: true,
-                    });
-
-                    batch.any_op(Operation::Bitmap {
-                        class: BitmapClass::Text {
-                            field,
-                            token: BitmapHash::new(random_bytes(field as usize + 2)),
-                        },
-                        set: true,
-                    });
-
                     batch.any_op(Operation::Index {
                         field,
                         key: random_bytes(field as usize + 2),
@@ -172,14 +142,14 @@ pub async fn test(db: Store) {
             })),
             random_bytes(idx),
         );
-        batch.set(
+        /*batch.set(
             ValueClass::InMemory(InMemoryClass::Key(random_bytes(idx))),
             random_bytes(idx),
         );
         batch.add(
             ValueClass::InMemory(InMemoryClass::Counter(random_bytes(idx))),
             rand::random(),
-        );
+        );*/
         batch.set(
             ValueClass::Config(random_bytes(idx + 10)),
             random_bytes(idx + 10),
@@ -196,7 +166,7 @@ pub async fn test(db: Store) {
 
     for account_id in [1, 2, 3, 4, 5] {
         batch
-            .create_document(account_id)
+            .with_document(account_id)
             .add(
                 ValueClass::Directory(DirectoryClass::UsedQuota(account_id)),
                 rand::random(),
@@ -246,8 +216,8 @@ pub async fn test(db: Store) {
 
     // Destroy store
     println!("Destroying store...");
-    db.destroy().await;
-    db.assert_is_empty(db.clone().into()).await;
+    store_destroy(&db).await;
+    store_assert_is_empty(&db, db.clone().into(), true).await;
 
     // Import store
     println!("Importing store...");
@@ -259,7 +229,8 @@ pub async fn test(db: Store) {
     println!(" GREAT SUCCESS!");
 
     // Destroy store
-    db.destroy().await;
+    store_destroy(&db).await;
+    store_assert_is_empty(&db, db.clone().into(), true).await;
     temp_dir.delete();
 }
 
@@ -283,13 +254,10 @@ impl Snapshot {
 
         for (subspace, with_values) in [
             (SUBSPACE_ACL, true),
-            (SUBSPACE_BITMAP_ID, false),
-            (SUBSPACE_BITMAP_TAG, false),
-            (SUBSPACE_BITMAP_TEXT, false),
             (SUBSPACE_DIRECTORY, true),
             (SUBSPACE_TASK_QUEUE, true),
             (SUBSPACE_INDEXES, false),
-            (SUBSPACE_BLOB_RESERVE, true),
+            (SUBSPACE_BLOB_EXTRA, true),
             (SUBSPACE_BLOB_LINK, true),
             (SUBSPACE_BLOBS, true),
             (SUBSPACE_LOGS, true),
@@ -303,7 +271,6 @@ impl Snapshot {
             (SUBSPACE_QUOTA, !is_sql),
             (SUBSPACE_REPORT_OUT, true),
             (SUBSPACE_REPORT_IN, true),
-            (SUBSPACE_FTS_INDEX, true),
         ] {
             let from_key = AnyKey {
                 subspace,

@@ -12,7 +12,10 @@ use crate::{changes::state::JmapCacheState, email::headers::HeaderToValue};
 use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::metadata::{ArchivedMetadataPartType, MessageMetadata},
+    message::metadata::{
+        ArchivedMetadataPartType, MESSAGE_HAS_ATTACHMENT, MESSAGE_RECEIVED_MASK, MessageMetadata,
+        MetadataHeaderName, PART_ENCODING_PROBLEM,
+    },
 };
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
@@ -21,8 +24,12 @@ use jmap_proto::{
     types::date::UTCDate,
 };
 use jmap_tools::{Key, Map, Value};
-use mail_parser::{ArchivedHeaderName, HeaderValue, core::rkyv::ArchivedGetHeader};
-use std::{borrow::Cow, future::Future};
+use mail_parser::HeaderValue;
+use std::future::Future;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::{AddContext, StoreEvent};
 use types::{
     acl::Acl,
@@ -32,6 +39,7 @@ use types::{
     field::EmailField,
     id::Id,
 };
+use utils::chained_bytes::ChainedBytes;
 
 pub trait EmailGet: Sync + Send {
     fn email_get(
@@ -149,12 +157,13 @@ impl EmailGet for Server {
                 continue;
             }
             let metadata_ = match self
-                .get_archive_by_property(
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                     account_id,
                     Collection::Email,
                     id.document_id(),
-                    EmailField::Metadata.into(),
-                )
+                    EmailField::Metadata,
+                ))
                 .await?
             {
                 Some(metadata) => metadata,
@@ -178,13 +187,20 @@ impl EmailGet for Server {
 
             // Retrieve raw message if needed
             let blob_hash = BlobHash::from(&metadata.blob_hash);
-            let raw_message: Cow<[u8]> = if needs_body {
-                if let Some(raw_message) = self
+            let raw_body;
+            let mut raw_message = ChainedBytes::new(metadata.raw_headers.as_ref());
+            if needs_body {
+                raw_body = self
                     .blob_store()
                     .get_blob(blob_hash.as_slice(), 0..usize::MAX)
-                    .await?
-                {
-                    raw_message.into()
+                    .await?;
+
+                if let Some(raw_body) = &raw_body {
+                    raw_message.append(
+                        raw_body
+                            .get(metadata.blob_body_offset.to_native() as usize..)
+                            .unwrap_or_default(),
+                    );
                 } else {
                     trc::event!(
                         Store(StoreEvent::NotFound),
@@ -199,9 +215,7 @@ impl EmailGet for Server {
                     response.not_found.push(id);
                     continue;
                 }
-            } else {
-                metadata.raw_headers.as_slice().into()
-            };
+            }
             let blob_id = BlobId {
                 hash: blob_hash,
                 class: BlobClass::Linked {
@@ -217,6 +231,8 @@ impl EmailGet for Server {
                 Map::with_capacity(properties.len());
             let contents = &metadata.contents[0];
             let root_part = &contents.parts[0];
+            let blob_body_offset = metadata.blob_body_offset.to_native() as isize
+                - root_part.offset_body.to_native() as isize;
             for property in &properties {
                 match property {
                     EmailProperty::Id => {
@@ -248,13 +264,13 @@ impl EmailGet for Server {
                         email.insert_unchecked(property.clone(), Value::Object(obj));
                     }
                     EmailProperty::Size => {
-                        email.insert_unchecked(EmailProperty::Size, u32::from(metadata.size));
+                        email.insert_unchecked(EmailProperty::Size, data.size);
                     }
                     EmailProperty::ReceivedAt => {
                         email.insert_unchecked(
                             EmailProperty::ReceivedAt,
                             EmailValue::Date(UTCDate::from_timestamp(
-                                u64::from(metadata.received_at) as i64,
+                                (metadata.rcvd_attach.to_native() & MESSAGE_RECEIVED_MASK) as i64,
                             )),
                         );
                     }
@@ -269,15 +285,14 @@ impl EmailGet for Server {
                     EmailProperty::HasAttachment => {
                         email.insert_unchecked(
                             EmailProperty::HasAttachment,
-                            metadata.has_attachments,
+                            (metadata.rcvd_attach.to_native() & MESSAGE_HAS_ATTACHMENT) != 0,
                         );
                     }
                     EmailProperty::Subject => {
                         email.insert_unchecked(
                             EmailProperty::Subject,
                             root_part
-                                .headers
-                                .header_value(&ArchivedHeaderName::Subject)
+                                .header_value(&MetadataHeaderName::Subject)
                                 .map(|value| HeaderValue::from(value).into_form(&HeaderForm::Text))
                                 .unwrap_or_default(),
                         );
@@ -286,8 +301,7 @@ impl EmailGet for Server {
                         email.insert_unchecked(
                             EmailProperty::SentAt,
                             root_part
-                                .headers
-                                .header_value(&ArchivedHeaderName::Date)
+                                .header_value(&MetadataHeaderName::Date)
                                 .map(|value| HeaderValue::from(value).into_form(&HeaderForm::Date))
                                 .unwrap_or_default(),
                         );
@@ -298,11 +312,10 @@ impl EmailGet for Server {
                         email.insert_unchecked(
                             property.clone(),
                             root_part
-                                .headers
                                 .header_value(&match property {
-                                    EmailProperty::MessageId => ArchivedHeaderName::MessageId,
-                                    EmailProperty::InReplyTo => ArchivedHeaderName::InReplyTo,
-                                    EmailProperty::References => ArchivedHeaderName::References,
+                                    EmailProperty::MessageId => MetadataHeaderName::MessageId,
+                                    EmailProperty::InReplyTo => MetadataHeaderName::InReplyTo,
+                                    EmailProperty::References => MetadataHeaderName::References,
                                     _ => unreachable!(),
                                 })
                                 .map(|value| {
@@ -321,14 +334,13 @@ impl EmailGet for Server {
                         email.insert_unchecked(
                             property.clone(),
                             root_part
-                                .headers
                                 .header_value(&match property {
-                                    EmailProperty::Sender => ArchivedHeaderName::Sender,
-                                    EmailProperty::From => ArchivedHeaderName::From,
-                                    EmailProperty::To => ArchivedHeaderName::To,
-                                    EmailProperty::Cc => ArchivedHeaderName::Cc,
-                                    EmailProperty::Bcc => ArchivedHeaderName::Bcc,
-                                    EmailProperty::ReplyTo => ArchivedHeaderName::ReplyTo,
+                                    EmailProperty::Sender => MetadataHeaderName::Sender,
+                                    EmailProperty::From => MetadataHeaderName::From,
+                                    EmailProperty::To => MetadataHeaderName::To,
+                                    EmailProperty::Cc => MetadataHeaderName::Cc,
+                                    EmailProperty::Bcc => MetadataHeaderName::Bcc,
+                                    EmailProperty::ReplyTo => MetadataHeaderName::ReplyTo,
                                     _ => unreachable!(),
                                 })
                                 .map(|value| {
@@ -340,13 +352,13 @@ impl EmailGet for Server {
                     EmailProperty::Header(_) => {
                         email.insert_unchecked(
                             property.clone(),
-                            root_part.headers.header_to_value(property, &raw_message),
+                            root_part.header_to_value(property, &raw_message),
                         );
                     }
                     EmailProperty::Headers => {
                         email.insert_unchecked(
                             EmailProperty::Headers,
-                            root_part.headers.headers_to_value(&raw_message),
+                            root_part.headers_to_value(&raw_message),
                         );
                     }
                     EmailProperty::TextBody
@@ -367,6 +379,7 @@ impl EmailGet for Server {
                                     &body_properties,
                                     &raw_message,
                                     &blob_id,
+                                    blob_body_offset,
                                 )
                             })
                             .collect::<Vec<_>>(),
@@ -375,7 +388,13 @@ impl EmailGet for Server {
                     EmailProperty::BodyStructure => {
                         email.insert_unchecked(
                             EmailProperty::BodyStructure,
-                            contents.to_body_part(0, &body_properties, &raw_message, &blob_id),
+                            contents.to_body_part(
+                                0,
+                                &body_properties,
+                                &raw_message,
+                                &blob_id,
+                                blob_body_offset,
+                            ),
                         );
                     }
                     EmailProperty::BodyValues => {
@@ -407,7 +426,7 @@ impl EmailGet for Server {
                                     Map::with_capacity(3)
                                         .with_key_value(
                                             EmailProperty::IsEncodingProblem,
-                                            part.is_encoding_problem,
+                                            (part.flags & PART_ENCODING_PROBLEM) != 0,
                                         )
                                         .with_key_value(EmailProperty::IsTruncated, is_truncated)
                                         .with_key_value(EmailProperty::Value, value),

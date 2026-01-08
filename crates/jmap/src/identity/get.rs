@@ -15,12 +15,13 @@ use jmap_proto::{
 use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::{
-    rkyv::{option::ArchivedOption, vec::ArchivedVec},
-    roaring::RoaringBitmap,
-    write::BatchBuilder,
+    ValueKey, rkyv::{option::ArchivedOption, vec::ArchivedVec}, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}
 };
 use trc::AddContext;
-use types::collection::{Collection, SyncCollection};
+use types::{
+    collection::{Collection, SyncCollection},
+    field::IdentityField,
+};
 use utils::sanitize_email;
 
 pub trait IdentityGet: Sync + Send {
@@ -80,7 +81,12 @@ impl IdentityGet for Server {
                 continue;
             }
             let _identity = if let Some(identity) = self
-                .get_archive(account_id, Collection::Identity, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Identity,
+                    document_id,
+                ))
                 .await?
             {
                 identity
@@ -142,9 +148,8 @@ impl IdentityGet for Server {
 
     async fn identity_get_or_create(&self, account_id: u32) -> trc::Result<RoaringBitmap> {
         let mut identity_ids = self
-            .get_document_ids(account_id, Collection::Identity)
-            .await?
-            .unwrap_or_default();
+            .document_ids(account_id, Collection::Identity, IdentityField::DocumentId)
+            .await?;
         if !identity_ids.is_empty() {
             return Ok(identity_ids);
         }
@@ -203,7 +208,8 @@ impl IdentityGet for Server {
             let document_id = next_document_id;
             next_document_id -= 1;
             batch
-                .create_document(document_id)
+                .with_document(document_id)
+                .tag(IdentityField::DocumentId)
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(Identity {
                     name,
                     email,

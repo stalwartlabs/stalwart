@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ahash::AHashMap;
 use directory::Directory;
-use store::{BlobStore, FtsStore, InMemoryStore, PubSubStore, PurgeSchedule, Store};
+use store::{BlobStore, SearchStore, InMemoryStore, PubSubStore, PurgeSchedule, Store};
 
 use crate::manager::config::ConfigManager;
 
@@ -16,7 +16,7 @@ use crate::manager::config::ConfigManager;
 pub struct Storage {
     pub data: Store,
     pub blob: BlobStore,
-    pub fts: FtsStore,
+    pub fts: SearchStore,
     pub lookup: InMemoryStore,
     pub pubsub: PubSubStore,
     pub directory: Arc<Directory>,
@@ -27,5 +27,5 @@ pub struct Storage {
     pub stores: AHashMap<String, Store>,
     pub blobs: AHashMap<String, BlobStore>,
     pub lookups: AHashMap<String, InMemoryStore>,
-    pub ftss: AHashMap<String, FtsStore>,
+    pub ftss: AHashMap<String, SearchStore>,
 }

@@ -463,6 +463,14 @@ impl ParseValue for i32 {
     }
 }
 
+impl ParseValue for f32 {
+    fn parse_value(value: &str) -> super::Result<Self> {
+        value
+            .parse()
+            .map_err(|_| format!("Invalid floating point value {:?}.", value))
+    }
+}
+
 impl ParseValue for IpAddr {
     fn parse_value(value: &str) -> super::Result<Self> {
         value

@@ -4,11 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use crate::{
+    addressbook_v2::migrate_addressbook_v013,
+    calendar_v2::migrate_calendar_v013,
+    contact_v2::migrate_contacts_v013,
+    event_v2::{migrate_calendar_events_v013, migrate_calendar_scheduling_v013},
+    get_document_ids,
+    push_v2::migrate_push_subscriptions_v013,
+    sieve_v2::migrate_sieve_v013,
+};
 use common::Server;
 use directory::{Principal, PrincipalData, Type, backend::internal::SpecialSecrets};
 use proc_macros::EnumMethods;
+use std::time::Instant;
 use store::{
     Serialize, ValueKey,
     roaring::RoaringBitmap,
@@ -17,19 +25,9 @@ use store::{
 use trc::AddContext;
 use types::collection::Collection;
 
-use crate::{
-    addressbook_v2::migrate_addressbook_v013,
-    calendar_v2::migrate_calendar_v013,
-    contact_v2::migrate_contacts_v013,
-    event_v2::{migrate_calendar_events_v013, migrate_calendar_scheduling_v013},
-    push_v2::migrate_push_subscriptions_v013,
-    sieve_v2::migrate_sieve_v013,
-};
-
 pub(crate) async fn migrate_principals_v0_13(server: &Server) -> trc::Result<RoaringBitmap> {
     // Obtain email ids
-    let principal_ids = server
-        .get_document_ids(u32::MAX, Collection::Principal)
+    let principal_ids = get_document_ids(server, u32::MAX, Collection::Principal)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -151,7 +149,7 @@ pub(crate) async fn migrate_principals_v0_13(server: &Server) -> trc::Result<Roa
                     batch
                         .with_account_id(u32::MAX)
                         .with_collection(Collection::Principal)
-                        .update_document(principal_id);
+                        .with_document(principal_id);
 
                     batch.set(
                         ValueClass::Directory(DirectoryClass::Principal(principal_id)),

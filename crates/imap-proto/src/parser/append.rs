@@ -249,6 +249,18 @@ mod tests {
                     }],
                 },
             ),
+            (
+                "A003 APPEND \"&A8g- \\\"&A9QD1APUA9gD3APcA-+\\\"\" (\\Seen) \"7-Feb-1994 22:43:04 -0800\" {1+}\r\na\r\n",
+                append::Arguments {
+                    tag: "A003".into(),
+                    mailbox_name: "ψ \"ϔϔϔϘϜϜ+\"".into(),
+                    messages: vec![Message {
+                        message: vec![b'a'],
+                        flags: vec![Flag::Seen],
+                        received_at: Some(760689784),
+                    }],
+                },
+            ),
         ] {
             assert_eq!(
                 receiver

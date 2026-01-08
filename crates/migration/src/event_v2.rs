@@ -9,11 +9,13 @@ use groupware::calendar::{
     Alarm, CalendarEvent, CalendarEventData, CalendarEventNotification, ComponentTimeRange,
 };
 use store::{
-    Serialize,
-    write::{Archiver, BatchBuilder, serialize::rkyv_deserialize},
+    Serialize, ValueKey,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
 use types::{collection::Collection, dead_property::DeadProperty, field::Field};
+
+use crate::get_document_ids;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -67,8 +69,7 @@ pub(crate) async fn migrate_calendar_events_v013(
     server: &Server,
     account_id: u32,
 ) -> trc::Result<u64> {
-    let document_ids = server
-        .get_document_ids(account_id, Collection::CalendarEvent)
+    let document_ids = get_document_ids(server, account_id, Collection::CalendarEvent)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -77,7 +78,12 @@ pub(crate) async fn migrate_calendar_events_v013(
 
     for document_id in document_ids.iter() {
         let Some(archive) = server
-            .get_archive(account_id, Collection::CalendarEvent, document_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::CalendarEvent,
+                document_id,
+            ))
             .await
             .caused_by(trc::location!())?
         else {
@@ -111,7 +117,7 @@ pub(crate) async fn migrate_calendar_events_v013(
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::CalendarEvent)
-                    .update_document(document_id)
+                    .with_document(document_id)
                     .set(
                         Field::ARCHIVE,
                         Archiver::new(new_event)
@@ -141,8 +147,7 @@ pub(crate) async fn migrate_calendar_scheduling_v013(
     server: &Server,
     account_id: u32,
 ) -> trc::Result<u64> {
-    let document_ids = server
-        .get_document_ids(account_id, Collection::CalendarEventNotification)
+    let document_ids = get_document_ids(server, account_id, Collection::CalendarEventNotification)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -151,11 +156,12 @@ pub(crate) async fn migrate_calendar_scheduling_v013(
 
     for document_id in document_ids.iter() {
         let Some(archive) = server
-            .get_archive(
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
                 account_id,
                 Collection::CalendarEventNotification,
                 document_id,
-            )
+            ))
             .await
             .caused_by(trc::location!())?
         else {
@@ -179,7 +185,7 @@ pub(crate) async fn migrate_calendar_scheduling_v013(
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::CalendarEventNotification)
-                    .update_document(document_id)
+                    .with_document(document_id)
                     .set(
                         Field::ARCHIVE,
                         Archiver::new(new_event)

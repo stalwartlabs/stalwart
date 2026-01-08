@@ -23,7 +23,7 @@ pub mod virtualq;
 
 pub fn build_rcpt(address: &str, retry: u64, notify: u64, expires: u64) -> Recipient {
     Recipient {
-        address: address.to_string(),
+        address: address.into(),
         retry: Schedule::later(retry),
         notify: Schedule::later(notify),
         expires: QueueExpiry::Ttl(expires),

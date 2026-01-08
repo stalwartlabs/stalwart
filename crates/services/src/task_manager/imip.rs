@@ -37,7 +37,7 @@ use store::{
     ValueKey,
     ahash::AHashMap,
     rkyv::rend::{i16_le, i32_le},
-    write::{AlignedBytes, Archive, TaskQueueClass, ValueClass, now},
+    write::{AlignedBytes, Archive, TaskEpoch, TaskQueueClass, ValueClass, now},
 };
 use trc::AddContext;
 use utils::template::{Variable, Variables};
@@ -47,7 +47,7 @@ pub trait SendImipTask: Sync + Send {
         &self,
         account_id: u32,
         document_id: u32,
-        due: u64,
+        due: TaskEpoch,
         server_instance: Arc<ServerInstance>,
     ) -> impl Future<Output = bool> + Send;
 }
@@ -57,7 +57,7 @@ impl SendImipTask for Server {
         &self,
         account_id: u32,
         document_id: u32,
-        due: u64,
+        due: TaskEpoch,
         server_instance: Arc<ServerInstance>,
     ) -> bool {
         match send_imip(self, account_id, document_id, due, server_instance).await {
@@ -79,7 +79,7 @@ async fn send_imip(
     server: &Server,
     account_id: u32,
     document_id: u32,
-    due: u64,
+    due: TaskEpoch,
     server_instance: Arc<ServerInstance>,
 ) -> trc::Result<bool> {
     // Obtain access token

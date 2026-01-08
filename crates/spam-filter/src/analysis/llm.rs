@@ -99,11 +99,8 @@ impl SpamFilterAnalyzeLlm for Server {
                         _ => return,
                     };
 
-                    if let (Some(header), Some(explanation)) =
-                        (&self.core.spam.headers.llm, explanation)
-                    {
-                        ctx.result.header =
-                            format!("{header}: {category} ({explanation})\r\n",).into();
+                    if let Some(explanation) = explanation {
+                        ctx.result.llm_result = Some((category, explanation));
                     }
                 }
                 Err(err) => {

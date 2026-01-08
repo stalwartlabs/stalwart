@@ -4,16 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::path::PathBuf;
-
+use super::{CF_BLOBS, RocksDbStore};
+use crate::*;
 use rocksdb::{ColumnFamilyDescriptor, MergeOperands, OptimisticTransactionDB, Options};
-
+use std::path::PathBuf;
 use tokio::sync::oneshot;
 use utils::config::{Config, utils::AsKey};
-
-use crate::*;
-
-use super::{CF_BLOBS, RocksDbStore};
 
 impl RocksDbStore {
     pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
@@ -34,20 +30,6 @@ impl RocksDbStore {
             .ok()?;
 
         let mut cfs = Vec::new();
-
-        // Bitmaps
-        for subspace in [
-            SUBSPACE_BITMAP_ID,
-            SUBSPACE_BITMAP_TAG,
-            SUBSPACE_BITMAP_TEXT,
-        ] {
-            let mut cf_opts = Options::default();
-            cf_opts.set_max_write_buffer_number(16);
-            cfs.push(ColumnFamilyDescriptor::new(
-                std::str::from_utf8(&[subspace]).unwrap(),
-                cf_opts,
-            ));
-        }
 
         // Counters
         for subspace in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
@@ -75,7 +57,7 @@ impl RocksDbStore {
             SUBSPACE_ACL,
             SUBSPACE_DIRECTORY,
             SUBSPACE_TASK_QUEUE,
-            SUBSPACE_BLOB_RESERVE,
+            SUBSPACE_BLOB_EXTRA,
             SUBSPACE_BLOB_LINK,
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,
@@ -84,12 +66,16 @@ impl RocksDbStore {
             SUBSPACE_QUEUE_EVENT,
             SUBSPACE_REPORT_OUT,
             SUBSPACE_REPORT_IN,
-            SUBSPACE_FTS_INDEX,
             SUBSPACE_LOGS,
             SUBSPACE_BLOBS,
             SUBSPACE_TELEMETRY_SPAN,
             SUBSPACE_TELEMETRY_METRIC,
-            SUBSPACE_TELEMETRY_INDEX,
+            SUBSPACE_SEARCH_INDEX,
+            LEGACY_SUBSPACE_BITMAP_ID,
+            LEGACY_SUBSPACE_BITMAP_TAG,
+            LEGACY_SUBSPACE_BITMAP_TEXT,
+            LEGACY_SUBSPACE_FTS_INDEX,
+            LEGACY_SUBSPACE_TELEMETRY_INDEX,
         ] {
             let cf_opts = Options::default();
             cfs.push(ColumnFamilyDescriptor::new(

@@ -4,15 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
 use common::{Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
-    method::query::{Comparator, Filter, QueryRequest, QueryResponse},
+    method::query::{Filter, QueryRequest, QueryResponse},
     object::contact::{ContactCard, ContactCardComparator, ContactCardFilter},
     request::MaybeInvalid,
 };
-use nlp::tokenizers::word::WordTokenizer;
-use store::{SerializeInfallible, backend::MAX_TOKEN_LENGTH, query, roaring::RoaringBitmap};
+use store::{
+    IterateParams, U32_LEN, U64_LEN, ValueKey,
+    roaring::RoaringBitmap,
+    search::{ContactSearchField, SearchComparator, SearchFilter, SearchQuery},
+    write::{IndexPropertyClass, SearchIndex, ValueClass, key::DeserializeBigEndian},
+};
+use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
@@ -20,14 +26,19 @@ use types::{
 };
 use utils::sanitize_email;
 
-use crate::{JmapMethods, changes::state::JmapCacheState};
-
 pub trait ContactCardQuery: Sync + Send {
     fn contact_card_query(
         &self,
         request: QueryRequest<ContactCard>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
+}
+
+#[derive(Clone)]
+struct CreatedUpdated {
+    document_id: u32,
+    created: u64,
+    updated: u64,
 }
 
 impl ContactCardQuery for Server {
@@ -41,100 +52,274 @@ impl ContactCardQuery for Server {
         let cache = self
             .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
             .await?;
-        let filter_mask = (access_token.is_shared(account_id))
-            .then(|| cache.shared_items(access_token, [Acl::ReadItems], true));
+        let mut created_to_updated = Vec::new();
+
+        if request.filter.iter().any(|cond| {
+            matches!(
+                cond,
+                Filter::Property(
+                    ContactCardFilter::CreatedBefore(_)
+                        | ContactCardFilter::CreatedAfter(_)
+                        | ContactCardFilter::UpdatedBefore(_)
+                        | ContactCardFilter::UpdatedAfter(_)
+                )
+            )
+        }) || request.sort.as_ref().is_some_and(|v| {
+            v.iter().any(|sort| {
+                matches!(
+                    sort.property,
+                    ContactCardComparator::Created | ContactCardComparator::Updated
+                )
+            })
+        }) {
+            self.store()
+                .iterate(
+                    IterateParams::new(
+                        ValueKey {
+                            account_id,
+                            collection: Collection::ContactCard.into(),
+                            document_id: 0,
+                            class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                                property: ContactField::CreatedToUpdated.into(),
+                                value: 0,
+                            }),
+                        },
+                        ValueKey {
+                            account_id,
+                            collection: Collection::ContactCard.into(),
+                            document_id: 0,
+                            class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                                property: ContactField::CreatedToUpdated.into(),
+                                value: u64::MAX,
+                            }),
+                        },
+                    )
+                    .ascending(),
+                    |key, value| {
+                        created_to_updated.push(CreatedUpdated {
+                            document_id: key.deserialize_be_u32(key.len() - U32_LEN)?,
+                            created: key.deserialize_be_u64(key.len() - U32_LEN - U64_LEN)?,
+                            updated: value.deserialize_be_u64(0)?,
+                        });
+
+                        Ok(true)
+                    },
+                )
+                .await
+                .caused_by(trc::location!())?;
+        }
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
                 Filter::Property(cond) => match cond {
                     ContactCardFilter::InAddressBook(MaybeInvalid::Value(id)) => {
-                        filters.push(query::Filter::is_in_set(RoaringBitmap::from_iter(
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.children_ids(id.document_id()),
                         )))
                     }
-                    ContactCardFilter::Uid(uid) => {
-                        filters.push(query::Filter::eq(ContactField::Uid, uid.into_bytes()))
+                    ContactCardFilter::Name(value)
+                    | ContactCardFilter::NameGiven(value)
+                    | ContactCardFilter::NameSurname(value)
+                    | ContactCardFilter::NameSurname2(value) => {
+                        filters.push(SearchFilter::has_keyword(ContactSearchField::Name, value));
                     }
-                    ContactCardFilter::Email(email) => filters.push(query::Filter::eq(
-                        ContactField::Email,
-                        sanitize_email(&email).unwrap_or(email).into_bytes(),
+                    ContactCardFilter::Nickname(value) => {
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Nickname,
+                            value,
+                        ));
+                    }
+                    ContactCardFilter::Organization(value) => {
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Organization,
+                            value,
+                        ));
+                    }
+                    ContactCardFilter::Phone(value) => {
+                        filters.push(SearchFilter::has_keyword(ContactSearchField::Phone, value));
+                    }
+                    ContactCardFilter::OnlineService(value) => {
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::OnlineService,
+                            value,
+                        ));
+                    }
+                    ContactCardFilter::Address(value) => {
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Address,
+                            value,
+                        ));
+                    }
+                    ContactCardFilter::Note(value) => {
+                        filters.push(SearchFilter::has_text_detect(
+                            ContactSearchField::Note,
+                            value,
+                            self.core.jmap.default_language,
+                        ));
+                    }
+                    ContactCardFilter::HasMember(value) => {
+                        filters.push(SearchFilter::has_keyword(ContactSearchField::Member, value));
+                    }
+                    ContactCardFilter::Kind(value) => {
+                        filters.push(SearchFilter::eq(ContactSearchField::Kind, value));
+                    }
+                    ContactCardFilter::Uid(value) => {
+                        filters.push(SearchFilter::eq(ContactSearchField::Uid, value))
+                    }
+                    ContactCardFilter::Email(email) => filters.push(SearchFilter::has_keyword(
+                        ContactSearchField::Email,
+                        sanitize_email(&email).unwrap_or(email),
                     )),
                     ContactCardFilter::Text(value) => {
-                        for token in WordTokenizer::new(&value, MAX_TOKEN_LENGTH) {
-                            filters.push(query::Filter::eq(
-                                ContactField::Text,
-                                token.word.into_owned().into_bytes(),
-                            ));
-                        }
+                        filters.push(SearchFilter::Or);
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Name,
+                            value.clone(),
+                        ));
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Nickname,
+                            value.clone(),
+                        ));
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Organization,
+                            value.clone(),
+                        ));
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Email,
+                            value.clone(),
+                        ));
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Phone,
+                            value.clone(),
+                        ));
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::OnlineService,
+                            value.clone(),
+                        ));
+                        filters.push(SearchFilter::has_keyword(
+                            ContactSearchField::Address,
+                            value.clone(),
+                        ));
+                        filters.push(SearchFilter::has_text_detect(
+                            ContactSearchField::Note,
+                            value,
+                            self.core.jmap.default_language,
+                        ));
+                        filters.push(SearchFilter::End);
                     }
-                    ContactCardFilter::CreatedBefore(before) => filters.push(query::Filter::lt(
-                        ContactField::Created,
-                        (before.timestamp() as u64).serialize(),
-                    )),
-                    ContactCardFilter::CreatedAfter(after) => filters.push(query::Filter::gt(
-                        ContactField::Created,
-                        (after.timestamp() as u64).serialize(),
-                    )),
-                    ContactCardFilter::UpdatedBefore(before) => filters.push(query::Filter::lt(
-                        ContactField::Updated,
-                        (before.timestamp() as u64).serialize(),
-                    )),
-                    ContactCardFilter::UpdatedAfter(after) => filters.push(query::Filter::gt(
-                        ContactField::Updated,
-                        (after.timestamp() as u64).serialize(),
-                    )),
+                    ContactCardFilter::CreatedBefore(before) => {
+                        let before = before.timestamp() as u64;
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            created_to_updated
+                                .iter()
+                                .filter_map(|cu| (cu.created < before).then_some(cu.document_id)),
+                        )));
+                    }
+                    ContactCardFilter::CreatedAfter(after) => {
+                        let after = after.timestamp() as u64;
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            created_to_updated
+                                .iter()
+                                .filter_map(|cu| (cu.created > after).then_some(cu.document_id)),
+                        )));
+                    }
+                    ContactCardFilter::UpdatedBefore(before) => {
+                        let before = before.timestamp() as u64;
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            created_to_updated
+                                .iter()
+                                .filter_map(|cu| (cu.updated < before).then_some(cu.document_id)),
+                        )));
+                    }
+                    ContactCardFilter::UpdatedAfter(after) => {
+                        let after = after.timestamp() as u64;
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            created_to_updated
+                                .iter()
+                                .filter_map(|cu| (cu.updated > after).then_some(cu.document_id)),
+                        )));
+                    }
                     unsupported => {
                         return Err(trc::JmapEvent::UnsupportedFilter
                             .into_err()
                             .details(unsupported.into_string()));
                     }
                 },
-
-                Filter::And | Filter::Or | Filter::Not | Filter::Close => {
-                    filters.push(cond.into());
+                Filter::And => {
+                    filters.push(SearchFilter::And);
+                }
+                Filter::Or => {
+                    filters.push(SearchFilter::Or);
+                }
+                Filter::Not => {
+                    filters.push(SearchFilter::Not);
+                }
+                Filter::Close => {
+                    filters.push(SearchFilter::End);
                 }
             }
         }
 
-        let mut result_set = self
-            .filter(account_id, Collection::ContactCard, filters)
+        let comparators = request
+            .sort
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|comparator| match comparator.property {
+                ContactCardComparator::Created => Ok(SearchComparator::sorted_set(
+                    created_to_updated
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, u)| (u.document_id, idx as u32))
+                        .collect(),
+                    comparator.is_ascending,
+                )),
+                ContactCardComparator::Updated => {
+                    let mut updated = created_to_updated.clone();
+                    updated.sort_by(|a, b| a.updated.cmp(&b.updated));
+                    Ok(SearchComparator::sorted_set(
+                        updated
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, u)| (u.document_id, idx as u32))
+                            .collect(),
+                        comparator.is_ascending,
+                    ))
+                }
+                other => Err(trc::JmapEvent::UnsupportedSort
+                    .into_err()
+                    .details(other.into_string())),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let results = self
+            .search_store()
+            .query_account(
+                SearchQuery::new(SearchIndex::Contacts)
+                    .with_filters(filters)
+                    .with_comparators(comparators)
+                    .with_account_id(account_id)
+                    .with_mask(if access_token.is_shared(account_id) {
+                        cache.shared_items(access_token, [Acl::ReadItems], true)
+                    } else {
+                        cache.document_ids(false).collect()
+                    }),
+            )
             .await?;
 
-        if let Some(filter_mask) = filter_mask {
-            result_set.apply_mask(filter_mask);
-        }
+        let mut response = QueryResponseBuilder::new(
+            results.len(),
+            self.core.jmap.query_max_results,
+            cache.get_state(false),
+            &request,
+        );
 
-        let (response, paginate) = self
-            .build_query_response(result_set.results.len() as usize, cache.get_state(false), &request)
-            .await?;
-
-        if let Some(paginate) = paginate {
-            // Parse sort criteria
-            let mut comparators = Vec::with_capacity(request.sort.as_ref().map_or(1, |s| s.len()));
-            for comparator in request
-                .sort
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| vec![Comparator::descending(ContactCardComparator::Updated)])
-            {
-                comparators.push(match comparator.property {
-                    ContactCardComparator::Created => {
-                        query::Comparator::field(ContactField::Created, comparator.is_ascending)
-                    }
-                    ContactCardComparator::Updated => {
-                        query::Comparator::field(ContactField::Updated, comparator.is_ascending)
-                    }
-                    unsupported => {
-                        return Err(trc::JmapEvent::UnsupportedSort
-                            .into_err()
-                            .details(unsupported.into_string()));
-                    }
-                });
+        for document_id in results {
+            if !response.add(0, document_id) {
+                break;
             }
-
-            // Sort results
-            self.sort(result_set, comparators, paginate, response).await
-        } else {
-            Ok(response)
         }
+
+        response.build()
     }
 }

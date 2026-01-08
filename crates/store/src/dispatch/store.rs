@@ -4,39 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    ops::{BitAndAssign, Range},
-    time::Instant,
-};
-
-use compact_str::ToCompactString;
-use roaring::RoaringBitmap;
-use trc::{AddContext, StoreEvent};
-use types::collection::Collection;
-
+use super::DocumentSet;
 use crate::{
-    BitmapKey, Deserialize, IterateParams, Key, QueryResult, SUBSPACE_BITMAP_ID,
-    SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT, SUBSPACE_COUNTER, SUBSPACE_INDEXES, SUBSPACE_LOGS,
-    Store, U32_LEN, Value, ValueKey,
+    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_BLOB_EXTRA, SUBSPACE_COUNTER,
+    SUBSPACE_INDEXES, SUBSPACE_LOGS, Store, U32_LEN, Value, ValueKey,
     write::{
-        AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, BitmapClass, BitmapHash, Operation,
-        ReportClass, ValueClass, ValueOp,
+        AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, Operation, ReportClass, ValueClass,
+        ValueOp,
         key::{DeserializeBigEndian, KeySerializer},
         now,
     },
 };
-
-use super::DocumentSet;
-
-#[cfg(feature = "test_mode")]
-#[allow(clippy::type_complexity)]
-static BITMAPS: std::sync::LazyLock<
-    std::sync::Arc<
-        parking_lot::Mutex<std::collections::HashMap<Vec<u8>, std::collections::HashSet<u32>>>,
-    >,
-> = std::sync::LazyLock::new(|| {
-    std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()))
-});
+use compact_str::ToCompactString;
+use std::{ops::Range, time::Instant};
+use trc::{AddContext, StoreEvent};
+use types::collection::Collection;
 
 impl Store {
     pub async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -63,54 +45,6 @@ impl Store {
             Self::None => Err(trc::StoreEvent::NotConfigured.into()),
         }
         .caused_by(trc::location!())
-    }
-
-    pub async fn get_bitmap(
-        &self,
-        key: BitmapKey<BitmapClass>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        match self {
-            #[cfg(feature = "sqlite")]
-            Self::SQLite(store) => store.get_bitmap(key).await,
-            #[cfg(feature = "foundation")]
-            Self::FoundationDb(store) => store.get_bitmap(key).await,
-            #[cfg(feature = "postgres")]
-            Self::PostgreSQL(store) => store.get_bitmap(key).await,
-            #[cfg(feature = "mysql")]
-            Self::MySQL(store) => store.get_bitmap(key).await,
-            #[cfg(feature = "rocks")]
-            Self::RocksDb(store) => store.get_bitmap(key).await,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-            Self::SQLReadReplica(store) => store.get_bitmap(key).await,
-            // SPDX-SnippetEnd
-            Self::None => Err(trc::StoreEvent::NotConfigured.into()),
-        }
-        .caused_by(trc::location!())
-    }
-
-    pub async fn get_bitmaps_intersection(
-        &self,
-        keys: Vec<BitmapKey<BitmapClass>>,
-    ) -> trc::Result<Option<RoaringBitmap>> {
-        let mut result: Option<RoaringBitmap> = None;
-        for key in keys {
-            if let Some(bitmap) = self.get_bitmap(key).await.caused_by(trc::location!())? {
-                if let Some(result) = &mut result {
-                    result.bitand_assign(&bitmap);
-                    if result.is_empty() {
-                        break;
-                    }
-                } else {
-                    result = Some(bitmap);
-                }
-            } else {
-                return Ok(None);
-            }
-        }
-        Ok(result)
     }
 
     pub async fn iterate<T: Key>(
@@ -183,11 +117,11 @@ impl Store {
     ) -> trc::Result<T> {
         let result = match self {
             #[cfg(feature = "sqlite")]
-            Self::SQLite(store) => store.query(query, &params).await,
+            Self::SQLite(store) => store.sql_query(query, &params).await,
             #[cfg(feature = "postgres")]
-            Self::PostgreSQL(store) => store.query(query, &params).await,
+            Self::PostgreSQL(store) => store.sql_query(query, &params).await,
             #[cfg(feature = "mysql")]
-            Self::MySQL(store) => store.query(query, &params).await,
+            Self::MySQL(store) => store.sql_query(query, &params).await,
             _ => Err(trc::StoreEvent::NotSupported.into_err()),
         };
 
@@ -411,12 +345,10 @@ impl Store {
 
     pub async fn danger_destroy_account(&self, account_id: u32) -> trc::Result<()> {
         for subspace in [
-            SUBSPACE_BITMAP_ID,
-            SUBSPACE_BITMAP_TAG,
-            SUBSPACE_BITMAP_TEXT,
             SUBSPACE_LOGS,
             SUBSPACE_INDEXES,
             SUBSPACE_COUNTER,
+            SUBSPACE_BLOB_EXTRA,
         ] {
             self.delete_range(
                 AnyKey {
@@ -435,16 +367,6 @@ impl Store {
         for (from_class, to_class) in [
             (ValueClass::Acl(account_id), ValueClass::Acl(account_id + 1)),
             (ValueClass::Property(0), ValueClass::Property(0)),
-            (
-                ValueClass::FtsIndex(BitmapHash {
-                    hash: [0u8; 8],
-                    len: 0,
-                }),
-                ValueClass::FtsIndex(BitmapHash {
-                    hash: [u8::MAX; 8],
-                    len: u8::MAX,
-                }),
-            ),
         ] {
             self.delete_range(
                 ValueKey {
@@ -534,367 +456,5 @@ impl Store {
             Self::None => Err(trc::StoreEvent::NotConfigured.into()),
         }
         .caused_by(trc::location!())
-    }
-
-    #[cfg(feature = "test_mode")]
-    pub async fn destroy(&self) {
-        use crate::*;
-
-        for subspace in [
-            SUBSPACE_ACL,
-            SUBSPACE_BITMAP_ID,
-            SUBSPACE_BITMAP_TAG,
-            SUBSPACE_BITMAP_TEXT,
-            SUBSPACE_DIRECTORY,
-            SUBSPACE_TASK_QUEUE,
-            SUBSPACE_INDEXES,
-            SUBSPACE_BLOB_RESERVE,
-            SUBSPACE_BLOB_LINK,
-            SUBSPACE_LOGS,
-            SUBSPACE_IN_MEMORY_COUNTER,
-            SUBSPACE_IN_MEMORY_VALUE,
-            SUBSPACE_COUNTER,
-            SUBSPACE_PROPERTY,
-            SUBSPACE_SETTINGS,
-            SUBSPACE_BLOBS,
-            SUBSPACE_QUEUE_MESSAGE,
-            SUBSPACE_QUEUE_EVENT,
-            SUBSPACE_QUOTA,
-            SUBSPACE_REPORT_OUT,
-            SUBSPACE_REPORT_IN,
-            SUBSPACE_FTS_INDEX,
-            SUBSPACE_TELEMETRY_SPAN,
-            SUBSPACE_TELEMETRY_METRIC,
-            SUBSPACE_TELEMETRY_INDEX,
-        ] {
-            self.delete_range(
-                AnyKey {
-                    subspace,
-                    key: &[0u8],
-                },
-                AnyKey {
-                    subspace,
-                    key: &[
-                        u8::MAX,
-                        u8::MAX,
-                        u8::MAX,
-                        u8::MAX,
-                        u8::MAX,
-                        u8::MAX,
-                        u8::MAX,
-                    ],
-                },
-            )
-            .await
-            .unwrap();
-        }
-
-        BITMAPS.lock().clear();
-    }
-
-    #[cfg(feature = "test_mode")]
-    pub async fn blob_expire_all(&self) {
-        use crate::{U64_LEN, write::BlobOp};
-
-        // Delete all temporary hashes
-        let from_key = ValueKey {
-            account_id: 0,
-            collection: 0,
-            document_id: 0,
-            class: ValueClass::Blob(BlobOp::Reserve {
-                hash: types::blob_hash::BlobHash::default(),
-                until: 0,
-            }),
-        };
-        let to_key = ValueKey {
-            account_id: u32::MAX,
-            collection: 0,
-            document_id: 0,
-            class: ValueClass::Blob(BlobOp::Reserve {
-                hash: types::blob_hash::BlobHash::default(),
-                until: 0,
-            }),
-        };
-        let mut batch = BatchBuilder::new();
-        let mut last_account_id = u32::MAX;
-        self.iterate(
-            IterateParams::new(from_key, to_key).ascending().no_values(),
-            |key, _| {
-                let account_id = key.deserialize_be_u32(0).caused_by(trc::location!())?;
-                if account_id != last_account_id {
-                    last_account_id = account_id;
-                    batch.with_account_id(account_id);
-                }
-
-                batch.any_op(Operation::Value {
-                    class: ValueClass::Blob(BlobOp::Reserve {
-                        hash: types::blob_hash::BlobHash::try_from_hash_slice(
-                            key.get(U32_LEN..U32_LEN + types::blob_hash::BLOB_HASH_LEN)
-                                .unwrap(),
-                        )
-                        .unwrap(),
-                        until: key
-                            .deserialize_be_u64(key.len() - U64_LEN)
-                            .caused_by(trc::location!())?,
-                    }),
-                    op: ValueOp::Clear,
-                });
-
-                Ok(true)
-            },
-        )
-        .await
-        .unwrap();
-        self.write(batch.build_all()).await.unwrap();
-    }
-
-    #[cfg(feature = "test_mode")]
-    pub async fn lookup_expire_all(&self) {
-        use crate::write::InMemoryClass;
-
-        // Delete all temporary counters
-        let from_key = ValueKey::from(ValueClass::InMemory(InMemoryClass::Key(vec![0u8])));
-        let to_key = ValueKey::from(ValueClass::InMemory(InMemoryClass::Key(vec![u8::MAX; 10])));
-
-        let mut expired_keys = Vec::new();
-        let mut expired_counters = Vec::new();
-
-        self.iterate(IterateParams::new(from_key, to_key), |key, value| {
-            let expiry = value.deserialize_be_u64(0).caused_by(trc::location!())?;
-            if expiry == 0 {
-                expired_counters.push(key.to_vec());
-            } else if expiry != u64::MAX {
-                expired_keys.push(key.to_vec());
-            }
-            Ok(true)
-        })
-        .await
-        .unwrap();
-
-        if !expired_keys.is_empty() {
-            let mut batch = BatchBuilder::new();
-            for key in expired_keys {
-                batch.any_op(Operation::Value {
-                    class: ValueClass::InMemory(InMemoryClass::Key(key)),
-                    op: ValueOp::Clear,
-                });
-                if batch.is_large_batch() {
-                    self.write(batch.build_all()).await.unwrap();
-                    batch = BatchBuilder::new();
-                }
-            }
-            if !batch.is_empty() {
-                self.write(batch.build_all()).await.unwrap();
-            }
-        }
-
-        if !expired_counters.is_empty() {
-            let mut batch = BatchBuilder::new();
-            for key in expired_counters {
-                batch.any_op(Operation::Value {
-                    class: ValueClass::InMemory(InMemoryClass::Counter(key.clone())),
-                    op: ValueOp::Clear,
-                });
-                batch.any_op(Operation::Value {
-                    class: ValueClass::InMemory(InMemoryClass::Key(key)),
-                    op: ValueOp::Clear,
-                });
-                if batch.is_large_batch() {
-                    self.write(batch.build_all()).await.unwrap();
-                    batch = BatchBuilder::new();
-                }
-            }
-            if !batch.is_empty() {
-                self.write(batch.build_all()).await.unwrap();
-            }
-        }
-    }
-
-    #[cfg(feature = "test_mode")]
-    #[allow(unused_variables)]
-    pub async fn assert_is_empty(&self, blob_store: crate::BlobStore) {
-        use utils::codec::leb128::Leb128Iterator;
-
-        use crate::*;
-
-        self.blob_expire_all().await;
-        self.lookup_expire_all().await;
-        self.purge_blobs(blob_store).await.unwrap();
-        self.purge_store().await.unwrap();
-
-        let store = self.clone();
-        let mut failed = false;
-
-        for (subspace, with_values) in [
-            (SUBSPACE_ACL, true),
-            //(SUBSPACE_DIRECTORY, true),
-            (SUBSPACE_TASK_QUEUE, true),
-            (SUBSPACE_IN_MEMORY_VALUE, true),
-            (SUBSPACE_IN_MEMORY_COUNTER, false),
-            (SUBSPACE_PROPERTY, true),
-            (SUBSPACE_SETTINGS, true),
-            (SUBSPACE_QUEUE_MESSAGE, true),
-            (SUBSPACE_QUEUE_EVENT, true),
-            (SUBSPACE_REPORT_OUT, true),
-            (SUBSPACE_REPORT_IN, true),
-            (SUBSPACE_FTS_INDEX, true),
-            (SUBSPACE_BLOB_RESERVE, true),
-            (SUBSPACE_BLOB_LINK, true),
-            (SUBSPACE_BLOBS, true),
-            (SUBSPACE_COUNTER, false),
-            (SUBSPACE_QUOTA, false),
-            (SUBSPACE_BLOBS, true),
-            (SUBSPACE_BITMAP_ID, false),
-            (SUBSPACE_BITMAP_TAG, false),
-            (SUBSPACE_BITMAP_TEXT, false),
-            (SUBSPACE_INDEXES, false),
-            (SUBSPACE_TELEMETRY_SPAN, true),
-            (SUBSPACE_TELEMETRY_METRIC, true),
-            (SUBSPACE_TELEMETRY_INDEX, true),
-        ] {
-            let from_key = crate::write::AnyKey {
-                subspace,
-                key: vec![0u8],
-            };
-            let to_key = crate::write::AnyKey {
-                subspace,
-                key: vec![u8::MAX; 10],
-            };
-
-            self.iterate(
-                IterateParams::new(from_key, to_key).set_values(with_values),
-                |key, value| {
-                    match subspace {
-                        SUBSPACE_BITMAP_ID | SUBSPACE_BITMAP_TAG | SUBSPACE_BITMAP_TEXT => {
-                            if key.get(0..4).unwrap_or_default() == u32::MAX.to_be_bytes() {
-                                return Ok(true);
-                            }
-
-                            const BM_DOCUMENT_IDS: u8 = 0;
-                            const BM_TAG: u8 = 1 << 6;
-                            const BM_TEXT: u8 = 1 << 7;
-                            const TAG_TEXT: u8 = 1 << 0;
-                            const TAG_STATIC: u8 = 1 << 1;
-
-                            match key[5] {
-                                BM_DOCUMENT_IDS => {
-                                    print!("Found document ids bitmap");
-                                }
-                                BM_TAG => {
-                                    print!(
-                                        "Found tagged id {} bitmap",
-                                        key[7..].iter().next_leb128::<u32>().unwrap()
-                                    );
-                                }
-                                TAG_TEXT => {
-                                    print!(
-                                        "Found tagged text {:?} bitmap",
-                                        String::from_utf8_lossy(&key[7..])
-                                    );
-                                }
-                                TAG_STATIC => {
-                                    print!("Found tagged static {} bitmap", key[7]);
-                                }
-                                other => {
-                                    if other & BM_TEXT == BM_TEXT {
-                                        print!(
-                                            "Found text hash {:?} bitmap",
-                                            String::from_utf8_lossy(&key[7..])
-                                        );
-                                    } else {
-                                        print!("Found unknown bitmap");
-                                    }
-                                }
-                            }
-
-                            println!(
-                                concat!(
-                                    ", account {}, collection {},",
-                                    " family {}, field {}, key {:?}: {:?}"
-                                ),
-                                u32::from_be_bytes(key[0..4].try_into().unwrap()),
-                                key[4],
-                                key[5],
-                                key[6],
-                                key,
-                                value
-                            );
-                        }
-                        SUBSPACE_COUNTER if key.len() == U32_LEN + 1 || key.len() == U32_LEN => {
-                            // Message ID and change ID counters
-                            return Ok(true);
-                        }
-                        SUBSPACE_INDEXES => {
-                            println!(
-                                concat!(
-                                    "Found index key, account {}, collection {}, ",
-                                    "document {}, property {}, value {:?}: {:?}"
-                                ),
-                                u32::from_be_bytes(key[0..4].try_into().unwrap()),
-                                key[4],
-                                u32::from_be_bytes(key[key.len() - 4..].try_into().unwrap()),
-                                key[5],
-                                String::from_utf8_lossy(&key[6..key.len() - 4]),
-                                key
-                            );
-                        }
-                        _ => {
-                            println!(
-                                "Found key in {:?}: {:?} ({:?}) = {:?} ({:?})",
-                                char::from(subspace),
-                                key,
-                                String::from_utf8_lossy(key),
-                                value,
-                                String::from_utf8_lossy(value)
-                            );
-                        }
-                    }
-                    failed = true;
-
-                    Ok(true)
-                },
-            )
-            .await
-            .unwrap();
-        }
-
-        // Delete logs and counters
-        self.delete_range(
-            AnyKey {
-                subspace: SUBSPACE_LOGS,
-                key: &[0u8],
-            },
-            AnyKey {
-                subspace: SUBSPACE_LOGS,
-                key: &[
-                    u8::MAX,
-                    u8::MAX,
-                    u8::MAX,
-                    u8::MAX,
-                    u8::MAX,
-                    u8::MAX,
-                    u8::MAX,
-                ],
-            },
-        )
-        .await
-        .unwrap();
-
-        self.delete_range(
-            AnyKey {
-                subspace: SUBSPACE_COUNTER,
-                key: &[0u8],
-            },
-            AnyKey {
-                subspace: SUBSPACE_COUNTER,
-                key: (u32::MAX / 2).to_be_bytes().as_slice(),
-            },
-        )
-        .await
-        .unwrap();
-
-        if failed {
-            panic!("Store is not empty.");
-        }
     }
 }

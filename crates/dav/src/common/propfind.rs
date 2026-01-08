@@ -56,10 +56,13 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::sync::Arc;
 use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
+use store::{
     ahash::AHashMap,
     query::log::{Change, Query},
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive},
 };
 use trc::AddContext;
 use types::{
@@ -431,7 +434,12 @@ impl PropFindRequestHandler for Server {
                     item.document_id == SCHEDULE_INBOX_ID,
                 )
             } else if let Some(archive) = self
-                .get_archive(account_id, collection, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    collection,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
             {

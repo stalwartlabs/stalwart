@@ -6,8 +6,8 @@
 
 use super::{SqliteStore, into_error};
 use crate::{
-    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA, U64_LEN,
-    write::{AssignedIds, Batch, BitmapClass, Operation, ValueClass, ValueOp},
+    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
+    write::{AssignedIds, Batch, MergeResult, Operation, ValueClass, ValueOp},
 };
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use trc::AddContext;
@@ -56,7 +56,7 @@ impl SqliteStore {
                     } => {
                         account_id = *account_id_;
                         if has_changes {
-                            change_id = result.last_change_id(account_id)?;
+                            change_id = result.set_current_change_id(account_id)?;
                         }
                     }
                     Operation::Collection {
@@ -74,15 +74,7 @@ impl SqliteStore {
                         let table = char::from(class.subspace(collection));
 
                         match op {
-                            ValueOp::Set {
-                                value,
-                                version_offset,
-                            } => {
-                                if let Some(offset) = version_offset {
-                                    value[*offset..*offset + U64_LEN]
-                                        .copy_from_slice(&change_id.to_be_bytes());
-                                }
-
+                            ValueOp::Set(value) => {
                                 trx.prepare_cached(&format!(
                                     "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
                                     table
@@ -92,6 +84,63 @@ impl SqliteStore {
                                 .execute([&key, value])
                                 .map_err(into_error)
                                 .caused_by(trc::location!())?;
+                            }
+                            ValueOp::SetFnc(set_op) => {
+                                let value = (set_op.fnc)(&set_op.params, &result)?;
+                                trx.prepare_cached(&format!(
+                                    "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
+                                    table
+                                ))
+                                .map_err(into_error)
+                                .caused_by(trc::location!())?
+                                .execute([&key, &value])
+                                .map_err(into_error)
+                                .caused_by(trc::location!())?;
+                            }
+                            ValueOp::MergeFnc(merge_op) => {
+                                let merge_result = trx
+                                    .prepare_cached(&format!("SELECT v FROM {} WHERE k = ?", table))
+                                    .map_err(into_error)
+                                    .caused_by(trc::location!())?
+                                    .query_row([&key], |row| {
+                                        Ok((merge_op.fnc)(
+                                            &merge_op.params,
+                                            &result,
+                                            Some(row.get_ref(0)?.as_bytes()?),
+                                        ))
+                                    })
+                                    .optional()
+                                    .map_err(into_error)
+                                    .caused_by(trc::location!())?
+                                    .unwrap_or_else(|| {
+                                        (merge_op.fnc)(&merge_op.params, &result, None)
+                                    })?;
+
+                                match merge_result {
+                                    MergeResult::Update(value) => {
+                                        trx.prepare_cached(&format!(
+                                            "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
+                                            table
+                                        ))
+                                        .map_err(into_error)
+                                        .caused_by(trc::location!())?
+                                        .execute([&key, &value])
+                                        .map_err(into_error)
+                                        .caused_by(trc::location!())?;
+                                    }
+                                    MergeResult::Delete => {
+                                        trx.prepare_cached(&format!(
+                                            "DELETE FROM {} WHERE k = ?",
+                                            table
+                                        ))
+                                        .map_err(into_error)
+                                        .caused_by(trc::location!())?
+                                        .execute([&key])
+                                        .map_err(into_error)
+                                        .caused_by(trc::location!())?;
+                                    }
+                                    MergeResult::Skip => (),
+                                }
                             }
                             ValueOp::AtomicAdd(by) => {
                                 if *by >= 0 {
@@ -135,29 +184,6 @@ impl SqliteStore {
                                     .caused_by(trc::location!())?,
                                 );
                             }
-                            ValueOp::Merge(merge) => {
-                                let value = trx
-                                    .prepare_cached(&format!("SELECT v FROM {} WHERE k = ?", table))
-                                    .map_err(into_error)
-                                    .caused_by(trc::location!())?
-                                    .query_row([&key], |row| {
-                                        Ok((merge.fnc)(Some(row.get_ref(0)?.as_bytes()?)))
-                                    })
-                                    .optional()
-                                    .map_err(into_error)
-                                    .caused_by(trc::location!())?
-                                    .unwrap_or_else(|| (merge.fnc)(None))?;
-
-                                trx.prepare_cached(&format!(
-                                    "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
-                                    table
-                                ))
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?
-                                .execute([&key, &value])
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?;
-                            }
                             ValueOp::Clear => {
                                 trx.prepare_cached(&format!("DELETE FROM {} WHERE k = ?", table))
                                     .map_err(into_error)
@@ -193,39 +219,6 @@ impl SqliteStore {
                                 .map_err(into_error)
                                 .caused_by(trc::location!())?;
                         }
-                    }
-                    Operation::Bitmap { class, set } => {
-                        let is_document_id = matches!(class, BitmapClass::DocumentIds);
-                        let key = class.serialize(account_id, collection, document_id, 0);
-                        let table = char::from(class.subspace());
-
-                        if *set {
-                            if is_document_id {
-                                trx.prepare_cached("INSERT INTO b (k) VALUES (?)")
-                                    .map_err(into_error)
-                                    .caused_by(trc::location!())?
-                                    .execute(params![&key])
-                                    .map_err(into_error)
-                                    .caused_by(trc::location!())?;
-                            } else {
-                                trx.prepare_cached(&format!(
-                                    "INSERT OR IGNORE INTO {} (k) VALUES (?)",
-                                    table
-                                ))
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?
-                                .execute(params![&key])
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?;
-                            }
-                        } else {
-                            trx.prepare_cached(&format!("DELETE FROM {} WHERE k = ?", table))
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?
-                                .execute(params![&key])
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?;
-                        };
                     }
                     Operation::Log { collection, set } => {
                         let key = LogKey {

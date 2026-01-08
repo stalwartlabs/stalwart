@@ -97,32 +97,37 @@ impl Server {
         // SPDX-License-Identifier: LicenseRef-SEL
 
         #[cfg(feature = "enterprise")]
-        if self.is_enterprise_edition()
-            && let Some(tenant_id) = tenant_id
         {
-            // Limit tenant permissions
+            use directory::{QueryParams, ROLE_USER};
 
-            use directory::QueryParams;
-            permissions.intersection(&self.get_role_permissions(tenant_id).await?.enabled);
+            if let Some(tenant_id) = tenant_id {
+                if self.is_enterprise_edition() {
+                    // Limit tenant permissions
+                    permissions.intersection(&self.get_role_permissions(tenant_id).await?.enabled);
 
-            // Obtain tenant quota
-            tenant = Some(TenantInfo {
-                id: tenant_id,
-                quota: self
-                    .store()
-                    .query(QueryParams::id(tenant_id).with_return_member_of(false))
-                    .await
-                    .caused_by(trc::location!())?
-                    .ok_or_else(|| {
-                        trc::SecurityEvent::Unauthorized
-                            .into_err()
-                            .details("Tenant not found")
-                            .id(tenant_id)
-                            .caused_by(trc::location!())
-                    })?
-                    .quota()
-                    .unwrap_or_default(),
-            });
+                    // Obtain tenant quota
+                    tenant = Some(TenantInfo {
+                        id: tenant_id,
+                        quota: self
+                            .store()
+                            .query(QueryParams::id(tenant_id).with_return_member_of(false))
+                            .await
+                            .caused_by(trc::location!())?
+                            .ok_or_else(|| {
+                                trc::SecurityEvent::Unauthorized
+                                    .into_err()
+                                    .details("Tenant not found")
+                                    .id(tenant_id)
+                                    .caused_by(trc::location!())
+                            })?
+                            .quota()
+                            .unwrap_or_default(),
+                    });
+                } else {
+                    // Enterprise edition downgrade, remove any tenant administrator permissions
+                    permissions.intersection(&self.get_role_permissions(ROLE_USER).await?.enabled);
+                }
+            }
         }
 
         // SPDX-SnippetEnd
@@ -411,6 +416,11 @@ impl AccessToken {
 
     pub fn with_permission(mut self, permission: Permission) -> Self {
         self.permissions.set(permission.id() as usize);
+        self
+    }
+
+    pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
+        self.tenant = tenant_id.map(|id| TenantInfo { id, quota: 0 });
         self
     }
 

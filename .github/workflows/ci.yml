@@ -12,7 +12,7 @@ on:
         default: false
         type: boolean
   push:
-     tags: ["v*.*.*"]
+    tags: ["v*.*.*"]
 
 env:
   SCCACHE_GHA_ENABLED: true
@@ -57,13 +57,13 @@ jobs:
           password: ${{secrets.DOCKERHUB_TOKEN}}
 
       - name: Download ${{matrix.variant}} meta bake definition
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: bake-meta-${{matrix.variant}}
           path: ${{ runner.temp }}/${{matrix.variant}}
 
       - name: Download ${{matrix.variant}} digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ${{ runner.temp }}/${{matrix.variant}}/digests
           pattern: digests-${{matrix.variant}}-*
@@ -113,41 +113,41 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             platform: linux/amd64
-            suffix: ''
-            build_env: ''
+            suffix: ""
+            build_env: ""
           - target: x86_64-unknown-linux-musl
             platform: linux/amd64
-            suffix: '-alpine'
-            build_env: ''
+            suffix: "-alpine"
+            build_env: ""
           - target: aarch64-unknown-linux-gnu
             platform: linux/arm64
-            suffix: ''
-            build_env: 'JEMALLOC_SYS_WITH_LG_PAGE=16 '
+            suffix: ""
+            build_env: "JEMALLOC_SYS_WITH_LG_PAGE=16 "
           - target: aarch64-unknown-linux-musl
             platform: linux/arm64
-            suffix: '-alpine'
-            build_env: 'JEMALLOC_SYS_WITH_LG_PAGE=16 '
+            suffix: "-alpine"
+            build_env: "JEMALLOC_SYS_WITH_LG_PAGE=16 "
           - target: armv7-unknown-linux-gnueabihf
             platform: linux/arm/v7
-            suffix: ''
-            build_env: 'JEMALLOC_SYS_WITH_LG_PAGE=16 '
+            suffix: ""
+            build_env: "JEMALLOC_SYS_WITH_LG_PAGE=16 "
           - target: armv7-unknown-linux-musleabihf
             platform: linux/arm/v7
-            suffix: '-alpine'
-            build_env: 'JEMALLOC_SYS_WITH_LG_PAGE=16 '
+            suffix: "-alpine"
+            build_env: "JEMALLOC_SYS_WITH_LG_PAGE=16 "
           - target: arm-unknown-linux-gnueabihf
             platform: linux/arm/v6
-            suffix: ''
-            build_env: ''
+            suffix: ""
+            build_env: ""
           - target: arm-unknown-linux-musleabihf
             platform: linux/arm/v6
-            suffix: '-alpine'
-            build_env: ''
+            suffix: "-alpine"
+            build_env: ""
     name: Build / ${{matrix.target}}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v6.0.1
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -182,7 +182,7 @@ jobs:
           echo "checksum=$(yq -p toml -oy '.package[] | select((.source | contains("")) or (.checksum | contains("")))' Cargo.lock | sha256sum | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Cache apt
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: apt-cache
         with:
           path: |
@@ -191,7 +191,7 @@ jobs:
           key: apt-cache-${{ hashFiles('Dockerfile.build') }}
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: cargo-cache
         with:
           path: |
@@ -247,7 +247,7 @@ jobs:
           targets: ${{(github.event_name == 'push' || inputs.Docker) && 'build,image' || 'build'}}
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: artifact-${{matrix.target}}
           path: |
@@ -264,7 +264,7 @@ jobs:
 
       - name: Upload digest
         if: github.event_name == 'push' || inputs.Docker
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: digests-${{matrix.suffix == '' && 'gnu' || 'musl'}}-${{ matrix.target }}
           path: ${{ runner.temp }}/digests/*
@@ -272,7 +272,7 @@ jobs:
           retention-days: 1
 
       - name: Upload GNU meta bake definition
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: (github.event_name == 'push' || inputs.Docker) && endsWith(matrix.target,'gnu') && startsWith(matrix.target,'x86')
         with:
           name: bake-meta-gnu
@@ -281,7 +281,7 @@ jobs:
           retention-days: 1
 
       - name: Upload musl meta bake definition
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: (github.event_name == 'push' || inputs.Docker) && endsWith(matrix.target,'musl') && startsWith(matrix.target,'x86')
         with:
           name: bake-meta-musl
@@ -296,12 +296,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        #   - target: aarch64-pc-windows-msvc
+          #   - target: aarch64-pc-windows-msvc
           - target: x86_64-pc-windows-msvc
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v6.0.1
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -311,14 +311,14 @@ jobs:
       - name: Build
         run: |
           rustup target add ${{matrix.target}}
-          cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "sqlite postgres mysql rocks elastic s3 redis azure nats enterprise"
+          cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise"
           cargo build --release --target ${{matrix.target}} -p stalwart-cli
           mkdir -p artifacts
           mv ./target/${{matrix.target}}/release/stalwart.exe ./artifacts/stalwart.exe
           mv ./target/${{matrix.target}}/release/stalwart-cli.exe ./artifacts/stalwart-cli.exe
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: artifact-${{matrix.target}}
           path: artifacts
@@ -334,36 +334,38 @@ jobs:
           - target: x86_64-apple-darwin
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v6.0.1
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           disable_annotations: true
 
-      - name: Build FoundationDB Edition
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          rustup target add ${{matrix.target}}
-          # Get latest FoundationDB installer
-          curl --retry 5 -Lso foundationdb.pkg "$(gh api -X GET /repos/apple/foundationdb/releases --jq '.[] | select(.prerelease == false) | .assets[] | select(.name | test("${{startsWith(matrix.target, 'x86') && 'x86_64' || 'arm64'}}" + ".pkg$")) | .browser_download_url' | head -n1)"
-          sudo installer -allowUntrusted -dumplog -pkg foundationdb.pkg -target /
-          cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "foundationdb elastic s3 redis nats enterprise"
-          mkdir -p artifacts
-          mv ./target/${{matrix.target}}/release/stalwart ./artifacts/stalwart-foundationdb
+      #- name: Build FoundationDB Edition
+      #  env:
+      #    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #  run: |
+      #    rustup target add ${{matrix.target}}
+      #    # Get latest FoundationDB installer
+      #    curl --retry 5 -Lso foundationdb.pkg "$(gh api -X GET /repos/apple/foundationdb/releases --jq '.[] | select(.prerelease == false) | .assets[] | select(.name | test("${{startsWith(matrix.target, 'x86') && 'x86_64' || 'arm64'}}" + ".pkg$")) | .browser_download_url' | head -n1)"
+      #    echo "=== Package contents ==="
+      #    pkgutil --payload-files foundationdb.pkg || true
+      #    sudo installer -allowUntrusted -verbose -dumplog -pkg foundationdb.pkg -target /
+      #    cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "foundationdb s3 redis nats enterprise"
+      #    mkdir -p artifacts
+      #    mv ./target/${{matrix.target}}/release/stalwart ./artifacts/stalwart-foundationdb
 
       - name: Build
         run: |
           rustup target add ${{matrix.target}}
-          cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "sqlite postgres mysql rocks elastic s3 redis azure nats enterprise"
+          cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise"
           cargo build --release --target ${{matrix.target}} -p stalwart-cli
           mkdir -p artifacts
           mv ./target/${{matrix.target}}/release/stalwart ./artifacts/stalwart
           mv ./target/${{matrix.target}}/release/stalwart-cli ./artifacts/stalwart-cli
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: artifact-${{matrix.target}}
           path: artifacts
@@ -379,7 +381,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: archive
           pattern: artifact-*

@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use self::tokenizer::TokenMap;
+use compact_str::CompactString;
+use regex::Regex;
 use std::{
     borrow::Cow,
     fmt::{Display, Formatter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     time::Duration,
 };
+use utils::config::{Rate, utils::ParseValue};
 
 pub const V_RECIPIENT: u32 = 0;
 pub const V_RECIPIENT_DOMAIN: u32 = 1;
@@ -80,12 +84,6 @@ pub const VARIABLES_MAP: &[(&str, u32)] = &[
     ("size", V_SIZE),
     ("queue_age", V_QUEUE_AGE),
 ];
-
-use compact_str::CompactString;
-use regex::Regex;
-use utils::config::{Rate, utils::ParseValue};
-
-use self::tokenizer::TokenMap;
 
 pub mod eval;
 pub mod functions;

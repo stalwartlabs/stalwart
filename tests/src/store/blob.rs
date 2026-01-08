@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::store::{CONFIG, TempDir, cleanup::store_destroy};
 use ahash::AHashMap;
+use common::{Core, Inner, Server, config::storage::Storage};
+use email::message::metadata::MessageMetadata;
+use http::management::stores::destroy_account_blobs;
+use std::sync::Arc;
 use store::{
-    BlobStore, SerializeInfallible, Stores,
-    write::{BatchBuilder, BlobOp, blob::BlobQuota, now},
+    BlobStore, Serialize, SerializeInfallible, Stores,
+    write::{Archiver, BatchBuilder, BlobLink, BlobOp, ValueClass, blob::BlobQuota, now},
 };
-use types::{blob::BlobClass, blob_hash::BlobHash, collection::Collection};
+use types::{blob::BlobClass, blob_hash::BlobHash, collection::Collection, field::EmailField};
 use utils::config::Config;
-
-use crate::store::{CONFIG, TempDir};
 
 #[tokio::test]
 pub async fn blob_tests() {
@@ -30,10 +33,21 @@ pub async fn blob_tests() {
         println!("Testing blob management on store {}...", store_id);
 
         // Init store
-        store.destroy().await;
+        store_destroy(&store).await;
 
         // Test internal blob store
         let blob_store: BlobStore = store.clone().into();
+        let server = Server {
+            inner: Arc::new(Inner::default()),
+            core: Arc::new(Core {
+                storage: Storage {
+                    data: store.clone(),
+                    blob: blob_store.clone(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        };
 
         // Blob hash exists
         let hash = BlobHash::generate(b"abc".as_slice());
@@ -46,8 +60,8 @@ pub async fn blob_tests() {
                 BatchBuilder::new()
                     .with_account_id(0)
                     .set(
-                        BlobOp::Reserve {
-                            until,
+                        BlobOp::Link {
+                            to: BlobLink::Temporary { until },
                             hash: hash.clone(),
                         },
                         1024u32.serialize(),
@@ -165,26 +179,54 @@ pub async fn blob_tests() {
         .enumerate()
         {
             let hash = BlobHash::generate(blob.as_slice());
-            let blob_op = if let Some(until) = expiry_times.get(blob) {
-                BlobOp::Reserve {
-                    until: *until,
-                    hash: hash.clone(),
+            let mut batch = BatchBuilder::new();
+            batch
+                .with_account_id(if document_id > 0 { 0 } else { 1 })
+                .with_collection(Collection::Email)
+                .with_document(document_id as u32);
+            if let Some(until) = expiry_times.get(blob) {
+                if !blob_value.is_empty() {
+                    batch.set(
+                        BlobOp::Quota {
+                            hash: hash.clone(),
+                            until: *until,
+                        },
+                        blob_value,
+                    );
                 }
+                batch.set(
+                    BlobOp::Link {
+                        hash: hash.clone(),
+                        to: BlobLink::Temporary { until: *until },
+                    },
+                    vec![],
+                );
             } else {
-                BlobOp::Link { hash: hash.clone() }
+                batch
+                    .set(
+                        BlobOp::Link {
+                            hash: hash.clone(),
+                            to: BlobLink::Document,
+                        },
+                        vec![],
+                    )
+                    .set(
+                        ValueClass::Property(EmailField::Metadata.into()),
+                        Archiver::new(MessageMetadata {
+                            contents: Default::default(),
+                            rcvd_attach: Default::default(),
+                            blob_hash: hash.clone(),
+                            blob_body_offset: Default::default(),
+                            preview: Default::default(),
+                            raw_headers: Default::default(),
+                        })
+                        .serialize()
+                        .unwrap(),
+                    );
             };
-            store
-                .write(
-                    BatchBuilder::new()
-                        .with_account_id(if document_id > 0 { 0 } else { 1 })
-                        .with_collection(Collection::Email)
-                        .update_document(document_id as u32)
-                        .set(blob_op, blob_value)
-                        .set(BlobOp::Commit { hash: hash.clone() }, vec![])
-                        .build_all(),
-                )
-                .await
-                .unwrap();
+            batch.set(BlobOp::Commit { hash: hash.clone() }, vec![]);
+
+            store.write(batch.build_all()).await.unwrap();
             blob_store
                 .put_blob(hash.as_ref(), blob.as_slice())
                 .await
@@ -291,9 +333,10 @@ pub async fn blob_tests() {
                 BatchBuilder::new()
                     .with_account_id(0)
                     .with_collection(Collection::Email)
-                    .update_document(2)
+                    .with_document(2)
                     .clear(BlobOp::Link {
                         hash: BlobHash::generate(b"789".as_slice()),
+                        to: BlobLink::Document,
                     })
                     .build_all(),
             )
@@ -360,7 +403,7 @@ pub async fn blob_tests() {
         }
 
         // Unlink all blobs from accountId 1 and purge
-        store.blob_hash_unlink_account(1).await.unwrap();
+        destroy_account_blobs(&server, 1).await.unwrap();
         store.purge_blobs(blob_store.clone()).await.unwrap();
 
         // Make sure only accountId 0's blobs are left

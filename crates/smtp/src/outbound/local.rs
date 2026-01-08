@@ -8,13 +8,13 @@ use crate::{
     outbound::DeliveryResult,
     queue::{
         Error, ErrorDetails, FROM_AUTHENTICATED, FROM_UNAUTHENTICATED_DMARC, HostResponse,
-        MessageSource, MessageWrapper, Status, UnexpectedResponse, quota::HasQueueQuota,
-        spool::SmtpSpool,
+        MessageSource, MessageWrapper, RCPT_SPAM_PAYLOAD, Status, UnexpectedResponse,
+        quota::HasQueueQuota, spool::SmtpSpool,
     },
     reporting::SmtpReporting,
 };
 use common::Server;
-use email::message::delivery::{IngestMessage, LocalDeliveryStatus, MailDelivery};
+use email::message::delivery::{IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery};
 use smtp_proto::Response;
 use trc::SieveEvent;
 
@@ -27,21 +27,25 @@ impl MessageWrapper {
     ) {
         // Prepare recipients list
         let mut pending_recipients = Vec::new();
-        let mut recipient_addresses = Vec::new();
+        let mut recipients = Vec::new();
         for &rcpt_idx in rcpt_idxs {
-            let rcpt_addr = self.message.recipients[rcpt_idx].address();
-            recipient_addresses.push(rcpt_addr.to_lowercase());
+            let rcpt = &self.message.recipients[rcpt_idx];
+            let rcpt_addr = rcpt.address();
+            recipients.push(IngestRecipient {
+                address: rcpt_addr.to_lowercase(),
+                is_spam: rcpt.flags & RCPT_SPAM_PAYLOAD != 0,
+            });
             pending_recipients.push((rcpt_idx, rcpt_addr));
         }
 
         // Deliver message
         let delivery_result = server
             .deliver_message(IngestMessage {
-                sender_address: self.message.return_path.clone(),
+                sender_address: self.message.return_path.to_string(),
                 sender_authenticated: self.message.flags
                     & (FROM_UNAUTHENTICATED_DMARC | FROM_AUTHENTICATED)
                     != 0,
-                recipients: recipient_addresses,
+                recipients,
                 message_blob: self.message.blob_hash.clone(),
                 message_size: self.message.size,
                 session_id: self.span_id,
@@ -65,7 +69,7 @@ impl MessageWrapper {
                     Status::TemporaryFailure(ErrorDetails {
                         entity: "localhost".into(),
                         details: Error::UnexpectedResponse(UnexpectedResponse {
-                            command: format!("RCPT TO:<{rcpt_addr}>"),
+                            command: format!("RCPT TO:<{rcpt_addr}>").into_boxed_str(),
                             response: Response {
                                 code: 451,
                                 esc: [4, 3, 0],
@@ -78,7 +82,7 @@ impl MessageWrapper {
                     Status::PermanentFailure(ErrorDetails {
                         entity: "localhost".into(),
                         details: Error::UnexpectedResponse(UnexpectedResponse {
-                            command: format!("RCPT TO:<{rcpt_addr}>"),
+                            command: format!("RCPT TO:<{rcpt_addr}>").into_boxed_str(),
                             response: Response {
                                 code: 550,
                                 esc: code,

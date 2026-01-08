@@ -7,11 +7,13 @@
 use common::{DavName, Server};
 use groupware::contact::ContactCard;
 use store::{
-    Serialize,
-    write::{Archiver, BatchBuilder, serialize::rkyv_deserialize},
+    Serialize, ValueKey,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
 use types::{collection::Collection, dead_property::DeadProperty, field::Field};
+
+use crate::get_document_ids;
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -27,8 +29,7 @@ pub struct ContactCardV2 {
 }
 
 pub(crate) async fn migrate_contacts_v013(server: &Server, account_id: u32) -> trc::Result<u64> {
-    let document_ids = server
-        .get_document_ids(account_id, Collection::ContactCard)
+    let document_ids = get_document_ids(server, account_id, Collection::ContactCard)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -37,7 +38,12 @@ pub(crate) async fn migrate_contacts_v013(server: &Server, account_id: u32) -> t
 
     for document_id in document_ids.iter() {
         let Some(archive) = server
-            .get_archive(account_id, Collection::ContactCard, document_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::ContactCard,
+                document_id,
+            ))
             .await
             .caused_by(trc::location!())?
         else {
@@ -62,7 +68,7 @@ pub(crate) async fn migrate_contacts_v013(server: &Server, account_id: u32) -> t
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::ContactCard)
-                    .update_document(document_id)
+                    .with_document(document_id)
                     .set(
                         Field::ARCHIVE,
                         Archiver::new(new_contact)

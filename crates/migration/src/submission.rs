@@ -5,16 +5,20 @@
  */
 
 use super::object::Object;
-use crate::object::{FromLegacy, Property, Value};
+use crate::{
+    get_document_ids,
+    object::{FromLegacy, Property, Value},
+    v014::{SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT},
+};
 use common::Server;
 use email::submission::{
     Address, Delivered, DeliveryStatus, EmailSubmission, Envelope, UndoStatus,
 };
 use store::{
-    SUBSPACE_BITMAP_TAG, SUBSPACE_BITMAP_TEXT, SUBSPACE_INDEXES, Serialize, SerializeInfallible,
-    U64_LEN, ValueKey,
+    SUBSPACE_INDEXES, Serialize, U32_LEN, U64_LEN, ValueKey,
     write::{
-        AlignedBytes, AnyKey, Archive, Archiver, BatchBuilder, ValueClass, key::KeySerializer,
+        AlignedBytes, AnyKey, Archive, Archiver, BatchBuilder, IndexPropertyClass, ValueClass,
+        key::KeySerializer,
     },
 };
 use trc::AddContext;
@@ -29,8 +33,7 @@ pub(crate) async fn migrate_email_submissions(
     account_id: u32,
 ) -> trc::Result<u64> {
     // Obtain email ids
-    let email_submission_ids = server
-        .get_document_ids(account_id, Collection::EmailSubmission)
+    let email_submission_ids = get_document_ids(server, account_id, Collection::EmailSubmission)
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
@@ -82,12 +85,19 @@ pub(crate) async fn migrate_email_submissions(
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::EmailSubmission)
-                    .update_document(email_submission_id)
-                    .index(EmailSubmissionField::UndoStatus, es.undo_status.as_index())
-                    .index(EmailSubmissionField::EmailId, es.email_id.serialize())
-                    .index(EmailSubmissionField::ThreadId, es.thread_id.serialize())
-                    .index(EmailSubmissionField::IdentityId, es.identity_id.serialize())
-                    .index(EmailSubmissionField::SendAt, es.send_at.serialize())
+                    .with_document(email_submission_id)
+                    .set(
+                        ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                            property: EmailSubmissionField::Metadata.into(),
+                            value: es.send_at,
+                        }),
+                        KeySerializer::new(U32_LEN * 3 + 1)
+                            .write(es.email_id)
+                            .write(es.thread_id)
+                            .write(es.identity_id)
+                            .write(es.undo_status.as_index())
+                            .finalize(),
+                    )
                     .set(
                         Field::ARCHIVE,
                         Archiver::new(es).serialize().caused_by(trc::location!())?,

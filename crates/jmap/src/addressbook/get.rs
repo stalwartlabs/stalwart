@@ -12,7 +12,7 @@ use jmap_proto::{
     object::addressbook::{self, AddressBookProperty, AddressBookValue},
 };
 use jmap_tools::{Map, Value};
-use store::{ValueKey, roaring::RoaringBitmap, write::ValueClass};
+use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, ValueClass}};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
@@ -95,7 +95,12 @@ impl AddressBookGet for Server {
                 continue;
             }
             let _address_book = if let Some(address_book) = self
-                .get_archive(account_id, Collection::AddressBook, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::AddressBook,
+                    document_id,
+                ))
                 .await?
             {
                 address_book

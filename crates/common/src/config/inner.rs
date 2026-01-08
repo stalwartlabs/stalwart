@@ -9,7 +9,10 @@ use crate::{
     CacheSwap, Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache,
     MessageUidCache, TlsConnectors,
     auth::{AccessToken, roles::RolePermissions},
-    config::smtp::resolver::{Policy, Tlsa},
+    config::{
+        smtp::resolver::{Policy, Tlsa},
+        spamfilter::SpamClassifier,
+    },
     listener::blocked::BlockedIps,
     manager::webadmin::WebAdminManager,
 };
@@ -17,7 +20,6 @@ use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
 use mail_auth::{MX, Parameters, Txt};
 use mail_send::smtp::tls::build_tls_connector;
-use nlp::bayes::{TokenHash, Weights};
 use parking_lot::RwLock;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -49,6 +51,7 @@ impl Data {
         }
 
         Data {
+            spam_classifier: ArcSwap::from_pointee(SpamClassifier::default()),
             tls_certificates: ArcSwap::from_pointee(certificates),
             tls_self_signed_cert: build_self_signed_cert(
                 subject_names.into_iter().collect::<Vec<_>>(),
@@ -138,12 +141,6 @@ impl Caches {
                 (std::mem::size_of::<DavResources>() + (500 * std::mem::size_of::<DavResource>()))
                     as u64,
             ),
-            bayes: CacheWithTtl::from_config(
-                config,
-                "bayes",
-                MB_10,
-                (std::mem::size_of::<TokenHash>() + std::mem::size_of::<Weights>()) as u64,
-            ),
             dns_txt: CacheWithTtl::from_config(
                 config,
                 "dns.txt",
@@ -223,6 +220,7 @@ impl Caches {
 impl Default for Data {
     fn default() -> Self {
         Self {
+            spam_classifier: Default::default(),
             tls_certificates: Default::default(),
             tls_self_signed_cert: Default::default(),
             blocked_ips: Default::default(),

@@ -12,9 +12,8 @@ use imap_proto::receiver::Request;
 use sieve::compiler::ErrorType;
 use std::time::Instant;
 use store::{
-    Serialize,
-    query::Filter,
-    write::{Archiver, BatchBuilder},
+    Serialize, ValueKey,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::SieveField};
@@ -56,12 +55,11 @@ impl<T: SessionStream> Session<T> {
 
         if self
             .server
-            .get_document_ids(account_id, Collection::SieveScript)
+            .document_ids(account_id, Collection::SieveScript, SieveField::Name)
             .await
             .caused_by(trc::location!())?
-            .map(|ids| ids.len() as usize)
-            .unwrap_or(0)
-            > access_token.object_quota(Collection::SieveScript) as usize
+            .len()
+            > access_token.object_quota(Collection::SieveScript) as u64
         {
             return Err(trc::ManageSieveEvent::Error
                 .into_err()
@@ -104,7 +102,12 @@ impl<T: SessionStream> Session<T> {
             // Obtain script values
             let script_ = self
                 .server
-                .get_archive(account_id, Collection::SieveScript, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::SieveScript,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or_else(|| {
@@ -118,19 +121,17 @@ impl<T: SessionStream> Session<T> {
                 .caused_by(trc::location!())?;
 
             // Write script blob
-            let blob_hash = self
+            let (blob_hash, blob_hold) = self
                 .server
-                .put_blob(account_id, &script_bytes, false)
-                .await
-                .caused_by(trc::location!())?
-                .hash;
+                .put_temporary_blob(account_id, &script_bytes, 60)
+                .await?;
 
             // Write record
             let mut batch = BatchBuilder::new();
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::SieveScript)
-                .update_document(document_id)
+                .with_document(document_id)
                 .custom(
                     ObjectIndexBuilder::new()
                         .with_changes(
@@ -143,7 +144,8 @@ impl<T: SessionStream> Session<T> {
                         .with_current(script)
                         .with_access_token(access_token),
                 )
-                .caused_by(trc::location!())?;
+                .caused_by(trc::location!())?
+                .clear(blob_hold);
 
             self.server
                 .commit_batch(batch)
@@ -160,11 +162,10 @@ impl<T: SessionStream> Session<T> {
             );
         } else {
             // Write script blob
-            let blob_hash = self
+            let (blob_hash, blob_hold) = self
                 .server
-                .put_blob(account_id, &script_bytes, false)
-                .await?
-                .hash;
+                .put_temporary_blob(account_id, &script_bytes, 60)
+                .await?;
 
             // Write record
             let mut batch = BatchBuilder::new();
@@ -177,7 +178,7 @@ impl<T: SessionStream> Session<T> {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::SieveScript)
-                .create_document(document_id)
+                .with_document(document_id)
                 .custom(
                     ObjectIndexBuilder::<(), _>::new()
                         .with_changes(
@@ -186,7 +187,8 @@ impl<T: SessionStream> Session<T> {
                         )
                         .with_access_token(access_token),
                 )
-                .caused_by(trc::location!())?;
+                .caused_by(trc::location!())?
+                .clear(blob_hold);
 
             self.server
                 .commit_batch(batch)
@@ -221,18 +223,14 @@ impl<T: SessionStream> Session<T> {
         } else {
             Ok(self
                 .server
-                .store()
-                .filter(
+                .document_ids_matching(
                     account_id,
                     Collection::SieveScript,
-                    vec![Filter::eq(
-                        SieveField::Name,
-                        name.to_lowercase().into_bytes(),
-                    )],
+                    SieveField::Name,
+                    name.to_lowercase().as_bytes(),
                 )
                 .await
                 .caused_by(trc::location!())?
-                .results
                 .min())
         }
     }

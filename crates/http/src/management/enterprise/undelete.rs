@@ -9,25 +9,24 @@
  */
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use common::{Server, enterprise::undelete::DeletedBlob};
+use common::{Server, enterprise::undelete::DeletedItemType};
 use directory::backend::internal::manage::ManageDirectory;
 use email::{
     mailbox::INBOX_ID,
     message::ingest::{EmailIngest, IngestEmail, IngestSource},
 };
+use http_proto::{request::decode_path_element, *};
 use hyper::Method;
 use mail_parser::{DateTime, MessageParser};
 use serde_json::json;
 use std::future::Future;
 use std::str::FromStr;
-use store::write::{BatchBuilder, BlobOp, ValueClass};
+use store::write::{BatchBuilder, BlobLink, BlobOp};
 use trc::AddContext;
 use types::{blob_hash::BlobHash, collection::Collection};
 use utils::url_params::UrlParams;
 
-use http_proto::{request::decode_path_element, *};
-
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Debug)]
 pub struct UndeleteRequest<H, C, T> {
     pub hash: H,
     pub collection: C,
@@ -45,6 +44,41 @@ pub enum UndeleteResponse {
     Success,
     NotFound,
     Error { reason: String },
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct DeletedBlobResponse {
+    pub hash: String,
+    pub size: u32,
+    #[serde(rename = "deletedAt")]
+    pub deleted_at: String,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: String,
+    pub item: DeletedItemResponse,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "camelCase")]
+pub enum DeletedItemResponse {
+    Email {
+        from: Box<str>,
+        subject: Box<str>,
+        received_at: String,
+    },
+    FileNode {
+        name: Box<str>,
+    },
+    CalendarEvent {
+        title: Box<str>,
+        start_time: String,
+    },
+    ContactCard {
+        name: Box<str>,
+    },
+    SieveScript {
+        name: Box<str>,
+    },
 }
 
 pub trait UndeleteApi: Sync + Send {
@@ -87,19 +121,46 @@ impl UndeleteApi for Server {
 
                 // Sort ascending by deleted_at
                 let total = deleted.len();
-                deleted.sort_by(|a, b| a.deleted_at.cmp(&b.deleted_at));
+                deleted.sort_by(|a, b| a.item.deleted_at.cmp(&b.item.deleted_at));
                 let mut results = Vec::with_capacity(if limit > 0 { limit } else { total });
 
                 for blob in deleted {
                     if offset == 0 {
-                        results.push(DeletedBlob {
+                        results.push(DeletedBlobResponse {
                             hash: URL_SAFE_NO_PAD.encode(blob.hash.as_slice()),
-                            size: blob.size,
-                            deleted_at: DateTime::from_timestamp(blob.deleted_at as i64)
+                            size: blob.item.size,
+                            deleted_at: DateTime::from_timestamp(blob.item.deleted_at as i64)
                                 .to_rfc3339(),
                             expires_at: DateTime::from_timestamp(blob.expires_at as i64)
                                 .to_rfc3339(),
-                            collection: Collection::from(blob.collection).to_string(),
+                            item: match blob.item.typ {
+                                DeletedItemType::Email {
+                                    from,
+                                    subject,
+                                    received_at,
+                                } => DeletedItemResponse::Email {
+                                    from,
+                                    subject,
+                                    received_at: DateTime::from_timestamp(received_at as i64)
+                                        .to_rfc3339(),
+                                },
+                                DeletedItemType::FileNode { name } => {
+                                    DeletedItemResponse::FileNode { name }
+                                }
+                                DeletedItemType::CalendarEvent { title, start_time } => {
+                                    DeletedItemResponse::CalendarEvent {
+                                        title,
+                                        start_time: DateTime::from_timestamp(start_time as i64)
+                                            .to_rfc3339(),
+                                    }
+                                }
+                                DeletedItemType::ContactCard { name } => {
+                                    DeletedItemResponse::ContactCard { name }
+                                }
+                                DeletedItemType::SieveScript { name } => {
+                                    DeletedItemResponse::SieveScript { name }
+                                }
+                            },
                         });
                         if results.len() == limit {
                             break;
@@ -169,8 +230,20 @@ impl UndeleteApi for Server {
                             for blob in deleted {
                                 results.push(UndeleteRequest {
                                     hash: blob.hash,
-                                    collection: Collection::from(blob.collection),
-                                    time: blob.deleted_at,
+                                    collection: match blob.item.typ {
+                                        DeletedItemType::Email { .. } => Collection::Email,
+                                        DeletedItemType::FileNode { .. } => Collection::FileNode,
+                                        DeletedItemType::CalendarEvent { .. } => {
+                                            Collection::CalendarEvent
+                                        }
+                                        DeletedItemType::ContactCard { .. } => {
+                                            Collection::ContactCard
+                                        }
+                                        DeletedItemType::SieveScript { .. } => {
+                                            Collection::SieveScript
+                                        }
+                                    },
+                                    time: blob.item.deleted_at,
                                     cancel_deletion: blob.expires_at.into(),
                                 });
                             }
@@ -201,13 +274,12 @@ impl UndeleteApi for Server {
                                         .email_ingest(IngestEmail {
                                             raw_message: &bytes,
                                             message: MessageParser::new().parse(&bytes),
+                                            blob_hash: Some(&request.hash),
                                             access_token: access_token.as_ref(),
                                             mailbox_ids: vec![INBOX_ID],
                                             keywords: vec![],
                                             received_at: request.time.into(),
                                             source: IngestSource::Restore,
-                                            spam_classify: false,
-                                            spam_train: false,
                                             session_id: session.session_id,
                                         })
                                         .await
@@ -215,10 +287,17 @@ impl UndeleteApi for Server {
                                         Ok(_) => {
                                             results.push(UndeleteResponse::Success);
                                             if let Some(cancel_deletion) = request.cancel_deletion {
-                                                batch.clear(ValueClass::Blob(BlobOp::Reserve {
-                                                    hash: request.hash,
-                                                    until: cancel_deletion,
-                                                }));
+                                                batch
+                                                    .clear(BlobOp::Link {
+                                                        hash: request.hash.clone(),
+                                                        to: BlobLink::Temporary {
+                                                            until: cancel_deletion,
+                                                        },
+                                                    })
+                                                    .clear(BlobOp::Undelete {
+                                                        hash: request.hash,
+                                                        until: cancel_deletion,
+                                                    });
                                             }
                                         }
                                         Err(mut err)

@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{Variable, functions::ResolveVariable, if_block::IfBlock, tokenizer::TokenMap};
+use ahash::AHashSet;
+use mail_auth::common::resolver::ToReverseName;
+use nlp::classifier::model::{CcfhClassifier, FhClassifier};
 use std::{
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
-
-use ahash::AHashSet;
-use mail_auth::common::resolver::ToReverseName;
-use nlp::bayes::BayesClassifier;
 use tokio::net::lookup_host;
 use utils::{
     cache::CacheItemWeight,
@@ -19,42 +19,40 @@ use utils::{
     glob::GlobMap,
 };
 
-use super::{Variable, functions::ResolveVariable, if_block::IfBlock, tokenizer::TokenMap};
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default)]
+pub enum SpamClassifier {
+    FhClassifier {
+        classifier: FhClassifier,
+        last_trained_at: u64,
+    },
+    CcfhClassifier {
+        classifier: CcfhClassifier,
+        last_trained_at: u64,
+    },
+    #[default]
+    Disabled,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct SpamFilterConfig {
     pub enabled: bool,
     pub card_is_ham: bool,
+    pub trusted_reply: bool,
+    pub grey_list_expiry: Option<u64>,
+
     pub dnsbl: DnsBlConfig,
     pub rules: SpamFilterRules,
     pub lists: SpamFilterLists,
     pub pyzor: Option<PyzorConfig>,
-    pub reputation: Option<ReputationConfig>,
-    pub bayes: Option<BayesConfig>,
+    pub classifier: Option<ClassifierConfig>,
     pub scores: SpamFilterScoreConfig,
-    pub expiry: SpamFilterExpiryConfig,
-    pub headers: SpamFilterHeaderConfig,
-}
-
-#[derive(Debug, Clone)]
-pub struct SpamFilterHeaderConfig {
-    pub status: Option<String>,
-    pub result: Option<String>,
-    pub bayes_result: Option<String>,
-    pub llm: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SpamFilterScoreConfig {
-    pub reject_threshold: f64,
-    pub discard_threshold: f64,
-    pub spam_threshold: f64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SpamFilterExpiryConfig {
-    pub grey_list: Option<u64>,
-    pub trusted_reply: Option<u64>,
+    pub reject_threshold: f32,
+    pub discard_threshold: f32,
+    pub spam_threshold: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -69,7 +67,7 @@ pub struct DnsBlConfig {
 #[derive(Debug, Clone, Default)]
 pub struct SpamFilterLists {
     pub file_extensions: GlobMap<FileExtension>,
-    pub scores: GlobMap<SpamFilterAction<f64>>,
+    pub scores: GlobMap<SpamFilterAction<f32>>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,32 +75,33 @@ pub enum SpamFilterAction<T> {
     Allow(T),
     Discard,
     Reject,
+    Disabled,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BayesConfig {
-    pub classifier: BayesClassifier,
-    pub auto_learn: bool,
+pub struct ClassifierConfig {
+    pub w_params: FtrlParameters,
+    pub i_params: Option<FtrlParameters>,
+    pub reservoir_capacity: usize,
+    pub min_ham_samples: u64,
+    pub min_spam_samples: u64,
     pub auto_learn_reply_ham: bool,
-    pub auto_learn_spam_threshold: f64,
-    pub auto_learn_ham_threshold: f64,
     pub auto_learn_card_is_ham: bool,
-    pub score_spam: f64,
-    pub score_ham: f64,
-    pub account_score_spam: f64,
-    pub account_score_ham: f64,
-    pub account_classify: bool,
+    pub auto_learn_spam_trap: bool,
+    pub auto_learn_spam_rbl_count: u32,
+    pub hold_samples_for: u64,
+    pub train_frequency: Option<u64>,
+    pub log_scale: bool,
+    pub l2_normalize: bool,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ReputationConfig {
-    pub expiry: u64,
-    pub token_score: f64,
-    pub factor: f64,
-    pub ip_weight: f64,
-    pub domain_weight: f64,
-    pub asn_weight: f64,
-    pub sender_weight: f64,
+pub struct FtrlParameters {
+    pub feature_hash_size: usize,
+    pub alpha: f64,
+    pub beta: f64,
+    pub l1_ratio: f64,
+    pub l2_ratio: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -181,17 +180,21 @@ impl SpamFilterConfig {
                 .property_or_default("spam-filter.enable", "true")
                 .unwrap_or(true),
             card_is_ham: config
-                .property_or_default("spam-filter.card-is-ham", "true")
+                .property_or_default("spam-filter.card-is-ham.enable", "true")
+                .unwrap_or(true),
+            trusted_reply: config
+                .property_or_default("spam-filter.trusted-reply.enable", "true")
                 .unwrap_or(true),
             dnsbl: DnsBlConfig::parse(config),
             rules: SpamFilterRules::parse(config),
             lists: SpamFilterLists::parse(config),
             pyzor: PyzorConfig::parse(config).await,
-            reputation: ReputationConfig::parse(config),
-            bayes: BayesConfig::parse(config),
+            classifier: ClassifierConfig::parse(config),
             scores: SpamFilterScoreConfig::parse(config),
-            expiry: SpamFilterExpiryConfig::parse(config),
-            headers: SpamFilterHeaderConfig::parse(config),
+            grey_list_expiry: config
+                .property::<Option<Duration>>("spam-filter.grey-list.duration")
+                .unwrap_or_default()
+                .map(|d| d.as_secs()),
         }
     }
 }
@@ -315,32 +318,6 @@ impl DnsBlServer {
             id,
         }
         .into()
-    }
-}
-
-impl SpamFilterHeaderConfig {
-    pub fn parse(config: &mut Config) -> Self {
-        let mut header = SpamFilterHeaderConfig::default();
-
-        for (typ, var) in [
-            ("status", &mut header.status),
-            ("result", &mut header.result),
-            ("llm", &mut header.llm),
-            ("bayes", &mut header.bayes_result),
-        ] {
-            if config
-                .property_or_default(("spam-filter.header", typ, "enable"), "true")
-                .unwrap_or(true)
-                && let Some(value) = config.value(("spam-filter.header", typ, "name"))
-            {
-                let value = value.trim();
-                if !value.is_empty() {
-                    *var = value.to_string().into();
-                }
-            }
-        }
-
-        header
     }
 }
 
@@ -474,102 +451,112 @@ impl PyzorConfig {
     }
 }
 
-impl ReputationConfig {
+impl ClassifierConfig {
     pub fn parse(config: &mut Config) -> Option<Self> {
-        if !config
-            .property_or_default("spam-filter.reputation.enable", "false")
-            .unwrap_or(false)
-        {
-            return None;
-        }
+        let ccfh = match config.value("spam-filter.classifier.model") {
+            Some("ftrl-fh") | None => false,
+            Some("ftrl-ccfh") => true,
+            Some("disabled" | "disable") => return None,
+            Some(other) => {
+                config.new_build_error(
+                    "spam-filter.classifier.model",
+                    format!("Invalid model type: {}", other),
+                );
+                return None;
+            }
+        };
 
-        ReputationConfig {
-            expiry: config
-                .property_or_default::<Duration>("spam-filter.reputation.expiry", "30d")
-                .map(|d| d.as_secs())
-                .unwrap_or(2592000),
-            token_score: config
-                .property_or_default("spam-filter.reputation.score", "0.98")
-                .unwrap_or(0.98),
-            factor: config
-                .property_or_default("spam-filter.reputation.factor", "0.5")
-                .unwrap_or(0.5),
-            ip_weight: config
-                .property_or_default("spam-filter.reputation.weight.ip", "0.2")
-                .unwrap_or(0.2),
-            domain_weight: config
-                .property_or_default("spam-filter.reputation.weight.domain", "0.2")
-                .unwrap_or(0.2),
-            asn_weight: config
-                .property_or_default("spam-filter.reputation.weight.asn", "0.1")
-                .unwrap_or(0.1),
-            sender_weight: config
-                .property_or_default("spam-filter.reputation.weight.sender", "0.5")
-                .unwrap_or(0.5),
+        let w_params = FtrlParameters::parse(config, "spam-filter.classifier.parameters", 20);
+        let i_params = if ccfh {
+            Some(FtrlParameters::parse(
+                config,
+                "spam-filter.classifier.parameters.ccfh",
+                w_params.feature_hash_size - 2,
+            ))
+        } else {
+            None
+        };
+
+        ClassifierConfig {
+            w_params,
+            i_params,
+            reservoir_capacity: config
+                .property_or_default("spam-filter.classifier.samples.reservoir-capacity", "1024")
+                .unwrap_or(1024),
+            auto_learn_card_is_ham: config
+                .property_or_default("spam-filter.card-is-ham.learn", "true")
+                .unwrap_or(true),
+            auto_learn_reply_ham: config
+                .property_or_default("spam-filter.trusted-reply.learn", "true")
+                .unwrap_or(true),
+            auto_learn_spam_trap: config
+                .property_or_default("spam-filter.classifier.auto-learn.spam-trap", "true")
+                .unwrap_or(true),
+            auto_learn_spam_rbl_count: config
+                .property_or_default("spam-filter.classifier.auto-learn.spam-rbl-count", "2")
+                .unwrap_or(2),
+            hold_samples_for: config
+                .property_or_default::<Duration>("spam-filter.classifier.samples.hold-for", "180d")
+                .unwrap_or(Duration::from_secs(180 * 24 * 60 * 60))
+                .as_secs(),
+            min_ham_samples: config
+                .property_or_default("spam-filter.classifier.samples.min-ham", "100")
+                .unwrap_or(100),
+            min_spam_samples: config
+                .property_or_default("spam-filter.classifier.samples.min-spam", "100")
+                .unwrap_or(100),
+            train_frequency: config
+                .property_or_default::<Option<Duration>>(
+                    "spam-filter.classifier.training.frequency",
+                    "12h",
+                )
+                .unwrap_or(Some(Duration::from_secs(12 * 60 * 60)))
+                .map(|d| d.as_secs()),
+            log_scale: config
+                .property_or_default("spam-filter.classifier.features.log-scale", "true")
+                .unwrap_or(true),
+            l2_normalize: config
+                .property_or_default("spam-filter.classifier.features.l2-normalize", "true")
+                .unwrap_or(true),
         }
         .into()
     }
 }
 
-impl BayesConfig {
-    pub fn parse(config: &mut Config) -> Option<Self> {
-        if !config
-            .property_or_default("spam-filter.bayes.enable", "true")
-            .unwrap_or(true)
-        {
-            return None;
+impl FtrlParameters {
+    pub fn parse(config: &mut Config, prefix: &str, default_features: usize) -> Self {
+        let feature_hash_size: usize = config
+            .property((prefix, "features"))
+            .unwrap_or(default_features);
+
+        if !(16..=28).contains(&feature_hash_size) {
+            config.new_build_error(
+                (prefix, "features"),
+                "Feature size must be between 2^16 and 2^28.",
+            );
         }
 
-        BayesConfig {
-            classifier: BayesClassifier {
-                min_token_hits: config
-                    .property_or_default("spam-filter.bayes.classify.tokens.hits", "2")
-                    .unwrap_or(2),
-                min_tokens: config
-                    .property_or_default("spam-filter.bayes.classify.tokens.min", "11")
-                    .unwrap_or(11),
-                min_prob_strength: config
-                    .property_or_default("spam-filter.bayes.classify.strength", "0.05")
-                    .unwrap_or(0.05),
-                min_learns: config
-                    .property_or_default("spam-filter.bayes.classify.learns", "200")
-                    .unwrap_or(200),
-                min_balance: config
-                    .property_or_default("spam-filter.bayes.classify.balance", "0.9")
-                    .unwrap_or(0.9),
-            },
-            auto_learn: config
-                .property_or_default("spam-filter.bayes.auto-learn.enable", "true")
-                .unwrap_or(true),
-            auto_learn_reply_ham: config
-                .property_or_default("spam-filter.bayes.auto-learn.trusted-reply", "true")
-                .unwrap_or(true),
-            auto_learn_spam_threshold: config
-                .property_or_default("spam-filter.bayes.auto-learn.threshold.spam", "6.0")
-                .unwrap_or(6.0),
-            auto_learn_ham_threshold: config
-                .property_or_default("spam-filter.bayes.auto-learn.threshold.ham", "-1.0")
-                .unwrap_or(-2.0),
-            score_spam: config
-                .property_or_default("spam-filter.bayes.score.spam", "0.7")
-                .unwrap_or(0.7),
-            score_ham: config
-                .property_or_default("spam-filter.bayes.score.ham", "0.5")
-                .unwrap_or(0.5),
-            account_classify: config
-                .property_or_default("spam-filter.bayes.account.enable", "false")
-                .unwrap_or(false),
-            account_score_spam: config
-                .property_or_default("spam-filter.bayes.account.score.spam", "0.7")
-                .unwrap_or(0.7),
-            account_score_ham: config
-                .property_or_default("spam-filter.bayes.account.score.ham", "0.5")
-                .unwrap_or(0.5),
-            auto_learn_card_is_ham: config
-                .property_or_default("spam-filter.bayes.auto-learn.card-is-ham", "true")
-                .unwrap_or(true),
+        FtrlParameters {
+            feature_hash_size: 1 << feature_hash_size,
+            alpha: config
+                .property_or_default((prefix, "alpha"), "2.0")
+                .unwrap_or(2.0),
+            beta: config
+                .property_or_default((prefix, "beta"), "1.0")
+                .unwrap_or(1.0),
+            l1_ratio: config
+                .property_or_default((prefix, "l1"), "0.001")
+                .unwrap_or(0.001),
+            l2_ratio: config
+                .property_or_default((prefix, "l2"), "0.0001")
+                .unwrap_or(0.0001),
         }
-        .into()
+    }
+}
+
+impl SpamClassifier {
+    pub fn is_active(&self) -> bool {
+        !matches!(self, SpamClassifier::Disabled)
     }
 }
 
@@ -585,24 +572,6 @@ impl SpamFilterScoreConfig {
             spam_threshold: config
                 .property_or_default("spam-filter.score.spam", "5.0")
                 .unwrap_or(5.0),
-        }
-    }
-}
-
-impl SpamFilterExpiryConfig {
-    pub fn parse(config: &mut Config) -> Self {
-        SpamFilterExpiryConfig {
-            grey_list: config
-                .property::<Option<Duration>>("spam-filter.grey-list.duration")
-                .unwrap_or_default()
-                .map(|d| d.as_secs()),
-            trusted_reply: config
-                .property_or_default::<Option<Duration>>(
-                    "spam-filter.trusted-reply.duration",
-                    "30d",
-                )
-                .unwrap_or_default()
-                .map(|d| d.as_secs()),
         }
     }
 }
@@ -642,17 +611,6 @@ impl Location {
             Location::BodyHtml => "body_html",
             Location::Attachment => "attachment",
             Location::Tcp => "tcp",
-        }
-    }
-}
-
-impl Default for SpamFilterHeaderConfig {
-    fn default() -> Self {
-        SpamFilterHeaderConfig {
-            status: "X-Spam-Status".to_string().into(),
-            result: "X-Spam-Result".to_string().into(),
-            bayes_result: "X-Spam-Bayes".to_string().into(),
-            llm: "X-Spam-LLM".to_string().into(),
         }
     }
 }
@@ -883,5 +841,14 @@ impl IpResolver {
 impl CacheItemWeight for IpResolver {
     fn weight(&self) -> u64 {
         (std::mem::size_of::<IpResolver>() + self.ip_string.len() + self.reverse.len()) as u64
+    }
+}
+
+impl<T> SpamFilterAction<T> {
+    pub fn as_score(&self) -> Option<&T> {
+        match self {
+            SpamFilterAction::Allow(value) => Some(value),
+            _ => None,
+        }
     }
 }

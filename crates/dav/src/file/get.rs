@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
-use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
-use groupware::{cache::GroupwareCache, file::FileNode};
-use http_proto::HttpResponse;
-use hyper::StatusCode;
-use trc::AddContext;
-use types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-};
-
 use crate::{
     DavError, DavMethod,
     common::{
@@ -23,6 +12,20 @@ use crate::{
         uri::DavUriResource,
     },
     file::DavFileResource,
+};
+use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
+use groupware::{cache::GroupwareCache, file::FileNode};
+use http_proto::HttpResponse;
+use hyper::StatusCode;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
+use trc::AddContext;
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
 };
 
 pub(crate) trait FileGetRequestHandler: Sync + Send {
@@ -55,7 +58,12 @@ impl FileGetRequestHandler for Server {
 
         // Fetch node
         let node_ = self
-            .get_archive(account_id, Collection::FileNode, resource.resource)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::FileNode,
+                resource.resource,
+            ))
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;

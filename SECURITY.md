@@ -6,11 +6,10 @@ We provide security updates for the following versions of Stalwart:
 
 | Version | Supported          | End of Support |
 | ------- | ------------------ | -------------- |
-| 0.14.x  | :white_check_mark: | TBD            |
-| 0.13.x  | :white_check_mark: | 2026-02-28     |
-| 0.12.x  | :white_check_mark: | 2025-12-31     |
-| 0.11.x  | :white_check_mark: | 2025-12-31     |
-| < 0.11  | :x:                | Ended          |
+| 0.15.x  | :white_check_mark: | TBD            |
+| 0.14.x  | :white_check_mark: | 2026-06-08     |
+| 0.13.x  | :white_check_mark: | 2026-03-31     |
+| < 0.13  | :x:                | Ended          |
 
 **Note**: We typically support the current major version and one previous major version. Users are strongly encouraged to upgrade to the latest version for the best security posture.
 

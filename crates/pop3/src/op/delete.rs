@@ -89,7 +89,12 @@ impl<T: SessionStream> Session<T> {
                 let mut batch = BatchBuilder::new();
                 let not_deleted = self
                     .server
-                    .emails_tombstone(mailbox.account_id, &mut batch, deleted)
+                    .emails_delete(
+                        mailbox.account_id,
+                        self.state.access_token().tenant_id(),
+                        &mut batch,
+                        deleted,
+                    )
                     .await
                     .caused_by(trc::location!())?;
 
@@ -98,6 +103,7 @@ impl<T: SessionStream> Session<T> {
                         .commit_batch(batch)
                         .await
                         .caused_by(trc::location!())?;
+                    self.server.notify_task_queue();
                 }
                 if not_deleted.is_empty() {
                     self.write_ok(format!(

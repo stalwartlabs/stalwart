@@ -10,8 +10,8 @@ use mail_parser::Message;
 use spam_filter::{
     SpamFilterInput,
     analysis::{
-        init::SpamFilterInit, score::SpamFilterAnalyzeScore,
-        trusted_reply::SpamFilterAnalyzeTrustedReply,
+        init::SpamFilterInit,
+        score::{SpamFilterAnalyzeScore, SpamFilterScore},
     },
 };
 
@@ -25,7 +25,7 @@ impl<T: SessionStream> Session<T> {
         arc_result: Option<&'x ArcOutput<'x>>,
         dmarc_result: Option<&'x DmarcResult>,
         dmarc_policy: Option<&'x Policy>,
-    ) -> SpamFilterAction<String> {
+    ) -> SpamFilterAction<SpamFilterScore> {
         let server = &self.server;
         let mut ctx = server.spam_filter_init(self.build_spam_input(
             message,
@@ -39,9 +39,8 @@ impl<T: SessionStream> Session<T> {
             // Spam classification
             server.spam_filter_classify(&mut ctx).await
         } else {
-            // Trusted reply tracking
-            server.spam_filter_analyze_reply_out(&mut ctx).await;
-            SpamFilterAction::Allow(String::new())
+            // Do not classify authenticated sessions
+            SpamFilterAction::Disabled
         }
     }
 
@@ -87,8 +86,8 @@ impl<T: SessionStream> Session<T> {
                 .iter()
                 .map(|r| r.address_lcase.as_str())
                 .collect(),
-            account_id: None,
             is_test: false,
+            is_train: false,
         }
     }
 }

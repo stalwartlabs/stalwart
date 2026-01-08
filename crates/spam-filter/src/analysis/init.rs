@@ -5,7 +5,8 @@
  */
 
 use common::Server;
-use compact_str::CompactString;
+
+use mail_auth::DmarcResult;
 use mail_parser::{HeaderName, PartType, parsers::fields::thread::thread_name};
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 
@@ -24,13 +25,14 @@ pub trait SpamFilterInit {
 const POSTMASTER_ADDRESSES: [&str; 3] = ["postmaster", "mailer-daemon", "root"];
 
 impl SpamFilterInit for Server {
-    fn spam_filter_init<'x>(&self, input: SpamFilterInput<'x>) -> SpamFilterContext<'x> {
+    fn spam_filter_init<'x>(&self, mut input: SpamFilterInput<'x>) -> SpamFilterContext<'x> {
         let mut subject = "";
         let mut from = None;
         let mut reply_to = None;
         let mut recipients_to = Vec::new();
         let mut recipients_cc = Vec::new();
         let mut recipients_bcc = Vec::new();
+        let mut found_spam_status = false;
 
         for header in input.message.headers() {
             match &header.name {
@@ -42,7 +44,7 @@ impl SpamFilterInit for Server {
                                 name: addr.name().and_then(|s| {
                                     let s = s.trim();
                                     if !s.is_empty() {
-                                        Some(CompactString::from_str_to_lowercase(s))
+                                        Some(s.to_lowercase())
                                     } else {
                                         None
                                     }
@@ -69,7 +71,7 @@ impl SpamFilterInit for Server {
                                 name: addr.name().and_then(|s| {
                                     let s = s.trim();
                                     if !s.is_empty() {
-                                        Some(CompactString::from_str_to_lowercase(s))
+                                        Some(s.to_lowercase())
                                     } else {
                                         None
                                     }
@@ -82,6 +84,31 @@ impl SpamFilterInit for Server {
                 }
                 HeaderName::From => {
                     from = header.value().as_address().and_then(|addrs| addrs.first());
+                }
+                HeaderName::Other(name)
+                    if input.is_train && !found_spam_status && name.eq("X-Spam-Result") =>
+                {
+                    for token in header
+                        .value()
+                        .as_text()
+                        .unwrap_or_default()
+                        .split_ascii_whitespace()
+                    {
+                        if let Some(dmarc) = token.strip_prefix("DMARC_") {
+                            input.dmarc_result = if dmarc == "POLICY_ALLOW" {
+                                Some(&DmarcResult::Pass)
+                            } else {
+                                Some(&DmarcResult::None)
+                            };
+                        } else if let Some(asn) = token
+                            .strip_prefix("SOURCE_ASN_")
+                            .and_then(|v| v.parse().ok())
+                        {
+                            input.asn = Some(asn);
+                        }
+                    }
+
+                    found_spam_status = true;
                 }
                 _ => {}
             }
@@ -206,9 +233,7 @@ impl SpamFilterInit for Server {
                                     TokenType::UrlNoScheme(s) => TokenType::UrlNoScheme(
                                         UrlParts::new(format!("https://{}", s.trim())),
                                     ),
-                                    TokenType::IpAddr(i) => {
-                                        TokenType::IpAddr(IpParts::new(i.to_string()))
-                                    }
+                                    TokenType::IpAddr(i) => TokenType::IpAddr(IpParts::new(i)),
                                     TokenType::Email(e) => TokenType::Email(Email::new(e)),
                                     TokenType::Float(s) => TokenType::Float(s.to_string().into()),
                                 })
@@ -246,9 +271,10 @@ impl SpamFilterInit for Server {
             output: SpamFilterOutput {
                 ehlo_host: Hostname::new(input.ehlo_domain.unwrap_or("unknown")),
                 iprev_ptr: input.iprev_result.and_then(|r| {
-                    r.ptr.as_ref().and_then(|ptr| ptr.first()).map(|ptr| {
-                        CompactString::from_str_to_lowercase(ptr.strip_suffix('.').unwrap_or(ptr))
-                    })
+                    r.ptr
+                        .as_ref()
+                        .and_then(|ptr| ptr.first())
+                        .map(|ptr| (ptr.strip_suffix('.').unwrap_or(ptr)).to_lowercase())
                 }),
                 env_from_postmaster: env_from_addr.address.is_empty()
                     || POSTMASTER_ADDRESSES.contains(&env_from_addr.local_part.as_str()),
@@ -260,9 +286,7 @@ impl SpamFilterInit for Server {
                     .collect(),
                 from: Recipient {
                     email: Email::new(from.and_then(|f| f.address()).unwrap_or_default()),
-                    name: from
-                        .and_then(|f| f.name())
-                        .map(CompactString::from_str_to_lowercase),
+                    name: from.and_then(|f| f.name()).map(|name| name.to_lowercase()),
                 },
                 reply_to,
                 subject_thread_lc: subject_thread.trim().to_lowercase(),

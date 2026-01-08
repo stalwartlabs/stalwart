@@ -26,7 +26,7 @@ use jmap_proto::{
     },
     types::state::State,
 };
-use store::{roaring::RoaringBitmap, write::BatchBuilder};
+use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -96,7 +96,6 @@ impl JmapCalendarEventCopy for Server {
 
         // Obtain quota
         let mut batch = BatchBuilder::new();
-        let mut nudge_queue = false;
 
         'create: for (id, create) in request.create.into_valid() {
             let from_calendar_event_id = id.document_id();
@@ -124,11 +123,12 @@ impl JmapCalendarEventCopy for Server {
             }
 
             let Some(_calendar_event) = self
-                .get_archive(
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
                     from_account_id,
                     Collection::CalendarEvent,
                     from_calendar_event_id,
-                )
+                ))
                 .await?
             else {
                 response.not_created.append(
@@ -158,9 +158,8 @@ impl JmapCalendarEventCopy for Server {
                 )
                 .await?
             {
-                Ok(result) => {
-                    response.created(id, result.document_id);
-                    nudge_queue |= result.nudge_queue;
+                Ok(document_id) => {
+                    response.created(id, document_id);
 
                     // Add to destroy list
                     if on_success_delete {
@@ -181,10 +180,7 @@ impl JmapCalendarEventCopy for Server {
                 .await
                 .and_then(|ids| ids.last_change_id(account_id))
                 .caused_by(trc::location!())?;
-
-            if nudge_queue {
-                self.notify_task_queue();
-            }
+            self.notify_task_queue();
 
             response.new_state = State::Exact(change_id);
         }

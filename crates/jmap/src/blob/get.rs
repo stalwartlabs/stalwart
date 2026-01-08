@@ -19,6 +19,7 @@ use jmap_tools::{Map, Value};
 use mail_builder::encoders::base64::base64_encode;
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
+use store::{ValueKey, write::{AlignedBytes, Archive}};
 use std::future::Future;
 use trc::AddContext;
 use types::{blob::BlobClass, collection::Collection, id::Id, type_state::DataType};
@@ -203,7 +204,12 @@ impl BlobOperations for Server {
                     let collection = Collection::from(*collection);
                     if collection == Collection::Email {
                         if let Some(data_) = self
-                            .get_archive(req_account_id, Collection::Email, *document_id)
+                            .store()
+                            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                                req_account_id,
+                                Collection::Email,
+                                *document_id,
+                            ))
                             .await?
                         {
                             let data = data_

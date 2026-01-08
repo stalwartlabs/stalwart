@@ -6,7 +6,6 @@
 
 use super::{PrincipalInfo, manage::ManageDirectory};
 use crate::{Principal, PrincipalData, QueryBy, QueryParams, Type, backend::RcptType};
-
 use mail_send::Credentials;
 use store::{
     Deserialize, IterateParams, Store, ValueKey,

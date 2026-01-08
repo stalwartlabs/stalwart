@@ -5,8 +5,13 @@
  */
 
 use crate::{
-    AssertConfig, TEST_USERS, add_test_certs, directory::internal::TestInternalDirectory,
-    jmap::assert_is_empty, store::TempDir,
+    AssertConfig, TEST_USERS, add_test_certs,
+    directory::internal::TestInternalDirectory,
+    jmap::{assert_is_empty, wait_for_index},
+    store::{
+        TempDir, build_store_config,
+        cleanup::{search_store_destroy, store_destroy},
+    },
 };
 use ::managesieve::core::ManageSieveSessionManager;
 use ::store::Stores;
@@ -41,7 +46,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use store::rand::{Rng, distr::Alphanumeric, rng};
+use store::{
+    ValueKey,
+    rand::{Rng, distr::Alphanumeric, rng},
+    write::{AlignedBytes, Archive},
+};
 use tokio::sync::watch;
 use types::{collection::Collection, field::EmailField};
 use utils::config::Config;
@@ -76,13 +85,7 @@ fn webdav_tests() {
             let assisted_discovery = std::env::var("ASSISTED_DISCOVERY").unwrap_or_default() == "1";
             let start_time = Instant::now();
             let delete = true;
-            let handle = init_webdav_tests(
-                &std::env::var("STORE")
-                    .expect("Missing store type. Try running `STORE=<store_type> cargo test`"),
-                assisted_discovery,
-                delete,
-            )
-            .await;
+            let handle = init_webdav_tests(assisted_discovery, delete).await;
 
             basic::test(&handle).await;
             put_get::test(&handle).await;
@@ -123,16 +126,11 @@ pub struct WebDavTest {
     shutdown_tx: watch::Sender<bool>,
 }
 
-async fn init_webdav_tests(
-    store_id: &str,
-    assisted_discovery: bool,
-    delete_if_exists: bool,
-) -> WebDavTest {
+async fn init_webdav_tests(assisted_discovery: bool, delete_if_exists: bool) -> WebDavTest {
     // Load and parse config
     let temp_dir = TempDir::new("webdav_tests", delete_if_exists);
     let mut config = Config::new(
-        add_test_certs(SERVER)
-            .replace("{STORE}", store_id)
+        add_test_certs(&(build_store_config(&temp_dir.path.to_string_lossy()) + SERVER))
             .replace("{TMP}", &temp_dir.path.display().to_string())
             .replace("{ASSISTED_DISCOVERY}", &assisted_discovery.to_string())
             .replace(
@@ -159,6 +157,7 @@ async fn init_webdav_tests(
     let cache = Caches::parse(&mut config);
 
     let store = core.storage.data.clone();
+    let search_store = core.storage.fts.clone();
     let (ipc, mut ipc_rxs) = build_ipc(false);
     let inner = Arc::new(Inner {
         shared_core: core.into_shared(),
@@ -215,7 +214,8 @@ async fn init_webdav_tests(
     });
 
     if delete_if_exists {
-        store.destroy().await;
+        store_destroy(&store).await;
+        search_store_destroy(&search_store).await;
     }
 
     // Create test accounts
@@ -278,6 +278,10 @@ impl WebDavTest {
     pub async fn assert_is_empty(&self) {
         assert_is_empty(&self.server).await;
         self.clear_cache();
+    }
+
+    pub async fn wait_for_index(&self) {
+        wait_for_index(&self.server).await;
     }
 }
 
@@ -1050,12 +1054,13 @@ impl WebDavTest {
     pub async fn fetch_email(&self, account_id: u32, document_id: u32) -> Vec<u8> {
         let metadata_ = self
             .server
-            .get_archive_by_property(
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                 account_id,
                 Collection::Email,
                 document_id,
-                EmailField::Metadata.into(),
-            )
+                EmailField::Metadata,
+            ))
             .await
             .unwrap()
             .unwrap();
@@ -1106,7 +1111,6 @@ reject-non-fqdn = false
 [session.rcpt]
 relay = [ { if = "!is_empty(authenticated_as)", then = true }, 
         { else = false } ]
-directory = "'{STORE}'"
 
 [session.rcpt.errors]
 total = 5
@@ -1126,58 +1130,9 @@ delivered-to = false
 future-release = [ { if = "!is_empty(authenticated_as)", then = "99999999d"},
                 { else = false } ]
 
-[store."sqlite"]
-type = "sqlite"
-path = "{TMP}/sqlite.db"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/rocks.db"
-
-[store."foundationdb"]
-type = "foundationdb"
-
-[store."postgresql"]
-type = "postgresql"
-host = "localhost"
-port = 5432
-database = "stalwart"
-user = "postgres"
-password = "mysecretpassword"
-
-[store."psql-replica"]
-type = "sql-read-replica"
-primary = "postgresql"
-replicas = "postgresql"
-
-[store."mysql"]
-type = "mysql"
-host = "localhost"
-port = 3307
-database = "stalwart"
-user = "root"
-password = "password"
-
-[store."elastic"]
-type = "elasticsearch"
-url = "https://localhost:9200"
-user = "elastic"
-password = "RtQ-Lu6+o4rxx=XJplVJ"
-disable = true
-
-[store."elastic".tls]
-allow-invalid-certs = true
-
 [certificate.default]
 cert = "%{file:{CERT}}%"
 private-key = "%{file:{PK}}%"
-
-[storage]
-data = "{STORE}"
-fts = "{STORE}"
-blob = "{STORE}"
-lookup = "{STORE}"
-directory = "{STORE}"
 
 [jmap.protocol]
 set.max-objects = 100000
@@ -1223,10 +1178,6 @@ emails = "SELECT address FROM emails WHERE name = ? AND type != 'list' ORDER BY 
 verify = "SELECT address FROM emails WHERE address LIKE '%' || ? || '%' AND type = 'primary' ORDER BY address LIMIT 5"
 expand = "SELECT p.address FROM emails AS p JOIN emails AS l ON p.name = l.name WHERE p.type = 'primary' AND l.address = ? AND l.type = 'list' ORDER BY p.address LIMIT 50"
 domains = "SELECT 1 FROM emails WHERE address LIKE '%@' || ? LIMIT 1"
-
-[directory."{STORE}"]
-type = "internal"
-store = "{STORE}"
 
 [oauth]
 key = "parerga_und_paralipomena"

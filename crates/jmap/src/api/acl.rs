@@ -5,6 +5,7 @@
  */
 
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use directory::backend::internal::manage::ManageDirectory;
 use jmap_proto::{
     error::set::SetError,
     object::{JmapRight, JmapSharedObject},
@@ -12,7 +13,6 @@ use jmap_proto::{
 use jmap_tools::{JsonPointerIter, Key, Map, Property, Value};
 use types::{
     acl::{Acl, AclGrant},
-    collection::Collection,
     id::Id,
 };
 use utils::map::bitmap::Bitmap;
@@ -240,9 +240,9 @@ impl JmapAcl for Server {
         }
 
         let principal_ids = self
-            .get_document_ids(u32::MAX, Collection::Principal)
+            .store()
+            .principal_ids(None, None)
             .await
-            .unwrap_or_default()
             .unwrap_or_default();
 
         for grant in grants {

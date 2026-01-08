@@ -7,6 +7,10 @@
 use super::SieveScript;
 use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use store::write::BatchBuilder;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{collection::Collection, field::SieveField};
 
@@ -30,14 +34,19 @@ impl SieveScriptDelete for Server {
     ) -> trc::Result<bool> {
         // Fetch record
         if let Some(obj_) = self
-            .get_archive(account_id, Collection::SieveScript, document_id)
+            .store()
+            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                account_id,
+                Collection::SieveScript,
+                document_id,
+            ))
             .await?
         {
             // Delete record
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::SieveScript)
-                .delete_document(document_id)
+                .with_document(document_id)
                 .clear(SieveField::Ids)
                 .custom(
                     ObjectIndexBuilder::<_, ()>::new()

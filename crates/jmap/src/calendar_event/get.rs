@@ -33,8 +33,10 @@ use jmap_proto::{
 use jmap_tools::{Key, Map, Value};
 use std::{str::FromStr, sync::Arc};
 use store::{
+    ValueKey,
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive},
 };
 use trc::AddContext;
 use types::{
@@ -130,7 +132,7 @@ impl CalendarEventGet for Server {
                         return_is_origin = true;
                     }
                     _ => {
-                        if matches!(property, JSCalendarProperty::ICalComponent) {
+                        if matches!(property, JSCalendarProperty::ICalendar) {
                             return_converted_props = true;
                         }
 
@@ -203,7 +205,12 @@ impl CalendarEventGet for Server {
             }
 
             let Some(_calendar_event) = self
-                .get_archive(account_id, Collection::CalendarEvent, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
                 .await?
             else {
                 response.not_found.push(id);

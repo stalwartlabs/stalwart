@@ -74,7 +74,7 @@ impl Server {
         let mut stores = Stores {
             stores: self.core.storage.stores.clone(),
             blob_stores: self.core.storage.blobs.clone(),
-            fts_stores: self.core.storage.ftss.clone(),
+            search_stores: self.core.storage.ftss.clone(),
             in_memory_stores: self.core.storage.lookups.clone(),
             pubsub_stores: Default::default(),
             purge_schedules: Default::default(),

@@ -36,6 +36,10 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::collections::HashSet;
 use store::write::{BatchBuilder, now};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -121,7 +125,12 @@ impl CalendarUpdateRequestHandler for Server {
 
             // Update
             let event_ = self
-                .get_archive(account_id, Collection::CalendarEvent, document_id)
+                .store()
+                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
                 .await
                 .caused_by(trc::location!())?
                 .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
@@ -266,8 +275,6 @@ impl CalendarUpdateRequestHandler for Server {
                     }
                 }
             }
-            let nudge_queue = next_email_alarm.is_some() || itip_messages.is_some();
-
             // Validate quota
             let extra_bytes =
                 (bytes.len() as u64).saturating_sub(u32::from(event.inner.size) as u64);
@@ -300,9 +307,7 @@ impl CalendarUpdateRequestHandler for Server {
                     .caused_by(trc::location!())?;
             }
             self.commit_batch(batch).await.caused_by(trc::location!())?;
-            if nudge_queue {
-                self.notify_task_queue();
-            }
+            self.notify_task_queue();
 
             Ok(HttpResponse::new(StatusCode::NO_CONTENT)
                 .with_etag_opt(etag)
@@ -400,7 +405,6 @@ impl CalendarUpdateRequestHandler for Server {
                     }
                 }
             }
-            let nudge_queue = next_email_alarm.is_some() || itip_messages.is_some();
 
             // Validate quota
             if !bytes.is_empty() {
@@ -435,10 +439,7 @@ impl CalendarUpdateRequestHandler for Server {
                     .caused_by(trc::location!())?;
             }
             self.commit_batch(batch).await.caused_by(trc::location!())?;
-
-            if nudge_queue {
-                self.notify_task_queue();
-            }
+            self.notify_task_queue();
 
             Ok(HttpResponse::new(StatusCode::CREATED)
                 .with_etag_opt(etag)
