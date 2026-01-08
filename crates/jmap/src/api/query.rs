@@ -162,3 +162,216 @@ impl QueryResponseBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jmap_proto::types::state::State;
+    use types::id::Id;
+
+    // Helper to create a QueryResponseBuilder with specific pagination settings
+    fn create_builder(
+        limit: usize,
+        position: i32,
+        anchor: Option<u32>,
+        anchor_offset: i32,
+    ) -> QueryResponseBuilder {
+        let (has_anchor, anchor_val) = anchor.map(|a| (true, a)).unwrap_or((false, 0));
+
+        QueryResponseBuilder {
+            requested_position: position,
+            position,
+            limit,
+            anchor: anchor_val,
+            anchor_offset,
+            has_anchor,
+            anchor_found: false,
+            response: jmap_proto::method::query::QueryResponse {
+                account_id: types::id::Id::default(),
+                query_state: State::Initial,
+                can_calculate_changes: true,
+                position: 0,
+                ids: vec![],
+                total: None,
+                limit: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_pagination_position_with_1_anchor_offset() {
+        let mut builder = create_builder(3, 0, Some(3), 1);
+
+        for i in 0..10 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 4, "First item should be 4");
+        assert_eq!(result.ids[1].document_id(), 5, "Second item should be 5");
+        assert_eq!(result.ids[2].document_id(), 6, "Third item should be 6");
+        assert_eq!(
+            result.position, 5,
+            "Position should be 5 (where we started collecting)"
+        );
+    }
+
+    #[test]
+    fn test_pagination_position_with_positive_anchor_offset() {
+        let mut builder = create_builder(3, 0, Some(3), 2);
+
+        for i in 0..10 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 5, "First item should be 5");
+        assert_eq!(result.ids[1].document_id(), 6, "Second item should be 6");
+        assert_eq!(result.ids[2].document_id(), 7, "Third item should be 7");
+        assert_eq!(
+            result.position, 6,
+            "Position should be 6 (where we started collecting)"
+        );
+    }
+
+    #[test]
+    fn test_pagination_position_with_zero_anchor_offset() {
+        let mut builder = create_builder(3, 0, Some(5), 0);
+
+        for i in 0..10 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 5, "First item should be 5");
+        assert_eq!(result.ids[1].document_id(), 6, "Second item should be 6");
+        assert_eq!(result.ids[2].document_id(), 7, "Third item should be 7");
+        assert_eq!(result.position, 6, "Position should be 6 (anchor position)");
+    }
+
+    #[test]
+    fn test_pagination_without_anchor_from_start() {
+        let mut builder = create_builder(3, 0, None, 0);
+
+        for i in 0..10 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 0, "First item should be 0");
+        assert_eq!(result.ids[1].document_id(), 1, "Second item should be 1");
+        assert_eq!(result.ids[2].document_id(), 2, "Third item should be 2");
+        assert_eq!(result.position, 0, "Position should be 0");
+    }
+
+    #[test]
+    fn test_pagination_without_anchor_with_offset() {
+        let mut builder = create_builder(3, 5, None, 0);
+
+        for i in 0..10 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(result.ids.len(), 3, "Should collect 3 items");
+        assert_eq!(result.ids[0].document_id(), 5, "First item should be 5");
+        assert_eq!(result.ids[1].document_id(), 6, "Second item should be 6");
+        assert_eq!(result.ids[2].document_id(), 7, "Third item should be 7");
+        assert_eq!(result.position, 5, "Position should be 5");
+    }
+
+    #[test]
+    fn test_pagination_without_anchor_partial_results() {
+        let mut builder = create_builder(5, 3, None, 0);
+
+        for i in 0..5 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(
+            result.ids.len(),
+            2,
+            "Should collect 2 items (not full limit)"
+        );
+        assert_eq!(result.ids[0].document_id(), 3, "First item should be 3");
+        assert_eq!(result.ids[1].document_id(), 4, "Second item should be 4");
+        assert_eq!(result.position, 3, " be 3");
+    }
+
+    #[test]
+    fn test_pagination_with_large_anchor_offset() {
+        let mut builder = create_builder(5, 0, Some(3), 10);
+
+        for i in 0..30 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(result.ids.len(), 5, "Should collect 5 items");
+        assert_eq!(result.ids[0].document_id(), 13, "First item should be 13");
+        assert_eq!(result.ids[1].document_id(), 14, "Second item should be 14");
+        assert_eq!(result.ids[2].document_id(), 15, "Third item should be 15");
+        assert_eq!(result.ids[3].document_id(), 16, "Fourth item should be 16");
+        assert_eq!(result.ids[4].document_id(), 17, "Fifth item should be 17");
+        assert_eq!(
+            result.position, 14,
+            "Position should be 14 (where we started collecting)"
+        );
+    }
+
+    #[test]
+    fn test_pagination_anchor_offset_10_expects_items_starting_at_anchor_plus_10() {
+        let mut builder = create_builder(10, 0, Some(5), 10);
+
+        for i in 0..30 {
+            let should_continue = builder.add_id(Id::from_parts(0, i));
+            if !should_continue {
+                break;
+            }
+        }
+
+        let result = builder.build().unwrap();
+
+        assert_eq!(result.ids.len(), 10, "Should collect 10 items");
+        // Anchor at index 5, offset 10 means: skip to position 5+10=15
+        assert_eq!(result.ids[0].document_id(), 15, "First item should be 15 (anchor_pos + offset)");
+        assert_eq!(result.ids[9].document_id(), 24, "Last item should be 24");
+        assert_eq!(
+            result.position, 16,
+            "Position should be 16"
+        );
+    }
+}
