@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_position_with_1_anchor_offset() {
+    fn test_pagination_with_1_anchor_offset() {
         let mut builder = create_builder(3, 0, Some(3), 1);
 
         for i in 0..10 {
@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_position_with_positive_anchor_offset() {
+    fn test_pagination_with_positive_anchor_offset() {
         let mut builder = create_builder(3, 0, Some(3), 2);
 
         for i in 0..10 {
@@ -234,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_position_with_zero_anchor_offset() {
+    fn test_pagination_with_zero_anchor_offset() {
         let mut builder = create_builder(3, 0, Some(5), 0);
 
         for i in 0..10 {
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_without_anchor_from_start() {
+    fn test_pagination_with_position_from_start() {
         let mut builder = create_builder(3, 0, None, 0);
 
         for i in 0..10 {
@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_without_anchor_with_offset() {
+    fn test_pagination_with_position_with_offset() {
         let mut builder = create_builder(3, 5, None, 0);
 
         for i in 0..10 {
@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_without_anchor_partial_results() {
+    fn test_pagination_with_position_partial_results() {
         let mut builder = create_builder(5, 3, None, 0);
 
         for i in 0..5 {
