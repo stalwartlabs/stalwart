@@ -327,7 +327,7 @@ impl DeserializeFrom for Keyword {
             FORWARDED => Some(Keyword::Forwarded),
             MDN_SENT => Some(Keyword::MdnSent),
             other => {
-                let len = other - OTHER;
+                let len = other - 12;
                 let mut keyword = Vec::with_capacity(len);
                 for _ in 0..len {
                     keyword.push(*bytes.next()?);

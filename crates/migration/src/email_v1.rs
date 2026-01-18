@@ -519,7 +519,7 @@ fn deserialize_keyword(bytes: &mut std::slice::Iter<'_, u8>) -> Option<LegacyKey
         FORWARDED => Some(LegacyKeyword::Forwarded),
         MDN_SENT => Some(LegacyKeyword::MdnSent),
         other => {
-            let len = other - OTHER;
+            let len = other - 12;
             let mut keyword = Vec::with_capacity(len);
             for _ in 0..len {
                 keyword.push(*bytes.next()?);
