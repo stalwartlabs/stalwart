@@ -266,9 +266,7 @@ impl QueryChanges for Server {
         if has_changes {
             if is_mutable {
                 for (index, id) in results.ids.into_iter().enumerate() {
-                    if matches!(up_to_id, Some(up_to_id) if up_to_id == id) {
-                        break;
-                    } else if changes.created.contains(&id) || changes.updated.contains(&id) {
+                    if changes.created.contains(&id) || changes.updated.contains(&id) {
                         response.added.push(AddedItem::new(id, index));
                     }
                 }
@@ -276,10 +274,11 @@ impl QueryChanges for Server {
                 response.removed = changes.updated;
             } else {
                 for (index, id) in results.ids.into_iter().enumerate() {
+                    if changes.created.contains(&id) {
+                        response.added.push(AddedItem::new(id, index));
+                    }
                     if matches!(up_to_id, Some(up_to_id) if up_to_id == id) {
                         break;
-                    } else if changes.created.contains(&id) {
-                        response.added.push(AddedItem::new(id, index));
                     }
                 }
             }
