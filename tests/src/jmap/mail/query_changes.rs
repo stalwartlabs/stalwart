@@ -50,6 +50,7 @@ pub async fn test(params: &mut JMAPTest) {
     let mut updated_ids = AHashSet::default();
     let mut removed_ids = AHashSet::default();
     let mut type1_ids = AHashSet::default();
+    let mut thread_id_map: AHashMap<u32, Id> = AHashMap::default();
 
     let mut thread_id = 100;
 
@@ -116,6 +117,9 @@ pub async fn test(params: &mut JMAPTest) {
                 if change_num % 2 == 0 {
                     type1_ids.insert(jmap_id);
                 }
+                thread_id_map
+                    .entry(jmap_id.prefix_id())
+                    .or_insert(jmap_id);
             }
             LogAction::Update(id) => {
                 let id = *id_map.get(id).unwrap();
@@ -176,6 +180,7 @@ pub async fn test(params: &mut JMAPTest) {
                     type1_ids.insert(new_id);
                 }
                 removed_ids.insert(id);
+                thread_id_map.insert(new_id.prefix_id(), new_id);
                 thread_id += 1;
             }
             LogAction::UpdateChild(_) => unreachable!(),
@@ -190,6 +195,7 @@ pub async fn test(params: &mut JMAPTest) {
                     since_query_state: state.clone(),
                     max_changes: 0,
                     up_to_id: None,
+                    collapse_threads: false,
                 },
                 QueryChanges {
                     filter: Some(email::query::Filter::from("test_1").into()),
@@ -197,6 +203,7 @@ pub async fn test(params: &mut JMAPTest) {
                     since_query_state: state.clone(),
                     max_changes: 0,
                     up_to_id: None,
+                    collapse_threads: false,
                 },
                 QueryChanges {
                     filter: Some(email::query::Filter::in_mailbox(&mailbox1_id).into()),
@@ -204,6 +211,7 @@ pub async fn test(params: &mut JMAPTest) {
                     since_query_state: state.clone(),
                     max_changes: 0,
                     up_to_id: None,
+                    collapse_threads: false,
                 },
                 QueryChanges {
                     filter: None,
@@ -214,12 +222,24 @@ pub async fn test(params: &mut JMAPTest) {
                         .get(&7)
                         .map(|id| id.to_string().into())
                         .unwrap_or(None),
+                    collapse_threads: false,
+                },
+                QueryChanges {
+                    filter: None,
+                    sort: vec![email::query::Comparator::received_at()],
+                    since_query_state: state.clone(),
+                    max_changes: 0,
+                    up_to_id: None,
+                    collapse_threads: true,
                 },
             ]
             .into_iter()
             .enumerate()
             {
-                if test_num == 3 && query.up_to_id.is_none() {
+                if (test_num == 3 || test_num == 4) && query.up_to_id.is_none() {
+                    continue;
+                }
+                if test_num == 4 && !query.collapse_threads {
                     continue;
                 }
                 let mut request = client.build();
@@ -233,6 +253,10 @@ pub async fn test(params: &mut JMAPTest) {
 
                 if let Some(up_to_id) = query.up_to_id {
                     query_request.up_to_id(up_to_id);
+                }
+
+                if query.collapse_threads {
+                    query_request.arguments().collapse_threads(true);
                 }
 
                 let changes = request.send_query_email_changes().await.unwrap();
@@ -269,6 +293,28 @@ pub async fn test(params: &mut JMAPTest) {
                         assert!(id < &7, "{:?} (id: {})", changes, id);
                     }
                 }
+                if test_num == 4 {
+                    // With collapse_threads, only first email per thread should be added.
+                    let mut seen_threads = AHashSet::new();
+                    for item in changes.added() {
+                        let item_id = Id::from_str(item.id()).unwrap();
+                        let thread_id = item_id.prefix_id();
+                        assert!(
+                            seen_threads.insert(thread_id),
+                            "Thread {} appears multiple times with collapse_threads: {:?}",
+                            thread_id,
+                            changes
+                        );
+                        // Verify this is the first email in this thread
+                        assert_eq!(
+                            thread_id_map.get(&thread_id),
+                            Some(&item_id),
+                            "Expected first email in thread {}, got {:?}",
+                            thread_id,
+                            item_id
+                        );
+                    }
+                }
 
                 if let State::Initial = state {
                     new_state = State::parse_str(changes.new_query_state()).unwrap();
@@ -289,4 +335,5 @@ pub struct QueryChanges {
     pub since_query_state: State,
     pub max_changes: usize,
     pub up_to_id: Option<String>,
+    pub collapse_threads: bool,
 }

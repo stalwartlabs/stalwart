@@ -130,7 +130,7 @@ impl<T: JmapObject> From<QueryChangesRequest<T>> for QueryRequest<T> {
             anchor_offset: None,
             limit: None,
             calculate_total: request.calculate_total,
-            arguments: T::QueryArguments::default(),
+            arguments: request.arguments,
         }
     }
 }
