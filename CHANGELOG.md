@@ -9,6 +9,7 @@ If you are upgrading from v0.15.x, replace the binary and update the webadmin.
 
 ## Added
 - Polish locale support (contributed by @mrxkp) (#2480)
+- JMAP: WebSocket ticket-based authentication for browser clients (#2677)
 
 ## Changed
 

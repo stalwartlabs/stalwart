@@ -190,7 +190,7 @@ impl ParseHttp for Server {
                     }
                     ("ws", &Method::GET) => {
                         // Check for ticket-based authentication
-                        let access_token = if let Some(ticket) =
+                        let (_in_flight, access_token) = if let Some(ticket) =
                             UrlParams::new(req.uri().query()).get("ticket")
                         {
                             // Validate ticket and get account_id
@@ -199,10 +199,18 @@ impl ParseHttp for Server {
                                 .await?;
 
                             // Get access token from account_id
-                            self.get_access_token(token_info.account_id).await?
+                            let access_token =
+                                self.get_access_token(token_info.account_id).await?;
+
+                            // Enforce authenticated rate limit
+                            let in_flight = self
+                                .is_http_authenticated_request_allowed(&access_token)
+                                .await?;
+
+                            (in_flight, access_token)
                         } else {
                             // Fall back to header authentication
-                            self.authenticate_headers(&req, &session, false).await?.1
+                            self.authenticate_headers(&req, &session, false).await?
                         };
 
                         return self
