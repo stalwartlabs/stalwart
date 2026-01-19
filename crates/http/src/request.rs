@@ -32,7 +32,8 @@ use directory::Permission;
 use groupware::{DavResourceName, calendar::itip::ItipIngest};
 use http_proto::{
     DownloadResponse, HtmlResponse, HttpContext, HttpRequest, HttpResponse, HttpResponseBody,
-    HttpSessionData, JsonProblemResponse, ToHttpResponse, form_urlencoded, request::fetch_body,
+    HttpSessionData, JsonProblemResponse, JsonResponse, ToHttpResponse, form_urlencoded,
+    request::fetch_body,
 };
 use hyper::{
     Method, StatusCode, body,
@@ -188,13 +189,48 @@ impl ParseHttp for Server {
                         return self.handle_event_source(req, access_token).await;
                     }
                     ("ws", &Method::GET) => {
-                        // Authenticate request
-                        let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                        // Check for ticket-based authentication
+                        let access_token = if let Some(ticket) =
+                            UrlParams::new(req.uri().query()).get("ticket")
+                        {
+                            // Validate ticket and get account_id
+                            let token_info = self
+                                .validate_access_token(GrantType::WsTicket.into(), ticket)
+                                .await?;
+
+                            // Get access token from account_id
+                            self.get_access_token(token_info.account_id).await?
+                        } else {
+                            // Fall back to header authentication
+                            self.authenticate_headers(&req, &session, false).await?.1
+                        };
 
                         return self
                             .upgrade_websocket_connection(req, access_token, session)
                             .await;
+                    }
+                    ("ws", &Method::POST) => {
+                        // Check if this is a ticket request
+                        if path.next() == Some("ticket") {
+                            // Authenticate request via header
+                            let (_in_flight, access_token) =
+                                self.authenticate_headers(&req, &session, false).await?;
+
+                            // Generate WebSocket ticket
+                            let ticket = self
+                                .encode_access_token(
+                                    GrantType::WsTicket,
+                                    access_token.primary_id,
+                                    "",
+                                    self.core.oauth.oauth_expiry_ws_ticket,
+                                )
+                                .await?;
+
+                            return Ok(JsonResponse::new(serde_json::json!({
+                                "value": ticket
+                            }))
+                            .into_http_response());
+                        }
                     }
                     ("session", &Method::GET) => {
                         return if req.headers().contains_key(header::AUTHORIZATION) {

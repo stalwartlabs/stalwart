@@ -138,6 +138,10 @@ pub struct WebSocketCapabilities {
     pub url: String,
     #[serde(rename(serialize = "supportsPush"))]
     pub supports_push: bool,
+    #[serde(rename(serialize = "supportsTicketAuth"))]
+    pub supports_ticket_auth: bool,
+    #[serde(rename(serialize = "ticketUrl"))]
+    pub ticket_url: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -373,12 +377,12 @@ impl Default for SieveSessionCapabilities {
 
 impl WebSocketCapabilities {
     pub fn new(base_url: &str) -> Self {
+        let ws_base = base_url.strip_prefix("http").unwrap_or_default();
         WebSocketCapabilities {
-            url: format!(
-                "ws{}/jmap/ws",
-                base_url.strip_prefix("http").unwrap_or_default()
-            ),
+            url: format!("ws{}/jmap/ws", ws_base),
             supports_push: true,
+            supports_ticket_auth: true,
+            ticket_url: format!("{}/jmap/ws/ticket", base_url),
         }
     }
 }

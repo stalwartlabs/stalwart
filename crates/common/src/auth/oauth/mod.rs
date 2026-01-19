@@ -26,6 +26,7 @@ pub enum GrantType {
     LiveMetrics,
     Troubleshoot,
     Rsvp,
+    WsTicket,
 }
 
 impl GrantType {
@@ -37,6 +38,7 @@ impl GrantType {
             GrantType::LiveMetrics => "live_metrics",
             GrantType::Troubleshoot => "troubleshoot",
             GrantType::Rsvp => "rsvp",
+            GrantType::WsTicket => "ws_ticket",
         }
     }
 
@@ -48,6 +50,7 @@ impl GrantType {
             GrantType::LiveMetrics => 3,
             GrantType::Troubleshoot => 4,
             GrantType::Rsvp => 5,
+            GrantType::WsTicket => 6,
         }
     }
 
@@ -59,6 +62,7 @@ impl GrantType {
             3 => Some(GrantType::LiveMetrics),
             4 => Some(GrantType::Troubleshoot),
             5 => Some(GrantType::Rsvp),
+            6 => Some(GrantType::WsTicket),
             _ => None,
         }
     }

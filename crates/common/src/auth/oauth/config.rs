@@ -34,6 +34,7 @@ pub struct OAuthConfig {
     pub oauth_expiry_token: u64,
     pub oauth_expiry_refresh_token: u64,
     pub oauth_expiry_refresh_token_renew: u64,
+    pub oauth_expiry_ws_ticket: u64,
     pub oauth_max_auth_attempts: u32,
 
     pub allow_anonymous_client_registration: bool,
@@ -175,6 +176,10 @@ impl OAuthConfig {
                 .property_or_default::<Duration>("oauth.expiry.refresh-token-renew", "4d")
                 .unwrap_or_else(|| Duration::from_secs(4 * 24 * 60 * 60))
                 .as_secs(),
+            oauth_expiry_ws_ticket: config
+                .property_or_default::<Duration>("oauth.expiry.ws-ticket", "60s")
+                .unwrap_or_else(|| Duration::from_secs(60))
+                .as_secs(),
             oauth_max_auth_attempts: config
                 .property_or_default("oauth.auth.max-attempts", "3")
                 .unwrap_or(10),
@@ -204,6 +209,7 @@ impl Default for OAuthConfig {
             oauth_expiry_token: Default::default(),
             oauth_expiry_refresh_token: Default::default(),
             oauth_expiry_refresh_token_renew: Default::default(),
+            oauth_expiry_ws_ticket: 60,
             oauth_max_auth_attempts: Default::default(),
             oidc_expiry_id_token: Default::default(),
             allow_anonymous_client_registration: Default::default(),
