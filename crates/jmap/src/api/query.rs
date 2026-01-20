@@ -144,36 +144,36 @@ impl QueryResponseBuilder {
     }
 
     pub fn build(mut self) -> trc::Result<QueryResponse> {
-        if self.has_anchor && !self.anchor_found {
-            return Err(trc::JmapEvent::AnchorNotFound.into_err());
-        }
-
-        if !self.has_anchor && self.requested_position >= 0 {
-            self.response.position = if self.position == 0 {
-                self.requested_position
+        if !self.has_anchor || self.anchor_found {
+            if !self.has_anchor && self.requested_position >= 0 {
+                self.response.position = if self.position == 0 {
+                    self.requested_position
+                } else {
+                    0
+                };
+            } else if self.position >= 0 {
+                self.response.position = self.position;
             } else {
-                0
-            };
-        } else if self.position >= 0 {
-            self.response.position = self.position;
+                let position = self.position.unsigned_abs() as usize;
+                let start_offset = if position < self.response.ids.len() {
+                    self.response.ids.len() - position
+                } else {
+                    0
+                };
+                self.response.position = start_offset as i32;
+                let end_offset = if self.limit > 0 {
+                    std::cmp::min(start_offset + self.limit, self.response.ids.len())
+                } else {
+                    self.response.ids.len()
+                };
+
+                self.response.ids = self.response.ids[start_offset..end_offset].to_vec()
+            }
+
+            Ok(self.response)
         } else {
-            let position = self.position.unsigned_abs() as usize;
-            let start_offset = if position < self.response.ids.len() {
-                self.response.ids.len() - position
-            } else {
-                0
-            };
-            self.response.position = start_offset as i32;
-            let end_offset = if self.limit > 0 {
-                std::cmp::min(start_offset + self.limit, self.response.ids.len())
-            } else {
-                self.response.ids.len()
-            };
-
-            self.response.ids = self.response.ids[start_offset..end_offset].to_vec()
+            Err(trc::JmapEvent::AnchorNotFound.into_err())
         }
-
-        Ok(self.response)
     }
 }
 
