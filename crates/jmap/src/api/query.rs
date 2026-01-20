@@ -9,7 +9,6 @@ use jmap_proto::{
     object::JmapObject,
     types::state::State,
 };
-use std::cmp::{max, min};
 use types::id::Id;
 
 pub struct QueryResponseBuilder {
