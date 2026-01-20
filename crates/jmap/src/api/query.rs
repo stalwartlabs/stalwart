@@ -98,6 +98,7 @@ impl QueryResponseBuilder {
                 self.response.ids.push(id);
             }
         } else {
+            // by anchor
             if document_id == self.anchor {
                 self.anchor_found = true;
             } else if !self.anchor_found {
