@@ -442,7 +442,7 @@ impl<'x> ArchivedResource<'x> {
             }
             ArchivedResource::CalendarEvent(archive) => archive.inner.display_name.as_deref(),
             ArchivedResource::AddressBook(archive) => {
-                Some(archive.inner.preferences(access_token).name.as_str())
+                Some(archive.inner.preferences(access_token.primary_id).name.as_str())
             }
             ArchivedResource::ContactCard(archive) => archive.inner.display_name.as_deref(),
             ArchivedResource::FileNode(archive) => archive.inner.display_name.as_deref(),

@@ -85,7 +85,7 @@ impl AddressBookSet for Server {
             };
 
             // Process changes
-            if let Err(err) = update_address_book(object, &mut address_book, access_token) {
+            if let Err(err) = update_address_book(object, &mut address_book, account_id) {
                 response.not_created.append(id, err);
                 continue 'create;
             }
@@ -153,7 +153,7 @@ impl AddressBookSet for Server {
 
             // Apply changes
             let has_acl_changes =
-                match update_address_book(object, &mut new_address_book, access_token) {
+                match update_address_book(object, &mut new_address_book, account_id) {
                     Ok(has_acl_changes_) => has_acl_changes_,
                     Err(err) => {
                         response.not_updated.append(id, err);
@@ -379,7 +379,7 @@ impl AddressBookSet for Server {
 fn update_address_book(
     updates: Value<'_, AddressBookProperty, AddressBookValue>,
     address_book: &mut AddressBook,
-    access_token: &AccessToken,
+    account_id: u32,
 ) -> Result<bool, SetError<AddressBookProperty>> {
     let mut has_acl_changes = false;
 
@@ -392,19 +392,18 @@ fn update_address_book(
 
         match (property, value) {
             (AddressBookProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
-                address_book.preferences_mut(access_token).name = value.into_owned();
+                address_book.preferences_mut(account_id).name = value.into_owned();
             }
             (AddressBookProperty::Description, Value::Str(value)) if value.len() < 255 => {
-                address_book.preferences_mut(access_token).description = value.into_owned().into();
+                address_book.preferences_mut(account_id).description = value.into_owned().into();
             }
             (AddressBookProperty::Description, Value::Null) => {
-                address_book.preferences_mut(access_token).description = None;
+                address_book.preferences_mut(account_id).description = None;
             }
             (AddressBookProperty::SortOrder, Value::Number(value)) => {
-                address_book.preferences_mut(access_token).sort_order = value.cast_to_u64() as u32;
+                address_book.preferences_mut(account_id).sort_order = value.cast_to_u64() as u32;
             }
             (AddressBookProperty::IsSubscribed, Value::Bool(subscribe)) => {
-                let account_id = access_token.primary_id();
                 if subscribe {
                     if !address_book.subscribers.contains(&account_id) {
                         address_book.subscribers.push(account_id);
@@ -444,7 +443,7 @@ fn update_address_book(
     }
 
     // Validate name
-    if address_book.preferences(access_token).name.is_empty() {
+    if address_book.preferences(account_id).name.is_empty() {
         return Err(SetError::invalid_properties()
             .with_property(AddressBookProperty::Name)
             .with_description("Missing name."));

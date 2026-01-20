@@ -50,11 +50,10 @@ pub struct ContactCard {
 }
 
 impl AddressBook {
-    pub fn preferences(&self, access_token: &AccessToken) -> &AddressBookPreferences {
+    pub fn preferences(&self, account_id: u32) -> &AddressBookPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.primary_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -63,8 +62,7 @@ impl AddressBook {
         }
     }
 
-    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut AddressBookPreferences {
-        let account_id = access_token.primary_id();
+    pub fn preferences_mut(&mut self, account_id: u32) -> &mut AddressBookPreferences {
         let idx = if let Some(idx) = self
             .preferences
             .iter()
@@ -83,11 +81,10 @@ impl AddressBook {
 }
 
 impl ArchivedAddressBook {
-    pub fn preferences(&self, access_token: &AccessToken) -> &ArchivedAddressBookPreferences {
+    pub fn preferences(&self, account_id: u32) -> &ArchivedAddressBookPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.primary_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)

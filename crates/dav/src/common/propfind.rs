@@ -795,7 +795,7 @@ impl PropFindRequestHandler for Server {
                             ArchivedResource::AddressBook(book),
                         ) => {
                             if let Some(desc) =
-                                book.inner.preferences(access_token).description.as_deref()
+                                book.inner.preferences(access_token.primary_id).description.as_deref()
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),

@@ -156,7 +156,7 @@ impl CardPropPatchRequestHandler for Server {
             // Remove properties
             if !request.set_first && !request.remove.is_empty() {
                 remove_addressbook_properties(
-                    access_token,
+                    access_token.primary_id,
                     &mut new_book,
                     std::mem::take(&mut request.remove),
                     &mut items,
@@ -175,7 +175,7 @@ impl CardPropPatchRequestHandler for Server {
             // Remove properties
             if is_success && !request.remove.is_empty() {
                 remove_addressbook_properties(
-                    access_token,
+                    access_token.primary_id,
                     &mut new_book,
                     request.remove,
                     &mut items,
@@ -257,7 +257,7 @@ impl CardPropPatchRequestHandler for Server {
             match (&property.property, property.value) {
                 (DavProperty::WebDav(WebDavProperty::DisplayName), DavValue::String(name)) => {
                     if name.len() <= self.core.groupware.live_property_size {
-                        address_book.preferences_mut(access_token).name = name;
+                        address_book.preferences_mut(access_token.primary_id).name = name;
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -273,7 +273,7 @@ impl CardPropPatchRequestHandler for Server {
                     DavValue::String(name),
                 ) => {
                     if name.len() <= self.core.groupware.live_property_size {
-                        address_book.preferences_mut(access_token).description = Some(name);
+                        address_book.preferences_mut(access_token.primary_id).description = Some(name);
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -440,7 +440,7 @@ fn remove_card_properties(
 }
 
 fn remove_addressbook_properties(
-    access_token: &AccessToken,
+    account_id: u32,
     book: &mut AddressBook,
     properties: Vec<DavProperty>,
     items: &mut PropStatBuilder,
@@ -448,11 +448,11 @@ fn remove_addressbook_properties(
     for property in properties {
         match &property {
             DavProperty::CardDav(CardDavProperty::AddressbookDescription) => {
-                book.preferences_mut(access_token).description = None;
+                book.preferences_mut(account_id).description = None;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
-                book.preferences_mut(access_token).name.clear();
+                book.preferences_mut(account_id).name.clear();
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             DavProperty::DeadProperty(dead) => {

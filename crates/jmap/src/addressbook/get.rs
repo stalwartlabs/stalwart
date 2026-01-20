@@ -120,14 +120,14 @@ impl AddressBookGet for Server {
                     AddressBookProperty::Name => {
                         result.insert_unchecked(
                             AddressBookProperty::Name,
-                            address_book.preferences(access_token).name.to_string(),
+                            address_book.preferences(access_token.primary_id).name.to_string(),
                         );
                     }
                     AddressBookProperty::Description => {
                         result.insert_unchecked(
                             AddressBookProperty::Description,
                             address_book
-                                .preferences(access_token)
+                                .preferences(access_token.primary_id)
                                 .description
                                 .as_ref()
                                 .map(|v| v.to_string()),
@@ -137,7 +137,7 @@ impl AddressBookGet for Server {
                         result.insert_unchecked(
                             AddressBookProperty::SortOrder,
                             address_book
-                                .preferences(access_token)
+                                .preferences(access_token.primary_id)
                                 .sort_order
                                 .to_native(),
                         );
