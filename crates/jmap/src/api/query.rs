@@ -9,6 +9,7 @@ use jmap_proto::{
     object::JmapObject,
     types::state::State,
 };
+use std::cmp::{max, min};
 use types::id::Id;
 
 pub struct QueryResponseBuilder {
@@ -84,6 +85,7 @@ impl QueryResponseBuilder {
 
         // Pagination
         if !self.has_anchor {
+            // by position
             if self.position >= 0 {
                 if self.position > 0 {
                     self.position -= 1;
@@ -96,29 +98,41 @@ impl QueryResponseBuilder {
             } else {
                 self.response.ids.push(id);
             }
-        } else if self.anchor_offset >= 0 {
-            if !self.anchor_found {
-                if document_id != self.anchor {
-                    return true;
-                }
+        } else {
+            if document_id == self.anchor {
                 self.anchor_found = true;
+            } else if !self.anchor_found {
+                self.position += 1;
             }
 
-            if self.anchor_offset > 0 {
-                self.anchor_offset -= 1;
-            } else {
+            if self.anchor_found && self.anchor_offset == 0 {
+                // once we're in a stable state (anchor found and offset zero), we'll keep pushing ids until we reach the limit
                 self.response.ids.push(id);
                 if self.response.ids.len() == self.limit {
                     return false;
                 }
-            }
-        } else {
-            self.anchor_found = document_id == self.anchor;
-            self.response.ids.push(id);
-
-            if self.anchor_found {
-                self.position = self.anchor_offset;
-                return false;
+            } else if self.anchor_offset < 0 {
+                // if the offset is negative, we need to "remember" the last -offset items we've seen
+                self.response.ids.push(id);
+                if self.anchor_found {
+                    // once we find the anchor, trim the list to keep those we need to include in the returned list
+                    self.position += self.anchor_offset;
+                    self.anchor_offset = 0;
+                    if self.response.ids.len() > self.limit {
+                        self.response.ids = self.response.ids[0..self.limit].to_vec();
+                        return false;
+                    }
+                    if self.response.ids.len() == self.limit {
+                        return false;
+                    }
+                } else if self.response.ids.len() > self.anchor_offset.unsigned_abs() as usize {
+                    // limit remembered items to -offset length
+                    self.response.ids.remove(0);
+                }
+            } else if self.anchor_found && self.anchor_offset > 0 {
+                // if the offset is positive, we don't start pushing ids until we've skipped offset items after finding the anchor
+                self.anchor_offset -= 1;
+                self.position += 1;
             }
         }
 
