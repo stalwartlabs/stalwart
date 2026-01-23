@@ -6,3 +6,5 @@
 run.sh
 _ignore
 .DS_Store
+crates/registry/src/schema/*s.rs
+crates/registry/src/schema/*impl.rs

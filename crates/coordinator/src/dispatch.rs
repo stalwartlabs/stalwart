@@ -4,68 +4,44 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::PubSubStore;
-
-pub enum PubSubStream {
-    #[cfg(feature = "redis")]
-    Redis(crate::backend::redis::pubsub::RedisPubSubStream),
-    #[cfg(feature = "redis")]
-    RedisCluster(crate::backend::redis::pubsub::RedisClusterPubSubStream),
-    #[cfg(feature = "nats")]
-    Nats(crate::backend::nats::pubsub::NatsPubSubStream),
-    #[cfg(feature = "zenoh")]
-    Zenoh(crate::backend::zenoh::pubsub::ZenohPubSubStream),
-    #[cfg(feature = "kafka")]
-    Kafka(crate::backend::kafka::pubsub::KafkaPubSubStream),
-    #[cfg(not(any(feature = "redis", feature = "nats")))]
-    Unimplemented,
-}
-
-pub enum Msg {
-    #[cfg(feature = "redis")]
-    Redis(redis::Msg),
-    #[cfg(feature = "nats")]
-    Nats(async_nats::Message),
-    #[cfg(feature = "zenoh")]
-    Zenoh(Vec<u8>),
-    #[cfg(feature = "kafka")]
-    Kafka(Vec<u8>),
-    #[cfg(not(any(feature = "redis", feature = "nats")))]
-    Unimplemented,
-}
+#[cfg(feature = "redis")]
+use crate::PubSubStream;
+use crate::{Coordinator, Msg};
 
 #[allow(unused_variables)]
-impl PubSubStore {
+impl Coordinator {
     pub async fn publish(&self, topic: &'static str, message: Vec<u8>) -> trc::Result<()> {
         match self {
             #[cfg(feature = "redis")]
-            PubSubStore::Redis(store) => store.publish(topic, message).await,
+            Coordinator::Redis(store) => {
+                crate::backend::redis::redis_publish(store, topic, message).await
+            }
             #[cfg(feature = "nats")]
-            PubSubStore::Nats(store) => store.publish(topic, message).await,
+            Coordinator::Nats(store) => store.publish(topic, message).await,
             #[cfg(feature = "zenoh")]
-            PubSubStore::Zenoh(store) => store.publish(topic, message).await,
+            Coordinator::Zenoh(store) => store.publish(topic, message).await,
             #[cfg(feature = "kafka")]
-            PubSubStore::Kafka(store) => store.publish(topic, message).await,
-            PubSubStore::None => Err(trc::StoreEvent::NotSupported.into_err()),
+            Coordinator::Kafka(store) => store.publish(topic, message).await,
+            Coordinator::None => Err(trc::StoreEvent::NotSupported.into_err()),
         }
     }
 
     pub async fn subscribe(&self, topic: &'static str) -> trc::Result<PubSubStream> {
         match self {
             #[cfg(feature = "redis")]
-            PubSubStore::Redis(store) => store.subscribe(topic).await,
+            Coordinator::Redis(store) => crate::backend::redis::redis_subscribe(store, topic).await,
             #[cfg(feature = "nats")]
-            PubSubStore::Nats(store) => store.subscribe(topic).await,
+            Coordinator::Nats(store) => store.subscribe(topic).await,
             #[cfg(feature = "zenoh")]
-            PubSubStore::Zenoh(store) => store.subscribe(topic).await,
+            Coordinator::Zenoh(store) => store.subscribe(topic).await,
             #[cfg(feature = "kafka")]
-            PubSubStore::Kafka(store) => store.subscribe(topic).await,
-            PubSubStore::None => Err(trc::StoreEvent::NotSupported.into_err()),
+            Coordinator::Kafka(store) => store.subscribe(topic).await,
+            Coordinator::None => Err(trc::StoreEvent::NotSupported.into_err()),
         }
     }
 
     pub fn is_none(&self) -> bool {
-        matches!(self, PubSubStore::None)
+        matches!(self, Coordinator::None)
     }
 }
 

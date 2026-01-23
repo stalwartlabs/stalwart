@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 store = { path = "../store" }
+coordinator = { path = "../coordinator" }
 jmap = { path = "../jmap" }
 types = { path = "../types" }
 smtp = { path = "../smtp" }
@@ -47,11 +48,11 @@ postgres = ["store/postgres"]
 mysql = ["store/mysql"]
 rocks = ["store/rocks"]
 s3 = ["store/s3"]
-redis = ["store/redis"]
-nats = ["store/nats"]
+redis = ["store/redis", "coordinator/redis"]
 azure = ["store/azure"]
-zenoh = ["store/zenoh"]
-kafka = ["store/kafka"]
+nats = ["coordinator/nats"]
+zenoh = ["coordinator/zenoh"]
+kafka = ["coordinator/kafka"]
 enterprise = [ "jmap/enterprise", 
                "smtp/enterprise", 
                "common/enterprise", 

@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Display, time::Duration};
-
 use deadpool::{
     Runtime,
     managed::{Manager, Pool},
@@ -14,28 +12,28 @@ use redis::{
     Client, ProtocolVersion,
     cluster::{ClusterClient, ClusterClientBuilder},
 };
+use std::{fmt::Display, time::Duration};
 use utils::config::{Config, utils::AsKey};
 
 pub mod lookup;
 pub mod pool;
-pub mod pubsub;
 
 #[derive(Debug)]
 pub struct RedisStore {
-    pool: RedisPool,
+    pub pool: RedisPool,
 }
 
-struct RedisConnectionManager {
-    client: Client,
+pub struct RedisConnectionManager {
+    pub client: Client,
     timeout: Duration,
 }
 
-struct RedisClusterConnectionManager {
-    client: ClusterClient,
+pub struct RedisClusterConnectionManager {
+    pub client: ClusterClient,
     timeout: Duration,
 }
 
-enum RedisPool {
+pub enum RedisPool {
     Single(Pool<RedisConnectionManager>),
     Cluster(Pool<RedisClusterConnectionManager>),
 }

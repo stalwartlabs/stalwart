@@ -8,6 +8,7 @@ pub mod backend;
 pub mod config;
 pub mod dispatch;
 pub mod query;
+pub mod registry;
 pub mod search;
 pub mod write;
 
@@ -21,7 +22,7 @@ pub use xxhash_rust;
 
 use ahash::AHashMap;
 use backend::{fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use utils::config::cron::SimpleCron;
 use write::ValueClass;
 
@@ -129,7 +130,6 @@ pub struct Stores {
     pub blob_stores: AHashMap<String, BlobStore>,
     pub search_stores: AHashMap<String, SearchStore>,
     pub in_memory_stores: AHashMap<String, InMemoryStore>,
-    pub pubsub_stores: AHashMap<String, PubSubStore>,
     pub purge_schedules: Vec<PurgeSchedule>,
 }
 
@@ -205,18 +205,10 @@ pub enum InMemoryStore {
     // SPDX-SnippetEnd
 }
 
-#[derive(Clone, Default)]
-pub enum PubSubStore {
-    #[cfg(feature = "redis")]
-    Redis(Arc<backend::redis::RedisStore>),
-    #[cfg(feature = "nats")]
-    Nats(Arc<backend::nats::NatsPubSub>),
-    #[cfg(feature = "zenoh")]
-    Zenoh(Arc<backend::zenoh::ZenohPubSub>),
-    #[cfg(feature = "kafka")]
-    Kafka(Arc<backend::kafka::KafkaPubSub>),
-    #[default]
-    None,
+#[derive(Clone)]
+pub enum RegistryStore {
+    Remote(Store),
+    Local(PathBuf),
 }
 
 #[cfg(feature = "sqlite")]

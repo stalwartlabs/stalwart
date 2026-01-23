@@ -13,6 +13,7 @@ use crate::{
     listener::tls::AcmeProviders, manager::config::ConfigManager,
 };
 use arc_swap::ArcSwap;
+use coordinator::Coordinator;
 use directory::{Directories, Directory};
 use groupware::GroupwareConfig;
 use hyper::HeaderMap;
@@ -132,21 +133,21 @@ impl Core {
                 }
             })
             .unwrap_or_default();
-        let pubsub = config
-            .value("cluster.coordinator")
-            .map(|id| id.to_string())
-            .and_then(|id| {
-                if let Some(store) = stores.pubsub_stores.get(&id) {
-                    store.clone().into()
-                } else {
-                    config.new_parse_error(
-                        "cluster.coordinator",
-                        format!("Coordinator backend {id:?} not found"),
-                    );
-                    None
-                }
-            })
-            .unwrap_or_default();
+        let pubsub = Coordinator::None; /*config
+        .value("cluster.coordinator")
+        .map(|id| id.to_string())
+        .and_then(|id| {
+        if let Some(store) = stores.pubsub_stores.get(&id) {
+        store.clone().into()
+        } else {
+        config.new_parse_error(
+        "cluster.coordinator",
+        format!("Coordinator backend {id:?} not found"),
+        );
+        None
+        }
+        })
+        .unwrap_or_default();*/
         let mut directories =
             Directories::parse(config, &stores, data.clone(), is_enterprise).await;
         let directory = config

@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use roaring::RoaringBitmap;
-
 use crate::Store;
+use roaring::RoaringBitmap;
 
 pub mod blob;
 pub mod lookup;
-pub mod pubsub;
+pub mod registry;
 pub mod search;
 pub mod store;
 

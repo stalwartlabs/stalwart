@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
 use ahash::AHashMap;
+use coordinator::Coordinator;
 use directory::Directory;
-use store::{BlobStore, SearchStore, InMemoryStore, PubSubStore, PurgeSchedule, Store};
+use std::sync::Arc;
+use store::{BlobStore, InMemoryStore, PurgeSchedule, SearchStore, Store};
 
 use crate::manager::config::ConfigManager;
 
@@ -18,7 +18,7 @@ pub struct Storage {
     pub blob: BlobStore,
     pub fts: SearchStore,
     pub lookup: InMemoryStore,
-    pub pubsub: PubSubStore,
+    pub pubsub: Coordinator,
     pub directory: Arc<Directory>,
     pub directories: AHashMap<String, Arc<Directory>>,
     pub purge_schedules: Vec<PurgeSchedule>,

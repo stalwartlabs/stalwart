@@ -227,11 +227,11 @@ impl Stores {
                     {
                         self.in_memory_stores
                             .insert(store_id.clone(), InMemoryStore::Redis(db.clone()));
-                        self.pubsub_stores
-                            .insert(store_id, crate::PubSubStore::Redis(db));
+                        //self.pubsub_stores
+                        //    .insert(store_id, crate::PubSubStore::Redis(db));
                     }
                 }
-                #[cfg(feature = "nats")]
+                /*#[cfg(feature = "nats")]
                 "nats" => {
                     if let Some(db) = crate::backend::nats::NatsPubSub::open(config, prefix)
                         .await
@@ -260,7 +260,7 @@ impl Stores {
                         self.pubsub_stores
                             .insert(store_id, crate::PubSubStore::Kafka(db));
                     }
-                }
+                }*/
                 // SPDX-SnippetBegin
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                 // SPDX-License-Identifier: LicenseRef-SEL

@@ -10,6 +10,7 @@ nlp = { path = "../nlp" }
 store = { path = "../store" }
 trc = { path = "../trc" }
 directory = { path = "../directory" }
+coordinator = { path = "../coordinator" }
 types = { path = "../types" }
 jmap_proto = { path = "../jmap-proto" }
 imap_proto = { path = "../imap-proto" }

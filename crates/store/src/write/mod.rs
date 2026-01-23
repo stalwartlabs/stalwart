@@ -279,6 +279,20 @@ pub enum DirectoryClass {
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
+pub enum RegistryClass {
+    Item(u64),
+    Relation {
+        from: u64,
+        to: u64,
+    },
+    Index {
+        index_id: u16,
+        item_id: u64,
+        key: Vec<u8>,
+    },
+}
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum QueueClass {
     Message(u64),
     MessageEvent(QueueEvent),

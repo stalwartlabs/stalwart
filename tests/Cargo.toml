@@ -13,14 +13,15 @@ postgres = ["store/postgres"]
 mysql = ["store/mysql"]
 rocks = ["store/rocks"]
 s3 = ["store/s3"]
-redis = ["store/redis"]
-nats = ["store/nats"]
+redis = ["store/redis", "coordinator/redis"]
+nats = ["coordinator/nats"]
 azure = ["store/azure"]
 
 [dev-dependencies]
 store = { path = "../crates/store", features = ["test_mode", "enterprise"] }
 nlp = { path = "../crates/nlp" }
 directory = { path = "../crates/directory", features = ["test_mode", "enterprise"] }
+coordinator = { path = "../crates/coordinator", features = ["test_mode", "enterprise"] }
 jmap = { path = "../crates/jmap", features = ["test_mode", "enterprise"] }
 jmap_proto = { path = "../crates/jmap-proto" }
 imap = { path = "../crates/imap", features = ["test_mode"] }
