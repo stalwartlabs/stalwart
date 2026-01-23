@@ -312,10 +312,8 @@ jobs:
         run: |
           rustup target add ${{matrix.target}}
           cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise"
-          cargo build --release --target ${{matrix.target}} -p stalwart-cli
           mkdir -p artifacts
           mv ./target/${{matrix.target}}/release/stalwart.exe ./artifacts/stalwart.exe
-          mv ./target/${{matrix.target}}/release/stalwart-cli.exe ./artifacts/stalwart-cli.exe
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
@@ -359,10 +357,8 @@ jobs:
         run: |
           rustup target add ${{matrix.target}}
           cargo build --release --target ${{matrix.target}} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise"
-          cargo build --release --target ${{matrix.target}} -p stalwart-cli
           mkdir -p artifacts
           mv ./target/${{matrix.target}}/release/stalwart ./artifacts/stalwart
-          mv ./target/${{matrix.target}}/release/stalwart-cli ./artifacts/stalwart-cli
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
