@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Variable, functions::ResolveVariable, if_block::IfBlock, tokenizer::TokenMap};
+use crate::{expr::if_block::IfBlock, manager::bootstrap::Bootstrap};
 use ahash::AHashSet;
 use mail_auth::common::resolver::ToReverseName;
 use nlp::classifier::model::{CcfhClassifier, FhClassifier};
@@ -13,11 +13,7 @@ use std::{
     time::Duration,
 };
 use tokio::net::lookup_host;
-use utils::{
-    cache::CacheItemWeight,
-    config::{Config, utils::ParseValue},
-    glob::GlobMap,
-};
+use utils::{cache::CacheItemWeight, config::utils::ParseValue, glob::GlobMap};
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default)]
 pub enum SpamClassifier {
@@ -174,7 +170,7 @@ pub struct DnsBlServer {
 }
 
 impl SpamFilterConfig {
-    pub async fn parse(config: &mut Config) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         SpamFilterConfig {
             enabled: config
                 .property_or_default("spam-filter.enable", "true")
@@ -200,7 +196,7 @@ impl SpamFilterConfig {
 }
 
 impl SpamFilterRules {
-    pub fn parse(config: &mut Config) -> SpamFilterRules {
+    pub fn parse(bp: &mut Bootstrap) -> SpamFilterRules {
         let mut rules = vec![];
         for id in config.sub_keys("spam-filter.rule", ".scope") {
             if let Some(rule) = SpamFilterRule::parse(config, id) {
@@ -234,7 +230,7 @@ struct SpamFilterRule {
 }
 
 impl SpamFilterRule {
-    pub fn parse(config: &mut Config, id: String) -> Option<Self> {
+    pub fn parse(bp: &mut Bootstrap, id: String) -> Option<Self> {
         let id = id.as_str();
         if !config
             .property_or_default(("spam-filter.rule", id, "enable"), "true")
@@ -263,7 +259,7 @@ impl SpamFilterRule {
 }
 
 impl DnsBlConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let mut servers = vec![];
         for id in config.sub_keys("spam-filter.dnsbl.server", ".scope") {
             if let Some(server) = DnsBlServer::parse(config, id) {
@@ -290,7 +286,7 @@ impl DnsBlConfig {
 }
 
 impl DnsBlServer {
-    pub fn parse(config: &mut Config, id: String) -> Option<Self> {
+    pub fn parse(bp: &mut Bootstrap, id: String) -> Option<Self> {
         let id_ = id.as_str();
 
         if !config
@@ -322,7 +318,7 @@ impl DnsBlServer {
 }
 
 impl SpamFilterLists {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let mut lists = SpamFilterLists {
             file_extensions: GlobMap::default(),
             scores: GlobMap::default(),
@@ -397,7 +393,7 @@ impl SpamFilterLists {
 }
 
 impl PyzorConfig {
-    pub async fn parse(config: &mut Config) -> Option<Self> {
+    pub async fn parse(bp: &mut Bootstrap) -> Option<Self> {
         if !config
             .property_or_default("spam-filter.pyzor.enable", "true")
             .unwrap_or(true)
@@ -452,7 +448,7 @@ impl PyzorConfig {
 }
 
 impl ClassifierConfig {
-    pub fn parse(config: &mut Config) -> Option<Self> {
+    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
         let ccfh = match config.value("spam-filter.classifier.model") {
             Some("ftrl-fh") | None => false,
             Some("ftrl-ccfh") => true,
@@ -524,7 +520,7 @@ impl ClassifierConfig {
 }
 
 impl FtrlParameters {
-    pub fn parse(config: &mut Config, prefix: &str, default_features: usize) -> Self {
+    pub fn parse(bp: &mut Bootstrap, prefix: &str, default_features: usize) -> Self {
         let feature_hash_size: usize = config
             .property((prefix, "features"))
             .unwrap_or(default_features);
@@ -561,7 +557,7 @@ impl SpamClassifier {
 }
 
 impl SpamFilterScoreConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         SpamFilterScoreConfig {
             reject_threshold: config
                 .property("spam-filter.score.reject")

@@ -135,7 +135,7 @@ pub struct PrometheusMetrics {
 }
 
 impl Telemetry {
-    pub fn parse(config: &mut Config, stores: &Stores) -> Self {
+    pub fn parse(bp: &mut Bootstrap, stores: &Stores) -> Self {
         let mut telemetry = Telemetry {
             tracers: Tracers::parse(config, stores),
             metrics: Interests::default(),
@@ -160,7 +160,7 @@ impl Telemetry {
 }
 
 impl Tracers {
-    pub fn parse(config: &mut Config, stores: &Stores) -> Self {
+    pub fn parse(bp: &mut Bootstrap, stores: &Stores) -> Self {
         // Parse custom logging levels
         let mut custom_levels = AHashMap::new();
         for event_name in config
@@ -595,7 +595,7 @@ impl Tracers {
 }
 
 impl Metrics {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let mut metrics = Metrics {
             prometheus: None,
             otel: None,
@@ -743,7 +743,7 @@ impl Metrics {
 }
 
 fn parse_webhook(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     id: &str,
     global_interests: &mut Interests,
 ) -> Option<TelemetrySubscriber> {

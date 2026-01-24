@@ -4,15 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::CompactString;
-use utils::config::{Config, utils::AsKey};
-
-use crate::expr::{Constant, Expression};
-
 use super::{
     ConstantValue, ExpressionItem,
     parser::ExpressionParser,
     tokenizer::{TokenMap, Tokenizer},
+};
+use crate::{
+    expr::{Constant, Expression},
+    manager::bootstrap::Bootstrap,
+};
+use compact_str::CompactString;
+use registry::{
+    schema::{prelude::Property, structs},
+    types::id::Id,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,37 +27,34 @@ pub struct IfThen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfBlock {
-    pub key: String,
+    pub property: Property,
     pub if_then: Vec<IfThen>,
     pub default: Expression,
 }
 
 impl IfBlock {
-    pub fn new<T: ConstantValue>(
-        key: impl Into<String>,
-        if_thens: impl IntoIterator<Item = (&'static str, &'static str)>,
-        default: impl AsRef<str>,
-    ) -> Self {
+    pub fn new_default<T: ConstantValue>(property: Property, expr: structs::Expression) -> Self {
         let token_map = TokenMap::default()
             .with_all_variables()
             .with_constants::<T>();
 
         Self {
-            key: key.into(),
-            if_then: if_thens
+            property,
+            if_then: expr
+                .match_
                 .into_iter()
-                .map(|(if_, then)| IfThen {
-                    expr: Expression::parse(&token_map, if_),
-                    then: Expression::parse(&token_map, then),
+                .map(|match_| IfThen {
+                    expr: Expression::parse(&token_map, &match_.if_),
+                    then: Expression::parse(&token_map, &match_.then),
                 })
                 .collect(),
-            default: Expression::parse(&token_map, default.as_ref()),
+            default: Expression::parse(&token_map, &expr.else_),
         }
     }
 
-    pub fn empty(key: impl Into<String>) -> Self {
+    pub fn empty(property: Property) -> Self {
         Self {
-            key: key.into(),
+            property,
             if_then: Default::default(),
             default: Expression {
                 items: Default::default(),
@@ -67,24 +68,6 @@ impl IfBlock {
 }
 
 impl Expression {
-    pub fn try_parse(
-        config: &mut Config,
-        key: impl AsKey,
-        token_map: &TokenMap,
-    ) -> Option<Expression> {
-        if let Some(expr) = config.value(key.as_key()) {
-            match ExpressionParser::new(Tokenizer::new(expr, token_map)).parse() {
-                Ok(expr) => Some(expr),
-                Err(err) => {
-                    config.new_parse_error(key, err);
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    }
-
     fn parse(token_map: &TokenMap, expr: &str) -> Self {
         ExpressionParser::new(Tokenizer::new(expr, token_map))
             .parse()
@@ -94,129 +77,96 @@ impl Expression {
 
 impl IfBlock {
     pub fn try_parse(
-        config: &mut Config,
-        prefix: impl AsKey,
+        bp: &mut Bootstrap,
+        id: Id,
+        property: Property,
+        expr: structs::Expression,
         token_map: &TokenMap,
     ) -> Option<IfBlock> {
-        let key = prefix.as_key();
-
         // Parse conditions
         let mut if_block = IfBlock {
-            key,
-            if_then: Default::default(),
+            property,
+            if_then: Vec::with_capacity(expr.match_.len()),
             default: Expression {
                 items: Default::default(),
             },
         };
 
-        // Try first with a single value
-        if config.contains_key(if_block.key.as_str()) {
-            if_block.default = Expression::try_parse(config, &if_block.key, token_map)?;
-            return Some(if_block);
+        if expr.else_.is_empty() {
+            if !expr.match_.is_empty() {
+                bp.invalid_property(id, property, "Missing 'else' block in 'if' expression");
+            }
+            return None;
         }
 
-        // Collect prefixes
-        let prefix = prefix.as_prefix();
-        let keys = config
-            .keys
-            .keys()
-            .filter(|k| k.starts_with(&prefix))
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut found_if = false;
-        let mut found_else = "";
-        let mut found_then = false;
-        let mut last_array_pos = "";
+        if expr
+            .match_
+            .iter()
+            .any(|m| m.if_.is_empty() || m.then.is_empty())
+        {
+            bp.invalid_property(id, property, "All 'if' and 'then' blocks must be non-empty");
+            return None;
+        }
 
-        for item in &keys {
-            let suffix_ = item.strip_prefix(&prefix).unwrap();
-
-            if let Some((array_pos, suffix)) = suffix_.split_once('.') {
-                let if_key = suffix.split_once('.').map(|(v, _)| v).unwrap_or(suffix);
-                if if_key == "if" {
-                    if array_pos != last_array_pos {
-                        if !last_array_pos.is_empty() && !found_then {
-                            config.new_parse_error(
-                                if_block.key,
-                                format!(
-                                    "Missing 'then' in 'if' condition {}.",
-                                    last_array_pos.parse().unwrap_or(0) + 1,
-                                ),
-                            );
-                            return None;
-                        }
-
-                        if_block.if_then.push(IfThen {
-                            expr: Expression::try_parse(config, item, token_map)?,
-                            then: Expression::default(),
-                        });
-
-                        found_then = false;
-                        last_array_pos = array_pos;
-                    }
-
-                    found_if = true;
-                } else if if_key == "else" {
-                    if found_else.is_empty() {
-                        if found_if {
-                            if_block.default = Expression::try_parse(config, item, token_map)?;
-                            found_else = array_pos;
-                        } else {
-                            config.new_parse_error(if_block.key, "Found 'else' before 'if'");
-                            return None;
-                        }
-                    } else if array_pos != found_else {
-                        config.new_parse_error(if_block.key, "Multiple 'else' found");
-                        return None;
-                    }
-                } else if if_key == "then" {
-                    if found_else.is_empty() {
-                        if array_pos == last_array_pos {
-                            if !found_then {
-                                if_block.if_then.last_mut().unwrap().then =
-                                    Expression::try_parse(config, item, token_map)?;
-                                found_then = true;
-                            }
-                        } else {
-                            config.new_parse_error(if_block.key, "Found 'then' without 'if'");
-                            return None;
-                        }
-                    } else {
-                        config.new_parse_error(if_block.key, "Found 'then' in 'else' block");
-                        return None;
-                    }
-                }
-            } else {
-                config.new_parse_error(
-                    if_block.key,
-                    format!("Invalid property {item:?} found in 'if' block."),
+        match ExpressionParser::new(Tokenizer::new(&expr.else_, token_map)).parse() {
+            Ok(expr) => {
+                if_block.default = expr;
+            }
+            Err(err) => {
+                bp.invalid_property(
+                    id,
+                    property,
+                    &format!("Error parsing 'else' expression: {}", err),
                 );
                 return None;
             }
         }
 
-        if !found_if {
-            None
-        } else if !found_then {
-            config.new_parse_error(
-                if_block.key,
-                format!(
-                    "Missing 'then' in 'if' condition {}",
-                    last_array_pos.parse().unwrap_or(0) + 1,
-                ),
-            );
-            None
-        } else if found_else.is_empty() {
-            config.new_parse_error(if_block.key, "Missing 'else'");
-            None
-        } else {
-            Some(if_block)
+        for (num, match_) in expr.match_.into_iter().enumerate() {
+            match ExpressionParser::new(Tokenizer::new(&match_.if_, token_map)).parse() {
+                Ok(if_expr) => {
+                    match ExpressionParser::new(Tokenizer::new(&match_.then, token_map)).parse() {
+                        Ok(then_expr) => {
+                            if_block.if_then.push(IfThen {
+                                expr: if_expr,
+                                then: then_expr,
+                            });
+                        }
+                        Err(err) => {
+                            bp.invalid_property(
+                                id,
+                                property,
+                                &format!(
+                                    "Error parsing 'then' expression in condition #{}: {}",
+                                    num + 1,
+                                    err
+                                ),
+                            );
+                            return None;
+                        }
+                    }
+                }
+                Err(err) => {
+                    bp.invalid_property(
+                        id,
+                        property,
+                        &format!(
+                            "Error parsing 'if' expression in condition #{}: {}",
+                            num + 1,
+                            err
+                        ),
+                    );
+                    return None;
+                }
+            }
         }
+
+        Some(if_block)
     }
 
-    pub fn into_default(self, key: impl Into<String>) -> IfBlock {
+    pub fn into_default(self, property: Property) -> IfBlock {
         IfBlock {
-            key: key.into(),
+            property,
             if_then: Default::default(),
             default: self.default,
         }

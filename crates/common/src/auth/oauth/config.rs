@@ -46,7 +46,7 @@ pub struct OAuthConfig {
 }
 
 impl OAuthConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let oidc_signature_algorithm = match config.value("oauth.oidc.signature-algorithm") {
             Some(alg) => match alg.to_uppercase().as_str() {
                 "HS256" => SignatureAlgorithm::HS256,
@@ -220,7 +220,7 @@ impl Default for OAuthConfig {
     }
 }
 
-fn parse_rsa_key(config: &mut Config) -> Option<(Secret, AlgorithmParameters)> {
+fn parse_rsa_key(bp: &mut Bootstrap) -> Option<(Secret, AlgorithmParameters)> {
     let rsa_key_pair = match build_rsa_keypair(config.value_require("oauth.oidc.signature-key")?) {
         Ok(key) => key,
         Err(err) => {
@@ -258,7 +258,7 @@ fn parse_rsa_key(config: &mut Config) -> Option<(Secret, AlgorithmParameters)> {
 }
 
 fn parse_ecdsa_key(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     oidc_signature_algorithm: SignatureAlgorithm,
 ) -> Option<(Secret, AlgorithmParameters)> {
     let (alg, curve) = match oidc_signature_algorithm {

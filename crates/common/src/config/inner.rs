@@ -27,12 +27,11 @@ use std::{
 };
 use utils::{
     cache::{Cache, CacheWithTtl},
-    config::Config,
     snowflake::SnowflakeIdGenerator,
 };
 
 impl Data {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         // Parse certificates
         let mut certificates = AHashMap::new();
         let mut subject_names = AHashSet::new();
@@ -79,7 +78,7 @@ impl Data {
 }
 
 impl Caches {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         const MB_50: u64 = 50 * 1024 * 1024;
         const MB_10: u64 = 10 * 1024 * 1024;
         const MB_5: u64 = 5 * 1024 * 1024;

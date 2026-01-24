@@ -11,7 +11,7 @@ use crate::expr::{Expression, tokenizer::TokenMap};
 use super::*;
 
 pub fn parse_queue_rate_limiter(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     prefix: impl AsKey,
     token_map: &TokenMap,
     available_rate_limiter_keys: u16,
@@ -35,7 +35,7 @@ pub fn parse_queue_rate_limiter(
 }
 
 fn parse_queue_rate_limiter_item(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     prefix: impl AsKey,
     rate_limiter_id: &str,
     token_map: &TokenMap,

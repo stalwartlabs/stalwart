@@ -10,8 +10,6 @@ use directory::Directory;
 use std::sync::Arc;
 use store::{BlobStore, InMemoryStore, PurgeSchedule, SearchStore, Store};
 
-use crate::manager::config::ConfigManager;
-
 #[derive(Default, Clone)]
 pub struct Storage {
     pub data: Store,
@@ -22,7 +20,6 @@ pub struct Storage {
     pub directory: Arc<Directory>,
     pub directories: AHashMap<String, Arc<Directory>>,
     pub purge_schedules: Vec<PurgeSchedule>,
-    pub config: ConfigManager,
 
     pub stores: AHashMap<String, Store>,
     pub blobs: AHashMap<String, BlobStore>,

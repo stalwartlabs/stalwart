@@ -135,7 +135,7 @@ impl Server {
 }
 
 impl AddressMapping {
-    pub fn parse(config: &mut Config, key: impl AsKey) -> Self {
+    pub fn parse(bp: &mut Bootstrap, key: impl AsKey) -> Self {
         let key = key.as_key();
         if let Some(value) = config.value(key.as_str()) {
             match value {

@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::settings::JmapConfig;
-use crate::config::groupware::GroupwareConfig;
+use crate::{config::mailstore::jmap::JmapConfig, manager::bootstrap::Bootstrap};
 use ahash::AHashSet;
 use calcard::icalendar::ICalendarDuration;
 use chrono::{DateTime, Utc};
@@ -19,24 +18,26 @@ use jmap_proto::{
     },
     types::date::UTCDate,
 };
-use types::{collection::Collection, type_state::DataType};
-use utils::{config::Config, map::vec_map::VecMap};
+use registry::{
+    schema::structs::{Calendar, Email, SieveUserInterpreter},
+    types::EnumType,
+};
+use types::type_state::DataType;
+use utils::map::vec_map::VecMap;
 
 impl JmapConfig {
-    pub fn add_capabilities(&mut self, config: &mut Config, groupware_config: &GroupwareConfig) {
+    pub async fn add_capabilities(&mut self, bp: &mut Bootstrap) {
         // Add core capabilities
         self.capabilities.session.append(
             Capability::Core,
             Capabilities::Core(CoreCapabilities {
-                max_size_upload: self.upload_max_size,
-                max_concurrent_upload: self.upload_max_concurrent.unwrap_or(u32::MAX as u64)
-                    as usize,
-                max_size_request: self.request_max_size,
-                max_concurrent_requests: self.request_max_concurrent.unwrap_or(u32::MAX as u64)
-                    as usize,
-                max_calls_in_request: self.request_max_calls,
-                max_objects_in_get: self.get_max_objects,
-                max_objects_in_set: self.set_max_objects,
+                max_size_upload: self.upload_max_size as u64,
+                max_concurrent_upload: self.upload_max_concurrent.unwrap_or(u32::MAX as u64),
+                max_size_request: self.request_max_size as u64,
+                max_concurrent_requests: self.request_max_concurrent.unwrap_or(u32::MAX as u64),
+                max_calls_in_request: self.request_max_calls as u64,
+                max_objects_in_get: self.get_max_objects as u64,
+                max_objects_in_set: self.set_max_objects as u64,
                 collation_algorithms: vec![
                     "i;ascii-numeric".to_string(),
                     "i;ascii-casemap".to_string(),
@@ -46,6 +47,7 @@ impl JmapConfig {
         );
 
         // Add email capabilities
+        let email = bp.setting_infallible::<Email>().await;
         self.capabilities.session.append(
             Capability::Mail,
             Capabilities::Empty(EmptyCapabilities::default()),
@@ -54,9 +56,9 @@ impl JmapConfig {
             Capability::Mail,
             Capabilities::Mail(MailCapabilities {
                 max_mailboxes_per_email: None,
-                max_mailbox_depth: self.mailbox_max_depth,
-                max_size_mailbox_name: self.mailbox_name_max_len,
-                max_size_attachments_per_email: self.mail_attachments_max_size,
+                max_mailbox_depth: email.max_mailbox_depth,
+                max_size_mailbox_name: email.max_mailbox_name_length,
+                max_size_attachments_per_email: email.max_attachment_size,
                 email_query_sort_options: vec![
                     EmailComparator::ReceivedAt,
                     EmailComparator::Size,
@@ -85,7 +87,11 @@ impl JmapConfig {
                 max_date_time: UTCDate::from_timestamp(DateTime::<Utc>::MAX_UTC.timestamp()),
                 max_expanded_query_duration: ICalendarDuration::from_seconds(86400 * 365)
                     .to_string(),
-                max_participants_per_event: groupware_config.max_ical_attendees_per_instance.into(),
+                max_participants_per_event: bp
+                    .setting_infallible::<Calendar>()
+                    .await
+                    .max_attendees
+                    .into(),
                 may_create_calendar: true,
             }),
         );
@@ -188,25 +194,16 @@ impl JmapConfig {
         );
 
         // Add Sieve capabilities
-        let mut notification_methods = Vec::new();
-
-        for (_, uri) in config.values("sieve.untrusted.notification-uris") {
-            notification_methods.push(uri.to_string());
-        }
-        if notification_methods.is_empty() {
-            notification_methods.push("mailto".to_string());
-        }
-
-        let mut capabilities: AHashSet<sieve::compiler::grammar::Capability> =
-            AHashSet::from_iter(sieve::compiler::grammar::Capability::all().iter().cloned());
-
-        for (_, capability) in config.values("sieve.untrusted.disabled-capabilities") {
-            capabilities.remove(&sieve::compiler::grammar::Capability::parse(capability));
-        }
-
-        let mut extensions = capabilities
+        let sieve = bp.setting_infallible::<SieveUserInterpreter>().await;
+        let disabled_capabilities = sieve
+            .disable_capabilities
             .into_iter()
+            .map(|v| v.as_str())
+            .collect::<AHashSet<&str>>();
+        let mut extensions = sieve::compiler::grammar::Capability::all()
+            .iter()
             .map(|c| c.to_string())
+            .filter(|c| !disabled_capabilities.contains(c.as_str()))
             .collect::<Vec<String>>();
         extensions.sort_unstable();
 
@@ -217,17 +214,13 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::Sieve,
             Capabilities::SieveAccount(SieveAccountCapabilities {
-                max_script_name: self.sieve_max_script_name,
-                max_script_size: config
-                    .property("sieve.untrusted.max-script-size")
-                    .unwrap_or(1024 * 1024),
-                max_scripts: self.max_objects[Collection::SieveScript as usize] as usize,
-                max_redirects: config
-                    .property("sieve.untrusted.max-redirects")
-                    .unwrap_or(1),
+                max_script_name: sieve.max_script_name_length as u64,
+                max_script_size: sieve.max_script_size,
+                max_scripts: sieve.max_scripts.unwrap_or(u32::MAX as u64),
+                max_redirects: sieve.max_redirects,
                 extensions,
-                notification_methods: if !notification_methods.is_empty() {
-                    notification_methods.into()
+                notification_methods: if !sieve.allowed_notify_uris.is_empty() {
+                    sieve.allowed_notify_uris.into()
                 } else {
                     None
                 },
@@ -243,8 +236,8 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::Blob,
             Capabilities::Blob(BlobCapabilities {
-                max_size_blob_set: (self.request_max_size * 3 / 4) - 512,
-                max_data_sources: self.request_max_calls,
+                max_size_blob_set: (self.request_max_size as u64 * 3 / 4) - 512,
+                max_data_sources: self.request_max_calls as u64,
                 supported_type_names: vec![
                     DataType::Email,
                     DataType::Thread,

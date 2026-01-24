@@ -44,7 +44,7 @@ pub static TLS13_VERSION: &[&SupportedProtocolVersion] = &[&TLS13];
 pub static TLS12_VERSION: &[&SupportedProtocolVersion] = &[&TLS12];
 
 impl AcmeProviders {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let mut providers = AHashMap::new();
 
         // Parse ACME providers
@@ -185,7 +185,7 @@ impl AcmeProviders {
 }
 
 #[allow(clippy::unnecessary_to_owned)]
-fn build_dns_updater(config: &mut Config, acme_id: &str) -> Option<DnsUpdater> {
+fn build_dns_updater(bp: &mut Bootstrap, acme_id: &str) -> Option<DnsUpdater> {
     let timeout = config
         .property_or_default(("acme", acme_id, "timeout"), "30s")
         .unwrap_or_else(|| Duration::from_secs(30));
@@ -316,7 +316,7 @@ fn build_dns_updater(config: &mut Config, acme_id: &str) -> Option<DnsUpdater> {
 }
 
 pub(crate) fn parse_certificates(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     certificates: &mut AHashMap<String, Arc<CertifiedKey>>,
     subject_names: &mut AHashSet<String>,
 ) {

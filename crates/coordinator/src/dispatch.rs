@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-#[cfg(feature = "redis")]
-use crate::PubSubStream;
-use crate::{Coordinator, Msg};
+use crate::{Coordinator, Msg, PubSubStream};
 
 #[allow(unused_variables)]
 impl Coordinator {
@@ -58,7 +56,6 @@ impl PubSubStream {
             PubSubStream::Zenoh(stream) => stream.next().await,
             #[cfg(feature = "kafka")]
             PubSubStream::Kafka(stream) => stream.next().await,
-            #[cfg(not(any(feature = "redis", feature = "nats")))]
             PubSubStream::Unimplemented => None,
         }
     }
@@ -75,7 +72,6 @@ impl Msg {
             Msg::Zenoh(msg) => msg.as_slice(),
             #[cfg(feature = "kafka")]
             Msg::Kafka(msg) => msg.as_slice(),
-            #[cfg(not(any(feature = "redis", feature = "nats")))]
             Msg::Unimplemented => &[],
         }
     }
@@ -90,7 +86,6 @@ impl Msg {
             Msg::Zenoh(_) => "",
             #[cfg(feature = "kafka")]
             Msg::Kafka(_) => "",
-            #[cfg(not(any(feature = "redis", feature = "nats")))]
             Msg::Unimplemented => "",
         }
     }

@@ -9,6 +9,7 @@ pub use crate::schema::enums::*;
 pub use crate::schema::properties::*;
 pub use crate::schema::structs::*;
 pub use crate::types::EnumType;
+pub use crate::types::ObjectType;
 pub use crate::types::datetime::UTCDateTime;
 pub use crate::types::duration::Duration;
 pub use crate::types::error::*;

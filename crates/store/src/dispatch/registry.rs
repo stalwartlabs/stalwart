@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use registry::{schema::prelude::Registry, types::id::Id};
-
-use crate::RegistryStore;
+use crate::{RegistryStore, registry::RegistryObject};
+use registry::types::{ObjectType, id::Id};
 
 impl RegistryStore {
-    pub async fn get(&self, id: Id) -> trc::Result<Option<Registry>> {
+    pub async fn get<T: ObjectType>(&self, id: Id) -> trc::Result<Option<T>> {
         todo!()
     }
 
-    pub async fn get_or_default(&self, id: Id) -> trc::Result<Registry> {
+    pub async fn list<T: ObjectType>(&self) -> trc::Result<Vec<RegistryObject<T>>> {
         todo!()
     }
 

@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::AHashMap;
-use arc_swap::ArcSwap;
-use store::Stores;
-use utils::config::Config;
-
 use crate::{
     Core, Server,
     config::{
@@ -17,8 +12,10 @@ use crate::{
     },
     listener::blocked::{BLOCKED_IP_KEY, BlockedIps},
 };
-
-use super::config::{ConfigManager, Patterns};
+use ahash::AHashMap;
+use arc_swap::ArcSwap;
+use store::Stores;
+use utils::config::Config;
 
 pub struct ReloadResult {
     pub config: Config,

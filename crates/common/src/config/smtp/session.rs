@@ -190,7 +190,7 @@ pub enum Stage {
 }
 
 impl SessionConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let has_conn_vars = TokenMap::default().with_variables(CONNECTION_VARS);
         let has_ehlo_hars = TokenMap::default().with_variables(SMTP_EHLO_VARS);
         let has_sender_vars = TokenMap::default().with_variables(SMTP_MAIL_FROM_VARS);
@@ -448,7 +448,7 @@ impl SessionConfig {
     }
 }
 
-fn parse_milter(config: &mut Config, id: &str, token_map: &TokenMap) -> Option<Milter> {
+fn parse_milter(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Option<Milter> {
     let hostname = config
         .value_require(("session.milter", id, "hostname"))?
         .to_string();
@@ -456,7 +456,7 @@ fn parse_milter(config: &mut Config, id: &str, token_map: &TokenMap) -> Option<M
     Some(Milter {
         enable: IfBlock::try_parse(config, ("session.milter", id, "enable"), token_map)
             .unwrap_or_else(|| {
-                IfBlock::new::<()>(format!("session.milter.{id}.enable"), [], "false")
+                IfBlock::new_default::<()>(format!("session.milter.{id}.enable"), [], "false")
             }),
         id: Arc::new(id.into()),
         addrs: format!("{}:{}", hostname, port)
@@ -515,7 +515,7 @@ fn parse_milter(config: &mut Config, id: &str, token_map: &TokenMap) -> Option<M
     })
 }
 
-fn parse_hooks(config: &mut Config, id: &str, token_map: &TokenMap) -> Option<MTAHook> {
+fn parse_hooks(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Option<MTAHook> {
     let mut headers = HeaderMap::new();
 
     for (header, value) in config
@@ -563,7 +563,7 @@ fn parse_hooks(config: &mut Config, id: &str, token_map: &TokenMap) -> Option<MT
     Some(MTAHook {
         enable: IfBlock::try_parse(config, ("session.hook", id, "enable"), token_map)
             .unwrap_or_else(|| {
-                IfBlock::new::<()>(format!("session.hook.{id}.enable"), [], "false")
+                IfBlock::new_default::<()>(format!("session.hook.{id}.enable"), [], "false")
             }),
         id: id.to_string(),
         url: config
@@ -589,7 +589,7 @@ fn parse_hooks(config: &mut Config, id: &str, token_map: &TokenMap) -> Option<MT
     })
 }
 
-fn parse_stages(config: &mut Config, prefix: &str, id: &str) -> AHashSet<Stage> {
+fn parse_stages(bp: &mut Bootstrap, prefix: &str, id: &str) -> AHashSet<Stage> {
     let mut stages = AHashSet::default();
     let mut invalid = Vec::new();
     for (_, value) in config.values((prefix, id, "stages")) {
@@ -626,17 +626,17 @@ fn parse_stages(config: &mut Config, prefix: &str, id: &str) -> AHashSet<Stage> 
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            timeout: IfBlock::new::<()>("session.timeout", [], "5m"),
-            duration: IfBlock::new::<()>("session.duration", [], "10m"),
-            transfer_limit: IfBlock::new::<()>("session.transfer-limit", [], "262144000"),
+            timeout: IfBlock::new_default::<()>("session.timeout", [], "5m"),
+            duration: IfBlock::new_default::<()>("session.duration", [], "10m"),
+            transfer_limit: IfBlock::new_default::<()>("session.transfer-limit", [], "262144000"),
             connect: Connect {
-                hostname: IfBlock::new::<()>(
+                hostname: IfBlock::new_default::<()>(
                     "server.connect.hostname",
                     [],
                     "config_get('server.hostname')",
                 ),
                 script: IfBlock::empty("session.connect.script"),
-                greeting: IfBlock::new::<()>(
+                greeting: IfBlock::new_default::<()>(
                     "session.connect.greeting",
                     [],
                     "config_get('server.hostname') + ' Stalwart ESMTP at your service'",
@@ -644,15 +644,15 @@ impl Default for SessionConfig {
             },
             ehlo: Ehlo {
                 script: IfBlock::empty("session.ehlo.script"),
-                require: IfBlock::new::<()>("session.ehlo.require", [], "true"),
-                reject_non_fqdn: IfBlock::new::<()>(
+                require: IfBlock::new_default::<()>("session.ehlo.require", [], "true"),
+                reject_non_fqdn: IfBlock::new_default::<()>(
                     "session.ehlo.reject-non-fqdn",
                     [("local_port == 25", "true")],
                     "false",
                 ),
             },
             auth: Auth {
-                directory: IfBlock::new::<()>(
+                directory: IfBlock::new_default::<()>(
                     "session.auth.directory",
                     #[cfg(feature = "test_mode")]
                     [],
@@ -660,7 +660,7 @@ impl Default for SessionConfig {
                     [("local_port != 25", "'*'")],
                     "false",
                 ),
-                mechanisms: IfBlock::new::<Mechanism>(
+                mechanisms: IfBlock::new_default::<Mechanism>(
                     "session.auth.mechanisms",
                     [
                         (
@@ -671,7 +671,7 @@ impl Default for SessionConfig {
                     ],
                     "false",
                 ),
-                require: IfBlock::new::<()>(
+                require: IfBlock::new_default::<()>(
                     "session.auth.require",
                     #[cfg(feature = "test_mode")]
                     [],
@@ -679,14 +679,18 @@ impl Default for SessionConfig {
                     [("local_port != 25", "true")],
                     "false",
                 ),
-                must_match_sender: IfBlock::new::<()>("session.auth.must-match-sender", [], "true"),
-                errors_max: IfBlock::new::<()>("session.auth.errors.total", [], "3"),
-                errors_wait: IfBlock::new::<()>("session.auth.errors.wait", [], "5s"),
+                must_match_sender: IfBlock::new_default::<()>(
+                    "session.auth.must-match-sender",
+                    [],
+                    "true",
+                ),
+                errors_max: IfBlock::new_default::<()>("session.auth.errors.total", [], "3"),
+                errors_wait: IfBlock::new_default::<()>("session.auth.errors.wait", [], "5s"),
             },
             mail: Mail {
                 script: IfBlock::empty("session.mail.script"),
                 rewrite: IfBlock::empty("session.mail.rewrite"),
-                is_allowed: IfBlock::new::<()>(
+                is_allowed: IfBlock::new_default::<()>(
                     "session.mail.is-allowed",
                     [],
                     "!is_empty(authenticated_as) || !key_exists('blocked-domains', sender_domain)",
@@ -694,12 +698,12 @@ impl Default for SessionConfig {
             },
             rcpt: Rcpt {
                 script: IfBlock::empty("session.rcpt.script"),
-                relay: IfBlock::new::<()>(
+                relay: IfBlock::new_default::<()>(
                     "session.rcpt.relay",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                directory: IfBlock::new::<()>(
+                directory: IfBlock::new_default::<()>(
                     "session.rcpt.directory",
                     [],
                     #[cfg(feature = "test_mode")]
@@ -708,48 +712,56 @@ impl Default for SessionConfig {
                     "'*'",
                 ),
                 rewrite: IfBlock::empty("session.rcpt.rewrite"),
-                errors_max: IfBlock::new::<()>("session.rcpt.errors.total", [], "5"),
-                errors_wait: IfBlock::new::<()>("session.rcpt.errors.wait", [], "5s"),
-                max_recipients: IfBlock::new::<()>("session.rcpt.max-recipients", [], "100"),
+                errors_max: IfBlock::new_default::<()>("session.rcpt.errors.total", [], "5"),
+                errors_wait: IfBlock::new_default::<()>("session.rcpt.errors.wait", [], "5s"),
+                max_recipients: IfBlock::new_default::<()>(
+                    "session.rcpt.max-recipients",
+                    [],
+                    "100",
+                ),
                 catch_all: AddressMapping::Enable,
                 subaddressing: AddressMapping::Enable,
             },
             data: Data {
                 script: IfBlock::empty("session.data.script"),
-                spam_filter: IfBlock::new::<()>("session.data.spam-filter", [], "true"),
-                max_messages: IfBlock::new::<()>("session.data.limits.messages", [], "10"),
-                max_message_size: IfBlock::new::<()>("session.data.limits.size", [], "104857600"),
-                max_received_headers: IfBlock::new::<()>(
+                spam_filter: IfBlock::new_default::<()>("session.data.spam-filter", [], "true"),
+                max_messages: IfBlock::new_default::<()>("session.data.limits.messages", [], "10"),
+                max_message_size: IfBlock::new_default::<()>(
+                    "session.data.limits.size",
+                    [],
+                    "104857600",
+                ),
+                max_received_headers: IfBlock::new_default::<()>(
                     "session.data.limits.received-headers",
                     [],
                     "50",
                 ),
-                add_received: IfBlock::new::<()>(
+                add_received: IfBlock::new_default::<()>(
                     "session.data.add-headers.received",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_received_spf: IfBlock::new::<()>(
+                add_received_spf: IfBlock::new_default::<()>(
                     "session.data.add-headers.received-spf",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_return_path: IfBlock::new::<()>(
+                add_return_path: IfBlock::new_default::<()>(
                     "session.data.add-headers.return-path",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_auth_results: IfBlock::new::<()>(
+                add_auth_results: IfBlock::new_default::<()>(
                     "session.data.add-headers.auth-results",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_message_id: IfBlock::new::<()>(
+                add_message_id: IfBlock::new_default::<()>(
                     "session.data.add-headers.message-id",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_date: IfBlock::new::<()>(
+                add_date: IfBlock::new_default::<()>(
                     "session.data.add-headers.date",
                     [("local_port == 25", "true")],
                     "false",
@@ -757,36 +769,40 @@ impl Default for SessionConfig {
                 add_delivered_to: false,
             },
             extensions: Extensions {
-                pipelining: IfBlock::new::<()>("session.extensions.pipelining", [], "true"),
-                chunking: IfBlock::new::<()>("session.extensions.chunking", [], "true"),
-                requiretls: IfBlock::new::<()>("session.extensions.requiretls", [], "true"),
-                dsn: IfBlock::new::<()>(
+                pipelining: IfBlock::new_default::<()>("session.extensions.pipelining", [], "true"),
+                chunking: IfBlock::new_default::<()>("session.extensions.chunking", [], "true"),
+                requiretls: IfBlock::new_default::<()>("session.extensions.requiretls", [], "true"),
+                dsn: IfBlock::new_default::<()>(
                     "session.extensions.dsn",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                vrfy: IfBlock::new::<()>(
+                vrfy: IfBlock::new_default::<()>(
                     "session.extensions.vrfy",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                expn: IfBlock::new::<()>(
+                expn: IfBlock::new_default::<()>(
                     "session.extensions.expn",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                no_soliciting: IfBlock::new::<()>("session.extensions.no-soliciting", [], "''"),
-                future_release: IfBlock::new::<()>(
+                no_soliciting: IfBlock::new_default::<()>(
+                    "session.extensions.no-soliciting",
+                    [],
+                    "''",
+                ),
+                future_release: IfBlock::new_default::<()>(
                     "session.extensions.future-release",
                     [("!is_empty(authenticated_as)", "7d")],
                     "false",
                 ),
-                deliver_by: IfBlock::new::<()>(
+                deliver_by: IfBlock::new_default::<()>(
                     "session.extensions.deliver-by",
                     [("!is_empty(authenticated_as)", "15d")],
                     "false",
                 ),
-                mt_priority: IfBlock::new::<MtPriority>(
+                mt_priority: IfBlock::new_default::<MtPriority>(
                     "session.extensions.mt-priority",
                     [("!is_empty(authenticated_as)", "mixer")],
                     "false",

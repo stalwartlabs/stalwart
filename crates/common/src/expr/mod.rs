@@ -233,20 +233,8 @@ pub enum Token {
 #[derive(Debug, Clone)]
 pub enum Setting {
     Hostname,
-    ReportDomain,
+    Domain,
     NodeId,
-    Other(CompactString),
-}
-
-impl From<CompactString> for Setting {
-    fn from(value: CompactString) -> Self {
-        match value.as_str() {
-            "server.hostname" => Setting::Hostname,
-            "report.domain" => Setting::ReportDomain,
-            "cluster.node-id" => Setting::NodeId,
-            _ => Setting::Other(value),
-        }
-    }
 }
 
 impl From<usize> for Variable<'_> {

@@ -68,7 +68,7 @@ pub enum AggregateFrequency {
 }
 
 impl ReportConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let sender_vars = TokenMap::default().with_variables(SMTP_MAIL_FROM_VARS);
         let rcpt_vars = TokenMap::default().with_variables(SMTP_RCPT_TO_VARS);
 
@@ -79,7 +79,7 @@ impl ReportConfig {
                 &TokenMap::default().with_variables(RCPT_DOMAIN_VARS),
             )
             .unwrap_or_else(|| {
-                IfBlock::new::<()>("report.submitter", [], "config_get('server.hostname')")
+                IfBlock::new_default::<()>("report.submitter", [], "config_get('server.hostname')")
             }),
             analysis: ReportAnalysis {
                 addresses: config
@@ -112,15 +112,19 @@ impl ReportConfig {
 }
 
 impl Report {
-    pub fn parse(config: &mut Config, id: &str, token_map: &TokenMap) -> Self {
+    pub fn parse(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Self {
         let mut report = Self {
-            name: IfBlock::new::<()>(format!("report.{id}.from-name"), [], "'Report Subsystem'"),
-            address: IfBlock::new::<()>(
+            name: IfBlock::new_default::<()>(
+                format!("report.{id}.from-name"),
+                [],
+                "'Report Subsystem'",
+            ),
+            address: IfBlock::new_default::<()>(
                 format!("report.{id}.from-address"),
                 [],
                 format!("'noreply-{id}@' + config_get('report.domain')"),
             ),
-            subject: IfBlock::new::<()>(
+            subject: IfBlock::new_default::<()>(
                 format!("report.{id}.subject"),
                 [],
                 format!(
@@ -128,12 +132,12 @@ impl Report {
                     id.to_ascii_uppercase()
                 ),
             ),
-            sign: IfBlock::new::<()>(
+            sign: IfBlock::new_default::<()>(
                 format!("report.{id}.sign"),
                 [],
                 "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
             ),
-            send: IfBlock::new::<()>(format!("report.{id}.send"), [], "[1, 1d]"),
+            send: IfBlock::new_default::<()>(format!("report.{id}.send"), [], "[1, 1d]"),
         };
         for (value, key) in [
             (&mut report.name, "from-name"),
@@ -152,37 +156,41 @@ impl Report {
 }
 
 impl AggregateReport {
-    pub fn parse(config: &mut Config, id: &str, token_map: &TokenMap) -> Self {
+    pub fn parse(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Self {
         let rcpt_vars = TokenMap::default().with_variables(RCPT_DOMAIN_VARS);
 
         let mut report = Self {
-            name: IfBlock::new::<()>(
+            name: IfBlock::new_default::<()>(
                 format!("report.{id}.aggregate.from-name"),
                 [],
                 format!("'{} Aggregate Report'", id.to_ascii_uppercase()),
             ),
-            address: IfBlock::new::<()>(
+            address: IfBlock::new_default::<()>(
                 format!("report.{id}.aggregate.from-address"),
                 [],
                 format!("'noreply-{id}@' + config_get('report.domain')"),
             ),
-            org_name: IfBlock::new::<()>(
+            org_name: IfBlock::new_default::<()>(
                 format!("report.{id}.aggregate.org-name"),
                 [],
                 "config_get('report.domain')",
             ),
             contact_info: IfBlock::empty(format!("report.{id}.aggregate.contact-info")),
-            send: IfBlock::new::<AggregateFrequency>(
+            send: IfBlock::new_default::<AggregateFrequency>(
                 format!("report.{id}.aggregate.send"),
                 [],
                 "daily",
             ),
-            sign: IfBlock::new::<()>(
+            sign: IfBlock::new_default::<()>(
                 format!("report.{id}.aggregate.sign"),
                 [],
                 "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
             ),
-            max_size: IfBlock::new::<()>(format!("report.{id}.aggregate.max-size"), [], "26214400"),
+            max_size: IfBlock::new_default::<()>(
+                format!("report.{id}.aggregate.max-size"),
+                [],
+                "26214400",
+            ),
         };
 
         for (value, key, token_map) in [

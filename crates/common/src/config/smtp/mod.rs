@@ -151,7 +151,7 @@ pub(crate) const SMTP_QUEUE_SENDER_VARS: &[u32; 8] = &[
 ];
 
 impl SmtpConfig {
-    pub async fn parse(config: &mut Config) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         Self {
             session: SessionConfig::parse(config),
             queue: QueueConfig::parse(config),

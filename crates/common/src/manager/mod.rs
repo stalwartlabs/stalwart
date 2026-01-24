@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use self::config::ConfigManager;
 use crate::USER_AGENT;
 use hyper::HeaderMap;
 use std::time::Duration;
@@ -12,7 +11,7 @@ use utils::HttpLimitResponse;
 
 pub mod backup;
 pub mod boot;
-pub mod config;
+pub mod bootstrap;
 pub mod console;
 pub mod reload;
 pub mod restore;

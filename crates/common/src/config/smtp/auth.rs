@@ -104,8 +104,8 @@ impl Default for MailAuthConfig {
     fn default() -> Self {
         Self {
             dkim: DkimAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>("auth.dkim.verify", [], "relaxed"),
-                sign: IfBlock::new::<()>(
+                verify: IfBlock::new_default::<VerifyStrategy>("auth.dkim.verify", [], "relaxed"),
+                sign: IfBlock::new_default::<()>(
                     "auth.dkim.sign",
                     [(
                         "is_local_domain('*', sender_domain)",
@@ -116,15 +116,15 @@ impl Default for MailAuthConfig {
                 strict: true,
             },
             arc: ArcAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>("auth.arc.verify", [], "relaxed"),
-                seal: IfBlock::new::<()>(
+                verify: IfBlock::new_default::<VerifyStrategy>("auth.arc.verify", [], "relaxed"),
+                seal: IfBlock::new_default::<()>(
                     "auth.arc.seal",
                     [],
                     "'rsa-' + config_get('report.domain')",
                 ),
             },
             spf: SpfAuthConfig {
-                verify_ehlo: IfBlock::new::<VerifyStrategy>(
+                verify_ehlo: IfBlock::new_default::<VerifyStrategy>(
                     "auth.spf.verify.ehlo",
                     [("local_port == 25", "relaxed")],
                     #[cfg(not(feature = "test_mode"))]
@@ -132,7 +132,7 @@ impl Default for MailAuthConfig {
                     #[cfg(feature = "test_mode")]
                     "relaxed",
                 ),
-                verify_mail_from: IfBlock::new::<VerifyStrategy>(
+                verify_mail_from: IfBlock::new_default::<VerifyStrategy>(
                     "auth.spf.verify.mail-from",
                     [("local_port == 25", "relaxed")],
                     #[cfg(not(feature = "test_mode"))]
@@ -142,7 +142,7 @@ impl Default for MailAuthConfig {
                 ),
             },
             dmarc: DmarcAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>(
+                verify: IfBlock::new_default::<VerifyStrategy>(
                     "auth.dmarc.verify",
                     [("local_port == 25", "relaxed")],
                     #[cfg(not(feature = "test_mode"))]
@@ -152,7 +152,7 @@ impl Default for MailAuthConfig {
                 ),
             },
             iprev: IpRevAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>(
+                verify: IfBlock::new_default::<VerifyStrategy>(
                     "auth.iprev.verify",
                     [("local_port == 25", "relaxed")],
                     #[cfg(not(feature = "test_mode"))]
@@ -167,7 +167,7 @@ impl Default for MailAuthConfig {
 }
 
 impl MailAuthConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let rcpt_vars = TokenMap::default()
             .with_variables(SMTP_RCPT_TO_VARS)
             .with_constants::<VerifyStrategy>();
@@ -236,7 +236,7 @@ impl MailAuthConfig {
     }
 }
 
-pub fn build_signature(config: &mut Config, id: &str) -> Option<(DkimSigner, ArcSealer)> {
+pub fn build_signature(bp: &mut Bootstrap, id: &str) -> Option<(DkimSigner, ArcSealer)> {
     match config.property_require::<Algorithm>(("signature", id, "algorithm"))? {
         Algorithm::RsaSha256 => {
             let pk = config
@@ -300,7 +300,7 @@ pub fn build_signature(config: &mut Config, id: &str) -> Option<(DkimSigner, Arc
     }
 }
 
-fn parse_pem(config: &mut Config, key: impl AsKey) -> Option<Vec<u8>> {
+fn parse_pem(bp: &mut Bootstrap, key: impl AsKey) -> Option<Vec<u8>> {
     if let Some(der) = simple_pem_parse(config.value_require(key.clone())?) {
         Some(der)
     } else {
@@ -339,7 +339,7 @@ pub fn simple_pem_parse(contents: &str) -> Option<Vec<u8>> {
 }
 
 fn parse_signature<T: SigningKey, U: SigningKey<Hasher = Sha256>>(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     id: &str,
     key_dkim: T,
     key_arc: U,

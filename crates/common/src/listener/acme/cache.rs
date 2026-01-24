@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::AcmeProvider;
+use crate::Server;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use trc::AddContext;
 use utils::config::ConfigKey;
-
-use crate::Server;
-
-use super::AcmeProvider;
 
 impl Server {
     pub(crate) async fn load_cert(&self, provider: &AcmeProvider) -> trc::Result<Option<Vec<u8>>> {

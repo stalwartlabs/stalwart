@@ -5,4 +5,8 @@
  */
 
 pub mod capabilities;
-pub mod settings;
+pub mod email;
+pub mod imap;
+pub mod jmap;
+pub mod scripts;
+pub mod spamfilter;

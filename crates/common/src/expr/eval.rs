@@ -4,20 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{cmp::Ordering, fmt::Display};
-
-use compact_str::{CompactString, ToCompactString, format_compact};
-use hyper::StatusCode;
-use trc::EvalEvent;
-
-use crate::Server;
-
 use super::{
     BinaryOperator, Constant, Expression, ExpressionItem, Setting, StringCow, UnaryOperator,
     Variable,
     functions::{FUNCTIONS, ResolveVariable},
     if_block::IfBlock,
 };
+use crate::Server;
+use compact_str::{CompactString, ToCompactString, format_compact};
+use hyper::StatusCode;
+use std::{cmp::Ordering, fmt::Display};
+use trc::EvalEvent;
 
 impl Server {
     pub async fn eval_if<'x, R: TryFrom<Variable<'x>>, V: ResolveVariable>(
@@ -214,21 +211,10 @@ impl<'x, V: ResolveVariable> EvalContext<'x, V, Expression, &mut Vec<CompactStri
                     Setting::Hostname => {
                         stack.push(self.core.core.network.server_name.as_str().into())
                     }
-                    Setting::ReportDomain => {
+                    Setting::Domain => {
                         stack.push(self.core.core.network.report_domain.as_str().into())
                     }
                     Setting::NodeId => stack.push(self.core.core.network.node_id.into()),
-                    Setting::Other(key) => stack.push(
-                        self.core
-                            .core
-                            .storage
-                            .config
-                            .get(key)
-                            .await?
-                            .unwrap_or_default()
-                            .to_compact_string()
-                            .into(),
-                    ),
                 },
                 ExpressionItem::UnaryOperator(op) => {
                     let value = stack.pop().unwrap_or_default();

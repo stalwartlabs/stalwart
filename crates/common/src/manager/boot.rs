@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{
-    WEBADMIN_KEY,
-    backup::BackupParams,
-    config::{ConfigManager, Patterns},
-    console::store_console,
-};
+use super::{WEBADMIN_KEY, backup::BackupParams, console::store_console};
 use crate::{
     Caches, Core, Data, IPC_CHANNEL_BUFFER, Inner, Ipc,
     config::{network::AsnGeoLookupConfig, server::Listeners, telemetry::Telemetry},

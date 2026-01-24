@@ -6,21 +6,27 @@
 
 #![warn(clippy::large_futures)]
 
+use crate::{
+    config::mailstore::{
+        email::EmailConfig,
+        imap::ImapConfig,
+        scripts::Scripting,
+        spamfilter::{IpResolver, SpamClassifier, SpamFilterConfig},
+    },
+    ipc::TrainTaskController,
+};
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
 use auth::{AccessToken, oauth::config::OAuthConfig, roles::RolePermissions};
 use calcard::common::timezone::Tz;
 use config::{
     groupware::GroupwareConfig,
-    imap::ImapConfig,
-    jmap::settings::JmapConfig,
+    mailstore::jmap::JmapConfig,
     network::Network,
-    scripts::Scripting,
     smtp::{
         SmtpConfig,
         resolver::{Policy, Tlsa},
     },
-    spamfilter::{IpResolver, SpamFilterConfig},
     storage::Storage,
     telemetry::Metrics,
 };
@@ -71,8 +77,6 @@ pub mod enterprise;
 // SPDX-SnippetEnd
 
 pub use psl;
-
-use crate::{config::spamfilter::SpamClassifier, ipc::TrainTaskController};
 
 pub static VERSION_PRIVATE: &str = env!("CARGO_PKG_VERSION");
 pub static VERSION_PUBLIC: &str = "1.0.0";
@@ -342,11 +346,12 @@ pub struct Core {
     pub network: Network,
     pub acme: AcmeProviders,
     pub oauth: OAuthConfig,
-    pub smtp: SmtpConfig,
+    pub email: EmailConfig,
     pub jmap: JmapConfig,
-    pub groupware: GroupwareConfig,
-    pub spam: SpamFilterConfig,
     pub imap: ImapConfig,
+    pub smtp: SmtpConfig,
+    pub spam: SpamFilterConfig,
+    pub groupware: GroupwareConfig,
     pub metrics: Metrics,
 
     // SPDX-SnippetBegin

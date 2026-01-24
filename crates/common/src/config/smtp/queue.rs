@@ -189,7 +189,7 @@ pub enum RequireOptional {
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
-            route: IfBlock::new::<()>(
+            route: IfBlock::new_default::<()>(
                 "queue.strategy.route",
                 #[cfg(not(feature = "test_mode"))]
                 [("is_local_domain('*', rcpt_domain)", "'local'")],
@@ -197,7 +197,7 @@ impl Default for QueueConfig {
                 [],
                 "'mx'",
             ),
-            queue: IfBlock::new::<()>(
+            queue: IfBlock::new_default::<()>(
                 "queue.strategy.schedule",
                 #[cfg(not(feature = "test_mode"))]
                 [
@@ -212,8 +212,8 @@ impl Default for QueueConfig {
                 #[cfg(feature = "test_mode")]
                 "'default'",
             ),
-            connection: IfBlock::new::<()>("queue.strategy.connection", [], "'default'"),
-            tls: IfBlock::new::<()>(
+            connection: IfBlock::new_default::<()>("queue.strategy.connection", [], "'default'"),
+            tls: IfBlock::new_default::<()>(
                 "queue.strategy.tls",
                 #[cfg(not(feature = "test_mode"))]
                 [("retry_num > 0 && last_error == 'tls'", "'invalid-tls'")],
@@ -222,13 +222,13 @@ impl Default for QueueConfig {
                 "'default'",
             ),
             dsn: Dsn {
-                name: IfBlock::new::<()>("report.dsn.from-name", [], "'Mail Delivery Subsystem'"),
-                address: IfBlock::new::<()>(
+                name: IfBlock::new_default::<()>("report.dsn.from-name", [], "'Mail Delivery Subsystem'"),
+                address: IfBlock::new_default::<()>(
                     "report.dsn.from-address",
                     [],
                     "'MAILER-DAEMON@' + config_get('report.domain')",
                 ),
-                sign: IfBlock::new::<()>(
+                sign: IfBlock::new_default::<()>(
                     "report.dsn.sign",
                     [],
                     "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
@@ -247,7 +247,7 @@ impl Default for QueueConfig {
 }
 
 impl QueueConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let mut queue = QueueConfig::default();
         let rcpt_vars = TokenMap::default().with_variables(SMTP_QUEUE_RCPT_VARS);
         let sender_vars = TokenMap::default().with_variables(SMTP_QUEUE_SENDER_VARS);
@@ -291,7 +291,7 @@ impl QueueConfig {
 }
 
 fn parse_queue_strategies(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     queues: &AHashMap<QueueName, VirtualQueue>,
 ) -> AHashMap<String, QueueStrategy> {
     let mut entries = AHashMap::new();
@@ -313,7 +313,7 @@ fn parse_queue_strategies(
 }
 
 fn parse_queue_strategy(
-    config: &mut Config,
+    bp: &mut Bootstrap,
     id: &str,
     queues: &AHashMap<QueueName, VirtualQueue>,
 ) -> Option<QueueStrategy> {
@@ -370,7 +370,7 @@ fn parse_queue_strategy(
     })
 }
 
-fn parse_virtual_queues(config: &mut Config) -> AHashMap<QueueName, VirtualQueue> {
+fn parse_virtual_queues(bp: &mut Bootstrap) -> AHashMap<QueueName, VirtualQueue> {
     let mut entries = AHashMap::new();
     for key in config.sub_keys("queue.virtual", ".threads-per-node") {
         if let Some(queue_name) = QueueName::new(&key) {
@@ -387,7 +387,7 @@ fn parse_virtual_queues(config: &mut Config) -> AHashMap<QueueName, VirtualQueue
     entries
 }
 
-fn parse_virtual_queue(config: &mut Config, id: &str) -> Option<VirtualQueue> {
+fn parse_virtual_queue(bp: &mut Bootstrap, id: &str) -> Option<VirtualQueue> {
     Some(VirtualQueue {
         threads: config
             .property_require::<usize>(("queue.virtual", id, "threads-per-node"))
@@ -395,7 +395,7 @@ fn parse_virtual_queue(config: &mut Config, id: &str) -> Option<VirtualQueue> {
     })
 }
 
-fn parse_routing_strategies(config: &mut Config) -> AHashMap<String, RoutingStrategy> {
+fn parse_routing_strategies(bp: &mut Bootstrap) -> AHashMap<String, RoutingStrategy> {
     let mut entries = AHashMap::new();
     for key in config.sub_keys("queue.route", ".type") {
         if let Some(strategy) = parse_route(config, &key) {
@@ -405,7 +405,7 @@ fn parse_routing_strategies(config: &mut Config) -> AHashMap<String, RoutingStra
     entries
 }
 
-fn parse_route(config: &mut Config, id: &str) -> Option<RoutingStrategy> {
+fn parse_route(bp: &mut Bootstrap, id: &str) -> Option<RoutingStrategy> {
     match config.value_require_non_empty(("queue.route", id, "type"))? {
         "relay" => RoutingStrategy::Relay(RelayConfig {
             address: config.property_require(("queue.route", id, "address"))?,
@@ -453,7 +453,7 @@ fn parse_route(config: &mut Config, id: &str) -> Option<RoutingStrategy> {
     }
 }
 
-fn parse_tls_strategies(config: &mut Config) -> AHashMap<String, TlsStrategy> {
+fn parse_tls_strategies(bp: &mut Bootstrap) -> AHashMap<String, TlsStrategy> {
     let mut entries = AHashMap::new();
     for key in config.sub_keys_with_suffixes(
         "queue.tls",
@@ -472,7 +472,7 @@ fn parse_tls_strategies(config: &mut Config) -> AHashMap<String, TlsStrategy> {
     entries
 }
 
-fn parse_tls(config: &mut Config, id: &str) -> Option<TlsStrategy> {
+fn parse_tls(bp: &mut Bootstrap, id: &str) -> Option<TlsStrategy> {
     Some(TlsStrategy {
         dane: config
             .property::<RequireOptional>(("queue.tls", id, "dane"))
@@ -495,7 +495,7 @@ fn parse_tls(config: &mut Config, id: &str) -> Option<TlsStrategy> {
     })
 }
 
-fn parse_connection_strategies(config: &mut Config) -> AHashMap<String, ConnectionStrategy> {
+fn parse_connection_strategies(bp: &mut Bootstrap) -> AHashMap<String, ConnectionStrategy> {
     let mut entries = AHashMap::new();
     for key in config.sub_keys_with_suffixes(
         "queue.connection",
@@ -516,7 +516,7 @@ fn parse_connection_strategies(config: &mut Config) -> AHashMap<String, Connecti
     entries
 }
 
-fn parse_connection(config: &mut Config, id: &str) -> Option<ConnectionStrategy> {
+fn parse_connection(bp: &mut Bootstrap, id: &str) -> Option<ConnectionStrategy> {
     let mut source_ipv4 = Vec::new();
     let mut source_ipv6 = Vec::new();
 
@@ -558,7 +558,7 @@ fn parse_connection(config: &mut Config, id: &str) -> Option<ConnectionStrategy>
     })
 }
 
-fn parse_inbound_rate_limiters(config: &mut Config) -> QueueRateLimiters {
+fn parse_inbound_rate_limiters(bp: &mut Bootstrap) -> QueueRateLimiters {
     let mut throttle = QueueRateLimiters::default();
     let all_throttles = parse_queue_rate_limiter(
         config,
@@ -605,7 +605,7 @@ fn parse_inbound_rate_limiters(config: &mut Config) -> QueueRateLimiters {
     throttle
 }
 
-fn parse_outbound_rate_limiters(config: &mut Config) -> QueueRateLimiters {
+fn parse_outbound_rate_limiters(bp: &mut Bootstrap) -> QueueRateLimiters {
     // Parse throttle
     let mut throttle = QueueRateLimiters::default();
 
@@ -643,7 +643,7 @@ fn parse_outbound_rate_limiters(config: &mut Config) -> QueueRateLimiters {
     throttle
 }
 
-fn parse_queue_quota(config: &mut Config) -> QueueQuotas {
+fn parse_queue_quota(bp: &mut Bootstrap) -> QueueQuotas {
     let mut capacities = QueueQuotas {
         sender: Vec::new(),
         rcpt: Vec::new(),
@@ -677,7 +677,7 @@ fn parse_queue_quota(config: &mut Config) -> QueueQuotas {
     capacities
 }
 
-fn parse_queue_quota_item(config: &mut Config, prefix: impl AsKey, id: &str) -> Option<QueueQuota> {
+fn parse_queue_quota_item(bp: &mut Bootstrap, prefix: impl AsKey, id: &str) -> Option<QueueQuota> {
     let prefix = prefix.as_key();
 
     // Skip disabled throttles

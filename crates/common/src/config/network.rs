@@ -18,10 +18,19 @@ pub struct Network {
     pub server_name: String,
     pub report_domain: String,
     pub security: Security,
+    pub http: Http,
     pub contact_form: Option<ContactForm>,
-    pub http_response_url: IfBlock,
-    pub http_allowed_endpoint: IfBlock,
     pub asn_geo_lookup: AsnGeoLookupConfig,
+}
+
+#[derive(Clone)]
+pub struct Http {
+    pub rate_authenticated: Option<Rate>,
+    pub rate_anonymous: Option<Rate>,
+    pub response_url: IfBlock,
+    pub allowed_endpoint: IfBlock,
+    pub response_headers: Vec<(hyper::header::HeaderName, hyper::header::HeaderValue)>,
+    pub use_forwarded: bool,
 }
 
 #[derive(Clone)]
@@ -110,12 +119,12 @@ impl Default for Network {
             security: Default::default(),
             contact_form: None,
             node_id: 1,
-            http_response_url: IfBlock::new::<()>(
+            http_response_url: IfBlock::new_default::<()>(
                 "http.url",
                 [],
                 "protocol + '://' + config_get('server.hostname') + ':' + local_port",
             ),
-            http_allowed_endpoint: IfBlock::new::<()>("http.allowed-endpoint", [], "200"),
+            http_allowed_endpoint: IfBlock::new_default::<()>("http.allowed-endpoint", [], "200"),
             asn_geo_lookup: AsnGeoLookupConfig::Disabled,
             server_name: Default::default(),
             report_domain: Default::default(),
@@ -125,7 +134,7 @@ impl Default for Network {
 }
 
 impl ContactForm {
-    pub fn parse(config: &mut Config) -> Option<Self> {
+    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
         if !config
             .property_or_default::<bool>("form.enable", "false")
             .unwrap_or_default()
@@ -167,7 +176,7 @@ impl ContactForm {
 }
 
 impl FieldOrDefault {
-    pub fn parse(config: &mut Config, key: &str, default: &str) -> Self {
+    pub fn parse(bp: &mut Bootstrap, key: &str, default: &str) -> Self {
         FieldOrDefault {
             field: config.value((key, "field")).map(|s| s.to_string()),
             default: config
@@ -179,7 +188,7 @@ impl FieldOrDefault {
 }
 
 impl Network {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let server_name = config
             .value("server.hostname")
             .map(|v| v.to_string())
@@ -300,6 +309,78 @@ impl Network {
     }
 }
 
+impl Http {
+    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
+        // Parse HTTP headers
+        let mut http_headers = config
+            .values("http.headers")
+            .map(|(_, v)| {
+                if let Some((k, v)) = v.split_once(':') {
+                    Ok((
+                        hyper::header::HeaderName::from_str(k.trim()).map_err(|err| {
+                            format!("Invalid header found in property \"http.headers\": {}", err)
+                        })?,
+                        hyper::header::HeaderValue::from_str(v.trim()).map_err(|err| {
+                            format!("Invalid header found in property \"http.headers\": {}", err)
+                        })?,
+                    ))
+                } else {
+                    Err(format!(
+                        "Invalid header found in property \"http.headers\": {}",
+                        v
+                    ))
+                }
+            })
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|e| config.new_parse_error("http.headers", e))
+            .unwrap_or_default();
+        // Add permissive CORS headers
+        if config
+            .property::<bool>("http.permissive-cors")
+            .unwrap_or(false)
+        {
+            http_headers.push((
+                hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                hyper::header::HeaderValue::from_static("*"),
+            ));
+            http_headers.push((
+                hyper::header::ACCESS_CONTROL_ALLOW_HEADERS,
+                hyper::header::HeaderValue::from_static(
+                    "Authorization, Content-Type, Accept, X-Requested-With",
+                ),
+            ));
+            http_headers.push((
+                hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
+                hyper::header::HeaderValue::from_static(
+                    "POST, GET, PATCH, PUT, DELETE, HEAD, OPTIONS",
+                ),
+            ));
+        }
+
+        // Add HTTP Strict Transport Security
+        if config.property::<bool>("http.hsts").unwrap_or(false) {
+            http_headers.push((
+                hyper::header::STRICT_TRANSPORT_SECURITY,
+                hyper::header::HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+            ));
+        }
+        //            http_use_forwarded: config.property("http.use-x-forwarded").unwrap_or(false),
+
+        /*
+
+           rate_authenticated: jmap
+               .property_or_default::<Option<Rate>>("http.rate-limit.account", "1000/1m")
+               .unwrap_or_default(),
+           rate_anonymous: jmap
+               .property_or_default::<Option<Rate>>("http.rate-limit.anonymous", "100/1m")
+               .unwrap_or_default(),
+
+        */
+
+        todo!()
+    }
+}
+
 struct NodeList(AHashSet<u64>);
 
 impl ParseValue for NodeList {
@@ -313,7 +394,7 @@ impl ParseValue for NodeList {
 }
 
 impl AsnGeoLookupConfig {
-    pub fn parse(config: &mut Config) -> Option<Self> {
+    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
         match config.value("asn.type")? {
             "dns" => AsnGeoLookupConfig::Dns {
                 zone_ipv4: config.value_require_non_empty("asn.zone.ipv4")?.to_string(),

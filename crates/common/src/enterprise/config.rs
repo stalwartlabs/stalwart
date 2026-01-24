@@ -12,10 +12,7 @@ use super::{
     AlertContent, AlertContentToken, AlertMethod, Enterprise, MetricAlert, MetricStore,
     SpamFilterLlmConfig, TraceStore, Undelete, license::LicenseKey, llm::AiApiConfig,
 };
-use crate::{
-    expr::{Expression, tokenizer::TokenMap},
-    manager::config::ConfigManager,
-};
+use crate::expr::{Expression, tokenizer::TokenMap};
 use ahash::AHashMap;
 use directory::{Type, backend::internal::manage::ManageDirectory};
 use std::{sync::Arc, time::Duration};
@@ -32,7 +29,7 @@ use utils::{
 
 impl Enterprise {
     pub async fn parse(
-        config: &mut Config,
+        bp: &mut Bootstrap,
         config_manager: &ConfigManager,
         stores: &Stores,
         data: &Store,
@@ -237,7 +234,7 @@ impl Enterprise {
 }
 
 impl SpamFilterLlmConfig {
-    pub fn parse(config: &mut Config, models: &AHashMap<String, Arc<AiApiConfig>>) -> Option<Self> {
+    pub fn parse(bp: &mut Bootstrap, models: &AHashMap<String, Arc<AiApiConfig>>) -> Option<Self> {
         if !config
             .property_or_default::<bool>("spam-filter.llm.enable", "false")
             .unwrap_or_default()
@@ -298,7 +295,7 @@ impl SpamFilterLlmConfig {
     }
 }
 
-pub fn parse_metric_alerts(config: &mut Config) -> Vec<MetricAlert> {
+pub fn parse_metric_alerts(bp: &mut Bootstrap) -> Vec<MetricAlert> {
     let mut alerts = Vec::new();
 
     for metric_id in config.sub_keys("metrics.alerts", ".enable") {
@@ -310,7 +307,7 @@ pub fn parse_metric_alerts(config: &mut Config) -> Vec<MetricAlert> {
     alerts
 }
 
-fn parse_metric_alert(config: &mut Config, id: String) -> Option<MetricAlert> {
+fn parse_metric_alert(bp: &mut Bootstrap, id: String) -> Option<MetricAlert> {
     if !config.property_or_default::<bool>(("metrics.alerts", id.as_str(), "enable"), "false")? {
         return None;
     }
@@ -417,7 +414,7 @@ fn parse_metric_alert(config: &mut Config, id: String) -> Option<MetricAlert> {
     alert.into()
 }
 
-fn parse_alert_content(key: impl AsKey, config: &mut Config) -> Option<AlertContent> {
+fn parse_alert_content(key: impl AsKey, bp: &mut Bootstrap) -> Option<AlertContent> {
     let mut tokens = Vec::new();
     let mut value = config.value(key)?.chars().peekable();
     let mut buf = String::new();

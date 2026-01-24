@@ -32,7 +32,7 @@ use super::{
 };
 
 impl Listeners {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         // Parse ACME managers
         let mut servers = Listeners {
             span_id_gen: Arc::new(
@@ -51,7 +51,7 @@ impl Listeners {
         servers
     }
 
-    fn parse_server(&mut self, config: &mut Config, id_: String) {
+    fn parse_server(&mut self, bp: &mut Bootstrap, id_: String) {
         // Parse protocol
         let id = id_.as_str();
         let protocol =
@@ -209,7 +209,7 @@ impl Listeners {
         });
     }
 
-    pub fn parse_tcp_acceptors(&mut self, config: &mut Config, inner: Arc<Inner>) {
+    pub fn parse_tcp_acceptors(&mut self, bp: &mut Bootstrap, inner: Arc<Inner>) {
         let resolver = Arc::new(CertificateResolver::new(inner.clone()));
 
         for id_ in config.sub_keys("server.listener", ".protocol") {

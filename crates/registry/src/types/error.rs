@@ -4,83 +4,93 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::schema::prelude::Property;
+use crate::{schema::prelude::Property, types::id::Id};
+use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValidationErrorType {
-    Invalid,
-    Required,
-    MinItems(usize),
-    MaxItems(usize),
-    MaxLength(usize),
-    MinLength(usize),
-    MaxValue(i64),
-    MinValue(i64),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidationError {
+    Invalid { property: Property, value: String },
+    Required { property: Property },
+    MaxLength { property: Property, required: usize },
+    MinLength { property: Property, required: usize },
+    MaxValue { property: Property, required: i64 },
+    MinValue { property: Property, required: i64 },
 }
 
-pub struct ValidationError {
-    pub property: Property,
-    pub typ: ValidationErrorType,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    Validation {
+        object_id: Id,
+        errors: Vec<ValidationError>,
+    },
+    Build {
+        object_id: Id,
+        message: String,
+    },
+    Internal {
+        object_id: Option<Id>,
+        error: trc::Error,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    pub object_id: Id,
+    pub property: Option<Property>,
+    pub message: String,
 }
 
 impl ValidationError {
-    pub fn new(property: Property, typ: ValidationErrorType) -> Self {
-        Self { property, typ }
-    }
-
     pub fn required(property: Property) -> Self {
-        Self {
+        Self::Required { property }
+    }
+
+    pub fn invalid(property: Property, value: impl Display) -> Self {
+        Self::Invalid {
             property,
-            typ: ValidationErrorType::Required,
+            value: value.to_string(),
         }
     }
 
-    pub fn invalid(property: Property) -> Self {
+    pub fn min_items(property: Property, required: usize) -> Self {
+        Self::MinLength { property, required }
+    }
+
+    pub fn max_items(property: Property, required: usize) -> Self {
+        Self::MaxLength { property, required }
+    }
+
+    pub fn max_length(property: Property, required: usize) -> Self {
+        Self::MaxLength { property, required }
+    }
+
+    pub fn min_length(property: Property, required: usize) -> Self {
+        Self::MinLength { property, required }
+    }
+
+    pub fn max_value(property: Property, required: i64) -> Self {
+        Self::MaxValue { property, required }
+    }
+
+    pub fn min_value(property: Property, required: i64) -> Self {
+        Self::MinValue { property, required }
+    }
+}
+
+impl Warning {
+    pub fn new(object_id: Id, message: impl Display) -> Self {
         Self {
-            property,
-            typ: ValidationErrorType::Invalid,
+            object_id,
+            property: None,
+            message: message.to_string(),
         }
     }
 
-    pub fn min_items(property: Property, value: usize) -> Self {
+    pub fn for_property(object_id: Id, property: Property, message: impl Display) -> Self {
         Self {
-            property,
-            typ: ValidationErrorType::MinItems(value),
-        }
-    }
-
-    pub fn max_items(property: Property, value: usize) -> Self {
-        Self {
-            property,
-            typ: ValidationErrorType::MaxItems(value),
-        }
-    }
-
-    pub fn max_length(property: Property, value: usize) -> Self {
-        Self {
-            property,
-            typ: ValidationErrorType::MaxLength(value),
-        }
-    }
-
-    pub fn min_length(property: Property, value: usize) -> Self {
-        Self {
-            property,
-            typ: ValidationErrorType::MinLength(value),
-        }
-    }
-
-    pub fn max_value(property: Property, value: i64) -> Self {
-        Self {
-            property,
-            typ: ValidationErrorType::MaxValue(value),
-        }
-    }
-
-    pub fn min_value(property: Property, value: i64) -> Self {
-        Self {
-            property,
-            typ: ValidationErrorType::MinValue(value),
+            object_id,
+            property: Some(property),
+            message: message.to_string(),
         }
     }
 }

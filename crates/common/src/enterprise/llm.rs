@@ -199,7 +199,7 @@ impl AiApiConfig {
         }
     }
 
-    pub fn parse(config: &mut Config, id: &str) -> Option<Self> {
+    pub fn parse(bp: &mut Bootstrap, id: &str) -> Option<Self> {
         let url = config.value(("enterprise.ai", id, "url"))?.to_string();
         let api_type = match config.value(("enterprise.ai", id, "type"))? {
             "chat" => ApiType::ChatCompletion,

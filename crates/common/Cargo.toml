@@ -12,6 +12,7 @@ trc = { path = "../trc" }
 directory = { path = "../directory" }
 coordinator = { path = "../coordinator" }
 types = { path = "../types" }
+registry = { path = "../registry" }
 jmap_proto = { path = "../jmap-proto" }
 imap_proto = { path = "../imap-proto" }
 sieve-rs = { version = "0.7", features = ["rkyv", "serde"] }

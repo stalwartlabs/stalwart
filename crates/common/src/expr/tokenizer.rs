@@ -89,24 +89,40 @@ impl<'x> Tokenizer<'x> {
                     self.buf.push(ch);
                 }
                 _ => {
-                    let (prev_token, ch) = if ch == b'(' && self.buf.eq(b"matches") {
-                        // Parse regular expressions
-                        let stop_ch = self.find_char(b"\"'")?;
-                        let regex_str = self.parse_string(stop_ch)?;
-                        let regex = Regex::new(&regex_str).map_err(|e| {
-                            format!("Invalid regular expression {:?}: {}", regex_str, e)
-                        })?;
-                        self.has_alpha = false;
-                        self.buf.clear();
-                        self.find_char(b",")?;
-                        (Token::Regex(regex).into(), b'(')
-                    } else if ch == b'(' && self.buf.eq(b"config_get") {
-                        // Parse setting
-                        let stop_ch = self.find_char(b"\"'")?;
-                        let setting_str = self.parse_string(stop_ch)?;
-                        self.has_alpha = false;
-                        self.buf.clear();
-                        (Token::Setting(Setting::from(setting_str)).into(), b'(')
+                    let (prev_token, ch) = if ch == b'(' && !self.buf.is_empty() {
+                        match self.buf.as_slice() {
+                            b"matches" => {
+                                // Parse regular expressions
+                                let stop_ch = self.find_char(b"\"'")?;
+                                let regex_str = self.parse_string(stop_ch)?;
+                                let regex = Regex::new(&regex_str).map_err(|e| {
+                                    format!("Invalid regular expression {:?}: {}", regex_str, e)
+                                })?;
+                                self.has_alpha = false;
+                                self.buf.clear();
+                                self.find_char(b",")?;
+                                (Token::Regex(regex).into(), b'(')
+                            }
+                            b"default_domain" => {
+                                self.has_alpha = false;
+                                self.buf.clear();
+                                (Token::Setting(Setting::Domain).into(), b'(')
+                            }
+                            b"node_hostname" => {
+                                self.has_alpha = false;
+                                self.buf.clear();
+                                (Token::Setting(Setting::Hostname).into(), b'(')
+                            }
+                            b"node_id" => {
+                                self.has_alpha = false;
+                                self.buf.clear();
+                                (Token::Setting(Setting::NodeId).into(), b'(')
+                            }
+                            _ => {
+                                self.is_start = false;
+                                (self.parse_buf()?.into(), ch)
+                            }
+                        }
                     } else if !self.buf.is_empty() {
                         self.is_start = false;
                         (self.parse_buf()?.into(), ch)

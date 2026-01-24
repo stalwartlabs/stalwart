@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use self::{
-    imap::ImapConfig, jmap::settings::JmapConfig, scripts::Scripting, smtp::SmtpConfig,
-    storage::Storage,
-};
+use self::{mailstore::jmap::JmapConfig, smtp::SmtpConfig, storage::Storage};
 use crate::{
     Core, Network, Security, auth::oauth::config::OAuthConfig, expr::*,
-    listener::tls::AcmeProviders, manager::config::ConfigManager,
+    listener::tls::AcmeProviders,
 };
 use arc_swap::ArcSwap;
 use coordinator::Coordinator;
@@ -18,21 +15,17 @@ use directory::{Directories, Directory};
 use groupware::GroupwareConfig;
 use hyper::HeaderMap;
 use ring::signature::{EcdsaKeyPair, RsaKeyPair};
-use spamfilter::SpamFilterConfig;
 use std::sync::Arc;
 use store::{BlobBackend, BlobStore, InMemoryStore, SearchStore, Store, Stores};
 use telemetry::Metrics;
-use utils::config::{Config, utils::AsKey};
+use utils::config::utils::AsKey;
 
 pub mod groupware;
-pub mod imap;
 pub mod inner;
-pub mod jmap;
+pub mod mailstore;
 pub mod network;
-pub mod scripts;
 pub mod server;
 pub mod smtp;
-pub mod spamfilter;
 pub mod storage;
 pub mod telemetry;
 
@@ -50,7 +43,7 @@ pub(crate) const CONNECTION_VARS: &[u32; 9] = &[
 
 impl Core {
     pub async fn parse(
-        config: &mut Config,
+        bp: &mut Bootstrap,
         mut stores: Stores,
         config_manager: ConfigManager,
     ) -> Self {

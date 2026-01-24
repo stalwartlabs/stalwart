@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Debug, net::IpAddr};
-
+use crate::{
+    KV_RATE_LIMIT_AUTH, KV_RATE_LIMIT_LOITER, KV_RATE_LIMIT_RCPT, KV_RATE_LIMIT_SCAN, Server,
+    ip_to_bytes, ipc::BroadcastEvent,
+};
 use ahash::AHashSet;
+use std::{fmt::Debug, net::IpAddr};
 use utils::{
     config::{
         Config, ConfigKey, Rate,
@@ -16,13 +19,10 @@ use utils::{
     glob::GlobPattern,
 };
 
-use crate::{
-    KV_RATE_LIMIT_AUTH, KV_RATE_LIMIT_LOITER, KV_RATE_LIMIT_RCPT, KV_RATE_LIMIT_SCAN, Server,
-    ip_to_bytes, ipc::BroadcastEvent, manager::config::MatchType,
-};
-
 #[derive(Debug, Clone)]
 pub struct Security {
+    fallback_admin: Option<(String, String)>,
+
     blocked_ip_networks: Vec<IpAddrMask>,
     has_blocked_networks: bool,
 
@@ -49,7 +49,7 @@ pub struct BlockedIps {
 }
 
 impl Security {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let mut allowed_ip_addresses = AHashSet::new();
         let mut allowed_ip_networks = Vec::new();
 
@@ -280,7 +280,7 @@ impl Server {
 }
 
 impl BlockedIps {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         let mut blocked_ip_addresses = AHashSet::new();
         let mut blocked_ip_networks = Vec::new();
 

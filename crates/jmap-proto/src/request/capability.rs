@@ -115,19 +115,19 @@ pub enum Capabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CoreCapabilities {
     #[serde(rename(serialize = "maxSizeUpload"))]
-    pub max_size_upload: usize,
+    pub max_size_upload: u64,
     #[serde(rename(serialize = "maxConcurrentUpload"))]
-    pub max_concurrent_upload: usize,
+    pub max_concurrent_upload: u64,
     #[serde(rename(serialize = "maxSizeRequest"))]
-    pub max_size_request: usize,
+    pub max_size_request: u64,
     #[serde(rename(serialize = "maxConcurrentRequests"))]
-    pub max_concurrent_requests: usize,
+    pub max_concurrent_requests: u64,
     #[serde(rename(serialize = "maxCallsInRequest"))]
-    pub max_calls_in_request: usize,
+    pub max_calls_in_request: u64,
     #[serde(rename(serialize = "maxObjectsInGet"))]
-    pub max_objects_in_get: usize,
+    pub max_objects_in_get: u64,
     #[serde(rename(serialize = "maxObjectsInSet"))]
-    pub max_objects_in_set: usize,
+    pub max_objects_in_set: u64,
     #[serde(rename(serialize = "collationAlgorithms"))]
     pub collation_algorithms: Vec<String>,
 }
@@ -149,13 +149,13 @@ pub struct SieveSessionCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SieveAccountCapabilities {
     #[serde(rename(serialize = "maxSizeScriptName"))]
-    pub max_script_name: usize,
+    pub max_script_name: u64,
     #[serde(rename(serialize = "maxSizeScript"))]
-    pub max_script_size: usize,
+    pub max_script_size: u64,
     #[serde(rename(serialize = "maxNumberScripts"))]
-    pub max_scripts: usize,
+    pub max_scripts: u64,
     #[serde(rename(serialize = "maxNumberRedirects"))]
-    pub max_redirects: usize,
+    pub max_redirects: u64,
     #[serde(rename(serialize = "sieveExtensions"))]
     pub extensions: Vec<String>,
     #[serde(rename(serialize = "notificationMethods"))]
@@ -167,13 +167,13 @@ pub struct SieveAccountCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MailCapabilities {
     #[serde(rename(serialize = "maxMailboxesPerEmail"))]
-    pub max_mailboxes_per_email: Option<usize>,
+    pub max_mailboxes_per_email: Option<u64>,
     #[serde(rename(serialize = "maxMailboxDepth"))]
-    pub max_mailbox_depth: usize,
+    pub max_mailbox_depth: u64,
     #[serde(rename(serialize = "maxSizeMailboxName"))]
-    pub max_size_mailbox_name: usize,
+    pub max_size_mailbox_name: u64,
     #[serde(rename(serialize = "maxSizeAttachmentsPerEmail"))]
-    pub max_size_attachments_per_email: usize,
+    pub max_size_attachments_per_email: u64,
     #[serde(rename(serialize = "emailQuerySortOptions"))]
     pub email_query_sort_options: Vec<EmailComparator>,
     #[serde(rename(serialize = "mayCreateTopLevelMailbox"))]
@@ -183,7 +183,7 @@ pub struct MailCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SubmissionCapabilities {
     #[serde(rename(serialize = "maxDelayedSend"))]
-    pub max_delayed_send: usize,
+    pub max_delayed_send: u64,
     #[serde(rename(serialize = "submissionExtensions"))]
     pub submission_extensions: VecMap<String, Vec<String>>,
 }
@@ -191,9 +191,9 @@ pub struct SubmissionCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BlobCapabilities {
     #[serde(rename(serialize = "maxSizeBlobSet"))]
-    pub max_size_blob_set: usize,
+    pub max_size_blob_set: u64,
     #[serde(rename(serialize = "maxDataSources"))]
-    pub max_data_sources: usize,
+    pub max_data_sources: u64,
     #[serde(rename(serialize = "supportedTypeNames"))]
     pub supported_type_names: Vec<DataType>,
     #[serde(rename(serialize = "supportedDigestAlgorithms"))]
@@ -203,7 +203,7 @@ pub struct BlobCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CalendarCapabilities {
     #[serde(rename(serialize = "maxCalendarsPerEvent"))]
-    pub max_calendars_per_event: Option<usize>,
+    pub max_calendars_per_event: Option<u64>,
     #[serde(rename(serialize = "minDateTime"))]
     pub min_date_time: UTCDate,
     #[serde(rename(serialize = "maxDateTime"))]
@@ -211,7 +211,7 @@ pub struct CalendarCapabilities {
     #[serde(rename(serialize = "maxExpandedQueryDuration"))]
     pub max_expanded_query_duration: String,
     #[serde(rename(serialize = "maxParticipantsPerEvent"))]
-    pub max_participants_per_event: Option<usize>,
+    pub max_participants_per_event: Option<u64>,
     #[serde(rename(serialize = "mayCreateCalendar"))]
     pub may_create_calendar: bool,
 }
@@ -219,7 +219,7 @@ pub struct CalendarCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ContactsCapabilities {
     #[serde(rename(serialize = "maxAddressBooksPerCard"))]
-    pub max_address_books_per_card: Option<usize>,
+    pub max_address_books_per_card: Option<u64>,
     #[serde(rename(serialize = "mayCreateAddressBook"))]
     pub may_create_address_book: bool,
 }
@@ -260,9 +260,9 @@ pub struct PrincipalCalendarCapabilities {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileNodeCapabilities {
     #[serde(rename(serialize = "maxFileNodeDepth"))]
-    pub max_file_node_depth: Option<usize>,
+    pub max_file_node_depth: Option<u64>,
     #[serde(rename(serialize = "maxSizeFileNodeName"))]
-    pub max_size_file_node_name: usize,
+    pub max_size_file_node_name: u64,
     #[serde(rename(serialize = "fileNodeQuerySortOptions"))]
     pub file_node_query_sort_options: Vec<FileNodeComparator>,
     #[serde(rename(serialize = "mayCreateTopLevelFileNode"))]

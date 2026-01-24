@@ -102,7 +102,7 @@ impl CacheItemWeight for Policy {
 }
 
 impl Resolvers {
-    pub async fn parse(config: &mut Config) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         let (resolver_config, mut opts) = match config.value("resolver.type").unwrap_or("system") {
             "cloudflare" => (ResolverConfig::cloudflare(), ResolverOpts::default()),
             "cloudflare-tls" => (ResolverConfig::cloudflare_tls(), ResolverOpts::default()),
@@ -245,7 +245,7 @@ impl Resolvers {
 }
 
 impl Policy {
-    pub fn try_parse(config: &mut Config) -> Option<Self> {
+    pub fn try_parse(bp: &mut Bootstrap) -> Option<Self> {
         let mode = config
             .property_or_default::<Option<Mode>>("session.mta-sts.mode", "testing")
             .unwrap_or_default()?;

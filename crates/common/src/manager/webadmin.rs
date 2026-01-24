@@ -4,19 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::WEBADMIN_KEY;
+use crate::Core;
+use ahash::AHashMap;
+use arc_swap::ArcSwap;
 use std::{
     borrow::Cow,
     io::{self, Cursor, Read},
     path::PathBuf,
 };
-
-use ahash::AHashMap;
-use arc_swap::ArcSwap;
 use store::BlobStore;
-
-use crate::Core;
-
-use super::WEBADMIN_KEY;
 
 pub struct WebAdminManager {
     bundle_path: TempDir,

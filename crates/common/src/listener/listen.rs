@@ -301,7 +301,7 @@ impl SocketOpts {
 }
 
 impl Listeners {
-    pub fn bind_and_drop_priv(&self, config: &mut Config) {
+    pub fn bind_and_drop_priv(&self, bp: &mut Bootstrap) {
         // Bind as root
         for server in &self.servers {
             for listener in &server.listeners {

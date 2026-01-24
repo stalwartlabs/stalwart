@@ -77,7 +77,7 @@ pub enum CalendarTemplateVariable {
 }
 
 impl GroupwareConfig {
-    pub fn parse(config: &mut Config) -> Self {
+    pub fn parse(bp: &mut Bootstrap) -> Self {
         GroupwareConfig {
             max_request_size: config
                 .property("dav.request.max-size")

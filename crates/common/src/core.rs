@@ -8,6 +8,7 @@ use crate::{
     Inner, Server,
     auth::{AccessToken, ResourceToken, TenantInfo},
     config::{
+        mailstore::spamfilter::SpamClassifier,
         smtp::{
             auth::{ArcSealer, DkimSigner, LazySignature, ResolvedSignature, build_signature},
             queue::{
@@ -15,7 +16,6 @@ use crate::{
                 QueueStrategy, RequireOptional, RoutingStrategy, TlsStrategy, VirtualQueue,
             },
         },
-        spamfilter::SpamClassifier,
     },
     ipc::{BroadcastEvent, PushEvent, PushNotification},
     manager::SPAM_CLASSIFIER_KEY,

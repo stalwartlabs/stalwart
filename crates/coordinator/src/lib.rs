@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+#[allow(unused_imports)]
 use std::sync::Arc;
 
 pub mod backend;
@@ -34,7 +35,6 @@ pub enum PubSubStream {
     Zenoh(crate::backend::zenoh::pubsub::ZenohPubSubStream),
     #[cfg(feature = "kafka")]
     Kafka(crate::backend::kafka::pubsub::KafkaPubSubStream),
-    #[cfg(not(any(feature = "redis", feature = "nats")))]
     Unimplemented,
 }
 
@@ -47,6 +47,5 @@ pub enum Msg {
     Zenoh(Vec<u8>),
     #[cfg(feature = "kafka")]
     Kafka(Vec<u8>),
-    #[cfg(not(any(feature = "redis", feature = "nats")))]
     Unimplemented,
 }
