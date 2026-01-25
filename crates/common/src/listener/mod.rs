@@ -7,6 +7,7 @@
 use std::{borrow::Cow, net::IpAddr, sync::Arc, time::Instant};
 
 use compact_str::ToCompactString;
+use registry::schema::enums::ExpressionVariable;
 use rustls::ServerConfig;
 use std::fmt::Debug;
 use tokio::{
@@ -222,15 +223,15 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
 }
 
 impl<T: SessionStream> ResolveVariable for SessionData<T> {
-    fn resolve_variable(&self, variable: u32) -> crate::expr::Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> crate::expr::Variable<'_> {
         match variable {
-            V_REMOTE_IP => self.remote_ip.to_compact_string().into(),
-            V_REMOTE_PORT => self.remote_port.into(),
-            V_LOCAL_IP => self.local_ip.to_compact_string().into(),
-            V_LOCAL_PORT => self.local_port.into(),
-            V_LISTENER => self.instance.id.as_str().into(),
-            V_PROTOCOL => self.protocol.as_str().into(),
-            V_TLS => self.stream.is_tls().into(),
+            ExpressionVariable::RemoteIp => self.remote_ip.to_compact_string().into(),
+            ExpressionVariable::RemotePort => self.remote_port.into(),
+            ExpressionVariable::LocalIp => self.local_ip.to_compact_string().into(),
+            ExpressionVariable::LocalPort => self.local_port.into(),
+            ExpressionVariable::Listener => self.instance.id.as_str().into(),
+            ExpressionVariable::Protocol => self.protocol.as_str().into(),
+            ExpressionVariable::IsTls => self.stream.is_tls().into(),
             _ => crate::expr::Variable::default(),
         }
     }

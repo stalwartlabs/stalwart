@@ -15,6 +15,7 @@ use mail_builder::{
         address::{Address, EmailAddress},
     },
 };
+use registry::schema::enums::ExpressionVariable;
 use trc::{Collector, MetricType, TOTAL_EVENT_COUNT, TelemetryEvent};
 
 use super::{AlertContent, AlertContentToken, AlertMethod};
@@ -108,7 +109,7 @@ impl Server {
 }
 
 impl ResolveVariable for CollectorResolver {
-    fn resolve_variable(&self, variable: u32) -> Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
         if (variable as usize) < TOTAL_EVENT_COUNT {
             Variable::Integer(Collector::read_event_metric(variable as usize) as i64)
         } else if let Some(metric_type) =

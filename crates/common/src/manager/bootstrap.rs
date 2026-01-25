@@ -95,4 +95,21 @@ impl Bootstrap {
             }],
         });
     }
+
+    pub fn validate(&mut self, id: Id, object: &impl ObjectType) -> bool {
+        let mut errors = Vec::new();
+        if object.validate(&mut errors) {
+            true
+        } else {
+            self.errors.push(Error::Validation {
+                object_id: id,
+                errors,
+            });
+            false
+        }
+    }
+
+    pub fn node_id(&self) -> u64 {
+        self.node.node_id
+    }
 }

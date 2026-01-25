@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use utils::config::{Config, utils::ParseValue};
-
-use crate::expr::{Constant, ConstantValue, Variable, if_block::IfBlock, tokenizer::TokenMap};
-
 use super::*;
+use crate::expr::{Constant, Variable, if_block::IfBlock, tokenizer::TokenMap};
+use registry::schema::enums::ExpressionConstant;
+use std::time::Duration;
+use utils::config::{Config, utils::ParseValue};
 
 #[derive(Clone)]
 pub struct ReportConfig {
@@ -79,7 +77,7 @@ impl ReportConfig {
                 &TokenMap::default().with_variables(RCPT_DOMAIN_VARS),
             )
             .unwrap_or_else(|| {
-                IfBlock::new_default::<()>("report.submitter", [], "config_get('server.hostname')")
+                IfBlock::new_default("report.submitter", [], "config_get('server.hostname')")
             }),
             analysis: ReportAnalysis {
                 addresses: config
@@ -114,17 +112,13 @@ impl ReportConfig {
 impl Report {
     pub fn parse(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Self {
         let mut report = Self {
-            name: IfBlock::new_default::<()>(
-                format!("report.{id}.from-name"),
-                [],
-                "'Report Subsystem'",
-            ),
-            address: IfBlock::new_default::<()>(
+            name: IfBlock::new_default(format!("report.{id}.from-name"), [], "'Report Subsystem'"),
+            address: IfBlock::new_default(
                 format!("report.{id}.from-address"),
                 [],
                 format!("'noreply-{id}@' + config_get('report.domain')"),
             ),
-            subject: IfBlock::new_default::<()>(
+            subject: IfBlock::new_default(
                 format!("report.{id}.subject"),
                 [],
                 format!(
@@ -132,12 +126,12 @@ impl Report {
                     id.to_ascii_uppercase()
                 ),
             ),
-            sign: IfBlock::new_default::<()>(
+            sign: IfBlock::new_default(
                 format!("report.{id}.sign"),
                 [],
                 "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
             ),
-            send: IfBlock::new_default::<()>(format!("report.{id}.send"), [], "[1, 1d]"),
+            send: IfBlock::new_default(format!("report.{id}.send"), [], "[1, 1d]"),
         };
         for (value, key) in [
             (&mut report.name, "from-name"),
@@ -160,17 +154,17 @@ impl AggregateReport {
         let rcpt_vars = TokenMap::default().with_variables(RCPT_DOMAIN_VARS);
 
         let mut report = Self {
-            name: IfBlock::new_default::<()>(
+            name: IfBlock::new_default(
                 format!("report.{id}.aggregate.from-name"),
                 [],
                 format!("'{} Aggregate Report'", id.to_ascii_uppercase()),
             ),
-            address: IfBlock::new_default::<()>(
+            address: IfBlock::new_default(
                 format!("report.{id}.aggregate.from-address"),
                 [],
                 format!("'noreply-{id}@' + config_get('report.domain')"),
             ),
-            org_name: IfBlock::new_default::<()>(
+            org_name: IfBlock::new_default(
                 format!("report.{id}.aggregate.org-name"),
                 [],
                 "config_get('report.domain')",
@@ -181,12 +175,12 @@ impl AggregateReport {
                 [],
                 "daily",
             ),
-            sign: IfBlock::new_default::<()>(
+            sign: IfBlock::new_default(
                 format!("report.{id}.aggregate.sign"),
                 [],
                 "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
             ),
-            max_size: IfBlock::new_default::<()>(
+            max_size: IfBlock::new_default(
                 format!("report.{id}.aggregate.max-size"),
                 [],
                 "26214400",
@@ -233,44 +227,17 @@ impl ParseValue for AggregateFrequency {
     }
 }
 
-impl From<AggregateFrequency> for Constant {
-    fn from(value: AggregateFrequency) -> Self {
-        match value {
-            AggregateFrequency::Never => 0.into(),
-            AggregateFrequency::Hourly => 2.into(),
-            AggregateFrequency::Daily => 3.into(),
-            AggregateFrequency::Weekly => 4.into(),
-        }
-    }
-}
-
 impl<'x> TryFrom<Variable<'x>> for AggregateFrequency {
     type Error = ();
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::Integer(0) => Ok(AggregateFrequency::Never),
-            Variable::Integer(2) => Ok(AggregateFrequency::Hourly),
-            Variable::Integer(3) => Ok(AggregateFrequency::Daily),
-            Variable::Integer(4) => Ok(AggregateFrequency::Weekly),
+            Variable::Constant(ExpressionConstant::Disable) => Ok(AggregateFrequency::Never),
+            Variable::Constant(ExpressionConstant::Hourly) => Ok(AggregateFrequency::Hourly),
+            Variable::Constant(ExpressionConstant::Daily) => Ok(AggregateFrequency::Daily),
+            Variable::Constant(ExpressionConstant::Weekly) => Ok(AggregateFrequency::Weekly),
             _ => Err(()),
         }
-    }
-}
-
-impl ConstantValue for AggregateFrequency {
-    fn add_constants(token_map: &mut crate::expr::tokenizer::TokenMap) {
-        token_map
-            .add_constant("never", AggregateFrequency::Never)
-            .add_constant("hourly", AggregateFrequency::Hourly)
-            .add_constant("hour", AggregateFrequency::Hourly)
-            .add_constant("daily", AggregateFrequency::Daily)
-            .add_constant("day", AggregateFrequency::Daily)
-            .add_constant("weekly", AggregateFrequency::Weekly)
-            .add_constant("week", AggregateFrequency::Weekly)
-            .add_constant("never", AggregateFrequency::Never)
-            .add_constant("disable", AggregateFrequency::Never)
-            .add_constant("false", AggregateFrequency::Never);
     }
 }
 

@@ -20,3 +20,12 @@ pub use crate::types::socketaddr::SocketAddr;
 pub use serde::{Deserialize, Serialize};
 pub use std::collections::HashMap;
 pub use std::str::FromStr;
+
+#[derive(Debug)]
+pub struct ExpressionContext<'x> {
+    pub expr: &'x Expression,
+    pub default: Option<Expression>,
+    pub property: Property,
+    pub allowed_variables: &'static [ExpressionVariable],
+    pub allowed_constants: &'static [ExpressionConstant],
+}

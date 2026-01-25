@@ -6,8 +6,7 @@
 
 use crate::{
     VERSION_PUBLIC,
-    config::smtp::SMTP_RCPT_TO_VARS,
-    expr::{if_block::IfBlock, tokenizer::TokenMap},
+    expr::if_block::IfBlock,
     manager::bootstrap::Bootstrap,
     scripts::{
         functions::{register_functions_trusted, register_functions_untrusted},
@@ -17,7 +16,7 @@ use crate::{
 use ahash::AHashMap;
 use registry::{
     schema::{
-        prelude::{Object, Property},
+        prelude::Object,
         structs::{
             SieveSystemInterpreter, SieveSystemScript, SieveUserInterpreter, SieveUserScript,
         },
@@ -103,7 +102,6 @@ impl Scripting {
             .with_max_includes(10)
             .with_no_capability_check(trusted.no_capability_check)
             .register_functions(&mut fnc_map_trusted);
-
         let mut trusted_runtime = Runtime::new()
             .without_capabilities([
                 Capability::FileInto,
@@ -164,51 +162,29 @@ impl Scripting {
             }
         }
 
-        let token_map = TokenMap::default().with_variables(SMTP_RCPT_TO_VARS);
-
-        let mut scripting = Scripting {
+        Scripting {
             untrusted_compiler,
             untrusted_runtime,
             trusted_runtime,
             untrusted_scripts,
             trusted_scripts,
-            ..Default::default()
-        };
-
-        for (property, from, to) in [
-            (
-                Property::DefaultFromAddress,
-                trusted.default_from_address,
-                &mut scripting.from_addr,
-            ),
-            (
-                Property::DefaultFromName,
-                trusted.default_from_name,
-                &mut scripting.from_name,
-            ),
-            (
-                Property::DefaultReturnPath,
-                trusted.default_return_path,
-                &mut scripting.return_path,
-            ),
-            (
-                Property::DkimSignDomain,
-                trusted.dkim_sign_domain,
-                &mut scripting.sign,
-            ),
-        ] {
-            if let Some(if_block) = IfBlock::try_parse(
-                bp,
+            from_addr: bp.compile_expr(
                 Object::SieveSystemScript.singleton(),
-                property,
-                from,
-                &token_map,
-            ) {
-                *to = if_block;
-            }
+                &trusted.ctx_default_from_address(),
+            ),
+            from_name: bp.compile_expr(
+                Object::SieveSystemScript.singleton(),
+                &trusted.ctx_default_from_name(),
+            ),
+            return_path: bp.compile_expr(
+                Object::SieveSystemScript.singleton(),
+                &trusted.ctx_default_return_path(),
+            ),
+            sign: bp.compile_expr(
+                Object::SieveSystemScript.singleton(),
+                &trusted.ctx_dkim_sign_domain(),
+            ),
         }
-
-        scripting
     }
 }
 
@@ -220,19 +196,10 @@ impl Default for Scripting {
             untrusted_compiler: Compiler::new(),
             untrusted_runtime: Runtime::new(),
             trusted_runtime: Runtime::new(),
-            from_addr: IfBlock::new_default::<()>(
-                Property::DefaultFromAddress,
-                script.default_from_address,
-            ),
-            from_name: IfBlock::new_default::<()>(
-                Property::DefaultFromName,
-                script.default_from_name,
-            ),
-            return_path: IfBlock::new_default::<()>(
-                Property::DefaultReturnPath,
-                script.default_return_path,
-            ),
-            sign: IfBlock::new_default::<()>(Property::DkimSignDomain, script.dkim_sign_domain),
+            from_addr: IfBlock::new_default(script.ctx_default_from_address()),
+            from_name: IfBlock::new_default(script.ctx_default_from_name()),
+            return_path: IfBlock::new_default(script.ctx_default_return_path()),
+            sign: IfBlock::new_default(script.ctx_dkim_sign_domain()),
             untrusted_scripts: AHashMap::new(),
             trusted_scripts: AHashMap::new(),
         }

@@ -13,6 +13,7 @@ use crate::{
 use ahash::AHashMap;
 use mail_auth::IpLookupStrategy;
 use mail_send::Credentials;
+use registry::schema::enums::ExpressionConstant;
 use std::{
     fmt::Display,
     hash::{Hash, Hasher},
@@ -189,7 +190,7 @@ pub enum RequireOptional {
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
-            route: IfBlock::new_default::<()>(
+            route: IfBlock::new_default(
                 "queue.strategy.route",
                 #[cfg(not(feature = "test_mode"))]
                 [("is_local_domain('*', rcpt_domain)", "'local'")],
@@ -197,7 +198,7 @@ impl Default for QueueConfig {
                 [],
                 "'mx'",
             ),
-            queue: IfBlock::new_default::<()>(
+            queue: IfBlock::new_default(
                 "queue.strategy.schedule",
                 #[cfg(not(feature = "test_mode"))]
                 [
@@ -212,8 +213,8 @@ impl Default for QueueConfig {
                 #[cfg(feature = "test_mode")]
                 "'default'",
             ),
-            connection: IfBlock::new_default::<()>("queue.strategy.connection", [], "'default'"),
-            tls: IfBlock::new_default::<()>(
+            connection: IfBlock::new_default("queue.strategy.connection", [], "'default'"),
+            tls: IfBlock::new_default(
                 "queue.strategy.tls",
                 #[cfg(not(feature = "test_mode"))]
                 [("retry_num > 0 && last_error == 'tls'", "'invalid-tls'")],
@@ -222,13 +223,13 @@ impl Default for QueueConfig {
                 "'default'",
             ),
             dsn: Dsn {
-                name: IfBlock::new_default::<()>("report.dsn.from-name", [], "'Mail Delivery Subsystem'"),
-                address: IfBlock::new_default::<()>(
+                name: IfBlock::new_default("report.dsn.from-name", [], "'Mail Delivery Subsystem'"),
+                address: IfBlock::new_default(
                     "report.dsn.from-address",
                     [],
                     "'MAILER-DAEMON@' + config_get('report.domain')",
                 ),
-                sign: IfBlock::new_default::<()>(
+                sign: IfBlock::new_default(
                     "report.dsn.sign",
                     [],
                     "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
@@ -579,7 +580,9 @@ fn parse_inbound_rate_limiters(bp: &mut Bootstrap) -> QueueRateLimiters {
             || t.expr.items().iter().any(|c| {
                 matches!(
                     c,
-                    ExpressionItem::Variable(V_RECIPIENT | V_RECIPIENT_DOMAIN)
+                    ExpressionItem::Variable(
+                        ExpressionVariable::Rcpt | ExpressionVariable::RcptDomain
+                    )
                 )
             })
         {
@@ -591,7 +594,10 @@ fn parse_inbound_rate_limiters(bp: &mut Bootstrap) -> QueueRateLimiters {
                 matches!(
                     c,
                     ExpressionItem::Variable(
-                        V_SENDER | V_SENDER_DOMAIN | V_HELO_DOMAIN | V_AUTHENTICATED_AS
+                        ExpressionVariable::Sender
+                            | ExpressionVariable::SenderDomain
+                            | ExpressionVariable::HeloDomain
+                            | ExpressionVariable::AuthenticatedAs
                     )
                 )
             })
@@ -622,17 +628,23 @@ fn parse_outbound_rate_limiters(bp: &mut Bootstrap) -> QueueRateLimiters {
     );
     for t in all_throttles {
         if (t.keys & (THROTTLE_MX | THROTTLE_REMOTE_IP | THROTTLE_LOCAL_IP)) != 0
-            || t.expr
-                .items()
-                .iter()
-                .any(|c| matches!(c, ExpressionItem::Variable(V_MX | V_REMOTE_IP | V_LOCAL_IP)))
+            || t.expr.items().iter().any(|c| {
+                matches!(
+                    c,
+                    ExpressionItem::Variable(
+                        ExpressionVariable::Mx
+                            | ExpressionVariable::RemoteIp
+                            | ExpressionVariable::LocalIp
+                    )
+                )
+            })
         {
             throttle.remote.push(t);
         } else if (t.keys & (THROTTLE_RCPT_DOMAIN)) != 0
             || t.expr
                 .items()
                 .iter()
-                .any(|c| matches!(c, ExpressionItem::Variable(V_RECIPIENT_DOMAIN)))
+                .any(|c| matches!(c, ExpressionItem::Variable(ExpressionVariable::RcptDomain)))
         {
             throttle.rcpt.push(t);
         } else {
@@ -657,7 +669,7 @@ fn parse_queue_quota(bp: &mut Bootstrap) -> QueueQuotas {
                     .expr
                     .items()
                     .iter()
-                    .any(|c| matches!(c, ExpressionItem::Variable(V_RECIPIENT)))
+                    .any(|c| matches!(c, ExpressionItem::Variable(ExpressionVariable::Rcpt)))
             {
                 capacities.rcpt.push(quota);
             } else if (quota.keys & THROTTLE_RCPT_DOMAIN) != 0
@@ -665,7 +677,7 @@ fn parse_queue_quota(bp: &mut Bootstrap) -> QueueQuotas {
                     .expr
                     .items()
                     .iter()
-                    .any(|c| matches!(c, ExpressionItem::Variable(V_RECIPIENT_DOMAIN)))
+                    .any(|c| matches!(c, ExpressionItem::Variable(ExpressionVariable::RcptDomain)))
             {
                 capacities.rcpt_domain.push(quota);
             } else {
@@ -766,34 +778,11 @@ impl<'x> TryFrom<Variable<'x>> for RequireOptional {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::Integer(2) => Ok(RequireOptional::Optional),
-            Variable::Integer(1) => Ok(RequireOptional::Require),
-            Variable::Integer(0) => Ok(RequireOptional::Disable),
+            Variable::Constant(ExpressionConstant::Optional) => Ok(RequireOptional::Optional),
+            Variable::Constant(ExpressionConstant::Require) => Ok(RequireOptional::Require),
+            Variable::Constant(ExpressionConstant::Disable) => Ok(RequireOptional::Disable),
             _ => Err(()),
         }
-    }
-}
-
-impl From<RequireOptional> for Constant {
-    fn from(value: RequireOptional) -> Self {
-        Constant::Integer(match value {
-            RequireOptional::Optional => 2,
-            RequireOptional::Require => 1,
-            RequireOptional::Disable => 0,
-        })
-    }
-}
-
-impl ConstantValue for RequireOptional {
-    fn add_constants(token_map: &mut crate::expr::tokenizer::TokenMap) {
-        token_map
-            .add_constant("optional", RequireOptional::Optional)
-            .add_constant("require", RequireOptional::Require)
-            .add_constant("required", RequireOptional::Require)
-            .add_constant("disable", RequireOptional::Disable)
-            .add_constant("disabled", RequireOptional::Disable)
-            .add_constant("none", RequireOptional::Disable)
-            .add_constant("false", RequireOptional::Disable);
     }
 }
 
@@ -802,11 +791,11 @@ impl<'x> TryFrom<Variable<'x>> for IpLookupStrategy {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::Integer(value) => match value {
-                2 => Ok(IpLookupStrategy::Ipv4Only),
-                3 => Ok(IpLookupStrategy::Ipv6Only),
-                4 => Ok(IpLookupStrategy::Ipv6thenIpv4),
-                5 => Ok(IpLookupStrategy::Ipv4thenIpv6),
+            Variable::Constant(value) => match value {
+                ExpressionConstant::Ipv4Only => Ok(IpLookupStrategy::Ipv4Only),
+                ExpressionConstant::Ipv6Only => Ok(IpLookupStrategy::Ipv6Only),
+                ExpressionConstant::Ipv6ThenIpv4 => Ok(IpLookupStrategy::Ipv6thenIpv4),
+                ExpressionConstant::Ipv4ThenIpv6 => Ok(IpLookupStrategy::Ipv4thenIpv6),
                 _ => Err(()),
             },
             Variable::String(value) => {
@@ -814,27 +803,6 @@ impl<'x> TryFrom<Variable<'x>> for IpLookupStrategy {
             }
             _ => Err(()),
         }
-    }
-}
-
-impl From<IpLookupStrategy> for Constant {
-    fn from(value: IpLookupStrategy) -> Self {
-        Constant::Integer(match value {
-            IpLookupStrategy::Ipv4Only => 2,
-            IpLookupStrategy::Ipv6Only => 3,
-            IpLookupStrategy::Ipv6thenIpv4 => 4,
-            IpLookupStrategy::Ipv4thenIpv6 => 5,
-        })
-    }
-}
-
-impl ConstantValue for IpLookupStrategy {
-    fn add_constants(token_map: &mut crate::expr::tokenizer::TokenMap) {
-        token_map
-            .add_constant("ipv4_only", IpLookupStrategy::Ipv4Only)
-            .add_constant("ipv6_only", IpLookupStrategy::Ipv6Only)
-            .add_constant("ipv6_then_ipv4", IpLookupStrategy::Ipv6thenIpv4)
-            .add_constant("ipv4_then_ipv6", IpLookupStrategy::Ipv4thenIpv6);
     }
 }
 

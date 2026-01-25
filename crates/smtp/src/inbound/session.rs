@@ -539,54 +539,56 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
 }
 
 impl<T: SessionStream> ResolveVariable for Session<T> {
-    fn resolve_variable(&self, variable: u32) -> expr::Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'_> {
         match variable {
-            V_RECIPIENT => self
+            ExpressionVariable::Rcpt => self
                 .data
                 .rcpt_to
                 .last()
                 .map(|r| r.address_lcase.as_str())
                 .unwrap_or_default()
                 .into(),
-            V_RECIPIENT_DOMAIN => self
+            ExpressionVariable::RcptDomain => self
                 .data
                 .rcpt_to
                 .last()
                 .map(|r| r.domain.as_str())
                 .unwrap_or_default()
                 .into(),
-            V_RECIPIENTS => self
+            ExpressionVariable::Recipients => self
                 .data
                 .rcpt_to
                 .iter()
                 .map(|r| Variable::from(r.address_lcase.as_str()))
                 .collect::<Vec<_>>()
                 .into(),
-            V_SENDER => self
+            ExpressionVariable::Sender => self
                 .data
                 .mail_from
                 .as_ref()
                 .map(|m| m.address_lcase.as_str())
                 .unwrap_or_default()
                 .into(),
-            V_SENDER_DOMAIN => self
+            ExpressionVariable::SenderDomain => self
                 .data
                 .mail_from
                 .as_ref()
                 .map(|m| m.domain.as_str())
                 .unwrap_or_default()
                 .into(),
-            V_HELO_DOMAIN => self.data.helo_domain.as_str().into(),
-            V_AUTHENTICATED_AS => self.authenticated_as().unwrap_or_default().into(),
-            V_LISTENER => self.instance.id.as_str().into(),
-            V_REMOTE_IP => self.data.remote_ip_str.as_str().into(),
-            V_REMOTE_PORT => self.data.remote_port.into(),
-            V_LOCAL_IP => self.data.local_ip_str.as_str().into(),
-            V_LOCAL_PORT => self.data.local_port.into(),
-            V_TLS => self.stream.is_tls().into(),
-            V_PRIORITY => self.data.priority.to_compact_string().into(),
-            V_PROTOCOL => self.instance.protocol.as_str().into(),
-            V_ASN => self
+            ExpressionVariable::HeloDomain => self.data.helo_domain.as_str().into(),
+            ExpressionVariable::AuthenticatedAs => {
+                self.authenticated_as().unwrap_or_default().into()
+            }
+            ExpressionVariable::Listener => self.instance.id.as_str().into(),
+            ExpressionVariable::RemoteIp => self.data.remote_ip_str.as_str().into(),
+            ExpressionVariable::RemotePort => self.data.remote_port.into(),
+            ExpressionVariable::LocalIp => self.data.local_ip_str.as_str().into(),
+            ExpressionVariable::LocalPort => self.data.local_port.into(),
+            ExpressionVariable::IsTls => self.stream.is_tls().into(),
+            ExpressionVariable::Priority => self.data.priority.to_compact_string().into(),
+            ExpressionVariable::Protocol => self.instance.protocol.as_str().into(),
+            ExpressionVariable::Asn => self
                 .data
                 .asn_geo_data
                 .asn
@@ -594,7 +596,7 @@ impl<T: SessionStream> ResolveVariable for Session<T> {
                 .map(|a| a.id)
                 .unwrap_or_default()
                 .into(),
-            V_COUNTRY => self
+            ExpressionVariable::Country => self
                 .data
                 .asn_geo_data
                 .country

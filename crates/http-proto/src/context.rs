@@ -49,19 +49,21 @@ impl<'x> HttpContext<'x> {
 }
 
 impl ResolveVariable for HttpContext<'_> {
-    fn resolve_variable(&self, variable: u32) -> Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
         match variable {
-            V_REMOTE_IP => self.session.remote_ip.to_compact_string().into(),
-            V_REMOTE_PORT => self.session.remote_port.into(),
-            V_LOCAL_IP => self.session.local_ip.to_compact_string().into(),
-            V_LOCAL_PORT => self.session.local_port.into(),
-            V_TLS => self.session.is_tls.into(),
-            V_PROTOCOL => if self.session.is_tls { "https" } else { "http" }.into(),
-            V_LISTENER => self.session.instance.id.as_str().into(),
-            V_URL => self.req.uri().to_compact_string().into(),
-            V_URL_PATH => self.req.uri().path().into(),
-            V_METHOD => self.req.method().as_str().into(),
-            V_HEADERS => self
+            ExpressionVariable::RemoteIp => self.session.remote_ip.to_compact_string().into(),
+            ExpressionVariable::RemotePort => self.session.remote_port.into(),
+            ExpressionVariable::LocalIp => self.session.local_ip.to_compact_string().into(),
+            ExpressionVariable::LocalPort => self.session.local_port.into(),
+            ExpressionVariable::IsTls => self.session.is_tls.into(),
+            ExpressionVariable::Protocol => {
+                if self.session.is_tls { "https" } else { "http" }.into()
+            }
+            ExpressionVariable::Listener => self.session.instance.id.as_str().into(),
+            ExpressionVariable::Url => self.req.uri().to_compact_string().into(),
+            ExpressionVariable::UrlPath => self.req.uri().path().into(),
+            ExpressionVariable::Method => self.req.method().as_str().into(),
+            ExpressionVariable::Headers => self
                 .req
                 .headers()
                 .iter()

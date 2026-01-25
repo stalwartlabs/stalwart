@@ -29,18 +29,6 @@ pub mod smtp;
 pub mod storage;
 pub mod telemetry;
 
-pub(crate) const CONNECTION_VARS: &[u32; 9] = &[
-    V_LISTENER,
-    V_REMOTE_IP,
-    V_REMOTE_PORT,
-    V_LOCAL_IP,
-    V_LOCAL_PORT,
-    V_PROTOCOL,
-    V_TLS,
-    V_ASN,
-    V_COUNTRY,
-];
-
 impl Core {
     pub async fn parse(
         bp: &mut Bootstrap,

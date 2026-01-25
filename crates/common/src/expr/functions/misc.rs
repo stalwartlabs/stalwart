@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::net::IpAddr;
-
+use crate::expr::Variable;
 use compact_str::CompactString;
 use mail_auth::common::resolver::ToReverseName;
-
-use crate::expr::Variable;
+use std::net::IpAddr;
 
 pub(crate) fn fn_is_empty(v: Vec<Variable>) -> Variable {
     match &v[0] {
         Variable::String(s) => s.is_empty(),
-        Variable::Integer(_) | Variable::Float(_) => false,
+        Variable::Integer(_) | Variable::Float(_) | Variable::Constant(_) => false,
         Variable::Array(a) => a.is_empty(),
     }
     .into()

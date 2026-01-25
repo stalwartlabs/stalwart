@@ -100,17 +100,17 @@ pub struct FieldOrDefault {
 }
 
 pub(crate) const HTTP_VARS: &[u32; 11] = &[
-    V_LISTENER,
-    V_REMOTE_IP,
-    V_REMOTE_PORT,
-    V_LOCAL_IP,
-    V_LOCAL_PORT,
-    V_PROTOCOL,
-    V_TLS,
-    V_URL,
-    V_URL_PATH,
-    V_HEADERS,
-    V_METHOD,
+    ExpressionVariable::Listener,
+    ExpressionVariable::RemoteIp,
+    ExpressionVariable::RemotePort,
+    ExpressionVariable::LocalIp,
+    ExpressionVariable::LocalPort,
+    ExpressionVariable::Protocol,
+    ExpressionVariable::IsTls,
+    ExpressionVariable::Url,
+    ExpressionVariable::UrlPath,
+    ExpressionVariable::Headers,
+    ExpressionVariable::Method,
 ];
 
 impl Default for Network {
@@ -119,12 +119,12 @@ impl Default for Network {
             security: Default::default(),
             contact_form: None,
             node_id: 1,
-            http_response_url: IfBlock::new_default::<()>(
+            http_response_url: IfBlock::new_default(
                 "http.url",
                 [],
                 "protocol + '://' + config_get('server.hostname') + ':' + local_port",
             ),
-            http_allowed_endpoint: IfBlock::new_default::<()>("http.allowed-endpoint", [], "200"),
+            http_allowed_endpoint: IfBlock::new_default("http.allowed-endpoint", [], "200"),
             asn_geo_lookup: AsnGeoLookupConfig::Disabled,
             server_name: Default::default(),
             report_domain: Default::default(),

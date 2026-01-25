@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Display, str::FromStr};
 use crate::pickle::{Pickle, PickledStream};
+use std::{fmt::Display, str::FromStr};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct Duration(pub std::time::Duration);
 
 impl Duration {

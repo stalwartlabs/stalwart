@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    io::Cursor,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::Arc,
-    time::Duration,
+use crate::{
+    listener::{
+        acme::{
+            AcmeProvider, ChallengeSettings, EabSettings,
+            directory::LETS_ENCRYPT_PRODUCTION_DIRECTORY,
+        },
+        tls::AcmeProviders,
+    },
+    manager::bootstrap::Bootstrap,
 };
-
 use ahash::{AHashMap, AHashSet};
 use base64::{
     Engine,
@@ -26,18 +29,16 @@ use rustls::{
 };
 use rustls_pemfile::{Item, certs, read_one};
 use rustls_pki_types::PrivateKeyDer;
-use utils::config::Config;
+use std::{
+    io::Cursor,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 use x509_parser::{
     certificate::X509Certificate,
     der_parser::asn1_rs::FromDer,
     extensions::{GeneralName, ParsedExtension},
-};
-
-use crate::listener::{
-    acme::{
-        AcmeProvider, ChallengeSettings, EabSettings, directory::LETS_ENCRYPT_PRODUCTION_DIRECTORY,
-    },
-    tls::AcmeProviders,
 };
 
 pub static TLS13_VERSION: &[&SupportedProtocolVersion] = &[&TLS13];

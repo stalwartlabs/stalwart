@@ -50,15 +50,15 @@ fn parse_if_blocks() {
     // Create context and add some conditions
 
     let token_map = TokenMap::default().with_variables(&[
-        V_RECIPIENT,
-        V_RECIPIENT_DOMAIN,
-        V_SENDER,
-        V_SENDER_DOMAIN,
-        V_AUTHENTICATED_AS,
-        V_LISTENER,
-        V_REMOTE_IP,
-        V_LOCAL_IP,
-        V_PRIORITY,
+        ExpressionVariable::Rcpt,
+        ExpressionVariable::RcptDomain,
+        ExpressionVariable::Sender,
+        ExpressionVariable::SenderDomain,
+        ExpressionVariable::AuthenticatedAs,
+        ExpressionVariable::Listener,
+        ExpressionVariable::RemoteIp,
+        ExpressionVariable::LocalIp,
+        ExpressionVariable::Priority,
     ]);
 
     assert_eq!(
@@ -69,7 +69,7 @@ fn parse_if_blocks() {
                 IfThen {
                     expr: Expression {
                         items: vec![
-                            ExpressionItem::Variable(V_SENDER),
+                            ExpressionItem::Variable(ExpressionVariable::Sender),
                             ExpressionItem::Constant(Constant::String("jdoe".into())),
                             ExpressionItem::BinaryOperator(BinaryOperator::Eq)
                         ]
@@ -81,12 +81,12 @@ fn parse_if_blocks() {
                 IfThen {
                     expr: Expression {
                         items: vec![
-                            ExpressionItem::Variable(V_PRIORITY),
+                            ExpressionItem::Variable(ExpressionVariable::Priority),
                             ExpressionItem::Constant(Constant::Integer(1)),
                             ExpressionItem::UnaryOperator(UnaryOperator::Minus),
                             ExpressionItem::BinaryOperator(BinaryOperator::Eq),
                             ExpressionItem::JmpIf { val: true, pos: 4 },
-                            ExpressionItem::Variable(V_RECIPIENT),
+                            ExpressionItem::Variable(ExpressionVariable::Rcpt),
                             ExpressionItem::Constant(Constant::String("jane".into())),
                             ExpressionItem::Function {
                                 id: 29,
@@ -114,7 +114,7 @@ fn parse_if_blocks() {
                 IfThen {
                     expr: Expression {
                         items: vec![
-                            ExpressionItem::Variable(V_SENDER),
+                            ExpressionItem::Variable(ExpressionVariable::Sender),
                             ExpressionItem::Constant(Constant::String("jdoe".into())),
                             ExpressionItem::BinaryOperator(BinaryOperator::Eq)
                         ]
@@ -131,12 +131,12 @@ fn parse_if_blocks() {
                 IfThen {
                     expr: Expression {
                         items: vec![
-                            ExpressionItem::Variable(V_PRIORITY),
+                            ExpressionItem::Variable(ExpressionVariable::Priority),
                             ExpressionItem::Constant(Constant::Integer(1)),
                             ExpressionItem::UnaryOperator(UnaryOperator::Minus),
                             ExpressionItem::BinaryOperator(BinaryOperator::Eq),
                             ExpressionItem::JmpIf { val: true, pos: 4 },
-                            ExpressionItem::Variable(V_RECIPIENT),
+                            ExpressionItem::Variable(ExpressionVariable::Rcpt),
                             ExpressionItem::Constant(Constant::String("jane".into())),
                             ExpressionItem::Function {
                                 id: 29,
@@ -166,7 +166,7 @@ fn parse_if_blocks() {
                 IfThen {
                     expr: Expression {
                         items: vec![
-                            ExpressionItem::Variable(V_SENDER),
+                            ExpressionItem::Variable(ExpressionVariable::Sender),
                             ExpressionItem::Constant(Constant::String("jdoe".into())),
                             ExpressionItem::BinaryOperator(BinaryOperator::Eq)
                         ]
@@ -183,12 +183,12 @@ fn parse_if_blocks() {
                 IfThen {
                     expr: Expression {
                         items: vec![
-                            ExpressionItem::Variable(V_PRIORITY),
+                            ExpressionItem::Variable(ExpressionVariable::Priority),
                             ExpressionItem::Constant(Constant::Integer(1)),
                             ExpressionItem::UnaryOperator(UnaryOperator::Minus),
                             ExpressionItem::BinaryOperator(BinaryOperator::Eq),
                             ExpressionItem::JmpIf { val: true, pos: 4 },
-                            ExpressionItem::Variable(V_RECIPIENT),
+                            ExpressionItem::Variable(ExpressionVariable::Rcpt),
                             ExpressionItem::Constant(Constant::String("jane".into())),
                             ExpressionItem::Function {
                                 id: 29,
@@ -248,15 +248,15 @@ fn parse_throttles() {
         &mut config,
         "throttle",
         &TokenMap::default().with_variables(&[
-            V_RECIPIENT,
-            V_RECIPIENT_DOMAIN,
-            V_SENDER,
-            V_SENDER_DOMAIN,
-            V_AUTHENTICATED_AS,
-            V_LISTENER,
-            V_REMOTE_IP,
-            V_LOCAL_IP,
-            V_PRIORITY,
+            ExpressionVariable::Rcpt,
+            ExpressionVariable::RcptDomain,
+            ExpressionVariable::Sender,
+            ExpressionVariable::SenderDomain,
+            ExpressionVariable::AuthenticatedAs,
+            ExpressionVariable::Listener,
+            ExpressionVariable::RemoteIp,
+            ExpressionVariable::LocalIp,
+            ExpressionVariable::Priority,
         ]),
         u16::MAX,
     );
@@ -408,16 +408,16 @@ async fn eval_if() {
     let mut config = Config::new(fs::read_to_string(file).unwrap()).unwrap();
     let envelope = TestEnvelope::from_config(&mut config);
     let token_map = TokenMap::default().with_variables(&[
-        V_RECIPIENT,
-        V_RECIPIENT_DOMAIN,
-        V_SENDER,
-        V_SENDER_DOMAIN,
-        V_AUTHENTICATED_AS,
-        V_LISTENER,
-        V_REMOTE_IP,
-        V_LOCAL_IP,
-        V_PRIORITY,
-        V_MX,
+        ExpressionVariable::Rcpt,
+        ExpressionVariable::RcptDomain,
+        ExpressionVariable::Sender,
+        ExpressionVariable::SenderDomain,
+        ExpressionVariable::AuthenticatedAs,
+        ExpressionVariable::Listener,
+        ExpressionVariable::RemoteIp,
+        ExpressionVariable::LocalIp,
+        ExpressionVariable::Priority,
+        ExpressionVariable::Mx,
     ]);
     let core = Server::default();
 
@@ -461,16 +461,16 @@ async fn eval_dynvalue() {
     let mut config = Config::new(fs::read_to_string(file).unwrap()).unwrap();
     let envelope = TestEnvelope::from_config(&mut config);
     let token_map = TokenMap::default().with_variables(&[
-        V_RECIPIENT,
-        V_RECIPIENT_DOMAIN,
-        V_SENDER,
-        V_SENDER_DOMAIN,
-        V_AUTHENTICATED_AS,
-        V_LISTENER,
-        V_REMOTE_IP,
-        V_LOCAL_IP,
-        V_PRIORITY,
-        V_MX,
+        ExpressionVariable::Rcpt,
+        ExpressionVariable::RcptDomain,
+        ExpressionVariable::Sender,
+        ExpressionVariable::SenderDomain,
+        ExpressionVariable::AuthenticatedAs,
+        ExpressionVariable::Listener,
+        ExpressionVariable::RemoteIp,
+        ExpressionVariable::LocalIp,
+        ExpressionVariable::Priority,
+        ExpressionVariable::Mx,
     ]);
     let core = Server::default();
 
@@ -495,19 +495,19 @@ async fn eval_dynvalue() {
 }
 
 impl ResolveVariable for TestEnvelope {
-    fn resolve_variable(&self, variable: u32) -> Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
         match variable {
-            V_RECIPIENT => self.rcpt.as_str().into(),
-            V_RECIPIENT_DOMAIN => self.rcpt_domain.as_str().into(),
-            V_SENDER => self.sender.as_str().into(),
-            V_SENDER_DOMAIN => self.sender_domain.as_str().into(),
-            V_AUTHENTICATED_AS => self.authenticated_as.as_str().into(),
-            V_LISTENER => self.listener_id.to_compact_string().into(),
-            V_REMOTE_IP => self.remote_ip.to_compact_string().into(),
-            V_LOCAL_IP => self.local_ip.to_compact_string().into(),
-            V_PRIORITY => self.priority.to_compact_string().into(),
-            V_MX => self.mx.as_str().into(),
-            V_HELO_DOMAIN => self.helo_domain.as_str().into(),
+            ExpressionVariable::Rcpt => self.rcpt.as_str().into(),
+            ExpressionVariable::RcptDomain => self.rcpt_domain.as_str().into(),
+            ExpressionVariable::Sender => self.sender.as_str().into(),
+            ExpressionVariable::SenderDomain => self.sender_domain.as_str().into(),
+            ExpressionVariable::AuthenticatedAs => self.authenticated_as.as_str().into(),
+            ExpressionVariable::Listener => self.listener_id.to_compact_string().into(),
+            ExpressionVariable::RemoteIp => self.remote_ip.to_compact_string().into(),
+            ExpressionVariable::LocalIp => self.local_ip.to_compact_string().into(),
+            ExpressionVariable::Priority => self.priority.to_compact_string().into(),
+            ExpressionVariable::Mx => self.mx.as_str().into(),
+            ExpressionVariable::HeloDomain => self.helo_domain.as_str().into(),
             _ => Default::default(),
         }
     }

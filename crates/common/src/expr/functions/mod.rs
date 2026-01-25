@@ -5,6 +5,7 @@
  */
 
 use super::{StringCow, Variable};
+use registry::schema::enums::ExpressionVariable;
 
 pub mod array;
 pub mod asynch;
@@ -13,7 +14,7 @@ pub mod misc;
 pub mod text;
 
 pub trait ResolveVariable: Sync + Send {
-    fn resolve_variable(&self, variable: u32) -> Variable<'_>;
+    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_>;
     fn resolve_global(&self, variable: &str) -> Variable<'_>;
 }
 

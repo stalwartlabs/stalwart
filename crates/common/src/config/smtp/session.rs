@@ -17,13 +17,11 @@ use hyper::{
     HeaderMap,
     header::{AUTHORIZATION, CONTENT_TYPE, HeaderName, HeaderValue},
 };
+use registry::schema::enums::ExpressionConstant;
 use smtp_proto::*;
 use utils::config::{Config, utils::ParseValue};
 
-use crate::{
-    config::CONNECTION_VARS,
-    expr::{if_block::IfBlock, tokenizer::TokenMap, *},
-};
+use crate::expr::{if_block::IfBlock, tokenizer::TokenMap, *};
 
 use self::resolver::Policy;
 
@@ -456,7 +454,7 @@ fn parse_milter(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Option<Mi
     Some(Milter {
         enable: IfBlock::try_parse(config, ("session.milter", id, "enable"), token_map)
             .unwrap_or_else(|| {
-                IfBlock::new_default::<()>(format!("session.milter.{id}.enable"), [], "false")
+                IfBlock::new_default(format!("session.milter.{id}.enable"), [], "false")
             }),
         id: Arc::new(id.into()),
         addrs: format!("{}:{}", hostname, port)
@@ -563,7 +561,7 @@ fn parse_hooks(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Option<MTA
     Some(MTAHook {
         enable: IfBlock::try_parse(config, ("session.hook", id, "enable"), token_map)
             .unwrap_or_else(|| {
-                IfBlock::new_default::<()>(format!("session.hook.{id}.enable"), [], "false")
+                IfBlock::new_default(format!("session.hook.{id}.enable"), [], "false")
             }),
         id: id.to_string(),
         url: config
@@ -626,17 +624,17 @@ fn parse_stages(bp: &mut Bootstrap, prefix: &str, id: &str) -> AHashSet<Stage> {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            timeout: IfBlock::new_default::<()>("session.timeout", [], "5m"),
-            duration: IfBlock::new_default::<()>("session.duration", [], "10m"),
-            transfer_limit: IfBlock::new_default::<()>("session.transfer-limit", [], "262144000"),
+            timeout: IfBlock::new_default("session.timeout", [], "5m"),
+            duration: IfBlock::new_default("session.duration", [], "10m"),
+            transfer_limit: IfBlock::new_default("session.transfer-limit", [], "262144000"),
             connect: Connect {
-                hostname: IfBlock::new_default::<()>(
+                hostname: IfBlock::new_default(
                     "server.connect.hostname",
                     [],
                     "config_get('server.hostname')",
                 ),
                 script: IfBlock::empty("session.connect.script"),
-                greeting: IfBlock::new_default::<()>(
+                greeting: IfBlock::new_default(
                     "session.connect.greeting",
                     [],
                     "config_get('server.hostname') + ' Stalwart ESMTP at your service'",
@@ -644,15 +642,15 @@ impl Default for SessionConfig {
             },
             ehlo: Ehlo {
                 script: IfBlock::empty("session.ehlo.script"),
-                require: IfBlock::new_default::<()>("session.ehlo.require", [], "true"),
-                reject_non_fqdn: IfBlock::new_default::<()>(
+                require: IfBlock::new_default("session.ehlo.require", [], "true"),
+                reject_non_fqdn: IfBlock::new_default(
                     "session.ehlo.reject-non-fqdn",
                     [("local_port == 25", "true")],
                     "false",
                 ),
             },
             auth: Auth {
-                directory: IfBlock::new_default::<()>(
+                directory: IfBlock::new_default(
                     "session.auth.directory",
                     #[cfg(feature = "test_mode")]
                     [],
@@ -671,7 +669,7 @@ impl Default for SessionConfig {
                     ],
                     "false",
                 ),
-                require: IfBlock::new_default::<()>(
+                require: IfBlock::new_default(
                     "session.auth.require",
                     #[cfg(feature = "test_mode")]
                     [],
@@ -679,18 +677,18 @@ impl Default for SessionConfig {
                     [("local_port != 25", "true")],
                     "false",
                 ),
-                must_match_sender: IfBlock::new_default::<()>(
+                must_match_sender: IfBlock::new_default(
                     "session.auth.must-match-sender",
                     [],
                     "true",
                 ),
-                errors_max: IfBlock::new_default::<()>("session.auth.errors.total", [], "3"),
-                errors_wait: IfBlock::new_default::<()>("session.auth.errors.wait", [], "5s"),
+                errors_max: IfBlock::new_default("session.auth.errors.total", [], "3"),
+                errors_wait: IfBlock::new_default("session.auth.errors.wait", [], "5s"),
             },
             mail: Mail {
                 script: IfBlock::empty("session.mail.script"),
                 rewrite: IfBlock::empty("session.mail.rewrite"),
-                is_allowed: IfBlock::new_default::<()>(
+                is_allowed: IfBlock::new_default(
                     "session.mail.is-allowed",
                     [],
                     "!is_empty(authenticated_as) || !key_exists('blocked-domains', sender_domain)",
@@ -698,12 +696,12 @@ impl Default for SessionConfig {
             },
             rcpt: Rcpt {
                 script: IfBlock::empty("session.rcpt.script"),
-                relay: IfBlock::new_default::<()>(
+                relay: IfBlock::new_default(
                     "session.rcpt.relay",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                directory: IfBlock::new_default::<()>(
+                directory: IfBlock::new_default(
                     "session.rcpt.directory",
                     [],
                     #[cfg(feature = "test_mode")]
@@ -712,9 +710,9 @@ impl Default for SessionConfig {
                     "'*'",
                 ),
                 rewrite: IfBlock::empty("session.rcpt.rewrite"),
-                errors_max: IfBlock::new_default::<()>("session.rcpt.errors.total", [], "5"),
-                errors_wait: IfBlock::new_default::<()>("session.rcpt.errors.wait", [], "5s"),
-                max_recipients: IfBlock::new_default::<()>(
+                errors_max: IfBlock::new_default("session.rcpt.errors.total", [], "5"),
+                errors_wait: IfBlock::new_default("session.rcpt.errors.wait", [], "5s"),
+                max_recipients: IfBlock::new_default(
                     "session.rcpt.max-recipients",
                     [],
                     "100",
@@ -724,44 +722,44 @@ impl Default for SessionConfig {
             },
             data: Data {
                 script: IfBlock::empty("session.data.script"),
-                spam_filter: IfBlock::new_default::<()>("session.data.spam-filter", [], "true"),
-                max_messages: IfBlock::new_default::<()>("session.data.limits.messages", [], "10"),
-                max_message_size: IfBlock::new_default::<()>(
+                spam_filter: IfBlock::new_default("session.data.spam-filter", [], "true"),
+                max_messages: IfBlock::new_default("session.data.limits.messages", [], "10"),
+                max_message_size: IfBlock::new_default(
                     "session.data.limits.size",
                     [],
                     "104857600",
                 ),
-                max_received_headers: IfBlock::new_default::<()>(
+                max_received_headers: IfBlock::new_default(
                     "session.data.limits.received-headers",
                     [],
                     "50",
                 ),
-                add_received: IfBlock::new_default::<()>(
+                add_received: IfBlock::new_default(
                     "session.data.add-headers.received",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_received_spf: IfBlock::new_default::<()>(
+                add_received_spf: IfBlock::new_default(
                     "session.data.add-headers.received-spf",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_return_path: IfBlock::new_default::<()>(
+                add_return_path: IfBlock::new_default(
                     "session.data.add-headers.return-path",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_auth_results: IfBlock::new_default::<()>(
+                add_auth_results: IfBlock::new_default(
                     "session.data.add-headers.auth-results",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_message_id: IfBlock::new_default::<()>(
+                add_message_id: IfBlock::new_default(
                     "session.data.add-headers.message-id",
                     [("local_port == 25", "true")],
                     "false",
                 ),
-                add_date: IfBlock::new_default::<()>(
+                add_date: IfBlock::new_default(
                     "session.data.add-headers.date",
                     [("local_port == 25", "true")],
                     "false",
@@ -769,35 +767,35 @@ impl Default for SessionConfig {
                 add_delivered_to: false,
             },
             extensions: Extensions {
-                pipelining: IfBlock::new_default::<()>("session.extensions.pipelining", [], "true"),
-                chunking: IfBlock::new_default::<()>("session.extensions.chunking", [], "true"),
-                requiretls: IfBlock::new_default::<()>("session.extensions.requiretls", [], "true"),
-                dsn: IfBlock::new_default::<()>(
+                pipelining: IfBlock::new_default("session.extensions.pipelining", [], "true"),
+                chunking: IfBlock::new_default("session.extensions.chunking", [], "true"),
+                requiretls: IfBlock::new_default("session.extensions.requiretls", [], "true"),
+                dsn: IfBlock::new_default(
                     "session.extensions.dsn",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                vrfy: IfBlock::new_default::<()>(
+                vrfy: IfBlock::new_default(
                     "session.extensions.vrfy",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                expn: IfBlock::new_default::<()>(
+                expn: IfBlock::new_default(
                     "session.extensions.expn",
                     [("!is_empty(authenticated_as)", "true")],
                     "false",
                 ),
-                no_soliciting: IfBlock::new_default::<()>(
+                no_soliciting: IfBlock::new_default(
                     "session.extensions.no-soliciting",
                     [],
                     "''",
                 ),
-                future_release: IfBlock::new_default::<()>(
+                future_release: IfBlock::new_default(
                     "session.extensions.future-release",
                     [("!is_empty(authenticated_as)", "7d")],
                     "false",
                 ),
-                deliver_by: IfBlock::new_default::<()>(
+                deliver_by: IfBlock::new_default(
                     "session.extensions.deliver-by",
                     [("!is_empty(authenticated_as)", "15d")],
                     "false",
@@ -873,13 +871,13 @@ impl<'x> TryFrom<Variable<'x>> for Mechanism {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::Integer(value) => Ok(Mechanism(value as u64)),
+            Variable::Constant(value) => Mechanism::try_from(value),
             Variable::Array(items) => {
                 let mut mechanism = 0;
 
                 for item in items {
                     match item {
-                        Variable::Integer(value) => mechanism |= value as u64,
+                        Variable::Constant(value) => mechanism |= Mechanism::try_from(value)?.0,
                         _ => return Err(()),
                     }
                 }
@@ -891,19 +889,17 @@ impl<'x> TryFrom<Variable<'x>> for Mechanism {
     }
 }
 
-impl From<Mechanism> for Constant {
-    fn from(value: Mechanism) -> Self {
-        Constant::Integer(value.0 as i64)
-    }
-}
+impl TryFrom<ExpressionConstant> for Mechanism {
+    type Error = ();
 
-impl ConstantValue for Mechanism {
-    fn add_constants(token_map: &mut crate::expr::tokenizer::TokenMap) {
-        token_map
-            .add_constant("login", Mechanism(AUTH_LOGIN))
-            .add_constant("plain", Mechanism(AUTH_PLAIN))
-            .add_constant("xoauth2", Mechanism(AUTH_XOAUTH2))
-            .add_constant("oauthbearer", Mechanism(AUTH_OAUTHBEARER));
+    fn try_from(value: ExpressionConstant) -> Result<Self, Self::Error> {
+        match value {
+            ExpressionConstant::Login => Ok(Mechanism(AUTH_LOGIN)),
+            ExpressionConstant::Plain => Ok(Mechanism(AUTH_PLAIN)),
+            ExpressionConstant::Xoauth2 => Ok(Mechanism(AUTH_XOAUTH2)),
+            ExpressionConstant::Oauthbearer => Ok(Mechanism(AUTH_OAUTHBEARER)),
+            _ => Err(()),
+        }
     }
 }
 
@@ -924,33 +920,14 @@ impl<'x> TryFrom<Variable<'x>> for MtPriority {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::Integer(value) => match value {
-                2 => Ok(MtPriority::Mixer),
-                3 => Ok(MtPriority::Stanag4406),
-                4 => Ok(MtPriority::Nsep),
+            Variable::Constant(value) => match value {
+                ExpressionConstant::Mixer => Ok(MtPriority::Mixer),
+                ExpressionConstant::Stanag4406 => Ok(MtPriority::Stanag4406),
+                ExpressionConstant::Nsep => Ok(MtPriority::Nsep),
                 _ => Err(()),
             },
             Variable::String(value) => MtPriority::parse_value(value.as_str()).map_err(|_| ()),
             _ => Err(()),
         }
-    }
-}
-
-impl From<MtPriority> for Constant {
-    fn from(value: MtPriority) -> Self {
-        Constant::Integer(match value {
-            MtPriority::Mixer => 2,
-            MtPriority::Stanag4406 => 3,
-            MtPriority::Nsep => 4,
-        })
-    }
-}
-
-impl ConstantValue for MtPriority {
-    fn add_constants(token_map: &mut TokenMap) {
-        token_map
-            .add_constant("mixer", MtPriority::Mixer)
-            .add_constant("stanag4406", MtPriority::Stanag4406)
-            .add_constant("nsep", MtPriority::Nsep);
     }
 }

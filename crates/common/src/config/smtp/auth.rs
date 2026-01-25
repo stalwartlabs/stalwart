@@ -4,25 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::Duration};
-
+use super::*;
+use crate::expr::{self, Constant, if_block::IfBlock, tokenizer::TokenMap};
 use ahash::AHashMap;
 use mail_auth::{
     common::crypto::{Algorithm, Ed25519Key, HashAlgorithm, RsaKey, Sha256, SigningKey},
     dkim::{Canonicalization, Done},
 };
 use mail_parser::decoders::base64::base64_decode;
+use registry::schema::enums::ExpressionConstant;
+use std::{sync::Arc, time::Duration};
 use utils::config::{
     Config,
     utils::{AsKey, ParseValue},
 };
-
-use crate::{
-    config::CONNECTION_VARS,
-    expr::{self, Constant, ConstantValue, if_block::IfBlock, tokenizer::TokenMap},
-};
-
-use super::*;
 
 #[derive(Clone)]
 pub struct MailAuthConfig {
@@ -105,7 +100,7 @@ impl Default for MailAuthConfig {
         Self {
             dkim: DkimAuthConfig {
                 verify: IfBlock::new_default::<VerifyStrategy>("auth.dkim.verify", [], "relaxed"),
-                sign: IfBlock::new_default::<()>(
+                sign: IfBlock::new_default(
                     "auth.dkim.sign",
                     [(
                         "is_local_domain('*', sender_domain)",
@@ -117,7 +112,7 @@ impl Default for MailAuthConfig {
             },
             arc: ArcAuthConfig {
                 verify: IfBlock::new_default::<VerifyStrategy>("auth.arc.verify", [], "relaxed"),
-                seal: IfBlock::new_default::<()>(
+                seal: IfBlock::new_default(
                     "auth.arc.seal",
                     [],
                     "'rsa-' + config_get('report.domain')",
@@ -427,24 +422,14 @@ impl<'x> TryFrom<expr::Variable<'x>> for VerifyStrategy {
 
     fn try_from(value: expr::Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            expr::Variable::Integer(c) => match c {
-                2 => Ok(VerifyStrategy::Relaxed),
-                3 => Ok(VerifyStrategy::Strict),
-                4 => Ok(VerifyStrategy::Disable),
+            expr::Variable::Constant(c) => match c {
+                ExpressionConstant::Relaxed => Ok(VerifyStrategy::Relaxed),
+                ExpressionConstant::Strict => Ok(VerifyStrategy::Strict),
+                ExpressionConstant::Disable => Ok(VerifyStrategy::Disable),
                 _ => Err(()),
             },
             _ => Err(()),
         }
-    }
-}
-
-impl From<VerifyStrategy> for Constant {
-    fn from(value: VerifyStrategy) -> Self {
-        Constant::Integer(match value {
-            VerifyStrategy::Relaxed => 2,
-            VerifyStrategy::Strict => 3,
-            VerifyStrategy::Disable => 4,
-        })
     }
 }
 
@@ -468,18 +453,6 @@ impl ParseValue for VerifyStrategy {
             "disable" | "disabled" | "never" | "none" => Ok(VerifyStrategy::Disable),
             _ => Err(format!("Invalid value {:?}.", value)),
         }
-    }
-}
-
-impl ConstantValue for VerifyStrategy {
-    fn add_constants(token_map: &mut TokenMap) {
-        token_map
-            .add_constant("relaxed", VerifyStrategy::Relaxed)
-            .add_constant("strict", VerifyStrategy::Strict)
-            .add_constant("disable", VerifyStrategy::Disable)
-            .add_constant("disabled", VerifyStrategy::Disable)
-            .add_constant("never", VerifyStrategy::Disable)
-            .add_constant("none", VerifyStrategy::Disable);
     }
 }
 

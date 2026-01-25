@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use self::tokenizer::TokenMap;
 use compact_str::CompactString;
 use regex::Regex;
+use registry::schema::enums::{ExpressionConstant, ExpressionVariable};
 use std::{
     borrow::Cow,
     fmt::{Display, Formatter},
@@ -14,76 +14,6 @@ use std::{
     time::Duration,
 };
 use utils::config::{Rate, utils::ParseValue};
-
-pub const V_RECIPIENT: u32 = 0;
-pub const V_RECIPIENT_DOMAIN: u32 = 1;
-pub const V_SENDER: u32 = 2;
-pub const V_SENDER_DOMAIN: u32 = 3;
-pub const V_MX: u32 = 4;
-pub const V_HELO_DOMAIN: u32 = 5;
-pub const V_AUTHENTICATED_AS: u32 = 6;
-pub const V_LISTENER: u32 = 7;
-pub const V_REMOTE_IP: u32 = 8;
-pub const V_REMOTE_PORT: u32 = 9;
-pub const V_LOCAL_IP: u32 = 10;
-pub const V_LOCAL_PORT: u32 = 11;
-pub const V_PRIORITY: u32 = 12;
-pub const V_PROTOCOL: u32 = 13;
-pub const V_TLS: u32 = 14;
-pub const V_RECIPIENTS: u32 = 15;
-pub const V_QUEUE_RETRY_NUM: u32 = 16;
-pub const V_QUEUE_NOTIFY_NUM: u32 = 17;
-pub const V_QUEUE_EXPIRES_IN: u32 = 18;
-pub const V_QUEUE_LAST_STATUS: u32 = 19;
-pub const V_QUEUE_LAST_ERROR: u32 = 20;
-pub const V_URL: u32 = 21;
-pub const V_URL_PATH: u32 = 22;
-pub const V_HEADERS: u32 = 23;
-pub const V_METHOD: u32 = 24;
-pub const V_ASN: u32 = 25;
-pub const V_COUNTRY: u32 = 26;
-pub const V_RECEIVED_VIA_PORT: u32 = 27;
-pub const V_RECEIVED_FROM_IP: u32 = 28;
-pub const V_QUEUE_NAME: u32 = 29;
-pub const V_SOURCE: u32 = 30;
-pub const V_SIZE: u32 = 31;
-pub const V_QUEUE_AGE: u32 = 32;
-
-pub const VARIABLES_MAP: &[(&str, u32)] = &[
-    ("rcpt", V_RECIPIENT),
-    ("rcpt_domain", V_RECIPIENT_DOMAIN),
-    ("sender", V_SENDER),
-    ("sender_domain", V_SENDER_DOMAIN),
-    ("mx", V_MX),
-    ("helo_domain", V_HELO_DOMAIN),
-    ("authenticated_as", V_AUTHENTICATED_AS),
-    ("listener", V_LISTENER),
-    ("remote_ip", V_REMOTE_IP),
-    ("local_ip", V_LOCAL_IP),
-    ("priority", V_PRIORITY),
-    ("local_port", V_LOCAL_PORT),
-    ("remote_port", V_REMOTE_PORT),
-    ("protocol", V_PROTOCOL),
-    ("is_tls", V_TLS),
-    ("recipients", V_RECIPIENTS),
-    ("retry_num", V_QUEUE_RETRY_NUM),
-    ("notify_num", V_QUEUE_NOTIFY_NUM),
-    ("expires_in", V_QUEUE_EXPIRES_IN),
-    ("last_status", V_QUEUE_LAST_STATUS),
-    ("last_error", V_QUEUE_LAST_ERROR),
-    ("url", V_URL),
-    ("url_path", V_URL_PATH),
-    ("headers", V_HEADERS),
-    ("method", V_METHOD),
-    ("asn", V_ASN),
-    ("country", V_COUNTRY),
-    ("received_via_port", V_RECEIVED_VIA_PORT),
-    ("received_from_ip", V_RECEIVED_FROM_IP),
-    ("queue_name", V_QUEUE_NAME),
-    ("source", V_SOURCE),
-    ("size", V_SIZE),
-    ("queue_age", V_QUEUE_AGE),
-];
 
 pub mod eval;
 pub mod functions;
@@ -98,9 +28,9 @@ pub struct Expression {
 
 #[derive(Debug, Clone)]
 pub enum ExpressionItem {
-    Variable(u32),
+    Variable(ExpressionVariable),
     Global(CompactString),
-    Setting(Setting),
+    System(SystemVariable),
     Capture(u32),
     Constant(Constant),
     BinaryOperator(BinaryOperator),
@@ -118,6 +48,7 @@ pub enum Variable<'x> {
     Integer(i64),
     Float(f64),
     Array(Vec<Variable<'x>>),
+    Constant(ExpressionConstant),
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +65,7 @@ impl Default for Variable<'_> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Constant {
+    Static(ExpressionConstant),
     Integer(i64),
     Float(f64),
     String(CompactString),
@@ -210,7 +142,7 @@ pub enum UnaryOperator {
 
 #[derive(Debug, Clone)]
 pub enum Token {
-    Variable(u32),
+    Variable(ExpressionVariable),
     Global(CompactString),
     Capture(u32),
     Function {
@@ -219,7 +151,7 @@ pub enum Token {
         num_args: u32,
     },
     Constant(Constant),
-    Setting(Setting),
+    System(SystemVariable),
     Regex(Regex),
     BinaryOperator(BinaryOperator),
     UnaryOperator(UnaryOperator),
@@ -231,10 +163,11 @@ pub enum Token {
 }
 
 #[derive(Debug, Clone)]
-pub enum Setting {
+pub enum SystemVariable {
     Hostname,
     Domain,
     NodeId,
+    Metric(usize),
 }
 
 impl From<usize> for Variable<'_> {
@@ -380,18 +313,6 @@ impl PartialEq for Token {
 
 impl Eq for Token {}
 
-pub struct NoConstants;
-
-pub trait ConstantValue:
-    ParseValue + for<'x> TryFrom<Variable<'x>> + Into<Constant> + Sized
-{
-    fn add_constants(token_map: &mut TokenMap);
-}
-
-impl ConstantValue for () {
-    fn add_constants(_: &mut TokenMap) {}
-}
-
 impl From<()> for Constant {
     fn from(_: ()) -> Self {
         Constant::Integer(0)
@@ -404,10 +325,6 @@ impl<'x> TryFrom<Variable<'x>> for () {
     fn try_from(_: Variable<'x>) -> Result<Self, Self::Error> {
         Ok(())
     }
-}
-
-impl ConstantValue for Duration {
-    fn add_constants(_: &mut TokenMap) {}
 }
 
 impl<'x> TryFrom<Variable<'x>> for Duration {

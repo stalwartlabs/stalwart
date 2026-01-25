@@ -202,17 +202,17 @@ async fn lookup_sql() {
 
     // Test expression functions
     let token_map = TokenMap::default().with_variables(&[
-        V_RECIPIENT,
-        V_RECIPIENT_DOMAIN,
-        V_SENDER,
-        V_SENDER_DOMAIN,
-        V_MX,
-        V_HELO_DOMAIN,
-        V_AUTHENTICATED_AS,
-        V_LISTENER,
-        V_REMOTE_IP,
-        V_LOCAL_IP,
-        V_PRIORITY,
+        ExpressionVariable::Rcpt,
+        ExpressionVariable::RcptDomain,
+        ExpressionVariable::Sender,
+        ExpressionVariable::SenderDomain,
+        ExpressionVariable::Mx,
+        ExpressionVariable::HeloDomain,
+        ExpressionVariable::AuthenticatedAs,
+        ExpressionVariable::Listener,
+        ExpressionVariable::RemoteIp,
+        ExpressionVariable::LocalIp,
+        ExpressionVariable::Priority,
     ]);
     for test_name in ["sql", "dns", "key_get", "counter_get"] {
         let e =

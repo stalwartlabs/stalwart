@@ -9,7 +9,7 @@ use crate::queue::{Error, ErrorDetails, HostResponse, Status};
 use common::{
     Server,
     config::smtp::queue::{ConnectionStrategy, IpAndHost, MxConfig},
-    expr::{V_MX, functions::ResolveVariable},
+    expr::{ExpressionVariable::Mx, functions::ResolveVariable},
 };
 use mail_auth::{IpLookupStrategy, MX};
 use rand::{Rng, seq::SliceRandom};
@@ -165,7 +165,9 @@ impl DnsLookup for Server {
                 details: Error::DnsError(
                     format!(
                         "No IP addresses found for {:?}.",
-                        envelope.resolve_variable(V_MX).to_string()
+                        envelope
+                            .resolve_variable(ExpressionVariable::Mx)
+                            .to_string()
                     )
                     .into_boxed_str(),
                 ),

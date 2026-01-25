@@ -25,17 +25,21 @@ impl NewKey for QueueQuota {
         let mut hasher = blake3::Hasher::new();
 
         if (self.keys & THROTTLE_RCPT) != 0 {
-            hasher.update(e.resolve_variable(V_RECIPIENT).to_string().as_bytes());
+            hasher.update(
+                e.resolve_variable(ExpressionVariable::Rcpt)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         if (self.keys & THROTTLE_RCPT_DOMAIN) != 0 {
             hasher.update(
-                e.resolve_variable(V_RECIPIENT_DOMAIN)
+                e.resolve_variable(ExpressionVariable::RcptDomain)
                     .to_string()
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_SENDER) != 0 {
-            let sender = e.resolve_variable(V_SENDER).into_string();
+            let sender = e.resolve_variable(ExpressionVariable::Sender).into_string();
             hasher.update(
                 if !sender.is_empty() {
                     sender.as_ref()
@@ -46,7 +50,9 @@ impl NewKey for QueueQuota {
             );
         }
         if (self.keys & THROTTLE_SENDER_DOMAIN) != 0 {
-            let sender_domain = e.resolve_variable(V_SENDER_DOMAIN).into_string();
+            let sender_domain = e
+                .resolve_variable(ExpressionVariable::SenderDomain)
+                .into_string();
             hasher.update(
                 if !sender_domain.is_empty() {
                     sender_domain.as_ref()
@@ -76,17 +82,21 @@ impl NewKey for QueueRateLimiter {
         let mut hasher = blake3::Hasher::new();
 
         if (self.keys & THROTTLE_RCPT) != 0 {
-            hasher.update(e.resolve_variable(V_RECIPIENT).to_string().as_bytes());
+            hasher.update(
+                e.resolve_variable(ExpressionVariable::Rcpt)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         if (self.keys & THROTTLE_RCPT_DOMAIN) != 0 {
             hasher.update(
-                e.resolve_variable(V_RECIPIENT_DOMAIN)
+                e.resolve_variable(ExpressionVariable::RcptDomain)
                     .to_string()
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_SENDER) != 0 {
-            let sender = e.resolve_variable(V_SENDER).into_string();
+            let sender = e.resolve_variable(ExpressionVariable::Sender).into_string();
             hasher.update(
                 if !sender.is_empty() {
                     sender.as_ref()
@@ -97,7 +107,9 @@ impl NewKey for QueueRateLimiter {
             );
         }
         if (self.keys & THROTTLE_SENDER_DOMAIN) != 0 {
-            let sender_domain = e.resolve_variable(V_SENDER_DOMAIN).into_string();
+            let sender_domain = e
+                .resolve_variable(ExpressionVariable::SenderDomain)
+                .into_string();
             hasher.update(
                 if !sender_domain.is_empty() {
                     sender_domain.as_ref()
@@ -108,26 +120,38 @@ impl NewKey for QueueRateLimiter {
             );
         }
         if (self.keys & THROTTLE_HELO_DOMAIN) != 0 {
-            hasher.update(e.resolve_variable(V_HELO_DOMAIN).to_string().as_bytes());
+            hasher.update(
+                e.resolve_variable(ExpressionVariable::HeloDomain)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         if (self.keys & THROTTLE_AUTH_AS) != 0 {
             hasher.update(
-                e.resolve_variable(V_AUTHENTICATED_AS)
+                e.resolve_variable(ExpressionVariable::AuthenticatedAs)
                     .to_string()
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_LISTENER) != 0 {
-            hasher.update(e.resolve_variable(V_LISTENER).to_string().as_bytes());
+            hasher.update(
+                e.resolve_variable(ExpressionVariable::Listener)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         if (self.keys & THROTTLE_MX) != 0 {
-            hasher.update(e.resolve_variable(V_MX).to_string().as_bytes());
+            hasher.update(
+                e.resolve_variable(ExpressionVariable::Mx)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         if (self.keys & THROTTLE_REMOTE_IP) != 0 {
-            hasher.update(e.resolve_variable(V_REMOTE_IP).to_string().as_bytes());
+            hasher.update(e.resolve_variable(ExpressionVariable::RemoteIp).to_string().as_bytes());
         }
         if (self.keys & THROTTLE_LOCAL_IP) != 0 {
-            hasher.update(e.resolve_variable(V_LOCAL_IP).to_string().as_bytes());
+            hasher.update(e.resolve_variable(ExpressionVariable::LocalIp).to_string().as_bytes());
         }
         hasher.update(&self.rate.period.as_secs().to_be_bytes()[..]);
         hasher.update(&self.rate.requests.to_be_bytes()[..]);

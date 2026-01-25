@@ -280,30 +280,30 @@ impl<'x> QueueEnvelope<'x> {
 }
 
 impl<'x> ResolveVariable for QueueEnvelope<'x> {
-    fn resolve_variable(&self, variable: u32) -> expr::Variable<'x> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'x> {
         match variable {
-            V_SENDER => self.message.return_path.as_ref().into(),
-            V_SENDER_DOMAIN => self.message.return_path.domain_part().into(),
-            V_RECIPIENT_DOMAIN => self.domain.into(),
-            V_RECIPIENT => self.rcpt.address.as_ref().into(),
-            V_RECIPIENTS => self
+            ExpressionVariable::Sender => self.message.return_path.as_ref().into(),
+            ExpressionVariable::SenderDomain => self.message.return_path.domain_part().into(),
+            ExpressionVariable::RcptDomain => self.domain.into(),
+            ExpressionVariable::Rcpt => self.rcpt.address.as_ref().into(),
+            ExpressionVariable::Recipients => self
                 .message
                 .recipients
                 .iter()
                 .map(|r| Variable::from(r.address.as_ref()))
                 .collect::<Vec<_>>()
                 .into(),
-            V_QUEUE_RETRY_NUM => self.rcpt.retry.inner.into(),
-            V_QUEUE_NOTIFY_NUM => self.rcpt.notify.inner.into(),
-            V_QUEUE_EXPIRES_IN => match &self.rcpt.expires {
+            ExpressionVariable::RetryNum => self.rcpt.retry.inner.into(),
+            ExpressionVariable::NotifyNum => self.rcpt.notify.inner.into(),
+            ExpressionVariable::ExpiresIn => match &self.rcpt.expires {
                 QueueExpiry::Ttl(time) => (*time + self.message.created).saturating_sub(now()),
                 QueueExpiry::Attempts(count) => {
                     (count.saturating_sub(self.rcpt.retry.inner)) as u64
                 }
             }
             .into(),
-            V_QUEUE_LAST_STATUS => self.rcpt.status.to_compact_string().into(),
-            V_QUEUE_LAST_ERROR => match &self.rcpt.status {
+            ExpressionVariable::LastStatus => self.rcpt.status.to_compact_string().into(),
+            ExpressionVariable::LastError => match &self.rcpt.status {
                 Status::Scheduled | Status::Completed(_) => "none",
                 Status::TemporaryFailure(err) | Status::PermanentFailure(err) => {
                     match &err.details {
@@ -320,9 +320,9 @@ impl<'x> ResolveVariable for QueueEnvelope<'x> {
                 }
             }
             .into(),
-            V_QUEUE_NAME => self.rcpt.queue.as_str().into(),
-            V_QUEUE_AGE => now().saturating_sub(self.message.created).into(),
-            V_SOURCE => if (self.message.flags & FROM_AUTHENTICATED) != 0 {
+            ExpressionVariable::QueueName => self.rcpt.queue.as_str().into(),
+            ExpressionVariable::QueueAge => now().saturating_sub(self.message.created).into(),
+            ExpressionVariable::Source => if (self.message.flags & FROM_AUTHENTICATED) != 0 {
                 "authenticated"
             } else if (self.message.flags & FROM_UNAUTHENTICATED_DMARC) != 0 {
                 "dmarc_pass"
@@ -338,13 +338,15 @@ impl<'x> ResolveVariable for QueueEnvelope<'x> {
                 "unknown"
             }
             .into(),
-            V_MX => self.mx.into(),
-            V_PRIORITY => self.message.priority.into(),
-            V_REMOTE_IP => self.remote_ip.to_compact_string().into(),
-            V_LOCAL_IP => self.local_ip.to_compact_string().into(),
-            V_RECEIVED_FROM_IP => self.message.received_from_ip.to_compact_string().into(),
-            V_RECEIVED_VIA_PORT => self.message.received_via_port.into(),
-            V_SIZE => self.message.size.into(),
+            ExpressionVariable::Mx => self.mx.into(),
+            ExpressionVariable::Priority => self.message.priority.into(),
+            ExpressionVariable::RemoteIp => self.remote_ip.to_compact_string().into(),
+            ExpressionVariable::LocalIp => self.local_ip.to_compact_string().into(),
+            ExpressionVariable::ReceivedFromIp => {
+                self.message.received_from_ip.to_compact_string().into()
+            }
+            ExpressionVariable::ReceivedViaPort => self.message.received_via_port.into(),
+            ExpressionVariable::Size => self.message.size.into(),
             _ => "".into(),
         }
     }
@@ -355,17 +357,17 @@ impl<'x> ResolveVariable for QueueEnvelope<'x> {
 }
 
 impl ResolveVariable for Message {
-    fn resolve_variable(&self, variable: u32) -> expr::Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'_> {
         match variable {
-            V_SENDER => self.return_path.as_ref().into(),
-            V_SENDER_DOMAIN => self.return_path.domain_part().into(),
-            V_RECIPIENTS => self
+            ExpressionVariable::Sender => self.return_path.as_ref().into(),
+            ExpressionVariable::SenderDomain => self.return_path.domain_part().into(),
+            ExpressionVariable::Recipients => self
                 .recipients
                 .iter()
                 .map(|r| Variable::from(r.address.as_ref()))
                 .collect::<Vec<_>>()
                 .into(),
-            V_PRIORITY => self.priority.into(),
+            ExpressionVariable::Priority => self.priority.into(),
             _ => "".into(),
         }
     }
@@ -384,9 +386,9 @@ impl<'x> RecipientDomain<'x> {
 }
 
 impl<'x> ResolveVariable for RecipientDomain<'x> {
-    fn resolve_variable(&self, variable: u32) -> expr::Variable<'x> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'x> {
         match variable {
-            V_RECIPIENT_DOMAIN => self.0.into(),
+            ExpressionVariable::RcptDomain => self.0.into(),
             _ => "".into(),
         }
     }

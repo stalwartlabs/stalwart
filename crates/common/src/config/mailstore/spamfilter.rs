@@ -4,14 +4,26 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{expr::if_block::IfBlock, manager::bootstrap::Bootstrap};
+use crate::{
+    expr::{Variable, functions::ResolveVariable, if_block::IfBlock},
+    manager::bootstrap::Bootstrap,
+};
 use ahash::AHashSet;
 use mail_auth::common::resolver::ToReverseName;
 use nlp::classifier::model::{CcfhClassifier, FhClassifier};
+use registry::schema::{
+    enums::{ExpressionVariable, ModelSize},
+    prelude::Object,
+    structs::{
+        self, SpamDnsblServer, SpamDnsblSettings, SpamFileExtension, SpamPyzor, SpamRule,
+        SpamSettings, SpamTag,
+    },
+};
 use std::{
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
+use store::registry::RegistryObject;
 use tokio::net::lookup_host;
 use utils::{cache::CacheItemWeight, config::utils::ParseValue, glob::GlobMap};
 
@@ -171,35 +183,32 @@ pub struct DnsBlServer {
 
 impl SpamFilterConfig {
     pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let spam = bp.setting_infallible::<SpamSettings>().await;
+
         SpamFilterConfig {
-            enabled: config
-                .property_or_default("spam-filter.enable", "true")
-                .unwrap_or(true),
-            card_is_ham: config
-                .property_or_default("spam-filter.card-is-ham.enable", "true")
-                .unwrap_or(true),
-            trusted_reply: config
-                .property_or_default("spam-filter.trusted-reply.enable", "true")
-                .unwrap_or(true),
-            dnsbl: DnsBlConfig::parse(config),
-            rules: SpamFilterRules::parse(config),
-            lists: SpamFilterLists::parse(config),
-            pyzor: PyzorConfig::parse(config).await,
-            classifier: ClassifierConfig::parse(config),
-            scores: SpamFilterScoreConfig::parse(config),
-            grey_list_expiry: config
-                .property::<Option<Duration>>("spam-filter.grey-list.duration")
-                .unwrap_or_default()
-                .map(|d| d.as_secs()),
+            enabled: spam.enable,
+            card_is_ham: spam.trust_contacts,
+            trusted_reply: spam.trust_replies,
+            dnsbl: DnsBlConfig::parse(bp).await,
+            rules: SpamFilterRules::parse(bp).await,
+            lists: SpamFilterLists::parse(bp).await,
+            pyzor: PyzorConfig::parse(bp).await,
+            classifier: ClassifierConfig::parse(bp).await,
+            scores: SpamFilterScoreConfig {
+                reject_threshold: spam.score_reject as f32,
+                discard_threshold: spam.score_discard as f32,
+                spam_threshold: spam.score_spam as f32,
+            },
+            grey_list_expiry: spam.greylist_for.map(|d| d.into_inner().as_secs()),
         }
     }
 }
 
 impl SpamFilterRules {
-    pub fn parse(bp: &mut Bootstrap) -> SpamFilterRules {
+    pub async fn parse(bp: &mut Bootstrap) -> SpamFilterRules {
         let mut rules = vec![];
-        for id in config.sub_keys("spam-filter.rule", ".scope") {
-            if let Some(rule) = SpamFilterRule::parse(config, id) {
+        for rule in bp.list_infallible::<SpamRule>().await {
+            if let Some(rule) = SpamFilterRule::parse(bp, rule) {
                 rules.push(rule);
             }
         }
@@ -230,162 +239,160 @@ struct SpamFilterRule {
 }
 
 impl SpamFilterRule {
-    pub fn parse(bp: &mut Bootstrap, id: String) -> Option<Self> {
-        let id = id.as_str();
-        if !config
-            .property_or_default(("spam-filter.rule", id, "enable"), "true")
-            .unwrap_or(true)
-        {
-            return None;
+    pub fn parse(bp: &mut Bootstrap, obj: RegistryObject<SpamRule>) -> Option<Self> {
+        match obj.object {
+            SpamRule::Any(rule) if rule.enable => SpamFilterRule {
+                rule: bp.compile_expr(obj.id, &rule.ctx_condition()),
+                scope: Element::Any,
+                priority: rule.priority as i32,
+            }
+            .into(),
+            SpamRule::Url(rule) if rule.enable => SpamFilterRule {
+                rule: bp.compile_expr(obj.id, &rule.ctx_condition()),
+                scope: Element::Url,
+                priority: rule.priority as i32,
+            }
+            .into(),
+            SpamRule::Domain(rule) if rule.enable => SpamFilterRule {
+                rule: bp.compile_expr(obj.id, &rule.ctx_condition()),
+                scope: Element::Domain,
+                priority: rule.priority as i32,
+            }
+            .into(),
+            SpamRule::Email(rule) if rule.enable => SpamFilterRule {
+                rule: bp.compile_expr(obj.id, &rule.ctx_condition()),
+                scope: Element::Email,
+                priority: rule.priority as i32,
+            }
+            .into(),
+            SpamRule::Ip(rule) if rule.enable => SpamFilterRule {
+                rule: bp.compile_expr(obj.id, &rule.ctx_condition()),
+                scope: Element::Ip,
+                priority: rule.priority as i32,
+            }
+            .into(),
+            SpamRule::Header(rule) if rule.enable => SpamFilterRule {
+                rule: bp.compile_expr(obj.id, &rule.ctx_condition()),
+                scope: Element::Header,
+                priority: rule.priority as i32,
+            }
+            .into(),
+            SpamRule::Body(rule) if rule.enable => SpamFilterRule {
+                rule: bp.compile_expr(obj.id, &rule.ctx_condition()),
+                scope: Element::Body,
+                priority: rule.priority as i32,
+            }
+            .into(),
+            _ => None,
         }
-        let priority = config
-            .property_or_default(("spam-filter.rule", id, "priority"), "0")
-            .unwrap_or(0);
-        let scope = config
-            .property_or_default::<Element>(("spam-filter.rule", id, "scope"), "any")
-            .unwrap_or_default();
-
-        SpamFilterRule {
-            rule: IfBlock::try_parse(
-                config,
-                ("spam-filter.rule", id, "condition"),
-                &scope.token_map(),
-            )?,
-            scope,
-            priority,
-        }
-        .into()
     }
 }
 
 impl DnsBlConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         let mut servers = vec![];
-        for id in config.sub_keys("spam-filter.dnsbl.server", ".scope") {
-            if let Some(server) = DnsBlServer::parse(config, id) {
+        for server in bp.list_infallible::<SpamDnsblServer>().await {
+            if let Some(server) = DnsBlServer::parse(bp, server) {
                 servers.push(server);
             }
         }
 
+        let dnsbl = bp.setting_infallible::<SpamDnsblSettings>().await;
         DnsBlConfig {
-            max_ip_checks: config
-                .property_or_default("spam-filter.dnsbl.max-check.ip", "50")
-                .unwrap_or(20),
-            max_domain_checks: config
-                .property_or_default("spam-filter.dnsbl.max-check.domain", "50")
-                .unwrap_or(20),
-            max_email_checks: config
-                .property_or_default("spam-filter.dnsbl.max-check.email", "50")
-                .unwrap_or(20),
-            max_url_checks: config
-                .property_or_default("spam-filter.dnsbl.max-check.url", "50")
-                .unwrap_or(20),
+            max_ip_checks: dnsbl.ip_limit as usize,
+            max_domain_checks: dnsbl.domain_limit as usize,
+            max_email_checks: dnsbl.email_limit as usize,
+            max_url_checks: dnsbl.url_limit as usize,
             servers,
         }
     }
 }
 
 impl DnsBlServer {
-    pub fn parse(bp: &mut Bootstrap, id: String) -> Option<Self> {
-        let id_ = id.as_str();
-
-        if !config
-            .property_or_default(("spam-filter.dnsbl.server", id_, "enable"), "true")
-            .unwrap_or(true)
-        {
-            return None;
+    pub fn parse(bp: &mut Bootstrap, obj: RegistryObject<SpamDnsblServer>) -> Option<Self> {
+        match obj.object {
+            SpamDnsblServer::Any(server) if server.enable => DnsBlServer {
+                zone: bp.compile_expr(obj.id, &server.ctx_zone()),
+                tags: bp.compile_expr(obj.id, &server.ctx_tag()),
+                scope: Element::Any,
+                id: server.name,
+            }
+            .into(),
+            SpamDnsblServer::Url(server) if server.enable => DnsBlServer {
+                zone: bp.compile_expr(obj.id, &server.ctx_zone()),
+                tags: bp.compile_expr(obj.id, &server.ctx_tag()),
+                scope: Element::Url,
+                id: server.name,
+            }
+            .into(),
+            SpamDnsblServer::Domain(server) if server.enable => DnsBlServer {
+                zone: bp.compile_expr(obj.id, &server.ctx_zone()),
+                tags: bp.compile_expr(obj.id, &server.ctx_tag()),
+                scope: Element::Domain,
+                id: server.name,
+            }
+            .into(),
+            SpamDnsblServer::Email(server) if server.enable => DnsBlServer {
+                zone: bp.compile_expr(obj.id, &server.ctx_zone()),
+                tags: bp.compile_expr(obj.id, &server.ctx_tag()),
+                scope: Element::Email,
+                id: server.name,
+            }
+            .into(),
+            SpamDnsblServer::Ip(server) if server.enable => DnsBlServer {
+                zone: bp.compile_expr(obj.id, &server.ctx_zone()),
+                tags: bp.compile_expr(obj.id, &server.ctx_tag()),
+                scope: Element::Ip,
+                id: server.name,
+            }
+            .into(),
+            SpamDnsblServer::Header(server) if server.enable => DnsBlServer {
+                zone: bp.compile_expr(obj.id, &server.ctx_zone()),
+                tags: bp.compile_expr(obj.id, &server.ctx_tag()),
+                scope: Element::Header,
+                id: server.name,
+            }
+            .into(),
+            SpamDnsblServer::Body(server) if server.enable => DnsBlServer {
+                zone: bp.compile_expr(obj.id, &server.ctx_zone()),
+                tags: bp.compile_expr(obj.id, &server.ctx_tag()),
+                scope: Element::Body,
+                id: server.name,
+            }
+            .into(),
+            _ => None,
         }
-
-        let scope =
-            config.property_require::<Element>(("spam-filter.dnsbl.server", id_, "scope"))?;
-
-        DnsBlServer {
-            zone: IfBlock::try_parse(
-                config,
-                ("spam-filter.dnsbl.server", id_, "zone"),
-                &scope.token_map(),
-            )?,
-            scope,
-            tags: IfBlock::try_parse(
-                config,
-                ("spam-filter.dnsbl.server", id_, "tag"),
-                &Element::Ip.token_map(),
-            )?,
-            id,
-        }
-        .into()
     }
 }
 
 impl SpamFilterLists {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         let mut lists = SpamFilterLists {
             file_extensions: GlobMap::default(),
             scores: GlobMap::default(),
         };
 
-        // Parse local lists
-        let mut errors = vec![];
-        for (key, value) in config.iterate_prefix("spam-filter.list") {
-            if let Some((id, key)) = key
-                .split_once('.')
-                .filter(|(id, key)| !id.is_empty() && !key.is_empty())
-            {
-                match id {
-                    "scores" => {
-                        let action = match value.to_lowercase().as_str() {
-                            "reject" => SpamFilterAction::Reject,
-                            "discard" => SpamFilterAction::Discard,
-                            score => match score.parse() {
-                                Ok(score) => SpamFilterAction::Allow(score),
-                                Err(err) => {
-                                    errors.push((
-                                        format!("spam-filter.list.{id}.{key}"),
-                                        format!("Invalid score: {}", err),
-                                    ));
-                                    continue;
-                                }
-                            },
-                        };
-                        lists.scores.insert(key, action);
-                    }
-                    "file-extensions" => {
-                        let mut ext = FileExtension::default();
-
-                        for part in value.split('|') {
-                            let part = part.trim();
-                            match part {
-                                "AR" => {
-                                    ext.is_archive = true;
-                                }
-                                "NZ" => {
-                                    ext.is_nz = true;
-                                }
-                                "BAD" => {
-                                    ext.is_bad = true;
-                                }
-                                other => {
-                                    if other.contains('/') {
-                                        ext.known_types.insert(other.to_string());
-                                    } else if !other.is_empty() {
-                                        errors.push((
-                                            format!("spam-filter.list.{id}.{key}"),
-                                            format!("Invalid file extension: {}", other),
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-
-                        lists.file_extensions.insert(key, ext);
-                    }
-                    _ => (),
-                }
+        for tag in bp.list_infallible::<SpamTag>().await {
+            match tag.object {
+                SpamTag::Score(tag) => lists
+                    .scores
+                    .insert(&tag.tag, SpamFilterAction::Allow(tag.score as f32)),
+                SpamTag::Discard(tag) => lists.scores.insert(&tag.tag, SpamFilterAction::Discard),
+                SpamTag::Reject(tag) => lists.scores.insert(&tag.tag, SpamFilterAction::Reject),
             }
         }
 
-        for (key, error) in errors {
-            config.new_parse_error(key, error);
+        for ext in bp.list_infallible::<SpamFileExtension>().await {
+            let ext = ext.object;
+            lists.file_extensions.insert(
+                &ext.extension,
+                FileExtension {
+                    known_types: ext.content_types.into_iter().collect(),
+                    is_bad: ext.is_bad,
+                    is_archive: ext.is_archive,
+                    is_nz: ext.is_nz,
+                },
+            );
         }
 
         lists
@@ -394,34 +401,29 @@ impl SpamFilterLists {
 
 impl PyzorConfig {
     pub async fn parse(bp: &mut Bootstrap) -> Option<Self> {
-        if !config
-            .property_or_default("spam-filter.pyzor.enable", "true")
-            .unwrap_or(true)
-        {
+        let pyzor = bp.setting_infallible::<SpamPyzor>().await;
+
+        if !pyzor.enable {
             return None;
         }
 
-        let port = config
-            .property_or_default::<u16>("spam-filter.pyzor.port", "24441")
-            .unwrap_or(24441);
-        let host = config
-            .value("spam-filter.pyzor.host")
-            .unwrap_or("public.pyzor.org");
+        let port = pyzor.port;
+        let host = pyzor.host;
         let address = match lookup_host(format!("{host}:{port}"))
             .await
             .map(|mut a| a.next())
         {
             Ok(Some(address)) => address,
             Ok(None) => {
-                config.new_build_error(
-                    "spam-filter.pyzor.host",
+                bp.build_error(
+                    Object::SpamPyzor.singleton(),
                     "Invalid address: No addresses found.",
                 );
                 return None;
             }
             Err(err) => {
-                config.new_build_error(
-                    "spam-filter.pyzor.host",
+                bp.build_error(
+                    Object::SpamPyzor.singleton(),
                     format!("Invalid address: {}", err),
                 );
                 return None;
@@ -430,122 +432,81 @@ impl PyzorConfig {
 
         PyzorConfig {
             address,
-            timeout: config
-                .property_or_default::<Duration>("spam-filter.pyzor.timeout", "5s")
-                .unwrap_or(Duration::from_secs(5)),
-            min_count: config
-                .property_or_default("spam-filter.pyzor.count", "5")
-                .unwrap_or(5),
-            min_wl_count: config
-                .property_or_default("spam-filter.pyzor.wl-count", "10")
-                .unwrap_or(10),
-            ratio: config
-                .property_or_default("spam-filter.pyzor.ratio", "0.2")
-                .unwrap_or(0.2),
+            timeout: pyzor.timeout.into_inner(),
+            min_count: pyzor.block_count,
+            min_wl_count: pyzor.allow_count,
+            ratio: pyzor.ratio,
         }
         .into()
     }
 }
 
 impl ClassifierConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
-        let ccfh = match config.value("spam-filter.classifier.model") {
-            Some("ftrl-fh") | None => false,
-            Some("ftrl-ccfh") => true,
-            Some("disabled" | "disable") => return None,
-            Some(other) => {
-                config.new_build_error(
-                    "spam-filter.classifier.model",
-                    format!("Invalid model type: {}", other),
-                );
-                return None;
-            }
-        };
+    pub async fn parse(bp: &mut Bootstrap) -> Option<Self> {
+        let classifier = bp.setting_infallible::<structs::SpamClassifier>().await;
+        let w_params;
+        let i_params;
+        let log_scale;
+        let l2_normalize;
 
-        let w_params = FtrlParameters::parse(config, "spam-filter.classifier.parameters", 20);
-        let i_params = if ccfh {
-            Some(FtrlParameters::parse(
-                config,
-                "spam-filter.classifier.parameters.ccfh",
-                w_params.feature_hash_size - 2,
-            ))
-        } else {
-            None
-        };
+        match classifier.model {
+            structs::SpamClassifierModel::FtrlFh(model) => {
+                log_scale = model.feature_log_scale;
+                l2_normalize = model.feature_l2_normalize;
+                w_params = FtrlParameters::parse(&model.parameters);
+                i_params = None;
+            }
+            structs::SpamClassifierModel::FtrlCcfh(model) => {
+                log_scale = model.feature_log_scale;
+                l2_normalize = model.feature_l2_normalize;
+                w_params = FtrlParameters::parse(&model.parameters);
+                i_params = Some(FtrlParameters::parse(&model.indicator_parameters));
+            }
+            structs::SpamClassifierModel::None => return None,
+        }
 
         ClassifierConfig {
             w_params,
             i_params,
-            reservoir_capacity: config
-                .property_or_default("spam-filter.classifier.samples.reservoir-capacity", "1024")
-                .unwrap_or(1024),
-            auto_learn_card_is_ham: config
-                .property_or_default("spam-filter.card-is-ham.learn", "true")
-                .unwrap_or(true),
-            auto_learn_reply_ham: config
-                .property_or_default("spam-filter.trusted-reply.learn", "true")
-                .unwrap_or(true),
-            auto_learn_spam_trap: config
-                .property_or_default("spam-filter.classifier.auto-learn.spam-trap", "true")
-                .unwrap_or(true),
-            auto_learn_spam_rbl_count: config
-                .property_or_default("spam-filter.classifier.auto-learn.spam-rbl-count", "2")
-                .unwrap_or(2),
-            hold_samples_for: config
-                .property_or_default::<Duration>("spam-filter.classifier.samples.hold-for", "180d")
-                .unwrap_or(Duration::from_secs(180 * 24 * 60 * 60))
-                .as_secs(),
-            min_ham_samples: config
-                .property_or_default("spam-filter.classifier.samples.min-ham", "100")
-                .unwrap_or(100),
-            min_spam_samples: config
-                .property_or_default("spam-filter.classifier.samples.min-spam", "100")
-                .unwrap_or(100),
-            train_frequency: config
-                .property_or_default::<Option<Duration>>(
-                    "spam-filter.classifier.training.frequency",
-                    "12h",
-                )
-                .unwrap_or(Some(Duration::from_secs(12 * 60 * 60)))
-                .map(|d| d.as_secs()),
-            log_scale: config
-                .property_or_default("spam-filter.classifier.features.log-scale", "true")
-                .unwrap_or(true),
-            l2_normalize: config
-                .property_or_default("spam-filter.classifier.features.l2-normalize", "true")
-                .unwrap_or(true),
+            reservoir_capacity: classifier.reservoir_capacity as usize,
+            auto_learn_card_is_ham: classifier.learn_ham_from_card,
+            auto_learn_reply_ham: classifier.learn_ham_from_reply,
+            auto_learn_spam_trap: classifier.learn_spam_from_traps,
+            auto_learn_spam_rbl_count: classifier.learn_spam_from_rbl_hits as u32,
+            hold_samples_for: classifier.hold_samples_for.into_inner().as_secs(),
+            min_ham_samples: classifier.min_ham_samples,
+            min_spam_samples: classifier.min_spam_samples,
+            train_frequency: classifier.train_frequency.map(|d| d.into_inner().as_secs()),
+            log_scale,
+            l2_normalize,
         }
         .into()
     }
 }
 
 impl FtrlParameters {
-    pub fn parse(bp: &mut Bootstrap, prefix: &str, default_features: usize) -> Self {
-        let feature_hash_size: usize = config
-            .property((prefix, "features"))
-            .unwrap_or(default_features);
-
-        if !(16..=28).contains(&feature_hash_size) {
-            config.new_build_error(
-                (prefix, "features"),
-                "Feature size must be between 2^16 and 2^28.",
-            );
-        }
-
+    pub fn parse(params: &structs::FtrlParameters) -> Self {
+        let hash_size = match params.num_features {
+            ModelSize::V16 => 16,
+            ModelSize::V17 => 17,
+            ModelSize::V18 => 18,
+            ModelSize::V19 => 19,
+            ModelSize::V20 => 20,
+            ModelSize::V21 => 21,
+            ModelSize::V22 => 22,
+            ModelSize::V23 => 23,
+            ModelSize::V24 => 24,
+            ModelSize::V25 => 25,
+            ModelSize::V26 => 26,
+            ModelSize::V27 => 27,
+            ModelSize::V28 => 28,
+        };
         FtrlParameters {
-            feature_hash_size: 1 << feature_hash_size,
-            alpha: config
-                .property_or_default((prefix, "alpha"), "2.0")
-                .unwrap_or(2.0),
-            beta: config
-                .property_or_default((prefix, "beta"), "1.0")
-                .unwrap_or(1.0),
-            l1_ratio: config
-                .property_or_default((prefix, "l1"), "0.001")
-                .unwrap_or(0.001),
-            l2_ratio: config
-                .property_or_default((prefix, "l2"), "0.0001")
-                .unwrap_or(0.0001),
+            feature_hash_size: 1 << hash_size,
+            alpha: params.alpha,
+            beta: params.beta,
+            l1_ratio: params.l1_ratio,
+            l2_ratio: params.l2_ratio,
         }
     }
 }
@@ -553,22 +514,6 @@ impl FtrlParameters {
 impl SpamClassifier {
     pub fn is_active(&self) -> bool {
         !matches!(self, SpamClassifier::Disabled)
-    }
-}
-
-impl SpamFilterScoreConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        SpamFilterScoreConfig {
-            reject_threshold: config
-                .property("spam-filter.score.reject")
-                .unwrap_or_default(),
-            discard_threshold: config
-                .property("spam-filter.score.discard")
-                .unwrap_or_default(),
-            spam_threshold: config
-                .property_or_default("spam-filter.score.spam", "5.0")
-                .unwrap_or(5.0),
-        }
     }
 }
 
@@ -611,170 +556,7 @@ impl Location {
     }
 }
 
-pub const V_SPAM_REMOTE_IP: u32 = 100;
-pub const V_SPAM_REMOTE_IP_PTR: u32 = 101;
-pub const V_SPAM_EHLO_DOMAIN: u32 = 102;
-pub const V_SPAM_AUTH_AS: u32 = 103;
-pub const V_SPAM_ASN: u32 = 104;
-pub const V_SPAM_COUNTRY: u32 = 105;
-pub const V_SPAM_IS_TLS: u32 = 106;
-pub const V_SPAM_ENV_FROM: u32 = 108;
-pub const V_SPAM_ENV_FROM_LOCAL: u32 = 109;
-pub const V_SPAM_ENV_FROM_DOMAIN: u32 = 110;
-pub const V_SPAM_ENV_TO: u32 = 111;
-pub const V_SPAM_FROM: u32 = 112;
-pub const V_SPAM_FROM_NAME: u32 = 113;
-pub const V_SPAM_FROM_LOCAL: u32 = 114;
-pub const V_SPAM_FROM_DOMAIN: u32 = 115;
-pub const V_SPAM_REPLY_TO: u32 = 116;
-pub const V_SPAM_REPLY_TO_NAME: u32 = 117;
-pub const V_SPAM_REPLY_TO_LOCAL: u32 = 118;
-pub const V_SPAM_REPLY_TO_DOMAIN: u32 = 119;
-pub const V_SPAM_TO: u32 = 120;
-pub const V_SPAM_TO_NAME: u32 = 121;
-pub const V_SPAM_TO_LOCAL: u32 = 122;
-pub const V_SPAM_TO_DOMAIN: u32 = 123;
-pub const V_SPAM_CC: u32 = 124;
-pub const V_SPAM_CC_NAME: u32 = 125;
-pub const V_SPAM_CC_LOCAL: u32 = 126;
-pub const V_SPAM_CC_DOMAIN: u32 = 127;
-pub const V_SPAM_BCC: u32 = 128;
-pub const V_SPAM_BCC_NAME: u32 = 129;
-pub const V_SPAM_BCC_LOCAL: u32 = 130;
-pub const V_SPAM_BCC_DOMAIN: u32 = 131;
-pub const V_SPAM_BODY_TEXT: u32 = 132;
-pub const V_SPAM_BODY_HTML: u32 = 133;
-pub const V_SPAM_BODY_RAW: u32 = 134;
-pub const V_SPAM_SUBJECT: u32 = 135;
-pub const V_SPAM_SUBJECT_THREAD: u32 = 136;
-pub const V_SPAM_LOCATION: u32 = 137;
-pub const V_WORDS_SUBJECT: u32 = 138;
-pub const V_WORDS_BODY: u32 = 139;
-
-pub const V_RCPT_EMAIL: u32 = 0;
-pub const V_RCPT_NAME: u32 = 1;
-pub const V_RCPT_LOCAL: u32 = 2;
-pub const V_RCPT_DOMAIN: u32 = 3;
-pub const V_RCPT_DOMAIN_SLD: u32 = 4;
-
-pub const V_URL_FULL: u32 = 0;
-pub const V_URL_PATH_QUERY: u32 = 1;
-pub const V_URL_PATH: u32 = 2;
-pub const V_URL_QUERY: u32 = 3;
-pub const V_URL_SCHEME: u32 = 4;
-pub const V_URL_AUTHORITY: u32 = 5;
-pub const V_URL_HOST: u32 = 6;
-pub const V_URL_HOST_SLD: u32 = 7;
-pub const V_URL_PORT: u32 = 8;
-
-pub const V_HEADER_NAME: u32 = 0;
-pub const V_HEADER_NAME_LOWER: u32 = 1;
-pub const V_HEADER_VALUE: u32 = 2;
-pub const V_HEADER_VALUE_LOWER: u32 = 3;
-pub const V_HEADER_PROPERTY: u32 = 4;
-pub const V_HEADER_RAW: u32 = 5;
-pub const V_HEADER_RAW_LOWER: u32 = 6;
-
-pub const V_IP: u32 = 0;
-pub const V_IP_REVERSE: u32 = 1;
-pub const V_IP_OCTETS: u32 = 2;
-pub const V_IP_IS_V4: u32 = 3;
-pub const V_IP_IS_V6: u32 = 4;
-
 impl Element {
-    pub fn token_map(&self) -> TokenMap {
-        let map = TokenMap::default().with_variables_map([
-            ("remote_ip", V_SPAM_REMOTE_IP),
-            ("remote_ip.ptr", V_SPAM_REMOTE_IP_PTR),
-            ("ehlo_domain", V_SPAM_EHLO_DOMAIN),
-            ("auth_as", V_SPAM_AUTH_AS),
-            ("asn", V_SPAM_ASN),
-            ("country", V_SPAM_COUNTRY),
-            ("is_tls", V_SPAM_IS_TLS),
-            ("env_from", V_SPAM_ENV_FROM),
-            ("env_from.local", V_SPAM_ENV_FROM_LOCAL),
-            ("env_from.domain", V_SPAM_ENV_FROM_DOMAIN),
-            ("env_to", V_SPAM_ENV_TO),
-            ("from", V_SPAM_FROM),
-            ("from.name", V_SPAM_FROM_NAME),
-            ("from.local", V_SPAM_FROM_LOCAL),
-            ("from.domain", V_SPAM_FROM_DOMAIN),
-            ("reply_to", V_SPAM_REPLY_TO),
-            ("reply_to.name", V_SPAM_REPLY_TO_NAME),
-            ("reply_to.local", V_SPAM_REPLY_TO_LOCAL),
-            ("reply_to.domain", V_SPAM_REPLY_TO_DOMAIN),
-            ("to", V_SPAM_TO),
-            ("to.name", V_SPAM_TO_NAME),
-            ("to.local", V_SPAM_TO_LOCAL),
-            ("to.domain", V_SPAM_TO_DOMAIN),
-            ("cc", V_SPAM_CC),
-            ("cc.name", V_SPAM_CC_NAME),
-            ("cc.local", V_SPAM_CC_LOCAL),
-            ("cc.domain", V_SPAM_CC_DOMAIN),
-            ("bcc", V_SPAM_BCC),
-            ("bcc.name", V_SPAM_BCC_NAME),
-            ("bcc.local", V_SPAM_BCC_LOCAL),
-            ("bcc.domain", V_SPAM_BCC_DOMAIN),
-            ("body", V_SPAM_BODY_TEXT),
-            ("body.text", V_SPAM_BODY_TEXT),
-            ("body.html", V_SPAM_BODY_HTML),
-            ("body.words", V_WORDS_BODY),
-            ("body.raw", V_SPAM_BODY_RAW),
-            ("subject", V_SPAM_SUBJECT),
-            ("subject.thread", V_SPAM_SUBJECT_THREAD),
-            ("subject.words", V_WORDS_SUBJECT),
-            ("location", V_SPAM_LOCATION),
-        ]);
-
-        match self {
-            Element::Url => map.with_variables_map([
-                ("url", V_URL_FULL),
-                ("value", V_URL_FULL),
-                ("path_query", V_URL_PATH_QUERY),
-                ("path", V_URL_PATH),
-                ("query", V_URL_QUERY),
-                ("scheme", V_URL_SCHEME),
-                ("authority", V_URL_AUTHORITY),
-                ("host", V_URL_HOST),
-                ("sld", V_URL_HOST_SLD),
-                ("port", V_URL_PORT),
-            ]),
-            Element::Email => map.with_variables_map([
-                ("email", V_RCPT_EMAIL),
-                ("value", V_RCPT_EMAIL),
-                ("name", V_RCPT_NAME),
-                ("local", V_RCPT_LOCAL),
-                ("domain", V_RCPT_DOMAIN),
-                ("sld", V_RCPT_DOMAIN_SLD),
-            ]),
-            Element::Ip => map.with_variables_map([
-                ("ip", V_IP),
-                ("value", V_IP),
-                ("input", V_IP),
-                ("reverse_ip", V_IP_REVERSE),
-                ("ip_reverse", V_IP_REVERSE),
-                ("octets", V_IP_OCTETS),
-                ("is_v4", V_IP_IS_V4),
-                ("is_v6", V_IP_IS_V6),
-            ]),
-            Element::Header => map.with_variables_map([
-                ("name", V_HEADER_NAME),
-                ("name_lower", V_HEADER_NAME_LOWER),
-                ("value", V_HEADER_VALUE),
-                ("value_lower", V_HEADER_VALUE_LOWER),
-                ("email", V_HEADER_VALUE),
-                ("email_lower", V_HEADER_VALUE_LOWER),
-                ("attributes", V_HEADER_PROPERTY),
-                ("raw", V_HEADER_RAW),
-                ("raw_lower", V_HEADER_RAW_LOWER),
-            ]),
-            Element::Body | Element::Domain => {
-                map.with_variables_map([("input", 0), ("value", 0), ("result", 0)])
-            }
-            Element::Any => map,
-        }
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Element::Url => "url",
@@ -796,13 +578,13 @@ pub struct IpResolver {
 }
 
 impl ResolveVariable for IpResolver {
-    fn resolve_variable(&self, variable: u32) -> Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
         match variable {
-            V_IP => self.ip_string.as_str().into(),
-            V_IP_REVERSE => self.reverse.as_str().into(),
-            V_IP_OCTETS => self.octets.clone(),
-            V_IP_IS_V4 => Variable::Integer(self.ip.is_ipv4() as _),
-            V_IP_IS_V6 => Variable::Integer(self.ip.is_ipv6() as _),
+            ExpressionVariable::Ip | ExpressionVariable::Value => self.ip_string.as_str().into(),
+            ExpressionVariable::IpReverse => self.reverse.as_str().into(),
+            ExpressionVariable::Octets => self.octets.clone(),
+            ExpressionVariable::IsV4 => Variable::Integer(self.ip.is_ipv4() as _),
+            ExpressionVariable::IsV6 => Variable::Integer(self.ip.is_ipv6() as _),
             _ => Variable::Integer(0),
         }
     }

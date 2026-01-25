@@ -5,15 +5,14 @@
  */
 
 use directory::{Directory, backend::RcptType};
+use registry::schema::enums::ExpressionVariable;
 use std::borrow::Cow;
 use utils::config::{Config, utils::AsKey};
 
 use crate::{
     Server,
     config::smtp::session::AddressMapping,
-    expr::{
-        V_RECIPIENT, Variable, functions::ResolveVariable, if_block::IfBlock, tokenizer::TokenMap,
-    },
+    expr::{Variable, functions::ResolveVariable, if_block::IfBlock, tokenizer::TokenMap},
 };
 
 impl Server {
@@ -153,9 +152,9 @@ impl AddressMapping {
             config,
             key,
             &TokenMap::default().with_variables_map([
-                ("address", V_RECIPIENT),
-                ("email", V_RECIPIENT),
-                ("rcpt", V_RECIPIENT),
+                ("address", ExpressionVariable::Rcpt),
+                ("email", ExpressionVariable::Rcpt),
+                ("rcpt", ExpressionVariable::Rcpt),
             ]),
         ) {
             AddressMapping::Custom(if_block)
@@ -168,7 +167,7 @@ impl AddressMapping {
 struct Address<'x>(&'x str);
 
 impl ResolveVariable for Address<'_> {
-    fn resolve_variable(&'_ self, _: u32) -> crate::expr::Variable<'_> {
+    fn resolve_variable(&'_ self, _: ExpressionVariable) -> crate::expr::Variable<'_> {
         Variable::from(self.0)
     }
 

@@ -9,10 +9,7 @@ use crate::{
     CacheSwap, Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache,
     MessageUidCache, TlsConnectors,
     auth::{AccessToken, roles::RolePermissions},
-    config::{
-        smtp::resolver::{Policy, Tlsa},
-        spamfilter::SpamClassifier,
-    },
+    config::smtp::resolver::{Policy, Tlsa},
     listener::blocked::BlockedIps,
     manager::webadmin::WebAdminManager,
 };
