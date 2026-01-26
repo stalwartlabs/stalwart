@@ -50,7 +50,7 @@ impl MtaStsLookup for Server {
             Ok(record) => record,
             Err(err) => {
                 // Return the cached policy in case of failure
-                return if let Some(value) = self.inner.cache.dbs_mta_sts.get(domain) {
+                return if let Some(value) = self.inner.cache.dns_mta_sts.get(domain) {
                     Ok(value)
                 } else {
                     Err(err.into())
@@ -59,7 +59,7 @@ impl MtaStsLookup for Server {
         };
 
         // Check if the policy has been cached
-        if let Some(value) = self.inner.cache.dbs_mta_sts.get(domain)
+        if let Some(value) = self.inner.cache.dns_mta_sts.get(domain)
             && value.id == record.id
         {
             return Ok(value);
@@ -87,7 +87,7 @@ impl MtaStsLookup for Server {
             record.id.clone(),
         )?);
 
-        self.inner.cache.dbs_mta_sts.insert(
+        self.inner.cache.dns_mta_sts.insert(
             domain.to_string(),
             policy.clone(),
             Duration::from_secs(if (3600..31557600).contains(&policy.max_age) {

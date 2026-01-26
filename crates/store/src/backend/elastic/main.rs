@@ -17,7 +17,8 @@ use utils::config::{Config, http::build_http_client, utils::AsKey};
 
 impl ElasticSearchStore {
     pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let client = build_http_client(config, prefix.clone(), "application/json".into())?;
+        todo!()
+        /*let client = build_http_client(config, prefix.clone(), "application/json".into())?;
         let prefix = prefix.as_key();
         let url = config
             .value_require((&prefix, "url"))?
@@ -43,7 +44,7 @@ impl ElasticSearchStore {
             config.new_build_error(prefix.as_str(), err.to_string());
         }
 
-        Some(es)
+        Some(es)*/
     }
 
     pub async fn create_indexes(

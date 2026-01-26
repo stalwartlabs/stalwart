@@ -8,10 +8,11 @@ use ahash::AHashMap;
 use coordinator::Coordinator;
 use directory::Directory;
 use std::sync::Arc;
-use store::{BlobStore, InMemoryStore, PurgeSchedule, SearchStore, Store};
+use store::{BlobStore, InMemoryStore, PurgeSchedule, RegistryStore, SearchStore, Store};
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Storage {
+    pub registry: RegistryStore,
     pub data: Store,
     pub blob: BlobStore,
     pub fts: SearchStore,

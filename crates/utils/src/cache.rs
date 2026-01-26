@@ -33,23 +33,11 @@ pub struct TtlEntry<V: Clone + CacheItemWeight> {
 }
 
 impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
-    pub fn from_config(
-        config: &mut Config,
-        key: &str,
-        max_weight: u64,
-        estimated_weight: u64,
-    ) -> Self {
-        let weight_capacity = config
-            .property(("cache", key, "size"))
-            .unwrap_or(max_weight);
-        let estimated_items_capacity = config
-            .property(("cache", key, "capacity"))
-            .unwrap_or_else(|| weight_capacity as usize / estimated_weight as usize);
-
-        Self::new(estimated_items_capacity, weight_capacity)
+    pub fn new(weight: u64, estimated_weight: u64) -> Self {
+        Self::new_estimated(weight as usize / estimated_weight as usize, weight)
     }
 
-    pub fn new(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
+    pub fn new_estimated(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
         Self(quick_cache::sync::Cache::with_weighter(
             estimated_items_capacity,
             weight_capacity,
@@ -99,23 +87,11 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
 }
 
 impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> CacheWithTtl<K, V> {
-    pub fn from_config(
-        config: &mut Config,
-        key: &str,
-        max_weight: u64,
-        estimated_weight: u64,
-    ) -> Self {
-        let weight_capacity = config
-            .property(("cache", key, "size"))
-            .unwrap_or(max_weight);
-        let estimated_items_capacity = config
-            .property(("cache", key, "capacity"))
-            .unwrap_or_else(|| weight_capacity as usize / estimated_weight as usize);
-
-        Self::new(estimated_items_capacity, weight_capacity)
+    pub fn new(weight: u64, estimated_weight: u64) -> Self {
+        Self::new_estimated(weight as usize / estimated_weight as usize, weight)
     }
 
-    pub fn new(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
+    pub fn new_estimated(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
         Self(quick_cache::sync::Cache::with_weighter(
             estimated_items_capacity,
             weight_capacity,

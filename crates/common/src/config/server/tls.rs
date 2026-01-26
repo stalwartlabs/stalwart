@@ -4,23 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    listener::{
-        acme::{
-            AcmeProvider, ChallengeSettings, EabSettings,
-            directory::LETS_ENCRYPT_PRODUCTION_DIRECTORY,
-        },
-        tls::AcmeProviders,
-    },
-    manager::bootstrap::Bootstrap,
-};
+use crate::{Server, listener::acme::AcmeProvider, manager::bootstrap::Bootstrap};
 use ahash::{AHashMap, AHashSet};
-use base64::{
-    Engine,
-    engine::general_purpose::{self, STANDARD},
+use dns_update::{
+    Algorithm, DnsUpdater, TsigAlgorithm,
+    providers::{ovh::OvhEndpoint, rfc2136::DnsAddress},
 };
-use dns_update::{DnsUpdater, TsigAlgorithm, providers::rfc2136::DnsAddress};
+use hickory_proto::rr::dnssec::KeyPair;
 use rcgen::generate_simple_self_signed;
+use registry::{
+    schema::{
+        enums,
+        structs::{self, Certificate, DnsServer},
+    },
+    types::id::Id,
+};
+use ring::signature::{EcdsaKeyPair, Ed25519KeyPair};
 use rustls::{
     SupportedProtocolVersion,
     crypto::ring::sign::any_supported_type,
@@ -31,10 +30,11 @@ use rustls_pemfile::{Item, certs, read_one};
 use rustls_pki_types::PrivateKeyDer;
 use std::{
     io::Cursor,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
-    time::Duration,
 };
+use store::registry::RegistryObject;
+use trc::AddContext;
 use x509_parser::{
     certificate::X509Certificate,
     der_parser::asn1_rs::FromDer,
@@ -44,296 +44,169 @@ use x509_parser::{
 pub static TLS13_VERSION: &[&SupportedProtocolVersion] = &[&TLS13];
 pub static TLS12_VERSION: &[&SupportedProtocolVersion] = &[&TLS12];
 
-impl AcmeProviders {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        let mut providers = AHashMap::new();
+impl Server {
+    pub async fn build_acme_provider(&self, id: Id) -> trc::Result<AcmeProvider> {
+        if let Some(server) = self
+            .registry()
+            .get::<structs::AcmeProvider>(id)
+            .await
+            .caused_by(trc::location!())?
+        {
+            Ok(AcmeProvider::new(RegistryObject { id, object: server }))
+        } else {
+            trc::bail!(
+                trc::AcmeEvent::Error
+                    .into_err()
+                    .id(id.to_string())
+                    .details("ACME provider not found")
+            )
+        }
+    }
 
-        // Parse ACME providers
-        'outer: for acme_id in config.sub_keys("acme", ".directory") {
-            let acme_id = acme_id.as_str();
-            let directory = config
-                .value(("acme", acme_id, "directory"))
-                .unwrap_or(LETS_ENCRYPT_PRODUCTION_DIRECTORY)
-                .trim()
-                .to_string();
-            let contact = config
-                .values(("acme", acme_id, "contact"))
-                .filter_map(|(_, v)| {
-                    let v = v.trim().to_string();
-                    if !v.is_empty() { Some(v) } else { None }
-                })
-                .collect::<Vec<_>>();
-            let renew_before: Duration = config
-                .property_or_default(("acme", acme_id, "renew-before"), "30d")
-                .unwrap_or_else(|| Duration::from_secs(30 * 24 * 60 * 60));
+    pub async fn build_dns_updater(&self, id: Id) -> trc::Result<DnsUpdater> {
+        let Some(server) = self
+            .registry()
+            .get::<DnsServer>(id)
+            .await
+            .caused_by(trc::location!())?
+        else {
+            trc::bail!(
+                trc::DnsEvent::BuildError
+                    .into_err()
+                    .id(id.to_string())
+                    .details("DNS server settings not found")
+            );
+        };
 
-            if directory.is_empty() {
-                config.new_parse_error(format!("acme.{acme_id}.directory"), "Missing property");
-                continue;
-            }
-
-            if contact.is_empty() {
-                config.new_parse_error(format!("acme.{acme_id}.contact"), "Missing property");
-                continue;
-            }
-
-            // Parse challenge type
-            let challenge = match config
-                .value(("acme", acme_id, "challenge"))
-                .unwrap_or("tls-alpn-01")
-            {
-                "tls-alpn-01" => ChallengeSettings::TlsAlpn01,
-                "http-01" => ChallengeSettings::Http01,
-                "dns-01" => match build_dns_updater(config, acme_id) {
-                    Some(updater) => ChallengeSettings::Dns01 {
-                        updater,
-                        origin: config
-                            .value(("acme", acme_id, "origin"))
-                            .map(|s| s.to_string()),
-                        polling_interval: config
-                            .property_or_default(("acme", acme_id, "polling-interval"), "15s")
-                            .unwrap_or_else(|| Duration::from_secs(15)),
-                        propagation_timeout: config
-                            .property_or_default(("acme", acme_id, "propagation-timeout"), "1m")
-                            .unwrap_or_else(|| Duration::from_secs(60)),
-                        ttl: config
-                            .property_or_default(("acme", acme_id, "ttl"), "5m")
-                            .unwrap_or_else(|| Duration::from_secs(5 * 60))
-                            .as_secs() as u32,
-                    },
-                    None => {
-                        continue;
-                    }
+        match server {
+            DnsServer::Tsig(server) => DnsUpdater::new_rfc2136_tsig(
+                match server.protocol {
+                    enums::IpProtocol::Udp => DnsAddress::Tcp(SocketAddr::new(
+                        server.host.into_inner(),
+                        server.port as u16,
+                    )),
+                    enums::IpProtocol::Tcp => DnsAddress::Udp(SocketAddr::new(
+                        server.host.into_inner(),
+                        server.port as u16,
+                    )),
                 },
-                _ => {
-                    config
-                        .new_parse_error(("acme", acme_id, "challenge"), "Invalid challenge type");
-                    continue;
-                }
-            };
-
-            // Domains covered by this ACME manager
-            let domains = config
-                .values(("acme", acme_id, "domains"))
-                .map(|(_, s)| s.trim().to_string())
-                .collect::<Vec<_>>();
-            if !matches!(challenge, ChallengeSettings::Dns01 { .. })
-                && domains.iter().any(|d| d.starts_with("*."))
-            {
-                config.new_parse_error(
-                    ("acme", acme_id, "domains"),
-                    "Wildcard domains are only supported with DNS-01 challenge",
-                );
-                continue 'outer;
+                server.key_name,
+                server.key,
+                match server.tsig_algorithm {
+                    enums::TsigAlgorithm::HmacMd5 => TsigAlgorithm::HmacMd5,
+                    enums::TsigAlgorithm::Gss => TsigAlgorithm::Gss,
+                    enums::TsigAlgorithm::HmacSha1 => TsigAlgorithm::HmacSha1,
+                    enums::TsigAlgorithm::HmacSha224 => TsigAlgorithm::HmacSha224,
+                    enums::TsigAlgorithm::HmacSha256 => TsigAlgorithm::HmacSha256,
+                    enums::TsigAlgorithm::HmacSha256128 => TsigAlgorithm::HmacSha256_128,
+                    enums::TsigAlgorithm::HmacSha384 => TsigAlgorithm::HmacSha384,
+                    enums::TsigAlgorithm::HmacSha384192 => TsigAlgorithm::HmacSha384_192,
+                    enums::TsigAlgorithm::HmacSha512 => TsigAlgorithm::HmacSha512,
+                    enums::TsigAlgorithm::HmacSha512256 => TsigAlgorithm::HmacSha512_256,
+                },
+            ),
+            DnsServer::Sig0(server) => DnsUpdater::new_rfc2136_sig0(
+                match server.protocol {
+                    enums::IpProtocol::Udp => DnsAddress::Tcp(SocketAddr::new(
+                        server.host.into_inner(),
+                        server.port as u16,
+                    )),
+                    enums::IpProtocol::Tcp => DnsAddress::Udp(SocketAddr::new(
+                        server.host.into_inner(),
+                        server.port as u16,
+                    )),
+                },
+                server.signer_name,
+                match server.sig0_algorithm {
+                    enums::Sig0Algorithm::EcdsaP256Sha256 => KeyPair::ECDSA(
+                        EcdsaKeyPair::from_pkcs8(
+                            &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+                            server.key.as_bytes(),
+                            &ring::rand::SystemRandom::new(),
+                        )
+                        .map_err(|err| {
+                            trc::DnsEvent::BuildError
+                                .reason(err)
+                                .details("Failed to build ECDSA P-256 key pair")
+                                .id(id.to_string())
+                        })?,
+                    ),
+                    enums::Sig0Algorithm::EcdsaP384Sha384 => KeyPair::ECDSA(
+                        EcdsaKeyPair::from_pkcs8(
+                            &ring::signature::ECDSA_P384_SHA384_ASN1_SIGNING,
+                            server.key.as_bytes(),
+                            &ring::rand::SystemRandom::new(),
+                        )
+                        .map_err(|err| {
+                            trc::DnsEvent::BuildError
+                                .reason(err)
+                                .details("Failed to build ECDSA P-384 key pair")
+                                .id(id.to_string())
+                        })?,
+                    ),
+                    enums::Sig0Algorithm::Ed25519 => KeyPair::ED25519(
+                        Ed25519KeyPair::from_pkcs8(server.key.as_bytes()).map_err(|err| {
+                            trc::DnsEvent::BuildError
+                                .reason(err)
+                                .details("Failed to build Ed25519 key pair")
+                                .id(id.to_string())
+                        })?,
+                    ),
+                },
+                server.public_key,
+                match server.sig0_algorithm {
+                    enums::Sig0Algorithm::EcdsaP256Sha256 => Algorithm::ECDSAP256SHA256,
+                    enums::Sig0Algorithm::EcdsaP384Sha384 => Algorithm::ECDSAP384SHA384,
+                    enums::Sig0Algorithm::Ed25519 => Algorithm::ED25519,
+                },
+            ),
+            DnsServer::Cloudflare(server) => DnsUpdater::new_cloudflare(
+                server.secret,
+                server.email,
+                server.timeout.into_inner().into(),
+            ),
+            DnsServer::DigitalOcean(server) => {
+                DnsUpdater::new_digitalocean(server.secret, server.timeout.into_inner().into())
             }
+            DnsServer::DeSEC(server) => {
+                DnsUpdater::new_desec(server.secret, server.timeout.into_inner().into())
+            }
+            DnsServer::Ovh(server) => DnsUpdater::new_ovh(
+                server.application_key,
+                server.application_secret,
+                server.consumer_key,
+                match server.ovh_endpoint {
+                    enums::OvhEndpoint::OvhEu => OvhEndpoint::OvhEu,
+                    enums::OvhEndpoint::OvhCa => OvhEndpoint::OvhCa,
+                    enums::OvhEndpoint::KimsufiEu => OvhEndpoint::KimsufiEu,
+                    enums::OvhEndpoint::KimsufiCa => OvhEndpoint::KimsufiCa,
+                    enums::OvhEndpoint::SoyoustartEu => OvhEndpoint::SoyoustartEu,
+                    enums::OvhEndpoint::SoyoustartCa => OvhEndpoint::SoyoustartCa,
+                },
+                server.timeout.into_inner().into(),
+            ),
+        }
+        .map_err(|err| {
+            trc::DnsEvent::BuildError
+                .reason(err)
+                .details("Failed to build DNS updater")
+                .id(id.to_string())
+        })
+    }
+}
 
-            // Obtain EAB settings
-            let eab = if let (Some(eab_kid), Some(eab_hmac_key)) = (
-                config
-                    .value(("acme", acme_id, "eab.kid"))
-                    .filter(|s| !s.is_empty()),
-                config
-                    .value(("acme", acme_id, "eab.hmac-key"))
-                    .filter(|s| !s.is_empty()),
+impl Bootstrap {
+    pub(crate) async fn parse_certificates(
+        &mut self,
+        certificates: &mut AHashMap<String, Arc<CertifiedKey>>,
+        subject_names: &mut AHashSet<String>,
+    ) {
+        // Parse certificates
+        for cert_obj in self.list_infallible::<Certificate>().await {
+            match build_certified_key(
+                cert_obj.object.certificate.into_bytes(),
+                cert_obj.object.private_key.into_bytes(),
             ) {
-                if let Ok(hmac_key) =
-                    general_purpose::URL_SAFE_NO_PAD.decode(eab_hmac_key.trim().as_bytes())
-                {
-                    EabSettings {
-                        kid: eab_kid.to_string(),
-                        hmac_key,
-                    }
-                    .into()
-                } else {
-                    config.new_build_error(
-                        format!("acme.{acme_id}.eab.hmac-key"),
-                        "Failed to base64 decode HMAC key",
-                    );
-                    None
-                }
-            } else {
-                None
-            };
-
-            // This ACME manager is the default when SNI is not available
-            let default = config
-                .property::<bool>(("acme", acme_id, "default"))
-                .unwrap_or_default();
-
-            if !domains.is_empty() {
-                match AcmeProvider::new(
-                    acme_id.to_string(),
-                    directory,
-                    domains,
-                    contact,
-                    challenge,
-                    eab,
-                    renew_before,
-                    default,
-                ) {
-                    Ok(acme_provider) => {
-                        providers.insert(acme_id.to_string(), acme_provider);
-                    }
-                    Err(err) => {
-                        config.new_build_error(format!("acme.{acme_id}"), err.to_string());
-                    }
-                }
-            }
-        }
-
-        AcmeProviders { providers }
-    }
-}
-
-#[allow(clippy::unnecessary_to_owned)]
-fn build_dns_updater(bp: &mut Bootstrap, acme_id: &str) -> Option<DnsUpdater> {
-    let timeout = config
-        .property_or_default(("acme", acme_id, "timeout"), "30s")
-        .unwrap_or_else(|| Duration::from_secs(30));
-
-    match config.value_require(("acme", acme_id, "provider"))? {
-        "rfc2136-tsig" => {
-            let algorithm: TsigAlgorithm = config
-                .value_require(("acme", acme_id, "tsig-algorithm"))?
-                .parse()
-                .map_err(|_| {
-                    config.new_parse_error(("acme", acme_id, "tsig-algorithm"), "Invalid algorithm")
-                })
-                .ok()?;
-            let key = STANDARD
-                .decode(config.value_require(("acme", acme_id, "secret"))?.trim())
-                .map_err(|_| {
-                    config.new_parse_error(
-                        ("acme", acme_id, "secret"),
-                        "Failed to base64 decode secret",
-                    )
-                })
-                .ok()?;
-            let host = config.property_require::<IpAddr>(("acme", acme_id, "host"))?;
-            let port = config
-                .property_or_default::<u16>(("acme", acme_id, "port"), "53")
-                .unwrap_or(53);
-            let addr = if config.value(("acme", acme_id, "protocol")) == Some("tcp") {
-                DnsAddress::Tcp(SocketAddr::new(host, port))
-            } else {
-                DnsAddress::Udp(SocketAddr::new(host, port))
-            };
-
-            DnsUpdater::new_rfc2136_tsig(
-                addr,
-                config
-                    .value_require(("acme", acme_id, "key"))?
-                    .trim()
-                    .to_string(),
-                key,
-                algorithm,
-            )
-            .map_err(|err| {
-                config.new_build_error(
-                    ("acme", acme_id, "provider"),
-                    format!("Failed to create RFC2136-TSIG DNS updater: {err}"),
-                )
-            })
-            .ok()
-        }
-        "cloudflare" => DnsUpdater::new_cloudflare(
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            config.value(("acme", acme_id, "user")).map(|s| s.trim()),
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create Cloudflare DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        "digitalocean" => DnsUpdater::new_digitalocean(
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create DigitalOcean DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        "desec" => DnsUpdater::new_desec(
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create Desec DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        "ovh" => DnsUpdater::new_ovh(
-            config
-                .value_require(("acme", acme_id, "key"))
-                .map(|s| s.trim())?
-                .to_string(),
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            config
-                .value_require(("acme", acme_id, "consumer-key"))?
-                .trim()
-                .to_string(),
-            config
-                .value_require(("acme", acme_id, "ovh-endpoint"))?
-                .parse()
-                .map_err(|_| {
-                    config
-                        .new_parse_error(("acme", acme_id, "ovh-endpoint"), "Invalid OVH endpoint")
-                })
-                .ok()?,
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create OVH DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        _ => {
-            config.new_parse_error(("acme", acme_id, "provider"), "Unsupported provider");
-            None
-        }
-    }
-}
-
-pub(crate) fn parse_certificates(
-    bp: &mut Bootstrap,
-    certificates: &mut AHashMap<String, Arc<CertifiedKey>>,
-    subject_names: &mut AHashSet<String>,
-) {
-    // Parse certificates
-    for cert_id in config.sub_keys("certificate", ".cert") {
-        let cert_id = cert_id.as_str();
-        let key_cert = ("certificate", cert_id, "cert");
-        let key_pk = ("certificate", cert_id, "private-key");
-
-        let cert = config
-            .value_require(key_cert)
-            .map(|s| s.as_bytes().to_vec());
-        let pk = config.value_require(key_pk).map(|s| s.as_bytes().to_vec());
-
-        if let (Some(cert), Some(pk)) = (cert, pk) {
-            match build_certified_key(cert, pk) {
                 Ok(cert) => {
                     match cert
                         .end_entity_cert()
@@ -378,11 +251,7 @@ pub(crate) fn parse_certificates(
                             }
 
                             // Add custom SNIs
-                            names.extend(
-                                config
-                                    .values(("certificate", cert_id, "subjects"))
-                                    .map(|(_, v)| v.trim().to_string()),
-                            );
+                            names.extend(cert_obj.object.subject_alternative_names);
 
                             // Add domain names
                             subject_names.extend(names.iter().cloned());
@@ -399,17 +268,18 @@ pub(crate) fn parse_certificates(
                             }
 
                             // Add default certificate
-                            if config
-                                .property::<bool>(("certificate", cert_id, "default"))
-                                .unwrap_or_default()
-                            {
+                            if cert_obj.object.default {
                                 certificates.insert("*".to_string(), cert.clone());
                             }
                         }
-                        Err(err) => config.new_build_error(format!("certificate.{cert_id}"), err),
+                        Err(err) => {
+                            self.build_error(cert_obj.id, format!("Invalid certificate: {err}"));
+                        }
                     }
                 }
-                Err(err) => config.new_build_error(format!("certificate.{cert_id}"), err),
+                Err(err) => {
+                    self.build_error(cert_obj.id, format!("Invalid certificate: {err}"));
+                }
             }
         }
     }

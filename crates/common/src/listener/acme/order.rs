@@ -12,7 +12,7 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use store::dispatch::lookup::KeyValue;
-use trc::{AcmeEvent, EventType};
+use trc::{AcmeEvent, DnsEvent, EventType};
 use x509_parser::parse_x509_certificate;
 
 use crate::listener::acme::ChallengeSettings;
@@ -255,7 +255,7 @@ impl Server {
                         if let Err(err) = updater.delete(&name, &origin, DnsRecordType::TXT).await {
                             // Errors are expected if the record does not exist
                             trc::event!(
-                                Acme(AcmeEvent::DnsRecordDeletionFailed),
+                                Dns(DnsEvent::RecordDeletionFailed),
                                 Hostname = name.to_string(),
                                 Reason = err.to_string(),
                                 Details = origin.to_string(),
@@ -275,7 +275,7 @@ impl Server {
                             )
                             .await
                         {
-                            return Err(EventType::Acme(AcmeEvent::DnsRecordCreationFailed)
+                            return Err(EventType::Dns(DnsEvent::RecordCreationFailed)
                                 .ctx(trc::Key::Id, provider.id.to_string())
                                 .ctx(trc::Key::Hostname, name)
                                 .ctx(trc::Key::Details, origin)
@@ -283,7 +283,7 @@ impl Server {
                         }
 
                         trc::event!(
-                            Acme(AcmeEvent::DnsRecordCreated),
+                            Dns(DnsEvent::RecordCreated),
                             Hostname = name.to_string(),
                             Details = origin.to_string(),
                             Id = provider.id.to_string(),
@@ -301,7 +301,7 @@ impl Server {
                                         break;
                                     } else {
                                         trc::event!(
-                                            Acme(AcmeEvent::DnsRecordNotPropagated),
+                                            Dns(DnsEvent::RecordNotPropagated),
                                             Id = provider.id.to_string(),
                                             Hostname = name.to_string(),
                                             Details = origin.to_string(),
@@ -312,7 +312,7 @@ impl Server {
                                 }
                                 Err(err) => {
                                     trc::event!(
-                                        Acme(AcmeEvent::DnsRecordLookupFailed),
+                                        Dns(DnsEvent::RecordLookupFailed),
                                         Id = provider.id.to_string(),
                                         Hostname = name.to_string(),
                                         Details = origin.to_string(),
@@ -326,14 +326,14 @@ impl Server {
 
                         if did_propagate {
                             trc::event!(
-                                Acme(AcmeEvent::DnsRecordPropagated),
+                                Dns(DnsEvent::RecordPropagated),
                                 Id = provider.id.to_string(),
                                 Hostname = name.to_string(),
                                 Details = origin.to_string(),
                             );
                         } else {
                             trc::event!(
-                                Acme(AcmeEvent::DnsRecordPropagationTimeout),
+                                Dns(DnsEvent::RecordPropagationTimeout),
                                 Id = provider.id.to_string(),
                                 Hostname = name.to_string(),
                                 Details = origin.to_string(),

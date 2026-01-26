@@ -94,3 +94,44 @@ impl Warning {
         }
     }
 }
+
+impl Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValidationError::Invalid { property, value } => {
+                write!(f, "Invalid value '{}' for property '{}'", value, property)
+            }
+            ValidationError::Required { property } => {
+                write!(f, "Property '{}' is required", property)
+            }
+            ValidationError::MaxLength { property, required } => {
+                write!(
+                    f,
+                    "Property '{}' exceeds maximum length of {}",
+                    property, required
+                )
+            }
+            ValidationError::MinLength { property, required } => {
+                write!(
+                    f,
+                    "Property '{}' is below minimum length of {}",
+                    property, required
+                )
+            }
+            ValidationError::MaxValue { property, required } => {
+                write!(
+                    f,
+                    "Property '{}' exceeds maximum value of {}",
+                    property, required
+                )
+            }
+            ValidationError::MinValue { property, required } => {
+                write!(
+                    f,
+                    "Property '{}' is below minimum value of {}",
+                    property, required
+                )
+            }
+        }
+    }
+}

@@ -8,7 +8,8 @@ use std::{fmt::Display, net::Ipv4Addr, str::FromStr};
 
 use crate::pickle::{Pickle, PickledStream};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(transparent)]
 pub struct IpAddr(pub std::net::IpAddr);
 
 impl IpAddr {

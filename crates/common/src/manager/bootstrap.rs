@@ -112,4 +112,8 @@ impl Bootstrap {
     pub fn node_id(&self) -> u64 {
         self.node.node_id
     }
+
+    pub fn hostname(&self) -> &str {
+        &self.node.hostname
+    }
 }

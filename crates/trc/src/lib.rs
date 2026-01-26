@@ -190,6 +190,7 @@ pub enum EventType {
     Ai(AiEvent),
     WebDav(WebDavEvent),
     Calendar(CalendarEvent),
+    Dns(DnsEvent),
 }
 
 #[event_type]
@@ -694,19 +695,24 @@ pub enum AcmeEvent {
     OrderValid,
     OrderInvalid,
     RenewBackoff,
-    DnsRecordCreated,
-    DnsRecordCreationFailed,
-    DnsRecordDeletionFailed,
-    DnsRecordNotPropagated,
-    DnsRecordLookupFailed,
-    DnsRecordPropagated,
-    DnsRecordPropagationTimeout,
     ClientSuppliedSni,
     ClientMissingSni,
     TlsAlpnReceived,
     TlsAlpnError,
     TokenNotFound,
     Error,
+}
+
+#[event_type]
+pub enum DnsEvent {
+    RecordCreated,
+    RecordCreationFailed,
+    RecordDeletionFailed,
+    RecordNotPropagated,
+    RecordLookupFailed,
+    RecordPropagated,
+    RecordPropagationTimeout,
+    BuildError,
 }
 
 #[event_type]
@@ -774,6 +780,7 @@ pub enum DkimEvent {
     SignatureExpired,
     SignatureLength,
     SignerNotFound,
+    BuildError,
 }
 
 #[event_type]

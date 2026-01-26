@@ -104,7 +104,7 @@ impl OAuthConfig {
             | SignatureAlgorithm::RS512
             | SignatureAlgorithm::PS256
             | SignatureAlgorithm::PS384
-            | SignatureAlgorithm::PS512 => parse_rsa_key(config).unwrap_or_else(|| {
+            | SignatureAlgorithm::PS512 => parse_rsa_key(bp).unwrap_or_else(|| {
                 (
                     Secret::Bytes(rand_key.clone()),
                     AlgorithmParameters::OctetKey(OctetKeyParameters {

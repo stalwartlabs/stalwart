@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use self::throttle::parse_queue_rate_limiter;
 use super::*;
 use crate::{
     config::server::ServerProtocol,
@@ -13,15 +12,22 @@ use crate::{
 use ahash::AHashMap;
 use mail_auth::IpLookupStrategy;
 use mail_send::Credentials;
-use registry::schema::enums::ExpressionConstant;
+use registry::schema::{
+    enums::{self, ExpressionConstant, ExpressionVariable, MtaRequiredOrOptional},
+    prelude::Object,
+    structs::{
+        DsnReportSettings, MtaConnectionStrategy, MtaDeliveryExpiration, MtaDeliverySchedule,
+        MtaInboundThrottle, MtaOutboundStrategy, MtaOutboundThrottle, MtaQueueQuota, MtaRoute,
+        MtaTlsStrategy, MtaVirtualQueue,
+    },
+};
 use std::{
     fmt::Display,
     hash::{Hash, Hasher},
     net::IpAddr,
     time::Duration,
 };
-use throttle::parse_queue_rate_limiter_key;
-use utils::config::{Config, utils::ParseValue};
+use utils::config::utils::ParseValue;
 
 #[derive(
     Debug,
@@ -187,483 +193,376 @@ pub enum RequireOptional {
     Disable,
 }
 
-impl Default for QueueConfig {
-    fn default() -> Self {
-        Self {
-            route: IfBlock::new_default(
-                "queue.strategy.route",
-                #[cfg(not(feature = "test_mode"))]
-                [("is_local_domain('*', rcpt_domain)", "'local'")],
-                #[cfg(feature = "test_mode")]
-                [],
-                "'mx'",
+impl QueueConfig {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let st = bp.setting_infallible::<MtaOutboundStrategy>().await;
+        let dsn = bp.setting_infallible::<DsnReportSettings>().await;
+
+        let mut queue = QueueConfig {
+            route: bp.compile_expr(Object::MtaOutboundStrategy.singleton(), &st.ctx_route()),
+            queue: bp.compile_expr(Object::MtaOutboundStrategy.singleton(), &st.ctx_schedule()),
+            connection: bp.compile_expr(
+                Object::MtaOutboundStrategy.singleton(),
+                &st.ctx_connection(),
             ),
-            queue: IfBlock::new_default(
-                "queue.strategy.schedule",
-                #[cfg(not(feature = "test_mode"))]
-                [
-                    ("is_local_domain('*', rcpt_domain)", "'local'"),
-                    ("source == 'dsn'", "'dsn'"),
-                    ("source == 'report'", "'report'"),
-                ],
-                #[cfg(feature = "test_mode")]
-                [],
-                #[cfg(not(feature = "test_mode"))]
-                "'remote'",
-                #[cfg(feature = "test_mode")]
-                "'default'",
-            ),
-            connection: IfBlock::new_default("queue.strategy.connection", [], "'default'"),
-            tls: IfBlock::new_default(
-                "queue.strategy.tls",
-                #[cfg(not(feature = "test_mode"))]
-                [("retry_num > 0 && last_error == 'tls'", "'invalid-tls'")],
-                #[cfg(feature = "test_mode")]
-                [],
-                "'default'",
-            ),
+            tls: bp.compile_expr(Object::MtaOutboundStrategy.singleton(), &st.ctx_tls()),
             dsn: Dsn {
-                name: IfBlock::new_default("report.dsn.from-name", [], "'Mail Delivery Subsystem'"),
-                address: IfBlock::new_default(
-                    "report.dsn.from-address",
-                    [],
-                    "'MAILER-DAEMON@' + config_get('report.domain')",
+                name: bp.compile_expr(Object::DsnReportSettings.singleton(), &dsn.ctx_from_name()),
+                address: bp.compile_expr(
+                    Object::DsnReportSettings.singleton(),
+                    &dsn.ctx_from_address(),
                 ),
-                sign: IfBlock::new_default(
-                    "report.dsn.sign",
-                    [],
-                    "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
+                sign: bp.compile_expr(
+                    Object::DsnReportSettings.singleton(),
+                    &dsn.ctx_dkim_sign_domain(),
                 ),
             },
-            inbound_limiters: QueueRateLimiters::default(),
-            outbound_limiters: QueueRateLimiters::default(),
-            quota: QueueQuotas::default(),
+            inbound_limiters: QueueRateLimiters::parse_inbound(bp).await,
+            outbound_limiters: QueueRateLimiters::parse_outbound(bp).await,
+            quota: QueueQuotas::parse(bp).await,
             queue_strategy: Default::default(),
-            virtual_queues: Default::default(),
             connection_strategy: Default::default(),
             routing_strategy: Default::default(),
             tls_strategy: Default::default(),
-        }
-    }
-}
+            virtual_queues: Default::default(),
+        };
 
-impl QueueConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        let mut queue = QueueConfig::default();
-        let rcpt_vars = TokenMap::default().with_variables(SMTP_QUEUE_RCPT_VARS);
-        let sender_vars = TokenMap::default().with_variables(SMTP_QUEUE_SENDER_VARS);
-        let host_vars = TokenMap::default().with_variables(SMTP_QUEUE_HOST_VARS);
-
-        for (value, key, token_map) in [
-            (&mut queue.route, "queue.strategy.route", &rcpt_vars),
-            (&mut queue.queue, "queue.strategy.schedule", &rcpt_vars),
-            (
-                &mut queue.connection,
-                "queue.strategy.connection",
-                &host_vars,
-            ),
-            (&mut queue.tls, "queue.strategy.tls", &host_vars),
-            (&mut queue.dsn.name, "report.dsn.from-name", &sender_vars),
-            (
-                &mut queue.dsn.address,
-                "report.dsn.from-address",
-                &sender_vars,
-            ),
-            (&mut queue.dsn.sign, "report.dsn.sign", &sender_vars),
-        ] {
-            if let Some(if_block) = IfBlock::try_parse(config, key, token_map) {
-                *value = if_block;
+        // Parse virtual queues
+        let mut queue_id_to_name = AHashMap::new();
+        for obj in bp.list_infallible::<MtaVirtualQueue>().await {
+            if bp.validate(obj.id, &obj.object)
+                && let Some(queue_name) = QueueName::new(&obj.object.name)
+            {
+                queue_id_to_name.insert(obj.id, queue_name);
+                queue.virtual_queues.insert(
+                    queue_name,
+                    VirtualQueue {
+                        threads: obj.object.threads_per_node as usize,
+                    },
+                );
             }
         }
 
-        // Parse strategies
-        queue.virtual_queues = parse_virtual_queues(config);
-        queue.queue_strategy = parse_queue_strategies(config, &queue.virtual_queues);
-        queue.connection_strategy = parse_connection_strategies(config);
-        queue.routing_strategy = parse_routing_strategies(config);
-        queue.tls_strategy = parse_tls_strategies(config);
+        // Parse queue strategies
+        for obj in bp.list_infallible::<MtaDeliverySchedule>().await {
+            if !bp.validate(obj.id, &obj.object) {
+                continue;
+            }
+            let virtual_queue = if let Some(name) = queue_id_to_name.get(&obj.object.queue_id) {
+                *name
+            } else {
+                bp.build_error(
+                    obj.id,
+                    format!("Virtual queue ID '{}' does not exist.", obj.object.queue_id),
+                );
+                continue;
+            };
+            queue.queue_strategy.insert(
+                obj.object.name,
+                QueueStrategy {
+                    retry: obj
+                        .object
+                        .retry
+                        .into_iter()
+                        .map(|d| d.into_inner().as_secs())
+                        .collect(),
+                    notify: obj
+                        .object
+                        .notify
+                        .into_iter()
+                        .map(|d| d.into_inner().as_secs())
+                        .collect(),
+                    expiry: match obj.object.expiry {
+                        MtaDeliveryExpiration::Ttl(exp) => {
+                            QueueExpiry::Ttl(exp.expire.into_inner().as_secs())
+                        }
+                        MtaDeliveryExpiration::Attempts(exp) => {
+                            QueueExpiry::Attempts(exp.max_attempts as u32)
+                        }
+                    },
+                    virtual_queue,
+                },
+            );
+        }
 
-        // Parse rate limiters
-        queue.inbound_limiters = parse_inbound_rate_limiters(config);
-        queue.outbound_limiters = parse_outbound_rate_limiters(config);
-        queue.quota = parse_queue_quota(config);
+        // Parse connection strategies
+        for obj in bp.list_infallible::<MtaConnectionStrategy>().await {
+            if !bp.validate(obj.id, &obj.object) {
+                continue;
+            }
+
+            let mut source_ipv4 = Vec::new();
+            let mut source_ipv6 = Vec::new();
+
+            for ip_host in obj.object.source_ips {
+                let ip_host = IpAndHost {
+                    ip: ip_host.source_ip.into_inner(),
+                    host: ip_host.ehlo_hostname,
+                };
+                if ip_host.ip.is_ipv4() {
+                    source_ipv4.push(ip_host);
+                } else {
+                    source_ipv6.push(ip_host);
+                }
+            }
+
+            queue.connection_strategy.insert(
+                obj.object.name,
+                ConnectionStrategy {
+                    source_ipv4,
+                    source_ipv6,
+                    ehlo_hostname: obj.object.ehlo_hostname,
+                    timeout_connect: obj.object.connect_timeout.into_inner(),
+                    timeout_greeting: obj.object.greeting_timeout.into_inner(),
+                    timeout_ehlo: obj.object.ehlo_timeout.into_inner(),
+                    timeout_mail: obj.object.mail_from_timeout.into_inner(),
+                    timeout_rcpt: obj.object.rcpt_to_timeout.into_inner(),
+                    timeout_data: obj.object.data_timeout.into_inner(),
+                },
+            );
+        }
+
+        // Parse routing strategies
+        for obj in bp.list_infallible::<MtaRoute>().await {
+            if !bp.validate(obj.id, &obj.object) {
+                continue;
+            }
+
+            match obj.object {
+                MtaRoute::Mx(route) => {
+                    queue.routing_strategy.insert(
+                        route.name,
+                        RoutingStrategy::Mx(MxConfig {
+                            max_mx: route.max_mx_hosts as usize,
+                            max_multi_homed: route.max_multihomed as usize,
+                            ip_lookup_strategy: match route.ip_lookup_strategy {
+                                enums::MtaIpStrategy::V4ThenV6 => IpLookupStrategy::Ipv4thenIpv6,
+                                enums::MtaIpStrategy::V6ThenV4 => IpLookupStrategy::Ipv6thenIpv4,
+                                enums::MtaIpStrategy::V4Only => IpLookupStrategy::Ipv4Only,
+                                enums::MtaIpStrategy::V6Only => IpLookupStrategy::Ipv6Only,
+                            },
+                        }),
+                    );
+                }
+                MtaRoute::Relay(route) => {
+                    queue.routing_strategy.insert(
+                        route.name,
+                        RoutingStrategy::Relay(RelayConfig {
+                            address: route.address,
+                            port: route.port as u16,
+                            protocol: match route.protocol {
+                                enums::MtaProtocol::Smtp => ServerProtocol::Smtp,
+                                enums::MtaProtocol::Lmtp => ServerProtocol::Lmtp,
+                            },
+                            auth: route
+                                .auth_username
+                                .and_then(|user| route.auth_secret.map(|secret| (user, secret)))
+                                .map(|(user, secret)| Credentials::new(user, secret)),
+                            tls_implicit: route.implicit_tls,
+                            tls_allow_invalid_certs: route.allow_invalid_certs,
+                        }),
+                    );
+                }
+                MtaRoute::Local(route) => {
+                    queue
+                        .routing_strategy
+                        .insert(route.name, RoutingStrategy::Local);
+                }
+            }
+        }
+
+        // Parse TLS strategies
+        for obj in bp.list_infallible::<MtaTlsStrategy>().await {
+            if !bp.validate(obj.id, &obj.object) {
+                continue;
+            }
+
+            queue.tls_strategy.insert(
+                obj.object.name,
+                TlsStrategy {
+                    dane: match obj.object.dane {
+                        MtaRequiredOrOptional::Optional => RequireOptional::Optional,
+                        MtaRequiredOrOptional::Require => RequireOptional::Require,
+                        MtaRequiredOrOptional::Disable => RequireOptional::Disable,
+                    },
+                    mta_sts: match obj.object.mta_sts {
+                        MtaRequiredOrOptional::Optional => RequireOptional::Optional,
+                        MtaRequiredOrOptional::Require => RequireOptional::Require,
+                        MtaRequiredOrOptional::Disable => RequireOptional::Disable,
+                    },
+                    tls: match obj.object.start_tls {
+                        MtaRequiredOrOptional::Optional => RequireOptional::Optional,
+                        MtaRequiredOrOptional::Require => RequireOptional::Require,
+                        MtaRequiredOrOptional::Disable => RequireOptional::Disable,
+                    },
+                    allow_invalid_certs: obj.object.allow_invalid_certs,
+                    timeout_tls: obj.object.tls_timeout.into_inner(),
+                    timeout_mta_sts: obj.object.mta_sts_timeout.into_inner(),
+                },
+            );
+        }
+
         queue
     }
 }
 
-fn parse_queue_strategies(
-    bp: &mut Bootstrap,
-    queues: &AHashMap<QueueName, VirtualQueue>,
-) -> AHashMap<String, QueueStrategy> {
-    let mut entries = AHashMap::new();
-    for key in config.sub_keys_with_suffixes(
-        "queue.schedule",
-        &[
-            ".queue-name",
-            ".retry",
-            ".notify",
-            ".expire",
-            ".max-attempts",
-        ],
-    ) {
-        if let Some(strategy) = parse_queue_strategy(config, &key, queues) {
-            entries.insert(key, strategy);
-        }
-    }
-    entries
-}
+impl QueueRateLimiters {
+    async fn parse_inbound(bp: &mut Bootstrap) -> QueueRateLimiters {
+        let mut throttle = QueueRateLimiters::default();
 
-fn parse_queue_strategy(
-    bp: &mut Bootstrap,
-    id: &str,
-    queues: &AHashMap<QueueName, VirtualQueue>,
-) -> Option<QueueStrategy> {
-    let virtual_queue = config
-        .property_require::<QueueName>(("queue.schedule", id, "queue-name"))
-        .unwrap_or_default();
-    if virtual_queue != DEFAULT_QUEUE_NAME && !queues.contains_key(&virtual_queue) {
-        config.new_parse_error(
-            ("queue.schedule", id, "queue-name"),
-            format!("Virtual queue '{virtual_queue}' does not exist."),
-        );
-        return None;
-    }
-    let mut retry: Vec<u64> = config
-        .properties::<Duration>(("queue.schedule", id, "retry"))
-        .into_iter()
-        .map(|(_, d)| d.as_secs())
-        .collect();
-    let mut notify: Vec<u64> = config
-        .properties::<Duration>(("queue.schedule", id, "notify"))
-        .into_iter()
-        .map(|(_, d)| d.as_secs())
-        .collect();
-    if retry.is_empty() {
-        config.new_parse_error(
-            ("queue.schedule", id, "retry"),
-            "At least one 'retry' duration must be specified.".to_string(),
-        );
-        retry.push(60 * 60); // Default to 1 minute
-    }
-    if notify.is_empty() {
-        notify.push(10000 * 86400); // Disable notifications by default
-    }
-
-    Some(QueueStrategy {
-        retry,
-        notify,
-        expiry: match (
-            config.property::<Duration>(("queue.schedule", id, "expire")),
-            config.property::<u32>(("queue.schedule", id, "max-attempts")),
-        ) {
-            (Some(duration), None) => QueueExpiry::Ttl(duration.as_secs()),
-            (None, Some(count)) => QueueExpiry::Attempts(count),
-            (Some(_), Some(_)) => {
-                config.new_parse_error(
-                    ("queue.schedule", id, "expire"),
-                    "Cannot specify both 'expire' and 'max-attempts'.".to_string(),
-                );
-                return None;
+        for obj in bp.list_infallible::<MtaInboundThrottle>().await {
+            if !bp.validate(obj.id, &obj.object) || !obj.object.enable {
+                continue;
             }
-            (None, None) => QueueExpiry::Ttl(60 * 60 * 24 * 3), // Default to 3 days
-        },
-        virtual_queue,
-    })
-}
 
-fn parse_virtual_queues(bp: &mut Bootstrap) -> AHashMap<QueueName, VirtualQueue> {
-    let mut entries = AHashMap::new();
-    for key in config.sub_keys("queue.virtual", ".threads-per-node") {
-        if let Some(queue_name) = QueueName::new(&key) {
-            if let Some(queue) = parse_virtual_queue(config, &key) {
-                entries.insert(queue_name, queue);
-            }
-        } else {
-            config.new_parse_error(
-                ("queue.virtual", &key, "threads-per-node"),
-                format!("Invalid virtual queue name: {key:?}. Must be 1-8 bytes long."),
-            );
-        }
-    }
-    entries
-}
+            let limiter = QueueRateLimiter {
+                expr: bp.compile_expr(obj.id, &obj.object.ctx_match_()).default,
+                id: obj.object.name,
+                keys: obj
+                    .object
+                    .key
+                    .iter()
+                    .map(|key| match key {
+                        enums::MtaInboundThrottleKey::Rcpt => THROTTLE_RCPT,
+                        enums::MtaInboundThrottleKey::RcptDomain => THROTTLE_RCPT_DOMAIN,
+                        enums::MtaInboundThrottleKey::Sender => THROTTLE_SENDER,
+                        enums::MtaInboundThrottleKey::SenderDomain => THROTTLE_SENDER_DOMAIN,
+                        enums::MtaInboundThrottleKey::AuthenticatedAs => THROTTLE_AUTH_AS,
+                        enums::MtaInboundThrottleKey::Listener => THROTTLE_LISTENER,
+                        enums::MtaInboundThrottleKey::RemoteIp => THROTTLE_REMOTE_IP,
+                        enums::MtaInboundThrottleKey::LocalIp => THROTTLE_LOCAL_IP,
+                        enums::MtaInboundThrottleKey::HeloDomain => THROTTLE_HELO_DOMAIN,
+                    })
+                    .fold(0, |acc, key| acc | key),
+                rate: obj.object.rate,
+            };
 
-fn parse_virtual_queue(bp: &mut Bootstrap, id: &str) -> Option<VirtualQueue> {
-    Some(VirtualQueue {
-        threads: config
-            .property_require::<usize>(("queue.virtual", id, "threads-per-node"))
-            .unwrap_or(1),
-    })
-}
-
-fn parse_routing_strategies(bp: &mut Bootstrap) -> AHashMap<String, RoutingStrategy> {
-    let mut entries = AHashMap::new();
-    for key in config.sub_keys("queue.route", ".type") {
-        if let Some(strategy) = parse_route(config, &key) {
-            entries.insert(key, strategy);
-        }
-    }
-    entries
-}
-
-fn parse_route(bp: &mut Bootstrap, id: &str) -> Option<RoutingStrategy> {
-    match config.value_require_non_empty(("queue.route", id, "type"))? {
-        "relay" => RoutingStrategy::Relay(RelayConfig {
-            address: config.property_require(("queue.route", id, "address"))?,
-            port: config
-                .property_require(("queue.route", id, "port"))
-                .unwrap_or(25),
-            protocol: config
-                .property_require(("queue.route", id, "protocol"))
-                .unwrap_or(ServerProtocol::Smtp),
-            auth: if let (Some(username), Some(secret)) = (
-                config.value(("queue.route", id, "auth.username")),
-                config.value(("queue.route", id, "auth.secret")),
-            ) {
-                Credentials::new(username.to_string(), secret.to_string()).into()
+            if (limiter.keys & (THROTTLE_RCPT | THROTTLE_RCPT_DOMAIN)) != 0
+                || limiter.expr.items().iter().any(|c| {
+                    matches!(
+                        c,
+                        ExpressionItem::Variable(
+                            ExpressionVariable::Rcpt | ExpressionVariable::RcptDomain
+                        )
+                    )
+                })
+            {
+                throttle.rcpt.push(limiter);
+            } else if (limiter.keys
+                & (THROTTLE_SENDER
+                    | THROTTLE_SENDER_DOMAIN
+                    | THROTTLE_HELO_DOMAIN
+                    | THROTTLE_AUTH_AS))
+                != 0
+                || limiter.expr.items().iter().any(|c| {
+                    matches!(
+                        c,
+                        ExpressionItem::Variable(
+                            ExpressionVariable::Sender
+                                | ExpressionVariable::SenderDomain
+                                | ExpressionVariable::HeloDomain
+                                | ExpressionVariable::AuthenticatedAs
+                        )
+                    )
+                })
+            {
+                throttle.sender.push(limiter);
             } else {
-                None
-            },
-            tls_implicit: config
-                .property(("queue.route", id, "tls.implicit"))
-                .unwrap_or(true),
-            tls_allow_invalid_certs: config
-                .property(("queue.route", id, "tls.allow-invalid-certs"))
-                .unwrap_or(false),
-        })
-        .into(),
-        "local" => RoutingStrategy::Local.into(),
-        "mx" => RoutingStrategy::Mx(MxConfig {
-            max_mx: config
-                .property(("queue.route", id, "limits.mx"))
-                .unwrap_or(5),
-            max_multi_homed: config
-                .property(("queue.route", id, "limits.multihomed"))
-                .unwrap_or(2),
-            ip_lookup_strategy: config
-                .property(("queue.route", id, "ip-lookup"))
-                .unwrap_or(IpLookupStrategy::Ipv4thenIpv6),
-        })
-        .into(),
-        invalid => {
-            let details =
-                format!("Invalid route type: {invalid:?}. Expected 'relay', 'local', or 'mx'.");
-            config.new_parse_error(("queue.route", id, "type"), details);
-            None
+                throttle.remote.push(limiter);
+            }
         }
+
+        throttle
+    }
+
+    async fn parse_outbound(bp: &mut Bootstrap) -> QueueRateLimiters {
+        // Parse throttle
+        let mut throttle = QueueRateLimiters::default();
+
+        for obj in bp.list_infallible::<MtaOutboundThrottle>().await {
+            if !bp.validate(obj.id, &obj.object) || !obj.object.enable {
+                continue;
+            }
+
+            let limiter = QueueRateLimiter {
+                expr: bp.compile_expr(obj.id, &obj.object.ctx_match_()).default,
+                id: obj.object.name,
+                keys: obj
+                    .object
+                    .key
+                    .iter()
+                    .map(|key| match key {
+                        enums::MtaOutboundThrottleKey::RcptDomain => THROTTLE_RCPT_DOMAIN,
+                        enums::MtaOutboundThrottleKey::Sender => THROTTLE_SENDER,
+                        enums::MtaOutboundThrottleKey::SenderDomain => THROTTLE_SENDER_DOMAIN,
+                        enums::MtaOutboundThrottleKey::Mx => THROTTLE_MX,
+                        enums::MtaOutboundThrottleKey::RemoteIp => THROTTLE_REMOTE_IP,
+                        enums::MtaOutboundThrottleKey::LocalIp => THROTTLE_LOCAL_IP,
+                    })
+                    .fold(0, |acc, key| acc | key),
+                rate: obj.object.rate,
+            };
+            if (limiter.keys & (THROTTLE_MX | THROTTLE_REMOTE_IP | THROTTLE_LOCAL_IP)) != 0
+                || limiter.expr.items().iter().any(|c| {
+                    matches!(
+                        c,
+                        ExpressionItem::Variable(
+                            ExpressionVariable::Mx
+                                | ExpressionVariable::RemoteIp
+                                | ExpressionVariable::LocalIp
+                        )
+                    )
+                })
+            {
+                throttle.remote.push(limiter);
+            } else if (limiter.keys & (THROTTLE_RCPT_DOMAIN)) != 0
+                || limiter
+                    .expr
+                    .items()
+                    .iter()
+                    .any(|c| matches!(c, ExpressionItem::Variable(ExpressionVariable::RcptDomain)))
+            {
+                throttle.rcpt.push(limiter);
+            } else {
+                throttle.sender.push(limiter);
+            }
+        }
+
+        throttle
     }
 }
 
-fn parse_tls_strategies(bp: &mut Bootstrap) -> AHashMap<String, TlsStrategy> {
-    let mut entries = AHashMap::new();
-    for key in config.sub_keys_with_suffixes(
-        "queue.tls",
-        &[
-            ".allow-invalid-certs",
-            ".dane",
-            ".starttls",
-            ".timeout.tls",
-            ".timeout.mta-sts",
-        ],
-    ) {
-        if let Some(strategy) = parse_tls(config, &key) {
-            entries.insert(key, strategy);
-        }
-    }
-    entries
-}
-
-fn parse_tls(bp: &mut Bootstrap, id: &str) -> Option<TlsStrategy> {
-    Some(TlsStrategy {
-        dane: config
-            .property::<RequireOptional>(("queue.tls", id, "dane"))
-            .unwrap_or(RequireOptional::Optional),
-        mta_sts: config
-            .property::<RequireOptional>(("queue.tls", id, "mta-sts"))
-            .unwrap_or(RequireOptional::Optional),
-        tls: config
-            .property::<RequireOptional>(("queue.tls", id, "starttls"))
-            .unwrap_or(RequireOptional::Optional),
-        allow_invalid_certs: config
-            .property::<bool>(("queue.tls", id, "allow-invalid-certs"))
-            .unwrap_or(false),
-        timeout_tls: config
-            .property::<Duration>(("queue.tls", id, "timeout.tls"))
-            .unwrap_or(Duration::from_secs(3 * 60)),
-        timeout_mta_sts: config
-            .property::<Duration>(("queue.tls", id, "timeout.mta-sts"))
-            .unwrap_or(Duration::from_secs(5 * 60)),
-    })
-}
-
-fn parse_connection_strategies(bp: &mut Bootstrap) -> AHashMap<String, ConnectionStrategy> {
-    let mut entries = AHashMap::new();
-    for key in config.sub_keys_with_suffixes(
-        "queue.connection",
-        &[
-            ".timeout.connect",
-            ".timeout.greeting",
-            ".timeout.ehlo",
-            ".timeout.mail-from",
-            ".timeout.rcpt-to",
-            ".timeout.data",
-            ".ehlo-hostname",
-        ],
-    ) {
-        if let Some(strategy) = parse_connection(config, &key) {
-            entries.insert(key, strategy);
-        }
-    }
-    entries
-}
-
-fn parse_connection(bp: &mut Bootstrap, id: &str) -> Option<ConnectionStrategy> {
-    let mut source_ipv4 = Vec::new();
-    let mut source_ipv6 = Vec::new();
-
-    for (_, ip) in config.properties::<IpAddr>(("queue.connection", id, "source-ips")) {
-        let ip_and_host = IpAndHost {
-            ip,
-            host: config.property::<String>(("queue.source-ip", ip.to_string(), "ehlo-hostname")),
+impl QueueQuotas {
+    async fn parse(bp: &mut Bootstrap) -> QueueQuotas {
+        let mut capacities = QueueQuotas {
+            sender: Vec::new(),
+            rcpt: Vec::new(),
+            rcpt_domain: Vec::new(),
         };
 
-        if ip.is_ipv4() {
-            source_ipv4.push(ip_and_host);
-        } else {
-            source_ipv6.push(ip_and_host);
-        }
-    }
+        for obj in bp.list_infallible::<MtaQueueQuota>().await {
+            if !bp.validate(obj.id, &obj.object) || !obj.object.enable {
+                continue;
+            }
 
-    Some(ConnectionStrategy {
-        source_ipv4,
-        source_ipv6,
-        ehlo_hostname: config.property::<String>(("queue.connection", id, "ehlo-hostname")),
-        timeout_connect: config
-            .property::<Duration>(("queue.connection", id, "timeout.connect"))
-            .unwrap_or(Duration::from_secs(5 * 60)),
-        timeout_greeting: config
-            .property::<Duration>(("queue.connection", id, "timeout.greeting"))
-            .unwrap_or(Duration::from_secs(5 * 60)),
-        timeout_ehlo: config
-            .property::<Duration>(("queue.connection", id, "timeout.ehlo"))
-            .unwrap_or(Duration::from_secs(5 * 60)),
-        timeout_mail: config
-            .property::<Duration>(("queue.connection", id, "timeout.mail-from"))
-            .unwrap_or(Duration::from_secs(5 * 60)),
-        timeout_rcpt: config
-            .property::<Duration>(("queue.connection", id, "timeout.rcpt-to"))
-            .unwrap_or(Duration::from_secs(5 * 60)),
-        timeout_data: config
-            .property::<Duration>(("queue.connection", id, "timeout.data"))
-            .unwrap_or(Duration::from_secs(10 * 60)),
-    })
-}
+            let quota = QueueQuota {
+                expr: bp.compile_expr(obj.id, &obj.object.ctx_match_()).default,
+                id: obj.object.name,
+                keys: obj
+                    .object
+                    .key
+                    .iter()
+                    .map(|key| match key {
+                        enums::MtaQueueQuotaKey::Rcpt => THROTTLE_RCPT,
+                        enums::MtaQueueQuotaKey::RcptDomain => THROTTLE_RCPT_DOMAIN,
+                        enums::MtaQueueQuotaKey::Sender => THROTTLE_SENDER,
+                        enums::MtaQueueQuotaKey::SenderDomain => THROTTLE_SENDER_DOMAIN,
+                    })
+                    .fold(0, |acc, key| acc | key),
+                size: obj.object.size,
+                messages: obj.object.messages,
+            };
 
-fn parse_inbound_rate_limiters(bp: &mut Bootstrap) -> QueueRateLimiters {
-    let mut throttle = QueueRateLimiters::default();
-    let all_throttles = parse_queue_rate_limiter(
-        config,
-        "queue.limiter.inbound",
-        &TokenMap::default().with_variables(SMTP_RCPT_TO_VARS),
-        THROTTLE_LISTENER
-            | THROTTLE_REMOTE_IP
-            | THROTTLE_LOCAL_IP
-            | THROTTLE_AUTH_AS
-            | THROTTLE_HELO_DOMAIN
-            | THROTTLE_RCPT
-            | THROTTLE_RCPT_DOMAIN
-            | THROTTLE_SENDER
-            | THROTTLE_SENDER_DOMAIN,
-    );
-    for t in all_throttles {
-        if (t.keys & (THROTTLE_RCPT | THROTTLE_RCPT_DOMAIN)) != 0
-            || t.expr.items().iter().any(|c| {
-                matches!(
-                    c,
-                    ExpressionItem::Variable(
-                        ExpressionVariable::Rcpt | ExpressionVariable::RcptDomain
-                    )
-                )
-            })
-        {
-            throttle.rcpt.push(t);
-        } else if (t.keys
-            & (THROTTLE_SENDER | THROTTLE_SENDER_DOMAIN | THROTTLE_HELO_DOMAIN | THROTTLE_AUTH_AS))
-            != 0
-            || t.expr.items().iter().any(|c| {
-                matches!(
-                    c,
-                    ExpressionItem::Variable(
-                        ExpressionVariable::Sender
-                            | ExpressionVariable::SenderDomain
-                            | ExpressionVariable::HeloDomain
-                            | ExpressionVariable::AuthenticatedAs
-                    )
-                )
-            })
-        {
-            throttle.sender.push(t);
-        } else {
-            throttle.remote.push(t);
-        }
-    }
-
-    throttle
-}
-
-fn parse_outbound_rate_limiters(bp: &mut Bootstrap) -> QueueRateLimiters {
-    // Parse throttle
-    let mut throttle = QueueRateLimiters::default();
-
-    let all_throttles = parse_queue_rate_limiter(
-        config,
-        "queue.limiter.outbound",
-        &TokenMap::default().with_variables(SMTP_QUEUE_HOST_VARS),
-        THROTTLE_RCPT_DOMAIN
-            | THROTTLE_SENDER
-            | THROTTLE_SENDER_DOMAIN
-            | THROTTLE_MX
-            | THROTTLE_REMOTE_IP
-            | THROTTLE_LOCAL_IP,
-    );
-    for t in all_throttles {
-        if (t.keys & (THROTTLE_MX | THROTTLE_REMOTE_IP | THROTTLE_LOCAL_IP)) != 0
-            || t.expr.items().iter().any(|c| {
-                matches!(
-                    c,
-                    ExpressionItem::Variable(
-                        ExpressionVariable::Mx
-                            | ExpressionVariable::RemoteIp
-                            | ExpressionVariable::LocalIp
-                    )
-                )
-            })
-        {
-            throttle.remote.push(t);
-        } else if (t.keys & (THROTTLE_RCPT_DOMAIN)) != 0
-            || t.expr
-                .items()
-                .iter()
-                .any(|c| matches!(c, ExpressionItem::Variable(ExpressionVariable::RcptDomain)))
-        {
-            throttle.rcpt.push(t);
-        } else {
-            throttle.sender.push(t);
-        }
-    }
-
-    throttle
-}
-
-fn parse_queue_quota(bp: &mut Bootstrap) -> QueueQuotas {
-    let mut capacities = QueueQuotas {
-        sender: Vec::new(),
-        rcpt: Vec::new(),
-        rcpt_domain: Vec::new(),
-    };
-
-    for quota_id in config.sub_keys("queue.quota", "") {
-        if let Some(quota) = parse_queue_quota_item(config, ("queue.quota", &quota_id), &quota_id) {
             if (quota.keys & THROTTLE_RCPT) != 0
                 || quota
                     .expr
@@ -684,92 +583,8 @@ fn parse_queue_quota(bp: &mut Bootstrap) -> QueueQuotas {
                 capacities.sender.push(quota);
             }
         }
-    }
 
-    capacities
-}
-
-fn parse_queue_quota_item(bp: &mut Bootstrap, prefix: impl AsKey, id: &str) -> Option<QueueQuota> {
-    let prefix = prefix.as_key();
-
-    // Skip disabled throttles
-    if !config
-        .property::<bool>((prefix.as_str(), "enable"))
-        .unwrap_or(true)
-    {
-        return None;
-    }
-
-    let mut keys = 0;
-    for (key_, value) in config
-        .values((&prefix, "key"))
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect::<Vec<_>>()
-    {
-        match parse_queue_rate_limiter_key(&value) {
-            Ok(key) => {
-                if (key
-                    & (THROTTLE_RCPT_DOMAIN
-                        | THROTTLE_RCPT
-                        | THROTTLE_SENDER
-                        | THROTTLE_SENDER_DOMAIN))
-                    != 0
-                {
-                    keys |= key;
-                } else {
-                    let err = format!("Quota key {value:?} is not available in this context");
-                    config.new_build_error(key_, err);
-                }
-            }
-            Err(err) => {
-                config.new_parse_error(key_, err);
-            }
-        }
-    }
-
-    let quota = QueueQuota {
-        id: id.to_string(),
-        expr: Expression::try_parse(
-            config,
-            (prefix.as_str(), "match"),
-            &TokenMap::default().with_variables(SMTP_QUEUE_HOST_VARS),
-        )
-        .unwrap_or_default(),
-        keys,
-        size: config
-            .property::<Option<u64>>((prefix.as_str(), "size"))
-            .filter(|&v| v.as_ref().is_some_and(|v| *v > 0))
-            .unwrap_or_default(),
-        messages: config
-            .property::<Option<u64>>((prefix.as_str(), "messages"))
-            .filter(|&v| v.as_ref().is_some_and(|v| *v > 0))
-            .unwrap_or_default(),
-    };
-
-    // Validate
-    if quota.size.is_none() && quota.messages.is_none() {
-        config.new_parse_error(
-            prefix.as_str(),
-            concat!(
-                "Queue quota needs to define a ",
-                "valid 'size' and/or 'messages' property."
-            )
-            .to_string(),
-        );
-        None
-    } else {
-        Some(quota)
-    }
-}
-
-impl ParseValue for RequireOptional {
-    fn parse_value(value: &str) -> Result<Self, String> {
-        match value {
-            "optional" => Ok(RequireOptional::Optional),
-            "require" | "required" => Ok(RequireOptional::Require),
-            "disable" | "disabled" | "none" | "false" => Ok(RequireOptional::Disable),
-            _ => Err(format!("Invalid TLS option value {:?}.", value,)),
-        }
+        capacities
     }
 }
 

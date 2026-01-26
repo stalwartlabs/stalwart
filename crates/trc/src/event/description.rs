@@ -54,6 +54,7 @@ impl EventType {
             EventType::Ai(event) => event.description(),
             EventType::WebDav(event) => event.description(),
             EventType::Calendar(event) => event.description(),
+            EventType::Dns(event) => event.description(),
         }
     }
 
@@ -104,6 +105,7 @@ impl EventType {
             EventType::Ai(event) => event.explain(),
             EventType::WebDav(event) => event.explain(),
             EventType::Calendar(event) => event.explain(),
+            EventType::Dns(event) => event.explain(),
         }
     }
 }
@@ -1221,13 +1223,6 @@ impl AcmeEvent {
             AcmeEvent::OrderValid => "ACME order valid",
             AcmeEvent::OrderInvalid => "ACME order invalid",
             AcmeEvent::RenewBackoff => "ACME renew backoff",
-            AcmeEvent::DnsRecordCreated => "ACME DNS record created",
-            AcmeEvent::DnsRecordCreationFailed => "ACME DNS record creation failed",
-            AcmeEvent::DnsRecordDeletionFailed => "ACME DNS record deletion failed",
-            AcmeEvent::DnsRecordNotPropagated => "ACME DNS record not propagated",
-            AcmeEvent::DnsRecordLookupFailed => "ACME DNS record lookup failed",
-            AcmeEvent::DnsRecordPropagated => "ACME DNS record propagated",
-            AcmeEvent::DnsRecordPropagationTimeout => "ACME DNS record propagation timeout",
             AcmeEvent::ClientSuppliedSni => "ACME client supplied SNI",
             AcmeEvent::ClientMissingSni => "ACME client missing SNI",
             AcmeEvent::TlsAlpnReceived => "ACME TLS ALPN received",
@@ -1253,19 +1248,40 @@ impl AcmeEvent {
             AcmeEvent::OrderValid => "ACME order is valid",
             AcmeEvent::OrderInvalid => "ACME order is invalid",
             AcmeEvent::RenewBackoff => "ACME renew backoff",
-            AcmeEvent::DnsRecordCreated => "ACME DNS record has been created",
-            AcmeEvent::DnsRecordCreationFailed => "Failed to create ACME DNS record",
-            AcmeEvent::DnsRecordDeletionFailed => "Failed to delete ACME DNS record",
-            AcmeEvent::DnsRecordNotPropagated => "ACME DNS record has not propagated",
-            AcmeEvent::DnsRecordLookupFailed => "Failed to look up ACME DNS record",
-            AcmeEvent::DnsRecordPropagated => "ACME DNS record has propagated",
-            AcmeEvent::DnsRecordPropagationTimeout => "ACME DNS record propagation timeout",
             AcmeEvent::ClientSuppliedSni => "ACME client supplied SNI",
             AcmeEvent::ClientMissingSni => "ACME client missing SNI",
             AcmeEvent::TlsAlpnReceived => "ACME TLS ALPN received",
             AcmeEvent::TlsAlpnError => "ACME TLS ALPN error",
             AcmeEvent::TokenNotFound => "ACME token not found",
             AcmeEvent::Error => "An error occurred with ACME",
+        }
+    }
+}
+
+impl DnsEvent {
+    pub fn description(&self) -> &'static str {
+        match self {
+            DnsEvent::RecordCreated => "DNS record created",
+            DnsEvent::RecordCreationFailed => "DNS record creation failed",
+            DnsEvent::RecordDeletionFailed => "DNS record deletion failed",
+            DnsEvent::RecordNotPropagated => "DNS record not propagated",
+            DnsEvent::RecordLookupFailed => "DNS record lookup failed",
+            DnsEvent::RecordPropagated => "DNS record propagated",
+            DnsEvent::RecordPropagationTimeout => "DNS record propagation timeout",
+            DnsEvent::BuildError => "DNS updater build error",
+        }
+    }
+
+    pub fn explain(&self) -> &'static str {
+        match self {
+            DnsEvent::RecordCreated => "DNS record has been created",
+            DnsEvent::RecordCreationFailed => "Failed to create DNS record",
+            DnsEvent::RecordDeletionFailed => "Failed to delete DNS record",
+            DnsEvent::RecordNotPropagated => "DNS record has not propagated",
+            DnsEvent::RecordLookupFailed => "Failed to look up DNS record",
+            DnsEvent::RecordPropagated => "DNS record has propagated",
+            DnsEvent::RecordPropagationTimeout => "DNS record propagation timeout",
+            DnsEvent::BuildError => "An error occurred while building the DNS updater",
         }
     }
 }
@@ -1399,6 +1415,7 @@ impl DkimEvent {
             DkimEvent::SignatureExpired => "DKIM signature expired",
             DkimEvent::SignatureLength => "DKIM signature length issue",
             DkimEvent::SignerNotFound => "DKIM signer not found",
+            DkimEvent::BuildError => "DKIM signature build error",
         }
     }
 
@@ -1422,6 +1439,7 @@ impl DkimEvent {
             DkimEvent::SignatureExpired => "The DKIM signature has expired",
             DkimEvent::SignatureLength => "The DKIM signature length is incorrect",
             DkimEvent::SignerNotFound => "The DKIM signer was not found",
+            DkimEvent::BuildError => "An error occurred while building the DKIM signature",
         }
     }
 }

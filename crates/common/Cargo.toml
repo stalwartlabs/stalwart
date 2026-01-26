@@ -76,6 +76,7 @@ indexmap = "2.7.1"
 tinyvec = "1.9.0"
 compact_str = { version = "0.9.0", features = ["rkyv", "serde"] }
 lz4_flex = { version = "0.12", features = ["frame"], default-features = false }
+hickory-proto = "0.24"
 
 [target.'cfg(unix)'.dependencies]
 privdrop = "0.5.3"

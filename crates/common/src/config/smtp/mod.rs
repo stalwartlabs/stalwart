@@ -4,25 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use utils::config::{Config, Rate};
-
 pub mod auth;
 pub mod queue;
 pub mod report;
 pub mod resolver;
 pub mod session;
-pub mod throttle;
-
-use crate::expr::{Expression, tokenizer::TokenMap};
 
 use self::{
     auth::MailAuthConfig, queue::QueueConfig, report::ReportConfig, resolver::Resolvers,
     session::SessionConfig,
 };
-
 use super::*;
+use crate::{expr::Expression, manager::bootstrap::Bootstrap};
+use registry::schema::structs::Rate;
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct SmtpConfig {
     pub session: SessionConfig,
     pub queue: QueueConfig,
@@ -32,7 +28,7 @@ pub struct SmtpConfig {
 }
 
 #[derive(Debug, Default, Clone)]
-#[cfg_attr(feature = "test_mode", derive(PartialEq, Eq))]
+//#[cfg_attr(feature = "test_mode", derive(PartialEq, Eq))]
 pub struct QueueRateLimiter {
     pub id: String,
     pub expr: Expression,
@@ -54,11 +50,11 @@ pub const THROTTLE_HELO_DOMAIN: u16 = 1 << 9;
 impl SmtpConfig {
     pub async fn parse(bp: &mut Bootstrap) -> Self {
         Self {
-            session: SessionConfig::parse(config),
-            queue: QueueConfig::parse(config),
-            resolvers: Resolvers::parse(config).await,
-            mail_auth: MailAuthConfig::parse(config),
-            report: ReportConfig::parse(config),
+            session: SessionConfig::parse(bp).await,
+            queue: QueueConfig::parse(bp).await,
+            resolvers: Resolvers::parse(bp).await,
+            mail_auth: MailAuthConfig::parse(bp).await,
+            report: ReportConfig::parse(bp).await,
         }
     }
 }

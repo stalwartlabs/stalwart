@@ -5,10 +5,7 @@
  */
 
 use self::{mailstore::jmap::JmapConfig, smtp::SmtpConfig, storage::Storage};
-use crate::{
-    Core, Network, Security, auth::oauth::config::OAuthConfig, expr::*,
-    listener::tls::AcmeProviders,
-};
+use crate::{Core, Network, Security, auth::oauth::config::OAuthConfig, expr::*};
 use arc_swap::ArcSwap;
 use coordinator::Coordinator;
 use directory::{Directories, Directory};
@@ -18,7 +15,6 @@ use ring::signature::{EcdsaKeyPair, RsaKeyPair};
 use std::sync::Arc;
 use store::{BlobBackend, BlobStore, InMemoryStore, SearchStore, Store, Stores};
 use telemetry::Metrics;
-use utils::config::utils::AsKey;
 
 pub mod groupware;
 pub mod inner;
@@ -166,7 +162,7 @@ impl Core {
             )
         }
 
-        let groupware = GroupwareConfig::parse(config);
+        let groupware = GroupwareConfig::parse(bp);
         Self {
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -175,14 +171,14 @@ impl Core {
             enterprise,
             // SPDX-SnippetEnd
             sieve: Scripting::parse(config, &stores).await,
-            network: Network::parse(config),
-            smtp: SmtpConfig::parse(config).await,
+            network: Network::parse(bp),
+            smtp: SmtpConfig::parse(bp).await,
             jmap: JmapConfig::parse(config, &groupware),
-            imap: ImapConfig::parse(config),
-            oauth: OAuthConfig::parse(config),
-            acme: AcmeProviders::parse(config),
-            metrics: Metrics::parse(config),
-            spam: SpamFilterConfig::parse(config).await,
+            imap: ImapConfig::parse(bp),
+            oauth: OAuthConfig::parse(bp),
+            acme: AcmeProviders::parse(bp),
+            metrics: Metrics::parse(bp),
+            spam: SpamFilterConfig::parse(bp).await,
             groupware,
             storage: Storage {
                 data,

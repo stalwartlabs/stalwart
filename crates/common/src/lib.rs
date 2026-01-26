@@ -175,7 +175,7 @@ pub struct Caches {
     pub dns_ipv4: CacheWithTtl<String, Arc<Vec<Ipv4Addr>>>,
     pub dns_ipv6: CacheWithTtl<String, Arc<Vec<Ipv6Addr>>>,
     pub dns_tlsa: CacheWithTtl<String, Arc<Tlsa>>,
-    pub dbs_mta_sts: CacheWithTtl<String, Arc<Policy>>,
+    pub dns_mta_sts: CacheWithTtl<String, Arc<Policy>>,
     pub dns_rbl: CacheWithTtl<String, Option<Arc<IpResolver>>>,
 }
 
@@ -496,7 +496,7 @@ impl Default for Caches {
             dns_ipv4: CacheWithTtl::new(1024, 10 * 1024 * 1024),
             dns_ipv6: CacheWithTtl::new(1024, 10 * 1024 * 1024),
             dns_tlsa: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dbs_mta_sts: CacheWithTtl::new(1024, 10 * 1024 * 1024),
+            dns_mta_sts: CacheWithTtl::new(1024, 10 * 1024 * 1024),
         }
     }
 }

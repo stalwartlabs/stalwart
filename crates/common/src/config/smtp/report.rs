@@ -5,10 +5,17 @@
  */
 
 use super::*;
-use crate::expr::{Constant, Variable, if_block::IfBlock, tokenizer::TokenMap};
-use registry::schema::enums::ExpressionConstant;
+use crate::expr::{Variable, if_block::IfBlock};
+use registry::schema::{
+    enums::ExpressionConstant,
+    prelude::Object,
+    structs::{
+        DataRetention, DkimReportSettings, DmarcReportSettings, ReportSettings, SpfReportSettings,
+        TlsReportSettings,
+    },
+};
 use std::time::Duration;
-use utils::config::{Config, utils::ParseValue};
+use utils::config::utils::ParseValue;
 
 #[derive(Clone)]
 pub struct ReportConfig {
@@ -66,152 +73,142 @@ pub enum AggregateFrequency {
 }
 
 impl ReportConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        let sender_vars = TokenMap::default().with_variables(SMTP_MAIL_FROM_VARS);
-        let rcpt_vars = TokenMap::default().with_variables(SMTP_RCPT_TO_VARS);
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let report = bp.setting_infallible::<ReportSettings>().await;
+        let dkim = bp.setting_infallible::<DkimReportSettings>().await;
+        let spf = bp.setting_infallible::<SpfReportSettings>().await;
+        let dmarc = bp.setting_infallible::<DmarcReportSettings>().await;
+        let tls = bp.setting_infallible::<TlsReportSettings>().await;
+        let dr = bp.setting_infallible::<DataRetention>().await;
 
-        Self {
-            submitter: IfBlock::try_parse(
-                config,
-                "report.submitter",
-                &TokenMap::default().with_variables(RCPT_DOMAIN_VARS),
-            )
-            .unwrap_or_else(|| {
-                IfBlock::new_default("report.submitter", [], "config_get('server.hostname')")
-            }),
+        ReportConfig {
+            submitter: bp.compile_expr(
+                Object::ReportSettings.singleton(),
+                &report.ctx_outbound_report_submitter(),
+            ),
             analysis: ReportAnalysis {
-                addresses: config
-                    .properties::<AddressMatch>("report.analysis.addresses")
-                    .into_iter()
-                    .map(|(_, m)| m)
+                addresses: report
+                    .inbound_report_addresses
+                    .iter()
+                    .filter_map(|addr| AddressMatch::parse_value(addr).ok())
                     .collect(),
-                forward: config.property("report.analysis.forward").unwrap_or(true),
-                store: config
-                    .property_or_default::<Option<Duration>>("report.analysis.store", "30d")
-                    .unwrap_or_default(),
+                forward: report.inbound_report_forwarding,
+                store: dr.hold_mta_reports_for.map(|d| d.into_inner()),
             },
-            dkim: Report::parse(config, "dkim", &rcpt_vars),
-            spf: Report::parse(config, "spf", &sender_vars),
-            dmarc: Report::parse(config, "dmarc", &rcpt_vars),
-            dmarc_aggregate: AggregateReport::parse(
-                config,
-                "dmarc",
-                &rcpt_vars.with_constants::<AggregateFrequency>(),
-            ),
-            tls: AggregateReport::parse(
-                config,
-                "tls",
-                &TokenMap::default()
-                    .with_variables(SMTP_QUEUE_HOST_VARS)
-                    .with_constants::<AggregateFrequency>(),
-            ),
-        }
-    }
-}
-
-impl Report {
-    pub fn parse(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Self {
-        let mut report = Self {
-            name: IfBlock::new_default(format!("report.{id}.from-name"), [], "'Report Subsystem'"),
-            address: IfBlock::new_default(
-                format!("report.{id}.from-address"),
-                [],
-                format!("'noreply-{id}@' + config_get('report.domain')"),
-            ),
-            subject: IfBlock::new_default(
-                format!("report.{id}.subject"),
-                [],
-                format!(
-                    "'{} Authentication Failure Report'",
-                    id.to_ascii_uppercase()
+            dkim: Report {
+                name: bp.compile_expr(
+                    Object::DkimReportSettings.singleton(),
+                    &dkim.ctx_from_name(),
                 ),
-            ),
-            sign: IfBlock::new_default(
-                format!("report.{id}.sign"),
-                [],
-                "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
-            ),
-            send: IfBlock::new_default(format!("report.{id}.send"), [], "[1, 1d]"),
-        };
-        for (value, key) in [
-            (&mut report.name, "from-name"),
-            (&mut report.address, "from-address"),
-            (&mut report.subject, "subject"),
-            (&mut report.sign, "sign"),
-            (&mut report.send, "send"),
-        ] {
-            if let Some(if_block) = IfBlock::try_parse(config, ("report", id, key), token_map) {
-                *value = if_block;
-            }
+                address: bp.compile_expr(
+                    Object::DkimReportSettings.singleton(),
+                    &dkim.ctx_from_address(),
+                ),
+                subject: bp
+                    .compile_expr(Object::DkimReportSettings.singleton(), &dkim.ctx_subject()),
+                sign: bp.compile_expr(
+                    Object::DkimReportSettings.singleton(),
+                    &dkim.ctx_dkim_sign_domain(),
+                ),
+                send: bp.compile_expr(
+                    Object::DkimReportSettings.singleton(),
+                    &dkim.ctx_send_frequency(),
+                ),
+            },
+            spf: Report {
+                name: bp.compile_expr(Object::SpfReportSettings.singleton(), &spf.ctx_from_name()),
+                address: bp.compile_expr(
+                    Object::SpfReportSettings.singleton(),
+                    &spf.ctx_from_address(),
+                ),
+                subject: bp.compile_expr(Object::SpfReportSettings.singleton(), &spf.ctx_subject()),
+                sign: bp.compile_expr(
+                    Object::SpfReportSettings.singleton(),
+                    &spf.ctx_dkim_sign_domain(),
+                ),
+                send: bp.compile_expr(
+                    Object::SpfReportSettings.singleton(),
+                    &spf.ctx_send_frequency(),
+                ),
+            },
+            dmarc: Report {
+                name: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_failure_from_name(),
+                ),
+                address: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_failure_from_address(),
+                ),
+                subject: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_failure_subject(),
+                ),
+                sign: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_failure_dkim_sign_domain(),
+                ),
+                send: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_failure_send_frequency(),
+                ),
+            },
+            dmarc_aggregate: AggregateReport {
+                name: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_aggregate_from_name(),
+                ),
+                address: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_aggregate_from_address(),
+                ),
+                org_name: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_aggregate_org_name(),
+                ),
+                contact_info: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_aggregate_contact_info(),
+                ),
+                send: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_aggregate_send_frequency(),
+                ),
+                sign: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_aggregate_dkim_sign_domain(),
+                ),
+                max_size: bp.compile_expr(
+                    Object::DmarcReportSettings.singleton(),
+                    &dmarc.ctx_aggregate_max_report_size(),
+                ),
+            },
+            tls: AggregateReport {
+                name: bp.compile_expr(Object::TlsReportSettings.singleton(), &tls.ctx_from_name()),
+                address: bp.compile_expr(
+                    Object::TlsReportSettings.singleton(),
+                    &tls.ctx_from_address(),
+                ),
+                org_name: bp
+                    .compile_expr(Object::TlsReportSettings.singleton(), &tls.ctx_org_name()),
+                contact_info: bp.compile_expr(
+                    Object::TlsReportSettings.singleton(),
+                    &tls.ctx_contact_info(),
+                ),
+                send: bp.compile_expr(
+                    Object::TlsReportSettings.singleton(),
+                    &tls.ctx_send_frequency(),
+                ),
+                sign: bp.compile_expr(
+                    Object::TlsReportSettings.singleton(),
+                    &tls.ctx_dkim_sign_domain(),
+                ),
+                max_size: bp.compile_expr(
+                    Object::TlsReportSettings.singleton(),
+                    &tls.ctx_max_report_size(),
+                ),
+            },
         }
-
-        report
-    }
-}
-
-impl AggregateReport {
-    pub fn parse(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Self {
-        let rcpt_vars = TokenMap::default().with_variables(RCPT_DOMAIN_VARS);
-
-        let mut report = Self {
-            name: IfBlock::new_default(
-                format!("report.{id}.aggregate.from-name"),
-                [],
-                format!("'{} Aggregate Report'", id.to_ascii_uppercase()),
-            ),
-            address: IfBlock::new_default(
-                format!("report.{id}.aggregate.from-address"),
-                [],
-                format!("'noreply-{id}@' + config_get('report.domain')"),
-            ),
-            org_name: IfBlock::new_default(
-                format!("report.{id}.aggregate.org-name"),
-                [],
-                "config_get('report.domain')",
-            ),
-            contact_info: IfBlock::empty(format!("report.{id}.aggregate.contact-info")),
-            send: IfBlock::new_default::<AggregateFrequency>(
-                format!("report.{id}.aggregate.send"),
-                [],
-                "daily",
-            ),
-            sign: IfBlock::new_default(
-                format!("report.{id}.aggregate.sign"),
-                [],
-                "['rsa-' + config_get('report.domain'), 'ed25519-' + config_get('report.domain')]",
-            ),
-            max_size: IfBlock::new_default(
-                format!("report.{id}.aggregate.max-size"),
-                [],
-                "26214400",
-            ),
-        };
-
-        for (value, key, token_map) in [
-            (&mut report.name, "aggregate.from-name", &rcpt_vars),
-            (&mut report.address, "aggregate.from-address", &rcpt_vars),
-            (&mut report.org_name, "aggregate.org-name", &rcpt_vars),
-            (
-                &mut report.contact_info,
-                "aggregate.contact-info",
-                &rcpt_vars,
-            ),
-            (&mut report.send, "aggregate.send", token_map),
-            (&mut report.sign, "aggregate.sign", &rcpt_vars),
-            (&mut report.max_size, "aggregate.max-size", &rcpt_vars),
-        ] {
-            if let Some(if_block) = IfBlock::try_parse(config, ("report", id, key), token_map) {
-                *value = if_block;
-            }
-        }
-
-        report
-    }
-}
-
-impl Default for ReportConfig {
-    fn default() -> Self {
-        Self::parse(&mut Config::default())
     }
 }
 

@@ -18,7 +18,8 @@ use utils::config::{Config, http::build_http_client, utils::AsKey};
 
 impl MeiliSearchStore {
     pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let client = build_http_client(config, prefix.clone(), "application/json".into())?;
+        todo!()
+        /*let client = build_http_client(config, prefix.clone(), "application/json".into())?;
         let prefix = prefix.as_key();
         let url = config
             .value_require((&prefix, "url"))?
@@ -55,7 +56,7 @@ impl MeiliSearchStore {
             task_poll_interval,
             task_poll_retries,
             task_fail_on_timeout,
-        })
+        })*/
     }
 
     pub async fn create_indexes(&self) -> trc::Result<()> {

@@ -33,11 +33,6 @@ use super::{
 pub static TLS13_VERSION: &[&SupportedProtocolVersion] = &[&TLS13];
 pub static TLS12_VERSION: &[&SupportedProtocolVersion] = &[&TLS12];
 
-#[derive(Default, Clone)]
-pub struct AcmeProviders {
-    pub providers: AHashMap<String, AcmeProvider>,
-}
-
 #[derive(Clone)]
 pub struct CertificateResolver {
     pub inner: Arc<Inner>,

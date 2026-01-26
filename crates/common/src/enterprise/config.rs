@@ -196,7 +196,7 @@ impl Enterprise {
             logo_url: config.value("enterprise.logo-url").map(|s| s.to_string()),
             trace_store,
             metrics_store,
-            metrics_alerts: parse_metric_alerts(config),
+            metrics_alerts: parse_metric_alerts(bp),
             spam_filter_llm: SpamFilterLlmConfig::parse(config, &ai_apis),
             ai_apis,
             template_calendar_alarm: None,

@@ -10,15 +10,14 @@ pub mod jose;
 pub mod order;
 pub mod resolver;
 
-use std::{fmt::Debug, sync::Arc, time::Duration};
-
+use self::directory::{Account, ChallengeType};
+use crate::Server;
 use arc_swap::ArcSwap;
 use dns_update::DnsUpdater;
+use registry::schema::structs;
 use rustls::sign::CertifiedKey;
-
-use crate::Server;
-
-use self::directory::{Account, ChallengeType};
+use std::{fmt::Debug, sync::Arc, time::Duration};
+use store::registry::RegistryObject;
 
 pub struct AcmeProvider {
     pub id: String,
@@ -56,37 +55,8 @@ pub struct StaticResolver {
 }
 
 impl AcmeProvider {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        id: String,
-        directory_url: String,
-        domains: Vec<String>,
-        contact: Vec<String>,
-        challenge: ChallengeSettings,
-        eab: Option<EabSettings>,
-        renew_before: Duration,
-        default: bool,
-    ) -> trc::Result<Self> {
-        Ok(AcmeProvider {
-            id,
-            directory_url,
-            contact: contact
-                .into_iter()
-                .map(|c| {
-                    if !c.starts_with("mailto:") {
-                        format!("mailto:{}", c)
-                    } else {
-                        c
-                    }
-                })
-                .collect(),
-            renew_before: chrono::Duration::from_std(renew_before).unwrap(),
-            domains,
-            account_key: Default::default(),
-            challenge,
-            eab,
-            default,
-        })
+    pub fn new(obj: RegistryObject<structs::AcmeProvider>) -> Self {
+        todo!()
     }
 }
 

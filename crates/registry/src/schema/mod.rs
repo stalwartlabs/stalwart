@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{schema::prelude::Property, types::EnumType};
+use std::fmt::Display;
 use utils::config::cron::SimpleCron;
 
 #[allow(clippy::derivable_impls)]
@@ -33,5 +35,11 @@ impl From<prelude::Cron> for SimpleCron {
                 minute: cron.minute as u32,
             },
         }
+    }
+}
+
+impl Display for Property {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }

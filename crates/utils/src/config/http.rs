@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::config::{Config, utils::AsKey};
 use base64::{Engine, engine::general_purpose};
 use reqwest::{
     Client,
@@ -13,73 +12,57 @@ use reqwest::{
 use std::{str::FromStr, time::Duration};
 
 pub fn build_http_client(
-    config: &mut Config,
-    prefix: impl AsKey,
+    raw_headers: impl IntoIterator<Item = (String, String)>,
+    username: Option<&str>,
+    password: Option<&str>,
+    token: Option<&str>,
     content_type: Option<&str>,
-) -> Option<Client> {
-    let mut headers = parse_http_headers(config, prefix.clone());
+    timeout: Duration,
+    allow_invalid_certs: bool,
+) -> Result<Client, String> {
+    let mut headers = build_http_headers(raw_headers, username, password, token, content_type)?;
     headers.insert(USER_AGENT, "Stalwart/1.0.0".parse().unwrap());
+
+    match Client::builder()
+        .connect_timeout(timeout)
+        .danger_accept_invalid_certs(allow_invalid_certs)
+        .default_headers(headers)
+        .build()
+    {
+        Ok(client) => Ok(client),
+        Err(err) => Err(format!("Failed to build HTTP client: {}", err)),
+    }
+}
+
+pub fn build_http_headers(
+    raw_headers: impl IntoIterator<Item = (String, String)>,
+    username: Option<&str>,
+    password: Option<&str>,
+    token: Option<&str>,
+    content_type: Option<&str>,
+) -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::new();
 
     if let Some(content_type) = content_type {
         headers.insert(CONTENT_TYPE, HeaderValue::from_str(content_type).unwrap());
     }
 
-    let prefix = prefix.as_key();
-    match Client::builder()
-        .connect_timeout(
-            config
-                .property_or_default::<Duration>((&prefix, "timeout"), "30s")
-                .unwrap_or(Duration::from_secs(30)),
-        )
-        .danger_accept_invalid_certs(
-            config
-                .property_or_default::<bool>((&prefix, "tls.allow-invalid-certs"), "false")
-                .unwrap_or(false),
-        )
-        .default_headers(headers)
-        .build()
-    {
-        Ok(client) => Some(client),
-        Err(err) => {
-            config.new_build_error(&prefix, format!("Failed to build HTTP client: {err}"));
-            None
-        }
-    }
-}
-
-pub fn parse_http_headers(config: &mut Config, prefix: impl AsKey) -> HeaderMap {
-    let prefix = prefix.as_key();
-    let mut headers = HeaderMap::new();
-
-    for (header, value) in config
-        .values((&prefix, "headers"))
-        .map(|(_, v)| {
-            if let Some((k, v)) = v.split_once(':') {
-                Ok((
-                    HeaderName::from_str(k.trim()).map_err(|err| {
-                        format!("Invalid header found in property \"{prefix}.headers\": {err}",)
-                    })?,
-                    HeaderValue::from_str(v.trim()).map_err(|err| {
-                        format!("Invalid header found in property \"{prefix}.headers\": {err}",)
-                    })?,
-                ))
-            } else {
-                Err(format!(
-                    "Invalid header found in property \"{prefix}.headers\": {v}",
-                ))
-            }
+    for (header, value) in raw_headers
+        .into_iter()
+        .map(|(k, v)| {
+            Ok((
+                HeaderName::from_str(k.trim())
+                    .map_err(|err| format!("Invalid header {k:?}: {err}",))?,
+                HeaderValue::from_str(v.trim())
+                    .map_err(|err| format!("Invalid value {v:?}: {err}",))?,
+            ))
         })
-        .collect::<Result<Vec<(HeaderName, HeaderValue)>, String>>()
-        .map_err(|e| config.new_parse_error((&prefix, "headers"), e))
-        .unwrap_or_default()
+        .collect::<Result<Vec<(HeaderName, HeaderValue)>, String>>()?
     {
         headers.insert(header, value);
     }
 
-    if let (Some(name), Some(secret)) = (
-        config.value((&prefix, "auth.username")),
-        config.value((&prefix, "auth.secret")),
-    ) {
+    if let (Some(name), Some(secret)) = (username, password) {
         headers.insert(
             AUTHORIZATION,
             format!(
@@ -89,9 +72,9 @@ pub fn parse_http_headers(config: &mut Config, prefix: impl AsKey) -> HeaderMap 
             .parse()
             .unwrap(),
         );
-    } else if let Some(token) = config.value((&prefix, "auth.token")) {
+    } else if let Some(token) = token {
         headers.insert(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap());
     }
 
-    headers
+    Ok(headers)
 }

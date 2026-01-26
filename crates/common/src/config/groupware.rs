@@ -4,9 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{str::FromStr, time::Duration};
-
-use utils::{config::Config, template::Template};
+use crate::manager::bootstrap::Bootstrap;
+use registry::schema::structs::{
+    AddressBook, Calendar, CalendarAlarm, CalendarScheduling, DataRetention, FileStorage, Sharing,
+    WebDav,
+};
+use std::str::FromStr;
+use utils::template::Template;
 
 #[derive(Debug, Clone, Default)]
 pub struct GroupwareConfig {
@@ -77,119 +81,67 @@ pub enum CalendarTemplateVariable {
 }
 
 impl GroupwareConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let calendar = bp.setting_infallible::<Calendar>().await;
+        let alarm = bp.setting_infallible::<CalendarAlarm>().await;
+        let sched = bp.setting_infallible::<CalendarScheduling>().await;
+        let book = bp.setting_infallible::<AddressBook>().await;
+        let dav = bp.setting_infallible::<WebDav>().await;
+        let file = bp.setting_infallible::<FileStorage>().await;
+        let share = bp.setting_infallible::<Sharing>().await;
+        let dr = bp.setting_infallible::<DataRetention>().await;
+
         GroupwareConfig {
-            max_request_size: config
-                .property("dav.request.max-size")
-                .unwrap_or(25 * 1024 * 1024),
-            dead_property_size: config
-                .property_or_default::<Option<usize>>("dav.property.max-size.dead", "1024")
-                .unwrap_or(Some(1024)),
-            live_property_size: config.property("dav.property.max-size.live").unwrap_or(250),
-            assisted_discovery: config
-                .property("dav.collection.assisted-discovery")
-                .unwrap_or(true),
-            max_lock_timeout: config
-                .property::<Duration>("dav.lock.max-timeout")
-                .map(|d| d.as_secs())
-                .unwrap_or(3600),
-            max_locks_per_user: config.property("dav.locks.max-per-user").unwrap_or(10),
-            max_results: config.property("dav.response.max-results").unwrap_or(2000),
-            default_calendar_name: config
-                .property_or_default::<Option<String>>("calendar.default.href-name", "default")
-                .unwrap_or_default(),
-            default_calendar_display_name: config
-                .property_or_default::<Option<String>>(
-                    "calendar.default.display-name",
-                    "Stalwart Calendar",
-                )
-                .unwrap_or_default(),
-            default_addressbook_name: config
-                .property_or_default::<Option<String>>("contacts.default.href-name", "default")
-                .unwrap_or_default(),
-            default_addressbook_display_name: config
-                .property_or_default::<Option<String>>(
-                    "contacts.default.display-name",
-                    "Stalwart Address Book",
-                )
-                .unwrap_or_default(),
-            max_ical_size: config.property("calendar.max-size").unwrap_or(512 * 1024),
-            max_ical_instances: config
-                .property("calendar.max-recurrence-expansions")
-                .unwrap_or(3000),
-            max_ical_attendees_per_instance: config
-                .property("calendar.max-attendees-per-instance")
-                .unwrap_or(20),
-            max_vcard_size: config.property("contacts.max-size").unwrap_or(512 * 1024),
-            max_file_size: config
-                .property("file-storage.max-size")
-                .unwrap_or(25 * 1024 * 1024),
-            alarms_enabled: config.property("calendar.alarms.enabled").unwrap_or(true),
-            alarms_minimum_interval: config
-                .property_or_default::<Duration>("calendar.alarms.minimum-interval", "1h")
-                .unwrap_or(Duration::from_secs(60 * 60))
-                .as_secs() as i64,
-            alarms_allow_external_recipients: config
-                .property("calendar.alarms.allow-external-recipients")
-                .unwrap_or(false),
-            alarms_from_name: config
-                .value("calendar.alarms.from.name")
-                .unwrap_or("Stalwart Calendar")
-                .to_string(),
-            alarms_from_email: config
-                .value("calendar.alarms.from.email")
-                .map(|s| s.to_string()),
+            max_request_size: dav.request_max_size as usize,
+            dead_property_size: dav.dead_property_max_size.map(|v| v as usize),
+            live_property_size: dav.live_property_max_size as usize,
+            assisted_discovery: dav.enable_assisted_discovery,
+            max_lock_timeout: dav.max_lock_timeout.into_inner().as_secs(),
+            max_locks_per_user: dav.max_locks as usize,
+            max_results: dav.max_results as usize,
+            default_calendar_name: calendar.default_href_name,
+            default_calendar_display_name: calendar.default_display_name,
+            default_addressbook_name: book.default_href_name,
+            default_addressbook_display_name: book.default_display_name,
+            max_ical_size: calendar.max_i_calendar_size as usize,
+            max_ical_instances: calendar.max_recurrence_expansions as usize,
+            max_ical_attendees_per_instance: calendar.max_attendees as usize,
+            max_vcard_size: book.max_v_card_size as usize,
+            max_file_size: file.max_size as usize,
+            alarms_enabled: alarm.enable,
+            alarms_minimum_interval: alarm.min_trigger_interval.into_inner().as_secs() as i64,
+            alarms_allow_external_recipients: alarm.allow_external_rcpts,
+            alarms_from_name: alarm.from_name,
+            alarms_from_email: alarm.from_email,
             alarms_template: Template::parse(include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../resources/html-templates/calendar-alarm.html.min"
             )))
             .expect("Failed to parse calendar template"),
-            itip_enabled: config
-                .property("calendar.scheduling.enable")
-                .unwrap_or(true),
-            itip_auto_add: config
-                .property("calendar.scheduling.inbound.auto-add")
-                .unwrap_or(false),
-            itip_inbound_max_ical_size: config
-                .property("calendar.scheduling.inbound.max-size")
-                .unwrap_or(512 * 1024),
-            itip_outbound_max_recipients: config
-                .property("calendar.scheduling.outbound.max-recipients")
-                .unwrap_or(100),
-            itip_inbox_auto_expunge: config
-                .property_or_default::<Option<Duration>>(
-                    "calendar.scheduling.inbox.auto-expunge",
-                    "30d",
-                )
-                .map(|d| d.map(|d| d.as_secs()))
-                .unwrap_or(Some(30 * 24 * 60 * 60)),
-            itip_http_rsvp_url: if config
-                .property("calendar.scheduling.http-rsvp.enable")
-                .unwrap_or(true)
-            {
-                if let Some(url) = config
-                    .value("calendar.scheduling.http-rsvp.url")
+            itip_enabled: sched.enable,
+            itip_auto_add: sched.auto_add_invitations,
+            itip_inbound_max_ical_size: sched.itip_max_size as usize,
+            itip_outbound_max_recipients: sched.max_recipients as usize,
+            itip_inbox_auto_expunge: dr
+                .expunge_scheduling_inbox_after
+                .map(|d| d.into_inner().as_secs()),
+            itip_http_rsvp_url: if sched.http_rsvp_enable {
+                if let Some(url) = sched
+                    .http_rsvp_template
+                    .as_deref()
                     .map(|v| v.trim().trim_end_matches('/'))
                     .filter(|v| !v.is_empty())
                 {
                     Some(url.to_string())
                 } else {
-                    Some(format!(
-                        "https://{}/calendar/rsvp",
-                        config.value("server.hostname").unwrap_or("localhost")
-                    ))
+                    Some(format!("https://{}/calendar/rsvp", bp.hostname()))
                 }
             } else {
                 None
             },
-            max_shares_per_item: config.property("sharing.max-shares-per-item").unwrap_or(10),
-            allow_directory_query: config
-                .property("sharing.allow-directory-query")
-                .unwrap_or(false),
-            itip_http_rsvp_expiration: config
-                .property_or_default::<Duration>("calendar.scheduling.http-rsvp.expiration", "90d")
-                .map(|d| d.as_secs())
-                .unwrap_or(90 * 24 * 60 * 60),
+            max_shares_per_item: share.max_shares as usize,
+            allow_directory_query: share.allow_directory_queries,
+            itip_http_rsvp_expiration: sched.http_rsvp_link_expiry.into_inner().as_secs(),
             itip_template: Template::parse(include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../resources/html-templates/calendar-invite.html.min"

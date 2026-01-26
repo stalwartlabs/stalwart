@@ -369,6 +369,69 @@ impl StoreEvent {
     }
 }
 
+impl DnsEvent {
+    pub fn ctx(self, key: Key, value: impl Into<Value>) -> Error {
+        self.into_err().ctx(key, value)
+    }
+
+    #[inline(always)]
+    pub fn caused_by(self, error: impl Into<Value>) -> Error {
+        self.into_err().caused_by(error)
+    }
+
+    #[inline(always)]
+    pub fn reason(self, error: impl Display) -> Error {
+        self.into_err().reason(error)
+    }
+
+    #[inline(always)]
+    pub fn into_err(self) -> Error {
+        Error::new(EventType::Dns(self))
+    }
+}
+
+impl AcmeEvent {
+    pub fn ctx(self, key: Key, value: impl Into<Value>) -> Error {
+        self.into_err().ctx(key, value)
+    }
+
+    #[inline(always)]
+    pub fn caused_by(self, error: impl Into<Value>) -> Error {
+        self.into_err().caused_by(error)
+    }
+
+    #[inline(always)]
+    pub fn reason(self, error: impl Display) -> Error {
+        self.into_err().reason(error)
+    }
+
+    #[inline(always)]
+    pub fn into_err(self) -> Error {
+        Error::new(EventType::Acme(self))
+    }
+}
+
+impl DkimEvent {
+    pub fn ctx(self, key: Key, value: impl Into<Value>) -> Error {
+        self.into_err().ctx(key, value)
+    }
+
+    #[inline(always)]
+    pub fn caused_by(self, error: impl Into<Value>) -> Error {
+        self.into_err().caused_by(error)
+    }
+
+    #[inline(always)]
+    pub fn reason(self, error: impl Display) -> Error {
+        self.into_err().reason(error)
+    }
+
+    #[inline(always)]
+    pub fn into_err(self) -> Error {
+        Error::new(EventType::Dkim(self))
+    }
+}
+
 impl SecurityEvent {
     #[inline(always)]
     pub fn into_err(self) -> Error {

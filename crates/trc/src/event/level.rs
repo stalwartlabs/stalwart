@@ -265,7 +265,7 @@ impl EventType {
                 ArcEvent::SealerNotFound => Level::Warn,
             },
             EventType::Dkim(event) => match event {
-                DkimEvent::SignerNotFound => Level::Warn,
+                DkimEvent::SignerNotFound | DkimEvent::BuildError => Level::Warn,
                 _ => Level::Debug,
             },
             EventType::MailAuth(_) => Level::Debug,
@@ -289,9 +289,7 @@ impl EventType {
                 ServerEvent::StartupError | ServerEvent::ThreadError => Level::Error,
             },
             EventType::Acme(event) => match event {
-                AcmeEvent::DnsRecordCreated
-                | AcmeEvent::DnsRecordPropagated
-                | AcmeEvent::TlsAlpnReceived
+                AcmeEvent::TlsAlpnReceived
                 | AcmeEvent::AuthStart
                 | AcmeEvent::AuthPending
                 | AcmeEvent::AuthValid
@@ -307,15 +305,18 @@ impl EventType {
                 | AcmeEvent::AuthError
                 | AcmeEvent::AuthTooManyAttempts
                 | AcmeEvent::TokenNotFound
-                | AcmeEvent::DnsRecordPropagationTimeout
-                | AcmeEvent::TlsAlpnError
-                | AcmeEvent::DnsRecordCreationFailed => Level::Warn,
+                | AcmeEvent::TlsAlpnError => Level::Warn,
                 AcmeEvent::RenewBackoff
-                | AcmeEvent::DnsRecordDeletionFailed
                 | AcmeEvent::ClientSuppliedSni
-                | AcmeEvent::ClientMissingSni
-                | AcmeEvent::DnsRecordNotPropagated
-                | AcmeEvent::DnsRecordLookupFailed => Level::Debug,
+                | AcmeEvent::ClientMissingSni => Level::Debug,
+            },
+            EventType::Dns(event) => match event {
+                DnsEvent::RecordCreated | DnsEvent::RecordPropagated => Level::Info,
+                DnsEvent::RecordPropagationTimeout | DnsEvent::RecordCreationFailed => Level::Warn,
+                DnsEvent::RecordDeletionFailed
+                | DnsEvent::RecordNotPropagated
+                | DnsEvent::RecordLookupFailed => Level::Debug,
+                DnsEvent::BuildError => Level::Error,
             },
             EventType::Tls(event) => match event {
                 TlsEvent::Handshake => Level::Info,

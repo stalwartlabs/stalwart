@@ -420,14 +420,16 @@ impl EventType {
                 | AcmeEvent::OrderCompleted
                 | AcmeEvent::AuthError
                 | AcmeEvent::AuthTooManyAttempts
-                | AcmeEvent::DnsRecordCreationFailed
-                | AcmeEvent::DnsRecordDeletionFailed
-                | AcmeEvent::DnsRecordPropagationTimeout
                 | AcmeEvent::ClientMissingSni
                 | AcmeEvent::TokenNotFound
-                | AcmeEvent::DnsRecordLookupFailed
                 | AcmeEvent::OrderInvalid
                 | AcmeEvent::Error,
+            ) => true,
+            EventType::Dns(
+                DnsEvent::RecordCreationFailed
+                | DnsEvent::RecordDeletionFailed
+                | DnsEvent::RecordPropagationTimeout
+                | DnsEvent::RecordLookupFailed,
             ) => true,
             EventType::Store(
                 StoreEvent::AssertValueFailed

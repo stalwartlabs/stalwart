@@ -5,10 +5,13 @@
  */
 
 use super::*;
-use crate::expr::{if_block::IfBlock, tokenizer::TokenMap};
+use crate::{
+    expr::{if_block::IfBlock, tokenizer::TokenMap},
+    manager::bootstrap::Bootstrap,
+};
 use ahash::AHashSet;
 use std::{hash::Hasher, time::Duration};
-use utils::config::{Config, Rate, http::parse_http_headers, utils::ParseValue};
+use utils::config::utils::ParseValue;
 use xxhash_rust::xxh3::Xxh3Builder;
 
 #[derive(Clone)]
@@ -99,40 +102,6 @@ pub struct FieldOrDefault {
     pub default: String,
 }
 
-pub(crate) const HTTP_VARS: &[u32; 11] = &[
-    ExpressionVariable::Listener,
-    ExpressionVariable::RemoteIp,
-    ExpressionVariable::RemotePort,
-    ExpressionVariable::LocalIp,
-    ExpressionVariable::LocalPort,
-    ExpressionVariable::Protocol,
-    ExpressionVariable::IsTls,
-    ExpressionVariable::Url,
-    ExpressionVariable::UrlPath,
-    ExpressionVariable::Headers,
-    ExpressionVariable::Method,
-];
-
-impl Default for Network {
-    fn default() -> Self {
-        Self {
-            security: Default::default(),
-            contact_form: None,
-            node_id: 1,
-            http_response_url: IfBlock::new_default(
-                "http.url",
-                [],
-                "protocol + '://' + config_get('server.hostname') + ':' + local_port",
-            ),
-            http_allowed_endpoint: IfBlock::new_default("http.allowed-endpoint", [], "200"),
-            asn_geo_lookup: AsnGeoLookupConfig::Disabled,
-            server_name: Default::default(),
-            report_domain: Default::default(),
-            roles: ClusterRoles::default(),
-        }
-    }
-}
-
 impl ContactForm {
     pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
         if !config
@@ -220,9 +189,9 @@ impl Network {
             node_id: config.property("cluster.node-id").unwrap_or(1),
             report_domain,
             server_name,
-            security: Security::parse(config),
-            contact_form: ContactForm::parse(config),
-            asn_geo_lookup: AsnGeoLookupConfig::parse(config).unwrap_or_default(),
+            security: Security::parse(bp),
+            contact_form: ContactForm::parse(bp),
+            asn_geo_lookup: AsnGeoLookupConfig::parse(bp).unwrap_or_default(),
             ..Default::default()
         };
         let token_map = &TokenMap::default().with_variables(HTTP_VARS);

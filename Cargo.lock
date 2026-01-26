@@ -1071,6 +1071,7 @@ dependencies = [
  "dns-update",
  "futures",
  "hashify",
+ "hickory-proto 0.24.4",
  "hostname",
  "hyper 1.8.1",
  "idna",

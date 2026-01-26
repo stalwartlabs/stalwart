@@ -78,7 +78,7 @@ impl Security {
             allowed_ip_addresses.insert(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
         }
 
-        let blocked = BlockedIps::parse(config);
+        let blocked = BlockedIps::parse(bp);
 
         // Parse blocked HTTP paths
         let mut http_banned_paths = config

@@ -4,28 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use self::resolver::Policy;
+use super::*;
+use crate::expr::if_block::IfBlock;
+use ahash::AHashSet;
+use hyper::HeaderMap;
+use registry::schema::{
+    enums::{self, ExpressionConstant, MtaStage},
+    prelude::Object,
+    structs::{
+        HttpAuth, MtaExtensions, MtaHook, MtaInboundSession, MtaMilter, MtaStageAuth,
+        MtaStageConnect, MtaStageData, MtaStageEhlo, MtaStageMail, MtaStageRcpt,
+    },
+};
+use smtp_proto::*;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
-    str::FromStr,
     time::Duration,
 };
-
-use ahash::AHashSet;
-use base64::{Engine, engine::general_purpose::STANDARD};
-
-use hyper::{
-    HeaderMap,
-    header::{AUTHORIZATION, CONTENT_TYPE, HeaderName, HeaderValue},
-};
-use registry::schema::enums::ExpressionConstant;
-use smtp_proto::*;
-use utils::config::{Config, utils::ParseValue};
-
-use crate::expr::{if_block::IfBlock, tokenizer::TokenMap, *};
-
-use self::resolver::Policy;
-
-use super::*;
+use utils::config::{http::build_http_headers, utils::ParseValue};
 
 #[derive(Clone)]
 pub struct SessionConfig {
@@ -76,7 +73,6 @@ pub struct Extensions {
 
 #[derive(Clone)]
 pub struct Auth {
-    pub directory: IfBlock,
     pub mechanisms: IfBlock,
     pub require: IfBlock,
     pub must_match_sender: IfBlock,
@@ -95,19 +91,11 @@ pub struct Mail {
 pub struct Rcpt {
     pub script: IfBlock,
     pub relay: IfBlock,
-    pub directory: IfBlock,
+    pub is_local: IfBlock,
     pub rewrite: IfBlock,
-
-    // Errors
     pub errors_max: IfBlock,
     pub errors_wait: IfBlock,
-
-    // Limits
     pub max_recipients: IfBlock,
-
-    // Catch-all and sub-addressing
-    pub catch_all: AddressMapping,
-    pub subaddressing: AddressMapping,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -122,13 +110,9 @@ pub enum AddressMapping {
 pub struct Data {
     pub script: IfBlock,
     pub spam_filter: IfBlock,
-
-    // Limits
     pub max_messages: IfBlock,
     pub max_message_size: IfBlock,
     pub max_received_headers: IfBlock,
-
-    // Headers
     pub add_received: IfBlock,
     pub add_received_spf: IfBlock,
     pub add_return_path: IfBlock,
@@ -188,627 +172,241 @@ pub enum Stage {
 }
 
 impl SessionConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        let has_conn_vars = TokenMap::default().with_variables(CONNECTION_VARS);
-        let has_ehlo_hars = TokenMap::default().with_variables(SMTP_EHLO_VARS);
-        let has_sender_vars = TokenMap::default().with_variables(SMTP_MAIL_FROM_VARS);
-        let has_rcpt_vars = TokenMap::default().with_variables(SMTP_RCPT_TO_VARS);
-        let mt_priority_vars = has_sender_vars.clone().with_constants::<MtPriority>();
-        let mechanisms_vars = has_ehlo_hars.clone().with_constants::<Mechanism>();
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let session = bp.setting_infallible::<MtaInboundSession>().await;
+        let connect = bp.setting_infallible::<MtaStageConnect>().await;
+        let auth = bp.setting_infallible::<MtaStageAuth>().await;
+        let ehlo = bp.setting_infallible::<MtaStageEhlo>().await;
+        let mail = bp.setting_infallible::<MtaStageMail>().await;
+        let rcpt = bp.setting_infallible::<MtaStageRcpt>().await;
+        let data = bp.setting_infallible::<MtaStageData>().await;
+        let ext = bp.setting_infallible::<MtaExtensions>().await;
 
-        let mut session = SessionConfig::default();
-        session.rcpt.catch_all = AddressMapping::parse(config, "session.rcpt.catch-all");
-        session.rcpt.subaddressing = AddressMapping::parse(config, "session.rcpt.sub-addressing");
-        session.milters = config
-            .sub_keys("session.milter", ".hostname")
-            .into_iter()
-            .filter_map(|id| parse_milter(config, &id, &has_rcpt_vars))
-            .collect();
-        session.hooks = config
-            .sub_keys("session.hook", ".url")
-            .into_iter()
-            .filter_map(|id| parse_hooks(config, &id, &has_rcpt_vars))
-            .collect();
-        session.mta_sts_policy = Policy::try_parse(config);
-
-        for (value, key, token_map) in [
-            (&mut session.duration, "session.duration", &has_conn_vars),
-            (
-                &mut session.transfer_limit,
-                "session.transfer-limit",
-                &has_conn_vars,
+        SessionConfig {
+            timeout: bp.compile_expr(
+                Object::MtaInboundSession.singleton(),
+                &session.ctx_timeout(),
             ),
-            (&mut session.timeout, "session.timeout", &has_conn_vars),
-            (
-                &mut session.connect.script,
-                "session.connect.script",
-                &has_conn_vars,
+            duration: bp.compile_expr(
+                Object::MtaInboundSession.singleton(),
+                &session.ctx_max_duration(),
             ),
-            (
-                &mut session.connect.hostname,
-                "session.connect.hostname",
-                &has_conn_vars,
+            transfer_limit: bp.compile_expr(
+                Object::MtaInboundSession.singleton(),
+                &session.ctx_transfer_limit(),
             ),
-            (
-                &mut session.connect.greeting,
-                "session.connect.greeting",
-                &has_conn_vars,
-            ),
-            (
-                &mut session.extensions.pipelining,
-                "session.extensions.pipelining",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.dsn,
-                "session.extensions.dsn",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.vrfy,
-                "session.extensions.vrfy",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.expn,
-                "session.extensions.expn",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.chunking,
-                "session.extensions.chunking",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.requiretls,
-                "session.extensions.requiretls",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.no_soliciting,
-                "session.extensions.no-soliciting",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.future_release,
-                "session.extensions.future-release",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.deliver_by,
-                "session.extensions.deliver-by",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.extensions.mt_priority,
-                "session.extensions.mt-priority",
-                &mt_priority_vars,
-            ),
-            (
-                &mut session.ehlo.script,
-                "session.ehlo.script",
-                &has_conn_vars,
-            ),
-            (
-                &mut session.ehlo.require,
-                "session.ehlo.require",
-                &has_conn_vars,
-            ),
-            (
-                &mut session.ehlo.reject_non_fqdn,
-                "session.ehlo.reject-non-fqdn",
-                &has_conn_vars,
-            ),
-            (
-                &mut session.auth.directory,
-                "session.auth.directory",
-                &has_ehlo_hars,
-            ),
-            (
-                &mut session.auth.mechanisms,
-                "session.auth.mechanisms",
-                &mechanisms_vars,
-            ),
-            (
-                &mut session.auth.require,
-                "session.auth.require",
-                &has_ehlo_hars,
-            ),
-            (
-                &mut session.auth.errors_max,
-                "session.auth.errors.total",
-                &has_ehlo_hars,
-            ),
-            (
-                &mut session.auth.errors_wait,
-                "session.auth.errors.wait",
-                &has_ehlo_hars,
-            ),
-            (
-                &mut session.auth.must_match_sender,
-                "session.auth.must-match-sender",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.mail.script,
-                "session.mail.script",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.mail.rewrite,
-                "session.mail.rewrite",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.mail.is_allowed,
-                "session.mail.is-allowed",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.rcpt.script,
-                "session.rcpt.script",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.rcpt.relay,
-                "session.rcpt.relay",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.rcpt.directory,
-                "session.rcpt.directory",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.rcpt.errors_max,
-                "session.rcpt.errors.total",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.rcpt.errors_wait,
-                "session.rcpt.errors.wait",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.rcpt.max_recipients,
-                "session.rcpt.max-recipients",
-                &has_sender_vars,
-            ),
-            (
-                &mut session.rcpt.rewrite,
-                "session.rcpt.rewrite",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.script,
-                "session.data.script",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.max_messages,
-                "session.data.limits.messages",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.max_message_size,
-                "session.data.limits.size",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.max_received_headers,
-                "session.data.limits.received-headers",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.spam_filter,
-                "session.data.spam-filter",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.add_received,
-                "session.data.add-headers.received",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.add_received_spf,
-                "session.data.add-headers.received-spf",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.add_return_path,
-                "session.data.add-headers.return-path",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.add_auth_results,
-                "session.data.add-headers.auth-results",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.add_message_id,
-                "session.data.add-headers.message-id",
-                &has_rcpt_vars,
-            ),
-            (
-                &mut session.data.add_date,
-                "session.data.add-headers.date",
-                &has_rcpt_vars,
-            ),
-        ] {
-            if let Some(if_block) = IfBlock::try_parse(config, key, token_map) {
-                *value = if_block;
-            }
-        }
-        session.data.add_delivered_to = config
-            .property_or_default("session.data.add-headers.delivered-to", "true")
-            .unwrap_or(true);
-        session
-    }
-}
-
-fn parse_milter(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Option<Milter> {
-    let hostname = config
-        .value_require(("session.milter", id, "hostname"))?
-        .to_string();
-    let port = config.property_require(("session.milter", id, "port"))?;
-    Some(Milter {
-        enable: IfBlock::try_parse(config, ("session.milter", id, "enable"), token_map)
-            .unwrap_or_else(|| {
-                IfBlock::new_default(format!("session.milter.{id}.enable"), [], "false")
-            }),
-        id: Arc::new(id.into()),
-        addrs: format!("{}:{}", hostname, port)
-            .to_socket_addrs()
-            .map_err(|err| {
-                config.new_build_error(
-                    ("session.milter", id, "hostname"),
-                    format!("Unable to resolve milter hostname {hostname}: {err}"),
-                )
-            })
-            .ok()?
-            .collect(),
-        hostname,
-        port,
-        timeout_connect: config
-            .property_or_default(("session.milter", id, "timeout.connect"), "30s")
-            .unwrap_or_else(|| Duration::from_secs(30)),
-        timeout_command: config
-            .property_or_default(("session.milter", id, "timeout.command"), "30s")
-            .unwrap_or_else(|| Duration::from_secs(30)),
-        timeout_data: config
-            .property_or_default(("session.milter", id, "timeout.data"), "60s")
-            .unwrap_or_else(|| Duration::from_secs(60)),
-        tls: config
-            .property_or_default(("session.milter", id, "tls"), "false")
-            .unwrap_or_default(),
-        tls_allow_invalid_certs: config
-            .property_or_default(("session.milter", id, "allow-invalid-certs"), "false")
-            .unwrap_or_default(),
-        tempfail_on_error: config
-            .property_or_default(("session.milter", id, "options.tempfail-on-error"), "true")
-            .unwrap_or(true),
-        max_frame_len: config
-            .property_or_default(
-                ("session.milter", id, "options.max-response-size"),
-                "52428800",
-            )
-            .unwrap_or(52428800),
-        protocol_version: match config
-            .property_or_default::<u32>(("session.milter", id, "options.version"), "6")
-            .unwrap_or(6)
-        {
-            6 => MilterVersion::V6,
-            2 => MilterVersion::V2,
-            v => {
-                config.new_parse_error(
-                    ("session.milter", id, "options.version"),
-                    format!("Unsupported milter protocol version {v}"),
-                );
-                MilterVersion::V6
-            }
-        },
-        flags_actions: config.property(("session.milter", id, "options.flags.actions")),
-        flags_protocol: config.property(("session.milter", id, "options.flags.protocol")),
-        run_on_stage: parse_stages(config, "session.milter", id),
-    })
-}
-
-fn parse_hooks(bp: &mut Bootstrap, id: &str, token_map: &TokenMap) -> Option<MTAHook> {
-    let mut headers = HeaderMap::new();
-
-    for (header, value) in config
-        .values(("session.hook", id, "headers"))
-        .map(|(_, v)| {
-            if let Some((k, v)) = v.split_once(':') {
-                Ok((
-                    HeaderName::from_str(k.trim()).map_err(|err| {
-                        format!(
-                            "Invalid header found in property \"session.hook.{id}.headers\": {err}",
-                        )
-                    })?,
-                    HeaderValue::from_str(v.trim()).map_err(|err| {
-                        format!(
-                            "Invalid header found in property \"session.hook.{id}.headers\": {err}",
-                        )
-                    })?,
-                ))
-            } else {
-                Err(format!(
-                    "Invalid header found in property \"session.hook.{id}.headers\": {v}",
-                ))
-            }
-        })
-        .collect::<Result<Vec<(HeaderName, HeaderValue)>, String>>()
-        .map_err(|e| config.new_parse_error(("session.hook", id, "headers"), e))
-        .unwrap_or_default()
-    {
-        headers.insert(header, value);
-    }
-
-    headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
-    if let (Some(name), Some(secret)) = (
-        config.value(("session.hook", id, "auth.username")),
-        config.value(("session.hook", id, "auth.secret")),
-    ) {
-        headers.insert(
-            AUTHORIZATION,
-            format!("Basic {}", STANDARD.encode(format!("{}:{}", name, secret)))
-                .parse()
-                .unwrap(),
-        );
-    }
-
-    Some(MTAHook {
-        enable: IfBlock::try_parse(config, ("session.hook", id, "enable"), token_map)
-            .unwrap_or_else(|| {
-                IfBlock::new_default(format!("session.hook.{id}.enable"), [], "false")
-            }),
-        id: id.to_string(),
-        url: config
-            .value_require(("session.hook", id, "url"))?
-            .to_string(),
-        timeout: config
-            .property_or_default(("session.hook", id, "timeout"), "30s")
-            .unwrap_or_else(|| Duration::from_secs(30)),
-        tls_allow_invalid_certs: config
-            .property_or_default(("session.hook", id, "allow-invalid-certs"), "false")
-            .unwrap_or_default(),
-        tempfail_on_error: config
-            .property_or_default(("session.hook", id, "options.tempfail-on-error"), "true")
-            .unwrap_or(true),
-        run_on_stage: parse_stages(config, "session.hook", id),
-        max_response_size: config
-            .property_or_default(
-                ("session.hook", id, "options.max-response-size"),
-                "52428800",
-            )
-            .unwrap_or(52428800),
-        headers,
-    })
-}
-
-fn parse_stages(bp: &mut Bootstrap, prefix: &str, id: &str) -> AHashSet<Stage> {
-    let mut stages = AHashSet::default();
-    let mut invalid = Vec::new();
-    for (_, value) in config.values((prefix, id, "stages")) {
-        let value = value.to_ascii_lowercase();
-        let state = match value.as_str() {
-            "connect" => Stage::Connect,
-            "ehlo" => Stage::Ehlo,
-            "auth" => Stage::Auth,
-            "mail" => Stage::Mail,
-            "rcpt" => Stage::Rcpt,
-            "data" => Stage::Data,
-            _ => {
-                invalid.push(value);
-                continue;
-            }
-        };
-        stages.insert(state);
-    }
-
-    if !invalid.is_empty() {
-        config.new_parse_error(
-            (prefix, id, "stages"),
-            format!("Invalid stages: {}", invalid.join(", ")),
-        );
-    }
-
-    if stages.is_empty() {
-        stages.insert(Stage::Data);
-    }
-
-    stages
-}
-
-impl Default for SessionConfig {
-    fn default() -> Self {
-        Self {
-            timeout: IfBlock::new_default("session.timeout", [], "5m"),
-            duration: IfBlock::new_default("session.duration", [], "10m"),
-            transfer_limit: IfBlock::new_default("session.transfer-limit", [], "262144000"),
             connect: Connect {
-                hostname: IfBlock::new_default(
-                    "server.connect.hostname",
-                    [],
-                    "config_get('server.hostname')",
-                ),
-                script: IfBlock::empty("session.connect.script"),
-                greeting: IfBlock::new_default(
-                    "session.connect.greeting",
-                    [],
-                    "config_get('server.hostname') + ' Stalwart ESMTP at your service'",
+                hostname: bp
+                    .compile_expr(Object::MtaStageConnect.singleton(), &connect.ctx_hostname()),
+                script: bp.compile_expr(Object::MtaStageConnect.singleton(), &connect.ctx_script()),
+                greeting: bp.compile_expr(
+                    Object::MtaStageConnect.singleton(),
+                    &connect.ctx_smtp_greeting(),
                 ),
             },
             ehlo: Ehlo {
-                script: IfBlock::empty("session.ehlo.script"),
-                require: IfBlock::new_default("session.ehlo.require", [], "true"),
-                reject_non_fqdn: IfBlock::new_default(
-                    "session.ehlo.reject-non-fqdn",
-                    [("local_port == 25", "true")],
-                    "false",
+                script: bp.compile_expr(Object::MtaStageEhlo.singleton(), &ehlo.ctx_script()),
+                require: bp.compile_expr(Object::MtaStageEhlo.singleton(), &ehlo.ctx_require()),
+                reject_non_fqdn: bp.compile_expr(
+                    Object::MtaStageEhlo.singleton(),
+                    &ehlo.ctx_reject_non_fqdn(),
                 ),
             },
             auth: Auth {
-                directory: IfBlock::new_default(
-                    "session.auth.directory",
-                    #[cfg(feature = "test_mode")]
-                    [],
-                    #[cfg(not(feature = "test_mode"))]
-                    [("local_port != 25", "'*'")],
-                    "false",
+                mechanisms: bp.compile_expr(
+                    Object::MtaStageAuth.singleton(),
+                    &auth.ctx_sasl_mechanisms(),
                 ),
-                mechanisms: IfBlock::new_default::<Mechanism>(
-                    "session.auth.mechanisms",
-                    [
-                        (
-                            "local_port != 25 && is_tls",
-                            "[plain, login, oauthbearer, xoauth2]",
-                        ),
-                        ("local_port != 25", "[oauthbearer, xoauth2]"),
-                    ],
-                    "false",
+                require: bp.compile_expr(Object::MtaStageAuth.singleton(), &auth.ctx_require()),
+                must_match_sender: bp.compile_expr(
+                    Object::MtaStageAuth.singleton(),
+                    &auth.ctx_must_match_sender(),
                 ),
-                require: IfBlock::new_default(
-                    "session.auth.require",
-                    #[cfg(feature = "test_mode")]
-                    [],
-                    #[cfg(not(feature = "test_mode"))]
-                    [("local_port != 25", "true")],
-                    "false",
-                ),
-                must_match_sender: IfBlock::new_default(
-                    "session.auth.must-match-sender",
-                    [],
-                    "true",
-                ),
-                errors_max: IfBlock::new_default("session.auth.errors.total", [], "3"),
-                errors_wait: IfBlock::new_default("session.auth.errors.wait", [], "5s"),
+                errors_max: bp
+                    .compile_expr(Object::MtaStageAuth.singleton(), &auth.ctx_max_failures()),
+                errors_wait: bp
+                    .compile_expr(Object::MtaStageAuth.singleton(), &auth.ctx_wait_on_fail()),
             },
             mail: Mail {
-                script: IfBlock::empty("session.mail.script"),
-                rewrite: IfBlock::empty("session.mail.rewrite"),
-                is_allowed: IfBlock::new_default(
-                    "session.mail.is-allowed",
-                    [],
-                    "!is_empty(authenticated_as) || !key_exists('blocked-domains', sender_domain)",
+                script: bp.compile_expr(Object::MtaStageMail.singleton(), &mail.ctx_script()),
+                rewrite: bp.compile_expr(Object::MtaStageMail.singleton(), &mail.ctx_rewrite()),
+                is_allowed: bp.compile_expr(
+                    Object::MtaStageMail.singleton(),
+                    &mail.ctx_is_sender_allowed(),
                 ),
             },
             rcpt: Rcpt {
-                script: IfBlock::empty("session.rcpt.script"),
-                relay: IfBlock::new_default(
-                    "session.rcpt.relay",
-                    [("!is_empty(authenticated_as)", "true")],
-                    "false",
-                ),
-                directory: IfBlock::new_default(
-                    "session.rcpt.directory",
-                    [],
-                    #[cfg(feature = "test_mode")]
-                    "false",
-                    #[cfg(not(feature = "test_mode"))]
-                    "'*'",
-                ),
-                rewrite: IfBlock::empty("session.rcpt.rewrite"),
-                errors_max: IfBlock::new_default("session.rcpt.errors.total", [], "5"),
-                errors_wait: IfBlock::new_default("session.rcpt.errors.wait", [], "5s"),
-                max_recipients: IfBlock::new_default(
-                    "session.rcpt.max-recipients",
-                    [],
-                    "100",
-                ),
-                catch_all: AddressMapping::Enable,
-                subaddressing: AddressMapping::Enable,
+                script: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_script()),
+                relay: bp
+                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_allow_relaying()),
+                is_local: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_is_local()),
+                rewrite: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_rewrite()),
+                errors_max: bp
+                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_max_failures()),
+                errors_wait: bp
+                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_wait_on_fail()),
+                max_recipients: bp
+                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_max_recipients()),
             },
             data: Data {
-                script: IfBlock::empty("session.data.script"),
-                spam_filter: IfBlock::new_default("session.data.spam-filter", [], "true"),
-                max_messages: IfBlock::new_default("session.data.limits.messages", [], "10"),
-                max_message_size: IfBlock::new_default(
-                    "session.data.limits.size",
-                    [],
-                    "104857600",
+                script: bp.compile_expr(Object::MtaStageData.singleton(), &data.ctx_script()),
+                spam_filter: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_enable_spam_filter(),
                 ),
-                max_received_headers: IfBlock::new_default(
-                    "session.data.limits.received-headers",
-                    [],
-                    "50",
+                max_messages: bp
+                    .compile_expr(Object::MtaStageData.singleton(), &data.ctx_max_messages()),
+                max_message_size: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_max_message_size(),
                 ),
-                add_received: IfBlock::new_default(
-                    "session.data.add-headers.received",
-                    [("local_port == 25", "true")],
-                    "false",
+                max_received_headers: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_max_received_headers(),
                 ),
-                add_received_spf: IfBlock::new_default(
-                    "session.data.add-headers.received-spf",
-                    [("local_port == 25", "true")],
-                    "false",
+                add_received: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_add_received_header(),
                 ),
-                add_return_path: IfBlock::new_default(
-                    "session.data.add-headers.return-path",
-                    [("local_port == 25", "true")],
-                    "false",
+                add_received_spf: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_add_received_spf_header(),
                 ),
-                add_auth_results: IfBlock::new_default(
-                    "session.data.add-headers.auth-results",
-                    [("local_port == 25", "true")],
-                    "false",
+                add_return_path: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_add_return_path_header(),
                 ),
-                add_message_id: IfBlock::new_default(
-                    "session.data.add-headers.message-id",
-                    [("local_port == 25", "true")],
-                    "false",
+                add_auth_results: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_add_auth_results_header(),
                 ),
-                add_date: IfBlock::new_default(
-                    "session.data.add-headers.date",
-                    [("local_port == 25", "true")],
-                    "false",
+                add_message_id: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_add_message_id_header(),
                 ),
-                add_delivered_to: false,
+                add_date: bp.compile_expr(
+                    Object::MtaStageData.singleton(),
+                    &data.ctx_add_date_header(),
+                ),
+                add_delivered_to: data.add_delivered_to_header,
             },
             extensions: Extensions {
-                pipelining: IfBlock::new_default("session.extensions.pipelining", [], "true"),
-                chunking: IfBlock::new_default("session.extensions.chunking", [], "true"),
-                requiretls: IfBlock::new_default("session.extensions.requiretls", [], "true"),
-                dsn: IfBlock::new_default(
-                    "session.extensions.dsn",
-                    [("!is_empty(authenticated_as)", "true")],
-                    "false",
-                ),
-                vrfy: IfBlock::new_default(
-                    "session.extensions.vrfy",
-                    [("!is_empty(authenticated_as)", "true")],
-                    "false",
-                ),
-                expn: IfBlock::new_default(
-                    "session.extensions.expn",
-                    [("!is_empty(authenticated_as)", "true")],
-                    "false",
-                ),
-                no_soliciting: IfBlock::new_default(
-                    "session.extensions.no-soliciting",
-                    [],
-                    "''",
-                ),
-                future_release: IfBlock::new_default(
-                    "session.extensions.future-release",
-                    [("!is_empty(authenticated_as)", "7d")],
-                    "false",
-                ),
-                deliver_by: IfBlock::new_default(
-                    "session.extensions.deliver-by",
-                    [("!is_empty(authenticated_as)", "15d")],
-                    "false",
-                ),
-                mt_priority: IfBlock::new_default::<MtPriority>(
-                    "session.extensions.mt-priority",
-                    [("!is_empty(authenticated_as)", "mixer")],
-                    "false",
-                ),
+                pipelining: bp
+                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_pipelining()),
+                chunking: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_chunking()),
+                requiretls: bp
+                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_require_tls()),
+                dsn: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_dsn()),
+                vrfy: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_vrfy()),
+                expn: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_expn()),
+                no_soliciting: bp
+                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_no_soliciting()),
+                future_release: bp
+                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_future_release()),
+                deliver_by: bp
+                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_deliver_by()),
+                mt_priority: bp
+                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_mt_priority()),
             },
-            mta_sts_policy: None,
-            milters: Default::default(),
-            hooks: Default::default(),
+            mta_sts_policy: Policy::try_parse(bp).await,
+            milters: bp
+                .list_infallible::<MtaMilter>()
+                .await
+                .into_iter()
+                .filter_map(|milter| {
+                    let id = milter.id;
+                    let milter = milter.object;
+
+                    if bp.validate(id, &milter) {
+                        Some(Milter {
+                            enable: bp.compile_expr(id, &milter.ctx_enable()),
+                            id: Arc::new(milter.name.into()),
+                            addrs: format!("{}:{}", milter.hostname, milter.port)
+                                .to_socket_addrs()
+                                .map_err(|err| {
+                                    bp.build_error(
+                                        id,
+                                        format!(
+                                            "Unable to resolve milter hostname {}: {}",
+                                            milter.hostname, err
+                                        ),
+                                    )
+                                })
+                                .ok()?
+                                .collect(),
+                            hostname: milter.hostname,
+                            port: milter.port as u16,
+                            timeout_connect: milter.timeout_connect.into_inner(),
+                            timeout_command: milter.timeout_command.into_inner(),
+                            timeout_data: milter.timeout_data.into_inner(),
+                            tls: milter.use_tls,
+                            tls_allow_invalid_certs: milter.allow_invalid_certs,
+                            tempfail_on_error: milter.temp_fail_on_error,
+                            max_frame_len: milter.max_response_size as usize,
+                            protocol_version: match milter.protocol_version {
+                                enums::MilterVersion::V2 => MilterVersion::V2,
+                                enums::MilterVersion::V6 => MilterVersion::V6,
+                            },
+                            flags_actions: milter.flags_action.map(|v| v as u32),
+                            flags_protocol: milter.flags_protocol.map(|v| v as u32),
+                            run_on_stage: milter.stages.into_iter().map(Stage::from).collect(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            hooks: bp
+                .list_infallible::<MtaHook>()
+                .await
+                .into_iter()
+                .filter_map(|hook| {
+                    let id = hook.id;
+                    let hook = hook.object;
+
+                    if bp.validate(id, &hook) {
+                        Some(MTAHook {
+                            enable: bp.compile_expr(id, &hook.ctx_enable()),
+                            id: hook.name,
+                            url: hook.url,
+                            timeout: hook.timeout.into_inner(),
+                            headers: match hook.http_auth {
+                                HttpAuth::None => build_http_headers(
+                                    hook.http_headers,
+                                    None,
+                                    None,
+                                    None,
+                                    "application/json".into(),
+                                ),
+                                HttpAuth::Basic(auth) => build_http_headers(
+                                    hook.http_headers,
+                                    auth.username.as_str().into(),
+                                    Some(auth.secret.as_str().into()),
+                                    None,
+                                    "application/json".into(),
+                                ),
+                                HttpAuth::Bearer(auth) => build_http_headers(
+                                    hook.http_headers,
+                                    None,
+                                    None,
+                                    Some(auth.bearer_token.as_str().into()),
+                                    "application/json".into(),
+                                ),
+                            }
+                            .map_err(|err| {
+                                bp.build_error(id, format!("Unable to build HTTP headers: {}", err))
+                            })
+                            .ok()?,
+                            tls_allow_invalid_certs: hook.allow_invalid_certs,
+                            tempfail_on_error: hook.temp_fail_on_error,
+                            run_on_stage: hook.stages.into_iter().map(Stage::from).collect(),
+                            max_response_size: hook.max_response_size as usize,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         }
     }
 }
@@ -928,6 +526,19 @@ impl<'x> TryFrom<Variable<'x>> for MtPriority {
             },
             Variable::String(value) => MtPriority::parse_value(value.as_str()).map_err(|_| ()),
             _ => Err(()),
+        }
+    }
+}
+
+impl From<MtaStage> for Stage {
+    fn from(value: MtaStage) -> Self {
+        match value {
+            MtaStage::Connect => Stage::Connect,
+            MtaStage::Ehlo => Stage::Ehlo,
+            MtaStage::Auth => Stage::Auth,
+            MtaStage::Mail => Stage::Mail,
+            MtaStage::Rcpt => Stage::Rcpt,
+            MtaStage::Data => Stage::Data,
         }
     }
 }

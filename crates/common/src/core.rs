@@ -29,7 +29,8 @@ use std::{
 };
 use store::{
     BlobStore, Deserialize, InMemoryStore, IndexKey, IndexKeyPrefix, IterateParams, Key, LogKey,
-    SUBSPACE_LOGS, SearchStore, SerializeInfallible, Store, U32_LEN, U64_LEN, ValueKey,
+    RegistryStore, SUBSPACE_LOGS, SearchStore, SerializeInfallible, Store, U32_LEN, U64_LEN,
+    ValueKey,
     dispatch::DocumentSet,
     roaring::RoaringBitmap,
     write::{
@@ -48,6 +49,11 @@ use types::{
 use utils::{map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
 
 impl Server {
+    #[inline(always)]
+    pub fn registry(&self) -> &RegistryStore {
+        &self.core.storage.registry
+    }
+
     #[inline(always)]
     pub fn store(&self) -> &Store {
         &self.core.storage.data
@@ -151,7 +157,7 @@ impl Server {
         let lazy_resolver_ = self.core.smtp.mail_auth.signatures.get(name)?;
         match lazy_resolver_.load().as_ref() {
             LazySignature::Resolved(resolved_signature) => Some(resolved_signature.clone()),
-            LazySignature::Pending(config) => {
+            LazySignature::Pending(bp) => {
                 let mut config = config.clone();
                 if let Some((signer, sealer)) = build_signature(&mut config, name) {
                     let resolved = ResolvedSignature {
