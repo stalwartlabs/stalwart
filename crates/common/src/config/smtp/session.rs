@@ -13,8 +13,8 @@ use registry::schema::{
     enums::{self, ExpressionConstant, MtaStage},
     prelude::Object,
     structs::{
-        HttpAuth, MtaExtensions, MtaHook, MtaInboundSession, MtaMilter, MtaStageAuth,
-        MtaStageConnect, MtaStageData, MtaStageEhlo, MtaStageMail, MtaStageRcpt,
+        MtaExtensions, MtaHook, MtaInboundSession, MtaMilter, MtaStageAuth, MtaStageConnect,
+        MtaStageData, MtaStageEhlo, MtaStageMail, MtaStageRcpt,
     },
 };
 use smtp_proto::*;
@@ -22,7 +22,7 @@ use std::{
     net::{SocketAddr, ToSocketAddrs},
     time::Duration,
 };
-use utils::config::{http::build_http_headers, utils::ParseValue};
+use utils::config::utils::ParseValue;
 
 #[derive(Clone)]
 pub struct SessionConfig {
@@ -317,43 +317,39 @@ impl SessionConfig {
                     let id = milter.id;
                     let milter = milter.object;
 
-                    if bp.validate(id, &milter) {
-                        Some(Milter {
-                            enable: bp.compile_expr(id, &milter.ctx_enable()),
-                            id: Arc::new(milter.name.into()),
-                            addrs: format!("{}:{}", milter.hostname, milter.port)
-                                .to_socket_addrs()
-                                .map_err(|err| {
-                                    bp.build_error(
-                                        id,
-                                        format!(
-                                            "Unable to resolve milter hostname {}: {}",
-                                            milter.hostname, err
-                                        ),
-                                    )
-                                })
-                                .ok()?
-                                .collect(),
-                            hostname: milter.hostname,
-                            port: milter.port as u16,
-                            timeout_connect: milter.timeout_connect.into_inner(),
-                            timeout_command: milter.timeout_command.into_inner(),
-                            timeout_data: milter.timeout_data.into_inner(),
-                            tls: milter.use_tls,
-                            tls_allow_invalid_certs: milter.allow_invalid_certs,
-                            tempfail_on_error: milter.temp_fail_on_error,
-                            max_frame_len: milter.max_response_size as usize,
-                            protocol_version: match milter.protocol_version {
-                                enums::MilterVersion::V2 => MilterVersion::V2,
-                                enums::MilterVersion::V6 => MilterVersion::V6,
-                            },
-                            flags_actions: milter.flags_action.map(|v| v as u32),
-                            flags_protocol: milter.flags_protocol.map(|v| v as u32),
-                            run_on_stage: milter.stages.into_iter().map(Stage::from).collect(),
-                        })
-                    } else {
-                        None
-                    }
+                    Some(Milter {
+                        enable: bp.compile_expr(id, &milter.ctx_enable()),
+                        id: Arc::new(milter.name.into()),
+                        addrs: format!("{}:{}", milter.hostname, milter.port)
+                            .to_socket_addrs()
+                            .map_err(|err| {
+                                bp.build_error(
+                                    id,
+                                    format!(
+                                        "Unable to resolve milter hostname {}: {}",
+                                        milter.hostname, err
+                                    ),
+                                )
+                            })
+                            .ok()?
+                            .collect(),
+                        hostname: milter.hostname,
+                        port: milter.port as u16,
+                        timeout_connect: milter.timeout_connect.into_inner(),
+                        timeout_command: milter.timeout_command.into_inner(),
+                        timeout_data: milter.timeout_data.into_inner(),
+                        tls: milter.use_tls,
+                        tls_allow_invalid_certs: milter.allow_invalid_certs,
+                        tempfail_on_error: milter.temp_fail_on_error,
+                        max_frame_len: milter.max_response_size as usize,
+                        protocol_version: match milter.protocol_version {
+                            enums::MilterVersion::V2 => MilterVersion::V2,
+                            enums::MilterVersion::V6 => MilterVersion::V6,
+                        },
+                        flags_actions: milter.flags_action.map(|v| v as u32),
+                        flags_protocol: milter.flags_protocol.map(|v| v as u32),
+                        run_on_stage: milter.stages.into_iter().map(Stage::from).collect(),
+                    })
                 })
                 .collect(),
             hooks: bp
@@ -364,47 +360,23 @@ impl SessionConfig {
                     let id = hook.id;
                     let hook = hook.object;
 
-                    if bp.validate(id, &hook) {
-                        Some(MTAHook {
-                            enable: bp.compile_expr(id, &hook.ctx_enable()),
-                            id: hook.name,
-                            url: hook.url,
-                            timeout: hook.timeout.into_inner(),
-                            headers: match hook.http_auth {
-                                HttpAuth::None => build_http_headers(
-                                    hook.http_headers,
-                                    None,
-                                    None,
-                                    None,
-                                    "application/json".into(),
-                                ),
-                                HttpAuth::Basic(auth) => build_http_headers(
-                                    hook.http_headers,
-                                    auth.username.as_str().into(),
-                                    Some(auth.secret.as_str().into()),
-                                    None,
-                                    "application/json".into(),
-                                ),
-                                HttpAuth::Bearer(auth) => build_http_headers(
-                                    hook.http_headers,
-                                    None,
-                                    None,
-                                    Some(auth.bearer_token.as_str().into()),
-                                    "application/json".into(),
-                                ),
-                            }
+                    Some(MTAHook {
+                        enable: bp.compile_expr(id, &hook.ctx_enable()),
+                        id: hook.name,
+                        url: hook.url,
+                        timeout: hook.timeout.into_inner(),
+                        headers: hook
+                            .http_auth
+                            .build_headers(hook.http_headers, "application/json".into())
                             .map_err(|err| {
                                 bp.build_error(id, format!("Unable to build HTTP headers: {}", err))
                             })
                             .ok()?,
-                            tls_allow_invalid_certs: hook.allow_invalid_certs,
-                            tempfail_on_error: hook.temp_fail_on_error,
-                            run_on_stage: hook.stages.into_iter().map(Stage::from).collect(),
-                            max_response_size: hook.max_response_size as usize,
-                        })
-                    } else {
-                        None
-                    }
+                        tls_allow_invalid_certs: hook.allow_invalid_certs,
+                        tempfail_on_error: hook.temp_fail_on_error,
+                        run_on_stage: hook.stages.into_iter().map(Stage::from).collect(),
+                        max_response_size: hook.max_response_size as usize,
+                    })
                 })
                 .collect(),
         }

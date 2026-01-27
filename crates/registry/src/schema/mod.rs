@@ -4,9 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{schema::prelude::Property, types::EnumType};
-use std::fmt::Display;
-use utils::config::cron::SimpleCron;
+use crate::{
+    schema::{
+        enums::{TracingLevel, TracingLevelOpt},
+        prelude::{HttpAuth, NodeRange, Property},
+    },
+    types::EnumType,
+};
+use std::{collections::HashMap, fmt::Display};
+use utils::{
+    HeaderMap,
+    config::{cron::SimpleCron, http::build_http_headers},
+};
 
 #[allow(clippy::derivable_impls)]
 pub mod enums;
@@ -38,8 +47,65 @@ impl From<prelude::Cron> for SimpleCron {
     }
 }
 
+impl NodeRange {
+    pub fn contains(&self, node_id: u64) -> bool {
+        node_id >= self.from_node_id && node_id <= self.to_node_id
+    }
+}
+
+impl HttpAuth {
+    pub fn build_headers(
+        &self,
+        extra_headers: HashMap<String, String>,
+        content_type: Option<&str>,
+    ) -> Result<HeaderMap, String> {
+        match self {
+            HttpAuth::None => build_http_headers(extra_headers, None, None, None, content_type),
+            HttpAuth::Basic(auth) => build_http_headers(
+                extra_headers,
+                auth.username.as_str().into(),
+                auth.secret.as_str().into(),
+                None,
+                content_type,
+            ),
+            HttpAuth::Bearer(auth) => build_http_headers(
+                extra_headers,
+                None,
+                None,
+                auth.bearer_token.as_str().into(),
+                content_type,
+            ),
+        }
+    }
+}
+
 impl Display for Property {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl From<TracingLevelOpt> for trc::Level {
+    fn from(level: TracingLevelOpt) -> Self {
+        match level {
+            TracingLevelOpt::Error => trc::Level::Error,
+            TracingLevelOpt::Warn => trc::Level::Warn,
+            TracingLevelOpt::Info => trc::Level::Info,
+            TracingLevelOpt::Debug => trc::Level::Debug,
+            TracingLevelOpt::Trace => trc::Level::Trace,
+            TracingLevelOpt::Disable => trc::Level::Disable,
+        }
+    }
+}
+
+impl From<TracingLevel> for trc::Level {
+    fn from(level: TracingLevel) -> Self {
+        match level {
+            TracingLevel::Error => trc::Level::Error,
+            TracingLevel::Warn => trc::Level::Warn,
+            TracingLevel::Info => trc::Level::Info,
+            TracingLevel::Debug => trc::Level::Debug,
+            TracingLevel::Trace => trc::Level::Trace,
+        }
     }
 }

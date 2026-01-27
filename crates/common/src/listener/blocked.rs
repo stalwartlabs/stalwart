@@ -6,7 +6,7 @@
 
 use crate::{
     KV_RATE_LIMIT_AUTH, KV_RATE_LIMIT_LOITER, KV_RATE_LIMIT_RCPT, KV_RATE_LIMIT_SCAN, Server,
-    ip_to_bytes, ipc::BroadcastEvent,
+    ip_to_bytes, ipc::BroadcastEvent, manager::bootstrap::Bootstrap,
 };
 use ahash::AHashSet;
 use std::{fmt::Debug, net::IpAddr};
@@ -49,7 +49,7 @@ pub struct BlockedIps {
 }
 
 impl Security {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         let mut allowed_ip_addresses = AHashSet::new();
         let mut allowed_ip_networks = Vec::new();
 
@@ -305,31 +305,6 @@ impl BlockedIps {
         Self {
             blocked_ip_addresses,
             blocked_ip_networks,
-        }
-    }
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for Security {
-    fn default() -> Self {
-        // Add IPv4 and IPv6 loopback addresses
-        Self {
-            #[cfg(not(feature = "test_mode"))]
-            allowed_ip_addresses: AHashSet::from_iter([
-                IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-                IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
-            ]),
-            #[cfg(feature = "test_mode")]
-            allowed_ip_addresses: Default::default(),
-            allowed_ip_networks: Default::default(),
-            has_allowed_networks: Default::default(),
-            blocked_ip_networks: Default::default(),
-            has_blocked_networks: Default::default(),
-            auth_fail_rate: Default::default(),
-            rcpt_fail_rate: Default::default(),
-            loiter_fail_rate: Default::default(),
-            scanner_fail_rate: Default::default(),
-            http_banned_paths: Default::default(),
         }
     }
 }

@@ -5,7 +5,12 @@
  */
 
 use self::{mailstore::jmap::JmapConfig, smtp::SmtpConfig, storage::Storage};
-use crate::{Core, Network, Security, auth::oauth::config::OAuthConfig, expr::*};
+use crate::{
+    Core, Network, Security,
+    auth::oauth::config::OAuthConfig,
+    config::mailstore::{imap::ImapConfig, scripts::Scripting, spamfilter::SpamFilterConfig},
+    expr::*,
+};
 use arc_swap::ArcSwap;
 use coordinator::Coordinator;
 use directory::{Directories, Directory};
@@ -162,7 +167,6 @@ impl Core {
             )
         }
 
-        let groupware = GroupwareConfig::parse(bp);
         Self {
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -170,16 +174,15 @@ impl Core {
             #[cfg(feature = "enterprise")]
             enterprise,
             // SPDX-SnippetEnd
-            sieve: Scripting::parse(config, &stores).await,
-            network: Network::parse(bp),
+            sieve: Scripting::parse(bp).await,
+            network: Network::parse(bp).await,
             smtp: SmtpConfig::parse(bp).await,
-            jmap: JmapConfig::parse(config, &groupware),
-            imap: ImapConfig::parse(bp),
-            oauth: OAuthConfig::parse(bp),
-            acme: AcmeProviders::parse(bp),
-            metrics: Metrics::parse(bp),
+            jmap: JmapConfig::parse(bp).await,
+            imap: ImapConfig::parse(bp).await,
+            oauth: OAuthConfig::parse(bp).await,
+            metrics: Metrics::parse(bp.await),
             spam: SpamFilterConfig::parse(bp).await,
-            groupware,
+            groupware: GroupwareConfig::parse(bp).await,
             storage: Storage {
                 data,
                 blob,
@@ -189,7 +192,6 @@ impl Core {
                 directory,
                 directories: directories.directories,
                 purge_schedules: stores.purge_schedules,
-                config: config_manager,
                 stores: stores.stores,
                 lookups: stores.in_memory_stores,
                 blobs: stores.blob_stores,

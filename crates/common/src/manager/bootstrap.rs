@@ -65,7 +65,10 @@ impl Bootstrap {
 
     pub async fn list_infallible<T: ObjectType>(&mut self) -> Vec<RegistryObject<T>> {
         match self.registry.list::<T>().await {
-            Ok(objects) => objects,
+            Ok(objects) => objects
+                .into_iter()
+                .filter(|object| self.validate(object.id, &object.object))
+                .collect(),
             Err(err) => {
                 if !self.has_fatal_errors {
                     self.errors.push(Error::Internal {
@@ -82,6 +85,14 @@ impl Bootstrap {
     pub fn build_error(&mut self, id: Id, message: impl Into<String>) {
         self.errors.push(Error::Build {
             object_id: id,
+            message: message.into(),
+        });
+    }
+
+    pub fn build_warning(&mut self, id: Id, message: impl Into<String>) {
+        self.warnings.push(Warning {
+            object_id: id,
+            property: None,
             message: message.into(),
         });
     }

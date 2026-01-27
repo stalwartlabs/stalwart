@@ -31,7 +31,7 @@ use config::{
     telemetry::Metrics,
 };
 use ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEvent};
-use listener::{asn::AsnGeoLookupData, blocked::Security, tls::AcmeProviders};
+use listener::{asn::AsnGeoLookupData, blocked::Security};
 use mail_auth::{MX, Txt};
 use manager::webadmin::{Resource, WebAdminManager};
 use parking_lot::{Mutex, RwLock};
@@ -339,12 +339,11 @@ pub struct DavName {
     pub parent_id: u32,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Core {
     pub storage: Storage,
     pub sieve: Scripting,
     pub network: Network,
-    pub acme: AcmeProviders,
     pub oauth: OAuthConfig,
     pub email: EmailConfig,
     pub jmap: JmapConfig,

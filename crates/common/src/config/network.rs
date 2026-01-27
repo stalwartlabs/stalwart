@@ -5,13 +5,17 @@
  */
 
 use super::*;
-use crate::{
-    expr::{if_block::IfBlock, tokenizer::TokenMap},
-    manager::bootstrap::Bootstrap,
+use crate::{expr::if_block::IfBlock, manager::bootstrap::Bootstrap};
+use ahash::AHashMap;
+use registry::{
+    schema::{
+        enums::NodeShardType,
+        prelude::Object,
+        structs::{self, Asn, HttpForm, NodeRole, NodeShard, Rate},
+    },
+    types::EnumType,
 };
-use ahash::AHashSet;
-use std::{hash::Hasher, time::Duration};
-use utils::config::utils::ParseValue;
+use std::{hash::Hasher, str::FromStr, time::Duration};
 use xxhash_rust::xxh3::Xxh3Builder;
 
 #[derive(Clone)]
@@ -19,7 +23,6 @@ pub struct Network {
     pub node_id: u64,
     pub roles: ClusterRoles,
     pub server_name: String,
-    pub report_domain: String,
     pub security: Security,
     pub http: Http,
     pub contact_form: Option<ContactForm>,
@@ -61,6 +64,7 @@ pub struct ClusterRoles {
     pub renew_acme: ClusterRole,
     pub calculate_metrics: ClusterRole,
     pub push_metrics: ClusterRole,
+    pub outbound_mta: ClusterRole,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -103,174 +107,199 @@ pub struct FieldOrDefault {
 }
 
 impl ContactForm {
-    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
-        if !config
-            .property_or_default::<bool>("form.enable", "false")
-            .unwrap_or_default()
-        {
+    pub async fn parse(bp: &mut Bootstrap) -> Option<Self> {
+        let form = bp.setting_infallible::<HttpForm>().await;
+
+        if !form.enable {
+            return None;
+        } else if form.deliver_to.is_empty() {
+            bp.build_error(
+                Object::HttpForm.singleton(),
+                "Contact form is enabled but no recipient addresses are configured",
+            );
             return None;
         }
 
-        let form = ContactForm {
-            rcpt_to: config
-                .values("form.deliver-to")
-                .filter_map(|(_, addr)| {
-                    if addr.contains('@') && addr.contains('.') {
-                        Some(addr.trim().to_lowercase())
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            max_size: config.property("form.max-size").unwrap_or(100 * 1024),
-            validate_domain: config
-                .property_or_default::<bool>("form.validate-domain", "true")
-                .unwrap_or(true),
-            from_email: FieldOrDefault::parse(config, "form.email", "postmaster@localhost"),
-            from_subject: FieldOrDefault::parse(config, "form.subject", "Contact form submission"),
-            from_name: FieldOrDefault::parse(config, "form.name", "Anonymous"),
-            field_honey_pot: config.value("form.honey-pot.field").map(|v| v.into()),
-            rate: config
-                .property_or_default::<Option<Rate>>("form.rate-limit", "5/1h")
-                .unwrap_or_default(),
-        };
-
-        if !form.rcpt_to.is_empty() {
-            Some(form)
-        } else {
-            config.new_build_error("form.deliver-to", "No valid email addresses found");
-            None
-        }
-    }
-}
-
-impl FieldOrDefault {
-    pub fn parse(bp: &mut Bootstrap, key: &str, default: &str) -> Self {
-        FieldOrDefault {
-            field: config.value((key, "field")).map(|s| s.to_string()),
-            default: config
-                .value((key, "default"))
-                .unwrap_or(default)
-                .to_string(),
-        }
+        Some(ContactForm {
+            rcpt_to: form.deliver_to,
+            max_size: form.max_size as usize,
+            validate_domain: form.validate_domain,
+            from_email: FieldOrDefault {
+                field: form.field_email,
+                default: form.default_from_address,
+            },
+            from_subject: FieldOrDefault {
+                field: form.field_subject,
+                default: form.default_subject,
+            },
+            from_name: FieldOrDefault {
+                field: form.field_name,
+                default: form.default_name,
+            },
+            field_honey_pot: form.field_honey_pot,
+            rate: form.rate_limit,
+        })
     }
 }
 
 impl Network {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        let server_name = config
-            .value("server.hostname")
-            .map(|v| v.to_string())
-            .or_else(|| {
-                config
-                    .value("lookup.default.hostname")
-                    .map(|v| v.to_lowercase())
-            })
-            .unwrap_or_else(|| {
-                hostname::get()
-                    .map(|v| v.to_string_lossy().to_lowercase())
-                    .unwrap_or_else(|_| "localhost".to_string())
-            });
-        let report_domain = config
-            .value("report.domain")
-            .map(|v| v.to_lowercase())
-            .or_else(|| {
-                config
-                    .value("lookup.default.domain")
-                    .map(|v| v.to_lowercase())
-            })
-            .unwrap_or_else(|| {
-                psl::domain_str(&server_name)
-                    .unwrap_or(server_name.as_str())
-                    .to_string()
-            });
-
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         let mut network = Network {
-            node_id: config.property("cluster.node-id").unwrap_or(1),
-            report_domain,
-            server_name,
-            security: Security::parse(bp),
-            contact_form: ContactForm::parse(bp),
-            asn_geo_lookup: AsnGeoLookupConfig::parse(bp).unwrap_or_default(),
-            ..Default::default()
+            node_id: bp.node_id(),
+            server_name: bp.hostname().to_string(),
+            security: Security::parse(bp).await,
+            contact_form: ContactForm::parse(bp).await,
+            asn_geo_lookup: AsnGeoLookupConfig::parse(bp).await.unwrap_or_default(),
+            roles: ClusterRoles::default(),
+            http: Http::parse(bp).await,
         };
-        let token_map = &TokenMap::default().with_variables(HTTP_VARS);
 
-        // Node roles
-        for (value, key) in [
-            (
-                &mut network.roles.purge_stores,
-                "cluster.roles.purge.stores",
-            ),
-            (
-                &mut network.roles.purge_accounts,
-                "cluster.roles.purge.accounts",
-            ),
-            (&mut network.roles.renew_acme, "cluster.roles.acme.renew"),
-            (
-                &mut network.roles.calculate_metrics,
-                "cluster.roles.metrics.calculate",
-            ),
-            (
-                &mut network.roles.push_metrics,
-                "cluster.roles.metrics.push",
-            ),
-            (
-                &mut network.roles.push_notifications,
-                "cluster.roles.push-notifications",
-            ),
-            (
-                &mut network.roles.fts_indexing,
-                "cluster.roles.fts-indexing",
-            ),
-            (
-                &mut network.roles.spam_training,
-                "cluster.roles.spam-training",
-            ),
-            (
-                &mut network.roles.imip_processing,
-                "cluster.roles.imip-processing",
-            ),
-            (
-                &mut network.roles.calendar_alerts,
-                "cluster.roles.calendar-alerts",
-            ),
-            (
-                &mut network.roles.merge_threads,
-                "cluster.roles.merge-threads",
-            ),
-        ] {
-            let shards = config
-                .properties::<NodeList>(key)
-                .into_iter()
-                .map(|(_, v)| v)
-                .collect::<Vec<_>>();
-            let shard_size = shards.len() as u32;
-            let mut found_node = false;
-            for (shard_id, shard) in shards.iter().enumerate() {
-                if shard.0.contains(&network.node_id) {
-                    if shard_size > 1 {
-                        *value = ClusterRole::Sharded {
-                            shard_id: shard_id as u32,
-                            total_shards: shard_size,
+        // Process ranges
+        let node_id = bp.node_id();
+        let ranges = bp.list_infallible::<NodeRole>().await;
+        if !ranges.is_empty() {
+            for network_role in network.roles.all_mut() {
+                network_role.set_uninit();
+            }
+
+            for range in ranges {
+                let is_success = match &range.object {
+                    NodeRole::CalculateMetrics(_)
+                    | NodeRole::PushMetrics(_)
+                    | NodeRole::TrainSpamClassifier(_) => {
+                        let (roles, role_obj) = match &range.object {
+                            NodeRole::CalculateMetrics(role) => {
+                                (&mut network.roles.calculate_metrics, role)
+                            }
+                            NodeRole::PushMetrics(role) => (&mut network.roles.push_metrics, role),
+                            NodeRole::TrainSpamClassifier(role) => {
+                                (&mut network.roles.spam_training, role)
+                            }
+                            _ => unreachable!(),
                         };
+
+                        roles.set_role(role_obj.node_id == node_id)
                     }
-                    found_node = true;
-                    break;
+                    NodeRole::PurgeStores(_)
+                    | NodeRole::PurgeAccounts(_)
+                    | NodeRole::AcmeRenew(_)
+                    | NodeRole::PushNotifications(_)
+                    | NodeRole::SearchIndexing(_)
+                    | NodeRole::ImipProcessing(_)
+                    | NodeRole::CalendarAlerts(_)
+                    | NodeRole::MergeThreads(_)
+                    | NodeRole::OutboundMta(_) => {
+                        let (roles, role_obj) = match &range.object {
+                            NodeRole::PurgeStores(role) => (&mut network.roles.purge_stores, role),
+                            NodeRole::PurgeAccounts(role) => {
+                                (&mut network.roles.purge_accounts, role)
+                            }
+                            NodeRole::AcmeRenew(role) => (&mut network.roles.renew_acme, role),
+                            NodeRole::PushNotifications(role) => {
+                                (&mut network.roles.push_notifications, role)
+                            }
+                            NodeRole::SearchIndexing(role) => {
+                                (&mut network.roles.fts_indexing, role)
+                            }
+                            NodeRole::ImipProcessing(role) => {
+                                (&mut network.roles.imip_processing, role)
+                            }
+                            NodeRole::CalendarAlerts(role) => {
+                                (&mut network.roles.calendar_alerts, role)
+                            }
+                            NodeRole::MergeThreads(role) => {
+                                (&mut network.roles.merge_threads, role)
+                            }
+                            NodeRole::OutboundMta(role) => (&mut network.roles.outbound_mta, role),
+                            _ => unreachable!(),
+                        };
+
+                        roles.set_role(
+                            role_obj
+                                .node_ranges
+                                .iter()
+                                .any(|range| range.contains(node_id)),
+                        )
+                    }
+                };
+
+                if !is_success {
+                    bp.build_warning(
+                        range.id,
+                        format!("Multiple role definitions found for node id {node_id}",),
+                    );
                 }
             }
 
-            if !shards.is_empty() && !found_node {
-                *value = ClusterRole::Disabled;
+            for network_role in network.roles.all_mut() {
+                network_role.finalize();
             }
-        }
 
-        for (value, key) in [
-            (&mut network.http_response_url, "http.url"),
-            (&mut network.http_allowed_endpoint, "http.allowed-endpoint"),
-        ] {
-            if let Some(if_block) = IfBlock::try_parse(config, key, token_map) {
-                *value = if_block;
+            // Node shards
+            let mut shards = AHashMap::new();
+            for shard in bp.list_infallible::<NodeShard>().await {
+                shards
+                    .entry(shard.object.shard_type)
+                    .or_insert_with(Vec::new)
+                    .push(shard);
+            }
+            for (shard_type, shards) in shards {
+                if shards.len() == 1 {
+                    bp.build_warning(shards[0].id, format!(
+                        "Only one shard defined for shard type {:?}, ignoring shard configuration",
+                        shard_type.as_str()
+                    ));
+                    continue;
+                }
+
+                let roles = match shard_type {
+                    NodeShardType::PurgeStores => &mut network.roles.purge_stores,
+                    NodeShardType::PurgeAccounts => &mut network.roles.purge_accounts,
+                    NodeShardType::AcmeRenew => &mut network.roles.renew_acme,
+                    NodeShardType::PushNotifications => &mut network.roles.push_notifications,
+                    NodeShardType::SearchIndexing => &mut network.roles.fts_indexing,
+                    NodeShardType::ImipProcessing => &mut network.roles.imip_processing,
+                    NodeShardType::CalendarAlerts => &mut network.roles.calendar_alerts,
+                    NodeShardType::MergeThreads => &mut network.roles.merge_threads,
+                };
+
+                if matches!(roles, ClusterRole::Disabled) {
+                    continue;
+                }
+
+                for (shard_num, shard) in shards.iter().enumerate() {
+                    if shard
+                        .object
+                        .node_ranges
+                        .iter()
+                        .any(|range| range.contains(node_id))
+                    {
+                        if matches!(roles, ClusterRole::Enabled) {
+                            *roles = ClusterRole::Sharded {
+                                shard_id: shard_num as u32,
+                                total_shards: shards.len() as u32,
+                            };
+                        } else {
+                            bp.build_warning(
+                                shard.id,
+                                format!(
+                                    "Node id {node_id} matches multiple shards for shard type {:?}",
+                                    shard_type.as_str()
+                                ),
+                            );
+                        }
+                    }
+                }
+
+                if matches!(roles, ClusterRole::Enabled) {
+                    bp.build_warning(
+                        shards[0].id,
+                        format!(
+                            "Node id {node_id} does not match any shards for shard type {:?}, defaulting to all shards",
+                            shard_type.as_str()
+                        ),
+                    );
+                }
             }
         }
 
@@ -279,35 +308,34 @@ impl Network {
 }
 
 impl Http {
-    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let http = bp.setting_infallible::<structs::Http>().await;
+
         // Parse HTTP headers
-        let mut http_headers = config
-            .values("http.headers")
-            .map(|(_, v)| {
-                if let Some((k, v)) = v.split_once(':') {
-                    Ok((
-                        hyper::header::HeaderName::from_str(k.trim()).map_err(|err| {
-                            format!("Invalid header found in property \"http.headers\": {}", err)
-                        })?,
-                        hyper::header::HeaderValue::from_str(v.trim()).map_err(|err| {
-                            format!("Invalid header found in property \"http.headers\": {}", err)
-                        })?,
-                    ))
-                } else {
-                    Err(format!(
-                        "Invalid header found in property \"http.headers\": {}",
-                        v
-                    ))
-                }
+        let mut http_headers = http
+            .response_headers
+            .iter()
+            .map(|(k, v)| {
+                Ok((
+                    hyper::header::HeaderName::from_str(k.trim()).map_err(|err| {
+                        format!("Invalid header found in property \"http.headers\": {}", err)
+                    })?,
+                    hyper::header::HeaderValue::from_str(v.trim()).map_err(|err| {
+                        format!("Invalid header found in property \"http.headers\": {}", err)
+                    })?,
+                ))
             })
             .collect::<Result<Vec<_>, String>>()
-            .map_err(|e| config.new_parse_error("http.headers", e))
+            .map_err(|e| {
+                bp.build_error(
+                    Object::Http.singleton(),
+                    format!("Failed to parse HTTP headers: {}", e),
+                )
+            })
             .unwrap_or_default();
+
         // Add permissive CORS headers
-        if config
-            .property::<bool>("http.permissive-cors")
-            .unwrap_or(false)
-        {
+        if http.use_permissive_cors {
             http_headers.push((
                 hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN,
                 hyper::header::HeaderValue::from_static("*"),
@@ -327,93 +355,66 @@ impl Http {
         }
 
         // Add HTTP Strict Transport Security
-        if config.property::<bool>("http.hsts").unwrap_or(false) {
+        if http.enable_hsts {
             http_headers.push((
                 hyper::header::STRICT_TRANSPORT_SECURITY,
                 hyper::header::HeaderValue::from_static("max-age=31536000; includeSubDomains"),
             ));
         }
-        //            http_use_forwarded: config.property("http.use-x-forwarded").unwrap_or(false),
 
-        /*
-
-           rate_authenticated: jmap
-               .property_or_default::<Option<Rate>>("http.rate-limit.account", "1000/1m")
-               .unwrap_or_default(),
-           rate_anonymous: jmap
-               .property_or_default::<Option<Rate>>("http.rate-limit.anonymous", "100/1m")
-               .unwrap_or_default(),
-
-        */
-
-        todo!()
-    }
-}
-
-struct NodeList(AHashSet<u64>);
-
-impl ParseValue for NodeList {
-    fn parse_value(value: &str) -> utils::config::Result<Self> {
-        value
-            .split(',')
-            .map(|s| s.trim().parse::<u64>().map_err(|e| e.to_string()))
-            .collect::<Result<AHashSet<u64>, String>>()
-            .map(NodeList)
+        Http {
+            response_url: bp.compile_expr(Object::Http.singleton(), &http.ctx_base_url()),
+            allowed_endpoint: bp
+                .compile_expr(Object::Http.singleton(), &http.ctx_allowed_endpoints()),
+            rate_authenticated: http.rate_limit_authenticated,
+            rate_anonymous: http.rate_limit_anonymous,
+            response_headers: http_headers,
+            use_forwarded: http.use_x_forwarded,
+        }
     }
 }
 
 impl AsnGeoLookupConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Option<Self> {
-        match config.value("asn.type")? {
-            "dns" => AsnGeoLookupConfig::Dns {
-                zone_ipv4: config.value_require_non_empty("asn.zone.ipv4")?.to_string(),
-                zone_ipv6: config.value_require_non_empty("asn.zone.ipv6")?.to_string(),
-                separator: config.value_require_non_empty("asn.separator")?.to_string(),
-                index_asn: config.property_require("asn.index.asn")?,
-                index_asn_name: config.property("asn.index.asn-name"),
-                index_country: config.property("asn.index.country"),
-            }
-            .into(),
-            "resource" => {
-                let asn_resources = config
-                    .values("asn.urls.asn")
-                    .map(|(_, v)| v.to_string())
-                    .collect::<Vec<_>>();
-                let geo_resources = config
-                    .values("asn.urls.geo")
-                    .map(|(_, v)| v.to_string())
-                    .collect::<Vec<_>>();
-
-                if asn_resources.is_empty() && geo_resources.is_empty() {
-                    config.new_build_error("asn.urls", "No resources found");
-                    return None;
-                }
-
-                AsnGeoLookupConfig::Resource {
-                    headers: parse_http_headers(config, "asn"),
-                    expires: config.property_or_default::<Duration>("asn.expires", "1d")?,
-                    timeout: config.property_or_default::<Duration>("asn.timeout", "5m")?,
-                    max_size: config.property("asn.max-size").unwrap_or(100 * 1024 * 1024),
-                    asn_resources,
-                    geo_resources,
-                }
-                .into()
-            }
-            "disable" | "disabled" | "none" | "false" => AsnGeoLookupConfig::Disabled.into(),
-            _ => {
-                config.new_build_error("asn.type", "Invalid value");
-                None
-            }
+    pub async fn parse(bp: &mut Bootstrap) -> Option<Self> {
+        match bp.setting_infallible::<Asn>().await {
+            Asn::Resource(asn) => Some(AsnGeoLookupConfig::Resource {
+                expires: asn.expires.into_inner(),
+                timeout: asn.timeout.into_inner(),
+                max_size: asn.max_size as usize,
+                headers: asn
+                    .http_auth
+                    .build_headers(asn.http_headers, None)
+                    .map_err(|err| {
+                        bp.build_error(
+                            Object::Asn.singleton(),
+                            format!("Unable to build HTTP headers: {}", err),
+                        )
+                    })
+                    .ok()?,
+                asn_resources: asn.asn_urls,
+                geo_resources: asn.geo_urls,
+            }),
+            Asn::Dns(asn) => Some(AsnGeoLookupConfig::Dns {
+                zone_ipv4: asn.zone_ip_v4,
+                zone_ipv6: asn.zone_ip_v6,
+                separator: asn.separator,
+                index_asn: asn.index_asn as usize,
+                index_asn_name: asn.index_asn_name.map(|v| v as usize),
+                index_country: asn.index_country.map(|v| v as usize),
+            }),
+            Asn::None => None,
         }
     }
 }
 
 impl ClusterRole {
     pub fn is_enabled_or_sharded(&self) -> bool {
+        debug_assert!(!self.is_uninit() && !self.is_seen_role());
         matches!(self, ClusterRole::Enabled | ClusterRole::Sharded { .. })
     }
 
     pub fn is_enabled_for_integer(&self, value: u32) -> bool {
+        debug_assert!(!self.is_uninit() && !self.is_seen_role());
         match self {
             ClusterRole::Enabled => true,
             ClusterRole::Disabled => false,
@@ -425,6 +426,7 @@ impl ClusterRole {
     }
 
     pub fn is_enabled_for_hash(&self, item: &impl std::hash::Hash) -> bool {
+        debug_assert!(!self.is_uninit() && !self.is_seen_role());
         match self {
             ClusterRole::Enabled => true,
             ClusterRole::Disabled => false,
@@ -437,5 +439,75 @@ impl ClusterRole {
                 hasher.finish() % (*total_shards as u64) == *shard_id as u64
             }
         }
+    }
+
+    fn set_uninit(&mut self) {
+        *self = ClusterRole::Sharded {
+            shard_id: u32::MAX,
+            total_shards: u32::MAX,
+        };
+    }
+
+    fn set_role(&mut self, is_member: bool) -> bool {
+        if self.is_uninit() {
+            if is_member {
+                *self = ClusterRole::Enabled;
+            } else {
+                *self = ClusterRole::Sharded {
+                    shard_id: u32::MAX,
+                    total_shards: 0,
+                };
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    fn is_seen_role(&self) -> bool {
+        match self {
+            ClusterRole::Sharded {
+                shard_id,
+                total_shards,
+            } if *shard_id == u32::MAX && *total_shards == 0 => true,
+            _ => false,
+        }
+    }
+
+    fn is_uninit(&self) -> bool {
+        match self {
+            ClusterRole::Sharded {
+                shard_id,
+                total_shards,
+            } if *shard_id == u32::MAX && *total_shards == u32::MAX => true,
+            _ => false,
+        }
+    }
+
+    fn finalize(&mut self) {
+        if self.is_uninit() {
+            *self = ClusterRole::Enabled;
+        } else if self.is_seen_role() {
+            *self = ClusterRole::Disabled;
+        }
+    }
+}
+
+impl ClusterRoles {
+    fn all_mut(&mut self) -> impl Iterator<Item = &mut ClusterRole> {
+        [
+            &mut self.purge_stores,
+            &mut self.purge_accounts,
+            &mut self.push_notifications,
+            &mut self.fts_indexing,
+            &mut self.spam_training,
+            &mut self.imip_processing,
+            &mut self.merge_threads,
+            &mut self.calendar_alerts,
+            &mut self.renew_acme,
+            &mut self.calculate_metrics,
+            &mut self.push_metrics,
+        ]
+        .into_iter()
     }
 }

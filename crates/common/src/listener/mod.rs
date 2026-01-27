@@ -4,27 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, net::IpAddr, sync::Arc, time::Instant};
-
+use self::limiter::{ConcurrencyLimiter, InFlight};
+use crate::{
+    Server,
+    config::server::ServerProtocol,
+    expr::{functions::ResolveVariable, *},
+};
 use compact_str::ToCompactString;
-use registry::schema::enums::ExpressionVariable;
+use registry::{schema::enums::ExpressionVariable, types::ipmask::IpAddrOrMask};
 use rustls::ServerConfig;
 use std::fmt::Debug;
+use std::{borrow::Cow, net::IpAddr, sync::Arc, time::Instant};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::watch,
 };
 use tokio_rustls::{Accept, TlsAcceptor};
 use trc::{Event, EventType, Key};
-use utils::{config::ipmask::IpAddrMask, snowflake::SnowflakeIdGenerator};
-
-use crate::{
-    Server,
-    config::server::ServerProtocol,
-    expr::{functions::ResolveVariable, *},
-};
-
-use self::limiter::{ConcurrencyLimiter, InFlight};
+use utils::snowflake::SnowflakeIdGenerator;
 
 pub mod acme;
 pub mod asn;
@@ -39,7 +36,7 @@ pub struct ServerInstance {
     pub protocol: ServerProtocol,
     pub acceptor: TcpAcceptor,
     pub limiter: ConcurrencyLimiter,
-    pub proxy_networks: Vec<IpAddrMask>,
+    pub proxy_networks: Vec<IpAddrOrMask>,
     pub shutdown_rx: watch::Receiver<bool>,
     pub span_id_gen: Arc<SnowflakeIdGenerator>,
 }

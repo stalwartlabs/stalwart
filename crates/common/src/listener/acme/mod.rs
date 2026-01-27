@@ -56,6 +56,7 @@ pub struct StaticResolver {
 
 impl AcmeProvider {
     pub fn new(obj: RegistryObject<structs::AcmeProvider>) -> Self {
+        // TODO: Prefix contact with "mailto:" if not present
         todo!()
     }
 }

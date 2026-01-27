@@ -230,9 +230,7 @@ impl QueueConfig {
         // Parse virtual queues
         let mut queue_id_to_name = AHashMap::new();
         for obj in bp.list_infallible::<MtaVirtualQueue>().await {
-            if bp.validate(obj.id, &obj.object)
-                && let Some(queue_name) = QueueName::new(&obj.object.name)
-            {
+            if let Some(queue_name) = QueueName::new(&obj.object.name) {
                 queue_id_to_name.insert(obj.id, queue_name);
                 queue.virtual_queues.insert(
                     queue_name,
@@ -245,9 +243,6 @@ impl QueueConfig {
 
         // Parse queue strategies
         for obj in bp.list_infallible::<MtaDeliverySchedule>().await {
-            if !bp.validate(obj.id, &obj.object) {
-                continue;
-            }
             let virtual_queue = if let Some(name) = queue_id_to_name.get(&obj.object.queue_id) {
                 *name
             } else {
@@ -287,10 +282,6 @@ impl QueueConfig {
 
         // Parse connection strategies
         for obj in bp.list_infallible::<MtaConnectionStrategy>().await {
-            if !bp.validate(obj.id, &obj.object) {
-                continue;
-            }
-
             let mut source_ipv4 = Vec::new();
             let mut source_ipv6 = Vec::new();
 
@@ -324,10 +315,6 @@ impl QueueConfig {
 
         // Parse routing strategies
         for obj in bp.list_infallible::<MtaRoute>().await {
-            if !bp.validate(obj.id, &obj.object) {
-                continue;
-            }
-
             match obj.object {
                 MtaRoute::Mx(route) => {
                     queue.routing_strategy.insert(
@@ -373,10 +360,6 @@ impl QueueConfig {
 
         // Parse TLS strategies
         for obj in bp.list_infallible::<MtaTlsStrategy>().await {
-            if !bp.validate(obj.id, &obj.object) {
-                continue;
-            }
-
             queue.tls_strategy.insert(
                 obj.object.name,
                 TlsStrategy {
@@ -411,7 +394,7 @@ impl QueueRateLimiters {
         let mut throttle = QueueRateLimiters::default();
 
         for obj in bp.list_infallible::<MtaInboundThrottle>().await {
-            if !bp.validate(obj.id, &obj.object) || !obj.object.enable {
+            if !obj.object.enable {
                 continue;
             }
 
@@ -480,7 +463,7 @@ impl QueueRateLimiters {
         let mut throttle = QueueRateLimiters::default();
 
         for obj in bp.list_infallible::<MtaOutboundThrottle>().await {
-            if !bp.validate(obj.id, &obj.object) || !obj.object.enable {
+            if !obj.object.enable {
                 continue;
             }
 
@@ -541,7 +524,7 @@ impl QueueQuotas {
         };
 
         for obj in bp.list_infallible::<MtaQueueQuota>().await {
-            if !bp.validate(obj.id, &obj.object) || !obj.object.enable {
+            if !obj.object.enable {
                 continue;
             }
 

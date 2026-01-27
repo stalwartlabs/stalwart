@@ -27,6 +27,8 @@ use rustls::{
 use rustls_pki_types::TrustAnchor;
 use std::sync::Arc;
 
+pub use reqwest::header::HeaderMap;
+
 pub trait HttpLimitResponse: Sync + Send {
     fn bytes_with_limit(
         self,

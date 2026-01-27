@@ -4,29 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{
+    ServerInstance, SessionData, SessionManager, SessionStream, TcpAcceptor,
+    limiter::{ConcurrencyLimiter, LimiterResult},
+};
+use crate::{
+    Inner, Server,
+    config::server::{Listener, Listeners, ServerProtocol, TcpListener},
+    core::BuildServer,
+    manager::bootstrap::Bootstrap,
+};
+use proxy_header::io::ProxiedStream;
+use rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
-
-use proxy_header::io::ProxiedStream;
-use rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256;
 use tokio::{net::TcpStream, sync::watch};
 use tokio_rustls::server::TlsStream;
 use trc::{EventType, HttpEvent, ImapEvent, ManageSieveEvent, Pop3Event, SmtpEvent};
-use utils::{UnwrapFailure, config::Config};
-
-use crate::{
-    Inner, Server,
-    config::server::{Listener, Listeners, ServerProtocol, TcpListener},
-    core::BuildServer,
-};
-
-use super::{
-    ServerInstance, SessionData, SessionManager, SessionStream, TcpAcceptor,
-    limiter::{ConcurrencyLimiter, LimiterResult},
-};
+use utils::UnwrapFailure;
 
 impl Listener {
     pub fn spawn(
@@ -306,8 +304,8 @@ impl Listeners {
         for server in &self.servers {
             for listener in &server.listeners {
                 if let Err(err) = listener.socket.bind(listener.addr) {
-                    config.new_build_error(
-                        format!("server.listener.{}", server.id),
+                    bp.build_error(
+                        server.registry_id,
                         format!("Failed to bind to {}: {}", listener.addr, err),
                     );
                 }

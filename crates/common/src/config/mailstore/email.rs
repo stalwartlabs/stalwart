@@ -24,6 +24,7 @@ use store::{
 use types::{collection::Collection, special_use::SpecialUse};
 use utils::config::cron::SimpleCron;
 
+#[derive(Clone)]
 pub struct EmailConfig {
     pub default_language: Language,
 

@@ -38,18 +38,12 @@ impl Listeners {
         // Parse servers
         let node_id = bp.node_id();
         for listener in bp.list_infallible::<NetworkListener>().await {
-            if bp.validate(listener.id, &listener.object)
-                && (listener.object.enable_for_nodes.is_empty()
-                    || listener
-                        .object
-                        .enable_for_nodes
-                        .iter()
-                        .any(|n| n.id() == node_id))
-                && !listener
+            if listener.object.enable_for_nodes.is_empty()
+                || listener
                     .object
-                    .disable_for_nodes
+                    .enable_for_nodes
                     .iter()
-                    .any(|n| n.id() == node_id)
+                    .any(|n| n.contains(node_id))
             {
                 servers.parse_server(bp, listener);
             }
@@ -134,6 +128,7 @@ impl Listeners {
         self.servers.push(Listener {
             max_connections: listener.max_connections.unwrap_or(bp.node.max_connections),
             id: listener.name.clone(),
+            registry_id: id,
             protocol,
             listeners,
             proxy_networks: if !listener.override_proxy_trusted_networks.is_empty() {
