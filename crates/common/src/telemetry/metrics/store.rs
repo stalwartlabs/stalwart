@@ -37,7 +37,7 @@ pub trait MetricsStore: Sync + Send {
         &self,
         from_timestamp: u64,
         to_timestamp: u64,
-    ) -> impl Future<Output = trc::Result<Vec<Metric<EventType, MetricType, u64>>>> + Send;
+    ) -> impl Future<Output = trc::Result<Vec<Metric<MetricType, MetricType, u64>>>> + Send;
     fn purge_metrics(&self, period: Duration) -> impl Future<Output = trc::Result<()>> + Send;
 }
 
@@ -116,7 +116,7 @@ impl MetricsStore for Store {
                 EventType::IncomingReport(IncomingReportEvent::TlsReport),
                 EventType::IncomingReport(IncomingReportEvent::TlsReportWithWarnings),
             ] {
-                let reading = Collector::read_event_metric(event.id());
+                let reading = Collector::read_metric_counter(event.to_id() as usize);
                 if reading > 0 {
                     let history = history.events.entry(event).or_insert(0);
                     let diff = reading - *history;
@@ -124,7 +124,7 @@ impl MetricsStore for Store {
                         batch.set(
                             ValueClass::Telemetry(TelemetryClass::Metric {
                                 timestamp,
-                                metric_id: (event.code() << 2) | TYPE_COUNTER,
+                                metric_id: (event.to_id() << 2) as u64 | TYPE_COUNTER,
                                 node_id,
                             }),
                             KeySerializer::new(U32_LEN).write_leb128(diff).finalize(),
@@ -142,7 +142,7 @@ impl MetricsStore for Store {
                         batch.set(
                             ValueClass::Telemetry(TelemetryClass::Metric {
                                 timestamp,
-                                metric_id: (gauge_id.code() << 2) | TYPE_GAUGE,
+                                metric_id: (gauge_id.to_id() << 2) as u64 | TYPE_GAUGE,
                                 node_id,
                             }),
                             KeySerializer::new(U32_LEN).write_leb128(value).finalize(),
@@ -155,10 +155,10 @@ impl MetricsStore for Store {
                 let histogram_id = histogram.id();
                 if matches!(
                     histogram_id,
-                    MetricType::MessageIngestionTime
-                        | MetricType::MessageFtsIndexTime
+                    MetricType::MessageIngestTime
+                        | MetricType::MessageIngestIndexTime
                         | MetricType::DeliveryTotalTime
-                        | MetricType::DeliveryTime
+                        | MetricType::DeliveryAttemptTime
                         | MetricType::DnsLookupTime
                 ) {
                     let history = history.histograms.entry(histogram_id).or_default();
@@ -170,7 +170,7 @@ impl MetricsStore for Store {
                         batch.set(
                             ValueClass::Telemetry(TelemetryClass::Metric {
                                 timestamp,
-                                metric_id: (histogram_id.code() << 2) | TYPE_HISTOGRAM,
+                                metric_id: (histogram_id.to_id() << 2) as u64 | TYPE_HISTOGRAM,
                                 node_id,
                             }),
                             KeySerializer::new(U32_LEN)
@@ -198,7 +198,7 @@ impl MetricsStore for Store {
         &self,
         from_timestamp: u64,
         to_timestamp: u64,
-    ) -> trc::Result<Vec<Metric<EventType, MetricType, u64>>> {
+    ) -> trc::Result<Vec<Metric<MetricType, MetricType, u64>>> {
         let mut metrics = Vec::new();
         self.iterate(
             IterateParams::new(
@@ -221,9 +221,10 @@ impl MetricsStore for Store {
                     .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))?;
                 match metric_type & 0x03 {
                     TYPE_COUNTER => {
-                        let id = EventType::from_code(metric_type >> 2).ok_or_else(|| {
-                            trc::Error::corrupted_key(key, None, trc::location!())
-                        })?;
+                        let id =
+                            MetricType::from_id((metric_type >> 2) as u16).ok_or_else(|| {
+                                trc::Error::corrupted_key(key, None, trc::location!())
+                            })?;
                         let (value, _) = value.read_leb128::<u64>().ok_or_else(|| {
                             trc::Error::corrupted_key(key, value.into(), trc::location!())
                         })?;
@@ -234,9 +235,10 @@ impl MetricsStore for Store {
                         });
                     }
                     TYPE_HISTOGRAM => {
-                        let id = MetricType::from_code(metric_type >> 2).ok_or_else(|| {
-                            trc::Error::corrupted_key(key, None, trc::location!())
-                        })?;
+                        let id =
+                            MetricType::from_id((metric_type >> 2) as u16).ok_or_else(|| {
+                                trc::Error::corrupted_key(key, None, trc::location!())
+                            })?;
                         let (count, bytes_read) = value.read_leb128::<u64>().ok_or_else(|| {
                             trc::Error::corrupted_key(key, value.into(), trc::location!())
                         })?;
@@ -254,9 +256,10 @@ impl MetricsStore for Store {
                         });
                     }
                     TYPE_GAUGE => {
-                        let id = MetricType::from_code(metric_type >> 2).ok_or_else(|| {
-                            trc::Error::corrupted_key(key, None, trc::location!())
-                        })?;
+                        let id =
+                            MetricType::from_id((metric_type >> 2) as u16).ok_or_else(|| {
+                                trc::Error::corrupted_key(key, None, trc::location!())
+                            })?;
                         let (value, _) = value.read_leb128::<u64>().ok_or_else(|| {
                             trc::Error::corrupted_key(key, value.into(), trc::location!())
                         })?;

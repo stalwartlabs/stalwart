@@ -13,6 +13,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     time::Duration,
 };
+use trc::MetricType;
 use utils::config::{Rate, utils::ParseValue};
 
 pub mod eval;
@@ -167,7 +168,7 @@ pub enum SystemVariable {
     Hostname,
     Domain,
     NodeId,
-    Metric(usize),
+    Metric(MetricType),
 }
 
 impl From<usize> for Variable<'_> {

@@ -103,3 +103,15 @@ pub const ASYNC_FUNCTIONS: &[(&str, u32, u32)] = &[
     ("dns_query", F_DNS_QUERY, 2),
     ("sql_query", F_SQL_QUERY, 3),
 ];
+
+pub struct EmptyResolver;
+
+impl ResolveVariable for EmptyResolver {
+    fn resolve_variable(&self, _: ExpressionVariable) -> Variable<'_> {
+        Variable::Integer(0)
+    }
+
+    fn resolve_global(&self, _: &str) -> Variable<'_> {
+        Variable::Integer(0)
+    }
+}

@@ -8089,6 +8089,7 @@ dependencies = [
  "base64 0.22.1",
  "compact_str",
  "event_macro",
+ "hashify",
  "mail-auth",
  "mail-parser",
  "parking_lot",

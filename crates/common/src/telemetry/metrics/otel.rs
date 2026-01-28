@@ -24,7 +24,7 @@ impl OtelMetrics {
         // Add counters
         for counter in Collector::collect_counters(is_enterprise) {
             metrics.push(Metric {
-                name: counter.id().name().into(),
+                name: counter.id().as_str().into(),
                 description: counter.id().description().into(),
                 unit: "events".into(),
                 data: Box::new(Sum {
@@ -44,7 +44,7 @@ impl OtelMetrics {
         // Add gauges
         for gauge in Collector::collect_gauges(is_enterprise) {
             metrics.push(Metric {
-                name: gauge.id().name().into(),
+                name: gauge.id().as_str().into(),
                 description: gauge.id().description().into(),
                 unit: gauge.id().unit().into(),
                 data: Box::new(Gauge {
@@ -62,7 +62,7 @@ impl OtelMetrics {
         // Add histograms
         for histogram in Collector::collect_histograms(is_enterprise) {
             metrics.push(Metric {
-                name: histogram.id().name().into(),
+                name: histogram.id().as_str().into(),
                 description: histogram.id().description().into(),
                 unit: histogram.id().unit().into(),
                 data: Box::new(Histogram {

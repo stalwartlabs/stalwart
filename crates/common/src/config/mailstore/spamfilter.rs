@@ -462,7 +462,7 @@ impl ClassifierConfig {
                 w_params = FtrlParameters::parse(&model.parameters);
                 i_params = Some(FtrlParameters::parse(&model.indicator_parameters));
             }
-            structs::SpamClassifierModel::None => return None,
+            structs::SpamClassifierModel::Disabled => return None,
         }
 
         ClassifierConfig {

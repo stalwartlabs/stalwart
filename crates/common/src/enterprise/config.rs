@@ -12,39 +12,36 @@ use super::{
     AlertContent, AlertContentToken, AlertMethod, Enterprise, MetricAlert, MetricStore,
     SpamFilterLlmConfig, TraceStore, Undelete, license::LicenseKey, llm::AiApiConfig,
 };
-use crate::expr::{Expression, tokenizer::TokenMap};
+use crate::{enterprise::llm::ApiType, manager::bootstrap::Bootstrap};
 use ahash::AHashMap;
-use directory::{Type, backend::internal::manage::ManageDirectory};
-use std::{sync::Arc, time::Duration};
-use store::{Store, Stores};
-use trc::{EventType, MetricType, TOTAL_EVENT_COUNT};
-use utils::{
-    config::{
-        Config, ConfigKey,
-        cron::SimpleCron,
-        utils::{AsKey, ParseValue},
+use registry::{
+    schema::{
+        enums::AiModelType,
+        prelude::{Object, Property},
+        structs::{
+            self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SpamLlm,
+            TelemetryHistory,
+        },
     },
-    template::Template,
+    types::id::Id,
 };
+use std::sync::Arc;
+use store::Store;
+use trc::MetricType;
+use utils::template::Template;
 
 impl Enterprise {
-    pub async fn parse(
-        bp: &mut Bootstrap,
-        config_manager: &ConfigManager,
-        stores: &Stores,
-        data: &Store,
-    ) -> Option<Self> {
-        let server_hostname = config
-            .value("server.hostname")
-            .or_else(|| config.value("lookup.default.hostname"))?;
+    pub async fn parse(bp: &mut Bootstrap) -> Option<Self> {
+        let server_hostname = bp.hostname().to_string();
         let mut update_license = None;
 
-        let license_result = match (
-            config.value("enterprise.license-key"),
-            config.value("enterprise.api-key"),
-        ) {
+        let mut enterprise = bp.setting_infallible::<structs::Enterprise>().await;
+        let license_result = match (&enterprise.license_key, &enterprise.api_key) {
             (Some(license_key), maybe_api_key) => {
-                match (LicenseKey::new(license_key, server_hostname), maybe_api_key) {
+                match (
+                    LicenseKey::new(license_key, &server_hostname),
+                    maybe_api_key,
+                ) {
                     (Ok(license), Some(api_key)) if license.is_near_expiration() => Ok(license
                         .try_renew(api_key)
                         .await
@@ -54,7 +51,7 @@ impl Enterprise {
                         })
                         .unwrap_or(license)),
                     (Ok(license), None) => Ok(license),
-                    (Err(_), Some(api_key)) => LicenseKey::invalid(server_hostname)
+                    (Err(_), Some(api_key)) => LicenseKey::invalid(&server_hostname)
                         .try_renew(api_key)
                         .await
                         .map(|result| {
@@ -64,7 +61,7 @@ impl Enterprise {
                     (maybe_license, _) => maybe_license,
                 }
             }
-            (None, Some(api_key)) => LicenseKey::invalid(server_hostname)
+            (None, Some(api_key)) => LicenseKey::invalid(&server_hostname)
                 .try_renew(api_key)
                 .await
                 .map(|result| {
@@ -80,24 +77,17 @@ impl Enterprise {
         let license = match license_result {
             Ok(license) => license,
             Err(err) => {
-                config.new_build_warning("enterprise.license-key", err.to_string());
+                bp.build_warning(Object::Enterprise.singleton(), err.to_string());
                 return None;
             }
         };
 
         // Update the license if a new one was obtained
         if let Some(license) = update_license {
-            config
-                .keys
-                .insert("enterprise.license-key".to_string(), license.clone());
-            if let Err(err) = config_manager
-                .set(
-                    [ConfigKey {
-                        key: "enterprise.license-key".to_string(),
-                        value: license.to_string(),
-                    }],
-                    true,
-                )
+            enterprise.license_key = Some(license);
+            if let Err(err) = bp
+                .registry
+                .put(Object::Enterprise.singleton(), &enterprise)
                 .await
             {
                 trc::error!(
@@ -107,13 +97,10 @@ impl Enterprise {
             }
         }
 
-        match data
-            .count_principals(None, Type::Individual.into(), None)
-            .await
-        {
+        match bp.registry.count(Object::Account).await {
             Ok(total) if total > license.accounts as u64 => {
-                config.new_build_warning(
-                    "enterprise.license-key",
+                bp.build_warning(
+                    Object::Enterprise.singleton(),
                     format!(
                         "License key is valid but only allows {} accounts, found {}.",
                         license.accounts, total
@@ -122,108 +109,145 @@ impl Enterprise {
                 return None;
             }
             Err(e) => {
-                if !matches!(data, Store::None) {
-                    config.new_build_error("enterprise.license-key", e.to_string());
-                }
+                trc::error!(
+                    e.caused_by(trc::location!())
+                        .details("Failed to count total individual principals")
+                );
                 return None;
             }
             _ => (),
         }
 
-        let trace_store = if config
-            .property_or_default("tracing.history.enable", "false")
-            .unwrap_or(false)
-        {
-            if let Some(store) = config
-                .value("tracing.history.store")
-                .and_then(|name| stores.stores.get(name))
-                .cloned()
-            {
-                TraceStore {
-                    retention: config
-                        .property_or_default::<Option<Duration>>("tracing.history.retention", "30d")
-                        .unwrap_or(Some(Duration::from_secs(30 * 24 * 60 * 60))),
-                    store,
-                }
-                .into()
-            } else {
-                None
+        let telemetry = bp.setting_infallible::<TelemetryHistory>().await;
+        let dr = bp.setting_infallible::<DataRetention>().await;
+        let todo = "map stores";
+        let trace_store = if telemetry.enable_tracing_history {
+            TraceStore {
+                retention: dr.hold_traces_for.map(|d| d.into_inner()),
+                store: Store::None,
             }
+            .into()
         } else {
             None
         };
-        let metrics_store = if config
-            .property_or_default("metrics.history.enable", "false")
-            .unwrap_or(false)
-        {
-            if let Some(store) = config
-                .value("metrics.history.store")
-                .and_then(|name| stores.stores.get(name))
-                .cloned()
-            {
-                MetricStore {
-                    retention: config
-                        .property_or_default::<Option<Duration>>("metrics.history.retention", "90d")
-                        .unwrap_or(Some(Duration::from_secs(90 * 24 * 60 * 60))),
-                    store,
-                    interval: config
-                        .property_or_default::<SimpleCron>("metrics.history.interval", "0 * *")
-                        .unwrap_or_else(|| SimpleCron::parse_value("0 * *").unwrap()),
-                }
-                .into()
-            } else {
-                None
+        let metrics_store = if telemetry.enable_metric_history {
+            MetricStore {
+                retention: dr.hold_metrics_for.map(|d| d.into_inner()),
+                store: Store::None,
+                interval: telemetry.metrics_collection_interval.into(),
             }
+            .into()
         } else {
             None
         };
 
         // Parse AI APIs
         let mut ai_apis = AHashMap::new();
-        for id in config.sub_keys("enterprise.ai", ".url") {
-            if let Some(api) = AiApiConfig::parse(config, &id) {
-                ai_apis.insert(id, api.into());
-            }
+        let mut ai_apis_ids = AHashMap::new();
+        for api in bp.list_infallible::<AiModel>().await {
+            let id = api.id.clone();
+            let api = api.object;
+            let api = Arc::new(AiApiConfig {
+                id: api.name,
+                api_type: match api.class {
+                    AiModelType::Chat => ApiType::ChatCompletion,
+                    AiModelType::Text => ApiType::TextCompletion,
+                },
+                url: api.url,
+                headers: api
+                    .http_auth
+                    .build_headers(api.http_headers, "application/json".into())
+                    .map_err(|err| {
+                        bp.build_error(id, format!("Unable to build HTTP headers: {}", err))
+                    })
+                    .unwrap_or_default(),
+                model: api.model,
+                timeout: api.timeout.into_inner(),
+                tls_allow_invalid_certs: api.allow_invalid_certs,
+                default_temperature: api.temperature,
+            });
+            ai_apis.insert(api.id.clone(), api.clone());
+            ai_apis_ids.insert(id, api);
         }
 
         // Build the enterprise configuration
         let mut enterprise = Enterprise {
             license,
-            undelete: config
-                .property_or_default::<Option<Duration>>("storage.undelete.retention", "false")
-                .unwrap_or_default()
-                .map(|retention| Undelete { retention }),
-            logo_url: config.value("enterprise.logo-url").map(|s| s.to_string()),
+            undelete: dr.hold_deleted_for.map(|retention| Undelete {
+                retention: retention.into_inner(),
+            }),
+            logo_url: enterprise.logo_url,
             trace_store,
             metrics_store,
-            metrics_alerts: parse_metric_alerts(bp),
-            spam_filter_llm: SpamFilterLlmConfig::parse(config, &ai_apis),
+            metrics_alerts: Default::default(),
+            spam_filter_llm: SpamFilterLlmConfig::parse(bp, &ai_apis_ids).await,
             ai_apis,
             template_calendar_alarm: None,
             template_scheduling_email: None,
             template_scheduling_web: None,
         };
 
+        // Parse metric alerts
+        for alert in bp.list_infallible::<Alert>().await {
+            let id = alert.id;
+            let alert = alert.object;
+
+            if !alert.enable {
+                continue;
+            }
+            let condition = bp.compile_expr(id, &alert.ctx_condition()).default;
+            let mut method = Vec::with_capacity(1);
+            if let structs::AlertEmail::Enabled(alert) = alert.email_alert {
+                method.push(AlertMethod::Email {
+                    from_name: alert.from_name,
+                    from_addr: alert.from_address,
+                    to: alert.to,
+                    subject: AlertContent::new(&alert.subject),
+                    body: AlertContent::new(&alert.body),
+                });
+            }
+            if let structs::AlertEvent::Enabled(alert) = alert.event_alert {
+                method.push(AlertMethod::Event {
+                    message: alert.event_message.as_deref().map(AlertContent::new),
+                });
+            }
+
+            enterprise.metrics_alerts.push(MetricAlert {
+                id,
+                condition,
+                method,
+            });
+        }
+
         // Parse templates
-        for (key, value) in [
+        let sched = bp.setting_infallible::<CalendarScheduling>().await;
+        let alarm = bp.setting_infallible::<CalendarAlarm>().await;
+
+        for (template, value, object, property) in [
             (
-                "calendar.alarms.template",
+                alarm.template,
                 &mut enterprise.template_calendar_alarm,
+                Object::CalendarAlarm.singleton(),
+                Property::Template,
             ),
             (
-                "calendar.scheduling.template.email",
+                sched.email_template,
                 &mut enterprise.template_scheduling_email,
+                Object::CalendarScheduling.singleton(),
+                Property::EmailTemplate,
             ),
             (
-                "calendar.scheduling.template.web",
+                sched.http_rsvp_template,
                 &mut enterprise.template_scheduling_web,
+                Object::CalendarScheduling.singleton(),
+                Property::HttpRsvpTemplate,
             ),
         ] {
-            if let Some(template) = config.value(key) {
-                match Template::parse(template) {
+            if let Some(template) = template {
+                match Template::parse(&template) {
                     Ok(template) => *value = Some(template),
                     Err(err) => {
-                        config.new_build_error(key, format!("Invalid template: {err}"));
+                        bp.invalid_property(object, property, format!("Invalid template: {err}"));
                     }
                 }
             }
@@ -234,249 +258,95 @@ impl Enterprise {
 }
 
 impl SpamFilterLlmConfig {
-    pub fn parse(bp: &mut Bootstrap, models: &AHashMap<String, Arc<AiApiConfig>>) -> Option<Self> {
-        if !config
-            .property_or_default::<bool>("spam-filter.llm.enable", "false")
-            .unwrap_or_default()
-        {
-            return None;
-        }
-        let model = config.value_require_non_empty("spam-filter.llm.model")?;
-        let model = if let Some(model) = models.get(model) {
-            model.clone()
-        } else {
-            let message = format!("Model {model:?} not found in AI API configuration");
-            config.new_build_error("spam-filter.llm.model", message);
-            return None;
-        };
-
-        let llm = SpamFilterLlmConfig {
-            model,
-            temperature: config
-                .property_or_default("spam-filter.llm.temperature", "0.5")
-                .unwrap_or(0.5),
-            prompt: config
-                .value_require_non_empty("spam-filter.llm.prompt")?
-                .to_string(),
-            separator: config
-                .value_require_non_empty("spam-filter.llm.separator")
-                .unwrap_or_default()
-                .chars()
-                .next()
-                .unwrap_or(','),
-            index_category: config
-                .property("spam-filter.llm.index.category")
-                .unwrap_or_default(),
-            index_confidence: config.property("spam-filter.llm.index.confidence"),
-            index_explanation: config.property("spam-filter.llm.index.explanation"),
-            categories: config
-                .values("spam-filter.llm.categories")
-                .map(|(_, v)| v.trim().to_uppercase())
-                .collect(),
-            confidence: config
-                .values("spam-filter.llm.confidence")
-                .map(|(_, v)| v.trim().to_uppercase())
-                .collect(),
-        };
-
-        if llm.categories.is_empty() {
-            config.new_build_error("spam-filter.llm.categories", "No categories defined");
-            return None;
-        }
-        if llm.index_confidence.is_some() && llm.confidence.is_empty() {
-            config.new_build_error(
-                "spam-filter.llm.confidence",
-                "Confidence index is defined but no confidence values are provided",
-            );
-            return None;
-        }
-
-        llm.into()
-    }
-}
-
-pub fn parse_metric_alerts(bp: &mut Bootstrap) -> Vec<MetricAlert> {
-    let mut alerts = Vec::new();
-
-    for metric_id in config.sub_keys("metrics.alerts", ".enable") {
-        if let Some(alert) = parse_metric_alert(config, metric_id) {
-            alerts.push(alert);
-        }
-    }
-
-    alerts
-}
-
-fn parse_metric_alert(bp: &mut Bootstrap, id: String) -> Option<MetricAlert> {
-    if !config.property_or_default::<bool>(("metrics.alerts", id.as_str(), "enable"), "false")? {
-        return None;
-    }
-
-    let mut alert = MetricAlert {
-        condition: Expression::try_parse(
-            config,
-            ("metrics.alerts", id.as_str(), "condition"),
-            &TokenMap::default().with_variables_map(
-                EventType::variants()
-                    .into_iter()
-                    .map(|e| (sanitize_metric_name(e.name()), e.id() as u32))
-                    .chain(MetricType::variants().iter().map(|m| {
-                        (
-                            sanitize_metric_name(m.name()),
-                            m.code() as u32 + TOTAL_EVENT_COUNT as u32,
-                        )
-                    })),
-            ),
-        )?,
-        method: Vec::new(),
-        id,
-    };
-    let id_str = alert.id.as_str();
-
-    if config
-        .property_or_default::<bool>(("metrics.alerts", id_str, "notify.event.enable"), "false")
-        .unwrap_or_default()
-    {
-        alert.method.push(AlertMethod::Event {
-            message: parse_alert_content(
-                ("metrics.alerts", id_str, "notify.event.message"),
-                config,
-            ),
-        });
-    }
-
-    if config
-        .property_or_default::<bool>(("metrics.alerts", id_str, "notify.email.enable"), "false")
-        .unwrap_or_default()
-    {
-        let from_addr = config
-            .value_require(("metrics.alerts", id_str, "notify.email.from-addr"))?
-            .trim()
-            .to_string();
-        let from_name = config
-            .value(("metrics.alerts", id_str, "notify.email.from-name"))
-            .map(|s| s.to_string());
-        let to = config
-            .values(("metrics.alerts", id_str, "notify.email.to"))
-            .filter_map(|(_, s)| {
-                if s.contains('@') {
-                    s.trim().to_string().into()
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        let subject =
-            parse_alert_content(("metrics.alerts", id_str, "notify.email.subject"), config)?;
-        let body = parse_alert_content(("metrics.alerts", id_str, "notify.email.body"), config)?;
-
-        if !from_addr.contains('@') {
-            config.new_build_error(
-                ("metrics.alerts", id_str, "notify.email.from-addr"),
-                "Invalid from email address",
-            );
-        }
-        if to.is_empty() {
-            config.new_build_error(
-                ("metrics.alerts", id_str, "notify.email.to"),
-                "Missing recipient address(es)",
-            );
-        }
-        if subject.0.is_empty() {
-            config.new_build_error(
-                ("metrics.alerts", id_str, "notify.email.subject"),
-                "Missing email subject",
-            );
-        }
-        if body.0.is_empty() {
-            config.new_build_error(
-                ("metrics.alerts", id_str, "notify.email.body"),
-                "Missing email body",
-            );
-        }
-
-        alert.method.push(AlertMethod::Email {
-            from_name,
-            from_addr,
-            to,
-            subject,
-            body,
-        });
-    }
-
-    if alert.method.is_empty() {
-        config.new_build_error(
-            ("metrics.alerts", id_str),
-            "No notification method enabled for alert",
-        );
-    }
-
-    alert.into()
-}
-
-fn parse_alert_content(key: impl AsKey, bp: &mut Bootstrap) -> Option<AlertContent> {
-    let mut tokens = Vec::new();
-    let mut value = config.value(key)?.chars().peekable();
-    let mut buf = String::new();
-
-    while let Some(ch) = value.next() {
-        if ch == '%' && value.peek() == Some(&'{') {
-            value.next();
-
-            let mut var_name = String::new();
-            let mut found_curly = false;
-
-            for ch in value.by_ref() {
-                if ch == '}' {
-                    found_curly = true;
-                    break;
-                }
-                var_name.push(ch);
+    pub async fn parse(
+        bp: &mut Bootstrap,
+        models: &AHashMap<Id, Arc<AiApiConfig>>,
+    ) -> Option<Self> {
+        match bp.setting_infallible::<SpamLlm>().await {
+            SpamLlm::Enable(llm) => {
+                let Some(model) = models.get(&llm.model).cloned() else {
+                    bp.build_error(
+                        Object::SpamLlm.singleton(),
+                        format!("Model {:?} not found in AI API configuration", llm.model),
+                    );
+                    return None;
+                };
+                Some(SpamFilterLlmConfig {
+                    model,
+                    temperature: llm.temperature,
+                    prompt: llm.prompt,
+                    separator: llm.separator.chars().next().unwrap_or(','),
+                    index_category: llm.response_pos_category as usize,
+                    index_confidence: llm.response_pos_confidence.map(|v| v as usize),
+                    index_explanation: llm.response_pos_explanation.map(|v| v as usize),
+                    categories: llm
+                        .categories
+                        .iter()
+                        .map(|v| v.trim().to_uppercase())
+                        .collect(),
+                    confidence: llm
+                        .confidence
+                        .iter()
+                        .map(|v| v.trim().to_uppercase())
+                        .collect(),
+                })
             }
+            SpamLlm::Disable => None,
+        }
+    }
+}
 
-            if found_curly && value.peek() == Some(&'%') {
+impl AlertContent {
+    fn new(value: &str) -> Self {
+        let mut tokens = Vec::new();
+        let mut value = value.chars().peekable();
+        let mut buf = String::new();
+
+        while let Some(ch) = value.next() {
+            if ch == '%' && value.peek() == Some(&'{') {
                 value.next();
-                if let Some(event_type) = EventType::try_parse(&var_name)
-                    .map(AlertContentToken::Event)
-                    .or_else(|| MetricType::try_parse(&var_name).map(AlertContentToken::Metric))
-                {
-                    if !buf.is_empty() {
-                        tokens.push(AlertContentToken::Text(std::mem::take(&mut buf)));
+
+                let mut var_name = String::new();
+                let mut found_curly = false;
+
+                for ch in value.by_ref() {
+                    if ch == '}' {
+                        found_curly = true;
+                        break;
                     }
-                    tokens.push(event_type);
+                    var_name.push(ch);
+                }
+
+                if found_curly && value.peek() == Some(&'%') {
+                    value.next();
+                    if let Some(event_type) =
+                        MetricType::parse(&var_name).map(AlertContentToken::Metric)
+                    {
+                        if !buf.is_empty() {
+                            tokens.push(AlertContentToken::Text(std::mem::take(&mut buf)));
+                        }
+                        tokens.push(event_type);
+                    } else {
+                        buf.push('%');
+                        buf.push('{');
+                        buf.push_str(&var_name);
+                        buf.push('}');
+                        buf.push('%');
+                    }
                 } else {
                     buf.push('%');
                     buf.push('{');
                     buf.push_str(&var_name);
-                    buf.push('}');
-                    buf.push('%');
                 }
             } else {
-                buf.push('%');
-                buf.push('{');
-                buf.push_str(&var_name);
+                buf.push(ch);
             }
-        } else {
-            buf.push(ch);
         }
-    }
 
-    if !buf.is_empty() {
-        tokens.push(AlertContentToken::Text(buf));
-    }
-
-    AlertContent(tokens).into()
-}
-
-fn sanitize_metric_name(name: &str) -> String {
-    let mut result = String::with_capacity(name.len());
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            result.push(ch);
-        } else {
-            result.push('_');
+        if !buf.is_empty() {
+            tokens.push(AlertContentToken::Text(buf));
         }
-    }
 
-    result
+        AlertContent(tokens)
+    }
 }

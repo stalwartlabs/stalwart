@@ -6,10 +6,7 @@
 
 use crate::{
     Core, Server,
-    config::{
-        server::{Listeners, tls::parse_certificates},
-        telemetry::Telemetry,
-    },
+    config::{server::Listeners, telemetry::Telemetry},
     listener::blocked::{BLOCKED_IP_KEY, BlockedIps},
 };
 use ahash::AHashMap;

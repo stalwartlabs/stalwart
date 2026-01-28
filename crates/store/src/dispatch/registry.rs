@@ -5,10 +5,17 @@
  */
 
 use crate::{RegistryStore, registry::RegistryObject};
-use registry::types::{ObjectType, id::Id};
+use registry::{
+    schema::prelude::Object,
+    types::{ObjectType, id::Id},
+};
 
 impl RegistryStore {
     pub async fn get<T: ObjectType>(&self, id: Id) -> trc::Result<Option<T>> {
+        todo!()
+    }
+
+    pub async fn put<T: ObjectType>(&self, id: Id, object: &T) -> trc::Result<RegistryObject<T>> {
         todo!()
     }
 
@@ -17,6 +24,10 @@ impl RegistryStore {
     }
 
     pub async fn delete(&self, id: Id) -> trc::Result<()> {
+        todo!()
+    }
+
+    pub async fn count(&self, typ: Object) -> trc::Result<u64> {
         todo!()
     }
 }

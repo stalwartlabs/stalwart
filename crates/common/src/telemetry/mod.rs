@@ -75,7 +75,7 @@ impl Telemetry {
         let mut interests = trc::ipc::subscriber::Interests::default();
         for event in trc::EventType::variants() {
             if level.is_contained(event.level()) {
-                interests.set(event);
+                interests.set(*event);
             }
         }
 

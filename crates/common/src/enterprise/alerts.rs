@@ -8,6 +8,9 @@
  *
  */
 
+use super::{AlertContent, AlertContentToken, AlertMethod};
+use crate::Server;
+use crate::expr::functions::EmptyResolver;
 use mail_builder::{
     MessageBuilder,
     headers::{
@@ -15,15 +18,9 @@ use mail_builder::{
         address::{Address, EmailAddress},
     },
 };
-use registry::schema::enums::ExpressionVariable;
-use trc::{Collector, MetricType, TOTAL_EVENT_COUNT, TelemetryEvent};
-
-use super::{AlertContent, AlertContentToken, AlertMethod};
-use crate::{
-    Server,
-    expr::{Variable, functions::ResolveVariable},
-};
+use registry::schema::prelude::Property;
 use std::fmt::Write;
+use trc::{Collector, TelemetryEvent};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AlertMessage {
@@ -31,8 +28,6 @@ pub struct AlertMessage {
     pub to: Vec<String>,
     pub body: Vec<u8>,
 }
-
-struct CollectorResolver;
 
 impl Server {
     pub async fn process_alerts(&self) -> Option<Vec<AlertMessage>> {
@@ -44,7 +39,13 @@ impl Server {
 
         for alert in alerts {
             if !self
-                .eval_expr(&alert.condition, &CollectorResolver, &alert.id, 0)
+                .eval_expr(
+                    &alert.condition,
+                    &EmptyResolver,
+                    alert.id,
+                    Property::Condition,
+                    0,
+                )
                 .await
                 .unwrap_or(false)
             {
@@ -108,24 +109,6 @@ impl Server {
     }
 }
 
-impl ResolveVariable for CollectorResolver {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
-        if (variable as usize) < TOTAL_EVENT_COUNT {
-            Variable::Integer(Collector::read_event_metric(variable as usize) as i64)
-        } else if let Some(metric_type) =
-            MetricType::from_code(variable as u64 - TOTAL_EVENT_COUNT as u64)
-        {
-            Variable::Float(Collector::read_metric(metric_type))
-        } else {
-            Variable::Integer(0)
-        }
-    }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
-    }
-}
-
 impl AlertContent {
     pub fn build(&self) -> String {
         let mut buf = String::with_capacity(self.len());
@@ -148,16 +131,13 @@ impl AlertContentToken {
             AlertContentToken::Metric(metric_type) => {
                 let _ = write!(buf, "{}", Collector::read_metric(*metric_type));
             }
-            AlertContentToken::Event(event_type) => {
-                let _ = write!(buf, "{}", Collector::read_event_metric(event_type.id()));
-            }
         }
     }
 
     fn len(&self) -> usize {
         match self {
             AlertContentToken::Text(s) => s.len(),
-            AlertContentToken::Metric(_) | AlertContentToken::Event(_) => 10,
+            AlertContentToken::Metric(_) => 10,
         }
     }
 }

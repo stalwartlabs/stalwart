@@ -12,7 +12,7 @@ use ahash::AHashSet;
 use std::{fmt::Debug, net::IpAddr};
 use utils::{
     config::{
-        Config, ConfigKey, Rate,
+        ConfigKey, Rate,
         ipmask::{IpAddrMask, IpAddrOrMask},
         utils::ParseValue,
     },

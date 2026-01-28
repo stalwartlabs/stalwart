@@ -12,7 +12,7 @@ use ahash::AHashSet;
 use regex::Regex;
 use registry::{schema::enums::ExpressionConstant, types::EnumType};
 use std::{borrow::Cow, iter::Peekable, slice::Iter, time::Duration};
-use trc::{EventType, MetricType, TOTAL_EVENT_COUNT};
+use trc::MetricType;
 use utils::config::utils::ParseValue;
 
 pub struct Tokenizer<'x> {
@@ -107,15 +107,9 @@ impl<'x> Tokenizer<'x> {
                             b"metric" => {
                                 let stop_ch = self.find_char(b"\"'")?;
                                 let metric_str = self.parse_string(stop_ch)?;
-                                let metric = EventType::try_parse(&metric_str)
-                                    .map(|e| e.id())
-                                    .or_else(|| {
-                                        MetricType::try_parse(&metric_str)
-                                            .map(|m| m.code() as usize + TOTAL_EVENT_COUNT)
-                                    })
-                                    .ok_or_else(|| {
-                                        format!("Invalid metric name {:?}", metric_str)
-                                    })?;
+                                let metric = MetricType::parse(&metric_str).ok_or_else(|| {
+                                    format!("Invalid metric name {:?}", metric_str)
+                                })?;
                                 self.has_alpha = false;
                                 self.buf.clear();
                                 (Token::System(SystemVariable::Metric(metric)).into(), b'(')

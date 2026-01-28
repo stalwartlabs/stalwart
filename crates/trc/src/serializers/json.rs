@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Error, Event, EventDetails, Key, Value};
+use crate::{Error, Event, EventDetails, EventType, Key, MetricType, Value};
 use ahash::AHashSet;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use mail_parser::DateTime;
@@ -91,7 +91,7 @@ impl<T: AsRef<Event<EventDetails>>> Serialize for JsonEventSerializer<T> {
         if self.with_id {
             map.serialize_entry(
                 "id",
-                &format!("{}{}", event.inner.timestamp, event.inner.typ.id()),
+                &format!("{}{}", event.inner.timestamp, event.inner.typ.to_id()),
             )?;
         }
         if self.with_description {
@@ -104,7 +104,7 @@ impl<T: AsRef<Event<EventDetails>>> Serialize for JsonEventSerializer<T> {
             "createdAt",
             &DateTime::from_timestamp(event.inner.timestamp as i64).to_rfc3339(),
         )?;
-        map.serialize_entry("type", event.inner.typ.name())?;
+        map.serialize_entry("type", event.inner.typ.as_str())?;
         map.serialize_entry(
             "data",
             &JsonEventSerializer {
@@ -162,7 +162,7 @@ impl Serialize for JsonEventSerializer<&Error> {
         S: Serializer,
     {
         let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("type", self.inner.0.inner.name())?;
+        map.serialize_entry("type", self.inner.0.inner.as_str())?;
         if self.with_description {
             map.serialize_entry("text", self.inner.0.inner.description())?;
         }
@@ -241,5 +241,43 @@ impl Serialize for JsonEventSerializer<&Vec<Value>> {
             })?;
         }
         seq.end()
+    }
+}
+
+impl serde::Serialize for EventType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for EventType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = <&str>::deserialize(deserializer)?;
+        Self::parse(s).ok_or_else(|| serde::de::Error::unknown_variant(s, &[]))
+    }
+}
+
+impl serde::Serialize for MetricType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MetricType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = <&str>::deserialize(deserializer)?;
+        Self::parse(s).ok_or_else(|| serde::de::Error::unknown_variant(s, &[]))
     }
 }

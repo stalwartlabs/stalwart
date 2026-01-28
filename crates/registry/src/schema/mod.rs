@@ -60,7 +60,9 @@ impl HttpAuth {
         content_type: Option<&str>,
     ) -> Result<HeaderMap, String> {
         match self {
-            HttpAuth::None => build_http_headers(extra_headers, None, None, None, content_type),
+            HttpAuth::Unauthenticated => {
+                build_http_headers(extra_headers, None, None, None, content_type)
+            }
             HttpAuth::Basic(auth) => build_http_headers(
                 extra_headers,
                 auth.username.as_str().into(),

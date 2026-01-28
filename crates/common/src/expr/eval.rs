@@ -13,9 +13,12 @@ use super::{
 use crate::Server;
 use compact_str::{CompactString, ToCompactString, format_compact};
 use hyper::StatusCode;
-use registry::types::EnumType;
+use registry::{
+    schema::prelude::Property,
+    types::{EnumType, id::Id},
+};
 use std::{cmp::Ordering, fmt::Display};
-use trc::{Collector, EvalEvent, MetricType, TOTAL_EVENT_COUNT};
+use trc::{Collector, EvalEvent};
 
 impl Server {
     pub async fn eval_if<'x, R: TryFrom<Variable<'x>>, V: ResolveVariable>(
@@ -28,7 +31,8 @@ impl Server {
             trc::event!(
                 Eval(EvalEvent::Result),
                 SpanId = session_id,
-                Id = if_block.property.as_str(),
+                Id = if_block.id.to_string(),
+                Key = if_block.property.as_str(),
                 Result = ""
             );
 
@@ -49,7 +53,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Result),
                     SpanId = session_id,
-                    Id = if_block.property.as_str(),
+                    Id = if_block.id.to_string(),
+                    Key = if_block.property.as_str(),
                     Result = format!("{result:?}"),
                 );
 
@@ -59,7 +64,8 @@ impl Server {
                         trc::event!(
                             Eval(EvalEvent::Result),
                             SpanId = session_id,
-                            Id = if_block.property.as_str(),
+                            Id = if_block.id.to_string(),
+                            Key = if_block.property.as_str(),
                             Result = "",
                         );
 
@@ -71,7 +77,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Error),
                     SpanId = session_id,
-                    Id = if_block.property.as_str(),
+                    Id = if_block.id.to_string(),
+                    Key = if_block.property.as_str(),
                     CausedBy = err,
                 );
 
@@ -84,7 +91,8 @@ impl Server {
         &'x self,
         expr: &'x Expression,
         resolver: &'x V,
-        expr_id: &'static str,
+        obj_id: Id,
+        property: Property,
         session_id: u64,
     ) -> Option<R> {
         if expr.is_empty() {
@@ -105,7 +113,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Result),
                     SpanId = session_id,
-                    Id = expr_id,
+                    Id = obj_id.to_string(),
+                    Key = property.as_str(),
                     Result = format!("{result:?}"),
                 );
 
@@ -115,7 +124,8 @@ impl Server {
                         trc::event!(
                             Eval(EvalEvent::Error),
                             SpanId = session_id,
-                            Id = expr_id,
+                            Id = obj_id.to_string(),
+                            Key = property.as_str(),
                             Details = "Failed to convert result",
                         );
 
@@ -127,7 +137,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Error),
                     SpanId = session_id,
-                    Id = expr_id,
+                    Id = obj_id.to_string(),
+                    Key = property.as_str(),
                     CausedBy = err,
                 );
 
@@ -218,15 +229,7 @@ impl<'x, V: ResolveVariable> EvalContext<'x, V, Expression, &mut Vec<CompactStri
                     }
                     SystemVariable::NodeId => stack.push(self.core.core.network.node_id.into()),
                     SystemVariable::Metric(variable) => {
-                        stack.push(if *variable < TOTAL_EVENT_COUNT {
-                            Variable::Integer(Collector::read_event_metric(*variable) as i64)
-                        } else if let Some(metric_type) =
-                            MetricType::from_code(*variable as u64 - TOTAL_EVENT_COUNT as u64)
-                        {
-                            Variable::Float(Collector::read_metric(metric_type))
-                        } else {
-                            Variable::Integer(0)
-                        });
+                        stack.push(Variable::Float(Collector::read_metric(*variable)));
                     }
                 },
                 ExpressionItem::UnaryOperator(op) => {

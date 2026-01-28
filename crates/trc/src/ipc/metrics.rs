@@ -20,27 +20,27 @@ static EVENT_COUNTERS: AtomicU32Array<TOTAL_EVENT_COUNT> = AtomicU32Array::new()
 static CONNECTION_METRICS: [ConnectionMetrics; TOTAL_CONN_TYPES] = init_conn_metrics();
 
 static MESSAGE_INGESTION_TIME: AtomicHistogram<12> =
-    AtomicHistogram::<10>::new_short_durations(MetricType::MessageIngestionTime);
+    AtomicHistogram::<10>::new_short_durations(MetricType::MessageIngestTime);
 static MESSAGE_INDEX_TIME: AtomicHistogram<12> =
-    AtomicHistogram::<10>::new_short_durations(MetricType::MessageFtsIndexTime);
+    AtomicHistogram::<10>::new_short_durations(MetricType::MessageIngestIndexTime);
 static MESSAGE_DELIVERY_TIME: AtomicHistogram<12> =
     AtomicHistogram::<18>::new_long_durations(MetricType::DeliveryTotalTime);
 
 static MESSAGE_INCOMING_SIZE: AtomicHistogram<12> =
     AtomicHistogram::<12>::new_message_sizes(MetricType::MessageSize);
 static MESSAGE_SUBMISSION_SIZE: AtomicHistogram<12> =
-    AtomicHistogram::<12>::new_message_sizes(MetricType::MessageAuthSize);
+    AtomicHistogram::<12>::new_message_sizes(MetricType::MessageAuthenticatedSize);
 static MESSAGE_OUT_REPORT_SIZE: AtomicHistogram<12> =
-    AtomicHistogram::<12>::new_message_sizes(MetricType::ReportOutgoingSize);
+    AtomicHistogram::<12>::new_message_sizes(MetricType::OutgoingReportSize);
 
 static STORE_DATA_READ_TIME: AtomicHistogram<12> =
-    AtomicHistogram::<10>::new_short_durations(MetricType::StoreReadTime);
+    AtomicHistogram::<10>::new_short_durations(MetricType::StoreDataReadTime);
 static STORE_DATA_WRITE_TIME: AtomicHistogram<12> =
-    AtomicHistogram::<10>::new_short_durations(MetricType::StoreWriteTime);
+    AtomicHistogram::<10>::new_short_durations(MetricType::StoreDataWriteTime);
 static STORE_BLOB_READ_TIME: AtomicHistogram<12> =
-    AtomicHistogram::<10>::new_short_durations(MetricType::BlobReadTime);
+    AtomicHistogram::<10>::new_short_durations(MetricType::StoreBlobReadTime);
 static STORE_BLOB_WRITE_TIME: AtomicHistogram<12> =
-    AtomicHistogram::<10>::new_short_durations(MetricType::BlobWriteTime);
+    AtomicHistogram::<10>::new_short_durations(MetricType::StoreBlobWriteTime);
 
 static DNS_LOOKUP_TIME: AtomicHistogram<12> =
     AtomicHistogram::<10>::new_short_durations(MetricType::DnsLookupTime);
@@ -270,28 +270,28 @@ impl Collector {
     }
 
     #[inline(always)]
-    pub fn read_event_metric(metric_id: usize) -> u32 {
+    pub fn read_metric_counter(metric_id: usize) -> u32 {
         EVENT_COUNTERS.get(metric_id)
     }
 
     pub fn read_metric(metric_type: MetricType) -> f64 {
         match metric_type {
             MetricType::ServerMemory => SERVER_MEMORY.get() as f64,
-            MetricType::MessageIngestionTime => MESSAGE_INGESTION_TIME.average(),
-            MetricType::MessageFtsIndexTime => MESSAGE_INDEX_TIME.average(),
+            MetricType::MessageIngestTime => MESSAGE_INGESTION_TIME.average(),
+            MetricType::MessageIngestIndexTime => MESSAGE_INDEX_TIME.average(),
             MetricType::MessageSize => MESSAGE_INCOMING_SIZE.average(),
-            MetricType::MessageAuthSize => MESSAGE_SUBMISSION_SIZE.average(),
+            MetricType::MessageAuthenticatedSize => MESSAGE_SUBMISSION_SIZE.average(),
             MetricType::DeliveryTotalTime => MESSAGE_DELIVERY_TIME.average(),
-            MetricType::DeliveryTime => CONNECTION_METRICS[CONN_SMTP_OUT].elapsed.average(),
+            MetricType::DeliveryAttemptTime => CONNECTION_METRICS[CONN_SMTP_OUT].elapsed.average(),
             MetricType::DeliveryActiveConnections => {
                 CONNECTION_METRICS[CONN_SMTP_OUT].active_connections.get() as f64
             }
             MetricType::QueueCount => QUEUE_COUNT.get() as f64,
-            MetricType::ReportOutgoingSize => MESSAGE_OUT_REPORT_SIZE.average(),
-            MetricType::StoreReadTime => STORE_DATA_READ_TIME.average(),
-            MetricType::StoreWriteTime => STORE_DATA_WRITE_TIME.average(),
-            MetricType::BlobReadTime => STORE_BLOB_READ_TIME.average(),
-            MetricType::BlobWriteTime => STORE_BLOB_WRITE_TIME.average(),
+            MetricType::OutgoingReportSize => MESSAGE_OUT_REPORT_SIZE.average(),
+            MetricType::StoreDataReadTime => STORE_DATA_READ_TIME.average(),
+            MetricType::StoreDataWriteTime => STORE_DATA_WRITE_TIME.average(),
+            MetricType::StoreBlobReadTime => STORE_BLOB_READ_TIME.average(),
+            MetricType::StoreBlobWriteTime => STORE_BLOB_WRITE_TIME.average(),
             MetricType::DnsLookupTime => DNS_LOOKUP_TIME.average(),
             MetricType::HttpActiveConnections => {
                 CONNECTION_METRICS[CONN_HTTP].active_connections.get() as f64
@@ -315,6 +315,7 @@ impl Collector {
             MetricType::SieveRequestTime => CONNECTION_METRICS[CONN_SIEVE].elapsed.average(),
             MetricType::UserCount => USER_COUNT.get() as f64,
             MetricType::DomainCount => DOMAIN_COUNT.get() as f64,
+            _ => EVENT_COUNTERS.get(metric_type.event_id()) as f64,
         }
     }
 
@@ -334,10 +335,12 @@ impl Collector {
 
     pub fn update_histogram(metric_type: MetricType, value: u64) {
         match metric_type {
-            MetricType::MessageIngestionTime => MESSAGE_INGESTION_TIME.observe(value),
-            MetricType::MessageFtsIndexTime => MESSAGE_INDEX_TIME.observe(value),
+            MetricType::MessageIngestTime => MESSAGE_INGESTION_TIME.observe(value),
+            MetricType::MessageIngestIndexTime => MESSAGE_INDEX_TIME.observe(value),
             MetricType::DeliveryTotalTime => MESSAGE_DELIVERY_TIME.observe(value),
-            MetricType::DeliveryTime => CONNECTION_METRICS[CONN_SMTP_OUT].elapsed.observe(value),
+            MetricType::DeliveryAttemptTime => {
+                CONNECTION_METRICS[CONN_SMTP_OUT].elapsed.observe(value)
+            }
             MetricType::DnsLookupTime => DNS_LOOKUP_TIME.observe(value),
             _ => {}
         }
@@ -358,8 +361,8 @@ impl ConnectionMetrics {
     #[allow(clippy::new_without_default)]
     pub const fn new() -> Self {
         Self {
-            active_connections: AtomicGauge::new(MetricType::BlobReadTime),
-            elapsed: AtomicHistogram::<18>::new_medium_durations(MetricType::BlobReadTime),
+            active_connections: AtomicGauge::new(MetricType::StoreBlobReadTime),
+            elapsed: AtomicHistogram::<18>::new_medium_durations(MetricType::StoreBlobReadTime),
         }
     }
 }
@@ -388,14 +391,14 @@ const fn init_conn_metrics() -> [ConnectionMetrics; TOTAL_CONN_TYPES] {
                 MetricType::SmtpActiveConnections,
             ],
             CONN_SMTP_OUT => &[
-                MetricType::DeliveryTime,
+                MetricType::DeliveryAttemptTime,
                 MetricType::DeliveryActiveConnections,
             ],
             CONN_SIEVE => &[
                 MetricType::SieveRequestTime,
                 MetricType::SieveActiveConnections,
             ],
-            _ => &[MetricType::BlobReadTime, MetricType::BlobReadTime],
+            _ => &[MetricType::StoreBlobReadTime, MetricType::StoreBlobReadTime],
         };
 
         array[i] = ConnectionMetrics {
@@ -405,282 +408,4 @@ const fn init_conn_metrics() -> [ConnectionMetrics; TOTAL_CONN_TYPES] {
         i += 1;
     }
     array
-}
-
-impl EventType {
-    pub fn is_metric(&self) -> bool {
-        match self {
-            EventType::Server(ServerEvent::ThreadError) => true,
-            EventType::Purge(PurgeEvent::Error) => true,
-            EventType::Eval(
-                EvalEvent::Error | EvalEvent::StoreNotFound | EvalEvent::DirectoryNotFound,
-            ) => true,
-            EventType::Acme(
-                AcmeEvent::TlsAlpnError
-                | AcmeEvent::OrderCompleted
-                | AcmeEvent::AuthError
-                | AcmeEvent::AuthTooManyAttempts
-                | AcmeEvent::ClientMissingSni
-                | AcmeEvent::TokenNotFound
-                | AcmeEvent::OrderInvalid
-                | AcmeEvent::Error,
-            ) => true,
-            EventType::Dns(
-                DnsEvent::RecordCreationFailed
-                | DnsEvent::RecordDeletionFailed
-                | DnsEvent::RecordPropagationTimeout
-                | DnsEvent::RecordLookupFailed,
-            ) => true,
-            EventType::Store(
-                StoreEvent::AssertValueFailed
-                | StoreEvent::FoundationdbError
-                | StoreEvent::MysqlError
-                | StoreEvent::PostgresqlError
-                | StoreEvent::RocksdbError
-                | StoreEvent::SqliteError
-                | StoreEvent::LdapError
-                | StoreEvent::ElasticsearchError
-                | StoreEvent::RedisError
-                | StoreEvent::S3Error
-                | StoreEvent::AzureError
-                | StoreEvent::FilesystemError
-                | StoreEvent::PoolError
-                | StoreEvent::DataCorruption
-                | StoreEvent::DecompressError
-                | StoreEvent::DeserializeError
-                | StoreEvent::NotFound
-                | StoreEvent::NotConfigured
-                | StoreEvent::NotSupported
-                | StoreEvent::UnexpectedError
-                | StoreEvent::CryptoError
-                | StoreEvent::BlobMissingMarker
-                | StoreEvent::DataWrite
-                | StoreEvent::DataIterate
-                | StoreEvent::BlobRead
-                | StoreEvent::BlobWrite
-                | StoreEvent::BlobDelete
-                | StoreEvent::HttpStoreError,
-            ) => true,
-            EventType::MessageIngest(_) => true,
-            EventType::Jmap(
-                JmapEvent::MethodCall
-                | JmapEvent::WebsocketStart
-                | JmapEvent::WebsocketError
-                | JmapEvent::UnsupportedFilter
-                | JmapEvent::UnsupportedSort
-                | JmapEvent::Forbidden
-                | JmapEvent::NotJson
-                | JmapEvent::NotRequest
-                | JmapEvent::InvalidArguments
-                | JmapEvent::RequestTooLarge
-                | JmapEvent::UnknownMethod,
-            ) => true,
-            EventType::Imap(ImapEvent::ConnectionStart | ImapEvent::ConnectionEnd) => true,
-            EventType::ManageSieve(
-                ManageSieveEvent::ConnectionStart | ManageSieveEvent::ConnectionEnd,
-            ) => true,
-            EventType::Pop3(Pop3Event::ConnectionStart | Pop3Event::ConnectionEnd) => true,
-            EventType::Smtp(
-                SmtpEvent::ConnectionStart
-                | SmtpEvent::ConnectionEnd
-                | SmtpEvent::Error
-                | SmtpEvent::ConcurrencyLimitExceeded
-                | SmtpEvent::TransferLimitExceeded
-                | SmtpEvent::RateLimitExceeded
-                | SmtpEvent::TimeLimitExceeded
-                | SmtpEvent::MessageParseFailed
-                | SmtpEvent::MessageTooLarge
-                | SmtpEvent::LoopDetected
-                | SmtpEvent::DkimPass
-                | SmtpEvent::DkimFail
-                | SmtpEvent::ArcPass
-                | SmtpEvent::ArcFail
-                | SmtpEvent::SpfEhloPass
-                | SmtpEvent::SpfEhloFail
-                | SmtpEvent::SpfFromPass
-                | SmtpEvent::SpfFromFail
-                | SmtpEvent::DmarcPass
-                | SmtpEvent::DmarcFail
-                | SmtpEvent::IprevPass
-                | SmtpEvent::IprevFail
-                | SmtpEvent::TooManyMessages
-                | SmtpEvent::InvalidEhlo
-                | SmtpEvent::DidNotSayEhlo
-                | SmtpEvent::MailFromUnauthenticated
-                | SmtpEvent::MailFromUnauthorized
-                | SmtpEvent::MailFromMissing
-                | SmtpEvent::MultipleMailFrom
-                | SmtpEvent::MailboxDoesNotExist
-                | SmtpEvent::RelayNotAllowed
-                | SmtpEvent::RcptToDuplicate
-                | SmtpEvent::RcptToMissing
-                | SmtpEvent::TooManyRecipients
-                | SmtpEvent::TooManyInvalidRcpt
-                | SmtpEvent::AuthMechanismNotSupported
-                | SmtpEvent::AuthExchangeTooLong
-                | SmtpEvent::CommandNotImplemented
-                | SmtpEvent::InvalidCommand
-                | SmtpEvent::SyntaxError
-                | SmtpEvent::RequestTooLarge,
-            ) => true,
-            EventType::Http(
-                HttpEvent::Error
-                | HttpEvent::RequestBody
-                | HttpEvent::ResponseBody
-                | HttpEvent::XForwardedMissing,
-            ) => true,
-            EventType::Network(NetworkEvent::Timeout) => true,
-            EventType::Security(_) => true,
-            EventType::Limit(_) => true,
-            EventType::Manage(_) => false,
-            EventType::Auth(
-                AuthEvent::Success
-                | AuthEvent::Failed
-                | AuthEvent::TooManyAttempts
-                | AuthEvent::Error,
-            ) => true,
-            EventType::Config(_) => false,
-            EventType::Resource(
-                ResourceEvent::NotFound | ResourceEvent::BadParameters | ResourceEvent::Error,
-            ) => true,
-            EventType::Arc(
-                ArcEvent::ChainTooLong
-                | ArcEvent::InvalidInstance
-                | ArcEvent::InvalidCv
-                | ArcEvent::HasHeaderTag
-                | ArcEvent::BrokenChain,
-            ) => true,
-            EventType::Dkim(_) => true,
-            EventType::Dmarc(_) => true,
-            EventType::Iprev(_) => true,
-            EventType::Dane(
-                DaneEvent::AuthenticationSuccess
-                | DaneEvent::AuthenticationFailure
-                | DaneEvent::NoCertificatesFound
-                | DaneEvent::CertificateParseError
-                | DaneEvent::TlsaRecordFetchError
-                | DaneEvent::TlsaRecordNotFound
-                | DaneEvent::TlsaRecordNotDnssecSigned
-                | DaneEvent::TlsaRecordInvalid,
-            ) => true,
-            EventType::Spf(_) => true,
-            EventType::MailAuth(_) => true,
-            EventType::Tls(TlsEvent::HandshakeError) => true,
-            EventType::Sieve(
-                SieveEvent::ActionAccept
-                | SieveEvent::ActionAcceptReplace
-                | SieveEvent::ActionDiscard
-                | SieveEvent::ActionReject
-                | SieveEvent::SendMessage
-                | SieveEvent::MessageTooLarge
-                | SieveEvent::RuntimeError
-                | SieveEvent::UnexpectedError
-                | SieveEvent::NotSupported
-                | SieveEvent::QuotaExceeded,
-            ) => true,
-            EventType::Spam(
-                SpamEvent::PyzorError
-                | SpamEvent::TrainCompleted
-                | SpamEvent::TrainSampleAdded
-                | SpamEvent::Classify
-                | SpamEvent::ModelNotReady
-                | SpamEvent::DnsblError,
-            ) => true,
-            EventType::PushSubscription(_) => true,
-            EventType::Cluster(
-                ClusterEvent::SubscriberError
-                | ClusterEvent::PublisherError
-                | ClusterEvent::SubscriberDisconnected,
-            ) => true,
-            EventType::Housekeeper(_) => false,
-            EventType::TaskQueue(
-                TaskQueueEvent::BlobNotFound | TaskQueueEvent::MetadataNotFound,
-            ) => true,
-            EventType::Milter(
-                MilterEvent::ActionAccept
-                | MilterEvent::ActionDiscard
-                | MilterEvent::ActionReject
-                | MilterEvent::ActionTempFail
-                | MilterEvent::ActionReplyCode
-                | MilterEvent::ActionConnectionFailure
-                | MilterEvent::ActionShutdown,
-            ) => true,
-            EventType::MtaHook(_) => true,
-            EventType::Delivery(
-                DeliveryEvent::AttemptStart
-                | DeliveryEvent::Completed
-                | DeliveryEvent::AttemptEnd
-                | DeliveryEvent::MxLookupFailed
-                | DeliveryEvent::IpLookupFailed
-                | DeliveryEvent::NullMx
-                | DeliveryEvent::GreetingFailed
-                | DeliveryEvent::EhloRejected
-                | DeliveryEvent::AuthFailed
-                | DeliveryEvent::MailFromRejected
-                | DeliveryEvent::Delivered
-                | DeliveryEvent::RcptToRejected
-                | DeliveryEvent::RcptToFailed
-                | DeliveryEvent::MessageRejected
-                | DeliveryEvent::StartTlsUnavailable
-                | DeliveryEvent::StartTlsError
-                | DeliveryEvent::StartTlsDisabled
-                | DeliveryEvent::ImplicitTlsError
-                | DeliveryEvent::ConcurrencyLimitExceeded
-                | DeliveryEvent::RateLimitExceeded
-                | DeliveryEvent::DoubleBounce
-                | DeliveryEvent::DsnSuccess
-                | DeliveryEvent::DsnTempFail
-                | DeliveryEvent::DsnPermFail,
-            ) => true,
-            EventType::Queue(
-                QueueEvent::QueueMessage
-                | QueueEvent::QueueMessageAuthenticated
-                | QueueEvent::QueueReport
-                | QueueEvent::QueueDsn
-                | QueueEvent::QueueAutogenerated
-                | QueueEvent::Rescheduled
-                | QueueEvent::BlobNotFound
-                | QueueEvent::RateLimitExceeded
-                | QueueEvent::ConcurrencyLimitExceeded
-                | QueueEvent::QuotaExceeded,
-            ) => true,
-            EventType::TlsRpt(_) => false,
-            EventType::MtaSts(
-                MtaStsEvent::Authorized | MtaStsEvent::NotAuthorized | MtaStsEvent::InvalidPolicy,
-            ) => true,
-            EventType::IncomingReport(_) => true,
-            EventType::OutgoingReport(
-                OutgoingReportEvent::SpfReport
-                | OutgoingReportEvent::SpfRateLimited
-                | OutgoingReportEvent::DkimReport
-                | OutgoingReportEvent::DkimRateLimited
-                | OutgoingReportEvent::DmarcReport
-                | OutgoingReportEvent::DmarcRateLimited
-                | OutgoingReportEvent::DmarcAggregateReport
-                | OutgoingReportEvent::TlsAggregate
-                | OutgoingReportEvent::HttpSubmission
-                | OutgoingReportEvent::UnauthorizedReportingAddress
-                | OutgoingReportEvent::ReportingAddressValidationError
-                | OutgoingReportEvent::NotFound
-                | OutgoingReportEvent::SubmissionError
-                | OutgoingReportEvent::NoRecipientsFound,
-            ) => true,
-            EventType::Telemetry(
-                TelemetryEvent::LogError
-                | TelemetryEvent::WebhookError
-                | TelemetryEvent::OtelExporterError
-                | TelemetryEvent::OtelMetricsExporterError
-                | TelemetryEvent::PrometheusExporterError
-                | TelemetryEvent::JournalError,
-            ) => true,
-            EventType::Calendar(
-                CalendarEvent::AlarmSent
-                | CalendarEvent::AlarmFailed
-                | CalendarEvent::ItipMessageReceived
-                | CalendarEvent::ItipMessageSent
-                | CalendarEvent::ItipMessageError,
-            ) => true,
-            _ => false,
-        }
-    }
 }

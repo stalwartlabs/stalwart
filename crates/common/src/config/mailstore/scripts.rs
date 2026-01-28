@@ -188,24 +188,6 @@ impl Scripting {
     }
 }
 
-impl Default for Scripting {
-    fn default() -> Self {
-        let script = SieveSystemInterpreter::default();
-
-        Scripting {
-            untrusted_compiler: Compiler::new(),
-            untrusted_runtime: Runtime::new(),
-            trusted_runtime: Runtime::new(),
-            from_addr: IfBlock::new_default(script.ctx_default_from_address()),
-            from_name: IfBlock::new_default(script.ctx_default_from_name()),
-            return_path: IfBlock::new_default(script.ctx_default_return_path()),
-            sign: IfBlock::new_default(script.ctx_dkim_sign_domain()),
-            untrusted_scripts: AHashMap::new(),
-            trusted_scripts: AHashMap::new(),
-        }
-    }
-}
-
 impl Clone for Scripting {
     fn clone(&self) -> Self {
         Self {

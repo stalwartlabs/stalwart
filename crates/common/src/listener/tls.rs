@@ -4,31 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    cmp::Ordering,
-    fmt::{self, Formatter},
-    sync::Arc,
+use super::{
+    ServerInstance, SessionStream, TcpAcceptor, TcpAcceptorResult,
+    acme::resolver::{IsTlsAlpnChallenge, build_acme_static_resolver},
 };
-
-use ahash::AHashMap;
+use crate::{Inner, Server};
 use rustls::{
     SupportedProtocolVersion,
     server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
     version::{TLS12, TLS13},
 };
+use std::{
+    cmp::Ordering,
+    fmt::{self, Formatter},
+    sync::Arc,
+};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_rustls::{Accept, LazyConfigAcceptor};
-
-use crate::{Inner, Server};
-
-use super::{
-    ServerInstance, SessionStream, TcpAcceptor, TcpAcceptorResult,
-    acme::{
-        AcmeProvider,
-        resolver::{IsTlsAlpnChallenge, build_acme_static_resolver},
-    },
-};
 
 pub static TLS13_VERSION: &[&SupportedProtocolVersion] = &[&TLS13];
 pub static TLS12_VERSION: &[&SupportedProtocolVersion] = &[&TLS12];

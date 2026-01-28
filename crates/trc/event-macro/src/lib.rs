@@ -6,167 +6,9 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{
-    Data, DeriveInput, Expr, ExprPath, Fields, Ident, Token, parse::Parse, parse_macro_input,
-};
+use syn::{Data, DeriveInput, Expr, ExprPath, Ident, Token, parse::Parse, parse_macro_input};
 
 static mut GLOBAL_ID_COUNTER: usize = 0;
-
-#[proc_macro_attribute]
-pub fn event_type(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
-    let name = &input.ident;
-    let name_str = name.to_string();
-    let prefix = to_snake_case(name_str.strip_suffix("Event").unwrap_or(&name_str));
-
-    let enum_variants = match &input.data {
-        Data::Enum(data_enum) => &data_enum.variants,
-        _ => panic!("This macro only works with enums"),
-    };
-
-    let mut variant_ids = Vec::new();
-    let mut variant_names = Vec::new();
-    let mut event_names = Vec::new();
-
-    for variant in enum_variants {
-        unsafe {
-            variant_ids.push(GLOBAL_ID_COUNTER);
-            GLOBAL_ID_COUNTER += 1;
-        }
-        let variant_name = &variant.ident;
-        event_names.push(format!(
-            "{prefix}.{}",
-            to_snake_case(&variant_name.to_string())
-        ));
-        variant_names.push(variant_name);
-    }
-
-    let id_fn = quote! {
-        pub const fn id(&self) -> usize {
-            match self {
-                #(Self::#variant_names => #variant_ids,)*
-            }
-        }
-    };
-
-    let name_fn = quote! {
-        pub fn name(&self) -> &'static str {
-            match self {
-                #(Self::#variant_names => #event_names,)*
-            }
-        }
-    };
-
-    let parse_fn = quote! {
-        pub fn try_parse(name: &str) -> Option<Self> {
-            match name {
-                #(#event_names => Some(Self::#variant_names),)*
-                _ => None,
-            }
-        }
-    };
-
-    let variants_fn = quote! {
-        pub const fn variants() -> &'static [Self] {
-            &[
-                #(#name::#variant_names,)*
-            ]
-        }
-    };
-
-    let expanded = quote! {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub enum #name {
-            #(#variant_names),*
-        }
-
-        impl #name {
-            #id_fn
-            #name_fn
-            #parse_fn
-            #variants_fn
-        }
-    };
-
-    TokenStream::from(expanded)
-}
-
-#[proc_macro_attribute]
-pub fn event_family(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
-    let name = &input.ident;
-
-    let variants = match &input.data {
-        Data::Enum(data_enum) => &data_enum.variants,
-        _ => panic!("EventType must be an enum"),
-    };
-
-    let variant_idents: Vec<_> = variants.iter().map(|v| &v.ident).collect();
-
-    let event_types: Vec<_> = variants
-        .iter()
-        .map(|v| match &v.fields {
-            Fields::Unnamed(fields) => &fields.unnamed[0],
-            _ => panic!("EventType variants must be unnamed and contain a single type"),
-        })
-        .map(|f| &f.ty)
-        .collect();
-
-    let variant_names: Vec<_> = variant_idents
-        .iter()
-        .map(|ident| {
-            let name_str = ident.to_string();
-            to_snake_case(name_str.strip_suffix("Event").unwrap_or(&name_str))
-        })
-        .collect();
-
-    let expanded = quote! {
-        pub enum #name {
-            #(#variant_idents(#event_types)),*
-        }
-
-        impl #name {
-            pub const fn id(&self) -> usize {
-                match self {
-                    #(#name::#variant_idents(e) => e.id()),*
-                }
-            }
-
-            pub fn name(&self) -> &'static str {
-                match self {
-                    #(#name::#variant_idents(e) => e.name()),*
-                }
-            }
-
-            pub fn try_parse(name: &str) -> Option<Self> {
-                match name.trim().split_once('.')?.0 {
-                #(
-                    #variant_names =>  <#event_types>::try_parse(&name).map(#name::#variant_idents),
-                )*
-                    _ => None,
-                }
-            }
-
-            pub const fn variants() -> [#name; crate::TOTAL_EVENT_COUNT] {
-                let mut variants = [crate::EventType::Eval(crate::EvalEvent::Error); crate::TOTAL_EVENT_COUNT];
-                #(
-                    {
-                        let sub_variants = <#event_types>::variants();
-                        let mut i = 0;
-                        while i < sub_variants.len() {
-                            variants[sub_variants[i].id()] = #name::#variant_idents(sub_variants[i]);
-                            i += 1;
-                        }
-
-                    }
-                )*
-                variants
-            }
-        }
-    };
-
-    TokenStream::from(expanded)
-}
 
 #[proc_macro_attribute]
 pub fn key_names(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -318,7 +160,7 @@ pub fn event(input: TokenStream) -> TokenStream {
     {
         quote! {{
             const ET: trc::EventType = trc::EventType::#event(#param);
-            const ET_ID: usize = ET.id();
+            const ET_ID: usize = ET.to_id() as usize;
             if trc::Collector::has_interest(ET_ID) {
                 let keys = vec![#(#key_value_tokens),*];
                 if trc::Collector::is_metric(ET_ID) {
@@ -332,7 +174,7 @@ pub fn event(input: TokenStream) -> TokenStream {
     } else {
         quote! {{
             let et = trc::EventType::#event(#param);
-            let et_id = et.id();
+            let et_id = et.to_id() as usize;
             if trc::Collector::has_interest(et_id) {
                 let keys = vec![#(#key_value_tokens),*];
                 if trc::Collector::is_metric(et_id) {

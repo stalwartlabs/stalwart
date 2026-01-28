@@ -5,9 +5,11 @@
  */
 
 pub mod conv;
-pub mod description;
 pub mod level;
-pub mod metrics;
+
+pub mod enums;
+#[allow(clippy::match_like_matches_macro)]
+pub mod enums_impl;
 
 use compact_str::ToCompactString;
 use std::fmt::Display;
@@ -298,25 +300,6 @@ impl EventType {
     pub fn into_err(self) -> Error {
         Error::new(self)
     }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            EventType::Store(cause) => cause.message(),
-            EventType::Jmap(cause) => cause.message(),
-            EventType::Imap(_) => "IMAP error",
-            EventType::ManageSieve(_) => "ManageSieve error",
-            EventType::Pop3(_) => "POP3 error",
-            EventType::Smtp(_) => "SMTP error",
-            EventType::Network(_) => "Network error",
-            EventType::Limit(cause) => cause.message(),
-            EventType::Manage(cause) => cause.message(),
-            EventType::Auth(cause) => cause.message(),
-            EventType::Config(_) => "Configuration error",
-            EventType::Resource(cause) => cause.message(),
-            EventType::Security(_) => "Insufficient permissions",
-            _ => "Internal server error",
-        }
-    }
 }
 
 impl StoreEvent {
@@ -338,34 +321,6 @@ impl StoreEvent {
     #[inline(always)]
     pub fn into_err(self) -> Error {
         Error::new(EventType::Store(self))
-    }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::AssertValueFailed => "Another process has modified the value",
-            Self::BlobMissingMarker => "Blob is missing marker",
-            Self::FoundationdbError => "FoundationDB error",
-            Self::MysqlError => "MySQL error",
-            Self::PostgresqlError => "PostgreSQL error",
-            Self::RocksdbError => "RocksDB error",
-            Self::SqliteError => "SQLite error",
-            Self::LdapError => "LDAP error",
-            Self::ElasticsearchError => "ElasticSearch error",
-            Self::RedisError => "Redis error",
-            Self::S3Error => "S3 error",
-            Self::AzureError => "Azure error",
-            Self::FilesystemError => "Filesystem error",
-            Self::PoolError => "Connection pool error",
-            Self::DataCorruption => "Data corruption",
-            Self::DecompressError => "Decompression error",
-            Self::DeserializeError => "Deserialization error",
-            Self::NotFound => "Not found",
-            Self::NotConfigured => "Not configured",
-            Self::NotSupported => "Operation not supported",
-            Self::UnexpectedError => "Unexpected error",
-            Self::CryptoError => "Crypto error",
-            _ => "Store error",
-        }
     }
 }
 
@@ -459,18 +414,6 @@ impl AuthEvent {
     pub fn into_err(self) -> Error {
         Error::new(EventType::Auth(self))
     }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::Failed => "Authentication failed",
-            Self::MissingTotp => concat!(
-                "A TOTP code is required to authenticate this account. ",
-                "Try authenticating again using 'secret$totp_token'."
-            ),
-            Self::TooManyAttempts => "Too many authentication attempts",
-            _ => "Authentication error",
-        }
-    }
 }
 
 impl ManageEvent {
@@ -492,17 +435,6 @@ impl ManageEvent {
     #[inline(always)]
     pub fn into_err(self) -> Error {
         Error::new(EventType::Manage(self))
-    }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::MissingParameter => "Missing parameter",
-            Self::AlreadyExists => "Already exists",
-            Self::AssertFailed => "Assertion failed",
-            Self::NotFound => "Not found",
-            Self::NotSupported => "Operation not supported",
-            Self::Error => "Management API Error",
-        }
     }
 }
 
@@ -526,30 +458,6 @@ impl JmapEvent {
     pub fn into_err(self) -> Error {
         Error::new(EventType::Jmap(self))
     }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::InvalidArguments => "Invalid arguments",
-            Self::RequestTooLarge => "Request too large",
-            Self::StateMismatch => "State mismatch",
-            Self::AnchorNotFound => "Anchor not found",
-            Self::UnsupportedFilter => "Unsupported filter",
-            Self::UnsupportedSort => "Unsupported sort",
-            Self::UnknownMethod => "Unknown method",
-            Self::InvalidResultReference => "Invalid result reference",
-            Self::Forbidden => "Forbidden",
-            Self::AccountNotFound => "Account not found",
-            Self::AccountNotSupportedByMethod => "Account not supported by method",
-            Self::AccountReadOnly => "Account read-only",
-            Self::NotFound => "Not found",
-            Self::CannotCalculateChanges => "Cannot calculate changes",
-            Self::UnknownDataType => "Unknown data type",
-            Self::UnknownCapability => "Unknown capability",
-            Self::NotJson => "Not JSON",
-            Self::NotRequest => "Not a request",
-            _ => "Other message",
-        }
-    }
 }
 
 impl LimitEvent {
@@ -572,21 +480,6 @@ impl LimitEvent {
     pub fn into_err(self) -> Error {
         Error::new(EventType::Limit(self))
     }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::SizeRequest => "Request too large",
-            Self::SizeUpload => "Upload too large",
-            Self::CallsIn => "Too many calls in",
-            Self::ConcurrentRequest => "Too many concurrent requests",
-            Self::ConcurrentConnection => "Too many concurrent connections",
-            Self::ConcurrentUpload => "Too many concurrent uploads",
-            Self::Quota => "Quota exceeded",
-            Self::BlobQuota => "Blob quota exceeded",
-            Self::TooManyRequests => "Too many requests",
-            Self::TenantQuota => "Tenant quota exceeded",
-        }
-    }
 }
 
 impl ResourceEvent {
@@ -608,15 +501,6 @@ impl ResourceEvent {
     #[inline(always)]
     pub fn into_err(self) -> Error {
         Error::new(EventType::Resource(self))
-    }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::NotFound => "Not found",
-            Self::BadParameters => "Bad parameters",
-            Self::Error => "Resource error",
-            _ => "Other status",
-        }
     }
 }
 
@@ -810,7 +694,7 @@ impl Eq for Value {}
 
 impl From<EventType> for usize {
     fn from(value: EventType) -> Self {
-        value.id()
+        value.to_id() as usize
     }
 }
 

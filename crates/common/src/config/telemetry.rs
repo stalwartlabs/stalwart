@@ -24,7 +24,7 @@ use registry::schema::{
     structs::{self, EventTracingLevel, MetricsPrometheus, Tracer, WebHook},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use trc::{EventType, Level, TelemetryEvent, ipc::subscriber::Interests};
+use trc::{EventType, Level, MetricType, TelemetryEvent, ipc::subscriber::Interests};
 
 #[derive(Debug)]
 pub struct TelemetrySubscriber {
@@ -148,11 +148,10 @@ impl Telemetry {
 
         // Parse metrics
         let metrics = bp.setting_infallible::<structs::Metrics>().await;
-        let todo = "implement";
-        apply_events(vec![], metrics.events_policy, |event_type| {
-            let todo = "use metrics";
-            if event_type.is_metric() {
-                telemetry.metrics.set(event_type);
+        apply_metrics(metrics.metrics, metrics.metrics_policy, |metric_type| {
+            let event_id = metric_type.event_id();
+            if event_id != usize::MAX {
+                telemetry.metrics.set(event_id);
             }
         });
 
@@ -165,11 +164,7 @@ impl Tracers {
         // Parse custom logging levels
         let mut custom_levels = AHashMap::new();
         for level in bp.list_infallible::<EventTracingLevel>().await {
-            let todo = "implement";
-            custom_levels.insert(
-                EventType::Acme(trc::AcmeEvent::AuthCompleted),
-                level.object.level.into(),
-            );
+            custom_levels.insert(level.object.event, level.object.level.into());
         }
 
         // Parse tracers
@@ -408,8 +403,7 @@ impl Tracers {
             };
 
             // Parse disabled events
-            let todo = "implement";
-            apply_events(vec![], events_policy, |event_type| {
+            apply_events(events, events_policy, |event_type| {
                 if exclude_event != Some(event_type) {
                     let event_level = custom_levels
                         .get(&event_type)
@@ -502,8 +496,7 @@ impl Tracers {
             };
 
             // Parse webhook events
-            let todo = "implement";
-            apply_events(vec![], hook.events_policy, |event_type| {
+            apply_events(hook.events, hook.events_policy, |event_type| {
                 if event_type != EventType::Telemetry(TelemetryEvent::WebhookError) {
                     tracer.interests.set(event_type);
                     global_interests.set(event_type);
@@ -569,7 +562,7 @@ impl Metrics {
                             .map(|secret| STANDARD.encode(format!("{user}:{secret}")))
                     }),
                 }),
-                MetricsPrometheus::None => None,
+                MetricsPrometheus::Disabled => None,
             },
             otel: match metrics.open_telemetry {
                 structs::MetricsOtel::Http(otel) => {
@@ -640,7 +633,7 @@ impl Metrics {
                         }
                     }
                 }
-                structs::MetricsOtel::None => None,
+                structs::MetricsOtel::Disabled => None,
             },
             log_path: bp
                 .list_infallible::<Tracer>()
@@ -664,10 +657,6 @@ fn apply_events(
     policy: EventPolicy,
     mut apply_fn: impl FnMut(EventType),
 ) {
-    let event_names = EventType::variants()
-        .into_iter()
-        .map(|e| (e, e.name()))
-        .collect::<Vec<_>>();
     let mut exclude_events = AHashSet::new();
 
     for event_type in event_types {
@@ -679,7 +668,31 @@ fn apply_events(
     }
 
     if policy != EventPolicy::Include {
-        for (event_type, _) in event_names.iter() {
+        for event_type in EventType::variants() {
+            if !exclude_events.contains(event_type) {
+                apply_fn(*event_type);
+            }
+        }
+    }
+}
+
+fn apply_metrics(
+    event_types: impl IntoIterator<Item = MetricType>,
+    policy: EventPolicy,
+    mut apply_fn: impl FnMut(MetricType),
+) {
+    let mut exclude_events = AHashSet::new();
+
+    for event_type in event_types {
+        if policy == EventPolicy::Include {
+            apply_fn(event_type);
+        } else {
+            exclude_events.insert(event_type);
+        }
+    }
+
+    if policy != EventPolicy::Include {
+        for event_type in MetricType::variants() {
             if !exclude_events.contains(event_type) {
                 apply_fn(*event_type);
             }

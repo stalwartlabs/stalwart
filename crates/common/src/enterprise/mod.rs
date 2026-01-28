@@ -14,6 +14,10 @@ pub mod license;
 pub mod llm;
 pub mod undelete;
 
+use crate::{
+    Core, Server, config::groupware::CalendarTemplateVariable, expr::Expression,
+    manager::webadmin::Resource,
+};
 use ahash::{AHashMap, AHashSet};
 use directory::{
     QueryParams, Type,
@@ -22,15 +26,11 @@ use directory::{
 use license::LicenseKey;
 use llm::AiApiConfig;
 use mail_parser::DateTime;
+use registry::types::id::Id;
 use std::{sync::Arc, time::Duration};
 use store::Store;
-use trc::{AddContext, EventType, MetricType};
+use trc::{AddContext, MetricType};
 use utils::{HttpLimitResponse, config::cron::SimpleCron, template::Template};
-
-use crate::{
-    Core, Server, config::groupware::CalendarTemplateVariable, expr::Expression,
-    manager::webadmin::Resource,
-};
 
 #[derive(Clone)]
 pub struct Enterprise {
@@ -80,7 +80,7 @@ pub struct MetricStore {
 
 #[derive(Clone, Debug)]
 pub struct MetricAlert {
-    pub id: String,
+    pub id: Id,
     pub condition: Expression,
     pub method: Vec<AlertMethod>,
 }
@@ -106,7 +106,6 @@ pub struct AlertContent(pub Vec<AlertContentToken>);
 pub enum AlertContentToken {
     Text(String),
     Metric(MetricType),
-    Event(EventType),
 }
 
 impl Core {

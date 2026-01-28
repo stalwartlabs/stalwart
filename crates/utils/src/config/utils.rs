@@ -642,7 +642,7 @@ impl ParseValue for trc::Level {
 
 impl ParseValue for trc::EventType {
     fn parse_value(value: &str) -> super::Result<Self> {
-        trc::EventType::try_parse(value).ok_or_else(|| format!("Unknown event type: {value}"))
+        trc::EventType::parse(value).ok_or_else(|| format!("Unknown event type: {value}"))
     }
 }
 

@@ -65,7 +65,8 @@ impl Server {
         class: &str,
         items: &[String],
     ) -> trc::Result<Option<Vec<u8>>> {
-        if let Some(content) = self
+        todo!()
+        /*if let Some(content) = self
             .core
             .storage
             .config
@@ -83,7 +84,7 @@ impl Server {
                 .map(Some)
         } else {
             Ok(None)
-        }
+        }*/
     }
 
     async fn write(
@@ -93,17 +94,18 @@ impl Server {
         items: &[String],
         contents: impl AsRef<[u8]>,
     ) -> trc::Result<()> {
-        self.core
-            .storage
-            .config
-            .set(
-                [ConfigKey {
-                    key: self.build_key(provider, class, items),
-                    value: URL_SAFE_NO_PAD.encode(contents.as_ref()),
-                }],
-                true,
-            )
-            .await
+        todo!()
+        /*self.core
+        .storage
+        .config
+        .set(
+            [ConfigKey {
+                key: self.build_key(provider, class, items),
+                value: URL_SAFE_NO_PAD.encode(contents.as_ref()),
+            }],
+            true,
+        )
+        .await*/
     }
 
     fn build_key(&self, provider: &AcmeProvider, class: &str, _: &[String]) -> String {

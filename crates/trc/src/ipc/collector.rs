@@ -28,7 +28,7 @@ pub(crate) type CollectorThread = JoinHandle<()>;
 pub(crate) static ACTIVE_SUBSCRIBERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 pub(crate) static COLLECTOR_UPDATES: Mutex<Vec<Update>> = Mutex::new(Vec::new());
 
-pub(crate) const EVENT_TYPES: [EventType; TOTAL_EVENT_COUNT] = EventType::variants();
+pub(crate) static EVENT_TYPES: &[EventType] = EventType::variants();
 
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum Update {
@@ -59,19 +59,20 @@ pub struct Collector {
     active_spans: AHashMap<u64, Arc<Event<EventDetails>>>,
 }
 
-const HTTP_CONN_START: usize = EventType::Http(HttpEvent::ConnectionStart).id();
-const HTTP_CONN_END: usize = EventType::Http(HttpEvent::ConnectionEnd).id();
-const IMAP_CONN_START: usize = EventType::Imap(ImapEvent::ConnectionStart).id();
-const IMAP_CONN_END: usize = EventType::Imap(ImapEvent::ConnectionEnd).id();
-const POP3_CONN_START: usize = EventType::Pop3(Pop3Event::ConnectionStart).id();
-const POP3_CONN_END: usize = EventType::Pop3(Pop3Event::ConnectionEnd).id();
-const SMTP_CONN_START: usize = EventType::Smtp(SmtpEvent::ConnectionStart).id();
-const SMTP_CONN_END: usize = EventType::Smtp(SmtpEvent::ConnectionEnd).id();
+const HTTP_CONN_START: usize = EventType::Http(HttpEvent::ConnectionStart).to_id() as usize;
+const HTTP_CONN_END: usize = EventType::Http(HttpEvent::ConnectionEnd).to_id() as usize;
+const IMAP_CONN_START: usize = EventType::Imap(ImapEvent::ConnectionStart).to_id() as usize;
+const IMAP_CONN_END: usize = EventType::Imap(ImapEvent::ConnectionEnd).to_id() as usize;
+const POP3_CONN_START: usize = EventType::Pop3(Pop3Event::ConnectionStart).to_id() as usize;
+const POP3_CONN_END: usize = EventType::Pop3(Pop3Event::ConnectionEnd).to_id() as usize;
+const SMTP_CONN_START: usize = EventType::Smtp(SmtpEvent::ConnectionStart).to_id() as usize;
+const SMTP_CONN_END: usize = EventType::Smtp(SmtpEvent::ConnectionEnd).to_id() as usize;
 const MANAGE_SIEVE_CONN_START: usize =
-    EventType::ManageSieve(ManageSieveEvent::ConnectionStart).id();
-const MANAGE_SIEVE_CONN_END: usize = EventType::ManageSieve(ManageSieveEvent::ConnectionEnd).id();
-const EV_ATTEMPT_START: usize = EventType::Delivery(DeliveryEvent::AttemptStart).id();
-const EV_ATTEMPT_END: usize = EventType::Delivery(DeliveryEvent::AttemptEnd).id();
+    EventType::ManageSieve(ManageSieveEvent::ConnectionStart).to_id() as usize;
+const MANAGE_SIEVE_CONN_END: usize =
+    EventType::ManageSieve(ManageSieveEvent::ConnectionEnd).to_id() as usize;
+const EV_ATTEMPT_START: usize = EventType::Delivery(DeliveryEvent::AttemptStart).to_id() as usize;
+const EV_ATTEMPT_END: usize = EventType::Delivery(DeliveryEvent::AttemptEnd).to_id() as usize;
 
 const STALE_SPAN_CHECK_WATERMARK: usize = 8000;
 const SPAN_MAX_HOLD: u64 = 60 * 60 * 24; // 1 day
@@ -116,7 +117,7 @@ impl Collector {
                     match rx.try_recv() {
                         Ok(Some(event)) => {
                             // Build event
-                            let event_id = event.inner.id();
+                            let event_id = event.inner.to_id() as usize;
                             let mut event = Event {
                                 inner: EventDetails {
                                     level: self.levels[event_id],
@@ -262,7 +263,7 @@ impl Collector {
                 }
                 Update::UpdateLevels { levels } => {
                     for event in EVENT_TYPES.iter() {
-                        let event_id = event.id();
+                        let event_id = event.to_id() as usize;
                         if let Some(level) = levels.get(event) {
                             self.levels[event_id] = *level;
                         } else {
@@ -347,7 +348,7 @@ impl Default for Collector {
         };
 
         for event in EVENT_TYPES.iter() {
-            let event_id = event.id();
+            let event_id = event.to_id() as usize;
             c.levels[event_id] = event.level();
         }
 

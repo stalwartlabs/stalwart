@@ -30,17 +30,19 @@ pub struct IfThen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfBlock {
+    pub id: Id,
     pub property: Property,
     pub if_then: Vec<IfThen>,
     pub default: Expression,
 }
 
 impl IfBlock {
-    pub fn new_default(expr_ctx: ExpressionContext<'_>) -> Self {
+    pub fn new_default(id: Id, expr_ctx: ExpressionContext<'_>) -> Self {
         let token_map = TokenMap::default();
 
         if let Some(default) = &expr_ctx.default {
             Self {
+                id,
                 property: expr_ctx.property,
                 if_then: default
                     .match_
@@ -53,12 +55,13 @@ impl IfBlock {
                 default: Expression::parse(&token_map, &default.else_),
             }
         } else {
-            Self::empty(expr_ctx.property)
+            Self::empty(id, expr_ctx.property)
         }
     }
 
-    pub fn empty(property: Property) -> Self {
+    pub fn empty(id: Id, property: Property) -> Self {
         Self {
+            id,
             property,
             if_then: Default::default(),
             default: Expression {
@@ -83,7 +86,7 @@ impl Expression {
 impl Bootstrap {
     pub fn compile_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
         if expr_ctx.expr.else_.is_empty() && expr_ctx.expr.match_.is_empty() {
-            return IfBlock::empty(expr_ctx.property);
+            return IfBlock::empty(id, expr_ctx.property);
         }
 
         if let Some(if_block) = self.try_compile_expr(id, expr_ctx, &expr_ctx.expr) {
@@ -98,7 +101,7 @@ impl Bootstrap {
             self.try_compile_expr(id, expr_ctx, default)
                 .expect("Valid default expression")
         } else {
-            IfBlock::empty(expr_ctx.property)
+            IfBlock::empty(id, expr_ctx.property)
         }
     }
 
@@ -110,6 +113,7 @@ impl Bootstrap {
     ) -> Option<IfBlock> {
         // Parse conditions
         let mut if_block = IfBlock {
+            id,
             property: expr_ctx.property,
             if_then: Vec::with_capacity(expr.match_.len()),
             default: Expression {
@@ -203,8 +207,9 @@ impl Bootstrap {
 }
 
 impl IfBlock {
-    pub fn into_default(self, property: Property) -> IfBlock {
+    pub fn into_default(self, id: Id, property: Property) -> IfBlock {
         IfBlock {
+            id,
             property,
             if_then: Default::default(),
             default: self.default,

@@ -402,7 +402,7 @@ impl AsnGeoLookupConfig {
                 index_asn_name: asn.index_asn_name.map(|v| v as usize),
                 index_country: asn.index_country.map(|v| v as usize),
             }),
-            Asn::None => None,
+            Asn::Disabled => None,
         }
     }
 }

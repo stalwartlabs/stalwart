@@ -153,7 +153,7 @@ where
             let event = event.as_ref();
 
             opentelemetry::trace::Event::new(
-                event.inner.typ.name(),
+                event.inner.typ.as_str(),
                 UNIX_EPOCH + Duration::from_secs(event.inner.timestamp),
                 event.keys.iter().filter_map(build_key_value).collect(),
                 0,
@@ -171,7 +171,7 @@ where
         ),
         dropped_attributes_count: 0,
         parent_span_id: 0.into(),
-        name: start_span.inner.typ.name().into(),
+        name: start_span.inner.typ.as_str().into(),
         start_time: UNIX_EPOCH + Duration::from_secs(start_span.inner.timestamp),
         end_time: UNIX_EPOCH + Duration::from_secs(end_span.inner.timestamp),
         attributes: start_span.keys.iter().filter_map(build_key_value).collect(),
@@ -189,7 +189,7 @@ impl OtelTracer {
         use opentelemetry::logs::Logger;
 
         let mut record = self.log_provider.create_log_record();
-        record.set_event_name(event.inner.typ.name());
+        record.set_event_name(event.inner.typ.as_str());
         record.set_severity_number(match event.inner.level {
             Level::Trace => Severity::Trace,
             Level::Debug => Severity::Debug,
@@ -255,7 +255,7 @@ fn build_any_value(value: &trc::Value) -> AnyValue {
         trc::Value::Event(v) => AnyValue::Map(Box::new(
             [(
                 Key::from_static_str("eventName"),
-                AnyValue::String(v.event_type().name().into()),
+                AnyValue::String(v.event_type().as_str().into()),
             )]
             .into_iter()
             .chain(

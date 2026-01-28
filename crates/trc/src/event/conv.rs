@@ -428,7 +428,7 @@ impl FromStr for EventType {
     type Err = ();
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        EventType::try_parse(s).ok_or(())
+        EventType::parse(s).ok_or(())
     }
 }
 

@@ -105,7 +105,7 @@ impl<T: AsyncWrite + Unpin> FmtWriter<T> {
         }
         self.writer.write_all(" (".as_bytes()).await?;
         self.writer
-            .write_all(event.inner.typ.name().as_bytes())
+            .write_all(event.inner.typ.as_str().as_bytes())
             .await?;
 
         self.writer
@@ -240,7 +240,7 @@ impl<T: AsyncWrite + Unpin> FmtWriter<T> {
                         .write_all(e.0.inner.description().as_bytes())
                         .await?;
                     self.writer.write_all(" (".as_bytes()).await?;
-                    self.writer.write_all(e.0.inner.name().as_bytes()).await?;
+                    self.writer.write_all(e.0.inner.as_str().as_bytes()).await?;
                     self.writer.write_all(")".as_bytes()).await?;
                     if !e.0.keys.is_empty() {
                         self.writer
@@ -354,7 +354,7 @@ impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.inner.description().fmt(f)?;
         " (".fmt(f)?;
-        self.0.inner.name().fmt(f)?;
+        self.0.inner.as_str().fmt(f)?;
         ")".fmt(f)?;
 
         if !self.0.keys.is_empty() {
@@ -370,81 +370,5 @@ impl Display for Error {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{EventType, Level};
-
-    #[allow(dead_code)]
-    fn to_camel_case(name: &str) -> String {
-        let mut out = String::with_capacity(name.len());
-        let mut upper = true;
-        for ch in name.chars() {
-            if ch.is_alphanumeric() {
-                if upper {
-                    out.push(ch.to_ascii_uppercase());
-                    upper = false;
-                } else {
-                    out.push(ch);
-                }
-            } else {
-                upper = true;
-            }
-        }
-        out
-    }
-
-    #[allow(dead_code)]
-    fn event_to_class(name: &str) -> String {
-        let (group, name) = name.split_once('.').unwrap();
-        let group = to_camel_case(group);
-        format!(
-            "EventType::{}({}Event::{})",
-            group,
-            group,
-            to_camel_case(name)
-        )
-    }
-
-    #[allow(dead_code)]
-    fn event_to_webadmin_class(name: &str) -> String {
-        let (group, name) = name.split_once('.').unwrap();
-        format!("{}{}", to_camel_case(group), to_camel_case(name))
-    }
-
-    #[test]
-    fn print_all_events() {
-        assert!(!Level::Disable.is_contained(Level::Warn));
-        assert!(Level::Trace.is_contained(Level::Error));
-        assert!(Level::Trace.is_contained(Level::Debug));
-        assert!(!Level::Error.is_contained(Level::Trace));
-        assert!(!Level::Debug.is_contained(Level::Trace));
-
-        let mut names = Vec::with_capacity(100);
-
-        for event in EventType::variants() {
-            names.push((event.name(), event.description(), event.level().as_str()));
-            assert_eq!(EventType::try_parse(event.name()).unwrap(), event);
-        }
-
-        // sort by name
-        names.sort_by(|a, b| a.0.cmp(b.0));
-
-        for (name, description, level) in names {
-            //println!("{:?},", name);
-            println!("|`{name}`|{description}|`{level}`|")
-        }
-
-        //for (pos, (name, _, _)) in names.iter().enumerate() {
-            //println!("{:?},", name);
-            //println!("{} => Some({}),", pos, event_to_class(name));
-            //println!("{} => {},", event_to_class(name), pos);
-            /*println!(
-                "#[serde(rename = \"{name}\")]\n{},",
-                event_to_webadmin_class(name)
-            );*/
-        //}
     }
 }

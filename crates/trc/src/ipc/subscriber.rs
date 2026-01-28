@@ -82,7 +82,7 @@ impl SubscriberBuilder {
     pub fn with_default_interests(mut self, level: Level) -> Self {
         for event in EventType::variants() {
             if event.level() >= level {
-                self.interests.set(event);
+                self.interests.set(*event);
             }
         }
         self

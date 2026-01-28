@@ -8,10 +8,9 @@
  *
  */
 
-use hyper::{HeaderMap, header::CONTENT_TYPE};
+use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use utils::config::{Config, http::parse_http_headers};
 
 #[derive(Clone, Debug)]
 pub struct AiApiConfig {
@@ -197,39 +196,5 @@ impl AiApiConfig {
                 std::str::from_utf8(&bytes).unwrap_or_default()
             ))
         }
-    }
-
-    pub fn parse(bp: &mut Bootstrap, id: &str) -> Option<Self> {
-        let url = config.value(("enterprise.ai", id, "url"))?.to_string();
-        let api_type = match config.value(("enterprise.ai", id, "type"))? {
-            "chat" => ApiType::ChatCompletion,
-            "text" => ApiType::TextCompletion,
-            _ => {
-                config.new_build_error(("enterprise.ai", id, "type"), "Invalid API type");
-                return None;
-            }
-        };
-
-        let mut headers = parse_http_headers(config, ("enterprise.ai", id));
-        headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
-
-        Some(AiApiConfig {
-            id: id.to_string(),
-            api_type,
-            url,
-            headers,
-            model: config
-                .value_require(("enterprise.ai", id, "model"))?
-                .to_string(),
-            timeout: config
-                .property_or_default(("enterprise.ai", id, "timeout"), "2m")
-                .unwrap_or_else(|| Duration::from_secs(120)),
-            tls_allow_invalid_certs: config
-                .property_or_default(("enterprise.ai", id, "allow-invalid-certs"), "false")
-                .unwrap_or_default(),
-            default_temperature: config
-                .property_or_default(("enterprise.ai", id, "default-temperature"), "0.7")
-                .unwrap_or(0.7),
-        })
     }
 }

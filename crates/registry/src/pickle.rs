@@ -202,3 +202,27 @@ where
         Some(map)
     }
 }
+
+impl Pickle for trc::EventType {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.to_id().to_le_bytes());
+    }
+
+    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
+        let mut id_arr = [0u8; 2];
+        id_arr.copy_from_slice(stream.read_bytes(2)?);
+        Self::from_id(u16::from_le_bytes(id_arr))
+    }
+}
+
+impl Pickle for trc::MetricType {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.to_id().to_le_bytes());
+    }
+
+    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
+        let mut id_arr = [0u8; 2];
+        id_arr.copy_from_slice(stream.read_bytes(2)?);
+        Self::from_id(u16::from_le_bytes(id_arr))
+    }
+}
