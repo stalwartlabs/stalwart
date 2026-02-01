@@ -22,7 +22,9 @@ impl Server {
         email: &str,
         session_id: u64,
     ) -> trc::Result<Option<u32>> {
-        let mut address = self
+        todo!()
+
+        /*let mut address = self
             .core
             .smtp
             .session
@@ -51,7 +53,7 @@ impl Server {
             }
         }
 
-        Ok(None)
+        Ok(None)*/
     }
 
     pub async fn rcpt(
@@ -60,8 +62,10 @@ impl Server {
         email: &str,
         session_id: u64,
     ) -> trc::Result<RcptType> {
+        todo!()
+
         // Expand subaddress
-        let mut address = self
+        /*let mut address = self
             .core
             .smtp
             .session
@@ -89,7 +93,7 @@ impl Server {
             }
         }
 
-        Ok(RcptType::Invalid)
+        Ok(RcptType::Invalid)*/
     }
 
     pub async fn vrfy(
@@ -98,18 +102,20 @@ impl Server {
         address: &str,
         session_id: u64,
     ) -> trc::Result<Vec<String>> {
-        directory
-            .vrfy(
-                self.core
-                    .smtp
-                    .session
-                    .rcpt
-                    .subaddressing
-                    .to_subaddress(self, address, session_id)
-                    .await
-                    .as_ref(),
-            )
-            .await
+        todo!()
+
+        /*directory
+        .vrfy(
+            self.core
+                .smtp
+                .session
+                .rcpt
+                .subaddressing
+                .to_subaddress(self, address, session_id)
+                .await
+                .as_ref(),
+        )
+        .await* */
     }
 
     pub async fn expn(
@@ -118,21 +124,23 @@ impl Server {
         address: &str,
         session_id: u64,
     ) -> trc::Result<Vec<String>> {
-        directory
-            .expn(
-                self.core
-                    .smtp
-                    .session
-                    .rcpt
-                    .subaddressing
-                    .to_subaddress(self, address, session_id)
-                    .await
-                    .as_ref(),
-            )
-            .await
+        todo!()
+        /*directory
+        .expn(
+            self.core
+                .smtp
+                .session
+                .rcpt
+                .subaddressing
+                .to_subaddress(self, address, session_id)
+                .await
+                .as_ref(),
+        )
+        .await*/
     }
 }
 
+/*
 impl AddressMapping {
     pub fn parse(bp: &mut Bootstrap, key: impl AsKey) -> Self {
         let key = key.as_key();
@@ -224,3 +232,4 @@ impl AddressMapping {
         }
     }
 }
+*/

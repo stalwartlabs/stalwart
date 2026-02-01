@@ -457,4 +457,22 @@ impl Store {
         }
         .caused_by(trc::location!())
     }
+
+    pub async fn create_tables(&self) -> trc::Result<()> {
+        match self {
+            #[cfg(feature = "sqlite")]
+            Self::SQLite(store) => store.create_tables(),
+            #[cfg(feature = "postgres")]
+            Self::PostgreSQL(store) => store.create_storage_tables().await,
+            #[cfg(feature = "mysql")]
+            Self::MySQL(store) => store.create_storage_tables().await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            Store::SQLReadReplica(store) => Box::pin(store.primary_store().create_tables()).await,
+            // SPDX-SnippetEnd
+            _ => Ok(()),
+        }
+    }
 }

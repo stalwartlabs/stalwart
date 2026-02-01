@@ -15,6 +15,9 @@ pub mod search;
 pub struct ElasticSearchStore {
     client: Client,
     url: String,
+    num_shards: usize,
+    num_replicas: usize,
+    include_source: bool,
 }
 
 #[derive(Debug, Deserialize)]

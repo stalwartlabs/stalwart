@@ -4,10 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
 use ahash::{AHashMap, AHashSet};
 use serde::Deserialize;
+use std::borrow::Cow;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchType {
+    Equal(String),
+    StartsWith(String),
+    EndsWith(String),
+    Matches(GlobPattern),
+    All,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobPattern {
@@ -161,7 +169,7 @@ impl GlobSet {
         GlobSet::default()
     }
 
-    pub fn insert(&mut self, pattern: &str) {
+    pub fn insert_pattern(&mut self, pattern: &str) {
         match GlobPattern::try_compile(pattern, false) {
             Ok(glob) => {
                 self.patterns.push(glob);
@@ -170,6 +178,10 @@ impl GlobSet {
                 self.entries.insert(entry);
             }
         }
+    }
+
+    pub fn insert_entry(&mut self, entry: String) {
+        self.entries.insert(entry);
     }
 
     pub fn contains(&self, key: &str) -> bool {
@@ -185,7 +197,7 @@ impl<V> GlobMap<V> {
         }
     }
 
-    pub fn insert(&mut self, pattern: &str, value: V) {
+    pub fn insert_pattern(&mut self, pattern: &str, value: V) {
         match GlobPattern::try_compile(pattern, false) {
             Ok(glob) => {
                 self.patterns.push((glob, value));
@@ -194,6 +206,10 @@ impl<V> GlobMap<V> {
                 self.entries.insert(entry, value);
             }
         }
+    }
+
+    pub fn insert_entry(&mut self, entry: String, value: V) {
+        self.entries.insert(entry, value);
     }
 
     pub fn get(&self, key: &str) -> Option<&V> {
@@ -208,6 +224,32 @@ impl<V> GlobMap<V> {
 impl<V> Default for GlobMap<V> {
     fn default() -> Self {
         GlobMap::new()
+    }
+}
+
+impl MatchType {
+    pub fn parse(value: &str) -> Self {
+        if value == "*" {
+            MatchType::All
+        } else if let Some(value) = value.strip_suffix('*') {
+            MatchType::StartsWith(value.to_string())
+        } else if let Some(value) = value.strip_prefix('*') {
+            MatchType::EndsWith(value.to_string())
+        } else if value.contains('*') {
+            MatchType::Matches(GlobPattern::compile(value, false))
+        } else {
+            MatchType::Equal(value.to_string())
+        }
+    }
+
+    pub fn matches(&self, value: &str) -> bool {
+        match self {
+            MatchType::Equal(pattern) => value == pattern,
+            MatchType::StartsWith(pattern) => value.starts_with(pattern),
+            MatchType::EndsWith(pattern) => value.ends_with(pattern),
+            MatchType::Matches(pattern) => pattern.matches(value),
+            MatchType::All => true,
+        }
     }
 }
 

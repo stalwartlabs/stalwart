@@ -8,48 +8,66 @@
  *
  */
 
-use std::ops::Range;
-
-use utils::config::{Config, utils::AsKey};
-
-use crate::{BlobBackend, Store, Stores};
+use crate::{BlobStore, Store, backend::fs::FsStore};
+use registry::schema::structs::{BlobStoreBase, ShardedBlobStore};
+use std::{ops::Range, sync::Arc};
 
 pub struct ShardedBlob {
-    pub stores: Vec<BlobBackend>,
+    pub stores: Vec<BlobStore>,
 }
 
+#[allow(unreachable_patterns)]
 impl ShardedBlob {
-    pub fn open(config: &mut Config, prefix: impl AsKey, stores: &Stores) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let store_ids = config
-            .values((&prefix, "stores"))
-            .map(|(_, v)| v.to_string())
-            .collect::<Vec<_>>();
+    pub async fn open(config: ShardedBlobStore) -> Result<BlobStore, String> {
+        if config.stores.len() >= 2 {
+            let mut stores = Vec::new();
 
-        let mut blob_stores = Vec::with_capacity(store_ids.len());
-        for store_id in store_ids {
-            if let Some(store) = stores.blob_stores.get(&store_id) {
-                blob_stores.push(store.backend.clone());
-            } else {
-                config.new_build_error(
-                    (&prefix, "stores"),
-                    format!("Blob store {store_id} not found"),
-                );
-                return None;
+            for store in config.stores {
+                let result = match store {
+                    #[cfg(feature = "s3")]
+                    BlobStoreBase::S3(s3_store) => {
+                        crate::backend::s3::S3Store::open(s3_store).await
+                    }
+                    #[cfg(feature = "azure")]
+                    BlobStoreBase::Azure(azure_store) => {
+                        crate::backend::azure::AzureStore::open(azure_store).await
+                    }
+                    BlobStoreBase::FileSystem(file_system_store) => {
+                        FsStore::open(file_system_store).await
+                    }
+                    #[cfg(feature = "foundation")]
+                    BlobStoreBase::FoundationDb(foundation_db_store) => {
+                        crate::backend::foundationdb::FdbStore::open(foundation_db_store)
+                            .await
+                            .map(BlobStore::Store)
+                    }
+                    #[cfg(feature = "postgres")]
+                    BlobStoreBase::PostgreSql(postgre_sql_store) => {
+                        crate::backend::postgres::PostgresStore::open(postgre_sql_store)
+                            .await
+                            .map(BlobStore::Store)
+                    }
+                    #[cfg(feature = "mysql")]
+                    BlobStoreBase::MySql(my_sql_store) => {
+                        crate::backend::mysql::MysqlStore::open(my_sql_store)
+                            .await
+                            .map(BlobStore::Store)
+                    }
+                    _ => Err(
+                        "Binary was not compiled with the selected blob store backend".to_string(),
+                    ),
+                };
+
+                stores.push(result?);
             }
-        }
-        if !blob_stores.is_empty() {
-            Some(Self {
-                stores: blob_stores,
-            })
+            Ok(BlobStore::Sharded(Arc::new(ShardedBlob { stores })))
         } else {
-            config.new_build_error((&prefix, "stores"), "No blob stores specified");
-            None
+            Err("At least two blob stores are required for sharded blob store".to_string())
         }
     }
 
     #[inline(always)]
-    fn get_store(&self, key: &[u8]) -> &BlobBackend {
+    fn get_store(&self, key: &[u8]) -> &BlobStore {
         &self.stores[xxhash_rust::xxh3::xxh3_64(key) as usize % self.stores.len()]
     }
 
@@ -58,9 +76,9 @@ impl ShardedBlob {
         key: &[u8],
         read_range: Range<usize>,
     ) -> trc::Result<Option<Vec<u8>>> {
-        Box::pin(async move {
+        async move {
             match self.get_store(key) {
-                BlobBackend::Store(store) => match store {
+                BlobStore::Store(store) => match store {
                     #[cfg(feature = "sqlite")]
                     Store::SQLite(store) => store.get_blob(key, read_range).await,
                     #[cfg(feature = "foundation")]
@@ -82,21 +100,21 @@ impl ShardedBlob {
                     // SPDX-SnippetEnd
                     Store::None => Err(trc::StoreEvent::NotConfigured.into()),
                 },
-                BlobBackend::Fs(store) => store.get_blob(key, read_range).await,
+                BlobStore::Fs(store) => store.get_blob(key, read_range).await,
                 #[cfg(feature = "s3")]
-                BlobBackend::S3(store) => store.get_blob(key, read_range).await,
+                BlobStore::S3(store) => store.get_blob(key, read_range).await,
                 #[cfg(feature = "azure")]
-                BlobBackend::Azure(store) => store.get_blob(key, read_range).await,
-                BlobBackend::Sharded(_) => unimplemented!(),
+                BlobStore::Azure(store) => store.get_blob(key, read_range).await,
+                BlobStore::Sharded(_) => unimplemented!(),
             }
-        })
+        }
         .await
     }
 
     pub async fn put_blob(&self, key: &[u8], data: &[u8]) -> trc::Result<()> {
-        Box::pin(async move {
+        async move {
             match self.get_store(key) {
-                BlobBackend::Store(store) => match store {
+                BlobStore::Store(store) => match store {
                     #[cfg(feature = "sqlite")]
                     Store::SQLite(store) => store.put_blob(key, data).await,
                     #[cfg(feature = "foundation")]
@@ -118,21 +136,21 @@ impl ShardedBlob {
                     Store::SQLReadReplica(store) => store.put_blob(key, data).await,
                     Store::None => Err(trc::StoreEvent::NotConfigured.into()),
                 },
-                BlobBackend::Fs(store) => store.put_blob(key, data).await,
+                BlobStore::Fs(store) => store.put_blob(key, data).await,
                 #[cfg(feature = "s3")]
-                BlobBackend::S3(store) => store.put_blob(key, data).await,
+                BlobStore::S3(store) => store.put_blob(key, data).await,
                 #[cfg(feature = "azure")]
-                BlobBackend::Azure(store) => store.put_blob(key, data).await,
-                BlobBackend::Sharded(_) => unimplemented!(),
+                BlobStore::Azure(store) => store.put_blob(key, data).await,
+                BlobStore::Sharded(_) => unimplemented!(),
             }
-        })
+        }
         .await
     }
 
     pub async fn delete_blob(&self, key: &[u8]) -> trc::Result<bool> {
-        Box::pin(async move {
+        async move {
             match self.get_store(key) {
-                BlobBackend::Store(store) => match store {
+                BlobStore::Store(store) => match store {
                     #[cfg(feature = "sqlite")]
                     Store::SQLite(store) => store.delete_blob(key).await,
                     #[cfg(feature = "foundation")]
@@ -154,14 +172,18 @@ impl ShardedBlob {
                     // SPDX-SnippetEnd
                     Store::None => Err(trc::StoreEvent::NotConfigured.into()),
                 },
-                BlobBackend::Fs(store) => store.delete_blob(key).await,
+                BlobStore::Fs(store) => store.delete_blob(key).await,
                 #[cfg(feature = "s3")]
-                BlobBackend::S3(store) => store.delete_blob(key).await,
+                BlobStore::S3(store) => store.delete_blob(key).await,
                 #[cfg(feature = "azure")]
-                BlobBackend::Azure(store) => store.delete_blob(key).await,
-                BlobBackend::Sharded(_) => unimplemented!(),
+                BlobStore::Azure(store) => store.delete_blob(key).await,
+                BlobStore::Sharded(_) => unimplemented!(),
             }
-        })
+        }
         .await
+    }
+
+    pub fn into_single(self) -> BlobStore {
+        self.stores.into_iter().next().unwrap()
     }
 }

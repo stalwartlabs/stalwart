@@ -130,7 +130,9 @@ impl Server {
         match &req.credentials {
             Credentials::Plain { username, secret } => {
                 // Then check if the credentials match the fallback admin or master user
-                match (&self.core.jmap.fallback_admin, &self.core.jmap.master_user) {
+                let master_user: Option<(String, String)> = None;
+                let todo = "implement master";
+                match (&self.core.network.security.fallback_admin, &master_user) {
                     (Some((fallback_admin, fallback_pass)), _) if username == fallback_admin => {
                         if verify_secret_hash(fallback_pass, secret).await? {
                             trc::event!(
@@ -204,7 +206,9 @@ impl Server {
                             )
                             .await
                             .unwrap_or_default()
-                    } else if let Some((_, fallback_pass)) = &self.core.jmap.fallback_admin {
+                    } else if let Some((_, fallback_pass)) =
+                        &self.core.network.security.fallback_admin
+                    {
                         Principal::fallback_admin(fallback_pass).into()
                     } else {
                         None

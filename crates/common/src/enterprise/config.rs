@@ -87,7 +87,7 @@ impl Enterprise {
             enterprise.license_key = Some(license);
             if let Err(err) = bp
                 .registry
-                .put(Object::Enterprise.singleton(), &enterprise)
+                .update(Object::Enterprise.singleton(), &enterprise)
                 .await
             {
                 trc::error!(

@@ -4,108 +4,54 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use foundationdb::{Database, api, options::DatabaseOption};
-use utils::config::{Config, utils::AsKey};
-
 use super::FdbStore;
+use crate::Store;
+use foundationdb::{Database, api, options::DatabaseOption};
+use registry::schema::structs;
+use std::sync::Arc;
 
 impl FdbStore {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let prefix = prefix.as_key();
+    pub async fn open(config: structs::FoundationDbStore) -> Result<Store, String> {
         let guard = unsafe {
             api::FdbApiBuilder::default()
                 .build()
-                .map_err(|err| {
-                    config.new_build_error(
-                        prefix.as_str(),
-                        format!("Failed to boot FoundationDB: {err:?}"),
-                    )
-                })
-                .ok()?
+                .map_err(|err| format!("Failed to boot FoundationDB: {err:?}"))?
                 .boot()
-                .map_err(|err| {
-                    config.new_build_error(
-                        prefix.as_str(),
-                        format!("Failed to boot FoundationDB: {err:?}"),
-                    )
-                })
-                .ok()?
+                .map_err(|err| format!("Failed to boot FoundationDB: {err:?}"))?
         };
 
-        let db = Database::new(config.value((&prefix, "cluster-file")))
-            .map_err(|err| {
-                config.new_build_error(
-                    prefix.as_str(),
-                    format!("Failed to create FoundationDB database: {err:?}"),
-                )
-            })
-            .ok()?;
+        let db = Database::new(config.cluster_file.as_deref())
+            .map_err(|err| format!("Failed to create FoundationDB database: {err:?}"))?;
 
-        if let Some(value) = config
-            .property::<Option<Duration>>((&prefix, "transaction.timeout"))
-            .unwrap_or_default()
-        {
-            db.set_option(DatabaseOption::TransactionTimeout(value.as_millis() as i32))
-                .map_err(|err| {
-                    config.new_build_error(
-                        (&prefix, "transaction.timeout"),
-                        format!("Failed to set option: {err:?}"),
-                    )
-                })
-                .ok()?;
-        }
-        if let Some(value) = config.property((&prefix, "transaction.retry-limit")) {
-            db.set_option(DatabaseOption::TransactionRetryLimit(value))
-                .map_err(|err| {
-                    config.new_build_error(
-                        (&prefix, "transaction.retry-limit"),
-                        format!("Failed to set option: {err:?}"),
-                    )
-                })
-                .ok()?;
-        }
-        if let Some(value) = config
-            .property::<Option<Duration>>((&prefix, "transaction.max-retry-delay"))
-            .unwrap_or_default()
-        {
-            db.set_option(DatabaseOption::TransactionMaxRetryDelay(
-                value.as_millis() as i32
+        if let Some(value) = config.transaction_timeout {
+            db.set_option(DatabaseOption::TransactionTimeout(
+                value.into_inner().as_millis() as i32,
             ))
-            .map_err(|err| {
-                config.new_build_error(
-                    (&prefix, "transaction.max-retry-delay"),
-                    format!("Failed to set option: {err:?}"),
-                )
-            })
-            .ok()?;
+            .map_err(|err| format!("Failed to set option: {err:?}"))?;
         }
-        if let Some(value) = config.property((&prefix, "ids.machine")) {
+        if let Some(value) = config.transaction_retry_limit {
+            db.set_option(DatabaseOption::TransactionRetryLimit(value as i32))
+                .map_err(|err| format!("Failed to set option: {err:?}"))?;
+        }
+        if let Some(value) = config.transaction_retry_delay {
+            db.set_option(DatabaseOption::TransactionMaxRetryDelay(
+                value.into_inner().as_millis() as i32,
+            ))
+            .map_err(|err| format!("Failed to set option: {err:?}"))?;
+        }
+        if let Some(value) = config.machine_id {
             db.set_option(DatabaseOption::MachineId(value))
-                .map_err(|err| {
-                    config.new_build_error(
-                        (&prefix, "ids.machine"),
-                        format!("Failed to set option: {err:?}"),
-                    )
-                })
-                .ok()?;
+                .map_err(|err| format!("Failed to set option: {err:?}"))?;
         }
-        if let Some(value) = config.property((&prefix, "ids.datacenter")) {
+        if let Some(value) = config.datacenter_id {
             db.set_option(DatabaseOption::DatacenterId(value))
-                .map_err(|err| {
-                    config.new_build_error(
-                        (&prefix, "ids.datacenter"),
-                        format!("Failed to set option: {err:?}"),
-                    )
-                })
-                .ok()?;
+                .map_err(|err| format!("Failed to set option: {err:?}"))?;
         }
 
-        Some(Self {
+        Ok(Store::FoundationDb(Arc::new(Self {
             guard,
             db,
             version: Default::default(),
-        })
+        })))
     }
 }

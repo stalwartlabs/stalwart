@@ -23,6 +23,16 @@ impl Duration {
     pub fn is_valid(&self) -> bool {
         self.0.as_millis() > 0
     }
+
+    #[inline(always)]
+    pub fn as_secs(&self) -> u64 {
+        self.0.as_secs()
+    }
+
+    #[inline(always)]
+    pub fn as_millis(&self) -> u64 {
+        self.0.as_millis() as u64
+    }
 }
 
 impl Default for Duration {

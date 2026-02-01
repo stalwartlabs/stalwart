@@ -9,16 +9,18 @@
  */
 
 use crate::{
-    Deserialize, IterateParams, Key, Store, Stores, ValueKey,
+    Deserialize, IterateParams, Key, Store, ValueKey,
     search::{IndexDocument, SearchComparator, SearchDocumentId, SearchFilter, SearchQuery},
     write::{AssignedIds, Batch, SearchIndex, ValueClass},
 };
 use std::{
     future::Future,
     ops::Range,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
-use utils::config::{Config, utils::AsKey};
 
 pub struct SQLReadReplica {
     primary: Store,
@@ -27,101 +29,12 @@ pub struct SQLReadReplica {
 }
 
 impl SQLReadReplica {
-    pub async fn open(
-        config: &mut Config,
-        prefix: impl AsKey,
-        stores: &Stores,
-        create_store_tables: bool,
-        create_search_tables: bool,
-    ) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let primary_id = config.value_require((&prefix, "primary"))?.to_string();
-        let replica_ids = config
-            .values((&prefix, "replicas"))
-            .map(|(_, v)| v.to_string())
-            .collect::<Vec<_>>();
-
-        let primary = if let Some(store) = stores.stores.get(&primary_id) {
-            if store.is_pg_or_mysql() {
-                store.clone()
-            } else {
-                config.new_build_error(
-                    (&prefix, "primary"),
-                    "Primary store must be a PostgreSQL or MySQL store",
-                );
-                return None;
-            }
-        } else {
-            config.new_build_error(
-                (&prefix, "primary"),
-                format!("Primary store {primary_id} not found"),
-            );
-            return None;
-        };
-        let mut replicas = Vec::with_capacity(replica_ids.len());
-        for replica_id in replica_ids {
-            if let Some(store) = stores.stores.get(&replica_id) {
-                if store.is_pg_or_mysql() {
-                    replicas.push(store.clone());
-                } else {
-                    config.new_build_error(
-                        (&prefix, "replicas"),
-                        "Replica store must be a PostgreSQL or MySQL store",
-                    );
-                    return None;
-                }
-            } else {
-                config.new_build_error(
-                    (&prefix, "replicas"),
-                    format!("Replica store {replica_id} not found"),
-                );
-                return None;
-            }
-        }
-        if !replicas.is_empty() {
-            if create_store_tables {
-                let result = match &primary {
-                    #[cfg(feature = "postgres")]
-                    Store::PostgreSQL(store) => store.create_storage_tables().await,
-                    #[cfg(feature = "mysql")]
-                    Store::MySQL(store) => store.create_storage_tables().await,
-                    _ => panic!("Invalid store type"),
-                };
-
-                if let Err(err) = result {
-                    config.new_build_error(
-                        (&prefix, "primary"),
-                        format!("Failed to create tables: {err}"),
-                    );
-                }
-            }
-
-            if create_search_tables {
-                let result = match &primary {
-                    #[cfg(feature = "postgres")]
-                    Store::PostgreSQL(store) => store.create_search_tables().await,
-                    #[cfg(feature = "mysql")]
-                    Store::MySQL(store) => store.create_search_tables().await,
-                    _ => panic!("Invalid store type"),
-                };
-
-                if let Err(err) = result {
-                    config.new_build_warning(
-                        (&prefix, "primary"),
-                        format!("Failed to create search tables: {err}"),
-                    );
-                }
-            }
-
-            Some(Self {
-                primary,
-                replicas,
-                last_used_replica: AtomicUsize::new(0),
-            })
-        } else {
-            config.new_build_error((&prefix, "replicas"), "No replica stores specified");
-            None
-        }
+    pub fn open(primary: Store, replicas: Vec<Store>) -> Result<Store, String> {
+        Ok(Store::SQLReadReplica(Arc::new(Self {
+            primary,
+            replicas,
+            last_used_replica: AtomicUsize::new(0),
+        })))
     }
 
     async fn run_op<'x, F, T, R>(&'x self, f: F) -> trc::Result<T>
@@ -320,5 +233,13 @@ impl SQLReadReplica {
             Store::MySQL(store) => store.query(index, filters, sort).await,
             _ => panic!("Invalid store type"),
         }
+    }
+
+    pub fn primary_store(&self) -> &Store {
+        &self.primary
+    }
+
+    pub fn into_primary(self) -> Store {
+        self.primary
     }
 }

@@ -5,7 +5,7 @@
  */
 
 use crate::pickle::{Pickle, PickledStream};
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr, time::SystemTime};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -126,14 +126,24 @@ impl FromStr for UTCDateTime {
 }
 
 impl UTCDateTime {
+    pub fn now() -> Self {
+        UTCDateTime(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()) as i64,
+        )
+    }
+
     pub fn from_timestamp(timestamp: i64) -> Self {
         UTCDateTime(timestamp)
     }
 
+    #[inline(always)]
     pub fn timestamp(&self) -> i64 {
         self.0
     }
 
+    #[inline(always)]
     pub fn is_valid(&self) -> bool {
         self.0 != i64::MAX
     }

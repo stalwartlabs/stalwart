@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
+use crate::{
+    config::{build_ecdsa_pem, build_rsa_keypair},
+    manager::{bootstrap::Bootstrap, webadmin::Resource},
+};
 use biscuit::{
     jwa::{Algorithm, SignatureAlgorithm},
     jwk::{
@@ -15,16 +17,11 @@ use biscuit::{
     },
     jws::Secret,
 };
+use registry::schema::{enums::JwtSignatureAlgorithm, prelude::Object, structs::Authentication};
 use ring::signature::{self, KeyPair};
 use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey, traits::PublicKeyParts};
 use store::rand::{Rng, distr::Alphanumeric, rng};
-use utils::config::Config;
 use x509_parser::num_bigint::BigUint;
-
-use crate::{
-    config::{build_ecdsa_pem, build_rsa_keypair},
-    manager::webadmin::Resource,
-};
 
 #[derive(Clone)]
 pub struct OAuthConfig {
@@ -46,32 +43,21 @@ pub struct OAuthConfig {
 }
 
 impl OAuthConfig {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        let oidc_signature_algorithm = match config.value("oauth.oidc.signature-algorithm") {
-            Some(alg) => match alg.to_uppercase().as_str() {
-                "HS256" => SignatureAlgorithm::HS256,
-                "HS384" => SignatureAlgorithm::HS384,
-                "HS512" => SignatureAlgorithm::HS512,
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let auth = bp.setting_infallible::<Authentication>().await;
 
-                "RS256" => SignatureAlgorithm::RS256,
-                "RS384" => SignatureAlgorithm::RS384,
-                "RS512" => SignatureAlgorithm::RS512,
-
-                "ES256" => SignatureAlgorithm::ES256,
-                "ES384" => SignatureAlgorithm::ES384,
-
-                "PS256" => SignatureAlgorithm::PS256,
-                "PS384" => SignatureAlgorithm::PS384,
-                "PS512" => SignatureAlgorithm::PS512,
-                _ => {
-                    config.new_parse_error(
-                        "oauth.oidc.signature-algorithm",
-                        format!("Invalid OIDC signature algorithm: {}", alg),
-                    );
-                    SignatureAlgorithm::HS256
-                }
-            },
-            None => SignatureAlgorithm::HS256,
+        let oidc_signature_algorithm = match auth.signature_algorithm {
+            JwtSignatureAlgorithm::Es256 => SignatureAlgorithm::ES256,
+            JwtSignatureAlgorithm::Es384 => SignatureAlgorithm::ES384,
+            JwtSignatureAlgorithm::Ps256 => SignatureAlgorithm::PS256,
+            JwtSignatureAlgorithm::Ps384 => SignatureAlgorithm::PS384,
+            JwtSignatureAlgorithm::Ps512 => SignatureAlgorithm::PS512,
+            JwtSignatureAlgorithm::Rs256 => SignatureAlgorithm::RS256,
+            JwtSignatureAlgorithm::Rs384 => SignatureAlgorithm::RS384,
+            JwtSignatureAlgorithm::Rs512 => SignatureAlgorithm::RS512,
+            JwtSignatureAlgorithm::Hs256 => SignatureAlgorithm::HS256,
+            JwtSignatureAlgorithm::Hs384 => SignatureAlgorithm::HS384,
+            JwtSignatureAlgorithm::Hs512 => SignatureAlgorithm::HS512,
         };
 
         let rand_key = rng()
@@ -85,36 +71,23 @@ impl OAuthConfig {
             SignatureAlgorithm::None
             | SignatureAlgorithm::HS256
             | SignatureAlgorithm::HS384
-            | SignatureAlgorithm::HS512 => {
-                let key = config
-                    .value("oauth.oidc.signature-key")
-                    .map(|s| s.to_string().into_bytes())
-                    .unwrap_or(rand_key);
-
-                (
-                    Secret::Bytes(key.clone()),
-                    AlgorithmParameters::OctetKey(OctetKeyParameters {
-                        key_type: OctetKeyType::Octet,
-                        value: key,
-                    }),
-                )
-            }
+            | SignatureAlgorithm::HS512 => (
+                Secret::Bytes(auth.signature_key.as_bytes().to_vec()),
+                AlgorithmParameters::OctetKey(OctetKeyParameters {
+                    key_type: OctetKeyType::Octet,
+                    value: auth.signature_key.as_bytes().to_vec(),
+                }),
+            ),
             SignatureAlgorithm::RS256
             | SignatureAlgorithm::RS384
             | SignatureAlgorithm::RS512
             | SignatureAlgorithm::PS256
             | SignatureAlgorithm::PS384
-            | SignatureAlgorithm::PS512 => parse_rsa_key(bp).unwrap_or_else(|| {
-                (
-                    Secret::Bytes(rand_key.clone()),
-                    AlgorithmParameters::OctetKey(OctetKeyParameters {
-                        key_type: OctetKeyType::Octet,
-                        value: rand_key,
-                    }),
-                )
-            }),
-            SignatureAlgorithm::ES256 | SignatureAlgorithm::ES384 | SignatureAlgorithm::ES512 => {
-                parse_ecdsa_key(config, oidc_signature_algorithm).unwrap_or_else(|| {
+            | SignatureAlgorithm::PS512 => parse_rsa_key(&auth)
+                .map_err(|err| {
+                    bp.build_error(Object::Authentication.singleton(), err);
+                })
+                .unwrap_or_else(|_| {
                     (
                         Secret::Bytes(rand_key.clone()),
                         AlgorithmParameters::OctetKey(OctetKeyParameters {
@@ -122,7 +95,21 @@ impl OAuthConfig {
                             value: rand_key,
                         }),
                     )
-                })
+                }),
+            SignatureAlgorithm::ES256 | SignatureAlgorithm::ES384 | SignatureAlgorithm::ES512 => {
+                parse_ecdsa_key(&auth, oidc_signature_algorithm)
+                    .map_err(|err| {
+                        bp.build_error(Object::Authentication.singleton(), err);
+                    })
+                    .unwrap_or_else(|_| {
+                        (
+                            Secret::Bytes(rand_key.clone()),
+                            AlgorithmParameters::OctetKey(OctetKeyParameters {
+                                key_type: OctetKeyType::Octet,
+                                value: rand_key,
+                            }),
+                        )
+                    })
             }
         };
 
@@ -145,49 +132,16 @@ impl OAuthConfig {
         };
 
         OAuthConfig {
-            oauth_key: config
-                .value("oauth.key")
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| {
-                    rng()
-                        .sample_iter(Alphanumeric)
-                        .take(64)
-                        .map(char::from)
-                        .collect::<String>()
-                }),
-            oauth_expiry_user_code: config
-                .property_or_default::<Duration>("oauth.expiry.user-code", "30m")
-                .unwrap_or_else(|| Duration::from_secs(30 * 60))
-                .as_secs(),
-            oauth_expiry_auth_code: config
-                .property_or_default::<Duration>("oauth.expiry.auth-code", "10m")
-                .unwrap_or_else(|| Duration::from_secs(10 * 60))
-                .as_secs(),
-            oauth_expiry_token: config
-                .property_or_default::<Duration>("oauth.expiry.token", "1h")
-                .unwrap_or_else(|| Duration::from_secs(60 * 60))
-                .as_secs(),
-            oauth_expiry_refresh_token: config
-                .property_or_default::<Duration>("oauth.expiry.refresh-token", "30d")
-                .unwrap_or_else(|| Duration::from_secs(30 * 24 * 60 * 60))
-                .as_secs(),
-            oauth_expiry_refresh_token_renew: config
-                .property_or_default::<Duration>("oauth.expiry.refresh-token-renew", "4d")
-                .unwrap_or_else(|| Duration::from_secs(4 * 24 * 60 * 60))
-                .as_secs(),
-            oauth_max_auth_attempts: config
-                .property_or_default("oauth.auth.max-attempts", "3")
-                .unwrap_or(10),
-            oidc_expiry_id_token: config
-                .property_or_default::<Duration>("oauth.oidc.expiry.id-token", "15m")
-                .unwrap_or_else(|| Duration::from_secs(15 * 60))
-                .as_secs(),
-            allow_anonymous_client_registration: config
-                .property_or_default("oauth.client-registration.anonymous", "false")
-                .unwrap_or(false),
-            require_client_authentication: config
-                .property_or_default("oauth.client-registration.require", "false")
-                .unwrap_or(true),
+            oauth_key: auth.encryption_key,
+            oauth_expiry_user_code: auth.user_code_expiry.as_secs(),
+            oauth_expiry_auth_code: auth.auth_code_expiry.as_secs(),
+            oauth_expiry_token: auth.access_token_expiry.as_secs(),
+            oauth_expiry_refresh_token: auth.refresh_token_expiry.as_secs(),
+            oauth_expiry_refresh_token_renew: auth.refresh_token_renewal.as_secs(),
+            oauth_max_auth_attempts: auth.auth_code_max_attempts as u32,
+            oidc_expiry_id_token: auth.id_token_expiry.as_secs(),
+            allow_anonymous_client_registration: auth.anonymous_client_registration,
+            require_client_authentication: auth.require_client_registration,
             oidc_signing_secret,
             oidc_signature_algorithm,
             oidc_jwks,
@@ -220,26 +174,13 @@ impl Default for OAuthConfig {
     }
 }
 
-fn parse_rsa_key(bp: &mut Bootstrap) -> Option<(Secret, AlgorithmParameters)> {
-    let rsa_key_pair = match build_rsa_keypair(config.value_require("oauth.oidc.signature-key")?) {
-        Ok(key) => key,
-        Err(err) => {
-            config.new_build_error(
-                "oauth.oidc.signature-key",
-                format!("Failed to build RSA key: {}", err),
-            );
-            return None;
-        }
-    };
+fn parse_rsa_key(auth: &Authentication) -> Result<(Secret, AlgorithmParameters), String> {
+    let rsa_key_pair = build_rsa_keypair(&auth.signature_key)?;
 
     let rsa_public_key = match RsaPublicKey::from_pkcs1_der(rsa_key_pair.public_key().as_ref()) {
         Ok(key) => key,
         Err(err) => {
-            config.new_build_error(
-                "oauth.oidc.signature-key",
-                format!("Failed to obtain RSA public key: {}", err),
-            );
-            return None;
+            return Err(format!("Failed to obtain RSA public key: {}", err));
         }
     };
 
@@ -250,17 +191,16 @@ fn parse_rsa_key(bp: &mut Bootstrap) -> Option<(Secret, AlgorithmParameters)> {
         ..Default::default()
     };
 
-    (
+    Ok((
         Secret::RsaKeyPair(rsa_key_pair.into()),
         AlgorithmParameters::RSA(rsa_key_params),
-    )
-        .into()
+    ))
 }
 
 fn parse_ecdsa_key(
-    bp: &mut Bootstrap,
+    auth: &Authentication,
     oidc_signature_algorithm: SignatureAlgorithm,
-) -> Option<(Secret, AlgorithmParameters)> {
+) -> Result<(Secret, AlgorithmParameters), String> {
     let (alg, curve) = match oidc_signature_algorithm {
         SignatureAlgorithm::ES256 => (
             &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
@@ -273,18 +213,7 @@ fn parse_ecdsa_key(
         _ => unreachable!(),
     };
 
-    let ecdsa_key_pair =
-        match build_ecdsa_pem(alg, config.value_require("oauth.oidc.signature-key")?) {
-            Ok(key) => key,
-            Err(err) => {
-                config.new_build_error(
-                    "oauth.oidc.signature-key",
-                    format!("Failed to build ECDSA key: {}", err),
-                );
-                return None;
-            }
-        };
-
+    let ecdsa_key_pair = build_ecdsa_pem(alg, &auth.signature_key)?;
     let ecdsa_public_key = ecdsa_key_pair.public_key().as_ref();
 
     let (x, y) = match oidc_signature_algorithm {
@@ -292,11 +221,7 @@ fn parse_ecdsa_key(
             let points = match p256::EncodedPoint::from_bytes(ecdsa_public_key) {
                 Ok(points) => points,
                 Err(err) => {
-                    config.new_build_error(
-                        "oauth.oidc.signature-key",
-                        format!("Failed to parse ECDSA key: {}", err),
-                    );
-                    return None;
+                    return Err(format!("Failed to parse ECDSA key: {}", err));
                 }
             };
 
@@ -309,11 +234,7 @@ fn parse_ecdsa_key(
             let points = match p384::EncodedPoint::from_bytes(ecdsa_public_key) {
                 Ok(points) => points,
                 Err(err) => {
-                    config.new_build_error(
-                        "oauth.oidc.signature-key",
-                        format!("Failed to parse ECDSA key: {}", err),
-                    );
-                    return None;
+                    return Err(format!("Failed to parse ECDSA key: {}", err));
                 }
             };
 
@@ -333,9 +254,8 @@ fn parse_ecdsa_key(
         d: None,
     };
 
-    (
+    Ok((
         Secret::EcdsaKeyPair(ecdsa_key_pair.into()),
         AlgorithmParameters::EllipticCurve(ecdsa_key_params),
-    )
-        .into()
+    ))
 }

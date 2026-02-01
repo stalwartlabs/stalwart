@@ -19,11 +19,39 @@ pub enum IpAddrOrMask {
 }
 
 impl IpAddrOrMask {
+    pub fn from_ip(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(addr) => IpAddrOrMask::V4 {
+                addr,
+                mask: u32::MAX,
+            },
+            IpAddr::V6(addr) => IpAddrOrMask::V6 {
+                addr,
+                mask: u128::MAX,
+            },
+        }
+    }
+
     pub fn is_valid(&self) -> bool {
         !matches!(
             self,
             IpAddrOrMask::V4 { addr, mask: _ } if addr == &Ipv4Addr::UNSPECIFIED
         )
+    }
+
+    pub fn try_to_ip(&self) -> Option<IpAddr> {
+        match self {
+            IpAddrOrMask::V4 { addr, mask } if *mask == u32::MAX => Some(IpAddr::V4(*addr)),
+            IpAddrOrMask::V6 { addr, mask } if *mask == u128::MAX => Some(IpAddr::V6(*addr)),
+            _ => None,
+        }
+    }
+
+    pub fn into_inner(self) -> (IpAddr, u128) {
+        match self {
+            IpAddrOrMask::V4 { addr, mask } => (IpAddr::V4(addr), mask as u128),
+            IpAddrOrMask::V6 { addr, mask } => (IpAddr::V6(addr), mask),
+        }
     }
 
     pub fn matches(&self, remote: &IpAddr) -> bool {

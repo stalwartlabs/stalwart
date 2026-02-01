@@ -244,7 +244,7 @@ impl Server {
                         .details("Account does not contain secrets")
                         .caused_by(trc::location!()),
                 )
-        } else if let Some((_, secret)) = &self.core.jmap.fallback_admin {
+        } else if let Some((_, secret)) = &self.core.network.security.fallback_admin {
             Ok(secret.into())
         } else {
             Err(trc::AuthEvent::Error

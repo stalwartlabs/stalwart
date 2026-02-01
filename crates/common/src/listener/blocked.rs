@@ -9,66 +9,81 @@ use crate::{
     ip_to_bytes, ipc::BroadcastEvent, manager::bootstrap::Bootstrap,
 };
 use ahash::AHashSet;
-use std::{fmt::Debug, net::IpAddr};
-use utils::{
-    config::{
-        ConfigKey, Rate,
-        ipmask::{IpAddrMask, IpAddrOrMask},
-        utils::ParseValue,
+use registry::{
+    schema::{
+        enums::BlockReason,
+        structs::{self, AllowedIp, BlockedIp, Rate},
     },
-    glob::GlobPattern,
+    types::{datetime::UTCDateTime, ipmask::IpAddrOrMask},
 };
+use std::{fmt::Debug, net::IpAddr};
+use store::write::now;
+use trc::AddContext;
+use utils::glob::{GlobPattern, MatchType};
 
 #[derive(Debug, Clone)]
 pub struct Security {
-    fallback_admin: Option<(String, String)>,
+    pub fallback_admin: Option<(String, String)>,
 
-    blocked_ip_networks: Vec<IpAddrMask>,
-    has_blocked_networks: bool,
+    pub allowed_ip_addresses: AHashSet<IpAddr>,
+    pub allowed_ip_networks: Vec<IpAddrOrMask>,
+    pub has_allowed_networks: bool,
+    pub blocked_ip_expiration: Option<u64>,
 
-    allowed_ip_addresses: AHashSet<IpAddr>,
-    allowed_ip_networks: Vec<IpAddrMask>,
-    has_allowed_networks: bool,
+    pub http_banned_paths: Vec<MatchType>,
+    pub scanner_fail_rate: Option<Rate>,
 
-    http_banned_paths: Vec<MatchType>,
-    scanner_fail_rate: Option<Rate>,
-
-    auth_fail_rate: Option<Rate>,
-    rcpt_fail_rate: Option<Rate>,
-    loiter_fail_rate: Option<Rate>,
+    pub auth_fail_rate: Option<Rate>,
+    pub rcpt_fail_rate: Option<Rate>,
+    pub loiter_fail_rate: Option<Rate>,
 }
 
-pub const BLOCKED_IP_KEY: &str = "server.blocked-ip";
-pub const BLOCKED_IP_PREFIX: &str = "server.blocked-ip.";
-pub const ALLOWED_IP_KEY: &str = "server.allowed-ip";
-pub const ALLOWED_IP_PREFIX: &str = "server.allowed-ip.";
-
+#[derive(Default)]
 pub struct BlockedIps {
     pub blocked_ip_addresses: AHashSet<IpAddr>,
-    pub blocked_ip_networks: Vec<IpAddrMask>,
+    pub blocked_ip_networks: Vec<IpAddrOrMask>,
+    pub has_blocked_networks: bool,
 }
 
 impl Security {
     pub async fn parse(bp: &mut Bootstrap) -> Self {
         let mut allowed_ip_addresses = AHashSet::new();
         let mut allowed_ip_networks = Vec::new();
+        let mut expired_allows = Vec::new();
+        let now = now() as i64;
 
-        for ip in config
-            .set_values(ALLOWED_IP_KEY)
-            .map(IpAddrOrMask::parse_value)
-            .collect::<Vec<_>>()
-        {
-            match ip {
-                Ok(IpAddrOrMask::Ip(ip)) => {
+        for ip in bp.list_infallible::<AllowedIp>().await {
+            let id = ip.id;
+            let ip = ip.object;
+
+            if ip.expires_at.is_none_or(|ip| ip.timestamp() > now) {
+                if let Some(ip) = ip.address.try_to_ip() {
                     allowed_ip_addresses.insert(ip);
+                } else {
+                    allowed_ip_networks.push(ip.address);
                 }
-                Ok(IpAddrOrMask::Mask(ip)) => {
-                    allowed_ip_networks.push(ip);
-                }
-                Err(err) => {
-                    config.new_parse_error(ALLOWED_IP_KEY, err);
+            } else {
+                expired_allows.push((id, ip.address));
+            }
+        }
+
+        if !expired_allows.is_empty() {
+            for (id, _) in &expired_allows {
+                if let Err(err) = bp.registry.delete(*id).await {
+                    trc::error!(
+                        err.details("Failed to delete expired allowed IP from registry.")
+                            .caused_by(trc::location!())
+                    );
                 }
             }
+
+            trc::event!(
+                Security(trc::SecurityEvent::IpAllowExpired),
+                Details = expired_allows
+                    .into_iter()
+                    .map(|(_, ip)| trc::Value::from(ip.into_inner().0))
+                    .collect::<Vec<_>>()
+            );
         }
 
         #[cfg(not(feature = "test_mode"))]
@@ -78,60 +93,27 @@ impl Security {
             allowed_ip_addresses.insert(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
         }
 
-        let blocked = BlockedIps::parse(bp);
-
-        // Parse blocked HTTP paths
-        let mut http_banned_paths = config
-            .values("server.auto-ban.scan.paths")
-            .filter_map(|(_, v)| {
-                let v = v.trim();
-                if !v.is_empty() {
-                    MatchType::parse(v).into()
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        if http_banned_paths.is_empty() {
-            for pattern in [
-                "*.php*",
-                "*.cgi*",
-                "*.asp*",
-                "*/wp-*",
-                "*/php*",
-                "*/cgi-bin*",
-                "*xmlrpc*",
-                "*../*",
-                "*/..*",
-                "*joomla*",
-                "*wordpress*",
-                "*drupal*",
-            ]
-            .iter()
-            {
-                http_banned_paths.push(MatchType::Matches(GlobPattern::compile(pattern, true)));
-            }
-        }
-
+        let security = bp.setting_infallible::<structs::Security>().await;
         Security {
-            has_blocked_networks: !blocked.blocked_ip_networks.is_empty(),
-            blocked_ip_networks: blocked.blocked_ip_networks,
+            fallback_admin: bp.local.fallback_admin_user.as_ref().and_then(|user| {
+                bp.local
+                    .fallback_admin_secret
+                    .as_ref()
+                    .map(|secret| (user.to_string(), secret.to_string()))
+            }),
             has_allowed_networks: !allowed_ip_networks.is_empty(),
             allowed_ip_addresses,
             allowed_ip_networks,
-            auth_fail_rate: config
-                .property_or_default::<Option<Rate>>("server.auto-ban.auth.rate", "100/1d")
-                .unwrap_or_default(),
-            rcpt_fail_rate: config
-                .property_or_default::<Option<Rate>>("server.auto-ban.abuse.rate", "35/1d")
-                .unwrap_or_default(),
-            loiter_fail_rate: config
-                .property_or_default::<Option<Rate>>("server.auto-ban.loiter.rate", "150/1d")
-                .unwrap_or_default(),
-            http_banned_paths,
-            scanner_fail_rate: config
-                .property_or_default::<Option<Rate>>("server.auto-ban.scan.rate", "30/1d")
-                .unwrap_or_default(),
+            blocked_ip_expiration: security.auth_ban_period.map(|v| v.as_secs()),
+            auth_fail_rate: security.auth_ban_rate,
+            rcpt_fail_rate: security.abuse_ban_rate,
+            loiter_fail_rate: security.loiter_ban_rate,
+            http_banned_paths: security
+                .scan_ban_paths
+                .iter()
+                .map(|pattern| MatchType::Matches(GlobPattern::compile(pattern, true)))
+                .collect(),
+            scanner_fail_rate: security.scan_ban_rate,
         }
     }
 }
@@ -152,7 +134,10 @@ impl Server {
                         .is_none());
 
             if !is_allowed {
-                return self.block_ip(ip).await.map(|_| true);
+                return self
+                    .block_ip(ip, BlockReason::RcptToFailure)
+                    .await
+                    .map(|_| true);
             }
         }
 
@@ -169,7 +154,10 @@ impl Server {
                     .is_none();
 
             if !is_allowed {
-                return self.block_ip(ip).await.map(|_| true);
+                return self
+                    .block_ip(ip, BlockReason::PortScanning)
+                    .await
+                    .map(|_| true);
             }
         }
 
@@ -180,7 +168,9 @@ impl Server {
         let paths = &self.core.network.security.http_banned_paths;
 
         if !paths.is_empty() && paths.iter().any(|p| p.matches(path)) && !self.is_ip_allowed(&ip) {
-            self.block_ip(ip).await.map(|_| true)
+            self.block_ip(ip, BlockReason::PortScanning)
+                .await
+                .map(|_| true)
         } else {
             Ok(false)
         }
@@ -196,7 +186,10 @@ impl Server {
                     .is_none();
 
             if !is_allowed {
-                return self.block_ip(ip).await.map(|_| true);
+                return self
+                    .block_ip(ip, BlockReason::Loitering)
+                    .await
+                    .map(|_| true);
             }
         }
 
@@ -219,29 +212,41 @@ impl Server {
                             .await?
                             .is_none()));
             if !is_allowed {
-                return self.block_ip(ip).await.map(|_| true);
+                return self
+                    .block_ip(ip, BlockReason::AuthFailure)
+                    .await
+                    .map(|_| true);
             }
         }
 
         Ok(false)
     }
 
-    pub async fn block_ip(&self, ip: IpAddr) -> trc::Result<()> {
+    pub async fn block_ip(&self, ip: IpAddr, reason: BlockReason) -> trc::Result<()> {
         // Add IP to blocked list
-        self.inner.data.blocked_ips.write().insert(ip);
+        self.inner
+            .data
+            .blocked_ips
+            .write()
+            .blocked_ip_addresses
+            .insert(ip);
 
         // Write blocked IP to config
-        self.core
-            .storage
-            .config
-            .set(
-                [ConfigKey {
-                    key: format!("{}.{}", BLOCKED_IP_KEY, ip),
-                    value: String::new(),
-                }],
-                true,
-            )
-            .await?;
+        let now = now() as i64;
+        self.registry()
+            .insert(&BlockedIp {
+                address: IpAddrOrMask::from_ip(ip),
+                created_at: UTCDateTime::from_timestamp(now),
+                expires_at: self
+                    .core
+                    .network
+                    .security
+                    .blocked_ip_expiration
+                    .map(|v| UTCDateTime::from_timestamp(now + v as i64)),
+                reason,
+            })
+            .await
+            .caused_by(trc::location!())?;
 
         // Increment version
         self.cluster_broadcast(BroadcastEvent::ReloadBlockedIps)
@@ -255,15 +260,14 @@ impl Server {
     }
 
     pub fn is_ip_blocked(&self, ip: &IpAddr) -> bool {
-        self.inner.data.blocked_ips.read().contains(ip)
-            || (self.core.network.security.has_blocked_networks
-                && self
-                    .core
-                    .network
-                    .security
+        let blocked_ips = self.inner.data.blocked_ips.read();
+        (blocked_ips.blocked_ip_addresses.contains(ip)
+            || (blocked_ips.has_blocked_networks
+                && blocked_ips
                     .blocked_ip_networks
                     .iter()
-                    .any(|network| network.matches(ip)))
+                    .any(|network| network.matches(ip))))
+            && !self.is_ip_allowed(ip)
     }
 
     pub fn is_ip_allowed(&self, ip: &IpAddr) -> bool {
@@ -280,31 +284,45 @@ impl Server {
 }
 
 impl BlockedIps {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
-        let mut blocked_ip_addresses = AHashSet::new();
-        let mut blocked_ip_networks = Vec::new();
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let mut ips = Self::default();
+        let mut expired_blocks = Vec::new();
+        let now = now() as i64;
 
-        for ip in config
-            .set_values(BLOCKED_IP_KEY)
-            .map(IpAddrOrMask::parse_value)
-            .collect::<Vec<_>>()
-        {
-            match ip {
-                Ok(IpAddrOrMask::Ip(ip)) => {
-                    blocked_ip_addresses.insert(ip);
+        for ip in bp.list_infallible::<BlockedIp>().await {
+            let id = ip.id;
+            let ip = ip.object;
+
+            if ip.expires_at.is_none_or(|ip| ip.timestamp() > now) {
+                if let Some(ip) = ip.address.try_to_ip() {
+                    ips.blocked_ip_addresses.insert(ip);
+                } else {
+                    ips.blocked_ip_networks.push(ip.address);
                 }
-                Ok(IpAddrOrMask::Mask(ip)) => {
-                    blocked_ip_networks.push(ip);
-                }
-                Err(err) => {
-                    config.new_parse_error(BLOCKED_IP_KEY, err);
-                }
+            } else {
+                expired_blocks.push((id, ip.address));
             }
         }
 
-        Self {
-            blocked_ip_addresses,
-            blocked_ip_networks,
+        if !expired_blocks.is_empty() {
+            for (id, _) in &expired_blocks {
+                if let Err(err) = bp.registry.delete(*id).await {
+                    trc::error!(
+                        err.details("Failed to delete expired blocked IP from registry.")
+                            .caused_by(trc::location!())
+                    );
+                }
+            }
+            trc::event!(
+                Security(trc::SecurityEvent::IpBlockExpired),
+                Details = expired_blocks
+                    .into_iter()
+                    .map(|(_, ip)| trc::Value::from(ip.into_inner().0))
+                    .collect::<Vec<_>>()
+            );
         }
+
+        ips.has_blocked_networks = !ips.blocked_ip_networks.is_empty();
+        ips
     }
 }

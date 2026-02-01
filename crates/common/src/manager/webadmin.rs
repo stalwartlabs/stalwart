@@ -141,7 +141,8 @@ impl WebAdminManager {
     }
 
     pub async fn update(&self, core: &Core) -> trc::Result<()> {
-        let bytes = core
+        todo!()
+        /*  let bytes = core
             .storage
             .config
             .fetch_resource("webadmin")
@@ -152,7 +153,7 @@ impl WebAdminManager {
                     .reason(err)
                     .details("Failed to download webadmin")
             })?;
-        core.storage.blob.put_blob(WEBADMIN_KEY, &bytes).await
+        core.storage.blob.put_blob(WEBADMIN_KEY, &bytes).await*/
     }
 
     pub async fn update_and_unpack(&self, core: &Core) -> trc::Result<()> {

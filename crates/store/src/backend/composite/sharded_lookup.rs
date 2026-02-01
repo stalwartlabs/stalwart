@@ -8,49 +8,51 @@
  *
  */
 
-use utils::config::{Config, utils::AsKey};
+#[cfg(feature = "redis")]
+use registry::schema::structs::InMemoryStoreBase;
+use registry::schema::structs::ShardedInMemoryStore;
 
 use crate::{
-    Deserialize, InMemoryStore, Stores, Value,
+    Deserialize, InMemoryStore, Value,
     dispatch::lookup::{KeyValue, LookupKey},
 };
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ShardedInMemory {
     pub stores: Vec<InMemoryStore>,
 }
 
+#[allow(unreachable_patterns)]
 impl ShardedInMemory {
-    pub fn open(config: &mut Config, prefix: impl AsKey, stores: &Stores) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let store_ids = config
-            .values((&prefix, "stores"))
-            .map(|(_, v)| v.to_string())
-            .collect::<Vec<_>>();
+    pub async fn open(config: ShardedInMemoryStore) -> Result<InMemoryStore, String> {
+        if config.stores.len() >= 2 {
+            let mut stores = Vec::new();
 
-        let mut in_memory_stores = Vec::with_capacity(store_ids.len());
-        for store_id in store_ids {
-            if let Some(store) = stores
-                .in_memory_stores
-                .get(&store_id)
-                .filter(|store| store.is_redis())
-            {
-                in_memory_stores.push(store.clone());
-            } else {
-                config.new_build_error(
-                    (&prefix, "stores"),
-                    format!("In-memory store {store_id} not found"),
-                );
-                return None;
+            for store in config.stores {
+                let result = match store {
+                    #[cfg(feature = "redis")]
+                    InMemoryStoreBase::Redis(redis_store) => {
+                        crate::backend::redis::RedisStore::open_single(redis_store).await
+                    }
+                    #[cfg(feature = "redis")]
+                    InMemoryStoreBase::RedisCluster(redis_cluster_store) => {
+                        crate::backend::redis::RedisStore::open_cluster(redis_cluster_store).await
+                    }
+                    _ => Err(
+                        "Binary was not compiled with the selected in-memory backend".to_string(),
+                    ),
+                };
+
+                stores.push(result?);
             }
-        }
-        if !in_memory_stores.is_empty() {
-            Some(Self {
-                stores: in_memory_stores,
-            })
+
+            Ok(InMemoryStore::Sharded(Arc::new(ShardedInMemory { stores })))
         } else {
-            config.new_build_error((&prefix, "stores"), "No in-memory stores specified");
-            None
+            Err(
+                "At least two in-memory stores are required for sharded in-memory store"
+                    .to_string(),
+            )
         }
     }
 
@@ -173,5 +175,9 @@ impl ShardedInMemory {
             }
         })
         .await
+    }
+
+    pub fn into_single(self) -> InMemoryStore {
+        self.stores.into_iter().next().unwrap()
     }
 }

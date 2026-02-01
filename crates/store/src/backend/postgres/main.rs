@@ -13,86 +13,74 @@ use crate::{
     },
     *,
 };
+use ::registry::schema::structs;
 use deadpool::managed::Object;
 use deadpool_postgres::{Config, Manager, ManagerConfig, PoolConfig, RecyclingMethod, Runtime};
-use nlp::language::Language;
-use std::time::Duration;
 use tokio_postgres::NoTls;
-use utils::{config::utils::AsKey, rustls_client_config};
+use utils::rustls_client_config;
 
 impl PostgresStore {
-    pub async fn open(
-        config: &mut utils::config::Config,
-        prefix: impl AsKey,
-        create_store_tables: bool,
-        create_search_tables: bool,
-    ) -> Option<Self> {
-        let prefix = prefix.as_key();
+    pub async fn open(config: structs::PostgreSqlStore) -> Result<Store, String> {
         let mut cfg = Config::new();
-        cfg.dbname = config
-            .value_require((&prefix, "database"))?
-            .to_string()
-            .into();
-        cfg.host = config.value((&prefix, "host")).map(|s| s.to_string());
-        cfg.user = config.value((&prefix, "user")).map(|s| s.to_string());
-        cfg.password = config.value((&prefix, "password")).map(|s| s.to_string());
-        cfg.port = config.property((&prefix, "port"));
-        cfg.connect_timeout = config
-            .property::<Option<Duration>>((&prefix, "timeout"))
-            .unwrap_or_default();
-        cfg.options = config.value((&prefix, "options")).map(|s| s.to_string());
+        cfg.dbname = config.database.into();
+        cfg.host = config.host.into();
+        cfg.user = config.auth_username;
+        cfg.password = config.auth_secret;
+        cfg.port = (config.port as u16).into();
+        cfg.connect_timeout = config.timeout.map(|t| t.into_inner());
+        cfg.options = config.options;
         cfg.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         });
-        if let Some(max_conn) = config.property::<usize>((&prefix, "pool.max-connections")) {
-            cfg.pool = PoolConfig::new(max_conn).into();
+        if let Some(max_conn) = config.pool_max_connections {
+            cfg.pool = PoolConfig::new(max_conn as usize).into();
         }
-        let mut db = Self {
-            conn_pool: if config
-                .property_or_default::<bool>((&prefix, "tls.enable"), "false")
-                .unwrap_or_default()
-            {
+        let todo = "implement disabled languages properly";
+
+        let mut replicas = vec![];
+        for replica in config.read_replicas {
+            let mut cfg = cfg.clone();
+            cfg.dbname = replica.database.into();
+            cfg.host = replica.host.into();
+            cfg.user = replica.auth_username;
+            cfg.password = replica.auth_secret;
+            cfg.port = (replica.port as u16).into();
+            cfg.options = replica.options;
+            replicas.push(Store::PostgreSQL(Arc::new(PostgresStore {
+                conn_pool: if config.enable_tls {
+                    cfg.create_pool(
+                        Some(Runtime::Tokio1),
+                        MakeRustlsConnect::new(rustls_client_config(config.allow_invalid_certs)),
+                    )
+                } else {
+                    cfg.create_pool(Some(Runtime::Tokio1), NoTls)
+                }
+                .map_err(|e| format!("Failed to create connection pool: {e}"))?,
+            })));
+        }
+
+        let primary = Store::PostgreSQL(Arc::new(PostgresStore {
+            conn_pool: if config.enable_tls {
                 cfg.create_pool(
                     Some(Runtime::Tokio1),
-                    MakeRustlsConnect::new(rustls_client_config(
-                        config
-                            .property_or_default((&prefix, "tls.allow-invalid-certs"), "false")
-                            .unwrap_or_default(),
-                    )),
+                    MakeRustlsConnect::new(rustls_client_config(config.allow_invalid_certs)),
                 )
             } else {
                 cfg.create_pool(Some(Runtime::Tokio1), NoTls)
             }
-            .map_err(|e| {
-                config.new_build_error(
-                    prefix.as_str(),
-                    format!("Failed to create connection pool: {e}"),
-                )
-            })
-            .ok()?,
-            languages: config
-                .properties::<Language>((&prefix, "languages"))
-                .into_iter()
-                .map(|(_, v)| v)
-                .collect(),
-        };
+            .map_err(|e| format!("Failed to create connection pool: {e}"))?,
+        }));
 
-        if db.languages.is_empty() {
-            db.languages.insert(Language::English);
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if !replicas.is_empty() {
+            return backend::composite::read_replica::SQLReadReplica::open(primary, replicas);
         }
+        // SPDX-SnippetEnd
 
-        if create_store_tables && let Err(err) = db.create_storage_tables().await {
-            config.new_build_error(prefix.as_str(), format!("Failed to create tables: {err}"));
-        }
-
-        if create_search_tables && let Err(err) = db.create_search_tables().await {
-            config.new_build_warning(
-                prefix.as_str(),
-                format!("Failed to create search tables: {err}"),
-            );
-        }
-
-        Some(db)
+        Ok(primary)
     }
 
     pub(crate) async fn create_storage_tables(&self) -> trc::Result<()> {

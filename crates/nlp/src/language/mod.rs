@@ -133,7 +133,7 @@ impl Language {
 
     pub fn from_iso_639(code: &str) -> Option<Self> {
         hashify::map!(
-            code.split_once('-').map(|c| c.0).unwrap_or(code).as_bytes(),
+            code.split_once(['-', '_']).map(|c| c.0).unwrap_or(code).as_bytes(),
             Language,
             "en" => Language::English,
             "es" => Language::Spanish,

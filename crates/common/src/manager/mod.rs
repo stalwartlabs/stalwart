@@ -11,7 +11,6 @@ use utils::HttpLimitResponse;
 
 pub mod backup;
 pub mod boot;
-pub mod bootstrap;
 pub mod console;
 pub mod reload;
 pub mod restore;
@@ -34,42 +33,6 @@ const DEFAULT_WEBADMIN_URL: &str =
 #[cfg(not(feature = "enterprise"))]
 const DEFAULT_WEBADMIN_URL: &str =
     "https://github.com/stalwartlabs/webadmin/releases/latest/download/webadmin-oss.zip";
-
-impl ConfigManager {
-    pub async fn fetch_resource(&self, resource_id: &str) -> Result<Vec<u8>, String> {
-        if let Some(url) = self
-            .get(&format!("{resource_id}.resource"))
-            .await
-            .map_err(|err| {
-                format!("Failed to fetch configuration key '{resource_id}.resource': {err}",)
-            })?
-        {
-            fetch_resource(&url, None, Duration::from_secs(60), MAX_SIZE).await
-        } else {
-            match resource_id {
-                "spam-filter" => {
-                    fetch_resource(
-                        DEFAULT_SPAMFILTER_URL,
-                        None,
-                        Duration::from_secs(60),
-                        MAX_SIZE,
-                    )
-                    .await
-                }
-                "webadmin" => {
-                    fetch_resource(
-                        DEFAULT_WEBADMIN_URL,
-                        None,
-                        Duration::from_secs(60),
-                        MAX_SIZE,
-                    )
-                    .await
-                }
-                _ => Err(format!("Unknown resource: {resource_id}")),
-            }
-        }
-    }
-}
 
 const MAX_SIZE: usize = 100 * 1024 * 1024;
 

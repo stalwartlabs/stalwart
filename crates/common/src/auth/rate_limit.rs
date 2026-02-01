@@ -20,7 +20,7 @@ impl Server {
         &self,
         access_token: &AccessToken,
     ) -> trc::Result<Option<InFlight>> {
-        let is_rate_allowed = if let Some(rate) = &self.core.jmap.rate_authenticated {
+        let is_rate_allowed = if let Some(rate) = &self.core.network.http.rate_authenticated {
             self.core
                 .storage
                 .lookup
@@ -57,7 +57,7 @@ impl Server {
     }
 
     pub async fn is_http_anonymous_request_allowed(&self, addr: &IpAddr) -> trc::Result<()> {
-        if let Some(rate) = &self.core.jmap.rate_anonymous
+        if let Some(rate) = &self.core.network.http.rate_anonymous
             && !self.is_ip_allowed(addr)
             && self
                 .core

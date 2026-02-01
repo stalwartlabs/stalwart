@@ -22,7 +22,6 @@ use registry::{
     types::ObjectType,
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
-use std::sync::Arc;
 use utils::config::utils::ParseValue;
 
 #[derive(Clone)]
@@ -32,12 +31,6 @@ pub struct MailAuthConfig {
     pub spf: SpfAuthConfig,
     pub dmarc: DmarcAuthConfig,
     pub iprev: IpRevAuthConfig,
-}
-
-#[derive(Clone)]
-pub struct ResolvedSignature {
-    pub signer: Arc<DkimSigner>,
-    pub sealer: Arc<ArcSealer>,
 }
 
 #[derive(Clone)]

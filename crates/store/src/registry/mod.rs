@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+pub mod bootstrap;
+
 use registry::types::{ObjectType, id::Id};
 
 pub struct RegistryObject<T: ObjectType> {

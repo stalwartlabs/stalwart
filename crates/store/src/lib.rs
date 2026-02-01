@@ -5,13 +5,14 @@
  */
 
 pub mod backend;
-pub mod config;
+pub mod bootstrap;
 pub mod dispatch;
 pub mod query;
 pub mod registry;
 pub mod search;
 pub mod write;
 
+use ::registry::schema::enums::CompressionAlgo;
 pub use ahash;
 pub use blake3;
 pub use parking_lot;
@@ -125,12 +126,8 @@ pub struct IterateParams<T: Key> {
 }
 
 #[derive(Clone, Default)]
-pub struct Stores {
-    pub stores: AHashMap<String, Store>,
-    pub blob_stores: AHashMap<String, BlobStore>,
-    pub search_stores: AHashMap<String, SearchStore>,
-    pub in_memory_stores: AHashMap<String, InMemoryStore>,
-    pub purge_schedules: Vec<PurgeSchedule>,
+pub struct LookupStores {
+    pub stores: AHashMap<String, InMemoryStore>,
 }
 
 #[derive(Clone, Default)]
@@ -156,19 +153,7 @@ pub enum Store {
 }
 
 #[derive(Clone)]
-pub struct BlobStore {
-    pub backend: BlobBackend,
-    pub compression: CompressionAlgo,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum CompressionAlgo {
-    None,
-    Lz4,
-}
-
-#[derive(Clone)]
-pub enum BlobBackend {
+pub enum BlobStore {
     Store(Store),
     Fs(Arc<FsStore>),
     #[cfg(feature = "s3")]
@@ -246,35 +231,6 @@ impl From<backend::rocksdb::RocksDbStore> for Store {
     }
 }
 
-impl From<FsStore> for BlobStore {
-    fn from(store: FsStore) -> Self {
-        BlobStore {
-            backend: BlobBackend::Fs(Arc::new(store)),
-            compression: CompressionAlgo::None,
-        }
-    }
-}
-
-#[cfg(feature = "s3")]
-impl From<backend::s3::S3Store> for BlobStore {
-    fn from(store: backend::s3::S3Store) -> Self {
-        BlobStore {
-            backend: BlobBackend::S3(Arc::new(store)),
-            compression: CompressionAlgo::None,
-        }
-    }
-}
-
-#[cfg(feature = "azure")]
-impl From<backend::azure::AzureStore> for BlobStore {
-    fn from(store: backend::azure::AzureStore) -> Self {
-        BlobStore {
-            backend: BlobBackend::Azure(Arc::new(store)),
-            compression: CompressionAlgo::None,
-        }
-    }
-}
-
 impl From<ElasticSearchStore> for SearchStore {
     fn from(store: ElasticSearchStore) -> Self {
         Self::ElasticSearch(Arc::new(store))
@@ -300,27 +256,9 @@ impl From<Store> for SearchStore {
     }
 }
 
-impl From<Store> for BlobStore {
-    fn from(store: Store) -> Self {
-        BlobStore {
-            backend: BlobBackend::Store(store),
-            compression: CompressionAlgo::None,
-        }
-    }
-}
-
 impl From<Store> for InMemoryStore {
     fn from(store: Store) -> Self {
         Self::Store(store)
-    }
-}
-
-impl Default for BlobStore {
-    fn default() -> Self {
-        Self {
-            backend: BlobBackend::Store(Store::None),
-            compression: CompressionAlgo::None,
-        }
     }
 }
 
@@ -782,22 +720,5 @@ impl From<Value<'_>> for trc::Value {
 impl From<Value<'static>> for () {
     fn from(_: Value<'static>) -> Self {
         unreachable!()
-    }
-}
-
-impl Stores {
-    pub fn disable_enterprise_only(&mut self) {
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
-        {
-            #[cfg(any(feature = "postgres", feature = "mysql"))]
-            self.stores
-                .retain(|_, store| !matches!(store, Store::SQLReadReplica(_)));
-            self.blob_stores
-                .retain(|_, store| !matches!(store.backend, BlobBackend::Sharded(_)));
-        }
-        // SPDX-SnippetEnd
     }
 }

@@ -27,6 +27,7 @@ use rustls::{
 use rustls_pki_types::TrustAnchor;
 use std::sync::Arc;
 
+pub use reqwest::Client;
 pub use reqwest::header::HeaderMap;
 
 pub trait HttpLimitResponse: Sync + Send {

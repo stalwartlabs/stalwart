@@ -10,6 +10,7 @@ use common::{
 };
 use compact_str::{ToCompactString, format_compact};
 use hyper::StatusCode;
+use registry::schema::enums::ExpressionVariable;
 
 use crate::{HttpContext, HttpRequest, HttpSessionData};
 
@@ -21,7 +22,7 @@ impl<'x> HttpContext<'x> {
     pub async fn resolve_response_url(&self, server: &Server) -> String {
         server
             .eval_if(
-                &server.core.network.http_response_url,
+                &server.core.network.http.response_url,
                 self,
                 self.session.session_id,
             )
@@ -39,7 +40,7 @@ impl<'x> HttpContext<'x> {
     pub async fn has_endpoint_access(&self, server: &Server) -> StatusCode {
         server
             .eval_if(
-                &server.core.network.http_allowed_endpoint,
+                &server.core.network.http.allowed_endpoint,
                 self,
                 self.session.session_id,
             )

@@ -44,7 +44,7 @@ impl Server {
         let mut role_permissions = RolePermissions::default();
 
         // Extract data
-        let mut object_quota = self.core.jmap.max_objects;
+        let mut object_quota = self.core.email.max_objects;
         let mut description = None;
         let mut tenant_id = None;
         let mut quota = None;
@@ -235,7 +235,7 @@ impl Server {
             Err(err) => Err(err),
         };
 
-        match &self.core.jmap.fallback_admin {
+        match &self.core.network.security.fallback_admin {
             Some((_, secret)) if account_id == u32::MAX => {
                 self.build_access_token_from_principal(Principal::fallback_admin(secret), revision)
                     .await

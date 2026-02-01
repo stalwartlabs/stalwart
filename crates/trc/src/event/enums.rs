@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 593;
+pub const TOTAL_EVENT_COUNT: usize = 595;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
@@ -628,6 +628,8 @@ pub enum SecurityEvent {
     ScanBan = 558,
     LoiterBan = 550,
     IpBlocked = 318,
+    IpBlockExpired = 593,
+    IpAllowExpired = 594,
     Unauthorized = 552,
 }
 

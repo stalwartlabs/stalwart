@@ -93,7 +93,6 @@ pub struct WebhookTracer {
     pub discard_after: Duration,
     pub tls_allow_invalid_certs: bool,
     pub headers: HeaderMap,
-    pub properties: HashSet<trc::Key>,
 }
 
 // SPDX-SnippetBegin
@@ -491,7 +490,6 @@ impl Tracers {
                     key: hook.signature_key.unwrap_or_default(),
                     throttle: hook.throttle.into_inner(),
                     discard_after: hook.discard_after.into_inner(),
-                    properties: Default::default(),
                 }),
             };
 

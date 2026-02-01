@@ -11,9 +11,7 @@ use crate::{
     },
     write::SearchIndex,
 };
-use ahash::AHashSet;
 use deadpool_postgres::Pool;
-use nlp::language::Language;
 
 pub mod blob;
 pub mod lookup;
@@ -25,7 +23,6 @@ pub mod write;
 
 pub struct PostgresStore {
     pub(crate) conn_pool: Pool,
-    pub(crate) languages: AHashSet<Language>,
 }
 
 #[inline(always)]

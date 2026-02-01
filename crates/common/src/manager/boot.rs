@@ -175,7 +175,8 @@ pub const DEFAULT_SETTINGS: &[(&str, &str)] = &[
 
 impl BootManager {
     pub async fn init() -> Self {
-        let mut config_path = std::env::var("CONFIG_PATH").ok();
+        todo!()
+        /*let mut config_path = std::env::var("CONFIG_PATH").ok();
         let mut import_export = StoreOp::None;
 
         if config_path.is_none() {
@@ -253,7 +254,7 @@ impl BootManager {
         config.resolve_macros(&["env"]).await;
 
         // Parser servers
-        let mut servers = Listeners::parse(&mut config);
+        let mut servers = Listeners::parse(&mut config).await;
 
         // Bind ports and drop privileges
         servers.bind_and_drop_priv(&mut config);
@@ -318,7 +319,7 @@ impl BootManager {
         }
 
         // Parse telemetry
-        let telemetry = Telemetry::parse(&mut config, &stores);
+        let telemetry = Telemetry::parse(&mut config);
 
         match import_export {
             StoreOp::None => {
@@ -541,7 +542,7 @@ impl BootManager {
                 .await;
                 std::process::exit(0);
             }
-        }
+        }*/
     }
 }
 

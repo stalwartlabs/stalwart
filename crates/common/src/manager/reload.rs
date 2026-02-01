@@ -7,7 +7,7 @@
 use crate::{
     Core, Server,
     config::{server::Listeners, telemetry::Telemetry},
-    listener::blocked::{BLOCKED_IP_KEY, BlockedIps},
+    listener::blocked::BlockedIps,
 };
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
@@ -22,7 +22,8 @@ pub struct ReloadResult {
 
 impl Server {
     pub async fn reload_blocked_ips(&self) -> trc::Result<ReloadResult> {
-        let mut config = self
+        todo!()
+        /*let mut config = self
             .core
             .storage
             .config
@@ -30,22 +31,24 @@ impl Server {
             .await?;
         *self.inner.data.blocked_ips.write() = BlockedIps::parse(&mut config).blocked_ip_addresses;
 
-        Ok(config.into())
+        Ok(config.into())*/
     }
 
     pub async fn reload_certificates(&self) -> trc::Result<ReloadResult> {
-        let mut config = self.core.storage.config.build_config("certificate").await?;
+        todo!()
+        /*let mut config = self.core.storage.config.build_config("certificate").await?;
         let mut certificates = self.inner.data.tls_certificates.load().as_ref().clone();
 
         parse_certificates(&mut config, &mut certificates, &mut Default::default());
 
         self.inner.data.tls_certificates.store(certificates.into());
 
-        Ok(config.into())
+        Ok(config.into())*/
     }
 
     pub async fn reload_lookups(&self) -> trc::Result<ReloadResult> {
-        let mut config = self.core.storage.config.build_config("lookup").await?;
+        todo!()
+        /*let mut config = self.core.storage.config.build_config("lookup").await?;
         let mut stores = Stores::default();
         stores.parse_static_stores(&mut config, true);
 
@@ -58,11 +61,12 @@ impl Server {
             config,
             new_core: core.into(),
             tracers: None,
-        })
+        })*/
     }
 
     pub async fn reload(&self) -> trc::Result<ReloadResult> {
-        let mut config = self.core.storage.config.build_config("").await?;
+        todo!()
+        /*let mut config = self.core.storage.config.build_config("").await?;
 
         // Load stores
         let mut stores = Stores {
@@ -129,7 +133,7 @@ impl Server {
             }
         } else {
             config.into()
-        })
+        })*/
     }
 }
 

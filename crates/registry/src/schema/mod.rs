@@ -7,14 +7,17 @@
 use crate::{
     schema::{
         enums::{TracingLevel, TracingLevelOpt},
-        prelude::{HttpAuth, NodeRange, Property},
+        prelude::{Duration, HttpAuth, NodeRange, Property},
     },
     types::EnumType,
 };
 use std::{collections::HashMap, fmt::Display};
 use utils::{
-    HeaderMap,
-    config::{cron::SimpleCron, http::build_http_headers},
+    Client, HeaderMap,
+    config::{
+        cron::SimpleCron,
+        http::{build_http_client, build_http_headers},
+    },
 };
 
 #[allow(clippy::derivable_impls)]
@@ -76,6 +79,44 @@ impl HttpAuth {
                 None,
                 auth.bearer_token.as_str().into(),
                 content_type,
+            ),
+        }
+    }
+
+    pub fn build_http_client(
+        &self,
+        extra_headers: HashMap<String, String>,
+        content_type: Option<&str>,
+        timeout: Duration,
+        allow_invalid_certs: bool,
+    ) -> Result<Client, String> {
+        match self {
+            HttpAuth::Unauthenticated => build_http_client(
+                extra_headers,
+                None,
+                None,
+                None,
+                content_type,
+                timeout.into_inner(),
+                allow_invalid_certs,
+            ),
+            HttpAuth::Basic(auth) => build_http_client(
+                extra_headers,
+                auth.username.as_str().into(),
+                auth.secret.as_str().into(),
+                None,
+                content_type,
+                timeout.into_inner(),
+                allow_invalid_certs,
+            ),
+            HttpAuth::Bearer(auth) => build_http_client(
+                extra_headers,
+                None,
+                None,
+                auth.bearer_token.as_str().into(),
+                content_type,
+                timeout.into_inner(),
+                allow_invalid_certs,
             ),
         }
     }

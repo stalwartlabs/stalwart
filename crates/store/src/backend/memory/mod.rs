@@ -4,96 +4,60 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::collections::hash_map::Entry;
-
+use crate::{InMemoryStore, LookupStores, Value, registry::bootstrap::Bootstrap};
 use ahash::AHashMap;
-use utils::{config::Config, glob::GlobMap};
+use registry::schema::structs;
+use utils::glob::{GlobMap, GlobSet};
 
-use crate::{InMemoryStore, Stores, Value};
+#[derive(Debug)]
+pub enum StaticMemoryStore {
+    Map(GlobMap<Value<'static>>),
+    Set(GlobSet),
+}
 
-pub type StaticMemoryStore = GlobMap<Value<'static>>;
-
-impl Stores {
-    pub fn parse_static_stores(&mut self, config: &mut Config, is_reload: bool) {
+impl LookupStores {
+    pub async fn parse_static(&mut self, bp: &mut Bootstrap) {
         let mut lookups = AHashMap::new();
-        let mut errors = Vec::new();
 
-        for (key, value) in config.iterate_prefix("lookup") {
-            if let Some((id, key)) = key
-                .split_once('.')
-                .filter(|(id, key)| !id.is_empty() && !key.is_empty())
+        for lookup in bp.list_infallible::<structs::MemoryLookupKeyValue>().await {
+            if let StaticMemoryStore::Map(map) = lookups
+                .entry(lookup.object.namespace)
+                .or_insert_with(|| StaticMemoryStore::Map(Default::default()))
             {
-                // Detect value type
-                let value = if !value.is_empty() {
-                    let mut has_integers = false;
-                    let mut has_floats = false;
-                    let mut has_others = false;
-
-                    for (pos, ch) in value.as_bytes().iter().enumerate() {
-                        match ch {
-                            b'.' if !has_floats && has_integers => {
-                                has_floats = true;
-                            }
-                            b'0'..=b'9' => {
-                                has_integers = true;
-                            }
-                            b'-' if pos == 0 && value.len() > 1 => {}
-                            _ => {
-                                has_others = true;
-                            }
-                        }
-                    }
-
-                    if has_others {
-                        if value == "true" {
-                            Value::Integer(1.into())
-                        } else if value == "false" {
-                            Value::Integer(0.into())
-                        } else {
-                            Value::Text(value.to_string().into())
-                        }
-                    } else if has_floats {
-                        value
-                            .parse()
-                            .map(Value::Float)
-                            .unwrap_or_else(|_| Value::Text(value.to_string().into()))
-                    } else {
-                        value
-                            .parse()
-                            .map(Value::Integer)
-                            .unwrap_or_else(|_| Value::Text(value.to_string().into()))
-                    }
+                if lookup.object.is_glob_pattern {
+                    map.insert_pattern(&lookup.object.key, Value::from(lookup.object.value));
                 } else {
-                    Value::Text("".into())
-                };
-
-                // Add entry
-                lookups
-                    .entry(id.to_string())
-                    .or_insert_with(StaticMemoryStore::default)
-                    .insert(key, value);
+                    map.insert_entry(lookup.object.key, Value::from(lookup.object.value));
+                }
             } else {
-                errors.push(key.to_string());
+                bp.build_warning(
+                    lookup.id,
+                    "Memory lookup has mixed types (key-value and set)",
+                );
             }
         }
 
-        for error in errors {
-            config.new_parse_error(error, "Invalid lookup key format");
+        for lookup in bp.list_infallible::<structs::MemoryLookupKey>().await {
+            if let StaticMemoryStore::Set(set) = lookups
+                .entry(lookup.object.namespace)
+                .or_insert_with(|| StaticMemoryStore::Set(Default::default()))
+            {
+                if lookup.object.is_glob_pattern {
+                    set.insert_pattern(&lookup.object.key);
+                } else {
+                    set.insert_entry(lookup.object.key);
+                }
+            } else {
+                bp.build_warning(
+                    lookup.id,
+                    "Memory lookup has mixed types (key-value and set)",
+                );
+            }
         }
 
-        for (id, store) in lookups {
-            match self.in_memory_stores.entry(id) {
-                Entry::Vacant(entry) => {
-                    entry.insert(InMemoryStore::Static(store.into()));
-                }
-                Entry::Occupied(e) if !is_reload => {
-                    config.new_build_error(
-                        ("lookup", e.key().as_str()),
-                        "An in-memory store with this id already exists",
-                    );
-                }
-                _ => {}
-            }
+        for (namespace, store) in lookups {
+            self.stores
+                .insert(namespace, InMemoryStore::Static(store.into()));
         }
     }
 }

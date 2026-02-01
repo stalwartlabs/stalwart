@@ -15,7 +15,11 @@ impl RegistryStore {
         todo!()
     }
 
-    pub async fn put<T: ObjectType>(&self, id: Id, object: &T) -> trc::Result<RegistryObject<T>> {
+    pub async fn insert<T: ObjectType>(&self, object: &T) -> trc::Result<bool> {
+        todo!()
+    }
+
+    pub async fn update<T: ObjectType>(&self, id: Id, object: &T) -> trc::Result<bool> {
         todo!()
     }
 

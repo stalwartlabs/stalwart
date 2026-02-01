@@ -32,7 +32,7 @@ use utils::{
 };
 
 impl Data {
-    pub fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         // Parse certificates
         let mut certificates = AHashMap::new();
         let mut subject_names = AHashSet::new();
@@ -65,7 +65,7 @@ impl Data {
             })
             .ok()
             .map(Arc::new),
-            blocked_ips: RwLock::new(BlockedIps::parse(bp).blocked_ip_addresses),
+            blocked_ips: RwLock::new(BlockedIps::parse(bp).await),
             jmap_id_gen: id_generator.clone(),
             queue_id_gen: id_generator.clone(),
             span_id_gen: id_generator,

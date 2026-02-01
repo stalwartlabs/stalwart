@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use mysql_async::{
-    Conn, OptsBuilder, Pool, PoolConstraints, PoolOpts, SslOpts, prelude::Queryable,
-};
-use utils::config::{Config, utils::AsKey};
-
+use super::{MysqlStore, into_error};
 use crate::{
     backend::mysql::MysqlSearchField,
     search::{
@@ -19,88 +13,72 @@ use crate::{
     },
     *,
 };
-
-use super::{MysqlStore, into_error};
+use ::registry::schema::structs;
+use mysql_async::{
+    Conn, OptsBuilder, Pool, PoolConstraints, PoolOpts, SslOpts, prelude::Queryable,
+};
 
 impl MysqlStore {
-    pub async fn open(
-        config: &mut Config,
-        prefix: impl AsKey,
-        create_store_tables: bool,
-        create_search_tables: bool,
-    ) -> Option<Self> {
-        let prefix = prefix.as_key();
+    pub async fn open(config: structs::MySqlStore) -> Result<Store, String> {
         let mut opts = OptsBuilder::default()
-            .ip_or_hostname(config.value_require((&prefix, "host"))?.to_string())
-            .user(config.value((&prefix, "user")).map(|s| s.to_string()))
-            .pass(config.value((&prefix, "password")).map(|s| s.to_string()))
-            .db_name(
-                config
-                    .value_require((&prefix, "database"))?
-                    .to_string()
-                    .into(),
-            )
-            .max_allowed_packet(config.property((&prefix, "max-allowed-packet")))
-            .wait_timeout(
-                config
-                    .property::<Option<Duration>>((&prefix, "timeout"))
-                    .unwrap_or_default()
-                    .map(|t| t.as_secs() as usize),
-            )
-            .client_found_rows(true);
-        if let Some(port) = config.property((&prefix, "port")) {
-            opts = opts.tcp_port(port);
-        }
+            .ip_or_hostname(config.host)
+            .user(config.auth_username)
+            .pass(config.auth_secret)
+            .db_name(Some(config.database))
+            .max_allowed_packet(config.max_allowed_packet.map(|v| v as usize))
+            .wait_timeout(config.timeout.map(|t| t.as_secs() as usize))
+            .client_found_rows(true)
+            .tcp_port(config.port as u16);
 
-        if config
-            .property_or_default::<bool>((&prefix, "tls.enable"), "false")
-            .unwrap_or_default()
-        {
-            let allow_invalid = config
-                .property_or_default::<bool>((&prefix, "tls.allow-invalid-certs"), "false")
-                .unwrap_or_default();
+        if config.enable_tls {
             opts = opts.ssl_opts(Some(
                 SslOpts::default()
-                    .with_danger_accept_invalid_certs(allow_invalid)
-                    .with_danger_skip_domain_validation(allow_invalid),
+                    .with_danger_accept_invalid_certs(config.allow_invalid_certs)
+                    .with_danger_skip_domain_validation(config.allow_invalid_certs),
             ));
         }
 
         // Configure connection pool
         let mut pool_min = PoolConstraints::default().min();
         let mut pool_max = PoolConstraints::default().max();
-        if let Some(n_size) = config
-            .property::<usize>((&prefix, "pool.min-connections"))
-            .filter(|&n| n > 0)
-        {
-            pool_min = n_size;
+        if let Some(n_size) = config.pool_min_connections {
+            pool_min = n_size as usize;
         }
-        if let Some(n_size) = config
-            .property::<usize>((&prefix, "pool.max-connections"))
-            .filter(|&n| n > 0)
-        {
-            pool_max = n_size;
+        if let Some(n_size) = config.pool_max_connections {
+            pool_max = n_size as usize;
         }
         opts = opts.pool_opts(
             PoolOpts::default().with_constraints(PoolConstraints::new(pool_min, pool_max).unwrap()),
         );
 
-        let db = Self {
+        let mut replicas = vec![];
+        for replica in config.read_replicas {
+            replicas.push(Store::MySQL(Arc::new(MysqlStore {
+                conn_pool: Pool::new(
+                    opts.clone()
+                        .ip_or_hostname(replica.host)
+                        .user(replica.auth_username)
+                        .pass(replica.auth_secret)
+                        .db_name(Some(replica.database))
+                        .tcp_port(replica.port as u16),
+                ),
+            })))
+        }
+
+        let primary = Store::MySQL(Arc::new(MysqlStore {
             conn_pool: Pool::new(opts),
-        };
+        }));
 
-        if create_store_tables && let Err(err) = db.create_storage_tables().await {
-            config.new_build_error(prefix.as_str(), format!("Failed to create tables: {err}"));
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if !replicas.is_empty() {
+            return backend::composite::read_replica::SQLReadReplica::open(primary, replicas);
         }
+        // SPDX-SnippetEnd
 
-        if create_search_tables && let Err(err) = db.create_search_tables().await {
-            config.new_build_warning(
-                prefix.as_str(),
-                format!("Failed to create search tables: {err}"),
-            );
-        }
-
-        Some(db)
+        Ok(primary)
     }
 
     pub(crate) async fn create_storage_tables(&self) -> trc::Result<()> {

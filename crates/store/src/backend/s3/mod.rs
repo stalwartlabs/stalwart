@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::BlobStore;
+use registry::schema::structs;
 use s3::{Bucket, Region, creds::Credentials};
-use std::{fmt::Display, io::Write, ops::Range, time::Duration};
-use utils::{
-    codec::base32_custom::Base32Writer,
-    config::{Config, utils::AsKey},
-};
+use std::{fmt::Display, io::Write, ops::Range, sync::Arc, time::Duration};
+use utils::codec::base32_custom::Base32Writer;
 
 pub struct S3Store {
     bucket: Box<Bucket>,
@@ -18,65 +17,79 @@ pub struct S3Store {
 }
 
 impl S3Store {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
+    pub async fn open(config: structs::S3Store) -> Result<BlobStore, String> {
         // Obtain region and endpoint from config
-        let prefix = prefix.as_key();
-        let region = config.value_require((&prefix, "region"))?.to_string();
-        let region = if let Some(endpoint) = config.value((&prefix, "endpoint")) {
-            Region::Custom {
-                region: region.to_string(),
-                endpoint: endpoint.to_string(),
-            }
-        } else {
-            region.parse().unwrap()
+        let region = match config.region {
+            structs::S3StoreRegion::UsEast1 => Region::UsEast1,
+            structs::S3StoreRegion::UsEast2 => Region::UsEast2,
+            structs::S3StoreRegion::UsWest1 => Region::UsWest1,
+            structs::S3StoreRegion::UsWest2 => Region::UsWest2,
+            structs::S3StoreRegion::CaCentral1 => Region::CaCentral1,
+            structs::S3StoreRegion::AfSouth1 => Region::AfSouth1,
+            structs::S3StoreRegion::ApEast1 => Region::ApEast1,
+            structs::S3StoreRegion::ApSouth1 => Region::ApSouth1,
+            structs::S3StoreRegion::ApNortheast1 => Region::ApNortheast1,
+            structs::S3StoreRegion::ApNortheast2 => Region::ApNortheast2,
+            structs::S3StoreRegion::ApNortheast3 => Region::ApNortheast3,
+            structs::S3StoreRegion::ApSoutheast1 => Region::ApSoutheast1,
+            structs::S3StoreRegion::ApSoutheast2 => Region::ApSoutheast2,
+            structs::S3StoreRegion::CnNorth1 => Region::CnNorth1,
+            structs::S3StoreRegion::CnNorthwest1 => Region::CnNorthwest1,
+            structs::S3StoreRegion::EuNorth1 => Region::EuNorth1,
+            structs::S3StoreRegion::EuCentral1 => Region::EuCentral1,
+            structs::S3StoreRegion::EuCentral2 => Region::EuCentral2,
+            structs::S3StoreRegion::EuWest1 => Region::EuWest1,
+            structs::S3StoreRegion::EuWest2 => Region::EuWest2,
+            structs::S3StoreRegion::EuWest3 => Region::EuWest3,
+            structs::S3StoreRegion::IlCentral1 => Region::IlCentral1,
+            structs::S3StoreRegion::MeSouth1 => Region::MeSouth1,
+            structs::S3StoreRegion::SaEast1 => Region::SaEast1,
+            structs::S3StoreRegion::DoNyc3 => Region::DoNyc3,
+            structs::S3StoreRegion::DoAms3 => Region::DoAms3,
+            structs::S3StoreRegion::DoSgp1 => Region::DoSgp1,
+            structs::S3StoreRegion::DoFra1 => Region::DoFra1,
+            structs::S3StoreRegion::Yandex => Region::Yandex,
+            structs::S3StoreRegion::WaUsEast1 => Region::WaUsEast1,
+            structs::S3StoreRegion::WaUsEast2 => Region::WaUsEast2,
+            structs::S3StoreRegion::WaUsCentral1 => Region::WaUsCentral1,
+            structs::S3StoreRegion::WaUsWest1 => Region::WaUsWest1,
+            structs::S3StoreRegion::WaCaCentral1 => Region::WaCaCentral1,
+            structs::S3StoreRegion::WaEuCentral1 => Region::WaEuCentral1,
+            structs::S3StoreRegion::WaEuCentral2 => Region::WaEuCentral2,
+            structs::S3StoreRegion::WaEuWest1 => Region::WaEuWest1,
+            structs::S3StoreRegion::WaEuWest2 => Region::WaEuWest2,
+            structs::S3StoreRegion::WaApNortheast1 => Region::WaApNortheast1,
+            structs::S3StoreRegion::WaApNortheast2 => Region::WaApNortheast2,
+            structs::S3StoreRegion::WaApSoutheast1 => Region::WaApSoutheast1,
+            structs::S3StoreRegion::WaApSoutheast2 => Region::WaApSoutheast2,
+            structs::S3StoreRegion::Custom(custom) => Region::Custom {
+                region: custom.custom_region,
+                endpoint: custom.custom_endpoint,
+            },
         };
         let credentials = Credentials::new(
-            config.value((&prefix, "access-key")),
-            config.value((&prefix, "secret-key")),
-            config.value((&prefix, "security-token")),
-            config.value((&prefix, "session-token")),
-            config.value((&prefix, "profile")),
+            config.access_key.as_deref(),
+            config.secret_key.as_deref(),
+            config.security_token.as_deref(),
+            config.session_token.as_deref(),
+            config.profile.as_deref(),
         )
-        .map_err(|err| {
-            config.new_build_error(
-                prefix.as_str(),
-                format!("Failed to create credentials: {err:?}"),
-            )
-        })
-        .ok()?;
-        let timeout = config
-            .property_or_default::<Duration>((&prefix, "timeout"), "30s")
-            .unwrap_or_else(|| Duration::from_secs(30));
-        /*let allow_invalid = config
-        .property_or_default::<bool>((&prefix, "tls.allow-invalid"), "false")
-        .unwrap_or_default();*/
+        .map_err(|err| format!("Failed to create credentials: {err:?}"))?;
 
-        Some(S3Store {
-            bucket: Bucket::new(
-                config.value_require((&prefix, "bucket"))?,
-                region,
-                credentials,
-            )
-            .map_err(|err| {
-                config.new_build_error(prefix.as_str(), format!("Failed to create bucket: {err:?}"))
-            })
-            .ok()?
-            .with_path_style()
-            /*.set_dangereous_config(allow_invalid, allow_invalid)
-            .map_err(|err| {
-                config.new_build_error(prefix.as_str(), format!("Failed to create bucket: {err:?}"))
-            })
-            .ok()?*/
-            .with_request_timeout(timeout)
-            .map_err(|err| {
-                config.new_build_error(prefix.as_str(), format!("Failed to create bucket: {err:?}"))
-            })
-            .ok()?,
-            max_retries: config
-                .property_or_default((&prefix, "max-retries"), "3")
-                .unwrap_or(3),
-            prefix: config.value((&prefix, "key-prefix")).map(|s| s.to_string()),
-        })
+        Ok(BlobStore::S3(Arc::new(S3Store {
+            bucket: Bucket::new(&config.bucket, region, credentials)
+                .map_err(|err| format!("Failed to create bucket: {err:?}"))?
+                .with_path_style()
+                /*.set_dangereous_config(allow_invalid, allow_invalid)
+                .map_err(|err| {
+                    format!("Failed to create bucket: {err:?}")
+                })
+                ?*/
+                .with_request_timeout(config.timeout.into_inner())
+                .map_err(|err| format!("Failed to create bucket: {err:?}"))?,
+            max_retries: config.max_retries as u32,
+            prefix: config.key_prefix,
+        })))
     }
 
     pub(crate) async fn get_blob(

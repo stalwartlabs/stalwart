@@ -10,6 +10,7 @@ use crate::{
     auth::oauth::config::OAuthConfig,
     config::mailstore::{imap::ImapConfig, scripts::Scripting, spamfilter::SpamFilterConfig},
     expr::*,
+    manager::bootstrap::Bootstrap,
 };
 use arc_swap::ArcSwap;
 use coordinator::Coordinator;
@@ -31,12 +32,9 @@ pub mod storage;
 pub mod telemetry;
 
 impl Core {
-    pub async fn parse(
-        bp: &mut Bootstrap,
-        mut stores: Stores,
-        config_manager: ConfigManager,
-    ) -> Self {
-        let mut data = config
+    pub async fn parse(bp: &mut Bootstrap, mut stores: Stores) -> Self {
+        todo!()
+        /*let mut data = config
             .value_require("storage.data")
             .map(|id| id.to_string())
             .and_then(|id| {
@@ -197,7 +195,7 @@ impl Core {
                 blobs: stores.blob_stores,
                 ftss: stores.search_stores,
             },
-        }
+        }*/
     }
 
     pub fn into_shared(self) -> ArcSwap<Self> {

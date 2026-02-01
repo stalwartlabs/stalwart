@@ -410,6 +410,8 @@ impl EventType {
             b"security.scan-ban" => EventType::Security(SecurityEvent::ScanBan),
             b"security.loiter-ban" => EventType::Security(SecurityEvent::LoiterBan),
             b"security.ip-blocked" => EventType::Security(SecurityEvent::IpBlocked),
+            b"security.ip-block-expired" => EventType::Security(SecurityEvent::IpBlockExpired),
+            b"security.ip-allow-expired" => EventType::Security(SecurityEvent::IpAllowExpired),
             b"security.unauthorized" => EventType::Security(SecurityEvent::Unauthorized),
             b"server.startup" => EventType::Server(ServerEvent::Startup),
             b"server.shutdown" => EventType::Server(ServerEvent::Shutdown),
@@ -1111,6 +1113,8 @@ impl EventType {
             EventType::Security(SecurityEvent::ScanBan) => "security.scan-ban",
             EventType::Security(SecurityEvent::LoiterBan) => "security.loiter-ban",
             EventType::Security(SecurityEvent::IpBlocked) => "security.ip-blocked",
+            EventType::Security(SecurityEvent::IpBlockExpired) => "security.ip-block-expired",
+            EventType::Security(SecurityEvent::IpAllowExpired) => "security.ip-allow-expired",
             EventType::Security(SecurityEvent::Unauthorized) => "security.unauthorized",
             EventType::Server(ServerEvent::Startup) => "server.startup",
             EventType::Server(ServerEvent::Shutdown) => "server.shutdown",
@@ -1723,6 +1727,8 @@ impl EventType {
             EventType::Security(SecurityEvent::ScanBan) => 558,
             EventType::Security(SecurityEvent::LoiterBan) => 550,
             EventType::Security(SecurityEvent::IpBlocked) => 318,
+            EventType::Security(SecurityEvent::IpBlockExpired) => 593,
+            EventType::Security(SecurityEvent::IpAllowExpired) => 594,
             EventType::Security(SecurityEvent::Unauthorized) => 552,
             EventType::Server(ServerEvent::Startup) => 393,
             EventType::Server(ServerEvent::Shutdown) => 392,
@@ -2357,6 +2363,8 @@ impl EventType {
             558 => Some(EventType::Security(SecurityEvent::ScanBan)),
             550 => Some(EventType::Security(SecurityEvent::LoiterBan)),
             318 => Some(EventType::Security(SecurityEvent::IpBlocked)),
+            593 => Some(EventType::Security(SecurityEvent::IpBlockExpired)),
+            594 => Some(EventType::Security(SecurityEvent::IpAllowExpired)),
             552 => Some(EventType::Security(SecurityEvent::Unauthorized)),
             393 => Some(EventType::Server(ServerEvent::Startup)),
             392 => Some(EventType::Server(ServerEvent::Shutdown)),
@@ -2746,6 +2754,8 @@ impl EventType {
             EventType::Security(SecurityEvent::ScanBan) => Level::Info,
             EventType::Security(SecurityEvent::LoiterBan) => Level::Info,
             EventType::Security(SecurityEvent::IpBlocked) => Level::Info,
+            EventType::Security(SecurityEvent::IpBlockExpired) => Level::Info,
+            EventType::Security(SecurityEvent::IpAllowExpired) => Level::Info,
             EventType::Security(SecurityEvent::Unauthorized) => Level::Info,
             EventType::Server(ServerEvent::Startup) => Level::Info,
             EventType::Server(ServerEvent::Shutdown) => Level::Info,
@@ -3402,6 +3412,8 @@ impl EventType {
             EventType::Security(SecurityEvent::ScanBan) => "Banned due to scan",
             EventType::Security(SecurityEvent::LoiterBan) => "Banned due to loitering",
             EventType::Security(SecurityEvent::IpBlocked) => "Blocked IP address",
+            EventType::Security(SecurityEvent::IpBlockExpired) => "IP block expired",
+            EventType::Security(SecurityEvent::IpAllowExpired) => "IP allow expired",
             EventType::Security(SecurityEvent::Unauthorized) => "Unauthorized access",
             EventType::Server(ServerEvent::Startup) => "Starting Stalwart Server v0.15.4",
             EventType::Server(ServerEvent::Shutdown) => "Shutting down Stalwart Server v0.15.4",
@@ -4348,6 +4360,12 @@ impl EventType {
             EventType::Security(SecurityEvent::IpBlocked) => {
                 "Rejected connection from blocked IP address"
             }
+            EventType::Security(SecurityEvent::IpBlockExpired) => {
+                "A previously blocked IP address block has expired"
+            }
+            EventType::Security(SecurityEvent::IpAllowExpired) => {
+                "A previously allowed IP address allow has expired"
+            }
             EventType::Security(SecurityEvent::Unauthorized) => {
                 "Account does not have permission to access resource"
             }
@@ -4865,6 +4883,8 @@ impl EventType {
             EventType::Security(SecurityEvent::ScanBan) => "Insufficient permissions",
             EventType::Security(SecurityEvent::LoiterBan) => "Insufficient permissions",
             EventType::Security(SecurityEvent::IpBlocked) => "Insufficient permissions",
+            EventType::Security(SecurityEvent::IpBlockExpired) => "Insufficient permissions",
+            EventType::Security(SecurityEvent::IpAllowExpired) => "Insufficient permissions",
             EventType::Security(SecurityEvent::Unauthorized) => "Insufficient permissions",
             EventType::Smtp(SmtpEvent::ConnectionStart) => "SMTP error",
             EventType::Smtp(SmtpEvent::ConnectionEnd) => "SMTP error",
@@ -5388,6 +5408,8 @@ impl EventType {
             EventType::Security(SecurityEvent::ScanBan),
             EventType::Security(SecurityEvent::LoiterBan),
             EventType::Security(SecurityEvent::IpBlocked),
+            EventType::Security(SecurityEvent::IpBlockExpired),
+            EventType::Security(SecurityEvent::IpAllowExpired),
             EventType::Security(SecurityEvent::Unauthorized),
             EventType::Server(ServerEvent::Startup),
             EventType::Server(ServerEvent::Shutdown),

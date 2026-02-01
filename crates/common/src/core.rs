@@ -10,7 +10,7 @@ use crate::{
     config::{
         mailstore::spamfilter::SpamClassifier,
         smtp::{
-            auth::{ArcSealer, DkimSigner, LazySignature, ResolvedSignature, build_signature},
+            auth::{ArcSealer, DkimSigner},
             queue::{
                 ConnectionStrategy, DEFAULT_QUEUE_NAME, MxConfig, QueueExpiry, QueueName,
                 QueueStrategy, RequireOptional, RoutingStrategy, TlsStrategy, VirtualQueue,
@@ -130,7 +130,8 @@ impl Server {
     }
 
     pub fn get_arc_sealer(&self, name: &str, session_id: u64) -> Option<Arc<ArcSealer>> {
-        self.resolve_signature(name).map(|s| s.sealer).or_else(|| {
+        todo!()
+        /*self.resolve_signature(name).map(|s| s.sealer).or_else(|| {
             trc::event!(
                 Arc(trc::ArcEvent::SealerNotFound),
                 Id = name.to_string(),
@@ -138,11 +139,12 @@ impl Server {
             );
 
             None
-        })
+        })*/
     }
 
     pub fn get_dkim_signer(&self, name: &str, session_id: u64) -> Option<Arc<DkimSigner>> {
-        self.resolve_signature(name).map(|s| s.signer).or_else(|| {
+        todo!()
+        /*self.resolve_signature(name).map(|s| s.signer).or_else(|| {
             trc::event!(
                 Dkim(trc::DkimEvent::SignerNotFound),
                 Id = name.to_string(),
@@ -150,30 +152,7 @@ impl Server {
             );
 
             None
-        })
-    }
-
-    fn resolve_signature(&self, name: &str) -> Option<ResolvedSignature> {
-        let lazy_resolver_ = self.core.smtp.mail_auth.signatures.get(name)?;
-        match lazy_resolver_.load().as_ref() {
-            LazySignature::Resolved(resolved_signature) => Some(resolved_signature.clone()),
-            LazySignature::Pending(bp) => {
-                let mut config = config.clone();
-                if let Some((signer, sealer)) = build_signature(&mut config, name) {
-                    let resolved = ResolvedSignature {
-                        signer: Arc::new(signer),
-                        sealer: Arc::new(sealer),
-                    };
-                    lazy_resolver_.store(Arc::new(LazySignature::Resolved(resolved.clone())));
-                    Some(resolved)
-                } else {
-                    config.log_errors();
-                    lazy_resolver_.store(Arc::new(LazySignature::Failed));
-                    None
-                }
-            }
-            LazySignature::Failed => None,
-        }
+        })*/
     }
 
     pub fn get_trusted_sieve_script(&self, name: &str, session_id: u64) -> Option<&Arc<Sieve>> {
@@ -895,6 +874,7 @@ impl Server {
     }
 
     pub async fn cluster_broadcast(&self, event: BroadcastEvent) {
+        let todo = "refactor event names";
         if let Some(broadcast_tx) = &self.inner.ipc.broadcast_tx.clone()
             && broadcast_tx.send(event).await.is_err()
         {

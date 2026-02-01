@@ -14,6 +14,7 @@ use crate::{
         spamfilter::{IpResolver, SpamClassifier, SpamFilterConfig},
     },
     ipc::TrainTaskController,
+    listener::blocked::BlockedIps,
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
@@ -143,7 +144,7 @@ pub struct Data {
     pub tls_certificates: ArcSwap<AHashMap<String, Arc<CertifiedKey>>>,
     pub tls_self_signed_cert: Option<Arc<CertifiedKey>>,
 
-    pub blocked_ips: RwLock<AHashSet<IpAddr>>,
+    pub blocked_ips: RwLock<BlockedIps>,
 
     pub asn_geo_data: AsnGeoLookupData,
 
@@ -448,70 +449,6 @@ impl BuildHasher for ThrottleKeyHasherBuilder {
 
     fn build_hasher(&self) -> Self::Hasher {
         ThrottleKeyHasher::default()
-    }
-}
-
-#[cfg(feature = "test_mode")]
-#[allow(clippy::derivable_impls)]
-impl Default for Server {
-    fn default() -> Self {
-        Self {
-            inner: Default::default(),
-            core: Default::default(),
-        }
-    }
-}
-
-#[cfg(feature = "test_mode")]
-#[allow(clippy::derivable_impls)]
-impl Default for Inner {
-    fn default() -> Self {
-        Self {
-            shared_core: Default::default(),
-            data: Default::default(),
-            ipc: Default::default(),
-            cache: Default::default(),
-        }
-    }
-}
-
-#[cfg(feature = "test_mode")]
-#[allow(clippy::derivable_impls)]
-impl Default for Caches {
-    fn default() -> Self {
-        Self {
-            access_tokens: Cache::new(1024, 10 * 1024 * 1024),
-            http_auth: Cache::new(1024, 10 * 1024 * 1024),
-            permissions: Cache::new(1024, 10 * 1024 * 1024),
-            messages: Cache::new(1024, 25 * 1024 * 1024),
-            files: Cache::new(1024, 10 * 1024 * 1024),
-            contacts: Cache::new(1024, 10 * 1024 * 1024),
-            events: Cache::new(1024, 10 * 1024 * 1024),
-            scheduling: Cache::new(1024, 10 * 1024 * 1024),
-            dns_rbl: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dns_txt: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dns_mx: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dns_ptr: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dns_ipv4: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dns_ipv6: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dns_tlsa: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-            dns_mta_sts: CacheWithTtl::new(1024, 10 * 1024 * 1024),
-        }
-    }
-}
-
-#[cfg(feature = "test_mode")]
-impl Default for Ipc {
-    fn default() -> Self {
-        Self {
-            push_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
-            housekeeper_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
-            task_tx: Default::default(),
-            queue_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
-            report_tx: mpsc::channel(IPC_CHANNEL_BUFFER).0,
-            broadcast_tx: None,
-            train_task_controller: Arc::new(TrainTaskController::default()),
-        }
     }
 }
 

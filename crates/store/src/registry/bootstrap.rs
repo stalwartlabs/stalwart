@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{RegistryStore, registry::RegistryObject};
 use registry::{
-    schema::{prelude::Property, structs::Node},
+    schema::{
+        prelude::Property,
+        structs::{LocalSettings, Node},
+    },
     types::{
         ObjectType,
         error::{Error, ValidationError, Warning},
         id::Id,
     },
 };
-use store::{RegistryStore, registry::RegistryObject};
 
 pub struct Bootstrap {
     pub registry: RegistryStore,
@@ -20,6 +23,7 @@ pub struct Bootstrap {
     pub warnings: Vec<Warning>,
     pub has_fatal_errors: bool,
     pub node: Node,
+    pub local: LocalSettings,
 }
 
 impl Bootstrap {
@@ -30,6 +34,7 @@ impl Bootstrap {
             warnings: Vec::new(),
             has_fatal_errors: false,
             node: Node::default(),
+            local: LocalSettings::default(),
         }
     }
 
@@ -60,6 +65,46 @@ impl Bootstrap {
                 }
                 T::default()
             }
+        }
+    }
+
+    pub async fn get_infallible<T: ObjectType>(&mut self, id: Id) -> Option<T> {
+        if id.object() != T::object() {
+            match self.registry.get::<T>(id).await {
+                Ok(Some(setting)) => {
+                    let mut errors = Vec::new();
+                    if setting.validate(&mut errors) {
+                        Some(setting)
+                    } else {
+                        self.errors.push(Error::Validation {
+                            object_id: id,
+                            errors,
+                        });
+                        None
+                    }
+                }
+                Ok(None) => {
+                    self.errors.push(Error::NotFound { object_id: id });
+                    None
+                }
+                Err(err) => {
+                    if !self.has_fatal_errors {
+                        self.errors.push(Error::Internal {
+                            object_id: Some(id),
+                            error: err,
+                        });
+                        self.has_fatal_errors = true;
+                    }
+                    None
+                }
+            }
+        } else {
+            self.errors.push(Error::TypeMismatch {
+                object_id: id,
+                object_type: id.object(),
+                expected_type: T::object(),
+            });
+            None
         }
     }
 

@@ -60,14 +60,7 @@ impl PostgresStore {
                     let value_ref = format!("${}", values.len() + 1);
                     let (text_len, language) = if let SearchValue::Text { value, language } = value
                     {
-                        (
-                            value.len(),
-                            if self.languages.contains(language) {
-                                pg_lang(language).unwrap_or("simple")
-                            } else {
-                                "simple"
-                            },
-                        )
+                        (value.len(), pg_lang(language).unwrap_or("simple"))
                     } else {
                         (0, "simple")
                     };
@@ -194,9 +187,7 @@ impl PostgresStore {
                         query.push(' ');
 
                         let language = match &value {
-                            SearchValue::Text { language, .. }
-                                if self.languages.contains(language) =>
-                            {
+                            SearchValue::Text { language, .. } => {
                                 pg_lang(language).unwrap_or("simple")
                             }
                             _ => "simple",

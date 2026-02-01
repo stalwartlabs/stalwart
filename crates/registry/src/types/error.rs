@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{schema::prelude::Property, types::id::Id};
+use crate::{
+    schema::prelude::{Object, Property},
+    types::id::Id,
+};
 use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +33,14 @@ pub enum Error {
     Internal {
         object_id: Option<Id>,
         error: trc::Error,
+    },
+    TypeMismatch {
+        object_id: Id,
+        object_type: Object,
+        expected_type: Object,
+    },
+    NotFound {
+        object_id: Id,
     },
 }
 

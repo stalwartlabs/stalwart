@@ -4,72 +4,47 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use std::sync::Arc;
+
 use crate::{
+    SearchStore,
     backend::elastic::ElasticSearchStore,
     search::{
         CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
         TracingSearchField,
     },
 };
+use registry::schema::structs;
 use reqwest::{Error, Response, Url};
 use serde_json::{Value, json};
-use utils::config::{Config, http::build_http_client, utils::AsKey};
 
 impl ElasticSearchStore {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        todo!()
-        /*let client = build_http_client(config, prefix.clone(), "application/json".into())?;
-        let prefix = prefix.as_key();
-        let url = config
-            .value_require((&prefix, "url"))?
-            .trim_end_matches("/")
-            .to_string();
-        Url::parse(&url)
-            .map_err(|e| config.new_parse_error((&prefix, "url"), format!("Invalid URL: {e}",)))
-            .ok()?;
+    pub async fn open(config: structs::ElasticSearchStore) -> Result<SearchStore, String> {
+        Url::parse(&config.url).map_err(|e| format!("Invalid URL: {e}",))?;
 
-        let es = Self { client, url };
-
-        let shards = config
-            .property_or_default((&prefix, "index.shards"), "3")
-            .unwrap_or(3);
-        let replicas = config
-            .property_or_default((&prefix, "index.replicas"), "0")
-            .unwrap_or(0);
-        let with_source = config
-            .property_or_default((&prefix, "index.include-source"), "false")
-            .unwrap_or(false);
-
-        if let Err(err) = es.create_indexes(shards, replicas, with_source).await {
-            config.new_build_error(prefix.as_str(), err.to_string());
-        }
-
-        Some(es)*/
+        Ok(SearchStore::ElasticSearch(Arc::new(Self {
+            client: config.http_auth.build_http_client(
+                config.http_headers,
+                "application/json".into(),
+                config.timeout,
+                config.allow_invalid_certs,
+            )?,
+            url: config.url,
+            num_replicas: config.num_replicas as usize,
+            num_shards: config.num_shards as usize,
+            include_source: config.include_source,
+        })))
     }
 
-    pub async fn create_indexes(
-        &self,
-        shards: usize,
-        replicas: usize,
-        with_source: bool,
-    ) -> trc::Result<()> {
-        self.create_index::<EmailSearchField>(shards, replicas, with_source)
-            .await?;
-        self.create_index::<CalendarSearchField>(shards, replicas, with_source)
-            .await?;
-        self.create_index::<ContactSearchField>(shards, replicas, with_source)
-            .await?;
-        self.create_index::<TracingSearchField>(shards, replicas, with_source)
-            .await?;
+    pub async fn create_indexes(&self) -> trc::Result<()> {
+        self.create_index::<EmailSearchField>().await?;
+        self.create_index::<CalendarSearchField>().await?;
+        self.create_index::<ContactSearchField>().await?;
+        self.create_index::<TracingSearchField>().await?;
         Ok(())
     }
 
-    async fn create_index<T: SearchableField>(
-        &self,
-        shards: usize,
-        replicas: usize,
-        with_source: bool,
-    ) -> trc::Result<()> {
+    async fn create_index<T: SearchableField>(&self) -> trc::Result<()> {
         let mut mappings = serde_json::Map::new();
         mappings.insert(
             "properties".to_string(),
@@ -81,14 +56,14 @@ impl ElasticSearchStore {
                     .collect::<serde_json::Map<String, Value>>(),
             ),
         );
-        if !with_source {
+        if !self.include_source {
             mappings.insert("_source".to_string(), json!({ "enabled": false }));
         }
         let body = json!({
           "mappings": mappings,
           "settings": {
-            "index.number_of_shards": shards,
-            "index.number_of_replicas": replicas,
+            "index.number_of_shards": self.num_shards,
+            "index.number_of_replicas": self.num_replicas,
             "analysis": {
               "analyzer": {
                 "default": {

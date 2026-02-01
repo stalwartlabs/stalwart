@@ -5,58 +5,48 @@
  */
 
 use crate::{
+    SearchStore,
     backend::meili::{MeiliSearchStore, Task, TaskStatus, TaskUid},
     search::{
         CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
         TracingSearchField,
     },
 };
+use registry::schema::structs;
 use reqwest::{Error, Response, Url};
 use serde_json::{Value, json};
-use std::time::Duration;
-use utils::config::{Config, http::build_http_client, utils::AsKey};
+use std::{sync::Arc, time::Duration};
 
 impl MeiliSearchStore {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        todo!()
-        /*let client = build_http_client(config, prefix.clone(), "application/json".into())?;
-        let prefix = prefix.as_key();
-        let url = config
-            .value_require((&prefix, "url"))?
-            .trim_end_matches("/")
-            .to_string();
-        Url::parse(&url)
-            .map_err(|e| config.new_parse_error((&prefix, "url"), format!("Invalid URL: {e}",)))
-            .ok()?;
-        let task_poll_interval = config
-            .property_or_default::<Duration>((&prefix, "task.poll-interval"), "500ms")
-            .unwrap_or(Duration::from_millis(500));
-        let task_poll_retries = config
-            .property_or_default::<usize>((&prefix, "task.poll-retries"), "120")
-            .unwrap_or(120);
-        let task_fail_on_timeout = config
-            .property_or_default::<bool>((&prefix, "task.fail-on-timeout"), "true")
-            .unwrap_or(true);
+    pub async fn open(config: structs::MeilisearchStore) -> Result<SearchStore, String> {
+        let client = config.http_auth.build_http_client(
+            config.http_headers,
+            "application/json".into(),
+            config.timeout,
+            config.allow_invalid_certs,
+        )?;
+
+        Url::parse(&config.url).map_err(|e| format!("Invalid URL: {e}",))?;
 
         let ms = Self {
             client,
-            url,
+            url: config.url,
             task_poll_interval: Duration::from_millis(500),
             task_poll_retries: 120,
             task_fail_on_timeout: true,
         };
 
         if let Err(err) = ms.create_indexes().await {
-            config.new_build_error(prefix.as_str(), err.to_string());
+            return Err(format!("Failed to create indexes: {err}"));
         }
 
-        Some(Self {
+        Ok(SearchStore::MeiliSearch(Arc::new(MeiliSearchStore {
             client: ms.client,
             url: ms.url,
-            task_poll_interval,
-            task_poll_retries,
-            task_fail_on_timeout,
-        })*/
+            task_poll_interval: config.poll_interval.into_inner(),
+            task_poll_retries: config.max_retries as usize,
+            task_fail_on_timeout: config.fail_on_timeout,
+        })))
     }
 
     pub async fn create_indexes(&self) -> trc::Result<()> {

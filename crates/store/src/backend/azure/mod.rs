@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Display, io::Write, ops::Range, time::Duration};
-
 use azure_core::error::ErrorKind;
 use azure_core::{ExponentialRetryOptions, RetryOptions, StatusCode, TransportOptions};
 use azure_storage::StorageCredentials;
 use azure_storage_blobs::prelude::{ClientBuilder, ContainerClient};
 use futures::stream::StreamExt;
+use registry::schema::structs::{self};
 use std::sync::Arc;
-use utils::{
-    codec::base32_custom::Base32Writer,
-    config::{Config, utils::AsKey},
-};
+use std::{fmt::Display, io::Write, ops::Range};
+use utils::codec::base32_custom::Base32Writer;
+
+use crate::BlobStore;
 
 pub struct AzureStore {
     client: ContainerClient,
@@ -23,76 +22,45 @@ pub struct AzureStore {
 }
 
 impl AzureStore {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let prefix = prefix.as_key();
-
-        let storage_account = config
-            .value_require((&prefix, "storage-account"))?
-            .to_string();
-        let container = config.value_require((&prefix, "container"))?.to_string();
-
-        let credentials = match (
-            config.value((&prefix, "azure-access-key")),
-            config.value((&prefix, "sas-token")),
-        ) {
+    pub async fn open(config: structs::AzureStore) -> Result<BlobStore, String> {
+        let credentials = match (config.access_key, config.sas_token) {
             (Some(access_key), None) => {
-                StorageCredentials::access_key(storage_account.clone(), access_key.to_string())
+                StorageCredentials::access_key(config.storage_account.clone(), access_key)
             }
             (None, Some(sas_token)) => match StorageCredentials::sas_token(sas_token) {
                 Ok(cred) => cred,
                 Err(err) => {
-                    config.new_build_error(
-                        prefix.as_str(),
-                        format!("Failed to create credentials: {err:?}"),
-                    );
-                    return None;
+                    return Err(format!("Failed to create credentials: {err:?}"));
                 }
             },
             _ => {
-                config.new_build_error(
-                    prefix.as_str(),
-                    concat!(
-                        "Failed to create credentials: exactly one of ",
-                        "'azure-access-key' and 'sas-token' must be specified"
-                    ),
-                );
-                return None;
+                return Err(concat!(
+                    "Failed to create credentials: exactly one of ",
+                    "'azure-access-key' and 'sas-token' must be specified"
+                )
+                .to_string());
             }
         };
 
-        let timeout = config
-            .property_or_default::<Duration>((&prefix, "timeout"), "30s")
-            .unwrap_or_else(|| Duration::from_secs(30));
-        let transport = match reqwest::Client::builder().timeout(timeout).build() {
+        let transport = match reqwest::Client::builder()
+            .timeout(config.timeout.into_inner())
+            .build()
+        {
             Ok(client) => Arc::new(client),
             Err(err) => {
-                config.new_build_error(
-                    prefix.as_str(),
-                    format!("Failed to create HTTP client: {err:?}"),
-                );
-                return None;
+                return Err(format!("Failed to create HTTP client: {err:?}"));
             }
         };
 
-        // Take the configured number of retries and multiply by 2. This is intended to match the
-        // precedent set by the S3 back end, where we do the indicated number of retries,
-        // ourselves, but internally the rust-s3 crate is also retrying each of our requests up to
-        // one additional time, itself. So our retries, and the S3 backend's retries, are
-        // comparable to each other.
-        let max_retries: u32 = config
-            .property_or_default((&prefix, "max-retries"), "3")
-            .unwrap_or(3)
-            * 2;
-
-        Some(AzureStore {
-            client: ClientBuilder::new(storage_account, credentials)
+        Ok(BlobStore::Azure(Arc::new(AzureStore {
+            client: ClientBuilder::new(config.storage_account, credentials)
                 .transport(TransportOptions::new(transport))
                 .retry(RetryOptions::exponential(
-                    ExponentialRetryOptions::default().max_retries(max_retries),
+                    ExponentialRetryOptions::default().max_retries(config.max_retries as u32 * 2),
                 ))
-                .container_client(container),
-            prefix: config.value((&prefix, "key-prefix")).map(|s| s.to_string()),
-        })
+                .container_client(config.container),
+            prefix: config.key_prefix,
+        })))
     }
 
     pub(crate) async fn get_blob(
