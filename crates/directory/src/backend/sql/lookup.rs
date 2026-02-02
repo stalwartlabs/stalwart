@@ -59,7 +59,11 @@ impl SqlDirectory {
                                     .await
                                     .caused_by(trc::location!())?,
                             )
-                            .caused_by(trc::location!())?,
+                            .caused_by(trc::location!())?
+                            .map(|mut p| {
+                                p.name = principal.name().into();
+                                p
+                            }),
                         Some(principal),
                     )
                 } else {
