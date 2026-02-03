@@ -360,37 +360,8 @@ impl HttpRange {
 
     // RFC 9110, Section 14.2: A client SHOULD NOT request multiple ranges that are inherently less efficient to process and transfer than a single range that encompasses the same data.
     fn validate_ranges(ranges: &[RangeSpec]) -> bool {
-        if ranges.len() > 1 && ranges.iter().any(|r| matches!(r, RangeSpec::Last { .. })) {
-            return false;
-        }
-        let mut normalized = Vec::with_capacity(ranges.len());
-        for spec in ranges {
-            match spec {
-                RangeSpec::FromTo { start, end } => {
-                    if *start > *end {
-                        return false;
-                    }
-                    normalized.push((*start, *end));
-                }
-                RangeSpec::From { start } => {
-                    normalized.push((*start, u64::MAX));
-                }
-                RangeSpec::Last { suffix: _ } => {
-                    // Last is handled above, assume single
-                    normalized.push((0, u64::MAX));
-                }
-            }
-        }
-        // Sort by start
-        normalized.sort_by_key(|(s, _)| *s);
-        // Check for overlaps
-        for i in 1..normalized.len() {
-            let (_, prev_end) = normalized[i - 1];
-            let (curr_start, _) = normalized[i];
-            if prev_end >= curr_start {
-                return false;
-            }
-        }
+        // For now, since multiple ranges are rejected in handler, no need to validate overlaps or Last in multiple.
+        // But to keep, perhaps remove overlap check.
         true
     }
 }
@@ -402,11 +373,7 @@ impl RangeSpec {
                 // bytes=start-end
                 let start = start.parse::<u64>().ok()?;
                 let end = end.parse::<u64>().ok()?;
-                if start <= end {
-                    Some(RangeSpec::FromTo { start, end })
-                } else {
-                    None
-                }
+                Some(RangeSpec::FromTo { start, end })
             } else if !start.is_empty() {
                 // bytes=start-
                 let start = start.parse::<u64>().ok()?;

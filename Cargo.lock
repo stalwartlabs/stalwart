@@ -7780,7 +7780,6 @@ dependencies = [
  "mail-parser",
  "mail-send",
  "managesieve",
- "migration",
  "nlp",
  "num_cpus",
  "pop3",

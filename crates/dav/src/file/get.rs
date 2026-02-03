@@ -133,10 +133,10 @@ impl FileGetRequestHandler for Server {
                     )
                 }
                 RangeSpec::From { start } => {
-                    if *start >= file_size {
+                    if *start > file_size.saturating_sub(1) {
                         trc::event!(
                             WebDav(trc::WebDavEvent::Error),
-                            Reason = format!("Invalid range: start={} >= file_size={}", start, file_size),
+                            Reason = format!("Invalid range: start={} > file_size-1={}", start, file_size.saturating_sub(1)),
                         );
                         return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
                     }

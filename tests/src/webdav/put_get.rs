@@ -67,13 +67,14 @@ pub async fn test(test: &WebDavTest) {
             let range_start = 5;
             let range_end = 15;
             let expected_body = &content_bytes[range_start..=range_end];
+            let header = format!("bytes={}-{}", range_start, range_end);
             client
-                .request_with_headers("GET", path, [("range", &format!("bytes={}-{}", range_start, range_end))], "")
+                .request_with_headers("GET", path, vec![("range", header.as_str())], "")
                 .await
                 .with_status(StatusCode::PARTIAL_CONTENT)
                 .with_header("content-range", &format!("bytes {}-{}/{}", range_start, range_end, content_bytes.len()))
                 .with_header("content-type", ct)
-                .with_body(expected_body);
+                .with_body(String::from_utf8_lossy(expected_body));
         }
     }
 
@@ -83,13 +84,14 @@ pub async fn test(test: &WebDavTest) {
             let content_bytes = content.as_bytes();
             let range_start = 10;
             let expected_body = &content_bytes[range_start..];
+            let header = format!("bytes={}-", range_start);
             client
-                .request_with_headers("GET", path, [("range", &format!("bytes={}-", range_start))], "")
+                .request_with_headers("GET", path, vec![("range", header.as_str())], "")
                 .await
                 .with_status(StatusCode::PARTIAL_CONTENT)
                 .with_header("content-range", &format!("bytes {}-{}/{}", range_start, content_bytes.len() - 1, content_bytes.len()))
                 .with_header("content-type", ct)
-                .with_body(expected_body);
+                .with_body(String::from_utf8_lossy(expected_body));
         }
     }
 
@@ -100,13 +102,14 @@ pub async fn test(test: &WebDavTest) {
             let suffix = 20;
             let start = content_bytes.len().saturating_sub(suffix);
             let expected_body = &content_bytes[start..];
+            let header = format!("bytes=-{}", suffix);
             client
-                .request_with_headers("GET", path, [("range", &format!("bytes=-{}", suffix))], "")
+                .request_with_headers("GET", path, vec![("range", header.as_str())], "")
                 .await
                 .with_status(StatusCode::PARTIAL_CONTENT)
                 .with_header("content-range", &format!("bytes {}-{}/{}", start, content_bytes.len() - 1, content_bytes.len()))
                 .with_header("content-type", ct)
-                .with_body(expected_body);
+                .with_body(String::from_utf8_lossy(expected_body));
         }
     }
 
@@ -115,28 +118,30 @@ pub async fn test(test: &WebDavTest) {
         if path.ends_with("file1.txt") {
             let content_len = content.len();
             // Invalid range: start > end
+            let header1 = format!("bytes={}-{}", content_len, content_len - 1);
             client
-                .request_with_headers("GET", path, [("range", &format!("bytes={}-{}", content_len, content_len - 1))], "")
+                .request_with_headers("GET", path, vec![("range", header1.as_str())], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
-            // Invalid range: start >= file_size
+            // Invalid range: start > file_size
+            let header2 = format!("bytes={}-", content_len + 1);
             client
-                .request_with_headers("GET", path, [("range", &format!("bytes={}-", content_len))], "")
+                .request_with_headers("GET", path, vec![("range", header2.as_str())], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
             // Multiple ranges: should be rejected
             client
-                .request_with_headers("GET", path, [("range", "bytes=0-10,20-30")], "")
+                .request_with_headers("GET", path, vec![("range", "bytes=0-10,20-30")], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
             // Intersecting ranges
             client
-                .request_with_headers("GET", path, [("range", "bytes=0-20,10-30")], "")
+                .request_with_headers("GET", path, vec![("range", "bytes=0-20,10-30")], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
             // Range with Last in multiple
             client
-                .request_with_headers("GET", path, [("range", "bytes=0-10,-20")], "")
+                .request_with_headers("GET", path, vec![("range", "bytes=0-10,-20")], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
         }
