@@ -365,11 +365,10 @@ impl DummyWebDavClient {
                 )
             })
             .collect();
-        let body = response
-            .bytes()
-            .await
-            .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
-            .map_err(|err| err.to_string());
+        let body = match response.bytes().await {
+            Ok(bytes) => String::from_utf8(bytes.to_vec()).map_err(|e| format!("Invalid UTF-8: {}", e)),
+            Err(e) => Err(e.to_string()),
+        };
         let xml = match &body {
             Ok(body) if body.starts_with("<?xml") => flatten_xml(body),
             _ => vec![],

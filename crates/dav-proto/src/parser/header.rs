@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Condition, Depth, HttpRange, If, RangeSpec, RequestHeaders, ResourceState, Return, Timeout};
+use crate::{Condition, Depth, HttpRange, If, RangeSpec, RequestHeaders, ResourceState, Return, Timeout, MAX_RANGE_PARTS};
 use calcard::vcard::VCardVersion;
 
 impl<'x> RequestHeaders<'x> {
@@ -340,99 +340,54 @@ impl HttpRange {
         }
         let range_specs = &value[6..];
         let mut ranges = tinyvec::TinyVec::new();
-        for spec in range_specs.split(',') {
+        for spec in range_specs.splitn(MAX_RANGE_PARTS + 1, ',') {
             let spec = spec.trim();
-            if let Some(range_spec) = RangeSpec::parse(spec) {
-                ranges.push(range_spec);
-            } else {
-                return None;
-            }
+            ranges.push(RangeSpec::parse(spec));
         }
-        if ranges.is_empty() || ranges.len() > 10 {
-            return None;
-        }
-        // Validate no intersections
-        if !Self::validate_ranges(&ranges) {
+        if ranges.is_empty() {
             return None;
         }
         Some(HttpRange { ranges })
     }
-
-    // RFC 9110, Section 14.2: A client SHOULD NOT request multiple ranges that are inherently less efficient to process and transfer than a single range that encompasses the same data.
-    fn validate_ranges(ranges: &[RangeSpec]) -> bool {
-        if ranges.len() <= 1 {
-            return true;
-        }
-
-        // Check for multiple Last ranges - only one allowed
-        let last_count = ranges.iter().filter(|r| matches!(r, RangeSpec::Last { .. })).count();
-        if last_count > 1 {
-            return false;
-        }
-
-        // Convert ranges to (start, end) pairs for overlap checking
-        // Note: This assumes file_size is not known here, so we check for obvious overlaps
-        // Actual start > end will be checked in the handler with file_size
-        let mut normalized = Vec::new();
-        for range in ranges {
-            match range {
-                RangeSpec::FromTo { start, end } => {
-                    if *start > *end {
-                        // Invalid range, but allow parsing, reject in handler
-                        normalized.push((*start, *end));
-                    } else {
-                        normalized.push((*start, *end));
-                    }
-                }
-                RangeSpec::From { start } => {
-                    // From start to end of file, no overlap check possible here
-                    normalized.push((*start, u64::MAX));
-                }
-                RangeSpec::Last { suffix } => {
-                    // Last suffix bytes, assume from 0 to suffix for overlap check
-                    // This is approximate, actual check in handler
-                    normalized.push((0, *suffix));
-                }
-            }
-        }
-
-        // Check for overlaps
-        for i in 0..normalized.len() {
-            for j in (i + 1)..normalized.len() {
-                let (s1, e1) = normalized[i];
-                let (s2, e2) = normalized[j];
-                if s1 < e2 && s2 < e1 {
-                    // Overlap detected
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
 }
 
 impl RangeSpec {
-    pub fn parse(spec: &str) -> Option<Self> {
+    pub fn parse(spec: &str) -> Self {
         if let Some((start, end)) = spec.split_once('-') {
             if !start.is_empty() && !end.is_empty() {
                 // bytes=start-end
-                let start = start.parse::<u64>().ok()?;
-                let end = end.parse::<u64>().ok()?;
-                Some(RangeSpec::FromTo { start, end })
+                if let (Ok(start), Ok(end)) = (start.parse::<u64>(), end.parse::<u64>()) {
+                    if start >= end {
+                        RangeSpec::Invalid { reason: "start >= end" }
+                    } else {
+                        RangeSpec::FromTo { start, end }
+                    }
+                } else {
+                    RangeSpec::Invalid { reason: "invalid numbers" }
+                }
             } else if !start.is_empty() {
                 // bytes=start-
-                let start = start.parse::<u64>().ok()?;
-                Some(RangeSpec::From { start })
+                if let Ok(start) = start.parse::<u64>() {
+                    RangeSpec::From { start }
+                } else {
+                    RangeSpec::Invalid { reason: "invalid start" }
+                }
             } else if !end.is_empty() {
                 // bytes=-suffix
-                let suffix = end.parse::<u64>().ok()?;
-                Some(RangeSpec::Last { suffix })
+                if let Ok(suffix) = end.parse::<u64>() {
+                    if suffix == 0 {
+                        RangeSpec::Invalid { reason: "suffix is zero" }
+                    } else {
+                        RangeSpec::Last { suffix }
+                    }
+                } else {
+                    RangeSpec::Invalid { reason: "invalid suffix" }
+                }
             } else {
-                None
+                RangeSpec::Invalid { reason: "empty range" }
             }
         } else {
-            None
+            RangeSpec::Invalid { reason: "no dash" }
         }
     }
 }

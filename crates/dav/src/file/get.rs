@@ -14,7 +14,7 @@ use crate::{
     file::DavFileResource,
 };
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
-use dav_proto::{HttpRange, RangeSpec, RequestHeaders, schema::property::Rfc1123DateTime};
+use dav_proto::{HttpRange, RangeSpec, RequestHeaders, schema::property::Rfc1123DateTime, MAX_RANGE_PARTS};
 
 use groupware::{cache::GroupwareCache, file::FileNode};
 use futures::{stream, StreamExt, TryStreamExt};
@@ -22,7 +22,7 @@ use http_proto::{HttpResponse, HttpResponseBody};
 use http_body_util::{combinators::UnsyncBoxBody, StreamBody};
 use hyper::body::Frame;
 use hyper::StatusCode;
-use rand;
+use rand::{Rng, distributions::Alphanumeric};
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive},
@@ -32,6 +32,8 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
+
+use bytes::BytesMut;
 
 pub(crate) trait FileGetRequestHandler: Sync + Send {
     fn handle_file_get_request(
@@ -111,48 +113,69 @@ impl FileGetRequestHandler for Server {
 
         // Check for range request
         let (status, content_type_header, content_range, body_data): (StatusCode, String, Option<String>, Option<HttpResponseBody>) = if let Some(range) = &headers.range {
+            // Validate number of ranges
+            if range.ranges.len() > MAX_RANGE_PARTS {
+                trc::event!(
+                    WebDav(trc::WebDavEvent::Error),
+                    Reason = "Too many range specs in request",
+                );
+                return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
+            }
             let file_size = size as u64;
-            let mut parts = Vec::new();
-            let mut has_invalid = false;
+            let mut parts: Vec<(usize, usize)> = Vec::new();
             // Process each range spec and validate against file size
             for spec in &range.ranges {
                 match spec {
+                    RangeSpec::Invalid { reason } => {
+                        trc::event!(
+                            WebDav(trc::WebDavEvent::Error),
+                            Reason = format!("Invalid range spec: {}", reason),
+                        );
+                        return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
+                    }
                     RangeSpec::FromTo { start, end } => {
-                        // Invalid if start > end or start >= file_size
-                        if *start > *end || *start >= file_size {
-                            has_invalid = true;
-                            break;
+                        // Validate start < file_size (parser validated start < end)
+                        if *start >= file_size {
+                            trc::event!(
+                                WebDav(trc::WebDavEvent::Error),
+                                Reason = "Range start beyond file size",
+                            );
+                            return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
                         }
-                        let actual_end = (*end).min(file_size - 1);
                         let range_start = *start as usize;
-                        let range_end = (actual_end + 1) as usize;
-                        parts.push((*start, actual_end, range_start, range_end));
+                        // HTTP range end is inclusive; convert to exclusive Rust range: clamp end to file_size-1, then +1
+                        let range_end = ((*end).min(file_size - 1) + 1) as usize;
+                        parts.push((range_start, range_end));
                     }
                     RangeSpec::From { start } => {
-                        // Invalid if start is beyond file
-                        if *start > file_size.saturating_sub(1) {
-                            has_invalid = true;
-                            break;
+                        // Validate start < file_size
+                        if *start >= file_size {
+                            trc::event!(
+                                WebDav(trc::WebDavEvent::Error),
+                                Reason = "Range start beyond file size",
+                            );
+                            return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
                         }
                         let range_start = *start as usize;
-                        parts.push((*start, file_size - 1, range_start, size));
+                        // Exclusive end at file size (covers from start to end of file)
+                        let range_end = size;
+                        parts.push((range_start, range_end));
                     }
                     RangeSpec::Last { suffix } => {
-                        // Invalid if suffix is 0 (would be empty range)
-                        if *suffix == 0 {
-                            has_invalid = true;
-                            break;
-                        }
+                        // Parser validated suffix > 0
+                        // Calculate start position for the last 'suffix' bytes
                         let start_pos = if *suffix >= file_size { 0 } else { file_size - *suffix };
                         let range_start = start_pos as usize;
-                        parts.push((start_pos, file_size - 1, range_start, size));
+                        // Exclusive end at file size
+                        let range_end = size;
+                        parts.push((range_start, range_end));
                     }
                 }
             }
-            if has_invalid {
+            if parts.len() > MAX_RANGE_PARTS {
                 trc::event!(
                     WebDav(trc::WebDavEvent::Error),
-                    Reason = "Invalid range in request",
+                    Reason = "Too many range parts in request",
                 );
                 return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
             }
@@ -165,13 +188,13 @@ impl FileGetRequestHandler for Server {
                 );
                 return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
             }
-            // Check for overlapping ranges - RFC 9110 discourages inefficient overlapping ranges
+            // Check for overlapping ranges - RFC 9110, Section 14.2: 'A client SHOULD NOT request multiple ranges that are inherently less efficient to process and transfer than a single range that encompasses the same data.'
+            // range_end is exclusive; overlap if prev_end > curr_start (not >=, to allow adjacent ranges)
             let mut sorted_parts = parts.clone();
-            sorted_parts.sort_by_key(|(s, _, _, _)| *s);
-            for i in 1..sorted_parts.len() {
-                let (_, prev_end, _, _) = sorted_parts[i - 1];
-                let (curr_start, _, _, _) = sorted_parts[i];
-                if prev_end >= curr_start {
+            sorted_parts.sort_by_key(|(s, _)| *s);
+            for window in sorted_parts.windows(2) {
+                let [(_, prev_end), (curr_start, _)] = window else { unreachable!() };
+                if prev_end > curr_start {
                     trc::event!(
                         WebDav(trc::WebDavEvent::Error),
                         Reason = "Overlapping ranges in request",
@@ -195,7 +218,10 @@ impl FileGetRequestHandler for Server {
                     }
                 )
             } else if parts.len() == 1 {
-                let (start, actual_end, range_start, range_end) = parts[0];
+                let (range_start, range_end) = parts[0];
+                let start = range_start as u64;
+                // range_end is exclusive; HTTP Content-Range end is inclusive: range_end - 1
+                let actual_end = (range_end - 1) as u64;
                 let content_range = format!("bytes {}-{}/{}", start, actual_end, file_size);
                 let body = if !is_head {
                     Some(HttpResponseBody::Binary(self.blob_store()
@@ -209,7 +235,11 @@ impl FileGetRequestHandler for Server {
                 (StatusCode::PARTIAL_CONTENT, content_type.unwrap_or("application/octet-stream").to_string(), Some(content_range), body)
             } else {
                 // Multipart
-                let boundary = format!("{:x}", rand::random::<u64>());
+                let boundary: String = rand::thread_rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(30)
+                    .map(char::from)
+                    .collect();
                 let content_type_multipart = format!("multipart/byteranges; boundary={}", boundary);
                 let content_type_str = content_type.unwrap_or("application/octet-stream").to_string();
                 let file_size_str = file_size.to_string();
@@ -222,7 +252,10 @@ impl FileGetRequestHandler for Server {
                     move |(mut remaining_parts, boundary, content_type, file_size, hash)| {
                         let blob_store = blob_store.clone();
                         async move {
-                            if let Some((start, actual_end, range_start, range_end)) = remaining_parts.pop() {
+                            if let Some((range_start, range_end)) = remaining_parts.pop() {
+                                let start = range_start as u64;
+                                // range_end is exclusive; HTTP Content-Range end is inclusive: range_end - 1
+                                let actual_end = (range_end - 1) as u64;
                                 let data_result = blob_store.get_blob(&hash, range_start..range_end).await;
                                 let data = match data_result {
                                     Ok(Some(d)) => d,
@@ -230,7 +263,12 @@ impl FileGetRequestHandler for Server {
                                     Err(e) => return Some((Err(std::io::Error::new(std::io::ErrorKind::Other, format!("{}", e))), (remaining_parts, boundary, content_type, file_size, hash))),
                                 };
 
-                                let mut part = Vec::new();
+                                let start_str = format!("{}", start);
+                                let actual_end_str = format!("{}", actual_end);
+                                let file_size_str = format!("{}", file_size);
+                                let data_len = data.len();
+                                let estimated_capacity = 150 + data_len + boundary.len() + content_type.len() + start_str.len() + actual_end_str.len() + file_size_str.len();
+                                let mut part = BytesMut::with_capacity(estimated_capacity);
                                 part.extend_from_slice(b"--");
                                 part.extend_from_slice(boundary.as_bytes());
                                 part.extend_from_slice(b"\r\n");
@@ -238,22 +276,22 @@ impl FileGetRequestHandler for Server {
                                 part.extend_from_slice(content_type.as_bytes());
                                 part.extend_from_slice(b"\r\n");
                                 part.extend_from_slice(b"Content-Range: bytes ");
-                                part.extend_from_slice(format!("{}", start).as_bytes());
+                                part.extend_from_slice(start_str.as_bytes());
                                 part.extend_from_slice(b"-");
-                                part.extend_from_slice(format!("{}", actual_end).as_bytes());
+                                part.extend_from_slice(actual_end_str.as_bytes());
                                 part.extend_from_slice(b"/");
-                                part.extend_from_slice(file_size.as_bytes());
+                                part.extend_from_slice(file_size_str.as_bytes());
                                 part.extend_from_slice(b"\r\n\r\n");
                                 part.extend_from_slice(&data);
                                 part.extend_from_slice(b"\r\n");
 
-                                Some((Ok(bytes::Bytes::from(part)), (remaining_parts, boundary, content_type, file_size, hash)))
+                                Some((Ok(part.freeze()), (remaining_parts, boundary, content_type, file_size, hash)))
                             } else {
-                                let mut end = Vec::new();
+                                let mut end = BytesMut::with_capacity(10 + boundary.len());
                                 end.extend_from_slice(b"--");
                                 end.extend_from_slice(boundary.as_bytes());
                                 end.extend_from_slice(b"--\r\n");
-                                Some((Ok(bytes::Bytes::from(end)), (remaining_parts, boundary, content_type, file_size, hash)))
+                                Some((Ok(end.freeze()), (remaining_parts, boundary, content_type, file_size, hash)))
                             }
                         }
                     }
@@ -325,6 +363,7 @@ impl FileGetRequestHandler for Server {
                                 let start_pos = if *suffix >= file_size { 0 } else { file_size - *suffix };
                                 response = response.with_content_length(size - start_pos as usize);
                             }
+                            RangeSpec::Invalid { .. } => unreachable!(),
                         }
                     }
                 }

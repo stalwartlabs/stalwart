@@ -9,6 +9,9 @@ use compact_str::{CompactString, ToCompactString};
 use trc::Value;
 
 pub mod parser;
+
+/// Maximum number of range parts supported in a multipart request.
+pub const MAX_RANGE_PARTS: usize = 10;
 pub mod requests;
 pub mod responses;
 pub mod schema;
@@ -112,6 +115,8 @@ pub enum RangeSpec {
     From { start: u64 },
     /// bytes=-suffix
     Last { suffix: u64 },
+    /// Invalid range specification
+    Invalid { reason: &'static str },
 }
 
 impl Default for RangeSpec {
@@ -148,6 +153,7 @@ impl From<&RequestHeaders<'_>> for Value {
                     RangeSpec::FromTo { start, end } => format!("{}-{}", start, end),
                     RangeSpec::From { start } => format!("{}-", start),
                     RangeSpec::Last { suffix } => format!("-{}", suffix),
+                    RangeSpec::Invalid { .. } => "invalid".to_string(),
                 });
             }
             values.push(format!("bytes={}", specs.join(",")).into());

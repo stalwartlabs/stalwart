@@ -30,7 +30,7 @@ serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.1", features = ["tokio"] }
-http-body-util = "0.1.0"
+http-body-util = { workspace = true }
 tokio = { version = "1.47", features = ["rt"] }
 futures-util = "0.3.28"
 async-stream = "0.3.5"

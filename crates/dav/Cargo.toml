@@ -23,7 +23,7 @@ chrono = "0.4.40"
 rand = "0.8"
 bytes = "1.0"
 futures = "0.3"
-http-body-util = "0.1"
+http-body-util = { workspace = true }
 
 [dev-dependencies]
 

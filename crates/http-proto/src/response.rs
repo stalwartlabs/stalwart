@@ -5,7 +5,7 @@
  */
 
 use common::manager::webadmin::Resource;
-use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
+use http_body_util::{BodyExt, Full};
 use hyper::{
     StatusCode,
     body::Bytes,

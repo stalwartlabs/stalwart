@@ -129,6 +129,11 @@ pub async fn test(test: &WebDavTest) {
                 .request_with_headers("GET", path, vec![("range", header2.as_str())], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+            // Valid multipart range
+            client
+                .request_with_headers("GET", path, vec![("range", "bytes=0-10,20-30")], "")
+                .await
+                .with_status(StatusCode::PARTIAL_CONTENT);
             // Multiple non-overlapping ranges: should be accepted
             client
                 .request_with_headers("GET", path, vec![("range", "bytes=0-10,20-30")], "")

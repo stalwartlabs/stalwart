@@ -29,6 +29,9 @@ members = [
     "tests",
 ]
 
+[workspace.dependencies]
+http-body-util = "0.1.3"
+
 [profile.dev]
 opt-level = 0
 debug = 1
