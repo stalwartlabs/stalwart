@@ -360,8 +360,54 @@ impl HttpRange {
 
     // RFC 9110, Section 14.2: A client SHOULD NOT request multiple ranges that are inherently less efficient to process and transfer than a single range that encompasses the same data.
     fn validate_ranges(ranges: &[RangeSpec]) -> bool {
-        // For now, since multiple ranges are rejected in handler, no need to validate overlaps or Last in multiple.
-        // But to keep, perhaps remove overlap check.
+        if ranges.len() <= 1 {
+            return true;
+        }
+
+        // Check for multiple Last ranges - only one allowed
+        let last_count = ranges.iter().filter(|r| matches!(r, RangeSpec::Last { .. })).count();
+        if last_count > 1 {
+            return false;
+        }
+
+        // Convert ranges to (start, end) pairs for overlap checking
+        // Note: This assumes file_size is not known here, so we check for obvious overlaps
+        // Actual start > end will be checked in the handler with file_size
+        let mut normalized = Vec::new();
+        for range in ranges {
+            match range {
+                RangeSpec::FromTo { start, end } => {
+                    if *start > *end {
+                        // Invalid range, but allow parsing, reject in handler
+                        normalized.push((*start, *end));
+                    } else {
+                        normalized.push((*start, *end));
+                    }
+                }
+                RangeSpec::From { start } => {
+                    // From start to end of file, no overlap check possible here
+                    normalized.push((*start, u64::MAX));
+                }
+                RangeSpec::Last { suffix } => {
+                    // Last suffix bytes, assume from 0 to suffix for overlap check
+                    // This is approximate, actual check in handler
+                    normalized.push((0, *suffix));
+                }
+            }
+        }
+
+        // Check for overlaps
+        for i in 0..normalized.len() {
+            for j in (i + 1)..normalized.len() {
+                let (s1, e1) = normalized[i];
+                let (s2, e2) = normalized[j];
+                if s1 < e2 && s2 < e1 {
+                    // Overlap detected
+                    return false;
+                }
+            }
+        }
+
         true
     }
 }

@@ -129,19 +129,49 @@ pub async fn test(test: &WebDavTest) {
                 .request_with_headers("GET", path, vec![("range", header2.as_str())], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
-            // Multiple ranges: should be rejected
+            // Multiple non-overlapping ranges: should be accepted
             client
                 .request_with_headers("GET", path, vec![("range", "bytes=0-10,20-30")], "")
                 .await
-                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+                .with_status(StatusCode::PARTIAL_CONTENT);
             // Intersecting ranges
             client
                 .request_with_headers("GET", path, vec![("range", "bytes=0-20,10-30")], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
-            // Range with Last in multiple
+            // Multiple ranges with Last (non-overlapping)
             client
                 .request_with_headers("GET", path, vec![("range", "bytes=0-10,-20")], "")
+                .await
+                .with_status(StatusCode::PARTIAL_CONTENT);
+
+            // Three non-overlapping ranges
+            client
+                .request_with_headers("GET", path, vec![("range", "bytes=0-10,20-30,40-50")], "")
+                .await
+                .with_status(StatusCode::PARTIAL_CONTENT);
+
+            // Adjacent ranges (not overlapping)
+            client
+                .request_with_headers("GET", path, vec![("range", "bytes=0-19,20-39")], "")
+                .await
+                .with_status(StatusCode::PARTIAL_CONTENT);
+
+            // Multiple Last ranges (error)
+            client
+                .request_with_headers("GET", path, vec![("range", "bytes=-10,-20")], "")
+                .await
+                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+
+            // Invalid suffix range (suffix=0)
+            client
+                .request_with_headers("GET", path, vec![("range", "bytes=-0")], "")
+                .await
+                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+
+            // Overlapping with Last
+            client
+                .request_with_headers("GET", path, vec![("range", "bytes=50-71,-10")], "")
                 .await
                 .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
         }

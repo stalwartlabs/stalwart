@@ -111,7 +111,7 @@ impl HttpResponse {
 
     pub fn with_stream_body(
         mut self,
-        stream: http_body_util::combinators::BoxBody<hyper::body::Bytes, hyper::Error>,
+        stream: http_body_util::combinators::BoxBody<hyper::body::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Self {
         self.body = HttpResponseBody::Stream(stream);
         self
@@ -173,22 +173,22 @@ impl HttpResponse {
 
     pub fn build(
         self,
-    ) -> hyper::Response<http_body_util::combinators::BoxBody<hyper::body::Bytes, hyper::Error>>
+    ) -> hyper::Response<http_body_util::combinators::BoxBody<hyper::body::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>>>
     {
         match self.body {
             HttpResponseBody::Text(body) => self.builder.body(
                 Full::new(Bytes::from(body))
-                    .map_err(|never| match never {})
+                    .map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::Other, "unreachable")) as Box<dyn std::error::Error + Send + Sync + 'static>)
                     .boxed(),
             ),
             HttpResponseBody::Binary(body) => self.builder.body(
                 Full::new(Bytes::from(body))
-                    .map_err(|never| match never {})
+                    .map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::Other, "unreachable")) as Box<dyn std::error::Error + Send + Sync + 'static>)
                     .boxed(),
             ),
             HttpResponseBody::Empty => self.builder.header(header::CONTENT_LENGTH, 0).body(
                 Full::new(Bytes::new())
-                    .map_err(|never| match never {})
+                    .map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::Other, "unreachable")) as Box<dyn std::error::Error + Send + Sync + 'static>)
                     .boxed(),
             ),
             HttpResponseBody::Stream(stream) => self.builder.body(stream),

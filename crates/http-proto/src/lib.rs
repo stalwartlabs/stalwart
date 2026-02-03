@@ -31,7 +31,7 @@ pub struct HtmlResponse {
 pub enum HttpResponseBody {
     Text(String),
     Binary(Vec<u8>),
-    Stream(http_body_util::combinators::BoxBody<hyper::body::Bytes, hyper::Error>),
+    Stream(http_body_util::combinators::BoxBody<hyper::body::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>>),
     WebsocketUpgrade(String),
     Empty,
 }
