@@ -1659,8 +1659,6 @@ dependencies = [
  "rand 0.8.5",
  "rkyv",
  "store",
- "tokio",
- "tokio-stream",
  "trc",
  "types",
  "utils",

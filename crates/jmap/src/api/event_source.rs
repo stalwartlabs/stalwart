@@ -6,7 +6,7 @@
 
 use crate::api::IntoPushObject;
 use common::{LONG_1D_SLUMBER, Server, auth::AccessToken, ipc::PushNotification};
-use http_body_util::{StreamBody, combinators::BoxBody};
+use http_body_util::{StreamBody, combinators::UnsyncBoxBody};
 use http_proto::*;
 use hyper::{
     StatusCode,
@@ -106,7 +106,7 @@ impl EventSourceHandler for Server {
         Ok(HttpResponse::new(StatusCode::OK)
             .with_content_type("text/event-stream")
             .with_cache_control("no-store")
-            .with_stream_body(BoxBody::new(StreamBody::new(async_stream::stream! {
+            .with_stream_body(UnsyncBoxBody::new(StreamBody::new(async_stream::stream! {
                 let mut last_message = Instant::now() - throttle;
                 let mut timeout =
                     ping.as_ref().map(|p| p.interval).unwrap_or(LONG_1D_SLUMBER);

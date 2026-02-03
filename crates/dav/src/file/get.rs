@@ -17,12 +17,11 @@ use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use dav_proto::{HttpRange, RangeSpec, RequestHeaders, schema::property::Rfc1123DateTime};
 
 use groupware::{cache::GroupwareCache, file::FileNode};
+use futures::{stream, StreamExt, TryStreamExt};
 use http_proto::{HttpResponse, HttpResponseBody};
-use http_body_util::StreamBody;
+use http_body_util::{combinators::UnsyncBoxBody, StreamBody};
 use hyper::body::Frame;
 use hyper::StatusCode;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use rand;
 use store::{
     ValueKey,
@@ -214,63 +213,53 @@ impl FileGetRequestHandler for Server {
                 let content_type_multipart = format!("multipart/byteranges; boundary={}", boundary);
                 let content_type_str = content_type.unwrap_or("application/octet-stream").to_string();
                 let file_size_str = file_size.to_string();
-                let parts_vec = parts;
                 // Clone the blob store Arc to make it owned, as the stream requires 'static lifetime
-        // Without cloning, the stream would borrow from self, causing lifetime errors
-        let blob_store = self.blob_store().clone();
+                // Without cloning, the stream would borrow from self, causing lifetime errors
+                let blob_store = self.blob_store().clone();
                 let hash_clone = hash.clone();
-                let (tx, rx) = mpsc::unbounded_channel();
-                let blob_store_clone = blob_store.clone();
-                let boundary_clone = boundary.clone();
-                let content_type_str_clone = content_type_str.clone();
-                let file_size_str_clone = file_size_str.clone();
-                tokio::spawn(async move {
-                    for (start, actual_end, range_start, range_end) in parts_vec {
-                        let data_result = blob_store_clone.get_blob(hash_clone.as_ref(), range_start..range_end).await;
-                        let data = match data_result {
-                            Ok(Some(d)) => d,
-                            Ok(None) => {
-                                let _ = tx.send(Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "Blob not found")) as Box<dyn std::error::Error + Send + Sync + 'static>));
-                                return;
-                            }
-                            Err(e) => {
-                                let _ = tx.send(Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("{}", e))) as Box<dyn std::error::Error + Send + Sync + 'static>));
-                                return;
-                            }
-                        };
+                let stream = stream::unfold(
+                    (parts, boundary, content_type_str, file_size_str, hash_clone),
+                    move |(mut remaining_parts, boundary, content_type, file_size, hash)| {
+                        let blob_store = blob_store.clone();
+                        async move {
+                            if let Some((start, actual_end, range_start, range_end)) = remaining_parts.pop() {
+                                let data_result = blob_store.get_blob(&hash, range_start..range_end).await;
+                                let data = match data_result {
+                                    Ok(Some(d)) => d,
+                                    Ok(None) => return Some((Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Blob not found")), (remaining_parts, boundary, content_type, file_size, hash))),
+                                    Err(e) => return Some((Err(std::io::Error::new(std::io::ErrorKind::Other, format!("{}", e))), (remaining_parts, boundary, content_type, file_size, hash))),
+                                };
 
-                        let mut part = Vec::new();
-                        part.extend_from_slice(b"--");
-                        part.extend_from_slice(boundary_clone.as_bytes());
-                        part.extend_from_slice(b"\r\n");
-                        part.extend_from_slice(b"Content-Type: ");
-                        part.extend_from_slice(content_type_str_clone.as_bytes());
-                        part.extend_from_slice(b"\r\n");
-                        part.extend_from_slice(b"Content-Range: bytes ");
-                        part.extend_from_slice(format!("{}", start).as_bytes());
-                        part.extend_from_slice(b"-");
-                        part.extend_from_slice(format!("{}", actual_end).as_bytes());
-                        part.extend_from_slice(b"/");
-                        part.extend_from_slice(file_size_str_clone.as_bytes());
-                        part.extend_from_slice(b"\r\n\r\n");
-                        part.extend_from_slice(&data);
-                        part.extend_from_slice(b"\r\n");
+                                let mut part = Vec::new();
+                                part.extend_from_slice(b"--");
+                                part.extend_from_slice(boundary.as_bytes());
+                                part.extend_from_slice(b"\r\n");
+                                part.extend_from_slice(b"Content-Type: ");
+                                part.extend_from_slice(content_type.as_bytes());
+                                part.extend_from_slice(b"\r\n");
+                                part.extend_from_slice(b"Content-Range: bytes ");
+                                part.extend_from_slice(format!("{}", start).as_bytes());
+                                part.extend_from_slice(b"-");
+                                part.extend_from_slice(format!("{}", actual_end).as_bytes());
+                                part.extend_from_slice(b"/");
+                                part.extend_from_slice(file_size.as_bytes());
+                                part.extend_from_slice(b"\r\n\r\n");
+                                part.extend_from_slice(&data);
+                                part.extend_from_slice(b"\r\n");
 
-                        if tx.send(Ok(Frame::data(bytes::Bytes::from(part)))).is_err() {
-                            return;
+                                Some((Ok(bytes::Bytes::from(part)), (remaining_parts, boundary, content_type, file_size, hash)))
+                            } else {
+                                let mut end = Vec::new();
+                                end.extend_from_slice(b"--");
+                                end.extend_from_slice(boundary.as_bytes());
+                                end.extend_from_slice(b"--\r\n");
+                                Some((Ok(bytes::Bytes::from(end)), (remaining_parts, boundary, content_type, file_size, hash)))
+                            }
                         }
                     }
-
-                    let mut end = Vec::new();
-                    end.extend_from_slice(b"--");
-                    end.extend_from_slice(boundary_clone.as_bytes());
-                    end.extend_from_slice(b"--\r\n");
-
-                    let _ = tx.send(Ok(Frame::data(bytes::Bytes::from(end))));
-                });
-
-                let stream = UnboundedReceiverStream::new(rx);
-                let boxed_body = http_body_util::combinators::BoxBody::new(StreamBody::new(stream));
+                );
+                let stream = stream.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>).map_ok(Frame::data);
+                let boxed_body = UnsyncBoxBody::new(StreamBody::new(stream));
                 (
                     StatusCode::PARTIAL_CONTENT,
                     content_type_multipart,

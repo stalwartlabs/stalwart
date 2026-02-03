@@ -20,7 +20,7 @@ use common::{
     psl,
 };
 use directory::backend::internal::manage;
-use http_body_util::{StreamBody, combinators::BoxBody};
+use http_body_util::{StreamBody, combinators::UnsyncBoxBody};
 use hyper::{
     Method, StatusCode,
     body::{Bytes, Frame},
@@ -95,7 +95,7 @@ impl TroubleshootApi for Server {
                 Ok(HttpResponse::new(StatusCode::OK)
                     .with_content_type("text/event-stream")
                     .with_cache_control("no-store")
-                    .with_stream_body(BoxBody::new(StreamBody::new(async_stream::stream! {
+                    .with_stream_body(UnsyncBoxBody::new(StreamBody::new(async_stream::stream! {
                         while let Some(stage) = rx.recv().await {
                             yield Ok(stage.to_frame());
                         }

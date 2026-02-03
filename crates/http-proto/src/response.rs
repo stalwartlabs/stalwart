@@ -5,7 +5,7 @@
  */
 
 use common::manager::webadmin::Resource;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
 use hyper::{
     StatusCode,
     body::Bytes,
@@ -111,7 +111,7 @@ impl HttpResponse {
 
     pub fn with_stream_body(
         mut self,
-        stream: http_body_util::combinators::BoxBody<hyper::body::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>>,
+        stream: http_body_util::combinators::UnsyncBoxBody<hyper::body::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Self {
         self.body = HttpResponseBody::Stream(stream);
         self
@@ -173,23 +173,23 @@ impl HttpResponse {
 
     pub fn build(
         self,
-    ) -> hyper::Response<http_body_util::combinators::BoxBody<hyper::body::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>>>
+    ) -> hyper::Response<http_body_util::combinators::UnsyncBoxBody<hyper::body::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>>>
     {
         match self.body {
             HttpResponseBody::Text(body) => self.builder.body(
                 Full::new(Bytes::from(body))
                     .map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::Other, "unreachable")) as Box<dyn std::error::Error + Send + Sync + 'static>)
-                    .boxed(),
+                    .boxed_unsync(),
             ),
             HttpResponseBody::Binary(body) => self.builder.body(
                 Full::new(Bytes::from(body))
                     .map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::Other, "unreachable")) as Box<dyn std::error::Error + Send + Sync + 'static>)
-                    .boxed(),
+                    .boxed_unsync(),
             ),
             HttpResponseBody::Empty => self.builder.header(header::CONTENT_LENGTH, 0).body(
                 Full::new(Bytes::new())
                     .map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::Other, "unreachable")) as Box<dyn std::error::Error + Send + Sync + 'static>)
-                    .boxed(),
+                    .boxed_unsync(),
             ),
             HttpResponseBody::Stream(stream) => self.builder.body(stream),
             HttpResponseBody::WebsocketUpgrade(derived_key) => self
@@ -201,7 +201,7 @@ impl HttpResponse {
                 .body(
                     Full::new(Bytes::from("Switching to WebSocket protocol"))
                         .map_err(|never| match never {})
-                        .boxed(),
+                        .boxed_unsync(),
                 ),
         }
         .unwrap()
