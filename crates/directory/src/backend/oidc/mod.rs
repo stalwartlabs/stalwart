@@ -9,31 +9,28 @@ pub mod lookup;
 
 use std::time::Duration;
 
-use store::Store;
-
-pub struct OpenIdDirectory {
-    config: OpenIdConfig,
-    pub(crate) data_store: Store,
-}
-
-struct OpenIdConfig {
-    pub endpoint: String,
-    pub endpoint_type: EndpointType,
-    pub endpoint_timeout: Duration,
-    pub email_field: String,
-    pub username_field: Option<String>,
-    pub full_name_field: Option<String>,
-}
-
-#[derive(Debug)]
-pub enum EndpointType {
-    Introspect(Authentication),
-    UserInfo,
-}
-
-#[derive(Debug)]
-pub enum Authentication {
-    Header(String),
-    Bearer,
-    None,
+pub enum OpenIdDirectory {
+    Introspect {
+        client: reqwest::Client,
+        endpoint: String,
+        claim_email: String,
+        claim_name: Option<String>,
+        require_aud: Option<String>,
+        require_scopes: Vec<String>,
+    },
+    UserInfo {
+        endpoint: String,
+        timeout: Duration,
+        allow_invalid_certs: bool,
+        claim_email: String,
+        claim_name: Option<String>,
+    },
+    Jwt {
+        jwks_url: String,
+        jwks_cache: Duration,
+        claim_email: String,
+        claim_name: Option<String>,
+        require_aud: Option<String>,
+        require_iss: Option<String>,
+    },
 }

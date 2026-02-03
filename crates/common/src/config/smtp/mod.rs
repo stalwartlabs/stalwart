@@ -15,8 +15,9 @@ use self::{
     session::SessionConfig,
 };
 use super::*;
-use crate::{expr::Expression, manager::bootstrap::Bootstrap};
+use crate::expr::Expression;
 use registry::schema::structs::Rate;
+use store::registry::bootstrap::Bootstrap;
 
 #[derive(Clone)]
 pub struct SmtpConfig {

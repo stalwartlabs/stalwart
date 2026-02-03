@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    expr::{self, if_block::IfBlock},
-    manager::bootstrap::Bootstrap,
+use crate::expr::{
+    self,
+    if_block::{BootstrapExprExt, IfBlock},
 };
 use mail_auth::{
     common::crypto::{Ed25519Key, HashAlgorithm, RsaKey, Sha256, SigningKey},
@@ -22,6 +22,7 @@ use registry::{
     types::ObjectType,
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
+use store::registry::bootstrap::Bootstrap;
 use utils::config::utils::ParseValue;
 
 #[derive(Clone)]
@@ -43,7 +44,7 @@ pub struct DkimAuthConfig {
 #[derive(Clone)]
 pub struct ArcAuthConfig {
     pub verify: IfBlock,
-    pub seal: IfBlock,
+    //pub seal: IfBlock,
 }
 
 #[derive(Clone)]
@@ -92,7 +93,7 @@ impl MailAuthConfig {
             },
             arc: ArcAuthConfig {
                 verify: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_arc_verify()),
-                seal: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_arc_seal_domain()),
+                //seal: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_arc_seal_domain()),
             },
             spf: SpfAuthConfig {
                 verify_ehlo: bp

@@ -12,7 +12,7 @@ use super::{
     AlertContent, AlertContentToken, AlertMethod, Enterprise, MetricAlert, MetricStore,
     SpamFilterLlmConfig, TraceStore, Undelete, license::LicenseKey, llm::AiApiConfig,
 };
-use crate::{enterprise::llm::ApiType, manager::bootstrap::Bootstrap};
+use crate::enterprise::llm::ApiType;
 use ahash::AHashMap;
 use registry::{
     schema::{

@@ -6,8 +6,7 @@
 
 use crate::{
     VERSION_PUBLIC,
-    expr::if_block::IfBlock,
-    manager::bootstrap::Bootstrap,
+    expr::if_block::{BootstrapExprExt, IfBlock},
     scripts::{
         functions::{register_functions_trusted, register_functions_untrusted},
         plugins::RegisterSievePlugins,
@@ -25,6 +24,7 @@ use registry::{
 };
 use sieve::{Compiler, Runtime, Sieve, compiler::grammar::Capability};
 use std::sync::Arc;
+use store::registry::bootstrap::Bootstrap;
 
 pub struct Scripting {
     pub untrusted_compiler: Compiler,

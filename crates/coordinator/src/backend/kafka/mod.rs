@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use std::sync::Arc;
+
+use crate::Coordinator;
 use rdkafka::{
     ClientConfig, ClientContext, TopicPartitionList,
     consumer::{BaseConsumer, ConsumerContext, Rebalance, StreamConsumer},
     error::KafkaResult,
     producer::FutureProducer,
 };
-use std::{fmt::Debug, time::Duration};
-use utils::config::{Config, utils::AsKey};
+use registry::schema::structs::KafkaCoordinator;
 
 pub mod pubsub;
 
@@ -23,70 +25,41 @@ pub struct KafkaPubSub {
 }
 
 impl KafkaPubSub {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let brokers = config
-            .values((&prefix, "brokers"))
-            .map(|(_, v)| v.to_string())
-            .collect::<Vec<_>>();
-        if brokers.is_empty() {
-            config.new_build_error((&prefix, "brokers"), "No Kafka brokers specified");
-            return None;
+    pub async fn open(config: KafkaCoordinator) -> Result<Coordinator, String> {
+        if config.brokers.is_empty() {
+            return Err("No Kafka brokers specified".to_string());
         }
 
+        let brokers = config.brokers.join(",");
         let mut consumer_builder = ClientConfig::new();
 
         consumer_builder
-            .set(
-                "group.id",
-                config.value_require_non_empty((&prefix, "group-id"))?,
-            )
-            .set(
-                "bootstrap.servers",
-                config.value_require_non_empty((&prefix, "brokers"))?,
-            )
+            .set("group.id", config.group_id)
+            .set("bootstrap.servers", &brokers)
             .set("enable.partition.eof", "false")
             .set(
                 "session.timeout.ms",
-                config
-                    .property_or_default((&prefix, "timeout.session"), "5s")
-                    .unwrap_or(Duration::from_secs(5))
-                    .as_millis()
-                    .to_string(),
+                config.timeout_session.as_millis().to_string(),
             )
             .set("enable.auto.commit", "true");
 
         let producer = ClientConfig::new()
-            .set(
-                "bootstrap.servers",
-                config.value_require_non_empty((&prefix, "brokers"))?,
-            )
+            .set("bootstrap.servers", brokers)
             .set(
                 "message.timeout.ms",
-                config
-                    .property_or_default((&prefix, "timeout.message"), "5s")
-                    .unwrap_or(Duration::from_secs(5))
-                    .as_millis()
-                    .to_string(),
+                config.timeout_message.as_millis().to_string(),
             )
             .create()
-            .map_err(|err| {
-                config.new_build_error(
-                    (&prefix, "config"),
-                    format!("Failed to create Kafka producer: {}", err),
-                );
-            })
-            .ok()?;
+            .map_err(|err| format!("Failed to create Kafka producer: {}", err))?;
 
-        KafkaPubSub {
+        Ok(Coordinator::Kafka(Arc::new(KafkaPubSub {
             consumer_builder,
             producer,
-        }
-        .into()
+        })))
     }
 }
 
-impl Debug for KafkaPubSub {
+impl std::fmt::Debug for KafkaPubSub {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KafkaPubSub").finish()
     }

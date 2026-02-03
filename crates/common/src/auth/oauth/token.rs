@@ -6,7 +6,6 @@
 
 use super::{CLIENT_ID_MAX_LEN, GrantType, RANDOM_CODE_LEN, crypto::SymmetricEncrypt};
 use crate::Server;
-use directory::{PrincipalData, QueryParams};
 use mail_builder::encoders::base64::base64_encode;
 use mail_parser::decoders::base64::base64_decode;
 use std::time::SystemTime;

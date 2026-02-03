@@ -5,10 +5,6 @@
  */
 
 use crate::Server;
-use directory::{
-    Type,
-    backend::internal::{PrincipalField, manage::ChangedPrincipals},
-};
 use types::acl::{AclGrant, ArchivedAclGrant};
 
 impl Server {

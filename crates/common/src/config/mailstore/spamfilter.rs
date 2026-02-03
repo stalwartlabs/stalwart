@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    expr::{Variable, functions::ResolveVariable, if_block::IfBlock},
-    manager::bootstrap::Bootstrap,
+use crate::expr::{
+    Variable,
+    functions::ResolveVariable,
+    if_block::{BootstrapExprExt, IfBlock},
 };
 use ahash::AHashSet;
 use mail_auth::common::resolver::ToReverseName;
@@ -23,7 +24,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
-use store::registry::RegistryObject;
+use store::registry::{RegistryObject, bootstrap::Bootstrap};
 use tokio::net::lookup_host;
 use utils::{cache::CacheItemWeight, config::utils::ParseValue, glob::GlobMap};
 
@@ -376,15 +377,19 @@ impl SpamFilterLists {
             match tag.object {
                 SpamTag::Score(tag) => lists
                     .scores
-                    .insert(&tag.tag, SpamFilterAction::Allow(tag.score as f32)),
-                SpamTag::Discard(tag) => lists.scores.insert(&tag.tag, SpamFilterAction::Discard),
-                SpamTag::Reject(tag) => lists.scores.insert(&tag.tag, SpamFilterAction::Reject),
+                    .insert_pattern(&tag.tag, SpamFilterAction::Allow(tag.score as f32)),
+                SpamTag::Discard(tag) => lists
+                    .scores
+                    .insert_pattern(&tag.tag, SpamFilterAction::Discard),
+                SpamTag::Reject(tag) => lists
+                    .scores
+                    .insert_pattern(&tag.tag, SpamFilterAction::Reject),
             }
         }
 
         for ext in bp.list_infallible::<SpamFileExtension>().await {
             let ext = ext.object;
-            lists.file_extensions.insert(
+            lists.file_extensions.insert_pattern(
                 &ext.extension,
                 FileExtension {
                     known_types: ext.content_types.into_iter().collect(),

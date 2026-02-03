@@ -9,10 +9,7 @@ use super::{
     parser::ExpressionParser,
     tokenizer::{TokenMap, Tokenizer},
 };
-use crate::{
-    expr::{Constant, Expression},
-    manager::bootstrap::Bootstrap,
-};
+use crate::expr::{Constant, Expression};
 use compact_str::CompactString;
 use registry::{
     schema::{
@@ -21,6 +18,7 @@ use registry::{
     },
     types::id::Id,
 };
+use store::registry::bootstrap::Bootstrap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfThen {
@@ -83,8 +81,19 @@ impl Expression {
     }
 }
 
-impl Bootstrap {
-    pub fn compile_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
+pub(crate) trait BootstrapExprExt {
+    fn compile_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock;
+    fn compile_default_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock;
+    fn try_compile_expr(
+        &mut self,
+        id: Id,
+        expr_ctx: &ExpressionContext<'_>,
+        expr: &structs::Expression,
+    ) -> Option<IfBlock>;
+}
+
+impl BootstrapExprExt for Bootstrap {
+    fn compile_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
         if expr_ctx.expr.else_.is_empty() && expr_ctx.expr.match_.is_empty() {
             return IfBlock::empty(id, expr_ctx.property);
         }
@@ -96,7 +105,7 @@ impl Bootstrap {
         }
     }
 
-    pub fn compile_default_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
+    fn compile_default_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
         if let Some(default) = &expr_ctx.default {
             self.try_compile_expr(id, expr_ctx, default)
                 .expect("Valid default expression")
@@ -105,7 +114,7 @@ impl Bootstrap {
         }
     }
 
-    pub fn try_compile_expr(
+    fn try_compile_expr(
         &mut self,
         id: Id,
         expr_ctx: &ExpressionContext<'_>,

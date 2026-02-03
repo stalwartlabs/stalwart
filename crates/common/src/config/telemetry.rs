@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::manager::bootstrap::Bootstrap;
 use ahash::{AHashMap, AHashSet, HashSet};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::HeaderMap;
@@ -24,6 +23,7 @@ use registry::schema::{
     structs::{self, EventTracingLevel, MetricsPrometheus, Tracer, WebHook},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
+use store::registry::bootstrap::Bootstrap;
 use trc::{EventType, Level, MetricType, TelemetryEvent, ipc::subscriber::Interests};
 
 #[derive(Debug)]

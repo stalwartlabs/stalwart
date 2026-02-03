@@ -20,7 +20,6 @@ use crate::{
     ipc::{BroadcastEvent, PushEvent, PushNotification},
     manager::SPAM_CLASSIFIER_KEY,
 };
-use directory::{Directory, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use mail_auth::IpLookupStrategy;
 use sieve::Sieve;
 use std::{

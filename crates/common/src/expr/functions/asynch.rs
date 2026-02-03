@@ -7,7 +7,6 @@
 use std::{cmp::Ordering, net::IpAddr, vec::IntoIter};
 
 use compact_str::{CompactString, ToCompactString};
-use directory::backend::RcptType;
 use mail_auth::IpLookupStrategy;
 use store::{Deserialize, Rows, Value, dispatch::lookup::KeyValue};
 use trc::AddContext;

@@ -11,10 +11,11 @@ use crate::{
     auth::{AccessToken, roles::RolePermissions},
     config::{
         mailstore::spamfilter::SpamClassifier,
+        server::tls::parse_certificates,
         smtp::resolver::{Policy, Tlsa},
     },
     listener::blocked::BlockedIps,
-    manager::{bootstrap::Bootstrap, webadmin::WebAdminManager},
+    manager::webadmin::WebAdminManager,
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
@@ -26,6 +27,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
+use store::registry::bootstrap::Bootstrap;
 use utils::{
     cache::{Cache, CacheWithTtl},
     snowflake::SnowflakeIdGenerator,
@@ -36,7 +38,7 @@ impl Data {
         // Parse certificates
         let mut certificates = AHashMap::new();
         let mut subject_names = AHashSet::new();
-        bp.parse_certificates(&mut certificates, &mut subject_names);
+        parse_certificates(bp, &mut certificates, &mut subject_names);
         if subject_names.is_empty() {
             subject_names.insert("localhost".to_string());
         }

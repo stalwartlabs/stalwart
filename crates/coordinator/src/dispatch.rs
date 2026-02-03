@@ -12,7 +12,7 @@ impl Coordinator {
         match self {
             #[cfg(feature = "redis")]
             Coordinator::Redis(store) => {
-                crate::backend::redis::redis_publish(store, topic, message).await
+                crate::backend::redis::pubsub::redis_publish(store, topic, message).await
             }
             #[cfg(feature = "nats")]
             Coordinator::Nats(store) => store.publish(topic, message).await,
@@ -27,7 +27,9 @@ impl Coordinator {
     pub async fn subscribe(&self, topic: &'static str) -> trc::Result<PubSubStream> {
         match self {
             #[cfg(feature = "redis")]
-            Coordinator::Redis(store) => crate::backend::redis::redis_subscribe(store, topic).await,
+            Coordinator::Redis(store) => {
+                crate::backend::redis::pubsub::redis_subscribe(store, topic).await
+            }
             #[cfg(feature = "nats")]
             Coordinator::Nats(store) => store.subscribe(topic).await,
             #[cfg(feature = "zenoh")]

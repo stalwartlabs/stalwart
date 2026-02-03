@@ -47,7 +47,7 @@ impl PostgresStore {
             cfg.port = (replica.port as u16).into();
             cfg.options = replica.options;
             replicas.push(Store::PostgreSQL(Arc::new(PostgresStore {
-                conn_pool: if config.enable_tls {
+                conn_pool: if config.use_tls {
                     cfg.create_pool(
                         Some(Runtime::Tokio1),
                         MakeRustlsConnect::new(rustls_client_config(config.allow_invalid_certs)),
@@ -60,7 +60,7 @@ impl PostgresStore {
         }
 
         let primary = Store::PostgreSQL(Arc::new(PostgresStore {
-            conn_pool: if config.enable_tls {
+            conn_pool: if config.use_tls {
                 cfg.create_pool(
                     Some(Runtime::Tokio1),
                     MakeRustlsConnect::new(rustls_client_config(config.allow_invalid_certs)),

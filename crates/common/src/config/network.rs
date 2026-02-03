@@ -5,7 +5,7 @@
  */
 
 use super::*;
-use crate::{expr::if_block::IfBlock, manager::bootstrap::Bootstrap};
+use crate::expr::if_block::{BootstrapExprExt, IfBlock};
 use ahash::AHashMap;
 use registry::{
     schema::{

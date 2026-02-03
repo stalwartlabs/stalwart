@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::manager::bootstrap::Bootstrap;
 use registry::schema::structs::{Imap, Rate};
 use std::time::Duration;
+use store::registry::bootstrap::Bootstrap;
 
 #[derive(Default, Clone)]
 pub struct ImapConfig {

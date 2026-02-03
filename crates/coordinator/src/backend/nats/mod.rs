@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
+use std::sync::Arc;
 
+use crate::Coordinator;
 use async_nats::Client;
-use utils::config::{Config, utils::AsKey};
+use registry::schema::structs::NatsCoordinator;
 
 pub mod pubsub;
 
@@ -17,92 +18,36 @@ pub struct NatsPubSub {
 }
 
 impl NatsPubSub {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let urls = config
-            .values((&prefix, "address"))
-            .map(|(_, v)| v.to_string())
-            .collect::<Vec<_>>();
-        if urls.is_empty() {
-            config.new_build_error((&prefix, "address"), "No Nats addresses specified");
-            return None;
+    pub async fn open(config: NatsCoordinator) -> Result<Coordinator, String> {
+        if config.addresses.is_empty() {
+            return Err("No Nats addresses specified".to_string());
         }
 
         let mut opts = async_nats::ConnectOptions::new()
-            .max_reconnects(
-                config
-                    .property_or_default::<Option<usize>>((&prefix, "max-reconnects"), "false")
-                    .unwrap_or_default(),
-            )
-            .connection_timeout(
-                config
-                    .property_or_default((&prefix, "timeout.connection"), "5s")
-                    .unwrap_or_else(|| Duration::from_secs(5)),
-            )
-            .request_timeout(
-                config
-                    .property_or_default::<Option<Duration>>((&prefix, "timeout.request"), "10s")
-                    .unwrap_or_else(|| Some(Duration::from_secs(10))),
-            )
-            .ping_interval(
-                config
-                    .property_or_default((&prefix, "ping-interval"), "60s")
-                    .unwrap_or_else(|| Duration::from_secs(5)),
-            )
-            .client_capacity(
-                config
-                    .property_or_default((&prefix, "capacity.client"), "2048")
-                    .unwrap_or(2048),
-            )
-            .subscription_capacity(
-                config
-                    .property_or_default((&prefix, "capacity.subscription"), "65536")
-                    .unwrap_or(65536),
-            )
-            .read_buffer_capacity(
-                config
-                    .property_or_default((&prefix, "capacity.read-buffer"), "65535")
-                    .unwrap_or(65535),
-            )
-            .require_tls(
-                config
-                    .property_or_default((&prefix, "tls.enable"), "false")
-                    .unwrap_or_default(),
-            );
+            .max_reconnects(config.max_reconnects.map(|v| v as usize))
+            .connection_timeout(config.timeout_connection.into_inner())
+            .request_timeout(config.timeout_request.into_inner().into())
+            .ping_interval(config.ping_interval.into_inner())
+            .client_capacity(config.capacity_client as usize)
+            .subscription_capacity(config.capacity_subscription as usize)
+            .read_buffer_capacity(config.capacity_read_buffer as u16)
+            .require_tls(config.use_tls);
 
-        if config
-            .property_or_default((&prefix, "no-echo"), "true")
-            .unwrap_or(true)
-        {
+        if config.no_echo {
             opts = opts.no_echo();
         }
 
-        if let (Some(user), Some(pass)) = (
-            config.value((&prefix, "user")),
-            config.value((&prefix, "password")),
-        ) {
+        if let (Some(user), Some(pass)) = (config.auth_username, config.auth_secret) {
             opts = opts.user_and_password(user.to_string(), pass.to_string());
-        } else if let Some(credentials) = config.value((&prefix, "credentials")) {
+        } else if let Some(credentials) = config.credentials {
             opts = opts
-                .credentials(credentials)
-                .map_err(|err| {
-                    config.new_build_error(
-                        (&prefix, "credentials"),
-                        format!("Failed to parse Nats credentials: {}", err),
-                    );
-                })
-                .ok()?;
+                .credentials(&credentials)
+                .map_err(|err| format!("Failed to parse Nats credentials: {}", err))?;
         }
 
-        async_nats::connect_with_options(urls, opts)
+        async_nats::connect_with_options(config.addresses, opts)
             .await
-            .map_err(|err| {
-                config.new_build_error(
-                    (&prefix, "urls"),
-                    format!("Failed to connect to Nats: {}", err),
-                );
-            })
-            .map(|client| NatsPubSub { client })
-            .ok()
+            .map(|client| Coordinator::Nats(Arc::new(NatsPubSub { client })))
+            .map_err(|err| format!("Failed to connect to Nats: {}", err))
     }
 }

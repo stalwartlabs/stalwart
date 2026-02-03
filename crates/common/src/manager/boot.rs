@@ -21,10 +21,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use store::{
-    Stores,
-    rand::{Rng, distr::Alphanumeric, rng},
-};
+use store::rand::{Rng, distr::Alphanumeric, rng};
 use tokio::sync::{Notify, mpsc};
 use utils::{
     UnwrapFailure,

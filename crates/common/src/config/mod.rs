@@ -10,7 +10,6 @@ use crate::{
     auth::oauth::config::OAuthConfig,
     config::mailstore::{imap::ImapConfig, scripts::Scripting, spamfilter::SpamFilterConfig},
     expr::*,
-    manager::bootstrap::Bootstrap,
 };
 use arc_swap::ArcSwap;
 use coordinator::Coordinator;
@@ -19,7 +18,7 @@ use groupware::GroupwareConfig;
 use hyper::HeaderMap;
 use ring::signature::{EcdsaKeyPair, RsaKeyPair};
 use std::sync::Arc;
-use store::{BlobBackend, BlobStore, InMemoryStore, SearchStore, Store, Stores};
+use store::{BlobStore, InMemoryStore, SearchStore, Store, registry::bootstrap::Bootstrap};
 use telemetry::Metrics;
 
 pub mod groupware;
@@ -32,7 +31,7 @@ pub mod storage;
 pub mod telemetry;
 
 impl Core {
-    pub async fn parse(bp: &mut Bootstrap, mut stores: Stores) -> Self {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
         todo!()
         /*let mut data = config
             .value_require("storage.data")

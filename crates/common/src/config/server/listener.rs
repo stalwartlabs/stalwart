@@ -11,7 +11,6 @@ use super::{
 use crate::{
     Inner,
     listener::{TcpAcceptor, tls::CertificateResolver},
-    manager::bootstrap::Bootstrap,
 };
 use registry::schema::{
     enums::{NetworkListenerProtocol, TlsCipherSuite, TlsVersion},
@@ -22,7 +21,7 @@ use rustls::{
     crypto::ring::{ALL_CIPHER_SUITES, cipher_suite::*, default_provider},
 };
 use std::sync::Arc;
-use store::registry::RegistryObject;
+use store::registry::{RegistryObject, bootstrap::Bootstrap};
 use tokio::net::TcpSocket;
 use tokio_rustls::TlsAcceptor;
 use utils::snowflake::SnowflakeIdGenerator;
@@ -107,8 +106,8 @@ impl Listeners {
                 }
             }
 
-            if let Some(tos) = listener.socket_tos {
-                if let Err(err) = socket.set_tos(tos as u32) {
+            if let Some(tos) = listener.socket_tos_v4 {
+                if let Err(err) = socket.set_tos_v4(tos as u32) {
                     bp.build_error(id, format!("Failed to set IP_TOS: {err}"));
                     return;
                 }
@@ -152,7 +151,7 @@ impl Listeners {
             let listener = listener.object;
 
             // Build TLS config
-            let acceptor = if listener.tls_enable {
+            let acceptor = if listener.use_tls {
                 // Parse protocol versions
                 let mut tls_v2 = true;
                 let mut tls_v3 = true;

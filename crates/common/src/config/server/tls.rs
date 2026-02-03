@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Server, listener::acme::AcmeProvider, manager::bootstrap::Bootstrap};
+use crate::{Server, listener::acme::AcmeProvider};
 use ahash::{AHashMap, AHashSet};
 use dns_update::{
     Algorithm, DnsUpdater, TsigAlgorithm,
@@ -33,7 +33,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
-use store::registry::RegistryObject;
+use store::registry::{RegistryObject, bootstrap::Bootstrap};
 use trc::AddContext;
 use x509_parser::{
     certificate::X509Certificate,
@@ -195,91 +195,87 @@ impl Server {
     }
 }
 
-impl Bootstrap {
-    pub(crate) async fn parse_certificates(
-        &mut self,
-        certificates: &mut AHashMap<String, Arc<CertifiedKey>>,
-        subject_names: &mut AHashSet<String>,
-    ) {
-        // Parse certificates
-        for cert_obj in self.list_infallible::<Certificate>().await {
-            match build_certified_key(
-                cert_obj.object.certificate.into_bytes(),
-                cert_obj.object.private_key.into_bytes(),
-            ) {
-                Ok(cert) => {
-                    match cert
-                        .end_entity_cert()
-                        .map_err(|err| format!("Failed to obtain end entity cert: {err}"))
-                        .and_then(|cert| {
-                            X509Certificate::from_der(cert.as_ref())
-                                .map_err(|err| format!("Failed to parse end entity cert: {err}"))
-                        }) {
-                        Ok((_, parsed)) => {
-                            // Add CNs and SANs to the list of names
-                            let mut names = AHashSet::new();
-                            for name in parsed.subject().iter_common_name() {
-                                if let Ok(name) = name.as_str() {
-                                    names.insert(name.to_string());
-                                }
-                            }
-                            for ext in parsed.extensions() {
-                                if let ParsedExtension::SubjectAlternativeName(san) =
-                                    ext.parsed_extension()
-                                {
-                                    for name in &san.general_names {
-                                        let name = match name {
-                                            GeneralName::DNSName(name) => name.to_string(),
-                                            GeneralName::IPAddress(ip) => match ip.len() {
-                                                4 => Ipv4Addr::from(
-                                                    <[u8; 4]>::try_from(*ip).unwrap(),
-                                                )
-                                                .to_string(),
-                                                16 => Ipv6Addr::from(
-                                                    <[u8; 16]>::try_from(*ip).unwrap(),
-                                                )
-                                                .to_string(),
-                                                _ => continue,
-                                            },
-                                            _ => {
-                                                continue;
-                                            }
-                                        };
-                                        names.insert(name);
-                                    }
-                                }
-                            }
-
-                            // Add custom SNIs
-                            names.extend(cert_obj.object.subject_alternative_names);
-
-                            // Add domain names
-                            subject_names.extend(names.iter().cloned());
-
-                            // Add certificates
-                            let cert = Arc::new(cert);
-                            for name in names {
-                                certificates.insert(
-                                    name.strip_prefix("*.")
-                                        .map(|name| name.to_string())
-                                        .unwrap_or(name),
-                                    cert.clone(),
-                                );
-                            }
-
-                            // Add default certificate
-                            if cert_obj.object.default {
-                                certificates.insert("*".to_string(), cert.clone());
+pub(crate) async fn parse_certificates(
+    bp: &mut Bootstrap,
+    certificates: &mut AHashMap<String, Arc<CertifiedKey>>,
+    subject_names: &mut AHashSet<String>,
+) {
+    // Parse certificates
+    for cert_obj in bp.list_infallible::<Certificate>().await {
+        match build_certified_key(
+            cert_obj.object.certificate.into_bytes(),
+            cert_obj.object.private_key.into_bytes(),
+        ) {
+            Ok(cert) => {
+                match cert
+                    .end_entity_cert()
+                    .map_err(|err| format!("Failed to obtain end entity cert: {err}"))
+                    .and_then(|cert| {
+                        X509Certificate::from_der(cert.as_ref())
+                            .map_err(|err| format!("Failed to parse end entity cert: {err}"))
+                    }) {
+                    Ok((_, parsed)) => {
+                        // Add CNs and SANs to the list of names
+                        let mut names = AHashSet::new();
+                        for name in parsed.subject().iter_common_name() {
+                            if let Ok(name) = name.as_str() {
+                                names.insert(name.to_string());
                             }
                         }
-                        Err(err) => {
-                            self.build_error(cert_obj.id, format!("Invalid certificate: {err}"));
+                        for ext in parsed.extensions() {
+                            if let ParsedExtension::SubjectAlternativeName(san) =
+                                ext.parsed_extension()
+                            {
+                                for name in &san.general_names {
+                                    let name = match name {
+                                        GeneralName::DNSName(name) => name.to_string(),
+                                        GeneralName::IPAddress(ip) => match ip.len() {
+                                            4 => Ipv4Addr::from(<[u8; 4]>::try_from(*ip).unwrap())
+                                                .to_string(),
+                                            16 => {
+                                                Ipv6Addr::from(<[u8; 16]>::try_from(*ip).unwrap())
+                                                    .to_string()
+                                            }
+                                            _ => continue,
+                                        },
+                                        _ => {
+                                            continue;
+                                        }
+                                    };
+                                    names.insert(name);
+                                }
+                            }
+                        }
+
+                        // Add custom SNIs
+                        names.extend(cert_obj.object.subject_alternative_names);
+
+                        // Add domain names
+                        subject_names.extend(names.iter().cloned());
+
+                        // Add certificates
+                        let cert = Arc::new(cert);
+                        for name in names {
+                            certificates.insert(
+                                name.strip_prefix("*.")
+                                    .map(|name| name.to_string())
+                                    .unwrap_or(name),
+                                cert.clone(),
+                            );
+                        }
+
+                        // Add default certificate
+                        if cert_obj.object.default {
+                            certificates.insert("*".to_string(), cert.clone());
                         }
                     }
+                    Err(err) => {
+                        bp.build_error(cert_obj.id, format!("Invalid certificate: {err}"));
+                    }
                 }
-                Err(err) => {
-                    self.build_error(cert_obj.id, format!("Invalid certificate: {err}"));
-                }
+            }
+            Err(err) => {
+                bp.build_error(cert_obj.id, format!("Invalid certificate: {err}"));
             }
         }
     }

@@ -6,10 +6,6 @@
 
 use crate::Server;
 use ahash::AHashSet;
-use directory::{
-    Permission, Permissions, QueryParams, ROLE_ADMIN, ROLE_TENANT_ADMIN, ROLE_USER,
-    backend::internal::lookup::DirectoryStore,
-};
 use std::sync::{Arc, LazyLock};
 use trc::AddContext;
 use utils::cache::CacheItemWeight;

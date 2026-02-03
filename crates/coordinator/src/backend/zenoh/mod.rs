@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use utils::config::{Config, utils::AsKey};
+use registry::schema::structs::ZenohCoordinator;
+
+use crate::Coordinator;
 pub mod pubsub;
 
 #[derive(Debug)]
@@ -13,26 +15,13 @@ pub struct ZenohPubSub {
 }
 
 impl ZenohPubSub {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let zenoh_config =
-            zenoh::Config::from_json5(config.value_require_non_empty((&prefix, "config"))?)
-                .map_err(|err| {
-                    config.new_build_error(
-                        (&prefix, "config"),
-                        format!("Invalid zenoh config: {}", err),
-                    );
-                })
-                .ok()?;
+    pub async fn open(config: ZenohCoordinator) -> Result<Coordinator, String> {
+        let zenoh_config = zenoh::Config::from_json5(&config.config)
+            .map_err(|err| format!("Invalid Zenoh config: {}", err))?;
         zenoh::open(zenoh_config)
             .await
-            .map_err(|err| {
-                config.new_build_error(
-                    (&prefix, "config"),
-                    format!("Failed to create zenoh session: {}", err),
-                );
-            })
+            .map_err(|err| format!("Failed to create Zenoh session: {}", err))
             .map(|session| ZenohPubSub { session })
-            .ok()
+            .map(|store| Coordinator::Zenoh(std::sync::Arc::new(store)))
     }
 }

@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 pub mod backend;
+pub mod bootstrap;
 pub mod dispatch;
 
 #[derive(Clone, Default)]
@@ -26,9 +27,9 @@ pub enum Coordinator {
 
 pub enum PubSubStream {
     #[cfg(feature = "redis")]
-    Redis(crate::backend::redis::RedisPubSubStream),
+    Redis(crate::backend::redis::pubsub::RedisPubSubStream),
     #[cfg(feature = "redis")]
-    RedisCluster(crate::backend::redis::RedisClusterPubSubStream),
+    RedisCluster(crate::backend::redis::pubsub::RedisClusterPubSubStream),
     #[cfg(feature = "nats")]
     Nats(crate::backend::nats::pubsub::NatsPubSubStream),
     #[cfg(feature = "zenoh")]

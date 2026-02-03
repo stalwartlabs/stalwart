@@ -11,7 +11,9 @@ use registry::schema::{prelude::Object, structs};
 impl InMemoryStore {
     pub async fn build(bp: &mut Bootstrap) -> Option<Self> {
         let result = match bp.setting_infallible::<structs::InMemoryStore>().await {
-            structs::InMemoryStore::Default => return None,
+            structs::InMemoryStore::Default => {
+                return Some(InMemoryStore::Store(bp.data_store.clone()));
+            }
             #[cfg(feature = "redis")]
             structs::InMemoryStore::Redis(redis_store) => {
                 crate::backend::redis::RedisStore::open_single(redis_store).await

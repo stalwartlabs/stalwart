@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{RegistryStore, registry::RegistryObject};
+use crate::{RegistryStore, Store, registry::RegistryObject};
 use registry::{
     schema::{
         prelude::Property,
@@ -19,6 +19,7 @@ use registry::{
 
 pub struct Bootstrap {
     pub registry: RegistryStore,
+    pub data_store: Store,
     pub errors: Vec<Error>,
     pub warnings: Vec<Warning>,
     pub has_fatal_errors: bool,
@@ -35,6 +36,7 @@ impl Bootstrap {
             has_fatal_errors: false,
             node: Node::default(),
             local: LocalSettings::default(),
+            data_store: Store::None,
         }
     }
 

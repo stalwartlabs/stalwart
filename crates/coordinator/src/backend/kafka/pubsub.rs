@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
 use super::{CustomContext, KafkaPubSub, LoggingConsumer};
-use crate::dispatch::pubsub::{Msg, PubSubStream};
+use crate::{Msg, PubSubStream};
 use rdkafka::{
     Message,
     consumer::{CommitMode, Consumer, StreamConsumer},
     producer::FutureRecord,
 };
+use std::time::Duration;
 use trc::{ClusterEvent, Error, EventType};
 
 pub struct KafkaPubSubStream {

@@ -7,6 +7,7 @@
 use super::backup::MAGIC_MARKER;
 use crate::{Core, DATABASE_SCHEMA_VERSION};
 use lz4_flex::frame::FrameDecoder;
+use registry::schema::enums::CompressionAlgo;
 use std::{
     fs::File,
     io::{BufReader, ErrorKind, Read},
@@ -56,7 +57,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
         SUBSPACE_BLOBS => {
             while let Some((key, value)) = reader.next() {
                 blob_store
-                    .put_blob(&key, &value)
+                    .put_blob(&key, &value, CompressionAlgo::Lz4)
                     .await
                     .failed("Failed to write blob");
             }

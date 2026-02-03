@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::manager::bootstrap::Bootstrap;
 use ahash::{AHashMap, AHashSet};
 use nlp::language::Language;
 use registry::{
@@ -18,6 +17,7 @@ use registry::{
 };
 use std::time::Duration;
 use store::{
+    registry::bootstrap::Bootstrap,
     search::{CalendarSearchField, ContactSearchField, EmailSearchField, SearchField},
     write::SearchIndex,
 };

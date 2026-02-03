@@ -6,7 +6,7 @@
 
 use self::resolver::Policy;
 use super::*;
-use crate::expr::if_block::IfBlock;
+use crate::expr::if_block::{BootstrapExprExt, IfBlock};
 use ahash::AHashSet;
 use hyper::HeaderMap;
 use registry::schema::{

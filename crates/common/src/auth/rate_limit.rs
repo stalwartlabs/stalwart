@@ -4,16 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::net::IpAddr;
-
+use crate::auth::AccessToken;
 use crate::{
     KV_RATE_LIMIT_HTTP_ANONYMOUS, KV_RATE_LIMIT_HTTP_AUTHENTICATED, Server, ip_to_bytes,
     listener::limiter::{InFlight, LimiterResult},
 };
-use directory::Permission;
+use std::net::IpAddr;
 use trc::AddContext;
-
-use crate::auth::AccessToken;
 
 impl Server {
     pub async fn is_http_authenticated_request_allowed(

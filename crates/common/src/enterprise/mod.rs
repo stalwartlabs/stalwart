@@ -19,10 +19,6 @@ use crate::{
     manager::webadmin::Resource,
 };
 use ahash::{AHashMap, AHashSet};
-use directory::{
-    QueryParams, Type,
-    backend::internal::{lookup::DirectoryStore, manage::ManageDirectory},
-};
 use license::LicenseKey;
 use llm::AiApiConfig;
 use mail_parser::DateTime;

@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::manager::bootstrap::Bootstrap;
 use registry::schema::structs::{
     AddressBook, Calendar, CalendarAlarm, CalendarScheduling, DataRetention, FileStorage, Sharing,
     WebDav,
 };
 use std::str::FromStr;
+use store::registry::bootstrap::Bootstrap;
 use utils::template::Template;
 
 #[derive(Debug, Clone, Default)]

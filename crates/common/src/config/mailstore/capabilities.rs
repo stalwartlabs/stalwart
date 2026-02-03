@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{config::mailstore::jmap::JmapConfig, manager::bootstrap::Bootstrap};
+use crate::config::mailstore::jmap::JmapConfig;
 use ahash::AHashSet;
 use calcard::icalendar::ICalendarDuration;
 use chrono::{DateTime, Utc};
@@ -22,6 +22,7 @@ use registry::{
     schema::structs::{Calendar, Email, SieveUserInterpreter},
     types::EnumType,
 };
+use store::registry::bootstrap::Bootstrap;
 use types::type_state::DataType;
 use utils::map::vec_map::VecMap;
 

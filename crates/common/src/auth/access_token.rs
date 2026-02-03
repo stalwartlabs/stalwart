@@ -11,13 +11,6 @@ use crate::{
     listener::limiter::{ConcurrencyLimiter, LimiterResult},
 };
 use ahash::AHashSet;
-use directory::{
-    Permission, Principal, PrincipalData, QueryParams, Type,
-    backend::internal::{
-        lookup::DirectoryStore,
-        manage::{ChangedPrincipals, ManageDirectory},
-    },
-};
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     sync::Arc,

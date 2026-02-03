@@ -4,25 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
+use super::{Bind, LdapConnectionManager, LdapDirectory, LdapFilter, LdapFilterItem, LdapMappings};
+use crate::{Directory, backend::ldap::AuthBind};
+use deadpool::{Runtime, managed::Pool};
 use ldap3::LdapConnSettings;
-use store::Store;
-use utils::config::{Config, utils::AsKey};
-
-use crate::core::config::build_pool;
-
-use super::{
-    AuthBind, Bind, LdapConnectionManager, LdapDirectory, LdapFilter, LdapFilterItem, LdapMappings,
-};
+use registry::schema::structs;
 
 impl LdapDirectory {
-    pub fn from_config(config: &mut Config, prefix: impl AsKey, data_store: Store) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let bind_dn = if let Some(dn) = config.value((&prefix, "bind.dn")) {
+    pub fn open(config: structs::LdapDirectory) -> Result<Directory, String> {
+        let bind_dn = if let Some(dn) = config.bind_dn {
             Bind::new(
-                dn.to_string(),
-                config.value_require((&prefix, "bind.secret"))?.to_string(),
+                dn,
+                config.bind_secret.ok_or_else(|| {
+                    "LDAP bind password is required when bind DN is set".to_string()
+                })?,
             )
             .into()
         } else {
@@ -30,180 +25,127 @@ impl LdapDirectory {
         };
 
         let manager = LdapConnectionManager::new(
-            config.value_require((&prefix, "url"))?.to_string(),
+            config.url,
             LdapConnSettings::new()
-                .set_conn_timeout(
-                    config
-                        .property_or_default((&prefix, "timeout"), "30s")
-                        .unwrap_or_else(|| Duration::from_secs(30)),
-                )
-                .set_starttls(
-                    config
-                        .property_or_default((&prefix, "tls.enable"), "false")
-                        .unwrap_or_default(),
-                )
-                .set_no_tls_verify(
-                    config
-                        .property_or_default((&prefix, "tls.allow-invalid-certs"), "false")
-                        .unwrap_or_default(),
-                ),
+                .set_conn_timeout(config.timeout.into_inner())
+                .set_starttls(config.use_tls)
+                .set_no_tls_verify(config.allow_invalid_certs),
             bind_dn,
         );
 
         let mut mappings = LdapMappings {
-            base_dn: config.value_require((&prefix, "base-dn"))?.to_string(),
-            filter_name: LdapFilter::from_config(config, (&prefix, "filter.name")),
-            filter_email: LdapFilter::from_config(config, (&prefix, "filter.email")),
-            attr_name: config
-                .values((&prefix, "attributes.name"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_groups: config
-                .values((&prefix, "attributes.groups"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_type: config
-                .values((&prefix, "attributes.class"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_description: config
-                .values((&prefix, "attributes.description"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_secret: config
-                .values((&prefix, "attributes.secret"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_secret_changed: config
-                .values((&prefix, "attributes.secret-changed"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_email_address: config
-                .values((&prefix, "attributes.email"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_quota: config
-                .values((&prefix, "attributes.quota"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attr_email_alias: config
-                .values((&prefix, "attributes.email-alias"))
-                .map(|(_, v)| v.to_lowercase())
-                .collect(),
-            attrs_principal: vec!["objectClass".to_lowercase()],
+            base_dn: config.base_dn,
+            filter_login: LdapFilter::new(&config.filter_login)?,
+            filter_mailbox: LdapFilter::new(&config.filter_mailbox)?,
+            attr_class: config.attr_class,
+            attr_groups: config.attr_groups,
+            attr_description: config.attr_description,
+            attr_secret: config.attr_secret,
+            attr_secret_changed: config.attr_secret_changed,
+            attr_email: config.attr_email,
+            attr_email_alias: config.attr_email_alias,
+            group_class: config.group_class,
+            attrs_principal: vec![],
         };
 
         for attr in [
-            &mappings.attr_name,
-            &mappings.attr_type,
             &mappings.attr_description,
             &mappings.attr_secret,
             &mappings.attr_secret_changed,
-            &mappings.attr_quota,
             &mappings.attr_groups,
-            &mappings.attr_email_address,
             &mappings.attr_email_alias,
+            &mappings.attr_email,
+            &mappings.attr_class,
         ] {
             mappings
                 .attrs_principal
                 .extend(attr.iter().filter(|a| !a.is_empty()).cloned());
         }
 
-        let auth_bind = match config
-            .value((&prefix, "bind.auth.method"))
-            .unwrap_or("default")
-        {
-            "template" => AuthBind::Template {
-                template: LdapFilter::from_config(config, (&prefix, "bind.auth.template")),
-                can_search: config
-                    .property_or_default::<bool>((&prefix, "bind.auth.search"), "true")
-                    .unwrap_or(true),
-            },
-            "lookup" => AuthBind::Lookup,
-            "default" => AuthBind::None,
-            unknown => {
-                config.new_parse_error(
-                    (&prefix, "bind.auth.method"),
-                    format!("Unknown LDAP bind method: {unknown}"),
-                );
-                return None;
+        let auth_bind = match config.password_verification {
+            structs::LdapPasswordVerification::Local => AuthBind::None,
+            structs::LdapPasswordVerification::Bind(bind) => {
+                if let Some(template) = bind.bind_auth_template {
+                    AuthBind::BindTemplate {
+                        template: LdapFilter::new(&template)?,
+                        can_search: bind.bind_auth_search,
+                    }
+                } else {
+                    AuthBind::Bind
+                }
             }
         };
 
-        Some(LdapDirectory {
+        let pool = Pool::builder(manager)
+            .runtime(Runtime::Tokio1)
+            .max_size(config.pool_max_connections as usize)
+            .create_timeout(config.pool_timeout_create.into_inner().into())
+            .wait_timeout(config.pool_timeout_wait.into_inner().into())
+            .recycle_timeout(config.pool_timeout_recycle.into_inner().into())
+            .build()
+            .map_err(|err| format!("Failed to build LDAP pool: {err}"))?;
+
+        Ok(Directory::Ldap(LdapDirectory {
             mappings,
-            pool: build_pool(config, &prefix, manager)
-                .map_err(|e| {
-                    config.new_parse_error(prefix, format!("Failed to build LDAP pool: {e:?}"))
-                })
-                .ok()?,
+            pool,
             auth_bind,
-            data_store,
-        })
+        }))
     }
 }
 
 impl LdapFilter {
-    fn from_config(config: &mut Config, key: impl AsKey) -> Self {
-        if let Some(value) = config.value(key.clone()) {
-            let mut filter = Vec::new();
-            let mut token = String::new();
-            let mut value = value.chars();
+    fn new(value: &str) -> Result<Self, String> {
+        let mut filter = Vec::new();
+        let mut token = String::new();
+        let mut value = value.chars();
 
-            while let Some(ch) = value.next() {
-                match ch {
-                    '?' => {
-                        // For backwards compatibility, we treat '?' as a placeholder for the full value.
-                        if !token.is_empty() {
-                            filter.push(LdapFilterItem::Static(token));
-                            token = String::new();
-                        }
-                        filter.push(LdapFilterItem::Full);
+        while let Some(ch) = value.next() {
+            match ch {
+                '?' => {
+                    // For backwards compatibility, we treat '?' as a placeholder for the full value.
+                    if !token.is_empty() {
+                        filter.push(LdapFilterItem::Static(token));
+                        token = String::new();
                     }
-                    '{' => {
-                        if !token.is_empty() {
-                            filter.push(LdapFilterItem::Static(token));
-                            token = String::new();
-                        }
-                        for ch in value.by_ref() {
-                            if ch == '}' {
-                                break;
-                            } else {
-                                token.push(ch);
-                            }
-                        }
-                        match token.as_str() {
-                            "user" | "username" | "email" => filter.push(LdapFilterItem::Full),
-                            "local" => filter.push(LdapFilterItem::LocalPart),
-                            "domain" => filter.push(LdapFilterItem::DomainPart),
-                            _ => {
-                                config.new_parse_error(
-                                    key,
-                                    format!("Unknown LDAP filter placeholder: {}", token),
-                                );
-                                return Self::default();
-                            }
-                        }
-                        token.clear();
-                    }
-                    _ => token.push(ch),
+                    filter.push(LdapFilterItem::Full);
                 }
-            }
-
-            if !token.is_empty() {
-                filter.push(LdapFilterItem::Static(token));
-            }
-
-            if filter.len() >= 2 {
-                return LdapFilter { filter };
-            } else {
-                config.new_parse_error(
-                    key,
-                    format!("Missing parameter placeholders in value {:?}", value),
-                );
+                '{' => {
+                    if !token.is_empty() {
+                        filter.push(LdapFilterItem::Static(token));
+                        token = String::new();
+                    }
+                    for ch in value.by_ref() {
+                        if ch == '}' {
+                            break;
+                        } else {
+                            token.push(ch);
+                        }
+                    }
+                    match token.as_str() {
+                        "user" | "username" | "email" => filter.push(LdapFilterItem::Full),
+                        "local" => filter.push(LdapFilterItem::LocalPart),
+                        "domain" => filter.push(LdapFilterItem::DomainPart),
+                        _ => {
+                            return Err(format!("Unknown LDAP filter placeholder: {}", token));
+                        }
+                    }
+                    token.clear();
+                }
+                _ => token.push(ch),
             }
         }
 
-        Self::default()
+        if !token.is_empty() {
+            filter.push(LdapFilterItem::Static(token));
+        }
+
+        if filter.len() >= 2 {
+            Ok(LdapFilter { filter })
+        } else {
+            Err(format!(
+                "Missing parameter placeholders in value {:?}",
+                value
+            ))
+        }
     }
 }

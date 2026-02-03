@@ -5,7 +5,7 @@
  */
 
 use super::ZenohPubSub;
-use crate::dispatch::pubsub::{Msg, PubSubStream};
+use crate::{Msg, PubSubStream};
 use trc::{ClusterEvent, Error, EventType};
 
 pub struct ZenohPubSubStream {

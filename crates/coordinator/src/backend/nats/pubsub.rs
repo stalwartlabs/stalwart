@@ -5,7 +5,7 @@
  */
 
 use super::NatsPubSub;
-use crate::dispatch::pubsub::{Msg, PubSubStream};
+use crate::{Msg, PubSubStream};
 use futures::StreamExt;
 use trc::{ClusterEvent, Error, EventType};
 

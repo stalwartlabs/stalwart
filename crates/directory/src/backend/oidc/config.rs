@@ -4,76 +4,44 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use base64::{Engine, engine::general_purpose};
-use store::Store;
-use utils::config::{Config, utils::AsKey};
-
-use super::{Authentication, EndpointType, OpenIdConfig, OpenIdDirectory};
+use super::OpenIdDirectory;
+use crate::Directory;
+use registry::schema::structs;
 
 impl OpenIdDirectory {
-    pub fn from_config(config: &mut Config, prefix: impl AsKey, data_store: Store) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let endpoint_type = match config.value_require((&prefix, "endpoint.method"))? {
-            "introspect" => match config.value_require((&prefix, "auth.method"))? {
-                #[allow(clippy::to_string_in_format_args)]
-                "basic" => EndpointType::Introspect(Authentication::Header(format!(
-                    "Basic {}",
-                    general_purpose::STANDARD.encode(
-                        format!(
-                            "{}:{}",
-                            config
-                                .value_require((&prefix, "auth.username"))?
-                                .to_string(),
-                            config.value_require((&prefix, "auth.secret"))?
-                        )
-                        .as_bytes()
-                    )
-                ))),
-                "token" => EndpointType::Introspect(Authentication::Header(format!(
-                    "Bearer {}",
-                    config.value_require((&prefix, "auth.token"))?
-                ))),
-                "user-token" => EndpointType::Introspect(Authentication::Bearer),
-                "none" => EndpointType::Introspect(Authentication::None),
-                _ => {
-                    config.new_build_error(
-                        (&prefix, "auth.method"),
-                        "Invalid authentication method, must be 'header', 'bearer' or 'none'",
-                    );
-                    return None;
+    pub fn open(config: structs::OidcDirectory) -> Result<Directory, String> {
+        Ok(Directory::OpenId(match config {
+            structs::OidcDirectory::UserInfo(config) => OpenIdDirectory::UserInfo {
+                endpoint: config.endpoint,
+                timeout: config.timeout.into_inner(),
+                allow_invalid_certs: config.allow_invalid_certs,
+                claim_email: config.claim_email,
+                claim_name: config.claim_name,
+            },
+            structs::OidcDirectory::Introspect(config) => {
+                let client = config.http_auth.build_http_client(
+                    config.http_headers,
+                    None,
+                    config.timeout,
+                    config.allow_invalid_certs,
+                )?;
+                OpenIdDirectory::Introspect {
+                    client,
+                    endpoint: config.endpoint,
+                    claim_email: config.claim_email,
+                    claim_name: config.claim_name,
+                    require_aud: config.require_audience,
+                    require_scopes: config.require_scopes,
                 }
-            },
-            "userinfo" => EndpointType::UserInfo,
-            _ => {
-                config.new_build_error(
-                    (&prefix, "endpoint.method"),
-                    "Invalid endpoint method, must be 'introspect' or 'userinfo'",
-                );
-                return None;
             }
-        };
-
-        let email_field = config.value_require((&prefix, "fields.email"))?.to_string();
-
-        Some(OpenIdDirectory {
-            config: OpenIdConfig {
-                endpoint: config.value_require((&prefix, "endpoint.url"))?.to_string(),
-                endpoint_type,
-                endpoint_timeout: config
-                    .property_or_default::<Duration>((&prefix, "timeout"), "30s")
-                    .unwrap_or_else(|| Duration::from_secs(30)),
-                username_field: config
-                    .value((&prefix, "fields.username"))
-                    .filter(|&v| v != email_field)
-                    .map(|v| v.to_string()),
-                email_field,
-                full_name_field: config
-                    .value((&prefix, "fields.full-name"))
-                    .map(|v| v.to_string()),
+            structs::OidcDirectory::Jwt(config) => OpenIdDirectory::Jwt {
+                jwks_url: config.jwks_url,
+                jwks_cache: config.jwks_cache_duration.into_inner(),
+                claim_email: config.claim_email,
+                claim_name: config.claim_name,
+                require_aud: config.require_audience,
+                require_iss: config.require_issuer,
             },
-            data_store,
-        })
+        }))
     }
 }

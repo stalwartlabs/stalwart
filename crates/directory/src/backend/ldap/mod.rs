@@ -6,34 +6,40 @@
 
 use deadpool::managed::Pool;
 use ldap3::{LdapConnSettings, ldap_escape};
-use store::Store;
 
 pub mod config;
 pub mod lookup;
 pub mod pool;
 
+pub(crate) enum AuthBind {
+    Bind,
+    BindTemplate {
+        template: LdapFilter,
+        can_search: bool,
+    },
+    None,
+}
+
 pub struct LdapDirectory {
     pool: Pool<LdapConnectionManager>,
     mappings: LdapMappings,
     auth_bind: AuthBind,
-    pub(crate) data_store: Store,
 }
 
 #[derive(Debug, Default)]
 pub struct LdapMappings {
     base_dn: String,
-    filter_name: LdapFilter,
-    filter_email: LdapFilter,
-    attr_name: Vec<String>,
-    attr_type: Vec<String>,
+    filter_login: LdapFilter,
+    filter_mailbox: LdapFilter,
+    attr_class: Vec<String>,
     attr_groups: Vec<String>,
     attr_description: Vec<String>,
     attr_secret: Vec<String>,
     attr_secret_changed: Vec<String>,
-    attr_email_address: Vec<String>,
+    attr_email: Vec<String>,
     attr_email_alias: Vec<String>,
-    attr_quota: Vec<String>,
     attrs_principal: Vec<String>,
+    group_class: String,
 }
 
 #[derive(Debug, Default)]
@@ -102,13 +108,4 @@ impl Bind {
     pub fn new(dn: String, password: String) -> Self {
         Self { dn, password }
     }
-}
-
-pub(crate) enum AuthBind {
-    Template {
-        template: LdapFilter,
-        can_search: bool,
-    },
-    Lookup,
-    None,
 }

@@ -30,7 +30,7 @@ impl MysqlStore {
             .client_found_rows(true)
             .tcp_port(config.port as u16);
 
-        if config.enable_tls {
+        if config.use_tls {
             opts = opts.ssl_opts(Some(
                 SslOpts::default()
                     .with_danger_accept_invalid_certs(config.allow_invalid_certs)

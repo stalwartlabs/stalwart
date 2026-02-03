@@ -11,7 +11,6 @@ use crate::{
 };
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
-use store::Stores;
 use utils::config::Config;
 
 pub struct ReloadResult {

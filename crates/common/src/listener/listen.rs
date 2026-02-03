@@ -12,7 +12,6 @@ use crate::{
     Inner, Server,
     config::server::{Listener, Listeners, ServerProtocol, TcpListener},
     core::BuildServer,
-    manager::bootstrap::Bootstrap,
 };
 use proxy_header::io::ProxiedStream;
 use rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256;
@@ -21,6 +20,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use store::registry::bootstrap::Bootstrap;
 use tokio::{net::TcpStream, sync::watch};
 use tokio_rustls::server::TlsStream;
 use trc::{EventType, HttpEvent, ImapEvent, ManageSieveEvent, Pop3Event, SmtpEvent};

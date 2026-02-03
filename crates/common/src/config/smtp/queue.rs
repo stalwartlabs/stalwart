@@ -7,7 +7,10 @@
 use super::*;
 use crate::{
     config::server::ServerProtocol,
-    expr::{if_block::IfBlock, *},
+    expr::{
+        if_block::{BootstrapExprExt, IfBlock},
+        *,
+    },
 };
 use ahash::AHashMap;
 use mail_auth::IpLookupStrategy;

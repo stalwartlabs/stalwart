@@ -12,19 +12,16 @@ pub mod lookup;
 pub struct SqlDirectory {
     sql_store: Store,
     mappings: SqlMappings,
-    pub(crate) data_store: Store,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct SqlMappings {
-    query_name: String,
-    query_members: String,
-    query_emails: String,
-    query_recipients: String,
-    query_secrets: String,
-    column_description: String,
-    column_secret: String,
+    query_login: String,
+    query_recipient: String,
+    query_member_of: Option<String>,
+    query_email_aliases: Option<String>,
     column_email: String,
-    column_quota: String,
-    column_type: String,
+    column_secret: String,
+    column_type: Option<String>,
+    column_description: Option<String>,
 }

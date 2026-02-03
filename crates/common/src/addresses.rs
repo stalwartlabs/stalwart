@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use directory::{Directory, backend::RcptType};
+use directory::Directory;
 use registry::schema::enums::ExpressionVariable;
 use std::borrow::Cow;
 use utils::config::{Config, utils::AsKey};

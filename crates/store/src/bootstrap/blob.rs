@@ -11,7 +11,7 @@ use registry::schema::{prelude::Object, structs};
 impl BlobStore {
     pub async fn build(bp: &mut Bootstrap) -> Option<Self> {
         let result = match bp.setting_infallible::<structs::BlobStore>().await {
-            structs::BlobStore::Default => return None,
+            structs::BlobStore::Default => return Some(BlobStore::Store(bp.data_store.clone())),
             #[cfg(feature = "foundation")]
             structs::BlobStore::FoundationDb(foundation_db_store) => {
                 crate::backend::foundationdb::FdbStore::open(foundation_db_store)

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Server, manager::bootstrap::Bootstrap};
+use crate::Server;
 use mail_auth::{
     MessageAuthenticator,
     hickory_resolver::{
@@ -26,6 +26,7 @@ use std::{
     net::SocketAddr,
     sync::Arc,
 };
+use store::registry::bootstrap::Bootstrap;
 use utils::{cache::CacheItemWeight, config::utils::ParseValue};
 
 pub struct Resolvers {

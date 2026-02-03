@@ -6,7 +6,7 @@
 
 use crate::{
     KV_RATE_LIMIT_AUTH, KV_RATE_LIMIT_LOITER, KV_RATE_LIMIT_RCPT, KV_RATE_LIMIT_SCAN, Server,
-    ip_to_bytes, ipc::BroadcastEvent, manager::bootstrap::Bootstrap,
+    ip_to_bytes, ipc::BroadcastEvent,
 };
 use ahash::AHashSet;
 use registry::{
@@ -17,7 +17,7 @@ use registry::{
     types::{datetime::UTCDateTime, ipmask::IpAddrOrMask},
 };
 use std::{fmt::Debug, net::IpAddr};
-use store::write::now;
+use store::{registry::bootstrap::Bootstrap, write::now};
 use trc::AddContext;
 use utils::glob::{GlobPattern, MatchType};
 

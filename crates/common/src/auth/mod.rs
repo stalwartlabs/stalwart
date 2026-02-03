@@ -5,10 +5,6 @@
  */
 
 use crate::{Server, listener::limiter::ConcurrencyLimiter};
-use directory::{
-    Directory, FALLBACK_ADMIN_ID, Permission, Permissions, Principal, QueryParams, Type,
-    backend::internal::lookup::DirectoryStore, core::secret::verify_secret_hash,
-};
 use mail_send::Credentials;
 use oauth::GrantType;
 use std::{net::IpAddr, sync::Arc};

@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
-use directory::Permission;
 use sieve::{FunctionMap, compiler::Number, runtime::Variable};
+use std::time::Instant;
 use trc::{AiEvent, SecurityEvent};
 
 use super::PluginContext;

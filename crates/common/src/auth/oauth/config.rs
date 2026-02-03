@@ -6,7 +6,7 @@
 
 use crate::{
     config::{build_ecdsa_pem, build_rsa_keypair},
-    manager::{bootstrap::Bootstrap, webadmin::Resource},
+    manager::webadmin::Resource,
 };
 use biscuit::{
     jwa::{Algorithm, SignatureAlgorithm},
@@ -20,7 +20,10 @@ use biscuit::{
 use registry::schema::{enums::JwtSignatureAlgorithm, prelude::Object, structs::Authentication};
 use ring::signature::{self, KeyPair};
 use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey, traits::PublicKeyParts};
-use store::rand::{Rng, distr::Alphanumeric, rng};
+use store::{
+    rand::{Rng, distr::Alphanumeric, rng},
+    registry::bootstrap::Bootstrap,
+};
 use x509_parser::num_bigint::BigUint;
 
 #[derive(Clone)]

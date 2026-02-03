@@ -5,7 +5,10 @@
  */
 
 use super::*;
-use crate::expr::{Variable, if_block::IfBlock};
+use crate::expr::{
+    Variable,
+    if_block::{BootstrapExprExt, IfBlock},
+};
 use registry::schema::{
     enums::ExpressionConstant,
     prelude::Object,

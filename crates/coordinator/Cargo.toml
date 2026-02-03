@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 utils = { path =  "../utils" }
 store = { path =  "../store" }
+registry = { path =  "../registry" }
 trc = { path = "../trc" }
 futures = { version = "0.3", optional = true }
 tokio = { version = "1.47", features = ["sync", "fs", "io-util"] }

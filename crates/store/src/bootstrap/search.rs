@@ -15,7 +15,9 @@ use registry::schema::{prelude::Object, structs};
 impl SearchStore {
     pub async fn build(bp: &mut Bootstrap) -> Option<Self> {
         let result = match bp.setting_infallible::<structs::SearchStore>().await {
-            structs::SearchStore::Default => return None,
+            structs::SearchStore::Default => {
+                return Some(SearchStore::Store(bp.data_store.clone()));
+            }
             structs::SearchStore::ElasticSearch(elastic_search_store) => {
                 ElasticSearchStore::open(elastic_search_store).await
             }
