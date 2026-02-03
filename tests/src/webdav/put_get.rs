@@ -60,6 +60,88 @@ pub async fn test(test: &WebDavTest) {
             .with_body(content);
     }
 
+    // Test GET with range (FromTo)
+    for (path, (content, ct, etag)) in &files {
+        if path.ends_with("file1.txt") {
+            let content_bytes = content.as_bytes();
+            let range_start = 5;
+            let range_end = 15;
+            let expected_body = &content_bytes[range_start..=range_end];
+            client
+                .request_with_headers("GET", path, [("range", &format!("bytes={}-{}", range_start, range_end))], "")
+                .await
+                .with_status(StatusCode::PARTIAL_CONTENT)
+                .with_header("content-range", &format!("bytes {}-{}/{}", range_start, range_end, content_bytes.len()))
+                .with_header("content-type", ct)
+                .with_body(expected_body);
+        }
+    }
+
+    // Test GET with range (From)
+    for (path, (content, ct, etag)) in &files {
+        if path.ends_with("file1.txt") {
+            let content_bytes = content.as_bytes();
+            let range_start = 10;
+            let expected_body = &content_bytes[range_start..];
+            client
+                .request_with_headers("GET", path, [("range", &format!("bytes={}-", range_start))], "")
+                .await
+                .with_status(StatusCode::PARTIAL_CONTENT)
+                .with_header("content-range", &format!("bytes {}-{}/{}", range_start, content_bytes.len() - 1, content_bytes.len()))
+                .with_header("content-type", ct)
+                .with_body(expected_body);
+        }
+    }
+
+    // Test GET with range (Last)
+    for (path, (content, ct, etag)) in &files {
+        if path.ends_with("file1.txt") {
+            let content_bytes = content.as_bytes();
+            let suffix = 20;
+            let start = content_bytes.len().saturating_sub(suffix);
+            let expected_body = &content_bytes[start..];
+            client
+                .request_with_headers("GET", path, [("range", &format!("bytes=-{}", suffix))], "")
+                .await
+                .with_status(StatusCode::PARTIAL_CONTENT)
+                .with_header("content-range", &format!("bytes {}-{}/{}", start, content_bytes.len() - 1, content_bytes.len()))
+                .with_header("content-type", ct)
+                .with_body(expected_body);
+        }
+    }
+
+    // Test GET with invalid range
+    for (path, (content, _, _)) in &files {
+        if path.ends_with("file1.txt") {
+            let content_len = content.len();
+            // Invalid range: start > end
+            client
+                .request_with_headers("GET", path, [("range", &format!("bytes={}-{}", content_len, content_len - 1))], "")
+                .await
+                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+            // Invalid range: start >= file_size
+            client
+                .request_with_headers("GET", path, [("range", &format!("bytes={}-", content_len))], "")
+                .await
+                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+            // Multiple ranges: should be rejected
+            client
+                .request_with_headers("GET", path, [("range", "bytes=0-10,20-30")], "")
+                .await
+                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+            // Intersecting ranges
+            client
+                .request_with_headers("GET", path, [("range", "bytes=0-20,10-30")], "")
+                .await
+                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+            // Range with Last in multiple
+            client
+                .request_with_headers("GET", path, [("range", "bytes=0-10,-20")], "")
+                .await
+                .with_status(StatusCode::RANGE_NOT_SATISFIABLE);
+        }
+    }
+
     // PUT under a non-existing parent should fail
     for (path, contents) in [
         ("/dav/file/john/foo/file1.txt", TEST_FILE_1),

@@ -49,6 +49,7 @@ pub struct RequestHeaders<'x> {
     pub ret: Return,
     pub depth_no_root: bool,
     pub if_: Vec<If<'x>>,
+    pub range: Option<HttpRange>,
 }
 
 pub struct ResourceState<T: AsRef<str>> {
@@ -98,6 +99,27 @@ pub enum Depth {
     None,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct HttpRange {
+    pub ranges: tinyvec::TinyVec<[RangeSpec; 1]>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum RangeSpec {
+    /// bytes=start-end
+    FromTo { start: u64, end: u64 },
+    /// bytes=start-
+    From { start: u64 },
+    /// bytes=-suffix
+    Last { suffix: u64 },
+}
+
+impl Default for RangeSpec {
+    fn default() -> Self {
+        RangeSpec::FromTo { start: 0, end: 0 }
+    }
+}
+
 impl From<&RequestHeaders<'_>> for Value {
     fn from(headers: &RequestHeaders<'_>) -> Self {
         let mut values = Vec::with_capacity(4);
@@ -117,6 +139,18 @@ impl From<&RequestHeaders<'_>> for Value {
                 Timeout::Second(n) => Value::Int(n as i64),
                 Timeout::None => Value::None,
             });
+        }
+        if let Some(range) = &headers.range {
+            values.push(CompactString::const_new("Range").into());
+            let mut specs = Vec::new();
+            for spec in &range.ranges {
+                specs.push(match spec {
+                    RangeSpec::FromTo { start, end } => format!("{}-{}", start, end),
+                    RangeSpec::From { start } => format!("{}-", start),
+                    RangeSpec::Last { suffix } => format!("-{}", suffix),
+                });
+            }
+            values.push(format!("bytes={}", specs.join(",")).into());
         }
         for (name, header_value) in [
             ("Content-Type", headers.content_type),

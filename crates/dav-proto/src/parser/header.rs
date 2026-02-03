@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Condition, Depth, If, RequestHeaders, ResourceState, Return, Timeout};
+use crate::{Condition, Depth, HttpRange, If, RangeSpec, RequestHeaders, ResourceState, Return, Timeout};
 use calcard::vcard::VCardVersion;
 
 impl<'x> RequestHeaders<'x> {
@@ -105,6 +105,12 @@ impl<'x> RequestHeaders<'x> {
             "Schedule-Reply" => {
                 self.no_schedule_reply = value == "F";
                 return true;
+            },
+            "Range" => {
+                if let Some(range) = HttpRange::parse(value) {
+                    self.range = Some(range);
+                    return true;
+                }
             },
             _ => {}
         );
@@ -323,6 +329,98 @@ impl Depth {
             "infinity" => Depth::Infinity,
             "infinite" => Depth::Infinity,
         )
+    }
+}
+
+impl HttpRange {
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if !value.starts_with("bytes=") {
+            return None;
+        }
+        let range_specs = &value[6..];
+        let mut ranges = tinyvec::TinyVec::new();
+        for spec in range_specs.split(',') {
+            let spec = spec.trim();
+            if let Some(range_spec) = RangeSpec::parse(spec) {
+                ranges.push(range_spec);
+            } else {
+                return None;
+            }
+        }
+        if ranges.is_empty() || ranges.len() > 10 {
+            return None;
+        }
+        // Validate no intersections
+        if !Self::validate_ranges(&ranges) {
+            return None;
+        }
+        Some(HttpRange { ranges })
+    }
+
+    // RFC 9110, Section 14.2: A client SHOULD NOT request multiple ranges that are inherently less efficient to process and transfer than a single range that encompasses the same data.
+    fn validate_ranges(ranges: &[RangeSpec]) -> bool {
+        if ranges.len() > 1 && ranges.iter().any(|r| matches!(r, RangeSpec::Last { .. })) {
+            return false;
+        }
+        let mut normalized = Vec::with_capacity(ranges.len());
+        for spec in ranges {
+            match spec {
+                RangeSpec::FromTo { start, end } => {
+                    if *start > *end {
+                        return false;
+                    }
+                    normalized.push((*start, *end));
+                }
+                RangeSpec::From { start } => {
+                    normalized.push((*start, u64::MAX));
+                }
+                RangeSpec::Last { suffix: _ } => {
+                    // Last is handled above, assume single
+                    normalized.push((0, u64::MAX));
+                }
+            }
+        }
+        // Sort by start
+        normalized.sort_by_key(|(s, _)| *s);
+        // Check for overlaps
+        for i in 1..normalized.len() {
+            let (_, prev_end) = normalized[i - 1];
+            let (curr_start, _) = normalized[i];
+            if prev_end >= curr_start {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl RangeSpec {
+    pub fn parse(spec: &str) -> Option<Self> {
+        if let Some((start, end)) = spec.split_once('-') {
+            if !start.is_empty() && !end.is_empty() {
+                // bytes=start-end
+                let start = start.parse::<u64>().ok()?;
+                let end = end.parse::<u64>().ok()?;
+                if start <= end {
+                    Some(RangeSpec::FromTo { start, end })
+                } else {
+                    None
+                }
+            } else if !start.is_empty() {
+                // bytes=start-
+                let start = start.parse::<u64>().ok()?;
+                Some(RangeSpec::From { start })
+            } else if !end.is_empty() {
+                // bytes=-suffix
+                let suffix = end.parse::<u64>().ok()?;
+                Some(RangeSpec::Last { suffix })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 

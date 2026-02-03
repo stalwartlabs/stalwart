@@ -14,7 +14,7 @@ use crate::{
     file::DavFileResource,
 };
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
-use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
+use dav_proto::{HttpRange, RangeSpec, RequestHeaders, schema::property::Rfc1123DateTime};
 use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -104,21 +104,93 @@ impl FileGetRequestHandler for Server {
         )
         .await?;
 
-        let response = HttpResponse::new(StatusCode::OK)
+        // Check for range request
+        let (status, content_range, range_start, range_end) = if let Some(range) = &headers.range {
+            let file_size = size as u64;
+            if range.ranges.len() > 1 {
+                trc::event!(
+                    WebDav(trc::WebDavEvent::Error),
+                    Reason = "Multiple ranges not supported",
+                );
+                return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
+            }
+            let spec = &range.ranges[0];
+            match spec {
+                RangeSpec::FromTo { start, end } => {
+                    if *start >= file_size || *start > *end {
+                        trc::event!(
+                            WebDav(trc::WebDavEvent::Error),
+                            Reason = format!("Invalid range: start={} end={} file_size={}", start, end, file_size),
+                        );
+                        return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
+                    }
+                    let actual_end = (*end).min(file_size - 1);
+                    (
+                        StatusCode::PARTIAL_CONTENT,
+                        Some(format!("bytes {}-{}/{}", start, actual_end, file_size)),
+                        *start as usize,
+                        (actual_end + 1) as usize,
+                    )
+                }
+                RangeSpec::From { start } => {
+                    if *start >= file_size {
+                        trc::event!(
+                            WebDav(trc::WebDavEvent::Error),
+                            Reason = format!("Invalid range: start={} >= file_size={}", start, file_size),
+                        );
+                        return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
+                    }
+                    (
+                        StatusCode::PARTIAL_CONTENT,
+                        Some(format!("bytes {}-{}/{}", start, file_size - 1, file_size)),
+                        *start as usize,
+                        size,
+                    )
+                }
+                RangeSpec::Last { suffix } => {
+                    if *suffix == 0 {
+                        trc::event!(
+                            WebDav(trc::WebDavEvent::Error),
+                            Reason = "Invalid range: suffix=0",
+                        );
+                        return Err(DavError::Code(StatusCode::RANGE_NOT_SATISFIABLE));
+                    }
+                    let start = if *suffix >= file_size { 0 } else { file_size - *suffix };
+                    (
+                        StatusCode::PARTIAL_CONTENT,
+                        Some(format!("bytes {}-{}/{}", start, file_size - 1, file_size)),
+                        start as usize,
+                        size,
+                    )
+                }
+            }
+        } else {
+            (StatusCode::OK, None, 0, size)
+        };
+
+        let mut response = HttpResponse::new(status)
             .with_content_type(content_type.unwrap_or("application/octet-stream"))
             .with_etag(etag)
             .with_last_modified(Rfc1123DateTime::new(i64::from(node.modified)).to_string());
 
+        if let Some(content_range) = content_range {
+            response = response.with_header("Content-Range", content_range);
+        }
+
         if !is_head {
-            Ok(response.with_binary_body(
-                self.blob_store()
-                    .get_blob(hash, 0..usize::MAX)
-                    .await
-                    .caused_by(trc::location!())?
-                    .ok_or(DavError::Code(StatusCode::NOT_FOUND))?,
-            ))
+            let body = self.blob_store()
+                .get_blob(hash, range_start..range_end)
+                .await
+                .caused_by(trc::location!())?
+                .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+            Ok(response.with_binary_body(body))
         } else {
-            Ok(response.with_content_length(size))
+            if status == StatusCode::PARTIAL_CONTENT {
+                response = response.with_content_length(range_end - range_start);
+            } else {
+                response = response.with_content_length(size);
+            }
+            Ok(response)
         }
     }
 }

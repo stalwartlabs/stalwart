@@ -1674,6 +1674,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "tinyvec",
  "trc",
  "types",
 ]
@@ -2228,9 +2229,9 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fancy-regex"
-version = "0.14.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+checksum = "72cf461f865c862bb7dc573f643dd6a2b6842f7c30b07882b56bd148cc2761b8"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -7244,9 +7245,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "sieve-rs"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ada516ead6adf4f915e69fcb123640bcf23a9b29fc4b537145487e91af7a594"
+checksum = "37baebe7a22af73f881c1856c620680444f6ea99482a7734a13f7fc570d17028"
 dependencies = [
  "ahash",
  "arc-swap",
