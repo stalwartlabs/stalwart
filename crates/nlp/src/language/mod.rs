@@ -15,7 +15,6 @@ use crate::tokenizers::{
     word::WordTokenizer,
 };
 use std::borrow::Cow;
-use utils::config::utils::ParseValue;
 
 pub type LanguageTokenizer<'x> = Box<dyn Iterator<Item = Token<Cow<'x, str>>> + 'x + Sync + Send>;
 
@@ -205,11 +204,5 @@ impl Language {
                 .unwrap_or(default);
             (text, l)
         }
-    }
-}
-
-impl ParseValue for Language {
-    fn parse_value(value: &str) -> utils::config::Result<Self> {
-        Language::from_iso_639(value).ok_or_else(|| format!("Invalid language code: {}", value))
     }
 }

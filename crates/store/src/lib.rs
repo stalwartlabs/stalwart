@@ -24,7 +24,6 @@ pub use xxhash_rust;
 use ahash::AHashMap;
 use backend::{fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
-use utils::config::cron::SimpleCron;
 use write::ValueClass;
 
 use crate::backend::{elastic::ElasticSearchStore, meili::MeiliSearchStore};
@@ -272,20 +271,6 @@ impl Default for SearchStore {
     fn default() -> Self {
         Self::Store(Store::None)
     }
-}
-
-#[derive(Clone)]
-pub enum PurgeStore {
-    Data(Store),
-    Blobs { store: Store, blob_store: BlobStore },
-    Lookup(InMemoryStore),
-}
-
-#[derive(Clone)]
-pub struct PurgeSchedule {
-    pub cron: SimpleCron,
-    pub store_id: String,
-    pub store: PurgeStore,
 }
 
 #[derive(Clone, Debug, PartialEq)]

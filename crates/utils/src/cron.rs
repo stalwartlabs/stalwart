@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
 use chrono::{Datelike, Local, TimeDelta, TimeZone, Timelike};
-
-use super::utils::ParseValue;
+use std::{str::FromStr, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimpleCron {
@@ -71,8 +68,10 @@ impl SimpleCron {
     }
 }
 
-impl ParseValue for SimpleCron {
-    fn parse_value(value: &str) -> super::Result<Self> {
+impl FromStr for SimpleCron {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         let mut hour = 0;
         let mut minute = 0;
 

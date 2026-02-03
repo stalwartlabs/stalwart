@@ -22,7 +22,6 @@ use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::fmt::Display;
 use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign};
-use utils::config::utils::ParseValue;
 use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,59 +267,6 @@ pub trait SearchableField: Sized {
     fn all_fields() -> &'static [SearchField];
     fn is_indexed(&self) -> bool;
     fn is_text(&self) -> bool;
-}
-
-impl ParseValue for SearchField {
-    fn parse_value(value: &str) -> utils::config::Result<Self> {
-        Ok(match value {
-            // Email
-            "email-from" => Self::Email(EmailSearchField::From),
-            "email-to" => Self::Email(EmailSearchField::To),
-            "email-cc" => Self::Email(EmailSearchField::Cc),
-            "email-bcc" => Self::Email(EmailSearchField::Bcc),
-            "email-subject" => Self::Email(EmailSearchField::Subject),
-            "email-body" => Self::Email(EmailSearchField::Body),
-            "email-attachment" => Self::Email(EmailSearchField::Attachment),
-            "email-received-at" => Self::Email(EmailSearchField::ReceivedAt),
-            "email-sent-at" => Self::Email(EmailSearchField::SentAt),
-            "email-size" => Self::Email(EmailSearchField::Size),
-            "email-has-attachment" => Self::Email(EmailSearchField::HasAttachment),
-            "email-headers" => Self::Email(EmailSearchField::Headers),
-
-            // Calendar
-            "cal-title" => Self::Calendar(CalendarSearchField::Title),
-            "cal-desc" => Self::Calendar(CalendarSearchField::Description),
-            "cal-location" => Self::Calendar(CalendarSearchField::Location),
-            "cal-owner" => Self::Calendar(CalendarSearchField::Owner),
-            "cal-attendee" => Self::Calendar(CalendarSearchField::Attendee),
-            "cal-start" => Self::Calendar(CalendarSearchField::Start),
-            "cal-uid" => Self::Calendar(CalendarSearchField::Uid),
-
-            // Contact
-            "contact-member" => Self::Contact(ContactSearchField::Member),
-            "contact-kind" => Self::Contact(ContactSearchField::Kind),
-            "contact-name" => Self::Contact(ContactSearchField::Name),
-            "contact-nickname" => Self::Contact(ContactSearchField::Nickname),
-            "contact-org" => Self::Contact(ContactSearchField::Organization),
-            "contact-email" => Self::Contact(ContactSearchField::Email),
-            "contact-phone" => Self::Contact(ContactSearchField::Phone),
-            "contact-online-service" => Self::Contact(ContactSearchField::OnlineService),
-            "contact-address" => Self::Contact(ContactSearchField::Address),
-            "contact-note" => Self::Contact(ContactSearchField::Note),
-            "contact-uid" => Self::Contact(ContactSearchField::Uid),
-
-            // File
-            "file-name" => Self::File(FileSearchField::Name),
-            "file-content" => Self::File(FileSearchField::Content),
-
-            // Tracing
-            "trace-event-type" => Self::Tracing(TracingSearchField::EventType),
-            "trace-queue-id" => Self::Tracing(TracingSearchField::QueueId),
-            "trace-keywords" => Self::Tracing(TracingSearchField::Keywords),
-
-            _ => return Err(format!("Unknown search field: {value}")),
-        })
-    }
 }
 
 impl Eq for SearchFilter {}

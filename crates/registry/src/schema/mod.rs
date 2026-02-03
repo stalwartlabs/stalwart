@@ -14,10 +14,8 @@ use crate::{
 use std::{collections::HashMap, fmt::Display};
 use utils::{
     Client, HeaderMap,
-    config::{
-        cron::SimpleCron,
-        http::{build_http_client, build_http_headers},
-    },
+    cron::SimpleCron,
+    http::{build_http_client, build_http_headers},
 };
 
 #[allow(clippy::derivable_impls)]

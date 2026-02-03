@@ -26,7 +26,7 @@ use registry::{
     types::id::Id,
 };
 use std::sync::Arc;
-use store::Store;
+use store::{Store, registry::bootstrap::Bootstrap};
 use trc::MetricType;
 use utils::template::Template;
 

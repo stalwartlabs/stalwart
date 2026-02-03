@@ -5,7 +5,6 @@
  */
 
 use jmap_tools::{Element, Property, Value};
-use utils::config::utils::ParseValue;
 
 #[derive(
     rkyv::Archive,
@@ -106,12 +105,6 @@ impl From<&ArchivedSpecialUse> for SpecialUse {
             ArchivedSpecialUse::Snoozed => SpecialUse::Snoozed,
             ArchivedSpecialUse::None => SpecialUse::None,
         }
-    }
-}
-
-impl ParseValue for SpecialUse {
-    fn parse_value(value: &str) -> Result<Self, String> {
-        SpecialUse::parse(value).ok_or_else(|| format!("Unknown folder role {:?}", value))
     }
 }
 
