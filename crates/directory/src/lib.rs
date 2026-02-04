@@ -54,6 +54,7 @@ pub struct Group {
 
 #[derive(Default, Clone, Debug)]
 pub struct Directories {
+    pub default_directory: Option<Arc<Directory>>,
     pub directories: AHashMap<Id, Arc<Directory>>,
 }
 

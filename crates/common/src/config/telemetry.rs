@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::{AHashMap, AHashSet, HashSet};
+use ahash::{AHashMap, AHashSet};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::HeaderMap;
 use opentelemetry::{InstrumentationScope, KeyValue, logs::LoggerProvider};

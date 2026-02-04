@@ -8,7 +8,7 @@ use super::server::tls::build_self_signed_cert;
 use crate::{
     CacheSwap, Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache,
     MessageUidCache, TlsConnectors,
-    auth::{AccessToken, roles::RolePermissions},
+    auth::AccessToken,
     config::{
         mailstore::spamfilter::SpamClassifier,
         server::tls::parse_certificates,
@@ -40,7 +40,7 @@ impl Data {
         let mut subject_names = AHashSet::new();
         parse_certificates(bp, &mut certificates, &mut subject_names);
         if subject_names.is_empty() {
-            subject_names.insert("localhost".to_string());
+            subject_names.insert("localhost".into());
         }
 
         // Build and test snowflake id generator
@@ -56,7 +56,10 @@ impl Data {
             spam_classifier: ArcSwap::from_pointee(SpamClassifier::default()),
             tls_certificates: ArcSwap::from_pointee(certificates),
             tls_self_signed_cert: build_self_signed_cert(
-                subject_names.into_iter().collect::<Vec<_>>(),
+                subject_names
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>(),
             )
             .or_else(|err| {
                 bp.build_error(
@@ -79,6 +82,7 @@ impl Data {
             logos: Default::default(),
             smtp_connectors: TlsConnectors::default(),
             asn_geo_data: Default::default(),
+            lookup_stores: Default::default(),
         }
     }
 }
@@ -93,10 +97,6 @@ impl Caches {
                 (std::mem::size_of::<AccessToken>() + 255) as u64,
             ),
             http_auth: Cache::new(cache.http_auth, (50 + std::mem::size_of::<u32>()) as u64),
-            permissions: Cache::new(
-                cache.permissions,
-                std::mem::size_of::<RolePermissions>() as u64,
-            ),
             messages: Cache::new(
                 cache.messages,
                 (std::mem::size_of::<u32>()
@@ -155,11 +155,11 @@ impl Caches {
     ) -> Parameters<
         '_,
         T,
-        CacheWithTtl<String, Txt>,
-        CacheWithTtl<String, Arc<Vec<MX>>>,
-        CacheWithTtl<String, Arc<Vec<Ipv4Addr>>>,
-        CacheWithTtl<String, Arc<Vec<Ipv6Addr>>>,
-        CacheWithTtl<IpAddr, Arc<Vec<String>>>,
+        CacheWithTtl<Box<str>, Txt>,
+        CacheWithTtl<Box<str>, Arc<Box<[MX]>>>,
+        CacheWithTtl<Box<str>, Arc<Box<[Ipv4Addr]>>>,
+        CacheWithTtl<Box<str>, Arc<Box<[Ipv6Addr]>>>,
+        CacheWithTtl<IpAddr, Arc<Box<[Box<str>]>>>,
     > {
         Parameters {
             params,
@@ -187,6 +187,7 @@ impl Default for Data {
             logos: Default::default(),
             smtp_connectors: Default::default(),
             asn_geo_data: Default::default(),
+            lookup_stores: Default::default(),
         }
     }
 }

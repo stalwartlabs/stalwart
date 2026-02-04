@@ -24,10 +24,11 @@ use std::{
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
     net::SocketAddr,
+    str::FromStr,
     sync::Arc,
 };
 use store::registry::bootstrap::Bootstrap;
-use utils::{cache::CacheItemWeight, config::utils::ParseValue};
+use utils::cache::CacheItemWeight;
 
 pub struct Resolvers {
     pub dns: MessageAuthenticator,
@@ -74,7 +75,7 @@ pub enum MxPattern {
 pub struct Policy {
     pub id: String,
     pub mode: Mode,
-    pub mx: Vec<MxPattern>,
+    pub mx: Box<[MxPattern]>,
     pub max_age: u64,
 }
 
@@ -304,8 +305,9 @@ impl Server {
     }
 }
 
-impl ParseValue for Mode {
-    fn parse_value(value: &str) -> Result<Self, String> {
+impl FromStr for Mode {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "enforce" => Ok(Self::Enforce),
             "testing" | "test" => Ok(Self::Testing),

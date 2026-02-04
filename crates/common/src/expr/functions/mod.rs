@@ -93,8 +93,8 @@ pub const F_SQL_QUERY: u32 = 7;
 pub const F_DNS_QUERY: u32 = 8;
 
 pub const ASYNC_FUNCTIONS: &[(&str, u32, u32)] = &[
-    ("is_local_domain", F_IS_LOCAL_DOMAIN, 2),
-    ("is_local_address", F_IS_LOCAL_ADDRESS, 2),
+    ("is_local_domain", F_IS_LOCAL_DOMAIN, 1),
+    ("is_local_address", F_IS_LOCAL_ADDRESS, 1),
     ("key_get", F_KEY_GET, 2),
     ("key_exists", F_KEY_EXISTS, 2),
     ("key_set", F_KEY_SET, 3),

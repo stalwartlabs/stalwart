@@ -4,25 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::Server;
+use crate::{
+    Server,
+    auth::{Permissions, PermissionsGroup},
+};
 use ahash::AHashSet;
 use std::sync::{Arc, LazyLock};
 use trc::AddContext;
 use utils::cache::CacheItemWeight;
 
-#[derive(Debug, Clone, Default)]
-pub struct RolePermissions {
-    pub enabled: Permissions,
-    pub disabled: Permissions,
-}
-
-static USER_PERMISSIONS: LazyLock<Arc<RolePermissions>> = LazyLock::new(user_permissions);
-static ADMIN_PERMISSIONS: LazyLock<Arc<RolePermissions>> = LazyLock::new(admin_permissions);
-static TENANT_ADMIN_PERMISSIONS: LazyLock<Arc<RolePermissions>> =
-    LazyLock::new(tenant_admin_permissions);
-
 impl Server {
-    pub async fn get_role_permissions(&self, role_id: u32) -> trc::Result<Arc<RolePermissions>> {
+    pub async fn get_role_permissions(&self, role_id: u32) -> trc::Result<Arc<PermissionsGroup>> {
         match role_id {
             ROLE_USER => Ok(USER_PERMISSIONS.clone()),
             ROLE_ADMIN => Ok(ADMIN_PERMISSIONS.clone()),
@@ -46,11 +38,11 @@ impl Server {
         }
     }
 
-    async fn build_role_permissions(&self, role_id: u32) -> trc::Result<Arc<RolePermissions>> {
+    async fn build_role_permissions(&self, role_id: u32) -> trc::Result<Arc<PermissionsGroup>> {
         let mut role_ids = vec![role_id].into_iter();
         let mut role_ids_stack = vec![];
         let mut fetched_role_ids = AHashSet::new();
-        let mut return_permissions = RolePermissions::default();
+        let mut return_permissions = PermissionsGroup::default();
 
         'outer: loop {
             if let Some(role_id) = role_ids.next() {
@@ -86,7 +78,7 @@ impl Server {
                         if let Some(role_permissions) = self.inner.cache.permissions.get(&role_id) {
                             return_permissions.union(role_permissions.as_ref());
                         } else {
-                            let mut role_permissions = RolePermissions::default();
+                            let mut role_permissions = PermissionsGroup::default();
 
                             // Obtain principal
                             let principal = self
@@ -143,8 +135,8 @@ impl Server {
     }
 }
 
-impl RolePermissions {
-    pub fn union(&mut self, other: &RolePermissions) {
+impl PermissionsGroup {
+    pub fn union(&mut self, other: &PermissionsGroup) {
         self.enabled.union(&other.enabled);
         self.disabled.union(&other.disabled);
     }
@@ -158,44 +150,5 @@ impl RolePermissions {
         let mut enabled = self.enabled.clone();
         enabled.difference(&self.disabled);
         enabled
-    }
-}
-
-fn tenant_admin_permissions() -> Arc<RolePermissions> {
-    let mut permissions = RolePermissions::default();
-
-    for permission_id in 0..Permission::COUNT {
-        let permission = Permission::from_id(permission_id as u32).unwrap();
-        if permission.is_tenant_admin_permission() {
-            permissions.enabled.set(permission_id);
-        }
-    }
-
-    Arc::new(permissions)
-}
-
-fn user_permissions() -> Arc<RolePermissions> {
-    let mut permissions = RolePermissions::default();
-
-    for permission_id in 0..Permission::COUNT {
-        let permission = Permission::from_id(permission_id as u32).unwrap();
-        if permission.is_user_permission() {
-            permissions.enabled.set(permission_id);
-        }
-    }
-
-    Arc::new(permissions)
-}
-
-fn admin_permissions() -> Arc<RolePermissions> {
-    Arc::new(RolePermissions {
-        enabled: Permissions::all(),
-        disabled: Permissions::new(),
-    })
-}
-
-impl CacheItemWeight for RolePermissions {
-    fn weight(&self) -> u64 {
-        std::mem::size_of::<RolePermissions>() as u64
     }
 }

@@ -7,6 +7,7 @@
 #![warn(clippy::large_futures)]
 
 use crate::{
+    auth::DirectoryEntries,
     config::mailstore::{
         email::EmailConfig,
         imap::ImapConfig,
@@ -18,7 +19,7 @@ use crate::{
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
-use auth::{AccessToken, oauth::config::OAuthConfig, roles::RolePermissions};
+use auth::{AccessToken, oauth::config::OAuthConfig};
 use calcard::common::timezone::Tz;
 use config::{
     groupware::GroupwareConfig,
@@ -43,7 +44,10 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
-use store::rand::{Rng, distr::Alphanumeric};
+use store::{
+    InMemoryStore,
+    rand::{Rng, distr::Alphanumeric},
+};
 use tinyvec::TinyVec;
 use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio_rustls::TlsConnector;
@@ -134,6 +138,7 @@ pub struct Server {
 pub struct Inner {
     pub shared_core: ArcSwap<Core>,
     pub data: Data,
+    pub directory: DirectoryEntries,
     pub cache: Caches,
     pub ipc: Ipc,
 }
@@ -141,10 +146,11 @@ pub struct Inner {
 pub struct Data {
     pub spam_classifier: ArcSwap<SpamClassifier>,
 
-    pub tls_certificates: ArcSwap<AHashMap<String, Arc<CertifiedKey>>>,
+    pub tls_certificates: ArcSwap<AHashMap<Box<str>, Arc<CertifiedKey>>>,
     pub tls_self_signed_cert: Option<Arc<CertifiedKey>>,
 
     pub blocked_ips: RwLock<BlockedIps>,
+    pub lookup_stores: ArcSwap<AHashMap<Box<str>, InMemoryStore>>,
 
     pub asn_geo_data: AsnGeoLookupData,
 
@@ -154,15 +160,14 @@ pub struct Data {
     pub queue_status: AtomicBool,
 
     pub webadmin: WebAdminManager,
-    pub logos: Mutex<AHashMap<String, Option<Resource<Vec<u8>>>>>,
+    pub logos: Mutex<AHashMap<Box<str>, Option<Resource<Vec<u8>>>>>,
 
     pub smtp_connectors: TlsConnectors,
 }
 
 pub struct Caches {
     pub access_tokens: Cache<u32, Arc<AccessToken>>,
-    pub http_auth: Cache<String, HttpAuthCache>,
-    pub permissions: Cache<u32, Arc<RolePermissions>>,
+    pub http_auth: Cache<Box<str>, HttpAuthCache>,
 
     pub messages: Cache<u32, CacheSwap<MessageStoreCache>>,
     pub files: Cache<u32, CacheSwap<DavResources>>,
@@ -170,14 +175,14 @@ pub struct Caches {
     pub events: Cache<u32, CacheSwap<DavResources>>,
     pub scheduling: Cache<u32, CacheSwap<DavResources>>,
 
-    pub dns_txt: CacheWithTtl<String, Txt>,
-    pub dns_mx: CacheWithTtl<String, Arc<Vec<MX>>>,
-    pub dns_ptr: CacheWithTtl<IpAddr, Arc<Vec<String>>>,
-    pub dns_ipv4: CacheWithTtl<String, Arc<Vec<Ipv4Addr>>>,
-    pub dns_ipv6: CacheWithTtl<String, Arc<Vec<Ipv6Addr>>>,
-    pub dns_tlsa: CacheWithTtl<String, Arc<Tlsa>>,
-    pub dns_mta_sts: CacheWithTtl<String, Arc<Policy>>,
-    pub dns_rbl: CacheWithTtl<String, Option<Arc<IpResolver>>>,
+    pub dns_txt: CacheWithTtl<Box<str>, Txt>,
+    pub dns_mx: CacheWithTtl<Box<str>, Arc<Box<[MX]>>>,
+    pub dns_ptr: CacheWithTtl<IpAddr, Arc<Box<[Box<str>]>>>,
+    pub dns_ipv4: CacheWithTtl<Box<str>, Arc<Box<[Ipv4Addr]>>>,
+    pub dns_ipv6: CacheWithTtl<Box<str>, Arc<Box<[Ipv6Addr]>>>,
+    pub dns_tlsa: CacheWithTtl<Box<str>, Arc<Tlsa>>,
+    pub dns_mta_sts: CacheWithTtl<Box<str>, Arc<Policy>>,
+    pub dns_rbl: CacheWithTtl<Box<str>, Option<Arc<IpResolver>>>,
 }
 
 #[derive(Debug, Clone)]

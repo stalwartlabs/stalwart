@@ -23,7 +23,6 @@ use registry::{
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 use store::registry::bootstrap::Bootstrap;
-use utils::config::utils::ParseValue;
 
 #[derive(Clone)]
 pub struct MailAuthConfig {
@@ -417,16 +416,5 @@ impl VerifyStrategy {
     #[inline(always)]
     pub fn is_strict(&self) -> bool {
         matches!(self, VerifyStrategy::Strict)
-    }
-}
-
-impl ParseValue for VerifyStrategy {
-    fn parse_value(value: &str) -> Result<Self, String> {
-        match value {
-            "relaxed" => Ok(VerifyStrategy::Relaxed),
-            "strict" => Ok(VerifyStrategy::Strict),
-            "disable" | "disabled" | "never" | "none" => Ok(VerifyStrategy::Disable),
-            _ => Err(format!("Invalid value {:?}.", value)),
-        }
     }
 }

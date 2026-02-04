@@ -10,61 +10,61 @@ use std::sync::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ConcurrencyLimiter {
-    pub max_concurrent: u64,
-    pub concurrent: Arc<AtomicU64>,
+#[repr(transparent)]
+pub struct ConcurrencyLimiter(Arc<ConcurrencyLimiterInner>);
+
+#[derive(Debug)]
+pub struct ConcurrencyLimiterInner {
+    max_concurrent: u64,
+    concurrent: AtomicU64,
 }
 
 #[derive(Default)]
-pub struct InFlight {
-    concurrent: Arc<AtomicU64>,
-}
-
-pub enum LimiterResult {
-    Allowed(InFlight),
-    Forbidden,
-    Disabled,
-}
+pub struct InFlight(Arc<ConcurrencyLimiterInner>);
 
 impl Drop for InFlight {
     fn drop(&mut self) {
-        self.concurrent.fetch_sub(1, Ordering::Relaxed);
+        self.0.concurrent.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
 impl ConcurrencyLimiter {
     pub fn new(max_concurrent: u64) -> Self {
-        ConcurrencyLimiter {
+        ConcurrencyLimiter(Arc::new(ConcurrencyLimiterInner {
             max_concurrent,
-            concurrent: Arc::new(0.into()),
-        }
+            concurrent: AtomicU64::new(0),
+        }))
     }
 
     pub fn is_allowed(&self) -> LimiterResult {
-        if self.concurrent.load(Ordering::Relaxed) < self.max_concurrent {
+        if self.0.concurrent.load(Ordering::Relaxed) < self.0.max_concurrent {
             // Return in-flight request
-            self.concurrent.fetch_add(1, Ordering::Relaxed);
-            LimiterResult::Allowed(InFlight {
-                concurrent: self.concurrent.clone(),
-            })
+            self.0.concurrent.fetch_add(1, Ordering::Relaxed);
+            LimiterResult::Allowed(InFlight(self.0.clone()))
         } else {
             LimiterResult::Forbidden
         }
     }
 
     pub fn check_is_allowed(&self) -> bool {
-        self.concurrent.load(Ordering::Relaxed) < self.max_concurrent
+        self.0.concurrent.load(Ordering::Relaxed) < self.0.max_concurrent
     }
 
     pub fn is_active(&self) -> bool {
-        self.concurrent.load(Ordering::Relaxed) > 0
+        self.0.concurrent.load(Ordering::Relaxed) > 0
     }
 }
 
 impl InFlight {
     pub fn num_concurrent(&self) -> u64 {
-        self.concurrent.load(Ordering::Relaxed)
+        self.0.concurrent.load(Ordering::Relaxed)
     }
+}
+
+pub enum LimiterResult {
+    Allowed(InFlight),
+    Forbidden,
+    Disabled,
 }
 
 impl From<LimiterResult> for Option<InFlight> {

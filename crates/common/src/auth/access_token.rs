@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{AccessToken, ResourceToken, TenantInfo, roles::RolePermissions};
+use super::{AccessToken, ResourceToken, TenantInfo, roles::PermissionsGroup};
 use crate::{
     Server,
     ipc::BroadcastEvent,
     listener::limiter::{ConcurrencyLimiter, LimiterResult},
 };
 use ahash::AHashSet;
+use registry::schema::enums::Permission;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     sync::Arc,
@@ -34,7 +35,7 @@ impl Server {
         principal: Principal,
         revision: u64,
     ) -> trc::Result<AccessToken> {
-        let mut role_permissions = RolePermissions::default();
+        let mut role_permissions = PermissionsGroup::default();
 
         // Extract data
         let mut object_quota = self.core.email.max_objects;

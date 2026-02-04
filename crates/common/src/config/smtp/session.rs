@@ -20,9 +20,9 @@ use registry::schema::{
 use smtp_proto::*;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
+    str::FromStr,
     time::Duration,
 };
-use utils::config::utils::ParseValue;
 
 #[derive(Clone)]
 pub struct SessionConfig {
@@ -386,8 +386,10 @@ impl SessionConfig {
 #[derive(Default)]
 pub struct Mechanism(u64);
 
-impl ParseValue for Mechanism {
-    fn parse_value(value: &str) -> Result<Self, String> {
+impl FromStr for Mechanism {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(Mechanism(match value.to_ascii_uppercase().as_str() {
             "LOGIN" => AUTH_LOGIN,
             "PLAIN" => AUTH_PLAIN,
@@ -496,7 +498,18 @@ impl<'x> TryFrom<Variable<'x>> for MtPriority {
                 ExpressionConstant::Nsep => Ok(MtPriority::Nsep),
                 _ => Err(()),
             },
-            Variable::String(value) => MtPriority::parse_value(value.as_str()).map_err(|_| ()),
+            Variable::String(value) => {
+                let value = value.as_str();
+                if value.eq_ignore_ascii_case("MIXER") {
+                    Ok(MtPriority::Mixer)
+                } else if value.eq_ignore_ascii_case("STANAG4406") {
+                    Ok(MtPriority::Stanag4406)
+                } else if value.eq_ignore_ascii_case("NSEP") {
+                    Ok(MtPriority::Nsep)
+                } else {
+                    Err(())
+                }
+            }
             _ => Err(()),
         }
     }

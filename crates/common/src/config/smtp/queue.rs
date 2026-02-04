@@ -30,7 +30,6 @@ use std::{
     net::IpAddr,
     time::Duration,
 };
-use utils::config::utils::ParseValue;
 
 #[derive(
     Debug,
@@ -600,7 +599,14 @@ impl<'x> TryFrom<Variable<'x>> for IpLookupStrategy {
                 _ => Err(()),
             },
             Variable::String(value) => {
-                IpLookupStrategy::parse_value(value.as_str()).map_err(|_| ())
+                match value.as_str() {
+                    "ipv4_only" => Ok(IpLookupStrategy::Ipv4Only),
+                    "ipv6_only" => Ok(IpLookupStrategy::Ipv6Only),
+                    //"ipv4_and_ipv6" => IpLookupStrategy::Ipv4AndIpv6,
+                    "ipv6_then_ipv4" => Ok(IpLookupStrategy::Ipv6thenIpv4),
+                    "ipv4_then_ipv6" => Ok(IpLookupStrategy::Ipv4thenIpv6),
+                    _ => Err(()),
+                }
             }
             _ => Err(()),
         }
@@ -723,18 +729,6 @@ impl ArchivedQueueName {
 impl Default for QueueName {
     fn default() -> Self {
         DEFAULT_QUEUE_NAME
-    }
-}
-
-impl ParseValue for QueueName {
-    fn parse_value(value: &str) -> Result<Self, String> {
-        if let Some(name) = QueueName::new(value.trim().as_bytes()) {
-            Ok(name)
-        } else {
-            Err(format!(
-                "Queue name '{value}' is too long. Maximum length is 8 bytes."
-            ))
-        }
     }
 }
 

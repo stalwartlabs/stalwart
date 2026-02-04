@@ -197,8 +197,8 @@ impl Server {
 
 pub(crate) async fn parse_certificates(
     bp: &mut Bootstrap,
-    certificates: &mut AHashMap<String, Arc<CertifiedKey>>,
-    subject_names: &mut AHashSet<String>,
+    certificates: &mut AHashMap<Box<str>, Arc<CertifiedKey>>,
+    subject_names: &mut AHashSet<Box<str>>,
 ) {
     // Parse certificates
     for cert_obj in bp.list_infallible::<Certificate>().await {
@@ -216,10 +216,10 @@ pub(crate) async fn parse_certificates(
                     }) {
                     Ok((_, parsed)) => {
                         // Add CNs and SANs to the list of names
-                        let mut names = AHashSet::new();
+                        let mut names: AHashSet<Box<str>> = AHashSet::new();
                         for name in parsed.subject().iter_common_name() {
                             if let Ok(name) = name.as_str() {
-                                names.insert(name.to_string());
+                                names.insert(name.into());
                             }
                         }
                         for ext in parsed.extensions() {
@@ -227,14 +227,16 @@ pub(crate) async fn parse_certificates(
                                 ext.parsed_extension()
                             {
                                 for name in &san.general_names {
-                                    let name = match name {
-                                        GeneralName::DNSName(name) => name.to_string(),
+                                    let name: Box<str> = match name {
+                                        GeneralName::DNSName(name) => (*name).into(),
                                         GeneralName::IPAddress(ip) => match ip.len() {
                                             4 => Ipv4Addr::from(<[u8; 4]>::try_from(*ip).unwrap())
-                                                .to_string(),
+                                                .to_string()
+                                                .into(),
                                             16 => {
                                                 Ipv6Addr::from(<[u8; 16]>::try_from(*ip).unwrap())
                                                     .to_string()
+                                                    .into()
                                             }
                                             _ => continue,
                                         },
@@ -248,7 +250,13 @@ pub(crate) async fn parse_certificates(
                         }
 
                         // Add custom SNIs
-                        names.extend(cert_obj.object.subject_alternative_names);
+                        names.extend(
+                            cert_obj
+                                .object
+                                .subject_alternative_names
+                                .into_iter()
+                                .map(Into::into),
+                        );
 
                         // Add domain names
                         subject_names.extend(names.iter().cloned());
@@ -257,16 +265,14 @@ pub(crate) async fn parse_certificates(
                         let cert = Arc::new(cert);
                         for name in names {
                             certificates.insert(
-                                name.strip_prefix("*.")
-                                    .map(|name| name.to_string())
-                                    .unwrap_or(name),
+                                name.strip_prefix("*.").map(Into::into).unwrap_or(name),
                                 cert.clone(),
                             );
                         }
 
                         // Add default certificate
                         if cert_obj.object.default {
-                            certificates.insert("*".to_string(), cert.clone());
+                            certificates.insert("*".into(), cert.clone());
                         }
                     }
                     Err(err) => {

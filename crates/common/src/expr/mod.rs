@@ -6,15 +6,18 @@
 
 use compact_str::CompactString;
 use regex::Regex;
-use registry::schema::enums::{ExpressionConstant, ExpressionVariable};
+use registry::schema::{
+    enums::{ExpressionConstant, ExpressionVariable},
+    structs::Rate,
+};
 use std::{
     borrow::Cow,
     fmt::{Display, Formatter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    str::FromStr,
     time::Duration,
 };
 use trc::MetricType;
-use utils::config::{Rate, utils::ParseValue};
 
 pub mod eval;
 pub mod functions;
@@ -23,8 +26,9 @@ pub mod parser;
 pub mod tokenizer;
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[repr(transparent)]
 pub struct Expression {
-    pub items: Vec<ExpressionItem>,
+    pub items: Box<[ExpressionItem]>,
 }
 
 #[derive(Debug, Clone)]
@@ -246,7 +250,7 @@ impl From<bool> for Variable<'_> {
 impl<T: Into<Constant>> From<T> for Expression {
     fn from(value: T) -> Self {
         Expression {
-            items: vec![ExpressionItem::Constant(value.into())],
+            items: Box::new([ExpressionItem::Constant(value.into())]),
         }
     }
 }
@@ -336,7 +340,9 @@ impl<'x> TryFrom<Variable<'x>> for Duration {
             Variable::Integer(value) if value > 0 => Ok(Duration::from_millis(value as u64)),
             Variable::Float(value) if value > 0.0 => Ok(Duration::from_millis(value as u64)),
             Variable::String(value) if !value.is_empty() => {
-                Duration::parse_value(value.as_str()).map_err(|_| ())
+                registry::types::duration::Duration::from_str(value.as_str())
+                    .map(|v| v.into_inner())
+                    .map_err(|_| ())
             }
             _ => Err(()),
         }
@@ -433,8 +439,8 @@ impl<'x> TryFrom<Variable<'x>> for Rate {
 
                 if requests > 0 && period > 0 {
                     Ok(Rate {
-                        requests: requests as u64,
-                        period: Duration::from_millis(period as u64),
+                        count: requests as u64,
+                        period: registry::types::duration::Duration::from_millis(period as u64),
                     })
                 } else {
                     Err(())

@@ -17,8 +17,7 @@ use registry::schema::{
         TlsReportSettings,
     },
 };
-use std::time::Duration;
-use utils::config::utils::ParseValue;
+use std::{str::FromStr, time::Duration};
 
 #[derive(Clone)]
 pub struct ReportConfig {
@@ -93,7 +92,7 @@ impl ReportConfig {
                 addresses: report
                     .inbound_report_addresses
                     .iter()
-                    .filter_map(|addr| AddressMatch::parse_value(addr).ok())
+                    .filter_map(|addr| AddressMatch::from_str(addr).ok())
                     .collect(),
                 forward: report.inbound_report_forwarding,
                 store: dr.hold_mta_reports_for.map(|d| d.into_inner()),
@@ -215,18 +214,6 @@ impl ReportConfig {
     }
 }
 
-impl ParseValue for AggregateFrequency {
-    fn parse_value(value: &str) -> Result<Self, String> {
-        match value {
-            "daily" | "day" => Ok(AggregateFrequency::Daily),
-            "hourly" | "hour" => Ok(AggregateFrequency::Hourly),
-            "weekly" | "week" => Ok(AggregateFrequency::Weekly),
-            "never" | "disable" | "false" => Ok(AggregateFrequency::Never),
-            _ => Err(format!("Invalid aggregate frequency value {:?}.", value,)),
-        }
-    }
-}
-
 impl<'x> TryFrom<Variable<'x>> for AggregateFrequency {
     type Error = ();
 
@@ -241,8 +228,10 @@ impl<'x> TryFrom<Variable<'x>> for AggregateFrequency {
     }
 }
 
-impl ParseValue for AddressMatch {
-    fn parse_value(value: &str) -> Result<Self, String> {
+impl FromStr for AddressMatch {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         if let Some(value) = value.strip_prefix('*').map(|v| v.trim()) {
             if !value.is_empty() {
                 return Ok(AddressMatch::EndsWith(value.to_lowercase()));

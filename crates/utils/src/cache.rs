@@ -214,6 +214,18 @@ impl CacheItemWeight for String {
     }
 }
 
+impl CacheItemWeight for Box<str> {
+    fn weight(&self) -> u64 {
+        self.len() as u64 + std::mem::size_of::<Box<str>>() as u64
+    }
+}
+
+impl<T> CacheItemWeight for Box<[T]> {
+    fn weight(&self) -> u64 {
+        (self.len() * std::mem::size_of::<T>()) as u64 + std::mem::size_of::<Box<[T]>>() as u64
+    }
+}
+
 impl CacheItemWeight for u32 {
     fn weight(&self) -> u64 {
         std::mem::size_of::<u32>() as u64

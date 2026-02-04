@@ -15,6 +15,8 @@ pub mod ipmask;
 pub mod socketaddr;
 
 pub trait EnumType: Sized {
+    const COUNT: usize;
+
     fn parse(s: &str) -> Option<Self>;
     fn as_str(&self) -> &'static str;
     fn from_id(id: u16) -> Option<Self>;

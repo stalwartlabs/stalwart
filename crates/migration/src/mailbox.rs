@@ -144,7 +144,7 @@ impl FromLegacy for Mailbox {
             role: legacy
                 .get(&Property::Role)
                 .as_string()
-                .and_then(|r| SpecialUse::parse_value(r).ok())
+                .and_then(SpecialUse::parse)
                 .unwrap_or(SpecialUse::None),
             parent_id: legacy
                 .get(&Property::ParentId)

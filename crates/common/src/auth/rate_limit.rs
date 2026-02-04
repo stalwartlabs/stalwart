@@ -9,6 +9,7 @@ use crate::{
     KV_RATE_LIMIT_HTTP_ANONYMOUS, KV_RATE_LIMIT_HTTP_AUTHENTICATED, Server, ip_to_bytes,
     listener::limiter::{InFlight, LimiterResult},
 };
+use registry::schema::enums::Permission;
 use std::net::IpAddr;
 use trc::AddContext;
 

@@ -30,7 +30,7 @@ pub struct IfThen {
 pub struct IfBlock {
     pub id: Id,
     pub property: Property,
-    pub if_then: Vec<IfThen>,
+    pub if_then: Box<[IfThen]>,
     pub default: Expression,
 }
 
@@ -121,13 +121,9 @@ impl BootstrapExprExt for Bootstrap {
         expr: &structs::Expression,
     ) -> Option<IfBlock> {
         // Parse conditions
-        let mut if_block = IfBlock {
-            id,
-            property: expr_ctx.property,
-            if_then: Vec::with_capacity(expr.match_.len()),
-            default: Expression {
-                items: Default::default(),
-            },
+        let mut if_then = Vec::with_capacity(expr.match_.len());
+        let mut default = Expression {
+            items: Default::default(),
         };
 
         if expr.else_.is_empty() {
@@ -160,7 +156,7 @@ impl BootstrapExprExt for Bootstrap {
 
         match ExpressionParser::new(Tokenizer::new(&expr.else_, &token_map)).parse() {
             Ok(expr) => {
-                if_block.default = expr;
+                default = expr;
             }
             Err(err) => {
                 self.invalid_property(
@@ -177,7 +173,7 @@ impl BootstrapExprExt for Bootstrap {
                 Ok(if_expr) => {
                     match ExpressionParser::new(Tokenizer::new(&match_.then, &token_map)).parse() {
                         Ok(then_expr) => {
-                            if_block.if_then.push(IfThen {
+                            if_then.push(IfThen {
                                 expr: if_expr,
                                 then: then_expr,
                             });
@@ -211,7 +207,12 @@ impl BootstrapExprExt for Bootstrap {
             }
         }
 
-        Some(if_block)
+        Some(IfBlock {
+            id,
+            property: expr_ctx.property,
+            if_then: if_then.into_boxed_slice(),
+            default,
+        })
     }
 }
 

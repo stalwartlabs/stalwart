@@ -7,7 +7,6 @@
 use directory::Directory;
 use registry::schema::enums::ExpressionVariable;
 use std::borrow::Cow;
-use utils::config::{Config, utils::AsKey};
 
 use crate::{
     Server,

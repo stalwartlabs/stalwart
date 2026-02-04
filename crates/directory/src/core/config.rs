@@ -9,7 +9,10 @@ use crate::{
     backend::{ldap::LdapDirectory, oidc::OpenIdDirectory, sql::SqlDirectory},
 };
 use ahash::AHashMap;
-use registry::schema::structs;
+use registry::schema::{
+    prelude::Object,
+    structs::{self, Authentication},
+};
 use std::sync::Arc;
 use store::registry::bootstrap::Bootstrap;
 
@@ -37,6 +40,22 @@ impl Directories {
             }
         }
 
-        Directories { directories }
+        let mut default_directory = None;
+        let auth = bp.setting_infallible::<Authentication>().await;
+        if let Some(id) = auth.directory_id {
+            if let Some(directory) = directories.get(&id) {
+                default_directory = Some(directory.clone());
+            } else {
+                bp.build_error(
+                    Object::Authentication.singleton(),
+                    format!("Default directory with id {} not found", id),
+                );
+            }
+        }
+
+        Directories {
+            default_directory,
+            directories,
+        }
     }
 }

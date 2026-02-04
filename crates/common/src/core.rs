@@ -6,11 +6,11 @@
 
 use crate::{
     Inner, Server,
-    auth::{AccessToken, ResourceToken, TenantInfo},
+    auth::AccessToken,
     config::{
         mailstore::spamfilter::SpamClassifier,
         smtp::{
-            auth::{ArcSealer, DkimSigner},
+            auth::DkimSigner,
             queue::{
                 ConnectionStrategy, DEFAULT_QUEUE_NAME, MxConfig, QueueExpiry, QueueName,
                 QueueStrategy, RequireOptional, RoutingStrategy, TlsStrategy, VirtualQueue,
@@ -98,47 +98,6 @@ impl Server {
 
     pub fn get_in_memory_store(&self, name: &str) -> Option<&InMemoryStore> {
         self.core.storage.lookups.get(name)
-    }
-
-    pub fn get_in_memory_store_or_default(&self, name: &str, session_id: u64) -> &InMemoryStore {
-        self.core.storage.lookups.get(name).unwrap_or_else(|| {
-            if !name.is_empty() {
-                trc::event!(
-                    Eval(trc::EvalEvent::StoreNotFound),
-                    Id = name.to_string(),
-                    SpanId = session_id,
-                );
-            }
-
-            &self.core.storage.lookup
-        })
-    }
-
-    pub fn get_data_store(&self, name: &str, session_id: u64) -> &Store {
-        self.core.storage.stores.get(name).unwrap_or_else(|| {
-            if !name.is_empty() {
-                trc::event!(
-                    Eval(trc::EvalEvent::StoreNotFound),
-                    Id = name.to_string(),
-                    SpanId = session_id,
-                );
-            }
-
-            &self.core.storage.data
-        })
-    }
-
-    pub fn get_arc_sealer(&self, name: &str, session_id: u64) -> Option<Arc<ArcSealer>> {
-        todo!()
-        /*self.resolve_signature(name).map(|s| s.sealer).or_else(|| {
-            trc::event!(
-                Arc(trc::ArcEvent::SealerNotFound),
-                Id = name.to_string(),
-                SpanId = session_id,
-            );
-
-            None
-        })*/
     }
 
     pub fn get_dkim_signer(&self, name: &str, session_id: u64) -> Option<Arc<DkimSigner>> {

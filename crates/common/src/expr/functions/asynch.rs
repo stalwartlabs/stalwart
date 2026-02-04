@@ -26,7 +26,6 @@ impl Server {
 
         match fnc_id {
             F_IS_LOCAL_DOMAIN => {
-                let directory = params.next_as_string();
                 let domain = params.next_as_string();
 
                 self.get_directory_or_default(directory.as_ref(), session_id)
@@ -36,7 +35,6 @@ impl Server {
                     .map(|v| v.into())
             }
             F_IS_LOCAL_ADDRESS => {
-                let directory = params.next_as_string();
                 let address = params.next_as_string();
 
                 self.get_directory_or_default(directory.as_ref(), session_id)

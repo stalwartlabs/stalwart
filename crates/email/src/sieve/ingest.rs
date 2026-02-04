@@ -36,7 +36,6 @@ use types::{
     keyword::Keyword,
     special_use::SpecialUse,
 };
-use utils::config::utils::ParseValue;
 
 struct SieveMessage<'x> {
     pub raw_message: Cow<'x, [u8]>,
@@ -198,20 +197,15 @@ impl SieveScriptIngest for Server {
                     } => {
                         if !mailboxes.is_empty() {
                             let mut special_use_ids = Vec::with_capacity(special_use.len());
-                            for role in special_use {
-                                special_use_ids.push(if role.eq_ignore_ascii_case("inbox") {
-                                    INBOX_ID
-                                } else if role.eq_ignore_ascii_case("trash") {
-                                    TRASH_ID
-                                } else {
-                                    let mut mailbox_id = u32::MAX;
-                                    if let Ok(role) = SpecialUse::parse_value(&role)
-                                        && let Some(m) = cache.mailbox_by_role(&role)
-                                    {
-                                        mailbox_id = m.document_id;
-                                    }
-
-                                    mailbox_id
+                            for role in special_use.iter().map(|v| SpecialUse::parse(v)) {
+                                special_use_ids.push(match role {
+                                    Some(SpecialUse::Inbox) => INBOX_ID,
+                                    Some(SpecialUse::Trash) => TRASH_ID,
+                                    Some(role) => cache
+                                        .mailbox_by_role(&role)
+                                        .map(|m| m.document_id)
+                                        .unwrap_or(u32::MAX),
+                                    None => u32::MAX,
                                 });
                             }
 
@@ -244,14 +238,11 @@ impl SieveScriptIngest for Server {
                         } else if !special_use.is_empty() {
                             let mut result = true;
 
-                            for role in special_use {
-                                if !role.eq_ignore_ascii_case("inbox")
-                                    && !role.eq_ignore_ascii_case("trash")
-                                {
-                                    let role = SpecialUse::parse_value(&role);
-                                    if role.is_err()
-                                        || cache.mailbox_by_role(&role.unwrap()).is_none()
-                                    {
+                            for role in special_use.iter().map(|v| SpecialUse::parse(v)) {
+                                match role {
+                                    Some(SpecialUse::Inbox | SpecialUse::Trash) => {}
+                                    Some(other) if cache.mailbox_by_role(&other).is_some() => {}
+                                    _ => {
                                         result = false;
                                         break;
                                     }
@@ -334,17 +325,22 @@ impl SieveScriptIngest for Server {
                         }
 
                         // Find mailbox by role
-                        if let Some(special_use) = special_use
-                            && target_id == u32::MAX
+                        if target_id == u32::MAX
+                            && let Some(special_use) =
+                                special_use.as_deref().and_then(SpecialUse::parse)
                         {
-                            if special_use.eq_ignore_ascii_case("inbox") {
-                                target_id = INBOX_ID;
-                            } else if special_use.eq_ignore_ascii_case("trash") {
-                                target_id = TRASH_ID;
-                            } else if let Ok(role) = SpecialUse::parse_value(&special_use)
-                                && let Some(item) = cache.mailbox_by_role(&role)
-                            {
-                                target_id = item.document_id;
+                            match special_use {
+                                SpecialUse::Inbox => {
+                                    target_id = INBOX_ID;
+                                }
+                                SpecialUse::Trash => {
+                                    target_id = TRASH_ID;
+                                }
+                                role => {
+                                    if let Some(item) = cache.mailbox_by_role(&role) {
+                                        target_id = item.document_id;
+                                    }
+                                }
                             }
                         }
 

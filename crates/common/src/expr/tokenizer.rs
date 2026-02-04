@@ -11,9 +11,8 @@ use super::{
 use ahash::AHashSet;
 use regex::Regex;
 use registry::{schema::enums::ExpressionConstant, types::EnumType};
-use std::{borrow::Cow, iter::Peekable, slice::Iter, time::Duration};
+use std::{borrow::Cow, iter::Peekable, slice::Iter};
 use trc::MetricType;
-use utils::config::utils::ParseValue;
 
 pub struct Tokenizer<'x> {
     pub(crate) iter: Peekable<Iter<'x, u8>>,
@@ -376,7 +375,7 @@ impl<'x> Tokenizer<'x> {
                 } else {
                     Err(format!("Constant {:?} not allowed in this context", buf))
                 }
-            } else if let Ok(duration) = Duration::parse_value(&buf) {
+            } else if let Ok(duration) = registry::types::duration::Duration::from_str(&buf) {
                 Ok(Token::Constant(Constant::Integer(
                     duration.as_millis() as i64
                 )))

@@ -26,7 +26,7 @@ use std::{
 };
 use store::registry::{RegistryObject, bootstrap::Bootstrap};
 use tokio::net::lookup_host;
-use utils::{cache::CacheItemWeight, config::utils::ParseValue, glob::GlobMap};
+use utils::{cache::CacheItemWeight, glob::GlobMap};
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default)]
 pub enum SpamClassifier {
@@ -519,21 +519,6 @@ impl FtrlParameters {
 impl SpamClassifier {
     pub fn is_active(&self) -> bool {
         !matches!(self, SpamClassifier::Disabled)
-    }
-}
-
-impl ParseValue for Element {
-    fn parse_value(value: &str) -> utils::config::Result<Self> {
-        match value {
-            "url" => Ok(Element::Url),
-            "domain" => Ok(Element::Domain),
-            "email" => Ok(Element::Email),
-            "ip" => Ok(Element::Ip),
-            "header" => Ok(Element::Header),
-            "body" => Ok(Element::Body),
-            "any" | "message" => Ok(Element::Any),
-            other => Err(format!("Invalid type {other:?}.",)),
-        }
     }
 }
 

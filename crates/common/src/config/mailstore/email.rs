@@ -22,7 +22,7 @@ use store::{
     write::SearchIndex,
 };
 use types::{collection::Collection, special_use::SpecialUse};
-use utils::config::cron::SimpleCron;
+use utils::cron::SimpleCron;
 
 #[derive(Clone)]
 pub struct EmailConfig {

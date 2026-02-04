@@ -143,6 +143,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcstr"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03918c3dbd7701a85c6b9887732e2921175f26c350b4563841d0958c21d57e6d"
+
+[[package]]
 name = "argon2"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1060,6 +1066,7 @@ dependencies = [
  "aes-gcm-siv",
  "ahash",
  "arc-swap",
+ "arcstr",
  "base64 0.22.1",
  "bincode 2.0.1",
  "biscuit",
@@ -1089,6 +1096,7 @@ dependencies = [
  "mail-send",
  "md5 0.8.0",
  "nlp",
+ "nohash-hasher",
  "num_cpus",
  "opentelemetry",
  "opentelemetry-otlp",
