@@ -144,7 +144,7 @@ impl MailboxGet for Server {
                     MailboxProperty::IsSubscribed => Value::Bool(
                         cached_mailbox
                             .subscribers
-                            .contains(&access_token.primary_id()),
+                            .contains(&access_token.account_id()),
                     ),
                     MailboxProperty::ShareWith => JmapRights::share_with::<Mailbox>(
                         account_id,

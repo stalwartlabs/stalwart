@@ -57,7 +57,7 @@ impl Server {
             Ok(token_info) => Ok(OAuthIntrospect {
                 active: true,
                 client_id: Some(token_info.client_id),
-                username: if access_token.primary_id() == token_info.account_id {
+                username: if access_token.account_id() == token_info.account_id {
                     access_token.name.clone()
                 } else {
                     self.get_access_token(token_info.account_id)

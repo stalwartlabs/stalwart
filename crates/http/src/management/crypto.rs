@@ -40,7 +40,7 @@ impl CryptoHandler for Server {
         let ec = if let Some(params_) = self
             .store()
             .get_value::<Archive<AlignedBytes>>(ValueKey::property(
-                access_token.primary_id(),
+                access_token.account_id(),
                 Collection::Principal,
                 0,
                 PrincipalField::EncryptionKeys,
@@ -104,7 +104,7 @@ impl CryptoHandler for Server {
                 // Disable encryption at rest
                 let mut batch = BatchBuilder::new();
                 batch
-                    .with_account_id(access_token.primary_id())
+                    .with_account_id(access_token.account_id())
                     .with_collection(Collection::Principal)
                     .with_document(0)
                     .clear(PrincipalField::EncryptionKeys);
@@ -159,7 +159,7 @@ impl CryptoHandler for Server {
         // Save encryption params
         let mut batch = BatchBuilder::new();
         batch
-            .with_account_id(access_token.primary_id())
+            .with_account_id(access_token.account_id())
             .with_collection(Collection::Principal)
             .with_document(0)
             .set(PrincipalField::EncryptionKeys, params);

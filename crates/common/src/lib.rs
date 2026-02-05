@@ -7,18 +7,25 @@
 #![warn(clippy::large_futures)]
 
 use crate::{
-    auth::DirectoryEntries,
-    config::mailstore::{
-        email::EmailConfig,
-        imap::ImapConfig,
-        scripts::Scripting,
-        spamfilter::{IpResolver, SpamClassifier, SpamFilterConfig},
+    auth::{
+        AccountCache, ApiKeyCache, DomainCache, EmailCache, MailingListCache, RoleCache,
+        TenantCache,
+    },
+    config::{
+        mailstore::{
+            email::EmailConfig,
+            imap::ImapConfig,
+            scripts::Scripting,
+            spamfilter::{IpResolver, SpamClassifier, SpamFilterConfig},
+        },
+        smtp::auth::DkimSigner,
     },
     ipc::TrainTaskController,
     listener::blocked::BlockedIps,
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
+use arcstr::ArcStr;
 use auth::{AccessToken, oauth::config::OAuthConfig};
 use calcard::common::timezone::Tz;
 use config::{
@@ -57,8 +64,8 @@ use utils::{
     snowflake::SnowflakeIdGenerator,
 };
 
-pub mod addresses;
 pub mod auth;
+pub mod cache;
 pub mod config;
 pub mod core;
 pub mod dns;
@@ -138,7 +145,6 @@ pub struct Server {
 pub struct Inner {
     pub shared_core: ArcSwap<Core>,
     pub data: Data,
-    pub directory: DirectoryEntries,
     pub cache: Caches,
     pub ipc: Ipc,
 }
@@ -169,24 +175,36 @@ pub struct Caches {
     pub access_tokens: Cache<u32, Arc<AccessToken>>,
     pub http_auth: Cache<Box<str>, HttpAuthCache>,
 
-    pub messages: Cache<u32, CacheSwap<MessageStoreCache>>,
-    pub files: Cache<u32, CacheSwap<DavResources>>,
-    pub contacts: Cache<u32, CacheSwap<DavResources>>,
-    pub events: Cache<u32, CacheSwap<DavResources>>,
-    pub scheduling: Cache<u32, CacheSwap<DavResources>>,
+    pub messages: Cache<u32, Arc<MessageStoreCache>>,
+    pub files: Cache<u32, Arc<DavResources>>,
+    pub contacts: Cache<u32, Arc<DavResources>>,
+    pub events: Cache<u32, Arc<DavResources>>,
+    pub scheduling: Cache<u32, Arc<DavResources>>,
+
+    pub emails: Cache<ArcStr, EmailCache>,
+    pub emails_temporary: CacheWithTtl<ArcStr, EmailCache>,
+    pub emails_negative: CacheWithTtl<ArcStr, ()>,
+    pub domains: Cache<ArcStr, Arc<DomainCache>>,
+    pub domains_negative: CacheWithTtl<ArcStr, ()>,
+
+    pub accounts: Cache<u32, Arc<AccountCache>>,
+    pub groups: Cache<u32, Arc<AccountCache>>,
+    pub roles: Cache<u32, Arc<RoleCache>>,
+    pub tenants: Cache<u32, Arc<TenantCache>>,
+    pub lists: Cache<u32, Arc<MailingListCache>>,
+    pub api_keys: Cache<u32, Arc<ApiKeyCache>>,
+
+    pub dkim_signers: Cache<Box<str>, Arc<[DkimSigner]>>,
 
     pub dns_txt: CacheWithTtl<Box<str>, Txt>,
-    pub dns_mx: CacheWithTtl<Box<str>, Arc<Box<[MX]>>>,
-    pub dns_ptr: CacheWithTtl<IpAddr, Arc<Box<[Box<str>]>>>,
-    pub dns_ipv4: CacheWithTtl<Box<str>, Arc<Box<[Ipv4Addr]>>>,
-    pub dns_ipv6: CacheWithTtl<Box<str>, Arc<Box<[Ipv6Addr]>>>,
+    pub dns_mx: CacheWithTtl<Box<str>, Arc<[MX]>>,
+    pub dns_ptr: CacheWithTtl<IpAddr, Arc<[Box<str>]>>,
+    pub dns_ipv4: CacheWithTtl<Box<str>, Arc<[Ipv4Addr]>>,
+    pub dns_ipv6: CacheWithTtl<Box<str>, Arc<[Ipv6Addr]>>,
     pub dns_tlsa: CacheWithTtl<Box<str>, Arc<Tlsa>>,
     pub dns_mta_sts: CacheWithTtl<Box<str>, Arc<Policy>>,
     pub dns_rbl: CacheWithTtl<Box<str>, Option<Arc<IpResolver>>>,
 }
-
-#[derive(Debug, Clone)]
-pub struct CacheSwap<T>(pub Arc<ArcSwap<T>>);
 
 #[derive(Debug, Clone)]
 pub struct MessageStoreCache {
@@ -365,12 +383,6 @@ pub struct Core {
     #[cfg(feature = "enterprise")]
     pub enterprise: Option<enterprise::Enterprise>,
     // SPDX-SnippetEnd
-}
-
-impl<T: CacheItemWeight> CacheItemWeight for CacheSwap<T> {
-    fn weight(&self) -> u64 {
-        std::mem::size_of::<CacheSwap<T>>() as u64 + self.0.load().weight()
-    }
 }
 
 impl CacheItemWeight for MessageStoreCache {
@@ -834,20 +846,6 @@ impl DavName {
                 .collect::<String>(),
             parent_id,
         }
-    }
-}
-
-impl<T> CacheSwap<T> {
-    pub fn new(value: Arc<T>) -> Self {
-        Self(Arc::new(ArcSwap::new(value)))
-    }
-
-    pub fn load_full(&self) -> Arc<T> {
-        self.0.load_full()
-    }
-
-    pub fn update(&self, value: Arc<T>) {
-        self.0.store(value);
     }
 }
 

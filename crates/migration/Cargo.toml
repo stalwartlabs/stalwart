@@ -17,7 +17,7 @@ groupware = { path =  "../groupware" }
 dav-proto = { path =  "../dav-proto" }
 proc_macros = { path =  "../utils/proc-macros" }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-auth = { version = "0.7.1", features = ["rkyv"] }
+mail-auth = { path = "/Users/me/code/mail-auth", features = ["rkyv"] }
 smtp-proto = { version = "0.2", features = ["rkyv", "serde"] }
 sieve-rs = { version = "0.7", features = ["rkyv"] } 
 calcard_latest = { package = "calcard", version = "0.3", features = ["rkyv"] }

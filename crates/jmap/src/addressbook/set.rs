@@ -404,7 +404,7 @@ fn update_address_book(
                 address_book.preferences_mut(access_token).sort_order = value.cast_to_u64() as u32;
             }
             (AddressBookProperty::IsSubscribed, Value::Bool(subscribe)) => {
-                let account_id = access_token.primary_id();
+                let account_id = access_token.account_id();
                 if subscribe {
                     if !address_book.subscribers.contains(&account_id) {
                         address_book.subscribers.push(account_id);

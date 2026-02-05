@@ -515,6 +515,13 @@ impl InMemoryStore {
             _ => false,
         }
     }
+
+    pub fn as_store(&self) -> Option<&Store> {
+        match self {
+            InMemoryStore::Store(store) => Some(store),
+            _ => None,
+        }
+    }
 }
 
 pub enum LookupKey<'x> {

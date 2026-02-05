@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use arcstr::ArcStr;
 use mail_auth::{MX, ResolverCache, Txt};
 use quick_cache::{
     Equivalent, Weighter,
@@ -69,6 +70,13 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     #[inline(always)]
     pub fn insert(&self, key: K, value: V) {
         self.0.insert(key, value);
+    }
+
+    #[inline(always)]
+    pub fn update(&self, key: K, value: V) {
+        if let Err((key, value)) = self.0.replace(key, value, true) {
+            self.0.insert(key, value);
+        }
     }
 
     #[inline(always)]
@@ -220,9 +228,15 @@ impl CacheItemWeight for Box<str> {
     }
 }
 
-impl<T> CacheItemWeight for Box<[T]> {
+impl<T: CacheItemWeight> CacheItemWeight for Box<[T]> {
     fn weight(&self) -> u64 {
-        (self.len() * std::mem::size_of::<T>()) as u64 + std::mem::size_of::<Box<[T]>>() as u64
+        std::mem::size_of::<Box<[T]>>() as u64 + self.iter().map(|item| item.weight()).sum::<u64>()
+    }
+}
+
+impl<T: CacheItemWeight> CacheItemWeight for Arc<[T]> {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<Arc<[T]>>() as u64 + self.iter().map(|item| item.weight()).sum::<u64>()
     }
 }
 
@@ -232,45 +246,28 @@ impl CacheItemWeight for u32 {
     }
 }
 
-impl CacheItemWeight for Vec<IpAddr> {
+impl CacheItemWeight for IpAddr {
     fn weight(&self) -> u64 {
-        (self.len() * std::mem::size_of::<IpAddr>()) as u64
-            + std::mem::size_of::<Vec<IpAddr>>() as u64
+        std::mem::size_of::<Vec<IpAddr>>() as u64
     }
 }
 
-impl CacheItemWeight for Vec<Ipv4Addr> {
+impl CacheItemWeight for Ipv4Addr {
     fn weight(&self) -> u64 {
-        (self.len() * std::mem::size_of::<Ipv4Addr>()) as u64
-            + std::mem::size_of::<Vec<Ipv4Addr>>() as u64
+        std::mem::size_of::<Vec<Ipv4Addr>>() as u64
     }
 }
 
-impl CacheItemWeight for Vec<Ipv6Addr> {
+impl CacheItemWeight for Ipv6Addr {
     fn weight(&self) -> u64 {
-        (self.len() * std::mem::size_of::<Ipv6Addr>()) as u64
-            + std::mem::size_of::<Vec<Ipv6Addr>>() as u64
+        std::mem::size_of::<Vec<Ipv6Addr>>() as u64
     }
 }
 
-impl CacheItemWeight for Vec<MX> {
+impl CacheItemWeight for MX {
     fn weight(&self) -> u64 {
-        self.iter()
-            .map(|mx| {
-                mx.exchanges
-                    .iter()
-                    .map(|e| e.len() + std::mem::size_of::<MX>())
-                    .sum::<usize>()
-            })
-            .sum::<usize>() as u64
-            + std::mem::size_of::<Vec<MX>>() as u64
-    }
-}
-
-impl CacheItemWeight for Vec<String> {
-    fn weight(&self) -> u64 {
-        self.iter().map(|s| s.len()).sum::<usize>() as u64
-            + std::mem::size_of::<Vec<String>>() as u64
+        self.exchanges.iter().map(|e| e.len() as u64).sum::<u64>()
+            + std::mem::size_of::<MX>() as u64
     }
 }
 
@@ -280,15 +277,21 @@ impl CacheItemWeight for Txt {
     }
 }
 
-impl CacheItemWeight for IpAddr {
-    fn weight(&self) -> u64 {
-        std::mem::size_of::<IpAddr>() as u64
-    }
-}
-
 impl CacheItemWeight for bool {
     fn weight(&self) -> u64 {
         std::mem::size_of::<bool>() as u64
+    }
+}
+
+impl CacheItemWeight for ArcStr {
+    fn weight(&self) -> u64 {
+        self.len() as u64 + std::mem::size_of::<ArcStr>() as u64
+    }
+}
+
+impl CacheItemWeight for () {
+    fn weight(&self) -> u64 {
+        0
     }
 }
 

@@ -367,7 +367,7 @@ impl From<&mail_auth::IprevOutput> for Error {
             Key::Details,
             value.ptr.as_ref().map(|s| {
                 s.iter()
-                    .map(|v| Value::String(v.into()))
+                    .map(|v| Value::String(v.as_ref().into()))
                     .collect::<Vec<_>>()
             }),
         )

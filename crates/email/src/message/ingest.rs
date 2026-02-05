@@ -131,7 +131,7 @@ impl EmailIngest for Server {
     async fn email_ingest(&self, mut params: IngestEmail<'_>) -> trc::Result<IngestedEmail> {
         // Check quota
         let start_time = Instant::now();
-        let account_id = params.access_token.primary_id;
+        let account_id = params.access_token.account_id;
         let tenant_id = params.access_token.tenant.map(|t| t.id);
         let mut raw_message_len = params.raw_message.len() as u64;
         let resource_token = params.access_token.as_resource_token();

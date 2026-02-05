@@ -120,7 +120,7 @@ impl MailboxQuery for Server {
                                     .items
                                     .iter()
                                     .filter(|mailbox| {
-                                        mailbox.subscribers.contains(&access_token.primary_id)
+                                        mailbox.subscribers.contains(&access_token.account_id)
                                             == is_subscribed
                                     })
                                     .map(|m| m.document_id)

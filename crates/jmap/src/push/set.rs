@@ -45,7 +45,7 @@ impl PushSubscriptionSet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<SetResponse<push_subscription::PushSubscription>> {
         // Load existing push subscriptions
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
         let subscriptions_archive = self
             .store()
             .get_value::<Archive<AlignedBytes>>(ValueKey::property(

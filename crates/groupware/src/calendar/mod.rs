@@ -216,7 +216,7 @@ impl Calendar {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.primary_id();
+            let account_id = access_token.account_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -226,7 +226,7 @@ impl Calendar {
     }
 
     pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut CalendarPreferences {
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
         let idx = if let Some(idx) = self
             .preferences
             .iter()
@@ -260,7 +260,7 @@ impl ArchivedCalendar {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.primary_id();
+            let account_id = access_token.account_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -274,11 +274,11 @@ impl CalendarEvent {
     pub fn preferences(&self, access_token: &AccessToken) -> Option<&EventPreferences> {
         self.preferences
             .iter()
-            .find(|p| p.account_id == access_token.primary_id())
+            .find(|p| p.account_id == access_token.account_id())
     }
 
     pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut EventPreferences {
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
         let idx = if let Some(idx) = self
             .preferences
             .iter()
@@ -334,7 +334,7 @@ impl ArchivedCalendarEvent {
     pub fn preferences(&self, access_token: &AccessToken) -> Option<&ArchivedEventPreferences> {
         self.preferences
             .iter()
-            .find(|p| p.account_id == access_token.primary_id())
+            .find(|p| p.account_id == access_token.account_id())
     }
 }
 

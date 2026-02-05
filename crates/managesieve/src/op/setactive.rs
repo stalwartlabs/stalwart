@@ -33,7 +33,7 @@ impl<T: SessionStream> Session<T> {
             })?;
 
         // De/activate script
-        let account_id = self.state.access_token().primary_id();
+        let account_id = self.state.access_token().account_id();
         let mut batch = BatchBuilder::new();
         if !name.is_empty() {
             let document_id = self.get_script_id(account_id, &name).await?;

@@ -17,7 +17,7 @@ use biscuit::{
     },
     jws::Secret,
 };
-use registry::schema::{enums::JwtSignatureAlgorithm, prelude::Object, structs::Authentication};
+use registry::schema::{enums::JwtSignatureAlgorithm, prelude::Object, structs::OidcProvider};
 use ring::signature::{self, KeyPair};
 use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey, traits::PublicKeyParts};
 use store::{
@@ -47,7 +47,7 @@ pub struct OAuthConfig {
 
 impl OAuthConfig {
     pub async fn parse(bp: &mut Bootstrap) -> Self {
-        let auth = bp.setting_infallible::<Authentication>().await;
+        let auth = bp.setting_infallible::<OidcProvider>().await;
 
         let oidc_signature_algorithm = match auth.signature_algorithm {
             JwtSignatureAlgorithm::Es256 => SignatureAlgorithm::ES256,
@@ -88,7 +88,7 @@ impl OAuthConfig {
             | SignatureAlgorithm::PS384
             | SignatureAlgorithm::PS512 => parse_rsa_key(&auth)
                 .map_err(|err| {
-                    bp.build_error(Object::Authentication.singleton(), err);
+                    bp.build_error(Object::OidcProvider.singleton(), err);
                 })
                 .unwrap_or_else(|_| {
                     (
@@ -102,7 +102,7 @@ impl OAuthConfig {
             SignatureAlgorithm::ES256 | SignatureAlgorithm::ES384 | SignatureAlgorithm::ES512 => {
                 parse_ecdsa_key(&auth, oidc_signature_algorithm)
                     .map_err(|err| {
-                        bp.build_error(Object::Authentication.singleton(), err);
+                        bp.build_error(Object::OidcProvider.singleton(), err);
                     })
                     .unwrap_or_else(|_| {
                         (
@@ -177,7 +177,7 @@ impl Default for OAuthConfig {
     }
 }
 
-fn parse_rsa_key(auth: &Authentication) -> Result<(Secret, AlgorithmParameters), String> {
+fn parse_rsa_key(auth: &OidcProvider) -> Result<(Secret, AlgorithmParameters), String> {
     let rsa_key_pair = build_rsa_keypair(&auth.signature_key)?;
 
     let rsa_public_key = match RsaPublicKey::from_pkcs1_der(rsa_key_pair.public_key().as_ref()) {
@@ -201,7 +201,7 @@ fn parse_rsa_key(auth: &Authentication) -> Result<(Secret, AlgorithmParameters),
 }
 
 fn parse_ecdsa_key(
-    auth: &Authentication,
+    auth: &OidcProvider,
     oidc_signature_algorithm: SignatureAlgorithm,
 ) -> Result<(Secret, AlgorithmParameters), String> {
     let (alg, curve) = match oidc_signature_algorithm {

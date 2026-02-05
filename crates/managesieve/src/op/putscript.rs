@@ -47,7 +47,7 @@ impl<T: SessionStream> Session<T> {
 
         // Check quota
         let access_token = self.state.access_token();
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
         self.server
             .has_available_quota(&access_token.as_resource_token(), script_bytes.len() as u64)
             .await

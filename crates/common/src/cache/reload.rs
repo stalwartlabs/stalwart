@@ -11,7 +11,6 @@ use crate::{
 };
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
-use utils::config::Config;
 
 pub struct ReloadResult {
     pub config: Config,
@@ -133,15 +132,5 @@ impl Server {
         } else {
             config.into()
         })*/
-    }
-}
-
-impl From<Config> for ReloadResult {
-    fn from(config: Config) -> Self {
-        Self {
-            config,
-            new_core: None,
-            tracers: None,
-        }
     }
 }

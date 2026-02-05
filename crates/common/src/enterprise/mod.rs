@@ -26,7 +26,7 @@ use registry::types::id::Id;
 use std::{sync::Arc, time::Duration};
 use store::Store;
 use trc::{AddContext, MetricType};
-use utils::{HttpLimitResponse, config::cron::SimpleCron, template::Template};
+use utils::{HttpLimitResponse, cron::SimpleCron, template::Template};
 
 #[derive(Clone)]
 pub struct Enterprise {

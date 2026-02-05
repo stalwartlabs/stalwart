@@ -44,7 +44,7 @@ impl WebSocketHandler for Server {
         trc::event!(
             Jmap(JmapEvent::WebsocketStart),
             SpanId = session.session_id,
-            AccountId = access_token.primary_id(),
+            AccountId = access_token.account_id(),
         );
 
         // Set timeouts

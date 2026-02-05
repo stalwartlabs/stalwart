@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::net::IpAddr;
-
-use mail_auth::{Error, IpLookupStrategy};
-
 use crate::Server;
+use mail_auth::{Error, IpLookupStrategy};
+use std::net::IpAddr;
 
 impl Server {
     pub async fn dns_exists_mx(&self, entry: &str) -> trc::Result<bool> {

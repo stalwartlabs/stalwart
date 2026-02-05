@@ -106,7 +106,7 @@ impl PrincipalPropFind for Server {
             let mut fields = Vec::with_capacity(properties.len());
             let mut fields_not_found = Vec::new();
 
-            let (name, description, emails, typ) = if access_token.primary_id() == account_id {
+            let (name, description, emails, typ) = if access_token.account_id() == account_id {
                 (
                     Cow::Borrowed(access_token.name.as_str()),
                     access_token
@@ -411,7 +411,7 @@ impl PrincipalPropFind for Server {
     }
 
     async fn owner_href(&self, access_token: &AccessToken, account_id: u32) -> trc::Result<Href> {
-        if access_token.primary_id() == account_id {
+        if access_token.account_id() == account_id {
             Ok(access_token.current_user_principal())
         } else {
             let name = self
@@ -449,9 +449,9 @@ pub(crate) async fn build_home_set(
         percent_encoding::utf8_percent_encode(name, RFC_3986),
     )));
 
-    if !server.core.groupware.assisted_discovery && account_id == access_token.primary_id() {
+    if !server.core.groupware.assisted_discovery && account_id == access_token.account_id() {
         for account_id in access_token.all_ids_by_collection(collection) {
-            if account_id != access_token.primary_id() {
+            if account_id != access_token.account_id() {
                 let other_name = server
                     .store()
                     .get_principal_name(account_id)

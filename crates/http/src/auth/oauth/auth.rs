@@ -109,7 +109,7 @@ impl OAuthApiHandler for Server {
                 // Serialize OAuth code
                 let value = Archiver::new(OAuthCode {
                     status: OAuthStatus::Authorized,
-                    account_id: access_token.primary_id(),
+                    account_id: access_token.account_id(),
                     client_id,
                     nonce,
                     params: redirect_uri.unwrap_or_default(),
@@ -167,7 +167,7 @@ impl OAuthApiHandler for Server {
                     if oauth.status == OAuthStatus::Pending {
                         let new_oauth_code = OAuthCode {
                             status: OAuthStatus::Authorized,
-                            account_id: access_token.primary_id(),
+                            account_id: access_token.account_id(),
                             client_id: oauth.client_id.to_string(),
                             nonce: oauth.nonce.as_ref().map(|s| s.to_string()),
                             params: Default::default(),

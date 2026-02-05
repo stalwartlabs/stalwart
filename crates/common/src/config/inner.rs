@@ -6,8 +6,8 @@
 
 use super::server::tls::build_self_signed_cert;
 use crate::{
-    CacheSwap, Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache,
-    MessageUidCache, TlsConnectors,
+    Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache, MessageUidCache,
+    TlsConnectors,
     auth::AccessToken,
     config::{
         mailstore::spamfilter::SpamClassifier,
@@ -100,7 +100,7 @@ impl Caches {
             messages: Cache::new(
                 cache.messages,
                 (std::mem::size_of::<u32>()
-                    + std::mem::size_of::<CacheSwap<MessageStoreCache>>()
+                    + std::mem::size_of::<Arc<MessageStoreCache>>()
                     + (1024 * std::mem::size_of::<MessageUidCache>())
                     + (15 * (std::mem::size_of::<MailboxCache>() + 60))) as u64,
             ),
@@ -156,10 +156,10 @@ impl Caches {
         '_,
         T,
         CacheWithTtl<Box<str>, Txt>,
-        CacheWithTtl<Box<str>, Arc<Box<[MX]>>>,
-        CacheWithTtl<Box<str>, Arc<Box<[Ipv4Addr]>>>,
-        CacheWithTtl<Box<str>, Arc<Box<[Ipv6Addr]>>>,
-        CacheWithTtl<IpAddr, Arc<Box<[Box<str>]>>>,
+        CacheWithTtl<Box<str>, Arc<[MX]>>,
+        CacheWithTtl<Box<str>, Arc<[Ipv4Addr]>>,
+        CacheWithTtl<Box<str>, Arc<[Ipv6Addr]>>,
+        CacheWithTtl<IpAddr, Arc<[Box<str>]>>,
     > {
         Parameters {
             params,

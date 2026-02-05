@@ -20,6 +20,7 @@ use crate::{
     ipc::{BroadcastEvent, PushEvent, PushNotification},
     manager::SPAM_CLASSIFIER_KEY,
 };
+use directory::Directory;
 use mail_auth::IpLookupStrategy;
 use sieve::Sieve;
 use std::{
@@ -73,31 +74,16 @@ impl Server {
         &self.core.storage.lookup
     }
 
-    #[inline(always)]
-    pub fn directory(&self) -> &Directory {
-        &self.core.storage.directory
-    }
-
     pub fn get_directory(&self, name: &str) -> Option<&Arc<Directory>> {
         self.core.storage.directories.get(name)
     }
 
-    pub fn get_directory_or_default(&self, name: &str, session_id: u64) -> &Arc<Directory> {
-        self.core.storage.directories.get(name).unwrap_or_else(|| {
-            if !name.is_empty() {
-                trc::event!(
-                    Eval(trc::EvalEvent::DirectoryNotFound),
-                    Id = name.to_string(),
-                    SpanId = session_id,
-                );
-            }
-
-            &self.core.storage.directory
-        })
+    pub fn get_default_directory(&self) -> Option<&Arc<Directory>> {
+        self.core.storage.directory.as_ref()
     }
 
-    pub fn get_in_memory_store(&self, name: &str) -> Option<&InMemoryStore> {
-        self.core.storage.lookups.get(name)
+    pub fn get_lookup_store(&self, name: &str) -> Option<InMemoryStore> {
+        self.inner.data.lookup_stores.load().get(name).cloned()
     }
 
     pub fn get_dkim_signer(&self, name: &str, session_id: u64) -> Option<Arc<DkimSigner>> {
@@ -334,7 +320,7 @@ impl Server {
         access_token: &AccessToken,
         account_id: u32,
     ) -> trc::Result<ResourceToken> {
-        Ok(if access_token.primary_id == account_id {
+        Ok(if access_token.account_id == account_id {
             ResourceToken {
                 account_id,
                 quota: access_token.quota,

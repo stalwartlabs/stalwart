@@ -188,7 +188,7 @@ impl<T: SessionStream> Session<T> {
                             .lookup
                             .is_rate_allowed(
                                 KV_RATE_LIMIT_IMAP,
-                                &access_token.primary_id().to_be_bytes(),
+                                &access_token.account_id().to_be_bytes(),
                                 rate,
                                 true,
                             )

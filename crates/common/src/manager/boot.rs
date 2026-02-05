@@ -23,11 +23,7 @@ use std::{
 };
 use store::rand::{Rng, distr::Alphanumeric, rng};
 use tokio::sync::{Notify, mpsc};
-use utils::{
-    UnwrapFailure,
-    config::{Config, ConfigKey},
-    failed,
-};
+use utils::{UnwrapFailure, failed};
 
 pub struct BootManager {
     pub config: Config,

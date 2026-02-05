@@ -60,7 +60,7 @@ impl QuotaGet for Server {
             not_found: vec![],
         };
 
-        let access_token = if account_id == access_token.primary_id() {
+        let access_token = if account_id == access_token.account_id() {
             AccessTokenRef::Borrowed(access_token)
         } else {
             AccessTokenRef::Owned(

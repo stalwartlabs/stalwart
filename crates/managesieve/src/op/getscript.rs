@@ -33,7 +33,7 @@ impl<T: SessionStream> Session<T> {
                     .into_err()
                     .details("Expected script name as a parameter.")
             })?;
-        let account_id = self.state.access_token().primary_id();
+        let account_id = self.state.access_token().account_id();
         let document_id = self.get_script_id(account_id, &name).await?;
         let sieve_ = self
             .server

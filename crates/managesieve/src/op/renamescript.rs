@@ -49,7 +49,7 @@ impl<T: SessionStream> Session<T> {
         if name == new_name {
             return Ok(StatusResponse::ok("Old and new script names are the same.").into_bytes());
         }
-        let account_id = self.state.access_token().primary_id();
+        let account_id = self.state.access_token().account_id();
         let document_id = self.get_script_id(account_id, &name).await?;
         if self.validate_name(account_id, &new_name).await?.is_some() {
             return Err(trc::ManageSieveEvent::Error

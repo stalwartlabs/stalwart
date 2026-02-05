@@ -98,7 +98,7 @@ impl Authenticator for Server {
             self.inner.cache.http_auth.insert(
                 token.to_string(),
                 HttpAuthCache {
-                    account_id: access_token.primary_id(),
+                    account_id: access_token.account_id(),
                     revision: access_token.revision,
                     expires: Instant::now()
                         + Duration::from_secs(self.core.oauth.oauth_expiry_token),

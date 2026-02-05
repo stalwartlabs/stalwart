@@ -116,7 +116,7 @@ impl<'x> Tokenizer<'x> {
                             b"system" => {
                                 let stop_ch = self.find_char(b"\"'")?;
                                 let var = match self.parse_string(stop_ch)?.as_str() {
-                                    "default_domain" => SystemVariable::Domain,
+                                    "domain" => SystemVariable::Domain,
                                     "hostname" => SystemVariable::Hostname,
                                     "node_id" => SystemVariable::NodeId,
                                     other => {

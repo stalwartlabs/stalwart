@@ -64,7 +64,7 @@ impl TroubleshootApi for Server {
         body: Option<Vec<u8>>,
     ) -> trc::Result<HttpResponse> {
         let params = UrlParams::new(req.uri().query());
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
 
         match (
             path.get(1).copied().unwrap_or_default(),

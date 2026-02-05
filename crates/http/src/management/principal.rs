@@ -690,10 +690,10 @@ impl PrincipalManager for Server {
             app_passwords: Vec::new(),
         };
 
-        if access_token.primary_id() != u32::MAX {
+        if access_token.account_id() != u32::MAX {
             let principal = self
                 .directory()
-                .query(QueryParams::id(access_token.primary_id()).with_return_member_of(false))
+                .query(QueryParams::id(access_token.account_id()).with_return_member_of(false))
                 .await?
                 .ok_or_else(|| trc::ManageEvent::NotFound.into_err())?;
 
@@ -760,7 +760,7 @@ impl PrincipalManager for Server {
         }
 
         // Handle Fallback admin password changes
-        if access_token.primary_id() == u32::MAX {
+        if access_token.account_id() == u32::MAX {
             match requests.into_iter().next().unwrap() {
                 AccountAuthRequest::SetPassword { password } => {
                     self.core
@@ -774,7 +774,7 @@ impl PrincipalManager for Server {
 
                     // Increment revision
                     self.invalidate_principal_caches(ChangedPrincipals::from_change(
-                        access_token.primary_id(),
+                        access_token.account_id(),
                         Type::Individual,
                         PrincipalField::Secrets,
                     ))
@@ -846,7 +846,7 @@ impl PrincipalManager for Server {
             .storage
             .data
             .update_principal(
-                UpdatePrincipal::by_id(access_token.primary_id())
+                UpdatePrincipal::by_id(access_token.account_id())
                     .with_updates(actions)
                     .with_tenant(access_token.tenant.map(|t| t.id)),
             )

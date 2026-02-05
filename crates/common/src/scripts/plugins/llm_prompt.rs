@@ -34,13 +34,17 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
 
         if let Some(ai_api) = ctx.server.core.enterprise.as_ref().and_then(|e| {
             if ctx.access_token.is_none_or(|token| {
+                use registry::schema::enums::Permission;
+
                 if token.has_permission(Permission::AiModelInteract) {
                     true
                 } else {
+                    use registry::types::EnumType;
+
                     trc::event!(
                         Security(SecurityEvent::Unauthorized),
-                        AccountId = token.primary_id(),
-                        Details = Permission::AiModelInteract.name(),
+                        AccountId = token.account_id(),
+                        Details = Permission::AiModelInteract.as_str(),
                         SpanId = ctx.session_id,
                     );
                     false

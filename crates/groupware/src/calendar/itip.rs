@@ -149,7 +149,7 @@ impl ItipIngest for Server {
         };
 
         // Find event by UID
-        let account_id = access_token.primary_id;
+        let account_id = access_token.account_id;
         let document_id = self
             .document_ids_matching(
                 account_id,

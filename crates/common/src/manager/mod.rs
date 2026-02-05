@@ -12,7 +12,6 @@ use utils::HttpLimitResponse;
 pub mod backup;
 pub mod boot;
 pub mod console;
-pub mod reload;
 pub mod restore;
 pub mod webadmin;
 

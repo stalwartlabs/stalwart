@@ -50,7 +50,7 @@ impl OpenIdHandler for Server {
         access_token: &AccessToken,
     ) -> trc::Result<HttpResponse> {
         Ok(JsonResponse::new(Userinfo {
-            sub: Some(access_token.primary_id.to_string()),
+            sub: Some(access_token.account_id.to_string()),
             name: access_token.description.clone(),
             preferred_username: Some(access_token.name.clone()),
             email: access_token.emails.first().cloned(),

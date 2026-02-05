@@ -108,7 +108,7 @@ impl SieveScriptIngest for Server {
         };
 
         // Obtain mailboxIds
-        let account_id = access_token.primary_id;
+        let account_id = access_token.account_id;
         let mut cache = self
             .get_cached_messages(account_id)
             .await

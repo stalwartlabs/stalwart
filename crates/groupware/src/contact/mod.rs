@@ -54,7 +54,7 @@ impl AddressBook {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.primary_id();
+            let account_id = access_token.account_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -64,7 +64,7 @@ impl AddressBook {
     }
 
     pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut AddressBookPreferences {
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
         let idx = if let Some(idx) = self
             .preferences
             .iter()
@@ -87,7 +87,7 @@ impl ArchivedAddressBook {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.primary_id();
+            let account_id = access_token.account_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)

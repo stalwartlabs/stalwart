@@ -110,7 +110,7 @@ impl<T: SessionStream> Session<T> {
         };
 
         // Fetch mailbox
-        let mailbox = self.fetch_mailbox(access_token.primary_id()).await?;
+        let mailbox = self.fetch_mailbox(access_token.account_id()).await?;
 
         // Create session
         self.state = State::Authenticated {

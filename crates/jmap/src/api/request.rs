@@ -186,7 +186,7 @@ impl RequestHandler for Server {
                         trc::error!(
                             error
                                 .span_id(session.session_id)
-                                .ctx_unique(trc::Key::AccountId, access_token.primary_id())
+                                .ctx_unique(trc::Key::AccountId, access_token.account_id())
                                 .caused_by(method_name)
                         );
 
@@ -626,7 +626,7 @@ impl RequestHandler for Server {
             Jmap(JmapEvent::MethodCall),
             Id = method_name.as_str(),
             SpanId = session.session_id,
-            AccountId = access_token.primary_id(),
+            AccountId = access_token.account_id(),
             Elapsed = op_start.elapsed(),
         );
 
@@ -637,6 +637,6 @@ impl RequestHandler for Server {
 #[inline]
 pub(crate) fn set_account_id_if_missing(account_id: &mut Id, access_token: &AccessToken) {
     if !account_id.is_valid() {
-        *account_id = Id::from(access_token.primary_id());
+        *account_id = Id::from(access_token.account_id());
     }
 }

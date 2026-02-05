@@ -53,7 +53,7 @@ impl EmailImport for Server {
         };
 
         // Obtain import access token
-        let import_access_token = if account_id != access_token.primary_id() {
+        let import_access_token = if account_id != access_token.account_id() {
             #[cfg(feature = "test_mode")]
             {
                 std::sync::Arc::new(AccessToken::from_id(account_id)).into()

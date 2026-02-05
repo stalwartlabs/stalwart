@@ -45,7 +45,7 @@ impl<T: SessionStream> Session<T> {
 
         // Validate name
         let access_token = self.state.access_token();
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
         self.validate_name(account_id, &name).await?;
 
         // Validate quota

@@ -93,7 +93,7 @@ impl DavUriResource for Server {
             } else {
                 let account = decode_path_element(account);
                 if access_token.name == account {
-                    access_token.primary_id
+                    access_token.account_id
                 } else {
                     self.store()
                         .get_principal_id(&account)

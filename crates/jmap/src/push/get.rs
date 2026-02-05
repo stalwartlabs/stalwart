@@ -44,7 +44,7 @@ impl PushSubscriptionFetch for Server {
             PushSubscriptionProperty::Types,
         ]);
 
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
 
         let mut response = GetResponse {
             account_id: request.account_id.into(),

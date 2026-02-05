@@ -83,7 +83,7 @@ pub struct SelectedMailbox {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct AccountId {
     pub account_id: u32,
-    pub primary_id: u32,
+    pub account_id: u32,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]

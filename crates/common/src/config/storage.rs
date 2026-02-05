@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::auth::IdMap;
 use coordinator::Coordinator;
 use directory::Directory;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use store::{BlobStore, InMemoryStore, RegistryStore, SearchStore, Store};
+
+pub type IdMap<V> = HashMap<u32, Arc<V>, nohash_hasher::BuildNoHashHasher<u32>>;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -16,7 +17,8 @@ pub struct Storage {
     pub data: Store,
     pub blob: BlobStore,
     pub fts: SearchStore,
-    pub lookup: InMemoryStore,
-    pub pubsub: Coordinator,
-    pub directories: IdMap<Arc<Directory>>,
+    pub memory: InMemoryStore,
+    pub coordinator: Coordinator,
+    pub directory: Option<Arc<Directory>>,
+    pub directories: IdMap<Directory>,
 }

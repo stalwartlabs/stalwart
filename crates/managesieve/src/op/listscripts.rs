@@ -22,7 +22,7 @@ impl<T: SessionStream> Session<T> {
         self.assert_has_permission(Permission::SieveListScripts)?;
 
         let op_start = Instant::now();
-        let account_id = self.state.access_token().primary_id();
+        let account_id = self.state.access_token().account_id();
         let document_ids = self
             .server
             .document_ids(account_id, Collection::SieveScript, SieveField::Name)

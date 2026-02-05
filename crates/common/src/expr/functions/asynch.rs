@@ -4,16 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{cmp::Ordering, net::IpAddr, vec::IntoIter};
-
+use super::*;
+use crate::{Server, expr::StringCow};
 use compact_str::{CompactString, ToCompactString};
 use mail_auth::IpLookupStrategy;
+use std::{cmp::Ordering, net::IpAddr, vec::IntoIter};
 use store::{Deserialize, Rows, Value, dispatch::lookup::KeyValue};
 use trc::AddContext;
-
-use crate::{Server, expr::StringCow};
-
-use super::*;
 
 impl Server {
     pub(crate) async fn eval_fnc<'x>(

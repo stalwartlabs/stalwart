@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{AccessToken, ResourceToken, TenantInfo, roles::PermissionsGroup};
+use super::AccessToken;
 use crate::{
     Server,
     ipc::BroadcastEvent,
@@ -23,11 +23,6 @@ use utils::map::{
     bitmap::{Bitmap, BitmapItem},
     vec_map::VecMap,
 };
-
-pub enum PrincipalOrId {
-    Principal(Principal),
-    Id(u32),
-}
 
 impl Server {
     async fn build_access_token_from_principal(
@@ -141,7 +136,7 @@ impl Server {
 
         // Build access token
         let mut access_token = AccessToken {
-            primary_id: principal.id,
+            account_id: principal.id,
             member_of,
             access_to: VecMap::new(),
             tenant,
@@ -167,7 +162,7 @@ impl Server {
             revision,
         };
 
-        for grant_account_id in [access_token.primary_id]
+        for grant_account_id in [access_token.account_id]
             .into_iter()
             .chain(access_token.member_of.iter().copied())
         {
@@ -375,31 +370,10 @@ impl Server {
     }
 }
 
-impl From<u32> for PrincipalOrId {
-    fn from(id: u32) -> Self {
-        Self::Id(id)
-    }
-}
-
-impl From<Principal> for PrincipalOrId {
-    fn from(principal: Principal) -> Self {
-        Self::Principal(principal)
-    }
-}
-
-impl PrincipalOrId {
-    pub fn id(&self) -> u32 {
-        match self {
-            Self::Principal(principal) => principal.id(),
-            Self::Id(id) => *id,
-        }
-    }
-}
-
 impl AccessToken {
-    pub fn from_id(primary_id: u32) -> Self {
+    pub fn from_id(account_id: u32) -> Self {
         Self {
-            primary_id,
+            account_id,
             ..Default::default()
         }
     }
@@ -427,8 +401,8 @@ impl AccessToken {
     }
 
     #[inline(always)]
-    pub fn primary_id(&self) -> u32 {
-        self.primary_id
+    pub fn account_id(&self) -> u32 {
+        self.account_id
     }
 
     #[inline(always)]
@@ -443,20 +417,20 @@ impl AccessToken {
     }
 
     pub fn member_ids(&self) -> impl Iterator<Item = u32> {
-        [self.primary_id]
+        [self.account_id]
             .into_iter()
             .chain(self.member_of.iter().copied())
     }
 
     pub fn all_ids(&self) -> impl Iterator<Item = u32> {
-        [self.primary_id]
+        [self.account_id]
             .into_iter()
             .chain(self.member_of.iter().copied())
             .chain(self.access_to.iter().map(|(id, _)| *id))
     }
 
     pub fn all_ids_by_collection(&self, collection: Collection) -> impl Iterator<Item = u32> {
-        [self.primary_id]
+        [self.account_id]
             .into_iter()
             .chain(self.member_of.iter().copied())
             .chain(self.access_to.iter().filter_map(move |(id, cols)| {
@@ -469,13 +443,13 @@ impl AccessToken {
     }
 
     pub fn is_member(&self, account_id: u32) -> bool {
-        self.primary_id == account_id
+        self.account_id == account_id
             || self.member_of.contains(&account_id)
             || self.has_permission(Permission::Impersonate)
     }
 
-    pub fn is_primary_id(&self, account_id: u32) -> bool {
-        self.primary_id == account_id
+    pub fn is_account_id(&self, account_id: u32) -> bool {
+        self.account_id == account_id
     }
 
     #[inline(always)]
@@ -549,7 +523,7 @@ impl AccessToken {
 
     pub fn as_resource_token(&self) -> ResourceToken {
         ResourceToken {
-            account_id: self.primary_id,
+            account_id: self.account_id,
             quota: self.quota,
             tenant: self.tenant,
         }

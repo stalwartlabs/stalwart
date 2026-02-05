@@ -18,7 +18,7 @@ imap_proto = { path = "../imap-proto" }
 sieve-rs = { version = "0.7", features = ["rkyv", "serde"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
 mail-builder = { version = "0.4" }
-mail-auth = { version = "0.7.1" }
+mail-auth = { path = "/Users/me/code/mail-auth" }
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
 smtp-proto = { version = "0.2", features = ["rkyv"] }
 dns-update = { version = "0.1.5" }

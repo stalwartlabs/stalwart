@@ -621,7 +621,7 @@ impl PropFindRequestHandler for Server {
                                     property.clone(),
                                     self.expand_principal(
                                         access_token,
-                                        access_token.primary_id(),
+                                        access_token.account_id(),
                                         &query.propfind,
                                     )
                                     .await?
@@ -1420,14 +1420,14 @@ async fn get(
             // This is invalid but it's the only workaround for clients which do not support multiple home-sets
             if server.core.groupware.assisted_discovery
                 && !is_sync
-                && account_id == access_token.primary_id()
+                && account_id == access_token.account_id()
                 && matches!(
                     sync_collection,
                     SyncCollection::Calendar | SyncCollection::AddressBook
                 )
             {
                 for shared_account_id in access_token.all_ids_by_collection(collection_container) {
-                    if shared_account_id == access_token.primary_id() {
+                    if shared_account_id == access_token.account_id() {
                         continue;
                     }
                     let shared_resources = data
@@ -1745,7 +1745,7 @@ async fn add_base_collection_response(
                     server,
                     access_token,
                     &access_token.name,
-                    access_token.primary_id,
+                    access_token.account_id,
                     true,
                 )
                 .await
@@ -1759,7 +1759,7 @@ async fn add_base_collection_response(
                     server,
                     access_token,
                     &access_token.name,
-                    access_token.primary_id,
+                    access_token.account_id,
                     false,
                 )
                 .await

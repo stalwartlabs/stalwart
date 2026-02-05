@@ -9,7 +9,7 @@ use types::acl::{AclGrant, ArchivedAclGrant};
 
 impl Server {
     pub async fn refresh_acls(&self, acl_changes: &[AclGrant], current: Option<&[AclGrant]>) {
-        let mut changed_principals = ChangedPrincipals::new();
+        let mut changed_principals = Vec::new();
         if let Some(acl_current) = current {
             for current_item in acl_current {
                 let mut invalidate = true;
@@ -20,11 +20,7 @@ impl Server {
                     }
                 }
                 if invalidate {
-                    changed_principals.add_change(
-                        current_item.account_id,
-                        Type::Individual,
-                        PrincipalField::EnabledPermissions,
-                    );
+                    changed_principals.push(current_item.account_id);
                 }
             }
 
@@ -37,20 +33,12 @@ impl Server {
                     }
                 }
                 if invalidate {
-                    changed_principals.add_change(
-                        change_item.account_id,
-                        Type::Individual,
-                        PrincipalField::EnabledPermissions,
-                    );
+                    changed_principals.push(change_item.account_id);
                 }
             }
         } else {
             for value in acl_changes {
-                changed_principals.add_change(
-                    value.account_id,
-                    Type::Individual,
-                    PrincipalField::EnabledPermissions,
-                );
+                changed_principals.push(value.account_id);
             }
         }
 
@@ -62,7 +50,7 @@ impl Server {
         acl_changes: &[AclGrant],
         acl_current: &[ArchivedAclGrant],
     ) {
-        let mut changed_principals = ChangedPrincipals::new();
+        let mut changed_principals = Vec::new();
         for current_item in acl_current.iter() {
             let mut invalidate = true;
             for change_item in acl_changes {
@@ -72,11 +60,7 @@ impl Server {
                 }
             }
             if invalidate {
-                changed_principals.add_change(
-                    current_item.account_id.to_native(),
-                    Type::Individual,
-                    PrincipalField::EnabledPermissions,
-                );
+                changed_principals.push(current_item.account_id.to_native());
             }
         }
 
@@ -89,11 +73,7 @@ impl Server {
                 }
             }
             if invalidate {
-                changed_principals.add_change(
-                    change_item.account_id,
-                    Type::Individual,
-                    PrincipalField::EnabledPermissions,
-                );
+                changed_principals.push(change_item.account_id);
             }
         }
 

@@ -154,7 +154,7 @@ impl CalendarEventGet for Server {
             )
         };
         let return_is_origin = if return_is_origin {
-            if access_token.primary_id() == account_id {
+            if access_token.account_id() == account_id {
                 OriginAddresses::Ref(access_token)
             } else {
                 OriginAddresses::Owned(self.get_access_token(account_id).await?)

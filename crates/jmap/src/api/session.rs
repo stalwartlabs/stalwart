@@ -34,7 +34,7 @@ impl SessionHandler for Server {
 
         // Set primary account
         session.username = access_token.name.to_string();
-        let account_id = Id::from(access_token.primary_id());
+        let account_id = Id::from(access_token.account_id());
         let mut account = Account {
             name: access_token.name.to_string(),
             is_personal: true,

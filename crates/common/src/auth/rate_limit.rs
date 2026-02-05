@@ -21,10 +21,10 @@ impl Server {
         let is_rate_allowed = if let Some(rate) = &self.core.network.http.rate_authenticated {
             self.core
                 .storage
-                .lookup
+                .memory
                 .is_rate_allowed(
                     KV_RATE_LIMIT_HTTP_AUTHENTICATED,
-                    &access_token.primary_id.to_be_bytes(),
+                    &access_token.account_id.to_be_bytes(),
                     rate,
                     false,
                 )
@@ -60,7 +60,7 @@ impl Server {
             && self
                 .core
                 .storage
-                .lookup
+                .memory
                 .is_rate_allowed(
                     KV_RATE_LIMIT_HTTP_ANONYMOUS,
                     &ip_to_bytes(addr),

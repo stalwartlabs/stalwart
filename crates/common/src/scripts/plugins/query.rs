@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::cmp::Ordering;
-
+use super::PluginContext;
 use crate::scripts::{into_sieve_value, to_store_value};
 use sieve::{FunctionMap, runtime::Variable};
+use std::cmp::Ordering;
 use store::{Rows, Value};
-
-use super::PluginContext;
 
 pub fn register(plugin_id: u32, fnc_map: &mut FunctionMap) {
     fnc_map.set_external_function("query", plugin_id, 3);
@@ -19,8 +17,11 @@ pub fn register(plugin_id: u32, fnc_map: &mut FunctionMap) {
 pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
     // Obtain store name
     let store = match &ctx.arguments[0] {
-        Variable::String(v) if !v.is_empty() => ctx.server.core.storage.stores.get(v.as_ref()),
-        _ => Some(&ctx.server.core.storage.data),
+        Variable::String(v) if !v.is_empty() => ctx
+            .server
+            .get_lookup_store(v.as_str())
+            .and_then(|v| v.as_store().cloned()),
+        _ => Some(ctx.server.core.storage.data.clone()),
     }
     .ok_or_else(|| {
         trc::SieveEvent::RuntimeError

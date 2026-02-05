@@ -576,7 +576,7 @@ impl ArchivedCalendarEvent {
             if let Some(calendar_) = server
                 .store()
                 .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
-                    access_token.primary_id,
+                    access_token.account_id,
                     Collection::Calendar,
                     event_name.parent_id.to_native(),
                 ))

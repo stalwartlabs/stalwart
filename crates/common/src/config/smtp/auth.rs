@@ -23,6 +23,7 @@ use registry::{
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 use store::registry::bootstrap::Bootstrap;
+use utils::cache::CacheItemWeight;
 
 #[derive(Clone)]
 pub struct MailAuthConfig {
@@ -416,5 +417,11 @@ impl VerifyStrategy {
     #[inline(always)]
     pub fn is_strict(&self) -> bool {
         matches!(self, VerifyStrategy::Strict)
+    }
+}
+
+impl CacheItemWeight for DkimSigner {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<Self>() as u64
     }
 }

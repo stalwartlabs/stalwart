@@ -39,7 +39,7 @@ impl<T: SessionStream> SessionData<T> {
         let mut session = SessionData {
             stream_tx: session.stream_tx.clone(),
             server: session.server.clone(),
-            account_id: access_token.primary_id(),
+            account_id: access_token.account_id(),
             session_id: session.session_id,
             mailboxes: Mutex::new(vec![]),
             state: access_token.state().into(),
@@ -100,7 +100,7 @@ impl<T: SessionStream> SessionData<T> {
             return Ok(None);
         }
 
-        let shared_mailbox_ids = if access_token.is_primary_id(account_id)
+        let shared_mailbox_ids = if access_token.is_account_id(account_id)
             || access_token.member_of.contains(&account_id)
         {
             None
@@ -168,7 +168,7 @@ impl<T: SessionStream> SessionData<T> {
                         .items
                         .iter()
                         .any(|child| child.parent_id == mailbox.document_id),
-                    is_subscribed: mailbox.subscribers.contains(&access_token.primary_id()),
+                    is_subscribed: mailbox.subscribers.contains(&access_token.account_id()),
                     special_use: match mailbox.role {
                         SpecialUse::Trash => Some(Attribute::Trash),
                         SpecialUse::Junk => Some(Attribute::Junk),
@@ -236,7 +236,7 @@ impl<T: SessionStream> SessionData<T> {
                     .copied()
                     .collect::<Vec<_>>();
                 for account in mailboxes.drain(..) {
-                    if access_token.is_primary_id(account.account_id)
+                    if access_token.is_account_id(account.account_id)
                         || has_access_to.contains(&account.account_id)
                     {
                         new_accounts.push(account);
