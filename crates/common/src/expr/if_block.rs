@@ -122,9 +122,7 @@ impl BootstrapExprExt for Bootstrap {
     ) -> Option<IfBlock> {
         // Parse conditions
         let mut if_then = Vec::with_capacity(expr.match_.len());
-        let mut default = Expression {
-            items: Default::default(),
-        };
+        let default;
 
         if expr.else_.is_empty() {
             if !expr.match_.is_empty() {

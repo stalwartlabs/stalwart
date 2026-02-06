@@ -15,8 +15,8 @@ use store::dispatch::lookup::KeyValue;
 use trc::{AcmeEvent, DnsEvent, EventType};
 use x509_parser::parse_x509_certificate;
 
-use crate::listener::acme::ChallengeSettings;
-use crate::listener::acme::directory::Identifier;
+use crate::network::acme::ChallengeSettings;
+use crate::network::acme::directory::Identifier;
 use crate::{KV_ACME, Server};
 
 use super::AcmeProvider;

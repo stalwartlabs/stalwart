@@ -7,7 +7,7 @@
 use crate::{
     IPC_CHANNEL_BUFFER, Server,
     auth::AccessToken,
-    ipc::{PushEvent, PushNotification},
+    ipc::{BroadcastEvent, PushEvent, PushNotification},
 };
 use tokio::sync::mpsc;
 use types::type_state::DataType;
@@ -36,5 +36,48 @@ impl Server {
             })?;
 
         Ok(rx)
+    }
+
+    #[inline(always)]
+    pub fn notify_task_queue(&self) {
+        self.inner.ipc.task_tx.notify_one();
+    }
+
+    pub async fn broadcast_push_notification(&self, notification: PushNotification) -> bool {
+        match self
+            .inner
+            .ipc
+            .push_tx
+            .clone()
+            .send(PushEvent::Publish {
+                notification,
+                broadcast: true,
+            })
+            .await
+        {
+            Ok(_) => true,
+            Err(_) => {
+                trc::event!(
+                    Server(trc::ServerEvent::ThreadError),
+                    Details = "Error sending state change.",
+                    CausedBy = trc::location!()
+                );
+
+                false
+            }
+        }
+    }
+
+    pub async fn cluster_broadcast(&self, event: BroadcastEvent) {
+        let todo = "refactor event names";
+        if let Some(broadcast_tx) = &self.inner.ipc.broadcast_tx.clone()
+            && broadcast_tx.send(event).await.is_err()
+        {
+            trc::event!(
+                Server(trc::ServerEvent::ThreadError),
+                Details = "Error sending broadcast event.",
+                CausedBy = trc::location!()
+            );
+        }
     }
 }

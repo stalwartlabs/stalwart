@@ -222,7 +222,9 @@ impl<'x> ExpressionParser<'x> {
         }
 
         if self.operator_stack.is_empty() {
-            Ok(Expression { items: self.output })
+            Ok(Expression {
+                items: self.output.into_boxed_slice(),
+            })
         } else {
             Err("Invalid expression".to_string())
         }

@@ -6,7 +6,7 @@
 
 use self::{mailstore::jmap::JmapConfig, smtp::SmtpConfig, storage::Storage};
 use crate::{
-    Core, Network, Security,
+    Core, Network,
     auth::oauth::config::OAuthConfig,
     config::mailstore::{imap::ImapConfig, scripts::Scripting, spamfilter::SpamFilterConfig},
     expr::*,

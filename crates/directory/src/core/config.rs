@@ -11,7 +11,7 @@ use crate::{
 use ahash::AHashMap;
 use registry::schema::{
     prelude::Object,
-    structs::{self, DefaultDirectory},
+    structs::{self, Authentication},
 };
 use std::sync::Arc;
 use store::registry::bootstrap::Bootstrap;
@@ -40,20 +40,20 @@ impl Directories {
             }
         }
 
-        let default_directory = match bp.setting_infallible::<DefaultDirectory>().await {
-            DefaultDirectory::Internal => Ok(None),
-            DefaultDirectory::Ldap(directory) => LdapDirectory::open(directory).map(Some),
-            DefaultDirectory::Sql(directory) => SqlDirectory::open(directory, &bp.data_store)
+        let default_directory = match bp.setting_infallible::<Authentication>().await {
+            Authentication::Internal => Ok(None),
+            Authentication::Ldap(directory) => LdapDirectory::open(directory).map(Some),
+            Authentication::Sql(directory) => SqlDirectory::open(directory, &bp.data_store)
                 .await
                 .map(Some),
-            DefaultDirectory::Oidc(directory) => OpenIdDirectory::open(directory).map(Some),
+            Authentication::Oidc(directory) => OpenIdDirectory::open(directory).map(Some),
         };
 
         Directories {
             default_directory: match default_directory {
                 Ok(default_directory) => default_directory.map(Arc::new),
                 Err(err) => {
-                    bp.build_error(Object::DefaultDirectory.singleton(), err);
+                    bp.build_error(Object::Authentication.singleton(), err);
                     None
                 }
             },

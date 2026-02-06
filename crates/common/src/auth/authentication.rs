@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::Server;
+
 impl Server {
     pub async fn authenticate(&self, req: &AuthRequest<'_>) -> trc::Result<Arc<AccessToken>> {
         // Resolve directory
@@ -236,12 +238,6 @@ impl<'x> AuthRequest<'x> {
     pub fn with_api_access(mut self, allow_api_access: bool) -> Self {
         self.allow_api_access = allow_api_access;
         self
-    }
-}
-
-impl CacheItemWeight for AccessToken {
-    fn weight(&self) -> u64 {
-        self.obj_size
     }
 }
 

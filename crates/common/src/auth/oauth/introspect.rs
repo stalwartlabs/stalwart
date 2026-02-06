@@ -57,16 +57,13 @@ impl Server {
             Ok(token_info) => Ok(OAuthIntrospect {
                 active: true,
                 client_id: Some(token_info.client_id),
-                username: if access_token.account_id() == token_info.account_id {
-                    access_token.name.clone()
-                } else {
-                    self.get_access_token(token_info.account_id)
-                        .await
-                        .caused_by(trc::location!())?
-                        .name
-                        .clone()
-                }
-                .into(),
+                username: self
+                    .account(access_token.account_id())
+                    .await
+                    .caused_by(trc::location!())?
+                    .addresses
+                    .first()
+                    .map(|v| v.to_string()),
                 token_type: Some("bearer".into()),
                 exp: Some(token_info.expiry as i64),
                 iat: Some(token_info.issued_at as i64),

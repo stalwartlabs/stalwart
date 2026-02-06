@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     Inner,
-    listener::{TcpAcceptor, tls::CertificateResolver},
+    network::{TcpAcceptor, tls::CertificateResolver},
 };
 use registry::schema::{
     enums::{NetworkListenerProtocol, TlsCipherSuite, TlsVersion},

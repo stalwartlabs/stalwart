@@ -6,6 +6,7 @@
 
 use coordinator::Coordinator;
 use directory::Directory;
+use registry::schema::enums::CompressionAlgo;
 use std::{collections::HashMap, sync::Arc};
 use store::{BlobStore, InMemoryStore, RegistryStore, SearchStore, Store};
 
@@ -21,4 +22,5 @@ pub struct Storage {
     pub coordinator: Coordinator,
     pub directory: Option<Arc<Directory>>,
     pub directories: IdMap<Directory>,
+    pub compression: CompressionAlgo,
 }

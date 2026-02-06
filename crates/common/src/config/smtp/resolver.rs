@@ -251,18 +251,20 @@ impl Policy {
         T: AsRef<str>,
     {
         if self.mx.is_empty() {
+            let mut mx = Vec::new();
             for name in names {
                 let name = name.as_ref();
                 if let Some(domain) = name.strip_prefix('.') {
-                    self.mx.push(MxPattern::StartsWith(domain.to_string()));
+                    mx.push(MxPattern::StartsWith(domain.to_string()));
                 } else if name != "*" && !name.is_empty() {
-                    self.mx.push(MxPattern::Equals(name.to_string()));
+                    mx.push(MxPattern::Equals(name.to_string()));
                 }
             }
 
-            if !self.mx.is_empty() {
-                self.mx.sort_unstable();
+            if !mx.is_empty() {
+                mx.sort_unstable();
                 self.id = self.hash().to_string();
+                self.mx = mx.into_boxed_slice();
                 Some(self)
             } else {
                 None

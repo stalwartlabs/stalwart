@@ -6,11 +6,10 @@
 
 #![warn(clippy::large_futures)]
 
+use crate::auth::AccessTokenInner;
+use crate::network::asn::AsnGeoLookupData;
 use crate::{
-    auth::{
-        AccountCache, ApiKeyCache, DomainCache, EmailCache, MailingListCache, RoleCache,
-        TenantCache,
-    },
+    auth::{AccountCache, DomainCache, EmailCache, MailingListCache, RoleCache, TenantCache},
     config::{
         mailstore::{
             email::EmailConfig,
@@ -21,12 +20,12 @@ use crate::{
         smtp::auth::DkimSigner,
     },
     ipc::TrainTaskController,
-    listener::blocked::BlockedIps,
+    network::security::BlockedIps,
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
 use arcstr::ArcStr;
-use auth::{AccessToken, oauth::config::OAuthConfig};
+use auth::oauth::config::OAuthConfig;
 use calcard::common::timezone::Tz;
 use config::{
     groupware::GroupwareConfig,
@@ -40,40 +39,33 @@ use config::{
     telemetry::Metrics,
 };
 use ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEvent};
-use listener::{asn::AsnGeoLookupData, blocked::Security};
 use mail_auth::{MX, Txt};
 use manager::webadmin::{Resource, WebAdminManager};
 use parking_lot::{Mutex, RwLock};
 use rustls::sign::CertifiedKey;
 use std::{
-    hash::{BuildHasher, Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
-use store::{
-    InMemoryStore,
-    rand::{Rng, distr::Alphanumeric},
-};
+use store::InMemoryStore;
 use tinyvec::TinyVec;
 use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio_rustls::TlsConnector;
 use types::{acl::AclGrant, special_use::SpecialUse};
 use utils::{
-    cache::{Cache, CacheItemWeight, CacheWithTtl},
+    cache::{Cache, CacheWithTtl},
     snowflake::SnowflakeIdGenerator,
 };
 
 pub mod auth;
 pub mod cache;
 pub mod config;
-pub mod core;
-pub mod dns;
 pub mod expr;
 pub mod i18n;
 pub mod ipc;
-pub mod listener;
 pub mod manager;
+pub mod network;
 pub mod scripts;
 pub mod sharing;
 pub mod storage;
@@ -172,7 +164,7 @@ pub struct Data {
 }
 
 pub struct Caches {
-    pub access_tokens: Cache<u32, Arc<AccessToken>>,
+    pub access_tokens: Cache<u32, Arc<AccessTokenInner>>,
     pub http_auth: Cache<Box<str>, HttpAuthCache>,
 
     pub messages: Cache<u32, Arc<MessageStoreCache>>,
@@ -182,19 +174,17 @@ pub struct Caches {
     pub scheduling: Cache<u32, Arc<DavResources>>,
 
     pub emails: Cache<ArcStr, EmailCache>,
-    pub emails_temporary: CacheWithTtl<ArcStr, EmailCache>,
     pub emails_negative: CacheWithTtl<ArcStr, ()>,
-    pub domains: Cache<ArcStr, Arc<DomainCache>>,
-    pub domains_negative: CacheWithTtl<ArcStr, ()>,
+    pub domain_names: Cache<ArcStr, u32>,
+    pub domain_names_negative: CacheWithTtl<ArcStr, ()>,
 
+    pub domains: Cache<u32, Arc<DomainCache>>,
     pub accounts: Cache<u32, Arc<AccountCache>>,
-    pub groups: Cache<u32, Arc<AccountCache>>,
     pub roles: Cache<u32, Arc<RoleCache>>,
     pub tenants: Cache<u32, Arc<TenantCache>>,
     pub lists: Cache<u32, Arc<MailingListCache>>,
-    pub api_keys: Cache<u32, Arc<ApiKeyCache>>,
 
-    pub dkim_signers: Cache<Box<str>, Arc<[DkimSigner]>>,
+    pub dkim_signers: Cache<u32, Arc<[DkimSigner]>>,
 
     pub dns_txt: CacheWithTtl<Box<str>, Txt>,
     pub dns_mx: CacheWithTtl<Box<str>, Arc<[MX]>>,
@@ -204,6 +194,8 @@ pub struct Caches {
     pub dns_tlsa: CacheWithTtl<Box<str>, Arc<Tlsa>>,
     pub dns_mta_sts: CacheWithTtl<Box<str>, Arc<Policy>>,
     pub dns_rbl: CacheWithTtl<Box<str>, Option<Arc<IpResolver>>>,
+
+    pub negative_cache_ttl: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -385,21 +377,16 @@ pub struct Core {
     // SPDX-SnippetEnd
 }
 
-impl CacheItemWeight for MessageStoreCache {
-    fn weight(&self) -> u64 {
-        self.size
-    }
+pub trait BuildServer {
+    fn build_server(&self) -> Server;
 }
 
-impl CacheItemWeight for HttpAuthCache {
-    fn weight(&self) -> u64 {
-        std::mem::size_of::<HttpAuthCache>() as u64
-    }
-}
-
-impl CacheItemWeight for DavResources {
-    fn weight(&self) -> u64 {
-        self.size
+impl BuildServer for Arc<Inner> {
+    fn build_server(&self) -> Server {
+        Server {
+            inner: self.clone(),
+            core: self.shared_core.load_full(),
+        }
     }
 }
 
@@ -419,457 +406,13 @@ pub struct ThrottleKey {
     pub hash: [u8; 32],
 }
 
-impl PartialEq for ThrottleKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
-    }
-}
-
-impl std::hash::Hash for ThrottleKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
-    }
-}
-
-impl AsRef<[u8]> for ThrottleKey {
-    fn as_ref(&self) -> &[u8] {
-        &self.hash
-    }
-}
-
 #[derive(Default)]
 pub struct ThrottleKeyHasher {
     hash: u64,
 }
 
-impl Hasher for ThrottleKeyHasher {
-    fn finish(&self) -> u64 {
-        self.hash
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        debug_assert!(
-            bytes.len() >= std::mem::size_of::<u64>(),
-            "ThrottleKeyHasher: input too short {bytes:?}"
-        );
-        self.hash = bytes
-            .get(0..std::mem::size_of::<u64>())
-            .map_or(0, |b| u64::from_ne_bytes(b.try_into().unwrap()));
-    }
-}
-
 #[derive(Clone, Default)]
 pub struct ThrottleKeyHasherBuilder {}
-
-impl BuildHasher for ThrottleKeyHasherBuilder {
-    type Hasher = ThrottleKeyHasher;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        ThrottleKeyHasher::default()
-    }
-}
-
-pub fn ip_to_bytes(ip: &IpAddr) -> Vec<u8> {
-    match ip {
-        IpAddr::V4(ip) => ip.octets().to_vec(),
-        IpAddr::V6(ip) => ip.octets().to_vec(),
-    }
-}
-
-pub fn ip_to_bytes_prefix(prefix: u8, ip: &IpAddr) -> Vec<u8> {
-    match ip {
-        IpAddr::V4(ip) => {
-            let mut buf = Vec::with_capacity(5);
-            buf.push(prefix);
-            buf.extend_from_slice(&ip.octets());
-            buf
-        }
-        IpAddr::V6(ip) => {
-            let mut buf = Vec::with_capacity(17);
-            buf.push(prefix);
-            buf.extend_from_slice(&ip.octets());
-            buf
-        }
-    }
-}
-
-impl DavResourcePath<'_> {
-    #[inline(always)]
-    pub fn document_id(&self) -> u32 {
-        self.resource.document_id
-    }
-
-    #[inline(always)]
-    pub fn parent_id(&self) -> Option<u32> {
-        self.path.parent_id
-    }
-
-    #[inline(always)]
-    pub fn path(&self) -> &str {
-        self.path.path.as_str()
-    }
-
-    #[inline(always)]
-    pub fn is_container(&self) -> bool {
-        self.resource.is_container()
-    }
-
-    #[inline(always)]
-    pub fn hierarchy_seq(&self) -> u32 {
-        self.path.hierarchy_seq
-    }
-
-    #[inline(always)]
-    pub fn size(&self) -> u32 {
-        self.resource.size().unwrap_or_default()
-    }
-}
-
-impl DavResources {
-    pub fn by_path(&self, name: &str) -> Option<DavResourcePath<'_>> {
-        self.paths.get(name).map(|path| DavResourcePath {
-            path,
-            resource: &self.resources[path.resource_idx],
-        })
-    }
-
-    pub fn container_resource_by_id(&self, id: u32) -> Option<&DavResource> {
-        self.resources
-            .iter()
-            .find(|res| res.document_id == id && res.is_container())
-    }
-
-    pub fn container_resource_path_by_id(&self, id: u32) -> Option<DavResourcePath<'_>> {
-        self.resources
-            .iter()
-            .enumerate()
-            .find(|(_, resource)| resource.document_id == id && resource.is_container())
-            .and_then(|(idx, resource)| {
-                self.paths
-                    .iter()
-                    .find(|path| path.resource_idx == idx)
-                    .map(|path| DavResourcePath { path, resource })
-            })
-    }
-
-    pub fn any_resource_path_by_id(&self, id: u32) -> Option<DavResourcePath<'_>> {
-        self.resources
-            .iter()
-            .enumerate()
-            .find(|(_, resource)| resource.document_id == id)
-            .and_then(|(idx, resource)| {
-                self.paths
-                    .iter()
-                    .find(|path| path.resource_idx == idx)
-                    .map(|path| DavResourcePath { path, resource })
-            })
-    }
-
-    pub fn subtree(&self, search_path: &str) -> impl Iterator<Item = DavResourcePath<'_>> {
-        let prefix = format!("{search_path}/");
-        self.paths.iter().filter_map(move |path| {
-            if path.path.starts_with(&prefix) || path.path == search_path {
-                Some(DavResourcePath {
-                    path,
-                    resource: &self.resources[path.resource_idx],
-                })
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn subtree_with_depth(
-        &self,
-        search_path: &str,
-        depth: usize,
-    ) -> impl Iterator<Item = DavResourcePath<'_>> {
-        let prefix = format!("{search_path}/");
-        self.paths.iter().filter_map(move |path| {
-            if path
-                .path
-                .strip_prefix(&prefix)
-                .is_some_and(|name| name.as_bytes().iter().filter(|&&c| c == b'/').count() < depth)
-                || path.path.as_str() == search_path
-            {
-                Some(DavResourcePath {
-                    path,
-                    resource: &self.resources[path.resource_idx],
-                })
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn tree_with_depth(&self, depth: usize) -> impl Iterator<Item = DavResourcePath<'_>> {
-        self.paths.iter().filter_map(move |path| {
-            if path.path.as_bytes().iter().filter(|&&c| c == b'/').count() <= depth {
-                Some(DavResourcePath {
-                    path,
-                    resource: &self.resources[path.resource_idx],
-                })
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn children(&self, parent_id: u32) -> impl Iterator<Item = DavResourcePath<'_>> {
-        self.paths
-            .iter()
-            .filter(move |item| item.parent_id.is_some_and(|id| id == parent_id))
-            .map(|path| DavResourcePath {
-                path,
-                resource: &self.resources[path.resource_idx],
-            })
-    }
-
-    pub fn children_ids(&self, parent_id: u32) -> impl Iterator<Item = u32> {
-        self.paths
-            .iter()
-            .filter(move |item| item.parent_id.is_some_and(|id| id == parent_id))
-            .map(|path| self.resources[path.resource_idx].document_id)
-    }
-
-    pub fn format_resource(&self, resource: DavResourcePath<'_>) -> String {
-        if resource.resource.is_container() {
-            format!("{}{}/", self.base_path, resource.path.path)
-        } else {
-            format!("{}{}", self.base_path, resource.path.path)
-        }
-    }
-
-    pub fn format_collection(&self, name: &str) -> String {
-        format!("{}{name}/", self.base_path)
-    }
-
-    pub fn format_item(&self, name: &str) -> String {
-        format!("{}{}", self.base_path, name)
-    }
-}
-
-const SCHEDULE_INBOX_ID: u32 = u32::MAX - 1;
-
-impl DavResource {
-    pub fn is_child_of(&self, parent_id: u32) -> bool {
-        match &self.data {
-            DavResourceMetadata::File { parent_id: id, .. } => id.is_some_and(|id| id == parent_id),
-            DavResourceMetadata::CalendarEvent { names, .. } => {
-                names.iter().any(|name| name.parent_id == parent_id)
-            }
-            DavResourceMetadata::ContactCard { names } => {
-                names.iter().any(|name| name.parent_id == parent_id)
-            }
-            DavResourceMetadata::CalendarEventNotification { names } => {
-                names.is_empty() && parent_id == SCHEDULE_INBOX_ID
-            }
-            _ => false,
-        }
-    }
-
-    pub fn parent_id(&self) -> Option<u32> {
-        match &self.data {
-            DavResourceMetadata::File { parent_id, .. } => *parent_id,
-            DavResourceMetadata::CalendarEvent { names, .. } => {
-                names.first().map(|name| name.parent_id)
-            }
-            DavResourceMetadata::ContactCard { names } => names.first().map(|name| name.parent_id),
-            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
-                Some(SCHEDULE_INBOX_ID)
-            }
-            _ => None,
-        }
-    }
-
-    pub fn child_names(&self) -> Option<&[DavName]> {
-        match &self.data {
-            DavResourceMetadata::CalendarEvent { names, .. } => Some(names.as_slice()),
-            DavResourceMetadata::ContactCard { names } => Some(names.as_slice()),
-            DavResourceMetadata::CalendarEventNotification { names } if !names.is_empty() => {
-                Some(names.as_slice())
-            }
-            _ => None,
-        }
-    }
-
-    pub fn container_name(&self) -> Option<&str> {
-        match &self.data {
-            DavResourceMetadata::File { name, .. } => Some(name.as_str()),
-            DavResourceMetadata::Calendar { name, .. } => Some(name.as_str()),
-            DavResourceMetadata::AddressBook { name, .. } => Some(name.as_str()),
-            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
-                Some(if self.document_id == SCHEDULE_INBOX_ID {
-                    "inbox"
-                } else {
-                    "outbox"
-                })
-            }
-            _ => None,
-        }
-    }
-
-    pub fn has_hierarchy_changes(&self, other: &DavResource) -> bool {
-        match (&self.data, &other.data) {
-            (
-                DavResourceMetadata::File {
-                    name: a,
-                    parent_id: c,
-                    ..
-                },
-                DavResourceMetadata::File {
-                    name: b,
-                    parent_id: d,
-                    ..
-                },
-            ) => a != b || c != d,
-            (
-                DavResourceMetadata::Calendar { name: a, .. },
-                DavResourceMetadata::Calendar { name: b, .. },
-            ) => a != b,
-            (
-                DavResourceMetadata::AddressBook { name: a, .. },
-                DavResourceMetadata::AddressBook { name: b, .. },
-            ) => a != b,
-            (
-                DavResourceMetadata::CalendarEvent { names: a, .. },
-                DavResourceMetadata::CalendarEvent { names: b, .. },
-            ) => a != b,
-            (
-                DavResourceMetadata::ContactCard { names: a, .. },
-                DavResourceMetadata::ContactCard { names: b, .. },
-            ) => a != b,
-            (
-                DavResourceMetadata::CalendarEventNotification { names: a, .. },
-                DavResourceMetadata::CalendarEventNotification { names: b, .. },
-            ) => a != b,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn event_time_range(&self) -> Option<(i64, i64)> {
-        match &self.data {
-            DavResourceMetadata::CalendarEvent {
-                start, duration, ..
-            } => Some((*start, *start + *duration as i64)),
-            _ => None,
-        }
-    }
-
-    pub fn calendar_preferences(&self, account_id: u32) -> Option<&TinyCalendarPreferences> {
-        match &self.data {
-            DavResourceMetadata::Calendar { preferences, .. } => preferences
-                .iter()
-                .find(|pref| pref.account_id == account_id)
-                .or_else(|| preferences.first()),
-            _ => None,
-        }
-    }
-
-    pub fn is_container(&self) -> bool {
-        match &self.data {
-            DavResourceMetadata::File { size, .. } => size.is_none(),
-            DavResourceMetadata::Calendar { .. } | DavResourceMetadata::AddressBook { .. } => true,
-            DavResourceMetadata::CalendarEventNotification { names } => names.is_empty(),
-            _ => false,
-        }
-    }
-
-    pub fn size(&self) -> Option<u32> {
-        match &self.data {
-            DavResourceMetadata::File { size, .. } => *size,
-            _ => None,
-        }
-    }
-
-    pub fn acls(&self) -> Option<&[AclGrant]> {
-        match &self.data {
-            DavResourceMetadata::File { acls, .. } => Some(acls.as_slice()),
-            DavResourceMetadata::Calendar { acls, .. } => Some(acls.as_slice()),
-            DavResourceMetadata::AddressBook { acls, .. } => Some(acls.as_slice()),
-            _ => None,
-        }
-    }
-}
-
-impl Hash for DavPath {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.path.hash(state);
-    }
-}
-
-impl PartialEq for DavPath {
-    fn eq(&self, other: &Self) -> bool {
-        self.path == other.path
-    }
-}
-
-impl Eq for DavPath {}
-
-impl std::borrow::Borrow<str> for DavPath {
-    fn borrow(&self) -> &str {
-        &self.path
-    }
-}
-
-impl std::hash::Hash for DavResource {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.document_id.hash(state);
-    }
-}
-
-impl PartialEq for DavResource {
-    fn eq(&self, other: &Self) -> bool {
-        self.document_id == other.document_id
-    }
-}
-
-impl Eq for DavResource {}
-
-impl std::borrow::Borrow<u32> for DavResource {
-    fn borrow(&self) -> &u32 {
-        &self.document_id
-    }
-}
-
-impl DavName {
-    pub fn new(name: String, parent_id: u32) -> Self {
-        Self { name, parent_id }
-    }
-
-    pub fn new_with_rand_name(parent_id: u32) -> Self {
-        Self {
-            name: store::rand::rng()
-                .sample_iter(Alphanumeric)
-                .take(10)
-                .map(char::from)
-                .collect::<String>(),
-            parent_id,
-        }
-    }
-}
-
-impl MailboxCache {
-    pub fn parent_id(&self) -> Option<u32> {
-        if self.parent_id != u32::MAX {
-            Some(self.parent_id)
-        } else {
-            None
-        }
-    }
-
-    pub fn sort_order(&self) -> Option<u32> {
-        if self.sort_order != u32::MAX {
-            Some(self.sort_order)
-        } else {
-            None
-        }
-    }
-
-    pub fn is_root(&self) -> bool {
-        self.parent_id == u32::MAX
-    }
-}
 
 pub const DEFAULT_LOGO_RAW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" id="Layer_1" x="0" y="0" style="enable-background:new 0 0 680.5 252.1" version="1.1" viewBox="0 0 680.5 252.1">
 <style>

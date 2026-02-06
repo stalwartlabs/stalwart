@@ -8,14 +8,16 @@ use super::server::tls::build_self_signed_cert;
 use crate::{
     Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache, MessageUidCache,
     TlsConnectors,
-    auth::AccessToken,
+    auth::{AccessTokenInner, AccountCache, DomainCache, MailingListCache, RoleCache, TenantCache},
     config::{
         mailstore::spamfilter::SpamClassifier,
         server::tls::parse_certificates,
-        smtp::resolver::{Policy, Tlsa},
+        smtp::{
+            auth::DkimSigner,
+            resolver::{Policy, Tlsa},
+        },
     },
-    listener::blocked::BlockedIps,
-    manager::webadmin::WebAdminManager,
+    network::security::BlockedIps,
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
@@ -94,7 +96,7 @@ impl Caches {
         Caches {
             access_tokens: Cache::new(
                 cache.access_tokens,
-                (std::mem::size_of::<AccessToken>() + 255) as u64,
+                (std::mem::size_of::<AccessTokenInner>() + 255) as u64,
             ),
             http_auth: Cache::new(cache.http_auth, (50 + std::mem::size_of::<u32>()) as u64),
             messages: Cache::new(
@@ -124,6 +126,40 @@ impl Caches {
                 (std::mem::size_of::<DavResources>() + (500 * std::mem::size_of::<DavResource>()))
                     as u64,
             ),
+            emails: Cache::new(cache.email_addresses, 255u64),
+            emails_negative: CacheWithTtl::new(
+                cache.email_addresses_negative,
+                (std::mem::size_of::<DomainCache>() + 255) as u64,
+            ),
+            domain_names: Cache::new(
+                cache.domain_names,
+                (std::mem::size_of::<DomainCache>() + 255) as u64,
+            ),
+            domain_names_negative: CacheWithTtl::new(
+                cache.domain_names_negative,
+                (std::mem::size_of::<DomainCache>() + 255) as u64,
+            ),
+            domains: Cache::new(
+                cache.domains,
+                (std::mem::size_of::<DomainCache>() + 255) as u64,
+            ),
+            accounts: Cache::new(
+                cache.accounts,
+                (std::mem::size_of::<AccountCache>() + 255) as u64,
+            ),
+            roles: Cache::new(cache.roles, (std::mem::size_of::<RoleCache>() + 255) as u64),
+            tenants: Cache::new(
+                cache.tenants,
+                (std::mem::size_of::<TenantCache>() + 255) as u64,
+            ),
+            lists: Cache::new(
+                cache.mailing_lists,
+                (std::mem::size_of::<MailingListCache>() + 255) as u64,
+            ),
+            dkim_signers: Cache::new(
+                cache.dkim_signatures,
+                (std::mem::size_of::<DkimSigner>() + 255) as u64,
+            ),
             dns_txt: CacheWithTtl::new(cache.dns_txt, (std::mem::size_of::<Txt>() + 255) as u64),
             dns_mx: CacheWithTtl::new(cache.dns_mx, ((std::mem::size_of::<MX>() + 255) * 2) as u64),
             dns_ptr: CacheWithTtl::new(cache.dns_ptr, (std::mem::size_of::<IpAddr>() + 255) as u64),
@@ -144,6 +180,7 @@ impl Caches {
                 cache.dns_rbl,
                 ((std::mem::size_of::<Ipv4Addr>() + 255) * 2) as u64,
             ),
+            negative_cache_ttl: cache.negative_ttl.into_inner(),
         }
     }
 

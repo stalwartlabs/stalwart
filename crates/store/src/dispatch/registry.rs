@@ -11,11 +11,19 @@ use registry::{
 };
 
 impl RegistryStore {
-    pub async fn get<T: ObjectType>(&self, id: Id) -> trc::Result<Option<T>> {
+    pub async fn id<T: ObjectType>(&self, id: Id) -> trc::Result<Option<T>> {
         todo!()
     }
 
-    pub async fn insert<T: ObjectType>(&self, object: &T) -> trc::Result<bool> {
+    pub async fn object<T: ObjectType>(&self, id: impl Into<u64>) -> trc::Result<Option<T>> {
+        self.id(Id::new(T::object(), id.into())).await
+    }
+
+    pub async fn singleton<T: ObjectType>(&self) -> trc::Result<Option<T>> {
+        self.id(T::object().singleton()).await
+    }
+
+    pub async fn insert<T: ObjectType>(&self, object: &T) -> trc::Result<Id> {
         todo!()
     }
 

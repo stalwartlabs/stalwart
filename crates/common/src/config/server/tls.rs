@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Server, listener::acme::AcmeProvider};
+use crate::{Server, network::acme::AcmeProvider};
 use ahash::{AHashMap, AHashSet};
 use dns_update::{
     Algorithm, DnsUpdater, TsigAlgorithm,
@@ -48,7 +48,7 @@ impl Server {
     pub async fn build_acme_provider(&self, id: Id) -> trc::Result<AcmeProvider> {
         if let Some(server) = self
             .registry()
-            .get::<structs::AcmeProvider>(id)
+            .id::<structs::AcmeProvider>(id)
             .await
             .caused_by(trc::location!())?
         {
@@ -66,7 +66,7 @@ impl Server {
     pub async fn build_dns_updater(&self, id: Id) -> trc::Result<DnsUpdater> {
         let Some(server) = self
             .registry()
-            .get::<DnsServer>(id)
+            .id::<DnsServer>(id)
             .await
             .caused_by(trc::location!())?
         else {

@@ -19,8 +19,11 @@ pub struct Id {
 }
 
 impl Id {
-    pub fn new(object: Object, id: u64) -> Self {
-        Self { object, id }
+    pub fn new(object: Object, id: impl Into<u64>) -> Self {
+        Self {
+            object,
+            id: id.into(),
+        }
     }
 
     pub fn id(&self) -> u64 {
@@ -50,7 +53,7 @@ impl Object {
     }
 
     pub fn singleton(&self) -> Id {
-        Id::new(*self, 20080258862541)
+        Id::new(*self, 20080258862541u64)
     }
 }
 

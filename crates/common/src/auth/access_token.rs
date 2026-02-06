@@ -7,79 +7,56 @@
 use super::AccessToken;
 use crate::{
     Server,
-    ipc::BroadcastEvent,
-    listener::limiter::{ConcurrencyLimiter, LimiterResult},
+    auth::{
+        AccessScope, AccessTo, AccessTokenInner, FALLBACK_ADMIN_ID, Permissions, PermissionsGroup,
+    },
+    network::limiter::{ConcurrencyLimiter, LimiterResult},
 };
-use ahash::AHashSet;
-use registry::schema::enums::Permission;
+use registry::{
+    schema::{
+        enums::Permission,
+        structs::{self, Account},
+    },
+    types::EnumType,
+};
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     sync::Arc,
 };
-use store::{query::acl::AclQuery, rand};
+use store::{query::acl::AclQuery, rand, write::now};
+use tinyvec::TinyVec;
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection};
-use utils::map::{
-    bitmap::{Bitmap, BitmapItem},
-    vec_map::VecMap,
-};
+use utils::map::bitmap::{Bitmap, BitmapItem};
 
 impl Server {
-    async fn build_access_token_from_principal(
+    async fn build_account_access_token(
         &self,
-        principal: Principal,
+        account: Account,
+        account_id: u32,
         revision: u64,
-    ) -> trc::Result<AccessToken> {
-        let mut role_permissions = PermissionsGroup::default();
-
-        // Extract data
-        let mut object_quota = self.core.email.max_objects;
-        let mut description = None;
-        let mut tenant_id = None;
-        let mut quota = None;
-        let mut locale = None;
-        let mut member_of = Vec::new();
-        let mut emails = Vec::new();
-        for data in principal.data {
-            match data {
-                PrincipalData::Tenant(v) => tenant_id = Some(v),
-                PrincipalData::MemberOf(v) => member_of.push(v),
-                PrincipalData::Role(v) => {
-                    role_permissions.union(self.get_role_permissions(v).await?.as_ref());
-                }
-                PrincipalData::Permission {
-                    permission_id,
-                    grant,
-                } => {
-                    if grant {
-                        role_permissions.enabled.set(permission_id as usize);
-                    } else {
-                        role_permissions.disabled.set(permission_id as usize);
-                    }
-                }
-                PrincipalData::DiskQuota(v) => quota = Some(v),
-                PrincipalData::ObjectQuota { quota, typ } => {
-                    object_quota[typ as usize] = quota;
-                }
-                PrincipalData::Description(v) => description = Some(v),
-                PrincipalData::PrimaryEmail(v) => {
-                    if emails.is_empty() {
-                        emails.push(v);
-                    } else {
-                        emails.insert(0, v);
-                    }
-                }
-                PrincipalData::EmailAlias(v) => {
-                    emails.push(v);
-                }
-                PrincipalData::Locale(v) => locale = Some(v),
-                _ => (),
+    ) -> trc::Result<AccessTokenInner> {
+        // Calculate effective permissions
+        let (mut permissions, roles) = match account.permissions {
+            structs::Permissions::Inherit => {
+                (PermissionsGroup::default(), account.role_ids.as_slice())
             }
+            structs::Permissions::Merge(permissions) => (
+                PermissionsGroup::from(permissions),
+                account.role_ids.as_slice(),
+            ),
+            structs::Permissions::Replace(permissions) => {
+                (PermissionsGroup::from(permissions), &[][..])
+            }
+        };
+        if !roles.is_empty() {
+            permissions = self
+                .add_role_permissions(permissions, roles.into_iter().map(|v| v.id() as u32))
+                .await
+                .caused_by(trc::location!())?
         }
 
-        // Apply principal permissions
-        let mut permissions = role_permissions.finalize();
-        let mut tenant = None;
+        let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
 
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -87,92 +64,56 @@ impl Server {
 
         #[cfg(feature = "enterprise")]
         {
-            use directory::{QueryParams, ROLE_USER};
-
             if let Some(tenant_id) = tenant_id {
                 if self.is_enterprise_edition() {
                     // Limit tenant permissions
-                    permissions.intersection(&self.get_role_permissions(tenant_id).await?.enabled);
-
-                    // Obtain tenant quota
-                    tenant = Some(TenantInfo {
-                        id: tenant_id,
-                        quota: self
-                            .store()
-                            .query(QueryParams::id(tenant_id).with_return_member_of(false))
+                    let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
+                    let (mut tenant_permissions, tenant_roles) =
+                        if let Some(permissions) = &tenant.permissions {
+                            if permissions.merge {
+                                ((**permissions).clone(), tenant.id_roles.as_slice())
+                            } else {
+                                ((**permissions).clone(), &[][..])
+                            }
+                        } else {
+                            (PermissionsGroup::default(), tenant.id_roles.as_slice())
+                        };
+                    if !tenant_roles.is_empty() {
+                        tenant_permissions = self
+                            .add_role_permissions(tenant_permissions, tenant_roles.iter().copied())
                             .await
                             .caused_by(trc::location!())?
-                            .ok_or_else(|| {
-                                trc::SecurityEvent::Unauthorized
-                                    .into_err()
-                                    .details("Tenant not found")
-                                    .id(tenant_id)
-                                    .caused_by(trc::location!())
-                            })?
-                            .quota()
-                            .unwrap_or_default(),
-                    });
+                    }
+
+                    permissions.restrict(&tenant_permissions);
                 } else {
                     // Enterprise edition downgrade, remove any tenant administrator permissions
-                    permissions.intersection(&self.get_role_permissions(ROLE_USER).await?.enabled);
+                    permissions.restrict(&PermissionsGroup::user());
                 }
             }
         }
 
         // SPDX-SnippetEnd
 
-        // Build member of and e-mail addresses
-        for &group_id in &member_of {
-            if let Some(group) = self
-                .store()
-                .query(QueryParams::id(group_id).with_return_member_of(false))
-                .await
-                .caused_by(trc::location!())?
-                && group.typ == Type::Group
-            {
-                emails.extend(group.into_email_addresses());
-            }
-        }
-
-        // Build access token
-        let mut access_token = AccessToken {
-            account_id: principal.id,
-            member_of,
-            access_to: VecMap::new(),
-            tenant,
-            name: principal.name,
-            description,
-            emails,
-            quota: quota.unwrap_or_default(),
-            locale,
-            permissions,
-            object_quota,
-            concurrent_imap_requests: self.core.imap.rate_concurrent.map(ConcurrencyLimiter::new),
-            concurrent_http_requests: self
-                .core
-                .jmap
-                .request_max_concurrent
-                .map(ConcurrencyLimiter::new),
-            concurrent_uploads: self
-                .core
-                .jmap
-                .upload_max_concurrent
-                .map(ConcurrencyLimiter::new),
-            obj_size: 0,
-            revision,
-        };
-
-        for grant_account_id in [access_token.account_id]
-            .into_iter()
-            .chain(access_token.member_of.iter().copied())
-        {
+        let can_impersonate = permissions.enabled.get(Permission::Impersonate as usize)
+            && !permissions.disabled.get(Permission::Impersonate as usize);
+        let member_of = account
+            .role_ids
+            .iter()
+            .map(|m| m.id() as u32)
+            .collect::<TinyVec<[u32; 3]>>();
+        let mut access_to: Vec<AccessTo> = Vec::new();
+        for grant_account_id in [account_id].into_iter().chain(member_of.iter().copied()) {
             for acl_item in self
                 .store()
                 .acl_query(AclQuery::HasAccess { grant_account_id })
                 .await
                 .caused_by(trc::location!())?
             {
-                if !access_token.is_member(acl_item.to_account_id) {
+                if acl_item.to_account_id != account_id
+                    && !member_of.contains(&acl_item.to_account_id)
+                    && !can_impersonate
+                {
                     let acl = Bitmap::<Acl>::from(acl_item.permissions);
                     let collection = acl_item.to_collection;
                     if !collection.is_valid() {
@@ -194,248 +135,186 @@ impl Server {
                     }
 
                     if !collections.is_empty() {
-                        access_token
-                            .access_to
-                            .get_mut_or_insert_with(acl_item.to_account_id, Bitmap::new)
-                            .union(&collections);
+                        if let Some(idx) = access_to
+                            .iter()
+                            .position(|a| a.account_id == acl_item.to_account_id)
+                        {
+                            access_to[idx].collections.union(&collections);
+                        } else {
+                            access_to.push(AccessTo {
+                                account_id: acl_item.to_account_id,
+                                collections,
+                            });
+                        }
                     }
                 }
             }
         }
 
-        Ok(access_token.update_size())
-    }
+        let now = now();
+        let app_password_scopes = account
+            .app_passwords
+            .into_iter()
+            .filter_map(|pass| {
+                let expires_at = pass
+                    .expires_at
+                    .map(|v| v.timestamp() as u64)
+                    .unwrap_or(u64::MAX);
+                if expires_at > now {
+                    let permissions = match pass.permissions {
+                        structs::Permissions::Inherit => permissions.clone().finalize(),
+                        structs::Permissions::Merge(merge) => {
+                            let mut permissions = permissions.clone();
+                            permissions.union(&PermissionsGroup::from(merge));
+                            permissions.finalize()
+                        }
+                        structs::Permissions::Replace(replace) => {
+                            PermissionsGroup::from(replace).finalize()
+                        }
+                    };
+                    Some(AccessScope {
+                        permissions,
+                        expires_at,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-    async fn build_access_token(&self, account_id: u32, revision: u64) -> trc::Result<AccessToken> {
-        let err = match self
-            .directory()
-            .query(QueryParams::id(account_id).with_return_member_of(true))
-            .await
-        {
-            Ok(Some(principal)) => {
-                return self
-                    .build_access_token_from_principal(principal, revision)
-                    .await;
-            }
-            Ok(None) => Err(trc::AuthEvent::Error
-                .into_err()
-                .details("Account not found.")
-                .caused_by(trc::location!())),
-            Err(err) => Err(err),
-        };
-
-        match &self.core.network.security.fallback_admin {
-            Some((_, secret)) if account_id == u32::MAX => {
-                self.build_access_token_from_principal(Principal::fallback_admin(secret), revision)
-                    .await
-            }
-            _ => err,
+        Ok(AccessTokenInner {
+            concurrent_imap_requests: self.core.imap.rate_concurrent.map(ConcurrencyLimiter::new),
+            concurrent_http_requests: self
+                .core
+                .jmap
+                .request_max_concurrent
+                .map(ConcurrencyLimiter::new),
+            concurrent_uploads: self
+                .core
+                .jmap
+                .upload_max_concurrent
+                .map(ConcurrencyLimiter::new),
+            obj_size: 0,
+            revision,
+            account_id,
+            tenant_id,
+            member_of,
+            access_to: access_to.into_boxed_slice(),
+            scopes: [AccessScope::new(permissions.finalize())]
+                .into_iter()
+                .chain(app_password_scopes)
+                .collect::<Box<[AccessScope]>>(),
         }
+        .update_size())
     }
 
-    pub async fn get_access_token(
+    pub async fn account_access_token(
         &self,
-        principal: impl Into<PrincipalOrId>,
-    ) -> trc::Result<Arc<AccessToken>> {
-        let principal = principal.into();
-
-        // Obtain current revision
-        let principal_id = principal.id();
-
+        account_id: u32,
+    ) -> trc::Result<Arc<AccessTokenInner>> {
         match self
             .inner
             .cache
             .access_tokens
-            .get_value_or_guard_async(&principal_id)
+            .get_value_or_guard_async(&account_id)
             .await
         {
             Ok(token) => Ok(token),
             Err(guard) => {
                 let revision = rand::random::<u64>();
-                let token: Arc<AccessToken> = match principal {
-                    PrincipalOrId::Principal(principal) => {
-                        self.build_access_token_from_principal(principal, revision)
-                            .await?
-                    }
-                    PrincipalOrId::Id(account_id) => {
-                        self.build_access_token(account_id, revision).await?
-                    }
-                }
-                .into();
+                let account = self
+                    .registry()
+                    .object::<Account>(account_id)
+                    .await?
+                    .ok_or_else(|| {
+                        trc::SecurityEvent::Unauthorized
+                            .into_err()
+                            .details("Account not found")
+                            .account_id(account_id)
+                            .caused_by(trc::location!())
+                    })?;
+                let token: Arc<AccessTokenInner> = self
+                    .build_account_access_token(account, account_id, revision)
+                    .await?
+                    .into();
                 let _ = guard.insert(token.clone());
                 Ok(token)
             }
         }
     }
 
-    pub async fn invalidate_principal_caches(&self, changed_principals: ChangedPrincipals) {
-        let mut nested_principals = Vec::new();
-        let mut changed_ids = AHashSet::new();
-        let mut changed_names = Vec::new();
-
-        for (id, changed_principal) in changed_principals.iter() {
-            changed_ids.insert(*id);
-
-            if changed_principal.name_change {
-                self.inner.cache.files.remove(id);
-                self.inner.cache.contacts.remove(id);
-                self.inner.cache.events.remove(id);
-                self.inner.cache.scheduling.remove(id);
-                changed_names.push(*id);
+    async fn access_token_from_account(
+        &self,
+        account_id: u32,
+        account: Account,
+    ) -> trc::Result<Arc<AccessTokenInner>> {
+        match self
+            .inner
+            .cache
+            .access_tokens
+            .get_value_or_guard_async(&account_id)
+            .await
+        {
+            Ok(token) => Ok(token),
+            Err(guard) => {
+                let revision = rand::random::<u64>();
+                let token: Arc<AccessTokenInner> = self
+                    .build_account_access_token(account, account_id, revision)
+                    .await?
+                    .into();
+                let _ = guard.insert(token.clone());
+                Ok(token)
             }
-
-            if changed_principal.member_change {
-                if changed_principal.typ == Type::Tenant {
-                    match self
-                        .store()
-                        .list_principals(
-                            None,
-                            (*id).into(),
-                            &[Type::Individual, Type::Group, Type::Role, Type::ApiKey],
-                            false,
-                            0,
-                            0,
-                        )
-                        .await
-                    {
-                        Ok(principals) => {
-                            for principal in principals.items {
-                                changed_ids.insert(principal.id());
-                            }
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.details("Failed to list principals")
-                                    .caused_by(trc::location!())
-                                    .account_id(*id)
-                            );
-                        }
-                    }
-                } else {
-                    nested_principals.push(*id);
-                }
-            }
-        }
-
-        if !nested_principals.is_empty() {
-            let mut ids = nested_principals.into_iter();
-            let mut ids_stack = vec![];
-
-            loop {
-                if let Some(id) = ids.next() {
-                    // Skip if already fetched
-                    if !changed_ids.insert(id) {
-                        continue;
-                    }
-
-                    // Obtain principal
-                    match self.store().get_members(id).await {
-                        Ok(members) => {
-                            ids_stack.push(ids);
-                            ids = members.into_iter();
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.details("Failed to obtain principal")
-                                    .caused_by(trc::location!())
-                                    .account_id(id)
-                            );
-                        }
-                    }
-                } else if let Some(prev_ids) = ids_stack.pop() {
-                    ids = prev_ids;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        // Invalidate access tokens in cluster
-        if !changed_ids.is_empty() {
-            let mut ids = Vec::with_capacity(changed_ids.len());
-            for id in changed_ids {
-                self.inner.cache.permissions.remove(&id);
-                self.inner.cache.access_tokens.remove(&id);
-                ids.push(id);
-            }
-            self.cluster_broadcast(BroadcastEvent::InvalidateAccessTokens(ids))
-                .await;
-        }
-
-        // Invalidate DAV caches
-        if !changed_names.is_empty() {
-            self.cluster_broadcast(BroadcastEvent::InvalidateGroupwareCache(changed_names))
-                .await;
         }
     }
 }
 
 impl AccessToken {
-    pub fn from_id(account_id: u32) -> Self {
-        Self {
-            account_id,
-            ..Default::default()
-        }
-    }
-
-    pub fn with_access_to(self, access_to: VecMap<u32, Bitmap<Collection>>) -> Self {
-        Self { access_to, ..self }
-    }
-
-    pub fn with_permission(mut self, permission: Permission) -> Self {
-        self.permissions.set(permission.id() as usize);
-        self
-    }
-
-    pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
-        self.tenant = tenant_id.map(|id| TenantInfo { id, quota: 0 });
-        self
-    }
-
     pub fn state(&self) -> u32 {
         // Hash state
         let mut s = DefaultHasher::new();
-        self.member_of.hash(&mut s);
-        self.access_to.hash(&mut s);
+        self.inner.member_of.hash(&mut s);
+        self.inner.access_to.hash(&mut s);
         s.finish() as u32
     }
 
     #[inline(always)]
     pub fn account_id(&self) -> u32 {
-        self.account_id
+        self.inner.account_id
     }
 
     #[inline(always)]
     pub fn tenant_id(&self) -> Option<u32> {
-        self.tenant.as_ref().map(|t| t.id)
+        self.inner.tenant_id
     }
 
     pub fn secondary_ids(&self) -> impl Iterator<Item = &u32> {
-        self.member_of
+        self.inner
+            .member_of
             .iter()
-            .chain(self.access_to.iter().map(|(id, _)| id))
+            .chain(self.inner.access_to.iter().map(|a| &a.account_id))
     }
 
     pub fn member_ids(&self) -> impl Iterator<Item = u32> {
-        [self.account_id]
+        [self.inner.account_id]
             .into_iter()
-            .chain(self.member_of.iter().copied())
+            .chain(self.inner.member_of.iter().copied())
     }
 
     pub fn all_ids(&self) -> impl Iterator<Item = u32> {
-        [self.account_id]
+        [self.inner.account_id]
             .into_iter()
-            .chain(self.member_of.iter().copied())
-            .chain(self.access_to.iter().map(|(id, _)| *id))
+            .chain(self.inner.member_of.iter().copied())
+            .chain(self.inner.access_to.iter().map(|a| a.account_id))
     }
 
     pub fn all_ids_by_collection(&self, collection: Collection) -> impl Iterator<Item = u32> {
-        [self.account_id]
+        [self.inner.account_id]
             .into_iter()
-            .chain(self.member_of.iter().copied())
-            .chain(self.access_to.iter().filter_map(move |(id, cols)| {
-                if cols.contains(collection) {
-                    Some(*id)
+            .chain(self.inner.member_of.iter().copied())
+            .chain(self.inner.access_to.iter().filter_map(move |a| {
+                if a.collections.contains(collection) {
+                    Some(a.account_id)
                 } else {
                     None
                 }
@@ -443,18 +322,29 @@ impl AccessToken {
     }
 
     pub fn is_member(&self, account_id: u32) -> bool {
-        self.account_id == account_id
-            || self.member_of.contains(&account_id)
+        self.inner.account_id == account_id
+            || self.inner.member_of.contains(&account_id)
             || self.has_permission(Permission::Impersonate)
     }
 
     pub fn is_account_id(&self, account_id: u32) -> bool {
-        self.account_id == account_id
+        self.inner.account_id == account_id
     }
 
     #[inline(always)]
     pub fn has_permission(&self, permission: Permission) -> bool {
-        self.permissions.get(permission.id() as usize)
+        self.inner
+            .scopes
+            .get(self.scope_id as usize)
+            .map_or(false, |scope| scope.permissions.get(permission as usize))
+    }
+
+    pub fn is_valid(&self) -> bool {
+        let todo = "use this function";
+        self.inner
+            .scopes
+            .get(self.scope_id as usize)
+            .map_or(false, |scope| scope.expires_at > now())
     }
 
     pub fn assert_has_permission(&self, permission: Permission) -> trc::Result<bool> {
@@ -463,7 +353,7 @@ impl AccessToken {
         } else {
             Err(trc::SecurityEvent::Unauthorized
                 .into_err()
-                .details(permission.name()))
+                .details(permission.as_str()))
         }
     }
 
@@ -472,14 +362,18 @@ impl AccessToken {
         const USIZE_MASK: u32 = USIZE_BITS as u32 - 1;
         let mut permissions = Vec::new();
 
-        for (block_num, bytes) in self.permissions.inner().iter().enumerate() {
+        let Some(scope) = self.inner.scopes.get(self.scope_id as usize) else {
+            return permissions;
+        };
+
+        for (block_num, bytes) in scope.permissions.inner().iter().enumerate() {
             let mut bytes = *bytes;
 
             while bytes != 0 {
                 let item = USIZE_MASK - bytes.leading_zeros();
                 bytes ^= 1 << item;
                 if let Some(permission) =
-                    Permission::from_id(((block_num * USIZE_BITS) + item as usize) as u32)
+                    Permission::from_id(((block_num * USIZE_BITS) + item as usize) as u16)
                 {
                     permissions.push(permission);
                 }
@@ -488,21 +382,22 @@ impl AccessToken {
         permissions
     }
 
-    #[inline(always)]
-    pub fn object_quota(&self, collection: Collection) -> u32 {
-        self.object_quota[collection as usize]
-    }
-
     pub fn is_shared(&self, account_id: u32) -> bool {
-        !self.is_member(account_id) && self.access_to.iter().any(|(id, _)| *id == account_id)
+        !self.is_member(account_id)
+            && self
+                .inner
+                .access_to
+                .iter()
+                .any(|a| a.account_id == account_id)
     }
 
     pub fn shared_accounts(&self, collection: Collection) -> impl Iterator<Item = &u32> {
-        self.member_of
+        self.inner
+            .member_of
             .iter()
-            .chain(self.access_to.iter().filter_map(move |(id, cols)| {
-                if cols.contains(collection) {
-                    id.into()
+            .chain(self.inner.access_to.iter().filter_map(move |a| {
+                if a.collections.contains(collection) {
+                    Some(&a.account_id)
                 } else {
                     None
                 }
@@ -512,49 +407,106 @@ impl AccessToken {
     pub fn has_access(&self, to_account_id: u32, to_collection: impl Into<Collection>) -> bool {
         let to_collection = to_collection.into();
         self.is_member(to_account_id)
-            || self.access_to.iter().any(|(id, collections)| {
-                *id == to_account_id && collections.contains(to_collection)
-            })
+            || self
+                .inner
+                .access_to
+                .iter()
+                .any(|a| a.account_id == to_account_id && a.collections.contains(to_collection))
     }
 
     pub fn has_account_access(&self, to_account_id: u32) -> bool {
-        self.is_member(to_account_id) || self.access_to.iter().any(|(id, _)| *id == to_account_id)
-    }
-
-    pub fn as_resource_token(&self) -> ResourceToken {
-        ResourceToken {
-            account_id: self.account_id,
-            quota: self.quota,
-            tenant: self.tenant,
-        }
+        self.is_member(to_account_id)
+            || self
+                .inner
+                .access_to
+                .iter()
+                .any(|a| a.account_id == to_account_id)
     }
 
     pub fn is_http_request_allowed(&self) -> LimiterResult {
-        self.concurrent_http_requests
+        self.inner
+            .concurrent_http_requests
             .as_ref()
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
     }
 
     pub fn is_imap_request_allowed(&self) -> LimiterResult {
-        self.concurrent_imap_requests
+        self.inner
+            .concurrent_imap_requests
             .as_ref()
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
     }
 
     pub fn is_upload_allowed(&self) -> LimiterResult {
-        self.concurrent_uploads
+        self.inner
+            .concurrent_uploads
             .as_ref()
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
+    }
+}
+
+impl AccessTokenInner {
+    pub fn from_id(account_id: u32) -> Self {
+        Self {
+            account_id,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_access_to(self, access_to: impl IntoIterator<Item = AccessTo>) -> Self {
+        Self {
+            access_to: access_to.into_iter().collect(),
+            ..self
+        }
+    }
+
+    pub fn with_scopes(self, scopes: impl IntoIterator<Item = AccessScope>) -> Self {
+        Self {
+            scopes: scopes.into_iter().collect(),
+            ..self
+        }
+    }
+
+    pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
+        self.tenant_id = tenant_id;
+        self
+    }
+
+    pub fn new_admin() -> Self {
+        AccessTokenInner {
+            account_id: FALLBACK_ADMIN_ID,
+            tenant_id: Default::default(),
+            member_of: Default::default(),
+            access_to: Default::default(),
+            scopes: Box::new([AccessScope::new(Permissions::all())]),
+            concurrent_http_requests: Default::default(),
+            concurrent_imap_requests: Default::default(),
+            concurrent_uploads: Default::default(),
+            revision: Default::default(),
+            obj_size: Default::default(),
+        }
     }
 
     pub fn update_size(mut self) -> Self {
         self.obj_size = (std::mem::size_of::<AccessToken>()
             + (self.member_of.len() * std::mem::size_of::<u32>())
             + (self.access_to.len() * (std::mem::size_of::<u32>() + std::mem::size_of::<u64>()))
-            + self.name.len()
-            + self.description.as_ref().map_or(0, |v| v.len())
-            + self.locale.as_ref().map_or(0, |v| v.len())
-            + self.emails.iter().map(|v| v.len()).sum::<usize>()) as u64;
+            + (self.scopes.len() * std::mem::size_of::<AccessScope>()))
+            as u64;
+        self
+    }
+}
+
+impl AccessScope {
+    pub fn new(permissions: Permissions) -> Self {
+        Self {
+            permissions,
+            expires_at: u64::MAX,
+        }
+    }
+
+    pub fn expires_at(mut self, expires_at: u64) -> Self {
+        self.expires_at = expires_at;
         self
     }
 }

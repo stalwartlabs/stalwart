@@ -6,7 +6,8 @@
 
 use crate::{
     KV_RATE_LIMIT_AUTH, KV_RATE_LIMIT_LOITER, KV_RATE_LIMIT_RCPT, KV_RATE_LIMIT_SCAN, Server,
-    ip_to_bytes, ipc::BroadcastEvent,
+    ipc::{BroadcastEvent, RegistryChange},
+    network::ip_to_bytes,
 };
 use ahash::AHashSet;
 use registry::{
@@ -233,7 +234,8 @@ impl Server {
 
         // Write blocked IP to config
         let now = now() as i64;
-        self.registry()
+        let id = self
+            .registry()
             .insert(&BlockedIp {
                 address: IpAddrOrMask::from_ip(ip),
                 created_at: UTCDateTime::from_timestamp(now),
@@ -249,7 +251,7 @@ impl Server {
             .caused_by(trc::location!())?;
 
         // Increment version
-        self.cluster_broadcast(BroadcastEvent::ReloadBlockedIps)
+        self.cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Insert(id)))
             .await;
 
         Ok(())

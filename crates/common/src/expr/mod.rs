@@ -18,6 +18,9 @@ use std::{
     time::Duration,
 };
 use trc::MetricType;
+use utils::cache::CacheItemWeight;
+
+use crate::expr::if_block::IfBlock;
 
 pub mod eval;
 pub mod functions;
@@ -496,5 +499,23 @@ where
             .into_iter()
             .map(|v| T::try_from(v))
             .collect()
+    }
+}
+
+impl CacheItemWeight for Expression {
+    fn weight(&self) -> u64 {
+        self.items.len() as u64 * std::mem::size_of::<ExpressionItem>() as u64
+    }
+}
+
+impl CacheItemWeight for IfBlock {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<IfBlock>() as u64
+            + self
+                .if_then
+                .iter()
+                .map(|if_then| if_then.expr.weight() + if_then.then.weight())
+                .sum::<u64>()
+            + self.default.weight()
     }
 }

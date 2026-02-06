@@ -20,7 +20,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
         Variable::String(v) if !v.is_empty() => ctx
             .server
             .get_lookup_store(v.as_str())
-            .and_then(|v| v.as_store().cloned()),
+            .and_then(|v| v.into_store()),
         _ => Some(ctx.server.core.storage.data.clone()),
     }
     .ok_or_else(|| {

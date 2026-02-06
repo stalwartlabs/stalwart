@@ -15,6 +15,7 @@ use mail_auth::{
     mta_sts::TlsRpt,
     report::{Record, tlsrpt::FailureDetails},
 };
+use registry::{schema::prelude::Object, types::id::Id};
 use std::{
     sync::{
         Arc,
@@ -101,12 +102,28 @@ pub struct CalendarAlert {
 #[derive(Debug)]
 pub enum BroadcastEvent {
     PushNotification(PushNotification),
-    InvalidateAccessTokens(Vec<u32>),
-    InvalidateGroupwareCache(Vec<u32>),
-    ReloadPushServers(u32),
-    ReloadSettings,
-    ReloadBlockedIps,
-    ReloadSpamFilter,
+    RegistryChange(RegistryChange),
+    CacheInvalidation(Vec<CacheInvalidation>),
+}
+
+#[derive(Debug)]
+pub enum RegistryChange {
+    Insert(Id),
+    Delete(Id),
+    Reload(Object),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CacheInvalidation {
+    AccessToken(u32),
+    DavResources(u32),
+    Domain(u32),
+    Account(u32),
+    Group(u32),
+    Tenant(u32),
+    Role(u32),
+    List(u32),
+    PushServers(u32),
 }
 
 #[derive(Debug)]

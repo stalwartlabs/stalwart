@@ -8,6 +8,7 @@ use super::{CLIENT_ID_MAX_LEN, GrantType, RANDOM_CODE_LEN, crypto::SymmetricEncr
 use crate::Server;
 use mail_builder::encoders::base64::base64_encode;
 use mail_parser::decoders::base64::base64_decode;
+use registry::schema::structs::Account;
 use std::time::SystemTime;
 use store::{
     blake3,
@@ -216,34 +217,18 @@ impl Server {
 
     pub async fn password_hash(&self, account_id: u32) -> trc::Result<String> {
         if account_id != u32::MAX {
-            self.core
-                .storage
-                .directory
-                .query(QueryParams::id(account_id).with_return_member_of(false))
+            self.registry()
+                .object::<Account>(account_id)
                 .await
                 .caused_by(trc::location!())?
+                .map(|account| account.secret)
                 .ok_or_else(|| {
                     trc::AuthEvent::Error
                         .into_err()
                         .details("Account no longer exists")
-                })?
-                .data
-                .into_iter()
-                .filter_map(|v| {
-                    if let PrincipalData::Password(secret) = v {
-                        Some(secret)
-                    } else {
-                        None
-                    }
                 })
-                .next()
-                .ok_or(
-                    trc::AuthEvent::Error
-                        .into_err()
-                        .details("Account does not contain secrets")
-                        .caused_by(trc::location!()),
-                )
         } else if let Some((_, secret)) = &self.core.network.security.fallback_admin {
+            let todo = "api keys?";
             Ok(secret.into())
         } else {
             Err(trc::AuthEvent::Error

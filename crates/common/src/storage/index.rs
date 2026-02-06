@@ -300,7 +300,7 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
     }
 
     pub fn with_access_token(mut self, access_token: &AccessToken) -> Self {
-        self.tenant_id = access_token.tenant.as_ref().map(|t| t.id);
+        self.tenant_id = access_token.tenant_id();
         self.changed_by = access_token.account_id();
         self
     }

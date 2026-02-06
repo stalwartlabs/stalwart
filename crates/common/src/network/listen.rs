@@ -9,9 +9,8 @@ use super::{
     limiter::{ConcurrencyLimiter, LimiterResult},
 };
 use crate::{
-    Inner, Server,
+    BuildServer, Inner, Server,
     config::server::{Listener, Listeners, ServerProtocol, TcpListener},
-    core::BuildServer,
 };
 use proxy_header::io::ProxiedStream;
 use rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256;
@@ -253,7 +252,7 @@ impl BuildSession for Arc<ServerInstance> {
                 LocalPort = local_addr.port(),
                 RemoteIp = remote_ip,
                 RemotePort = remote_port,
-                Limit = self.limiter.max_concurrent,
+                Limit = self.limiter.max_concurrent(),
             );
 
             None

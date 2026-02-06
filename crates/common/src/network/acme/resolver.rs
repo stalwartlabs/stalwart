@@ -29,17 +29,14 @@ impl Server {
         let mut certificates = self.inner.data.tls_certificates.load().as_ref().clone();
         for domain in provider.domains.iter() {
             certificates.insert(
-                domain
-                    .strip_prefix("*.")
-                    .unwrap_or(domain.as_str())
-                    .to_string(),
+                domain.strip_prefix("*.").unwrap_or(domain.as_str()).into(),
                 cert.clone(),
             );
         }
 
         // Add default certificate
         if provider.default {
-            certificates.insert("*".to_string(), cert);
+            certificates.insert("*".into(), cert);
         }
 
         self.inner.data.tls_certificates.store(certificates.into());

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::listener::TcpAcceptor;
+use crate::network::TcpAcceptor;
 use ahash::AHashMap;
 use registry::{
     schema::structs::NetworkListener,

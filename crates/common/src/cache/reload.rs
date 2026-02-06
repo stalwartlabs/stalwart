@@ -7,13 +7,13 @@
 use crate::{
     Core, Server,
     config::{server::Listeners, telemetry::Telemetry},
-    listener::blocked::BlockedIps,
 };
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
+use store::registry::bootstrap::Bootstrap;
 
 pub struct ReloadResult {
-    pub config: Config,
+    pub bp: Bootstrap,
     pub new_core: Option<Core>,
     pub tracers: Option<Telemetry>,
 }

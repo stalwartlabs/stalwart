@@ -8,7 +8,6 @@ use super::{WEBADMIN_KEY, backup::BackupParams, console::store_console};
 use crate::{
     Caches, Core, Data, IPC_CHANNEL_BUFFER, Inner, Ipc,
     config::{network::AsnGeoLookupConfig, server::Listeners, telemetry::Telemetry},
-    core::BuildServer,
     ipc::{
         BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEvent,
         TrainTaskController,
@@ -21,12 +20,15 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use store::rand::{Rng, distr::Alphanumeric, rng};
+use store::{
+    rand::{Rng, distr::Alphanumeric, rng},
+    registry::bootstrap::Bootstrap,
+};
 use tokio::sync::{Notify, mpsc};
 use utils::{UnwrapFailure, failed};
 
 pub struct BootManager {
-    pub config: Config,
+    pub bp: Bootstrap,
     pub inner: Arc<Inner>,
     pub servers: Listeners,
     pub ipc_rxs: IpcReceivers,

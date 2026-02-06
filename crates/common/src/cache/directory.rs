@@ -6,7 +6,7 @@
 
 use crate::{
     Server,
-    auth::{AccountCache, ApiKeyCache, DomainCache, EmailCache, RoleCache, TenantCache},
+    auth::{AccountCache, DomainCache, EmailCache, RoleCache, TenantCache},
     config::smtp::auth::DkimSigner,
 };
 use std::sync::Arc;
@@ -21,10 +21,13 @@ impl Server {
     }
 
     pub async fn account(&self, id: u32) -> trc::Result<Arc<AccountCache>> {
-        todo!()
-    }
+        /*
 
-    pub async fn group(&self, id: u32) -> trc::Result<Arc<AccountCache>> {
+        Err(trc::AuthEvent::Error
+                .into_err()
+                .details("Account not found.")
+                .caused_by(trc::location!()))
+         */
         todo!()
     }
 
@@ -32,15 +35,11 @@ impl Server {
         todo!()
     }
 
-    pub async fn tenant(&self, id: u32) -> trc::Result<Option<Arc<TenantCache>>> {
+    pub async fn tenant(&self, id: u32) -> trc::Result<Arc<TenantCache>> {
         todo!()
     }
 
-    pub async fn api_key(&self, id: u32) -> trc::Result<Option<Arc<ApiKeyCache>>> {
-        todo!()
-    }
-
-    pub async fn dkim_signers(&self, domain_id: u32) -> trc::Result<Option<Arc<[DkimSigner]>>> {
+    pub async fn dkim_signers(&self, domain: &str) -> trc::Result<Option<Arc<[DkimSigner]>>> {
         todo!()
     }
 }

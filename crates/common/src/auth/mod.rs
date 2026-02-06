@@ -4,14 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{expr::if_block::IfBlock, listener::limiter::ConcurrencyLimiter};
+use crate::{
+    expr::if_block::IfBlock,
+    network::limiter::ConcurrencyLimiter,
+    storage::{ObjectQuota, TenantQuota},
+};
 use arcstr::ArcStr;
 use directory::Credentials;
 use registry::{
-    schema::enums::{Locale, Permission, StorageQuota, TenantStorageQuota},
+    schema::enums::{Locale, Permission},
     types::EnumType,
 };
-use std::net::IpAddr;
+use std::{net::IpAddr, sync::Arc};
 use tinyvec::TinyVec;
 use trc::ipc::bitset::Bitset;
 use types::collection::Collection;
@@ -24,10 +28,10 @@ pub mod permissions;
 pub mod rate_limit;
 pub mod sasl;
 
+pub const FALLBACK_ADMIN_ID: u32 = u32::MAX;
 const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
 pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
-pub type ObjectQuota = [u32; StorageQuota::COUNT - 1];
-pub type TenantQuota = [u32; TenantStorageQuota::COUNT - 1];
+
 //pub type IdMap<V> = HashMap<u32, Arc<V>, nohash_hasher::BuildNoHashHasher<u32>>;
 //pub type NameMap<V> = AHashMap<ArcStr, Arc<V>>;
 
@@ -41,9 +45,10 @@ pub enum EmailCache {
 #[derive(Debug, Clone)]
 pub struct DomainCache {
     pub name: ArcStr,
-    pub id_tenant: u32,
+    pub id: u32,
     pub id_directory: u32,
-    pub catch_all: Option<Box<str>>,
+    pub id_tenant: u32,
+    pub catch_all: Option<ArcStr>,
     pub sub_addressing_custom: Option<Box<IfBlock>>,
     pub flags: u8,
 }
@@ -58,9 +63,8 @@ pub const DOMAIN_FLAG_ALIAS_LOGIN: u8 = 1 << 4;
 pub struct AccountCache {
     pub addresses: Box<[ArcStr]>,
     pub addresses_temporary: Box<[TemporaryAddress]>,
-    pub id_member_of: TinyVec<[u32; 3]>,
     pub id_tenant: u32,
-    pub id_roles: TinyVec<[u32; 3]>,
+    pub id_member_of: TinyVec<[u32; 3]>,
     pub quota_disk: u64,
     pub quota_objects: Option<Box<ObjectQuota>>,
     pub description: Option<Box<str>>,
@@ -75,7 +79,6 @@ pub struct TemporaryAddress {
 
 #[derive(Debug, Clone)]
 pub struct RoleCache {
-    pub id_tenant: u32,
     pub id_roles: TinyVec<[u32; 3]>,
     pub permissions: PermissionsGroup,
 }
@@ -84,8 +87,7 @@ pub struct RoleCache {
 pub struct MailingListCache {
     pub addresses: Box<[ArcStr]>,
     pub addresses_temporary: Box<[TemporaryAddress]>,
-    pub id_tenant: u32,
-    pub recipients: Box<[ArcStr]>,
+    pub recipients: Arc<[ArcStr]>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,15 +96,6 @@ pub struct TenantCache {
     pub quota_disk: u64,
     pub quota_objects: Option<Box<TenantQuota>>,
     pub permissions: Option<Box<PermissionsGroup>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApiKeyCache {
-    pub id: u32,
-    pub id_tenant: u32,
-    pub id_roles: TinyVec<[u32; 3]>,
-    pub permissions: Option<Box<PermissionsGroup>>,
-    pub expires_at: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -114,9 +107,17 @@ pub struct PermissionsGroup {
 
 #[derive(Debug, Default)]
 pub struct AccessToken {
+    scope_id: u32,
+    inner: Arc<AccessTokenInner>,
+}
+
+#[derive(Debug, Default)]
+pub struct AccessTokenInner {
     pub account_id: u32,
+    pub tenant_id: Option<u32>,
+    pub member_of: TinyVec<[u32; 3]>,
     pub access_to: Box<[AccessTo]>,
-    pub permissions: Permissions,
+    pub scopes: Box<[AccessScope]>,
     pub concurrent_http_requests: Option<ConcurrencyLimiter>,
     pub concurrent_imap_requests: Option<ConcurrencyLimiter>,
     pub concurrent_uploads: Option<ConcurrencyLimiter>,
@@ -125,6 +126,12 @@ pub struct AccessToken {
 }
 
 #[derive(Debug, Default)]
+struct AccessScope {
+    pub permissions: Permissions,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Default, Hash, PartialEq, Eq)]
 pub struct AccessTo {
     pub account_id: u32,
     pub collections: Bitmap<Collection>,
@@ -138,7 +145,7 @@ pub struct AuthRequest {
     allow_api_access: bool,
 }
 
-impl CacheItemWeight for AccessToken {
+impl CacheItemWeight for AccessTokenInner {
     fn weight(&self) -> u64 {
         self.obj_size
     }
@@ -194,12 +201,5 @@ impl CacheItemWeight for TenantCache {
 impl CacheItemWeight for PermissionsGroup {
     fn weight(&self) -> u64 {
         std::mem::size_of::<PermissionsGroup>() as u64
-    }
-}
-
-impl CacheItemWeight for ApiKeyCache {
-    fn weight(&self) -> u64 {
-        std::mem::size_of::<ApiKeyCache>() as u64
-            + self.permissions.as_ref().map_or(0, |p| p.weight())
     }
 }

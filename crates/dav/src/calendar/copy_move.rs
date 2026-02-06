@@ -990,12 +990,7 @@ async fn copy_container(
 
     if from_account_id != to_account_id && required_space > 0 {
         server
-            .has_available_quota(
-                &server
-                    .get_resource_token(access_token, to_account_id)
-                    .await?,
-                required_space,
-            )
+            .has_available_quota(to_account_id, required_space)
             .await?;
     }
 

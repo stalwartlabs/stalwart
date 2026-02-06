@@ -5,10 +5,9 @@
  */
 
 use crate::auth::AccessToken;
-use crate::{
-    KV_RATE_LIMIT_HTTP_ANONYMOUS, KV_RATE_LIMIT_HTTP_AUTHENTICATED, Server, ip_to_bytes,
-    listener::limiter::{InFlight, LimiterResult},
-};
+use crate::network::ip_to_bytes;
+use crate::network::limiter::{InFlight, LimiterResult};
+use crate::{KV_RATE_LIMIT_HTTP_ANONYMOUS, KV_RATE_LIMIT_HTTP_AUTHENTICATED, Server};
 use registry::schema::enums::Permission;
 use std::net::IpAddr;
 use trc::AddContext;
@@ -24,7 +23,7 @@ impl Server {
                 .memory
                 .is_rate_allowed(
                     KV_RATE_LIMIT_HTTP_AUTHENTICATED,
-                    &access_token.account_id.to_be_bytes(),
+                    &access_token.account_id().to_be_bytes(),
                     rate,
                     false,
                 )

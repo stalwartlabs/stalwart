@@ -10,6 +10,7 @@ use crate::{
     config::server::ServerProtocol,
     expr::{functions::ResolveVariable, *},
 };
+use arcstr::ArcStr;
 use compact_str::ToCompactString;
 use registry::{schema::enums::ExpressionVariable, types::ipmask::IpAddrOrMask};
 use rustls::ServerConfig;
@@ -25,11 +26,22 @@ use utils::snowflake::SnowflakeIdGenerator;
 
 pub mod acme;
 pub mod asn;
-pub mod blocked;
+pub mod dns;
 pub mod limiter;
 pub mod listen;
+pub mod mta;
+pub mod security;
 pub mod stream;
 pub mod tls;
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub enum RcptExpansion {
+    Mailbox(u32),
+    List(Arc<[ArcStr]>),
+    External(ArcStr),
+    #[default]
+    Invalid,
+}
 
 pub struct ServerInstance {
     pub id: String,
@@ -249,6 +261,30 @@ impl Debug for TcpAcceptor {
                 .field("implicit", implicit)
                 .finish(),
             Self::Plain => write!(f, "Plain"),
+        }
+    }
+}
+
+pub fn ip_to_bytes(ip: &IpAddr) -> Vec<u8> {
+    match ip {
+        IpAddr::V4(ip) => ip.octets().to_vec(),
+        IpAddr::V6(ip) => ip.octets().to_vec(),
+    }
+}
+
+pub fn ip_to_bytes_prefix(prefix: u8, ip: &IpAddr) -> Vec<u8> {
+    match ip {
+        IpAddr::V4(ip) => {
+            let mut buf = Vec::with_capacity(5);
+            buf.push(prefix);
+            buf.extend_from_slice(&ip.octets());
+            buf
+        }
+        IpAddr::V6(ip) => {
+            let mut buf = Vec::with_capacity(17);
+            buf.push(prefix);
+            buf.extend_from_slice(&ip.octets());
+            buf
         }
     }
 }

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::Server;
+use crate::{Server, ipc::CacheInvalidation};
 use types::acl::{AclGrant, ArchivedAclGrant};
 
 impl Server {
@@ -20,7 +20,8 @@ impl Server {
                     }
                 }
                 if invalidate {
-                    changed_principals.push(current_item.account_id);
+                    changed_principals
+                        .push(CacheInvalidation::AccessToken(current_item.account_id));
                 }
             }
 
@@ -33,16 +34,16 @@ impl Server {
                     }
                 }
                 if invalidate {
-                    changed_principals.push(change_item.account_id);
+                    changed_principals.push(CacheInvalidation::AccessToken(change_item.account_id));
                 }
             }
         } else {
             for value in acl_changes {
-                changed_principals.push(value.account_id);
+                changed_principals.push(CacheInvalidation::AccessToken(value.account_id));
             }
         }
 
-        self.invalidate_principal_caches(changed_principals).await;
+        self.invalidate_caches(changed_principals, true).await;
     }
 
     pub async fn refresh_archived_acls(
@@ -60,7 +61,9 @@ impl Server {
                 }
             }
             if invalidate {
-                changed_principals.push(current_item.account_id.to_native());
+                changed_principals.push(CacheInvalidation::AccessToken(
+                    current_item.account_id.to_native(),
+                ));
             }
         }
 
@@ -73,10 +76,10 @@ impl Server {
                 }
             }
             if invalidate {
-                changed_principals.push(change_item.account_id);
+                changed_principals.push(CacheInvalidation::AccessToken(change_item.account_id));
             }
         }
 
-        self.invalidate_principal_caches(changed_principals).await;
+        self.invalidate_caches(changed_principals, true).await;
     }
 }

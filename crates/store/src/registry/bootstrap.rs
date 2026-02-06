@@ -43,7 +43,7 @@ impl Bootstrap {
     pub async fn setting<T: ObjectType>(&mut self) -> trc::Result<T> {
         let object_id = T::object().singleton();
 
-        if let Some(setting) = self.registry.get::<T>(object_id).await? {
+        if let Some(setting) = self.registry.id::<T>(object_id).await? {
             let mut errors = Vec::new();
             if setting.validate(&mut errors) {
                 return Ok(setting);
@@ -72,7 +72,7 @@ impl Bootstrap {
 
     pub async fn get_infallible<T: ObjectType>(&mut self, id: Id) -> Option<T> {
         if id.object() != T::object() {
-            match self.registry.get::<T>(id).await {
+            match self.registry.id::<T>(id).await {
                 Ok(Some(setting)) => {
                     let mut errors = Vec::new();
                     if setting.validate(&mut errors) {

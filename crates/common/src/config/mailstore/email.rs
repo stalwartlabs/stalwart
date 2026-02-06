@@ -8,9 +8,10 @@ use ahash::{AHashMap, AHashSet};
 use nlp::language::Language;
 use registry::{
     schema::{
-        enums::{SearchCalendarField, SearchContactField, SearchEmailField},
+        enums::{SearchCalendarField, SearchContactField, SearchEmailField, StorageQuota},
         structs::{
-            AddressBook, Calendar, DataRetention, Email, Jmap, Search, SieveUserInterpreter,
+            AddressBook, Calendar, DataRetention, Email, Jmap, OidcProvider, Search,
+            SieveUserInterpreter,
         },
     },
     types::EnumType,
@@ -21,8 +22,10 @@ use store::{
     search::{CalendarSearchField, ContactSearchField, EmailSearchField, SearchField},
     write::SearchIndex,
 };
-use types::{collection::Collection, special_use::SpecialUse};
+use types::special_use::SpecialUse;
 use utils::cron::SimpleCron;
+
+use crate::storage::ObjectQuota;
 
 #[derive(Clone)]
 pub struct EmailConfig {
@@ -50,7 +53,7 @@ pub struct EmailConfig {
     pub index_batch_size: usize,
     pub index_fields: AHashMap<SearchIndex, AHashSet<SearchField>>,
 
-    pub max_objects: [u32; Collection::MAX],
+    pub max_objects: ObjectQuota,
 
     pub account_purge_frequency: SimpleCron,
 }
@@ -73,22 +76,28 @@ impl EmailConfig {
         let jmap = bp.setting_infallible::<Jmap>().await;
         let calendar = bp.setting_infallible::<Calendar>().await;
         let address_book = bp.setting_infallible::<AddressBook>().await;
+        let oidc = bp.setting_infallible::<OidcProvider>().await;
 
         // Parse default object quotas
-        let mut max_objects = [u32::MAX; Collection::MAX];
-        for (collection, max) in [
-            (Collection::Mailbox, email.max_mailboxes),
-            (Collection::SieveScript, sieve.max_scripts),
-            (Collection::Identity, email.max_identities),
-            (Collection::EmailSubmission, email.max_submissions),
-            (Collection::PushSubscription, jmap.max_subscriptions),
-            (Collection::Calendar, calendar.max_calendars),
-            (Collection::CalendarEvent, calendar.max_events),
-            (Collection::AddressBook, address_book.max_address_books),
-            (Collection::ContactCard, address_book.max_contacts),
+        let mut max_objects = ObjectQuota::default();
+        for (item, max) in [
+            (StorageQuota::MaxMailboxes, email.max_mailboxes),
+            (StorageQuota::MaxSieveScripts, sieve.max_scripts),
+            (StorageQuota::MaxIdentities, email.max_identities),
+            (StorageQuota::MaxEmailSubmissions, email.max_submissions),
+            (StorageQuota::MaxMaskedAddresses, email.max_masked_addresses),
+            (StorageQuota::MaxAppPasswords, oidc.max_app_passwords),
+            (StorageQuota::MaxPushSubscriptions, jmap.max_subscriptions),
+            (StorageQuota::MaxCalendars, calendar.max_calendars),
+            (StorageQuota::MaxCalendarEvents, calendar.max_events),
+            (
+                StorageQuota::MaxAddressBooks,
+                address_book.max_address_books,
+            ),
+            (StorageQuota::MaxContactCards, address_book.max_contacts),
         ] {
             if let Some(max) = max {
-                max_objects[collection as usize] = max as u32;
+                max_objects.set(item, max as u32);
             }
         }
 
