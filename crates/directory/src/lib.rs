@@ -18,8 +18,14 @@ pub mod backend;
 pub mod core;
 
 pub enum Credentials {
-    Basic { username: String, secret: String },
-    Bearer { token: String },
+    Basic {
+        username: String,
+        secret: String,
+    },
+    Bearer {
+        username: Option<String>,
+        token: String,
+    },
 }
 
 pub enum Directory {
@@ -40,7 +46,6 @@ pub struct Account {
     pub email: String,
     pub email_aliases: Vec<String>,
     pub secret: Option<String>,
-    pub is_authenticated: bool,
     pub groups: Vec<String>,
     pub description: Option<String>,
 }

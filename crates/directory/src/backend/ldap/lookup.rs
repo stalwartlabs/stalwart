@@ -5,16 +5,19 @@
  */
 
 use super::{LdapDirectory, LdapMappings};
-use crate::{Account, Credentials, Group, IntoError, Recipient, backend::ldap::AuthBind};
+use crate::{
+    Account, Credentials, Group, IntoError, Recipient, backend::ldap::AuthBind,
+    core::secret::verify_secret_hash,
+};
 use ldap3::{Ldap, LdapConnAsync, ResultEntry, Scope, SearchEntry};
 use store::xxhash_rust;
 use utils::sanitize_email;
 
 impl LdapDirectory {
-    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Option<Account>> {
+    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Account> {
         let (username, secret) = match credentials {
             Credentials::Basic { username, secret } => (username, secret),
-            Credentials::Bearer { token } => (token, token),
+            Credentials::Bearer { token, .. } => (token, token),
         };
         let mut conn = self.pool.get().await.map_err(|err| err.into_error())?;
 
@@ -41,12 +44,10 @@ impl LdapDirectory {
                     .success()
                     .is_err()
                 {
-                    trc::event!(
-                        Store(trc::StoreEvent::LdapWarning),
-                        Reason = "Secret rejected during auth bind using template",
-                        Details = dn
-                    );
-                    return Ok(None);
+                    return Err(trc::AuthEvent::Failed
+                        .into_err()
+                        .details("Invalid credentials for auth bind using template")
+                        .details(dn));
                 }
 
                 let filter = self.mappings.filter_login.build(username);
@@ -61,7 +62,6 @@ impl LdapDirectory {
                         if result.account.email.is_empty() {
                             result.account.email = username.into();
                         }
-                        result.account.is_authenticated = true;
                         result.account
                     }
                     Err(err)
@@ -71,21 +71,16 @@ impl LdapDirectory {
                                 .and_then(|v| v.to_uint())
                                 .is_some_and(|rc| [49, 50].contains(&rc)) =>
                     {
-                        trc::event!(
-                            Store(trc::StoreEvent::LdapWarning),
-                            Reason = "Error codes 49 or 50 returned by LDAP server",
-                            Details = vec![dn, filter]
-                        );
-                        return Ok(None);
+                        return Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .details("Error codes 49 or 50 returned by LDAP server")
+                            .details(vec![dn, filter]));
                     }
                     Ok(None) => {
-                        trc::event!(
-                            Store(trc::StoreEvent::LdapWarning),
-                            Reason = "Auth bind successful but filter yielded no results",
-                            Details = vec![dn, filter]
-                        );
-
-                        return Ok(None);
+                        return Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .details("Auth bind successful but filter yielded no results")
+                            .details(vec![dn, filter]));
                     }
                     Err(err) => return Err(err),
                 }
@@ -113,36 +108,43 @@ impl LdapDirectory {
                         if result.account.email.is_empty() {
                             result.account.email = username.into();
                         }
-                        result.account.is_authenticated = true;
                         result.account
                     } else {
-                        trc::event!(
-                            Store(trc::StoreEvent::LdapWarning),
-                            Reason = "Secret rejected during auth bind using lookup filter",
-                            Details = vec![result.dn, filter]
-                        );
-                        return Ok(None);
+                        return Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .details("Secret rejected during auth bind using lookup filter")
+                            .details(vec![result.dn, filter]));
                     }
                 } else {
-                    trc::event!(
-                        Store(trc::StoreEvent::LdapWarning),
-                        Reason = "Auth bind lookup filter yielded no results",
-                        Details = filter
-                    );
-                    return Ok(None);
+                    return Err(trc::AuthEvent::Failed
+                        .into_err()
+                        .details("Auth bind lookup filter yielded no results")
+                        .details(vec![filter]));
                 }
             }
             AuthBind::None => {
                 let filter = self.mappings.filter_login.build(username);
                 if let Some(result) = self.find_object(&mut conn, &filter).await? {
+                    if let Some(account_secret) = &result.account.secret {
+                        if !verify_secret_hash(account_secret, secret.as_bytes()).await? {
+                            return Err(trc::AuthEvent::Failed
+                                .into_err()
+                                .details("Invalid credentials")
+                                .details(vec![filter]));
+                        }
+                    } else {
+                        return Err(trc::AuthEvent::Error
+                            .into_err()
+                            .details("Account does not have a secret")
+                            .details(vec![filter]));
+                    }
+
                     result.account
                 } else {
-                    trc::event!(
-                        Store(trc::StoreEvent::LdapWarning),
-                        Reason = "Authentication filter yielded no results",
-                        Details = filter
-                    );
-                    return Ok(None);
+                    return Err(trc::AuthEvent::Failed
+                        .into_err()
+                        .details("Authentication filter yielded no results")
+                        .details(vec![filter]));
                 }
             }
         };
@@ -177,7 +179,7 @@ impl LdapDirectory {
             }
         }
 
-        Ok(Some(account))
+        Ok(account)
     }
 
     pub async fn recipient(&self, address: &str) -> trc::Result<Recipient> {

@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{io::Write, slice::Iter};
-
 use super::leb128::{Leb128Iterator, Leb128Writer};
+use std::{io::Write, slice::Iter};
 
 pub static BASE32_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz792013";
 pub static BASE32_INVERSE: [u8; 256] = [

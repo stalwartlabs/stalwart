@@ -4,208 +4,477 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::Server;
+use crate::{
+    Server,
+    auth::{
+        AccessToken, AuthRequest, EmailCache,
+        credential::{ApiKey, AppPassword},
+        oauth::GrantType,
+    },
+};
+use directory::{
+    Credentials, Directory,
+    core::secret::{verify_mfa_secret_hash, verify_secret_hash},
+};
+use registry::schema::{
+    enums::{CredentialType, Permission},
+    structs,
+};
+use std::{net::IpAddr, sync::Arc};
+use store::write::now;
+use trc::AddContext;
+
+pub struct UsernameParts {
+    pub account: Username,
+    pub master_user: Option<Username>,
+}
+
+#[derive(PartialEq, Eq)]
+pub struct Username {
+    pub name: String,
+    pub domain_start: usize,
+}
 
 impl Server {
-    pub async fn authenticate(&self, req: &AuthRequest<'_>) -> trc::Result<Arc<AccessToken>> {
-        // Resolve directory
-        let directory = req.directory.unwrap_or(&self.core.storage.directory);
-
-        // Validate credentials
-        match &req.credentials {
-            Credentials::OAuthBearer { token } if !directory.has_bearer_token_support() => {
-                match self
-                    .validate_access_token(GrantType::AccessToken.into(), token)
-                    .await
+    pub async fn authenticate(&self, req: &AuthRequest) -> trc::Result<AccessToken> {
+        match self
+            .route_auth_request(req)
+            .await
+            .and_then(|token| token.assert_has_permission(Permission::Authenticate))
+        {
+            Ok(token) => Ok(token),
+            Err(err) => {
+                if err.matches(trc::EventType::Auth(trc::AuthEvent::Failed))
+                    && self.has_auth_fail2ban()
+                    && self
+                        .is_auth_fail2banned(req.remote_ip, req.username())
+                        .await?
                 {
-                    Ok(token_into) => self.get_access_token(token_into.account_id).await,
-                    Err(err) => Err(err),
+                    Err(trc::SecurityEvent::AuthenticationBan
+                        .into_err()
+                        .ctx(trc::Key::RemoteIp, req.remote_ip)
+                        .ctx_opt(trc::Key::AccountName, req.username().map(|s| s.to_string())))
+                } else {
+                    Err(err.ctx(trc::Key::RemoteIp, req.remote_ip))
                 }
             }
-            _ => match self.authenticate_credentials(req, directory).await {
-                Ok(principal) => self.get_access_token(principal).await,
-                Err(err) => Err(err),
-            },
         }
-        .and_then(|token| {
-            token
-                .assert_has_permission(Permission::Authenticate)
-                .map(|_| token)
-        })
     }
 
-    async fn authenticate_credentials(
-        &self,
-        req: &AuthRequest<'_>,
-        directory: &Directory,
-    ) -> trc::Result<Principal> {
-        // First try to authenticate the user against the default directory
-        let result = match directory
-            .query(
-                QueryParams::credentials(&req.credentials)
-                    .with_return_member_of(req.return_member_of),
-            )
-            .await
-        {
-            Ok(Some(principal)) => {
-                trc::event!(
-                    Auth(trc::AuthEvent::Success),
-                    AccountName = principal.name().to_string(),
-                    AccountId = principal.id(),
-                    SpanId = req.session_id,
-                );
-
-                return Ok(principal);
-            }
-            Ok(None) => Ok(()),
-            Err(err) => {
-                if err.matches(trc::EventType::Auth(trc::AuthEvent::MissingTotp)) {
-                    return Err(err);
-                } else {
-                    Err(err)
-                }
-            }
-        };
-
+    async fn route_auth_request(&self, req: &AuthRequest) -> trc::Result<AccessToken> {
         match &req.credentials {
-            Credentials::Plain { username, secret } => {
-                // Then check if the credentials match the fallback admin or master user
-                let master_user: Option<(String, String)> = None;
-                let todo = "implement master";
-                match (&self.core.network.security.fallback_admin, &master_user) {
-                    (Some((fallback_admin, fallback_pass)), _) if username == fallback_admin => {
-                        if verify_secret_hash(fallback_pass, secret).await? {
-                            trc::event!(
-                                Auth(trc::AuthEvent::Success),
-                                AccountName = username.clone(),
-                                SpanId = req.session_id,
-                            );
+            Credentials::Basic { username, secret } => {
+                let username = UsernameParts::new(username);
 
-                            return Ok(Principal::fallback_admin(fallback_pass));
-                        }
-                    }
-                    (_, Some((master_user, master_pass))) if username.ends_with(master_user) => {
-                        if verify_secret_hash(master_pass, secret).await? {
-                            let username = username.strip_suffix(master_user).unwrap();
-                            let username = username.strip_suffix('%').unwrap_or(username);
-
-                            if let Some(principal) = directory
-                                .query(
-                                    QueryParams::name(username)
-                                        .with_return_member_of(req.return_member_of),
-                                )
-                                .await?
+                // Try to authenticate as fallback admin if configured
+                if let Some((fallback_user, fallback_hash)) =
+                    &self.core.network.security.fallback_admin
+                    && username.auth_as().address() == fallback_user
+                {
+                    return if verify_secret_hash(fallback_hash, secret.as_bytes()).await? {
+                        if username.is_master() {
+                            let address = username.account().address();
+                            if let Some(EmailCache::Account(account_id)) =
+                                self.email(address).await?
                             {
                                 trc::event!(
                                     Auth(trc::AuthEvent::Success),
-                                    AccountName = username.to_string(),
+                                    AccountName = address.to_string(),
+                                    AccountId = account_id,
                                     SpanId = req.session_id,
-                                    AccountId = principal.id(),
-                                    Type = principal.typ().description(),
+                                    Details = fallback_user.to_string(),
                                 );
 
-                                return Ok(principal);
+                                self.access_token(account_id).await.map(AccessToken::new)
+                            } else {
+                                Err(trc::AuthEvent::Failed
+                                    .into_err()
+                                    .ctx(trc::Key::AccountName, address.to_string())
+                                    .reason("Master user account not found for fallback admin authentication"))
                             }
-                        }
-                    }
-                    _ => {
-                        // Validate API credentials
-                        if req.allow_api_access
-                            && let Ok(Some(principal)) = self
-                                .store()
-                                .query(
-                                    QueryParams::credentials(&req.credentials)
-                                        .with_return_member_of(req.return_member_of),
-                                )
-                                .await
-                            && principal.typ == Type::ApiKey
-                        {
+                        } else {
                             trc::event!(
                                 Auth(trc::AuthEvent::Success),
-                                AccountName = principal.name().to_string(),
-                                AccountId = principal.id(),
+                                AccountName = fallback_user.to_string(),
                                 SpanId = req.session_id,
                             );
 
-                            return Ok(principal);
+                            Ok(AccessToken::new_admin())
+                        }
+                    } else {
+                        Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .ctx(trc::Key::AccountName, fallback_user.to_string())
+                            .ctx(trc::Key::SpanId, req.session_id)
+                            .reason("Fallback admin authentication failed"))
+                    };
+                }
+
+                let auth_as = username.auth_as();
+
+                // Authenticate app passwords
+                if let Some(app_pass) = AppPassword::parse(secret) {
+                    let account_name = auth_as.address();
+                    return if let Some(EmailCache::Account(account_id)) =
+                        self.email(account_name).await?
+                    {
+                        self.validate_credential(
+                            account_id,
+                            app_pass.credential_id,
+                            app_pass.secret.as_ref(),
+                            req.session_id,
+                        )
+                        .await
+                    } else {
+                        Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .ctx(trc::Key::AccountName, account_name.to_string())
+                            .reason("App password authentication failed: account not found"))
+                    };
+                }
+
+                // Obtain external directory, if any
+                let address = auth_as.address();
+                let directory = self
+                    .directory_for_domain(address, auth_as.domain())
+                    .await
+                    .caused_by(trc::location!())?;
+
+                let mut is_alias_login = false;
+                let token = if let Some(directory) = directory {
+                    let directory_account = directory.authenticate(&req.credentials).await?;
+                    is_alias_login = directory_account.email != address;
+                    self.update_registry(directory_account).await
+                } else if let Some(EmailCache::Account(account_id)) = self.email(address).await? {
+                    if let Some(account) = self
+                        .registry()
+                        .object::<structs::Account>(account_id)
+                        .await?
+                    {
+                        if verify_mfa_secret_hash(
+                            account.otp_auth.as_deref(),
+                            account.secret.as_str(),
+                            secret,
+                        )
+                        .await?
+                        {
+                            is_alias_login = account.name != address;
+                            self.access_token(account_id).await.map(AccessToken::new)
+                        } else {
+                            Err(trc::AuthEvent::Failed
+                                .into_err()
+                                .ctx(trc::Key::AccountName, address.to_string())
+                                .ctx(trc::Key::AccountId, account_id)
+                                .ctx(trc::Key::SpanId, req.session_id)
+                                .reason("Authentication failed"))
+                        }
+                    } else {
+                        Err(trc::AuthEvent::Error
+                            .into_err()
+                            .ctx(trc::Key::AccountName, address.to_string())
+                            .ctx(trc::Key::AccountId, account_id)
+                            .reason("Account not found in registry"))
+                    }
+                } else {
+                    Err(trc::AuthEvent::Failed
+                        .into_err()
+                        .ctx(trc::Key::AccountName, address.to_string())
+                        .reason("Account not found"))
+                }?;
+
+                // Enforce alias login restrictions
+                if is_alias_login && !token.has_permission(Permission::AuthenticateAlias) {
+                    return Err(trc::AuthEvent::Failed
+                        .into_err()
+                        .ctx(trc::Key::AccountName, address.to_string())
+                        .ctx(trc::Key::AccountId, token.account_id())
+                        .ctx(trc::Key::SpanId, req.session_id)
+                        .reason("Authenticated using an email alias but account does not have AuthenticateAlias permission"));
+                }
+
+                // Validate master user access
+                if username.is_master() {
+                    token.assert_has_permissions(&[
+                        Permission::Impersonate,
+                        Permission::Authenticate,
+                    ])?;
+                    let address = username.account().address();
+                    let master_address = username.account().address();
+                    if let Some(EmailCache::Account(account_id)) = self.email(address).await? {
+                        trc::event!(
+                            Auth(trc::AuthEvent::Success),
+                            AccountName = address.to_string(),
+                            AccountId = account_id,
+                            SpanId = req.session_id,
+                            Details = master_address.to_string(),
+                        );
+
+                        self.access_token(account_id).await.map(AccessToken::new)
+                    } else {
+                        Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .ctx(trc::Key::AccountName, address.to_string())
+                            .details(master_address.to_string())
+                            .reason("Master user account not found"))
+                    }
+                } else {
+                    trc::event!(
+                        Auth(trc::AuthEvent::Success),
+                        AccountName = address.to_string(),
+                        AccountId = token.account_id(),
+                        SpanId = req.session_id,
+                    );
+
+                    Ok(token)
+                }
+            }
+            Credentials::Bearer { username, token } => {
+                // Handle API key authentication
+                if let Some(key) = ApiKey::parse(token) {
+                    return self
+                        .validate_credential(
+                            key.account_id,
+                            key.credential_id,
+                            key.secret.as_ref(),
+                            req.session_id,
+                        )
+                        .await;
+                }
+
+                // Obtain external directory, if any
+                let directory = if let Some(username) = username.as_deref().map(UsernameParts::new)
+                {
+                    let auth_as = username.auth_as();
+                    self.directory_for_domain(auth_as.address(), auth_as.domain())
+                        .await
+                        .caused_by(trc::location!())?
+                } else {
+                    self.get_default_directory()
+                };
+                if let Some(directory) = directory
+                    && directory.has_bearer_token_support()
+                {
+                    match directory.authenticate(&req.credentials).await {
+                        Ok(result) => {
+                            return self.update_registry(result).await;
+                        }
+                        Err(err) => {
+                            if !err.matches(trc::EventType::Auth(trc::AuthEvent::Failed)) {
+                                return Err(err);
+                            }
                         }
                     }
                 }
-            }
-            Credentials::OAuthBearer { token } if directory.has_bearer_token_support() => {
-                // Check for bearer tokens issued locally
-                if let Ok(token_info) = self
-                    .validate_access_token(GrantType::AccessToken.into(), token)
-                    .await
-                {
-                    let principal = if token_info.account_id != FALLBACK_ADMIN_ID {
-                        directory
-                            .query(
-                                QueryParams::id(token_info.account_id)
-                                    .with_return_member_of(req.return_member_of),
-                            )
-                            .await
-                            .unwrap_or_default()
-                    } else if let Some((_, fallback_pass)) =
-                        &self.core.network.security.fallback_admin
-                    {
-                        Principal::fallback_admin(fallback_pass).into()
-                    } else {
-                        None
-                    };
-                    if let Some(principal) = principal {
-                        trc::event!(
-                            Auth(trc::AuthEvent::Success),
-                            AccountName = principal.name().to_string(),
-                            AccountId = principal.id(),
-                            SpanId = req.session_id,
-                        );
 
-                        return Ok(principal);
+                // Internal OAuth
+                let token_info = self
+                    .validate_access_token(GrantType::AccessToken.into(), token)
+                    .await?;
+                self.access_token(token_info.account_id)
+                    .await
+                    .map(AccessToken::new)
+            }
+        }
+    }
+
+    async fn validate_credential(
+        &self,
+        account_id: u32,
+        credential_id: u32,
+        secret: &[u8],
+        span_id: u64,
+    ) -> trc::Result<AccessToken> {
+        if let Some(account) = self
+            .registry()
+            .object::<structs::Account>(account_id)
+            .await?
+        {
+            // Find credential by credential_id
+            for credential in account.credentials.iter() {
+                if credential.credential_id as u32 == credential_id {
+                    if !verify_secret_hash(&credential.secret, secret).await? {
+                        return Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .ctx(trc::Key::AccountName, account.name)
+                            .ctx(trc::Key::AccountId, account_id)
+                            .ctx(trc::Key::Id, credential_id)
+                            .ctx(trc::Key::SpanId, span_id)
+                            .reason("Invalid credential secret"));
                     }
+
+                    if credential
+                        .expires_at
+                        .as_ref()
+                        .is_some_and(|exp| exp.timestamp() < now() as i64)
+                    {
+                        return Err(trc::AuthEvent::Failed
+                            .into_err()
+                            .ctx(trc::Key::AccountName, account.name)
+                            .ctx(trc::Key::AccountId, account_id)
+                            .ctx(trc::Key::Id, credential_id)
+                            .ctx(trc::Key::SpanId, span_id)
+                            .reason("Credential has expired"));
+                    }
+
+                    trc::event!(
+                        Auth(trc::AuthEvent::Success),
+                        AccountName = account.name.clone(),
+                        AccountId = account_id,
+                        Id = credential_id,
+                        SpanId = span_id,
+                        Details = match credential.credential_type {
+                            CredentialType::AppPassword => "Authenticated with app password",
+                            CredentialType::ApiKey => "Authenticated with API key",
+                        }
+                    );
+
+                    let token = self.access_token_from_account(account_id, account).await?;
+                    let scope_idx = token
+                        .scopes
+                        .iter()
+                        .position(|scope| scope.credential_id == credential_id)
+                        .ok_or_else(|| {
+                            trc::AuthEvent::Error
+                                .into_err()
+                                .ctx(trc::Key::AccountId, account_id)
+                                .ctx(trc::Key::Id, credential_id)
+                                .ctx(trc::Key::SpanId, span_id)
+                                .reason("Credential not found in access token scopes")
+                        })?;
+
+                    return Ok(AccessToken::scoped(token, scope_idx));
                 }
             }
-            _ => (),
-        };
 
-        if let Err(err) = result {
-            Err(err)
-        } else if self.has_auth_fail2ban() {
-            let login = req.credentials.login();
-            if self.is_auth_fail2banned(req.remote_ip, login).await? {
-                Err(trc::SecurityEvent::AuthenticationBan
-                    .into_err()
-                    .ctx(trc::Key::RemoteIp, req.remote_ip)
-                    .ctx_opt(trc::Key::AccountName, login.map(|s| s.to_string())))
-            } else {
-                Err(trc::AuthEvent::Failed
-                    .ctx(trc::Key::RemoteIp, req.remote_ip)
-                    .ctx_opt(trc::Key::AccountName, login.map(|s| s.to_string())))
-            }
+            Err(trc::AuthEvent::Failed
+                .into_err()
+                .ctx(trc::Key::AccountId, account_id)
+                .ctx(trc::Key::Id, credential_id)
+                .ctx(trc::Key::SpanId, span_id)
+                .reason("Credential not found for account"))
         } else {
             Err(trc::AuthEvent::Failed
-                .ctx(trc::Key::RemoteIp, req.remote_ip)
-                .ctx_opt(
-                    trc::Key::AccountName,
-                    req.credentials.login().map(|s| s.to_string()),
-                ))
+                .into_err()
+                .ctx(trc::Key::AccountId, account_id)
+                .ctx(trc::Key::SpanId, span_id)
+                .reason("Account not found for credential"))
         }
+    }
+
+    async fn directory_for_domain(
+        &self,
+        address: &str,
+        domain_name: Option<&str>,
+    ) -> trc::Result<Option<&Arc<Directory>>> {
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if self.core.is_enterprise_edition() {
+            if let Some(domain_name) = domain_name {
+                if let Some(domain) = self.domain(domain_name).await? {
+                    if domain.id_directory != u32::MAX {
+                        if let Some(directory) =
+                            self.core.storage.directories.get(&domain.id_directory)
+                        {
+                            return Ok(Some(directory));
+                        } else {
+                            trc::event!(
+                                Auth(trc::AuthEvent::Warning),
+                                AccountName = address.to_string(),
+                                Domain = domain_name.to_string(),
+                                Id = domain.id_directory,
+                                Reason = "Directory not found for domain",
+                            );
+                        }
+                    }
+                } else {
+                    trc::event!(
+                        Auth(trc::AuthEvent::Warning),
+                        AccountName = address.to_string(),
+                        Reason = "Domain not found",
+                    );
+                }
+            } else {
+                trc::event!(
+                    Auth(trc::AuthEvent::Warning),
+                    AccountName = address.to_string(),
+                    Reason = "No domain in username",
+                );
+            }
+        }
+        // SPDX-SnippetEnd
+
+        Ok(self.get_default_directory())
+    }
+
+    async fn update_registry(&self, account: directory::Account) -> trc::Result<AccessToken> {
+        todo!()
     }
 }
 
-impl<'x> AuthRequest<'x> {
-    pub fn from_credentials(
-        credentials: Credentials<String>,
-        session_id: u64,
-        remote_ip: IpAddr,
-    ) -> Self {
+impl UsernameParts {
+    pub fn new(address: &str) -> Self {
+        let mut account = Username {
+            name: String::with_capacity(address.len()),
+            domain_start: usize::MAX,
+        };
+        let mut master_user = None;
+
+        for ch in address.chars() {
+            if ch == '%' {
+                master_user = Some(Username {
+                    name: String::with_capacity(address.len()),
+                    domain_start: usize::MAX,
+                });
+            } else {
+                let target = master_user.as_mut().unwrap_or(&mut account);
+                if ch != '@' {
+                    for lower in ch.to_lowercase() {
+                        target.name.push(lower);
+                    }
+                } else {
+                    target.name.push(ch);
+                    target.domain_start = target.name.len();
+                }
+            }
+        }
+
+        UsernameParts {
+            master_user: master_user.filter(|u| u != &account),
+            account,
+        }
+    }
+
+    pub fn auth_as(&self) -> &Username {
+        self.master_user.as_ref().unwrap_or(&self.account)
+    }
+
+    pub fn account(&self) -> &Username {
+        &self.account
+    }
+
+    pub fn is_master(&self) -> bool {
+        self.master_user.is_some()
+    }
+}
+
+impl Username {
+    pub fn address(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn domain(&self) -> Option<&str> {
+        self.name.get(self.domain_start..)
+    }
+}
+
+impl AuthRequest {
+    pub fn from_credentials(credentials: Credentials, session_id: u64, remote_ip: IpAddr) -> Self {
         Self {
             credentials,
             session_id,
             remote_ip,
-            return_member_of: true,
-            directory: None,
-            allow_api_access: false,
         }
     }
 
@@ -216,7 +485,7 @@ impl<'x> AuthRequest<'x> {
         remote_ip: IpAddr,
     ) -> Self {
         Self::from_credentials(
-            Credentials::Plain {
+            Credentials::Basic {
                 username: user.into(),
                 secret: pass.into(),
             },
@@ -225,33 +494,10 @@ impl<'x> AuthRequest<'x> {
         )
     }
 
-    pub fn without_members(mut self) -> Self {
-        self.return_member_of = false;
-        self
-    }
-
-    pub fn with_directory(mut self, directory: &'x Directory) -> Self {
-        self.directory = Some(directory);
-        self
-    }
-
-    pub fn with_api_access(mut self, allow_api_access: bool) -> Self {
-        self.allow_api_access = allow_api_access;
-        self
-    }
-}
-
-pub(crate) trait CredentialsUsername {
-    fn login(&self) -> Option<&str>;
-}
-
-impl CredentialsUsername for Credentials<String> {
-    fn login(&self) -> Option<&str> {
-        match self {
-            Credentials::Plain { username, .. } | Credentials::XOauth2 { username, .. } => {
-                username.as_str().into()
-            }
-            Credentials::OAuthBearer { .. } => None,
+    pub fn username(&self) -> Option<&str> {
+        match &self.credentials {
+            Credentials::Basic { username, .. } => Some(username.as_str()),
+            Credentials::Bearer { username, .. } => username.as_deref(),
         }
     }
 }

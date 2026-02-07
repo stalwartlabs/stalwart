@@ -12,6 +12,7 @@ use crate::{
     },
     network::limiter::{ConcurrencyLimiter, LimiterResult},
 };
+use ahash::AHasher;
 use registry::{
     schema::{
         enums::Permission,
@@ -20,7 +21,7 @@ use registry::{
     types::EnumType,
 };
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
+    hash::{Hash, Hasher},
     sync::Arc,
 };
 use store::{query::acl::AclQuery, rand, write::now};
@@ -30,11 +31,12 @@ use types::{acl::Acl, collection::Collection};
 use utils::map::bitmap::{Bitmap, BitmapItem};
 
 impl Server {
-    async fn build_account_access_token(
+    async fn build_access_token(
         &self,
         account: Account,
         account_id: u32,
         revision: u64,
+        revision_account: u64,
     ) -> trc::Result<AccessTokenInner> {
         // Calculate effective permissions
         let (mut permissions, roles) = match account.permissions {
@@ -152,8 +154,8 @@ impl Server {
         }
 
         let now = now();
-        let app_password_scopes = account
-            .app_passwords
+        let credential_scopes = account
+            .credentials
             .into_iter()
             .filter_map(|pass| {
                 let expires_at = pass
@@ -173,6 +175,7 @@ impl Server {
                         }
                     };
                     Some(AccessScope {
+                        credential_id: pass.credential_id as u32,
                         permissions,
                         expires_at,
                     })
@@ -196,22 +199,20 @@ impl Server {
                 .map(ConcurrencyLimiter::new),
             obj_size: 0,
             revision,
+            revision_account,
             account_id,
             tenant_id,
             member_of,
             access_to: access_to.into_boxed_slice(),
-            scopes: [AccessScope::new(permissions.finalize())]
+            scopes: [AccessScope::new(permissions.finalize(), u32::MAX)]
                 .into_iter()
-                .chain(app_password_scopes)
+                .chain(credential_scopes)
                 .collect::<Box<[AccessScope]>>(),
         }
         .update_size())
     }
 
-    pub async fn account_access_token(
-        &self,
-        account_id: u32,
-    ) -> trc::Result<Arc<AccessTokenInner>> {
+    pub async fn access_token(&self, account_id: u32) -> trc::Result<Arc<AccessTokenInner>> {
         match self
             .inner
             .cache
@@ -221,7 +222,6 @@ impl Server {
         {
             Ok(token) => Ok(token),
             Err(guard) => {
-                let revision = rand::random::<u64>();
                 let account = self
                     .registry()
                     .object::<Account>(account_id)
@@ -233,8 +233,10 @@ impl Server {
                             .account_id(account_id)
                             .caused_by(trc::location!())
                     })?;
+                let revision = rand::random::<u64>();
+                let revision_account = hash_account(&account);
                 let token: Arc<AccessTokenInner> = self
-                    .build_account_access_token(account, account_id, revision)
+                    .build_access_token(account, account_id, revision, revision_account)
                     .await?
                     .into();
                 let _ = guard.insert(token.clone());
@@ -243,11 +245,12 @@ impl Server {
         }
     }
 
-    async fn access_token_from_account(
+    pub(crate) async fn access_token_from_account(
         &self,
         account_id: u32,
         account: Account,
     ) -> trc::Result<Arc<AccessTokenInner>> {
+        let revision_account = hash_account(&account);
         match self
             .inner
             .cache
@@ -255,11 +258,31 @@ impl Server {
             .get_value_or_guard_async(&account_id)
             .await
         {
-            Ok(token) => Ok(token),
+            Ok(token) => {
+                if token.revision_account == revision_account {
+                    Ok(token)
+                } else {
+                    // Token is stale, rebuild it
+                    debug_assert!(
+                        false,
+                        "Token is stale, invalidation should have been triggered"
+                    );
+                    let revision = rand::random::<u64>();
+                    let token: Arc<AccessTokenInner> = self
+                        .build_access_token(account, account_id, revision, revision_account)
+                        .await?
+                        .into();
+                    self.inner
+                        .cache
+                        .access_tokens
+                        .update(account_id, token.clone());
+                    Ok(token)
+                }
+            }
             Err(guard) => {
                 let revision = rand::random::<u64>();
                 let token: Arc<AccessTokenInner> = self
-                    .build_account_access_token(account, account_id, revision)
+                    .build_access_token(account, account_id, revision, revision_account)
                     .await?
                     .into();
                 let _ = guard.insert(token.clone());
@@ -270,9 +293,20 @@ impl Server {
 }
 
 impl AccessToken {
+    pub fn new(inner: Arc<AccessTokenInner>) -> Self {
+        AccessToken {
+            scope_idx: 0,
+            inner,
+        }
+    }
+
+    pub fn scoped(inner: Arc<AccessTokenInner>, scope_idx: usize) -> Self {
+        AccessToken { scope_idx, inner }
+    }
+
     pub fn state(&self) -> u32 {
         // Hash state
-        let mut s = DefaultHasher::new();
+        let mut s = AHasher::default();
         self.inner.member_of.hash(&mut s);
         self.inner.access_to.hash(&mut s);
         s.finish() as u32
@@ -335,7 +369,7 @@ impl AccessToken {
     pub fn has_permission(&self, permission: Permission) -> bool {
         self.inner
             .scopes
-            .get(self.scope_id as usize)
+            .get(self.scope_idx)
             .map_or(false, |scope| scope.permissions.get(permission as usize))
     }
 
@@ -343,17 +377,31 @@ impl AccessToken {
         let todo = "use this function";
         self.inner
             .scopes
-            .get(self.scope_id as usize)
+            .get(self.scope_idx)
             .map_or(false, |scope| scope.expires_at > now())
     }
 
-    pub fn assert_has_permission(&self, permission: Permission) -> trc::Result<bool> {
+    pub fn assert_has_permissions(self, permissions: &[Permission]) -> trc::Result<Self> {
+        for permission in permissions {
+            if !self.has_permission(*permission) {
+                return Err(trc::SecurityEvent::Unauthorized
+                    .into_err()
+                    .details(permission.as_str())
+                    .account_id(self.account_id()));
+            }
+        }
+
+        Ok(self)
+    }
+
+    pub fn assert_has_permission(self, permission: Permission) -> trc::Result<Self> {
         if self.has_permission(permission) {
-            Ok(true)
+            Ok(self)
         } else {
             Err(trc::SecurityEvent::Unauthorized
                 .into_err()
-                .details(permission.as_str()))
+                .details(permission.as_str())
+                .account_id(self.account_id()))
         }
     }
 
@@ -362,7 +410,7 @@ impl AccessToken {
         const USIZE_MASK: u32 = USIZE_BITS as u32 - 1;
         let mut permissions = Vec::new();
 
-        let Some(scope) = self.inner.scopes.get(self.scope_id as usize) else {
+        let Some(scope) = self.inner.scopes.get(self.scope_idx) else {
             return permissions;
         };
 
@@ -443,6 +491,25 @@ impl AccessToken {
             .as_ref()
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
     }
+
+    pub fn new_admin() -> AccessToken {
+        AccessToken {
+            scope_idx: 0,
+            inner: Arc::new(AccessTokenInner {
+                account_id: FALLBACK_ADMIN_ID,
+                tenant_id: Default::default(),
+                member_of: Default::default(),
+                access_to: Default::default(),
+                scopes: Box::new([AccessScope::new(Permissions::all(), u32::MAX)]),
+                concurrent_http_requests: Default::default(),
+                concurrent_imap_requests: Default::default(),
+                concurrent_uploads: Default::default(),
+                revision: Default::default(),
+                revision_account: Default::default(),
+                obj_size: Default::default(),
+            }),
+        }
+    }
 }
 
 impl AccessTokenInner {
@@ -472,21 +539,6 @@ impl AccessTokenInner {
         self
     }
 
-    pub fn new_admin() -> Self {
-        AccessTokenInner {
-            account_id: FALLBACK_ADMIN_ID,
-            tenant_id: Default::default(),
-            member_of: Default::default(),
-            access_to: Default::default(),
-            scopes: Box::new([AccessScope::new(Permissions::all())]),
-            concurrent_http_requests: Default::default(),
-            concurrent_imap_requests: Default::default(),
-            concurrent_uploads: Default::default(),
-            revision: Default::default(),
-            obj_size: Default::default(),
-        }
-    }
-
     pub fn update_size(mut self) -> Self {
         self.obj_size = (std::mem::size_of::<AccessToken>()
             + (self.member_of.len() * std::mem::size_of::<u32>())
@@ -495,12 +547,17 @@ impl AccessTokenInner {
             as u64;
         self
     }
+
+    pub fn is_fresh(&self, account: &Account) -> bool {
+        self.member_of.len() == account.member_group_ids.len()
+    }
 }
 
 impl AccessScope {
-    pub fn new(permissions: Permissions) -> Self {
+    pub fn new(permissions: Permissions, credential_id: u32) -> Self {
         Self {
             permissions,
+            credential_id,
             expires_at: u64::MAX,
         }
     }
@@ -508,5 +565,42 @@ impl AccessScope {
     pub fn expires_at(mut self, expires_at: u64) -> Self {
         self.expires_at = expires_at;
         self
+    }
+}
+
+fn hash_account(account: &Account) -> u64 {
+    let mut s = AHasher::default();
+    account.member_tenant_id.hash(&mut s);
+    account.role_ids.hash(&mut s);
+    hash_permissions(&mut s, &account.permissions);
+    for credential in &account.credentials {
+        credential.credential_id.hash(&mut s);
+        credential.expires_at.hash(&mut s);
+        hash_permissions(&mut s, &credential.permissions);
+    }
+    s.finish()
+}
+
+fn hash_permissions(hasher: &mut AHasher, permissions: &structs::Permissions) {
+    match permissions {
+        structs::Permissions::Inherit => {
+            0u8.hash(hasher);
+        }
+        structs::Permissions::Merge(permissions) => {
+            2u8.hash(hasher);
+            for (perm, enabled) in permissions.permissions.iter() {
+                if *enabled {
+                    perm.hash(hasher);
+                }
+            }
+        }
+        structs::Permissions::Replace(permissions) => {
+            3u8.hash(hasher);
+            for (perm, enabled) in permissions.permissions.iter() {
+                if *enabled {
+                    perm.hash(hasher);
+                }
+            }
+        }
     }
 }

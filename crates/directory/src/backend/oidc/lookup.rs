@@ -14,13 +14,13 @@ use utils::sanitize_email;
 type OpenIdResponse = HashMap<String, serde_json::Value>;
 
 impl OpenIdDirectory {
-    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Option<Account>> {
+    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Account> {
         let token = match credentials {
-            Credentials::Bearer { token } => token,
+            Credentials::Bearer { token, .. } => token,
             _ => {
                 return Err(AuthEvent::Error
                     .into_err()
-                    .details("Unsupported credentials type for OIDC authentication"));
+                    .details("Unsupported credentials type for OIDC backend"));
             }
         };
         let email;
@@ -116,7 +116,7 @@ impl OpenIdDirectory {
                 if value == *required_aud {
                     aud_matched = true;
                 } else {
-                    return Err(AuthEvent::Error
+                    return Err(AuthEvent::Failed
                         .into_err()
                         .details("Audience claim does not match"));
                 }
@@ -127,7 +127,7 @@ impl OpenIdDirectory {
                 if value == *required_iss {
                     iss_matched = true;
                 } else {
-                    return Err(AuthEvent::Error
+                    return Err(AuthEvent::Failed
                         .into_err()
                         .details("Issuer claim does not match"));
                 }
@@ -156,8 +156,7 @@ impl OpenIdDirectory {
                 .into_err()
                 .details("One or more required scopes not found in OIDC response"))
         } else if !account.email.is_empty() {
-            account.is_authenticated = true;
-            Ok(Some(account))
+            Ok(account)
         } else {
             Err(trc::AuthEvent::Error
                 .into_err()

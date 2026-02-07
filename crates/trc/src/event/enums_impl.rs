@@ -48,6 +48,7 @@ impl EventType {
             b"auth.too-many-attempts" => EventType::Auth(AuthEvent::TooManyAttempts),
             b"auth.client-registration" => EventType::Auth(AuthEvent::ClientRegistration),
             b"auth.error" => EventType::Auth(AuthEvent::Error),
+            b"auth.warning" => EventType::Auth(AuthEvent::Warning),
             b"calendar.rule-expansion-error" => EventType::Calendar(CalendarEvent::RuleExpansionError),
             b"calendar.alarm-sent" => EventType::Calendar(CalendarEvent::AlarmSent),
             b"calendar.alarm-skipped" => EventType::Calendar(CalendarEvent::AlarmSkipped),
@@ -649,6 +650,7 @@ impl EventType {
             EventType::Auth(AuthEvent::TooManyAttempts) => "auth.too-many-attempts",
             EventType::Auth(AuthEvent::ClientRegistration) => "auth.client-registration",
             EventType::Auth(AuthEvent::Error) => "auth.error",
+            EventType::Auth(AuthEvent::Warning) => "auth.warning",
             EventType::Calendar(CalendarEvent::RuleExpansionError) => {
                 "calendar.rule-expansion-error"
             }
@@ -1365,6 +1367,7 @@ impl EventType {
             EventType::Auth(AuthEvent::TooManyAttempts) => 38,
             EventType::Auth(AuthEvent::ClientRegistration) => 555,
             EventType::Auth(AuthEvent::Error) => 34,
+            EventType::Auth(AuthEvent::Warning) => 595,
             EventType::Calendar(CalendarEvent::RuleExpansionError) => 576,
             EventType::Calendar(CalendarEvent::AlarmSent) => 579,
             EventType::Calendar(CalendarEvent::AlarmSkipped) => 580,
@@ -1965,6 +1968,7 @@ impl EventType {
             38 => Some(EventType::Auth(AuthEvent::TooManyAttempts)),
             555 => Some(EventType::Auth(AuthEvent::ClientRegistration)),
             34 => Some(EventType::Auth(AuthEvent::Error)),
+            595 => Some(EventType::Auth(AuthEvent::Warning)),
             576 => Some(EventType::Calendar(CalendarEvent::RuleExpansionError)),
             579 => Some(EventType::Calendar(CalendarEvent::AlarmSent)),
             580 => Some(EventType::Calendar(CalendarEvent::AlarmSkipped)),
@@ -2938,6 +2942,7 @@ impl EventType {
             EventType::Auth(AuthEvent::TooManyAttempts) => "Too many authentication attempts",
             EventType::Auth(AuthEvent::ClientRegistration) => "OAuth Client registration",
             EventType::Auth(AuthEvent::Error) => "Authentication error",
+            EventType::Auth(AuthEvent::Warning) => "Authentication warning",
             EventType::Calendar(CalendarEvent::RuleExpansionError) => {
                 "Calendar rule expansion error"
             }
@@ -3672,6 +3677,7 @@ impl EventType {
                 "OAuth client successfully registered"
             }
             EventType::Auth(AuthEvent::Error) => "An error occurred with authentication",
+            EventType::Auth(AuthEvent::Warning) => "A warning occurred with authentication",
             EventType::Calendar(CalendarEvent::RuleExpansionError) => {
                 "An error occurred while expanding calendar recurrences"
             }
@@ -5046,6 +5052,7 @@ impl EventType {
             EventType::Auth(AuthEvent::TooManyAttempts),
             EventType::Auth(AuthEvent::ClientRegistration),
             EventType::Auth(AuthEvent::Error),
+            EventType::Auth(AuthEvent::Warning),
             EventType::Calendar(CalendarEvent::RuleExpansionError),
             EventType::Calendar(CalendarEvent::AlarmSent),
             EventType::Calendar(CalendarEvent::AlarmSkipped),

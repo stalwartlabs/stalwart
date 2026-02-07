@@ -8,7 +8,7 @@ use crate::{Account, Credentials, Directory, Recipient};
 use trc::AddContext;
 
 impl Directory {
-    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Option<Account>> {
+    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Account> {
         match &self {
             Directory::Ldap(store) => store.authenticate(credentials).await,
             Directory::Sql(store) => store.authenticate(credentials).await,

@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 595;
+pub const TOTAL_EVENT_COUNT: usize = 596;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
@@ -111,6 +111,7 @@ pub enum AuthEvent {
     TooManyAttempts = 38,
     ClientRegistration = 555,
     Error = 34,
+    Warning = 595,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

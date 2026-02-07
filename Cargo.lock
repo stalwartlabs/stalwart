@@ -1763,6 +1763,8 @@ dependencies = [
  "deadpool 0.10.0",
  "futures",
  "ldap3",
+ "mail-builder",
+ "mail-parser",
  "md5 0.8.0",
  "nlp",
  "password-hash",

@@ -6,7 +6,7 @@
 
 use super::{USIZE_BITS, USIZE_BITS_MASK};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Bitset<const N: usize>(pub(crate) [usize; N]);
 
 impl<const N: usize> Bitset<N> {

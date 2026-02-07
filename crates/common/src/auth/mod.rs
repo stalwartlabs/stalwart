@@ -23,10 +23,10 @@ use utils::{cache::CacheItemWeight, map::bitmap::Bitmap};
 
 pub mod access_token;
 pub mod authentication;
+pub mod credential;
 pub mod oauth;
 pub mod permissions;
 pub mod rate_limit;
-pub mod sasl;
 
 pub const FALLBACK_ADMIN_ID: u32 = u32::MAX;
 const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
@@ -107,7 +107,7 @@ pub struct PermissionsGroup {
 
 #[derive(Debug, Default)]
 pub struct AccessToken {
-    scope_id: u32,
+    scope_idx: usize,
     inner: Arc<AccessTokenInner>,
 }
 
@@ -121,13 +121,15 @@ pub struct AccessTokenInner {
     pub concurrent_http_requests: Option<ConcurrencyLimiter>,
     pub concurrent_imap_requests: Option<ConcurrencyLimiter>,
     pub concurrent_uploads: Option<ConcurrencyLimiter>,
+    pub revision_account: u64,
     pub revision: u64,
     pub obj_size: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Hash)]
 struct AccessScope {
     pub permissions: Permissions,
+    pub credential_id: u32,
     pub expires_at: u64,
 }
 
@@ -141,8 +143,6 @@ pub struct AuthRequest {
     credentials: Credentials,
     session_id: u64,
     remote_ip: IpAddr,
-    return_member_of: bool,
-    allow_api_access: bool,
 }
 
 impl CacheItemWeight for AccessTokenInner {

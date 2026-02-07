@@ -228,7 +228,6 @@ impl Server {
                         .details("Account no longer exists")
                 })
         } else if let Some((_, secret)) = &self.core.network.security.fallback_admin {
-            let todo = "api keys?";
             Ok(secret.into())
         } else {
             Err(trc::AuthEvent::Error

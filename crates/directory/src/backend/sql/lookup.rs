@@ -5,16 +5,20 @@
  */
 
 use super::{SqlDirectory, SqlMappings};
-use crate::{Account, Credentials, Recipient};
+use crate::{Account, Credentials, Recipient, core::secret::verify_secret_hash};
 use store::{NamedRows, Rows, Value};
 use trc::AddContext;
 use utils::sanitize_email;
 
 impl SqlDirectory {
-    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Option<Account>> {
-        let username = match credentials {
-            Credentials::Basic { username, .. } => username,
-            Credentials::Bearer { token } => token,
+    pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Account> {
+        let (username, secret) = match credentials {
+            Credentials::Basic { username, secret } => (username, secret),
+            Credentials::Bearer { .. } => {
+                return Err(trc::AuthEvent::Error
+                    .into_err()
+                    .details("Unsupported credentials type for SQL authentication"));
+            }
         };
 
         let Recipient::Account(mut account) = self.mappings.row_to_account(
@@ -23,8 +27,26 @@ impl SqlDirectory {
                 .await
                 .caused_by(trc::location!())?,
         ) else {
-            return Ok(None);
+            return Err(trc::AuthEvent::Error
+                .into_err()
+                .details("SQL login query did not return an account")
+                .ctx(trc::Key::AccountName, username.to_string()));
         };
+
+        // Validate secret
+        if let Some(account_secret) = &account.secret {
+            if !verify_secret_hash(account_secret, secret.as_bytes()).await? {
+                return Err(trc::AuthEvent::Failed
+                    .into_err()
+                    .details("Invalid credentials")
+                    .ctx(trc::Key::AccountName, username.to_string()));
+            }
+        } else {
+            return Err(trc::AuthEvent::Error
+                .into_err()
+                .details("Account does not have a secret")
+                .ctx(trc::Key::AccountName, username.to_string()));
+        }
 
         // Obtain members
         if let Some(query) = &self.mappings.query_member_of {
@@ -60,7 +82,7 @@ impl SqlDirectory {
             );
         }
 
-        Ok(Some(account))
+        Ok(account)
     }
 
     pub async fn recipient(&self, address: &str) -> trc::Result<Recipient> {
@@ -142,10 +164,9 @@ impl SqlMappings {
                     is_group = value.to_str().eq_ignore_ascii_case("group");
                 } else if let Some(column_description) = &self.column_description
                     && name.eq_ignore_ascii_case(column_description)
+                    && let Value::Text(text) = value
                 {
-                    if let Value::Text(text) = value {
-                        account.description = Some(text.into_owned());
-                    }
+                    account.description = Some(text.into_owned());
                 }
             }
         }
