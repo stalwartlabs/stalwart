@@ -56,7 +56,11 @@ impl CardCopyMoveRequestHandler for Server {
             .into_owned_uri()?;
         let from_account_id = from_resource_.account_id;
         let from_resources = self
-            .fetch_dav_resources(access_token, from_account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                from_account_id,
+                SyncCollection::AddressBook,
+            )
             .await
             .caused_by(trc::location!())?;
         let from_resource_name = from_resource_
@@ -100,9 +104,13 @@ impl CardCopyMoveRequestHandler for Server {
         let to_resources = if to_account_id == from_account_id {
             from_resources.clone()
         } else {
-            self.fetch_dav_resources(access_token, to_account_id, SyncCollection::AddressBook)
-                .await
-                .caused_by(trc::location!())?
+            self.fetch_dav_resources(
+                access_token.account_id(),
+                to_account_id,
+                SyncCollection::AddressBook,
+            )
+            .await
+            .caused_by(trc::location!())?
         };
 
         // Validate headers
@@ -459,7 +467,11 @@ async fn copy_card(
     assert_is_unique_uid(
         server,
         server
-            .fetch_dav_resources(access_token, to_account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                to_account_id,
+                SyncCollection::AddressBook,
+            )
             .await
             .caused_by(trc::location!())?
             .as_ref(),
@@ -479,7 +491,7 @@ async fn copy_card(
         });
         new_card
             .update(
-                access_token,
+                access_token.account_tenant_ids(),
                 card,
                 from_account_id,
                 from_document_id,
@@ -500,7 +512,12 @@ async fn copy_card(
             .await
             .caused_by(trc::location!())?;
         new_card
-            .insert(access_token, to_account_id, to_document_id, &mut batch)
+            .insert(
+                access_token.account_tenant_ids(),
+                to_account_id,
+                to_document_id,
+                &mut batch,
+            )
             .caused_by(trc::location!())?;
     }
 
@@ -522,7 +539,7 @@ async fn copy_card(
 
             DestroyArchive(card)
                 .delete(
-                    access_token,
+                    access_token.account_tenant_ids(),
                     to_account_id,
                     to_document_id,
                     to_addressbook_id,
@@ -582,7 +599,11 @@ async fn move_card(
         assert_is_unique_uid(
             server,
             server
-                .fetch_dav_resources(access_token, to_account_id, SyncCollection::AddressBook)
+                .fetch_dav_resources(
+                    access_token.account_id(),
+                    to_account_id,
+                    SyncCollection::AddressBook,
+                )
                 .await
                 .caused_by(trc::location!())?
                 .as_ref(),
@@ -619,7 +640,7 @@ async fn move_card(
         });
         new_card
             .update(
-                access_token,
+                access_token.account_tenant_ids(),
                 card.clone(),
                 from_account_id,
                 from_document_id,
@@ -638,7 +659,7 @@ async fn move_card(
 
         DestroyArchive(card)
             .delete(
-                access_token,
+                access_token.account_tenant_ids(),
                 from_account_id,
                 from_document_id,
                 from_addressbook_id,
@@ -653,7 +674,12 @@ async fn move_card(
             .await
             .caused_by(trc::location!())?;
         new_card
-            .insert(access_token, to_account_id, to_document_id, &mut batch)
+            .insert(
+                access_token.account_tenant_ids(),
+                to_account_id,
+                to_document_id,
+                &mut batch,
+            )
             .caused_by(trc::location!())?;
     }
 
@@ -675,7 +701,7 @@ async fn move_card(
 
             DestroyArchive(card)
                 .delete(
-                    access_token,
+                    access_token.account_tenant_ids(),
                     to_account_id,
                     to_document_id,
                     to_addressbook_id,
@@ -737,7 +763,13 @@ async fn rename_card(
 
     let mut batch = BatchBuilder::new();
     new_card
-        .update(access_token, card, account_id, document_id, &mut batch)
+        .update(
+            access_token.account_tenant_ids(),
+            card,
+            account_id,
+            document_id,
+            &mut batch,
+        )
         .caused_by(trc::location!())?;
     batch.log_vanished_item(VanishedCollection::AddressBook, from_resource_path);
     server
@@ -787,7 +819,7 @@ async fn copy_container(
     if remove_source {
         DestroyArchive(old_book)
             .delete(
-                access_token,
+                access_token.account_tenant_ids(),
                 from_account_id,
                 from_document_id,
                 from_resource_path.into(),
@@ -827,7 +859,7 @@ async fn copy_container(
             DestroyArchive(book)
                 .delete_with_cards(
                     server,
-                    access_token,
+                    access_token.account_tenant_ids(),
                     to_account_id,
                     to_document_id,
                     to_children_ids,
@@ -846,8 +878,13 @@ async fn copy_container(
             .await
             .caused_by(trc::location!())?
     };
-    book.insert(access_token, to_account_id, to_document_id, &mut batch)
-        .caused_by(trc::location!())?;
+    book.insert(
+        access_token.account_tenant_ids(),
+        to_account_id,
+        to_document_id,
+        &mut batch,
+    )
+    .caused_by(trc::location!())?;
 
     // Copy children
     let mut required_space = 0;
@@ -898,7 +935,7 @@ async fn copy_container(
                 new_card.names.push(new_name);
                 new_card
                     .update(
-                        access_token,
+                        access_token.account_tenant_ids(),
                         card,
                         from_account_id,
                         from_child_document_id,
@@ -909,7 +946,7 @@ async fn copy_container(
                 if remove_source {
                     DestroyArchive(card)
                         .delete(
-                            access_token,
+                            access_token.account_tenant_ids(),
                             from_account_id,
                             from_child_document_id,
                             from_document_id,
@@ -927,7 +964,12 @@ async fn copy_container(
                 new_card.names = vec![new_name];
                 required_space += new_card.size as u64;
                 new_card
-                    .insert(access_token, to_account_id, to_document_id, &mut batch)
+                    .insert(
+                        access_token.account_tenant_ids(),
+                        to_account_id,
+                        to_document_id,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?;
             }
         }
@@ -935,12 +977,7 @@ async fn copy_container(
 
     if from_account_id != to_account_id && required_space > 0 {
         server
-            .has_available_quota(
-                &server
-                    .get_resource_token(access_token, to_account_id)
-                    .await?,
-                required_space,
-            )
+            .has_available_quota(to_account_id, required_space)
             .await?;
     }
 
@@ -987,7 +1024,13 @@ async fn rename_container(
 
     let mut batch = BatchBuilder::new();
     new_book
-        .update(access_token, book, account_id, document_id, &mut batch)
+        .update(
+            access_token.account_tenant_ids(),
+            book,
+            account_id,
+            document_id,
+            &mut batch,
+        )
         .caused_by(trc::location!())?;
     batch.log_vanished_item(VanishedCollection::AddressBook, from_resource_path);
     server

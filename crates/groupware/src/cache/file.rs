@@ -8,11 +8,9 @@ use crate::{
     DavResourceName, RFC_3986,
     file::{ArchivedFileNode, FileNode},
 };
-use common::{DavPath, DavResource, DavResourceMetadata, DavResources, Server};
-use directory::backend::internal::manage::ManageDirectory;
+use common::{DavPath, DavResource, DavResourceMetadata, DavResources, Server, UpdateLock};
 use std::sync::Arc;
 use store::ahash::{AHashMap, AHashSet};
-use tokio::sync::Semaphore;
 use trc::AddContext;
 use types::{
     acl::AclGrant,
@@ -23,7 +21,7 @@ use utils::{map::bitmap::Bitmap, topological::TopologicalSort};
 pub(super) async fn build_file_resources(
     server: &Server,
     account_id: u32,
-    update_lock: Arc<Semaphore>,
+    update_lock: Arc<UpdateLock>,
 ) -> trc::Result<DavResources> {
     let last_change_id = server
         .core
@@ -33,12 +31,7 @@ pub(super) async fn build_file_resources(
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
-    let name = server
-        .store()
-        .get_principal_name(account_id)
-        .await
-        .caused_by(trc::location!())?
-        .unwrap_or_else(|| format!("_{account_id}"));
+    let account_info = server.account_info(account_id).await?;
 
     let mut resources = Vec::with_capacity(16);
     server
@@ -58,11 +51,12 @@ pub(super) async fn build_file_resources(
         .await
         .caused_by(trc::location!())?;
 
+    update_lock.set_revision(last_change_id);
     let mut files = DavResources {
         base_path: format!(
             "{}/{}/",
             DavResourceName::File.base_path(),
-            percent_encoding::utf8_percent_encode(&name, RFC_3986),
+            percent_encoding::utf8_percent_encode(account_info.name(), RFC_3986),
         ),
         size: std::mem::size_of::<DavResources>() as u64,
         paths: AHashSet::with_capacity(resources.len()),

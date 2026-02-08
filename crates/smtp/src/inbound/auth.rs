@@ -12,7 +12,7 @@ use common::{
     listener::SessionStream,
 };
 
-use directory::Permission;
+use registry::schema::enums::Permission;
 use mail_parser::decoders::base64::base64_decode;
 use mail_send::Credentials;
 use smtp_proto::{AUTH_LOGIN, AUTH_OAUTHBEARER, AUTH_PLAIN, AUTH_XOAUTH2, IntoString};

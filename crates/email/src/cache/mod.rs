@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{CacheSwap, MessageStoreCache, Server};
+use common::{MessageStoreCache, Server, UpdateLock, cache::LockResult};
 use email::{full_email_cache_build, update_email_cache};
 use mailbox::{full_mailbox_cache_build, update_mailbox_cache};
 use std::{collections::hash_map::Entry, sync::Arc, time::Instant};
@@ -12,7 +12,6 @@ use store::{
     ahash::AHashMap,
     query::log::{Change, Query},
 };
-use tokio::sync::Semaphore;
 use trc::{AddContext, StoreEvent};
 use types::collection::SyncCollection;
 
@@ -28,23 +27,15 @@ pub trait MessageCacheFetch: Sync + Send {
 
 impl MessageCacheFetch for Server {
     async fn get_cached_messages(&self, account_id: u32) -> trc::Result<Arc<MessageStoreCache>> {
-        let cache_ = match self
-            .inner
-            .cache
-            .messages
-            .get_value_or_guard_async(&account_id)
-            .await
-        {
+        let cache_store = &self.inner.cache.messages;
+        let mut cache = match cache_store.get_value_or_guard_async(&account_id).await {
             Ok(cache) => cache,
             Err(guard) => {
                 let start_time = Instant::now();
-                let cache = full_cache_build(self, account_id, Arc::new(Semaphore::new(1))).await?;
+                let cache = full_cache_build(self, account_id, Arc::new(UpdateLock::new())).await?;
 
-                if guard.insert(CacheSwap::new(cache.clone())).is_err() {
-                    self.inner
-                        .cache
-                        .messages
-                        .insert(account_id, CacheSwap::new(cache.clone()));
+                if guard.insert(cache.clone()).is_err() {
+                    cache_store.update(account_id, cache.clone());
                 }
 
                 trc::event!(
@@ -61,7 +52,6 @@ impl MessageCacheFetch for Server {
         };
 
         // Obtain current state
-        let cache = cache_.load_full();
         let start_time = Instant::now();
         let changes = self
             .core
@@ -78,7 +68,7 @@ impl MessageCacheFetch for Server {
         // Regenerate cache if the change log has been truncated
         if changes.is_truncated {
             let cache = full_cache_build(self, account_id, cache.update_lock.clone()).await?;
-            cache_.update(cache.clone());
+            cache_store.update(account_id, cache.clone());
 
             trc::event!(
                 Store(StoreEvent::CacheStale),
@@ -106,21 +96,26 @@ impl MessageCacheFetch for Server {
         }
 
         // Lock for updates
-        let _permit = cache.update_lock.acquire().await;
-        let cache = cache_.0.load();
-        let mut cache = if cache.last_change_id >= changes.to_change_id {
-            trc::event!(
-                Store(StoreEvent::CacheHit),
-                AccountId = account_id,
-                Collection = SyncCollection::Email.as_str(),
-                ChangeId = cache.last_change_id,
-                Elapsed = start_time.elapsed(),
-            );
+        let lock = cache.update_lock.clone();
+        let _permit = match lock.acquire(cache.last_change_id).await? {
+            LockResult::Acquired(permit) => permit,
+            LockResult::Stale(permit) => {
+                cache = cache_store.peek(&account_id).unwrap_or(cache.clone());
+                if cache.last_change_id >= changes.to_change_id {
+                    trc::event!(
+                        Store(StoreEvent::CacheHit),
+                        AccountId = account_id,
+                        Collection = SyncCollection::Email.as_str(),
+                        ChangeId = cache.last_change_id,
+                        Elapsed = start_time.elapsed(),
+                    );
+                    return Ok(cache);
+                }
 
-            return Ok(cache.clone());
-        } else {
-            cache.as_ref().clone()
+                permit
+            }
         };
+        let mut cache = cache.as_ref().clone();
 
         let mut changed_items: AHashMap<u32, bool> = AHashMap::with_capacity(changes.changes.len());
         let mut changed_containers: AHashMap<u32, bool> =
@@ -176,8 +171,9 @@ impl MessageCacheFetch for Server {
         cache.size = cache.emails.size + cache.mailboxes.size;
         cache.last_change_id = changes.to_change_id;
 
+        cache.update_lock.set_revision(cache.last_change_id);
         let cache = Arc::new(cache);
-        cache_.update(cache.clone());
+        cache_store.update(account_id, cache.clone());
 
         trc::event!(
             Store(StoreEvent::CacheUpdate),
@@ -196,7 +192,7 @@ impl MessageCacheFetch for Server {
 async fn full_cache_build(
     server: &Server,
     account_id: u32,
-    update_lock: Arc<Semaphore>,
+    update_lock: Arc<UpdateLock>,
 ) -> trc::Result<Arc<MessageStoreCache>> {
     let last_change_id = server
         .core
@@ -211,6 +207,7 @@ async fn full_cache_build(
     let size = emails.size + mailboxes.size;
     emails.change_id = last_change_id;
     mailboxes.change_id = last_change_id;
+    update_lock.set_revision(last_change_id);
 
     Ok(Arc::new(MessageStoreCache {
         update_lock,

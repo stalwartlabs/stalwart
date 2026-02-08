@@ -119,7 +119,7 @@ impl MailboxDestroy for Server {
                                 .with_document(message_id)
                                 .custom(
                                     ObjectIndexBuilder::<_, ()>::new()
-                                        .with_access_token(access_token)
+                                        .with_changed_by(access_token.account_tenant_ids())
                                         .with_current(prev_message_data),
                                 )
                                 .caused_by(trc::location!())?
@@ -157,7 +157,7 @@ impl MailboxDestroy for Server {
                                 .with_document(message_id)
                                 .custom(
                                     ObjectIndexBuilder::new()
-                                        .with_access_token(access_token)
+                                        .with_changed_by(access_token.account_tenant_ids())
                                         .with_changes(new_message_data)
                                         .with_current(prev_message_data),
                                 )

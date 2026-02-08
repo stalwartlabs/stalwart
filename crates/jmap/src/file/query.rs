@@ -36,7 +36,7 @@ impl FileNodeQuery for Server {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::FileNode)
             .await?;
 
         for cond in std::mem::take(&mut request.filter) {

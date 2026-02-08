@@ -83,7 +83,11 @@ impl CalendarPropPatchRequestHandler for Server {
         let uri = headers.uri;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource = resource_
@@ -187,7 +191,13 @@ impl CalendarPropPatchRequestHandler for Server {
 
             if is_success {
                 new_calendar
-                    .update(access_token, calendar, account_id, document_id, &mut batch)
+                    .update(
+                        access_token.account_tenant_ids(),
+                        calendar,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?
                     .etag()
             } else {
@@ -221,7 +231,13 @@ impl CalendarPropPatchRequestHandler for Server {
 
             if is_success {
                 new_event
-                    .update(access_token, event, account_id, document_id, &mut batch)
+                    .update(
+                        access_token.account_tenant_ids(),
+                        event,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?
                     .etag()
             } else {

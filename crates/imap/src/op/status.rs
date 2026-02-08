@@ -11,7 +11,7 @@ use crate::{
     spawn_op,
 };
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,

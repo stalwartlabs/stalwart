@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::{UploadResponse, download::BlobDownload};
 use common::{Server, auth::AccessToken};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use jmap_proto::{
     error::set::SetError,
     method::upload::{

@@ -8,10 +8,11 @@ use super::ingest::{EmailIngest, IngestEmail, IngestSource};
 use crate::{mailbox::INBOX_ID, sieve::ingest::SieveScriptIngest};
 use common::{
     Server,
+    auth::BuildAccessToken,
     ipc::{EmailPush, PushNotification},
 };
-use directory::Permission;
 use mail_parser::MessageParser;
+use registry::schema::enums::Permission;
 use std::{borrow::Cow, future::Future};
 use store::ahash::AHashMap;
 use types::blob_hash::BlobHash;
@@ -117,14 +118,7 @@ impl MailDelivery for Server {
         };
 
         for rcpt in message.recipients {
-            let account_id = match self
-                .email_to_id(
-                    &self.core.storage.directory,
-                    &rcpt.address,
-                    message.session_id,
-                )
-                .await
-            {
+            let account_id = match self.account_id(&rcpt.address).await {
                 Ok(Some(account_id)) => account_id,
                 Ok(None) => {
                     // Something went wrong
@@ -156,10 +150,10 @@ impl MailDelivery for Server {
             }
 
             // Obtain access token
-            let status = match self.get_access_token(account_id).await.and_then(|token| {
+            let status = match self.access_token(account_id).await.and_then(|token| {
                 token
+                    .build()
                     .assert_has_permission(Permission::EmailReceive)
-                    .map(|_| token)
             }) {
                 Ok(access_token) => {
                     // Check if there is an active sieve script

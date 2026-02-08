@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 
 use crate::{Session, protocol::response::Response};
 

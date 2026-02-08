@@ -213,6 +213,12 @@ impl TrainTaskController {
     }
 }
 
+impl BroadcastEvent {
+    pub fn reload(object: Object) -> Self {
+        BroadcastEvent::RegistryChange(RegistryChange::Reload(object))
+    }
+}
+
 pub trait ToHash {
     fn to_hash(&self) -> u64;
 }

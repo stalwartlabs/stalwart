@@ -11,7 +11,7 @@ use crate::{
 };
 use ahash::AHashMap;
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::metadata::{

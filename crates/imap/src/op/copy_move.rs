@@ -10,7 +10,7 @@ use crate::{
     spawn_op,
 };
 use common::{ipc::PushNotification, listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{JUNK_ID, TRASH_ID, UidMailbox},

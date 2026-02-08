@@ -15,7 +15,7 @@ use calcard::{
     jscalendar::{JSCalendar, JSCalendarProperty, JSCalendarValue},
 };
 use common::{Server, TinyCalendarPreferences, auth::AccessToken};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use groupware::{
     cache::GroupwareCache,
     calendar::{CALENDAR_SUBSCRIBED, CalendarEvent},
@@ -95,7 +95,7 @@ impl PrincipalGetAvailability for Server {
 
         for account_id in principal.all_ids_by_collection(Collection::Calendar) {
             let resources = self
-                .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+                .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
                 .await
                 .caused_by(trc::location!())?;
 

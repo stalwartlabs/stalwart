@@ -145,7 +145,7 @@ impl ChangesLookup for Server {
             State::Exact(change_id) => {
                 let last_state = match collection {
                     SyncCollection::Calendar | SyncCollection::AddressBook => self
-                        .fetch_dav_resources(access_token, account_id, collection)
+                        .fetch_dav_resources(access_token.account_id(), account_id, collection)
                         .await
                         .caused_by(trc::location!())?
                         .get_state(is_container)

@@ -14,7 +14,6 @@ use crate::{
     },
 };
 use common::{Server, auth::AccessToken, scripts::plugins::PluginContext};
-use directory::QueryParams;
 use mail_parser::MessageParser;
 use sieve::{Envelope, Event, Input, Mailbox, Recipient, Sieve, SpamStatus};
 use std::{borrow::Cow, sync::Arc};
@@ -108,7 +107,7 @@ impl SieveScriptIngest for Server {
         };
 
         // Obtain mailboxIds
-        let account_id = access_token.account_id;
+        let account_id = access_token.account_id();
         let mut cache = self
             .get_cached_messages(account_id)
             .await
@@ -118,20 +117,16 @@ impl SieveScriptIngest for Server {
         let mut instance = self.core.sieve.untrusted_runtime.filter_parsed(message);
 
         // Set account name and email
-        let mail_from = self
-            .core
-            .storage
-            .directory
-            .query(QueryParams::id(account_id).with_return_member_of(false))
+        let account_info = self
+            .account_info(account_id)
             .await
-            .caused_by(trc::location!())?
-            .and_then(|p| {
-                instance.set_user_full_name(p.description().unwrap_or_else(|| p.name()));
-                p.into_primary_email()
-            });
-
-        // Set account address
-        let mail_from = mail_from.unwrap_or_else(|| envelope_to.address.as_str().into());
+            .caused_by(trc::location!())?;
+        let mail_from = account_info.name().to_string();
+        instance.set_user_full_name(
+            account_info
+                .description()
+                .unwrap_or_else(|| account_info.name()),
+        );
         instance.set_user_address(&mail_from);
 
         // Set envelope
@@ -401,7 +396,7 @@ impl SieveScriptIngest for Server {
                                 }
                             };
 
-                            if message.raw_message.len() <= self.core.jmap.mail_max_size {
+                            if message.raw_message.len() <= self.core.email.mail_max_size {
                                 trc::event!(
                                     Sieve(SieveEvent::SendMessage),
                                     From = mail_from.clone(),
@@ -427,7 +422,7 @@ impl SieveScriptIngest for Server {
                                         .map(|r| trc::Value::String(r.as_str().into()))
                                         .collect::<Vec<_>>(),
                                     Size = message.raw_message.len(),
-                                    Limit = self.core.jmap.mail_max_size,
+                                    Limit = self.core.email.mail_max_size,
                                     SpanId = session_id,
                                 );
                             }

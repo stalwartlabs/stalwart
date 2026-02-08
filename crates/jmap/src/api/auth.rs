@@ -5,7 +5,7 @@
  */
 
 use common::auth::AccessToken;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use jmap_proto::request::{
     CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
     QueryRequestMethod, RequestMethod, SetRequestMethod, method::MethodObject,

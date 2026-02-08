@@ -6,7 +6,6 @@
 
 use crate::{DavError, DavResourceName};
 use common::{Server, auth::AccessToken};
-use directory::backend::internal::manage::ManageDirectory;
 use groupware::cache::GroupwareCache;
 use http_proto::request::decode_path_element;
 use hyper::StatusCode;
@@ -92,15 +91,10 @@ impl DavUriResource for Server {
                     .map_err(|_| DavError::Code(error_status))?
             } else {
                 let account = decode_path_element(account);
-                if access_token.name == account {
-                    access_token.account_id
-                } else {
-                    self.store()
-                        .get_principal_id(&account)
-                        .await
-                        .caused_by(trc::location!())?
-                        .ok_or(DavError::Code(error_status))?
-                }
+                self.account_id(&account)
+                    .await
+                    .caused_by(trc::location!())?
+                    .ok_or(DavError::Code(error_status))?
             };
 
             // Validate access
@@ -125,7 +119,11 @@ impl DavUriResource for Server {
     ) -> trc::Result<Option<DocumentUri>> {
         if let Some(resource) = uri.resource {
             if let Some(resource) = self
-                .fetch_dav_resources(access_token, uri.account_id, uri.collection.into())
+                .fetch_dav_resources(
+                    access_token.account_id(),
+                    uri.account_id,
+                    uri.collection.into(),
+                )
                 .await
                 .caused_by(trc::location!())?
                 .by_path(resource)

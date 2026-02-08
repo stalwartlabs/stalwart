@@ -16,7 +16,11 @@ use crate::{
     scheduling::{ItipMessages, event_cancel::itip_cancel},
 };
 use calcard::common::timezone::Tz;
-use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
+use common::{
+    Server,
+    auth::{AccountInfo, AccountTenantIds},
+    storage::index::ObjectIndexBuilder,
+};
 use store::{
     IterateParams, U16_LEN, U32_LEN, U64_LEN, ValueKey,
     roaring::RoaringBitmap,
@@ -129,10 +133,11 @@ impl ItipAutoExpunge for Server {
 
         // Tombstone messages
         let mut batch = BatchBuilder::new();
-        let access_token = self
-            .get_access_token(account_id)
+        let changed_by = self
+            .account_info(account_id)
             .await
-            .caused_by(trc::location!())?;
+            .caused_by(trc::location!())?
+            .account_tenant_ids();
 
         for document_id in destroy_ids {
             // Fetch event
@@ -150,7 +155,7 @@ impl ItipAutoExpunge for Server {
                     .to_unarchived::<CalendarEventNotification>()
                     .caused_by(trc::location!())?;
                 DestroyArchive(event)
-                    .delete(&access_token, account_id, document_id, &mut batch)
+                    .delete(changed_by, account_id, document_id, &mut batch)
                     .caused_by(trc::location!())?;
             }
         }
@@ -164,7 +169,7 @@ impl ItipAutoExpunge for Server {
 impl CalendarEvent {
     pub fn update<'x>(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         event: Archive<&ArchivedCalendarEvent>,
         account_id: u32,
         document_id: u32,
@@ -184,19 +189,19 @@ impl CalendarEvent {
                 ObjectIndexBuilder::new()
                     .with_current(event)
                     .with_changes(new_event)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
 
-    pub fn insert<'x>(
+    pub fn insert(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         next_alarm: Option<CalendarAlarm>,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
         // Build event
         let mut event = self;
         let now = now() as i64;
@@ -211,7 +216,7 @@ impl CalendarEvent {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|batch| {
                 if let Some(next_alarm) = next_alarm {
@@ -224,13 +229,13 @@ impl CalendarEvent {
 }
 
 impl Calendar {
-    pub fn insert<'x>(
+    pub fn insert(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
         // Build address calendar
         let mut calendar = self;
         let now = now() as i64;
@@ -253,14 +258,14 @@ impl Calendar {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(calendar)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
 
     pub fn update<'x>(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         calendar: Archive<&ArchivedCalendar>,
         account_id: u32,
         document_id: u32,
@@ -279,20 +284,20 @@ impl Calendar {
                 ObjectIndexBuilder::new()
                     .with_current(calendar)
                     .with_changes(new_calendar)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
 }
 
 impl CalendarEventNotification {
-    pub fn insert<'x>(
+    pub fn insert(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
         // Build event
         let mut event = self;
         let now = now() as i64;
@@ -307,7 +312,7 @@ impl CalendarEventNotification {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|batch| batch.commit_point())
     }
@@ -318,7 +323,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
     pub async fn delete_with_events(
         self,
         server: &Server,
-        access_token: &AccessToken,
+        account_info: &AccountInfo,
         account_id: u32,
         document_id: u32,
         children_ids: Vec<u32>,
@@ -344,7 +349,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
                         .caused_by(trc::location!())?,
                 )
                 .delete(
-                    access_token,
+                    account_info,
                     account_id,
                     document_id,
                     calendar_id,
@@ -355,12 +360,18 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
             }
         }
 
-        self.delete(access_token, account_id, document_id, delete_path, batch)
+        self.delete(
+            account_info.account_tenant_ids(),
+            account_id,
+            document_id,
+            delete_path,
+            batch,
+        )
     }
 
     pub fn delete(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         delete_path: Option<String>,
@@ -374,7 +385,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
             .with_document(document_id)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_access_token(access_token)
+                    .with_changed_by(changed_by)
                     .with_current(calendar),
             )
             .caused_by(trc::location!())?;
@@ -391,7 +402,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
     #[allow(clippy::too_many_arguments)]
     pub fn delete(
         self,
-        access_token: &AccessToken,
+        account_info: &AccountInfo,
         account_id: u32,
         document_id: u32,
         calendar_id: u32,
@@ -419,13 +430,13 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                     .with_document(document_id)
                     .custom(
                         ObjectIndexBuilder::new()
-                            .with_access_token(access_token)
+                            .with_changed_by(account_info.account_tenant_ids())
                             .with_current(event)
                             .with_changes(new_event),
                     )
                     .caused_by(trc::location!())?;
             } else {
-                self.delete_all(access_token, account_id, document_id, send_itip, batch)?;
+                self.delete_all(account_info, account_id, document_id, send_itip, batch)?;
             }
 
             if let Some(delete_path) = delete_path {
@@ -441,7 +452,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
     #[allow(clippy::too_many_arguments)]
     pub fn delete_all(
         self,
-        access_token: &AccessToken,
+        account_info: &AccountInfo,
         account_id: u32,
         document_id: u32,
         send_itip: bool,
@@ -469,9 +480,8 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
 
-            if let Ok(messages) =
-                itip_cancel(&event.data.event, access_token.emails.as_slice(), true)
-            {
+            let emails = account_info.addresses().collect::<Vec<_>>();
+            if let Ok(messages) = itip_cancel(&event.data.event, emails.as_slice(), true) {
                 ItipMessages::new(vec![messages])
                     .queue(batch)
                     .caused_by(trc::location!())?;
@@ -481,7 +491,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         batch
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_access_token(access_token)
+                    .with_changed_by(account_info.account_tenant_ids())
                     .with_current(event),
             )
             .caused_by(trc::location!())?;
@@ -494,7 +504,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEventNotification>> {
     #[allow(clippy::too_many_arguments)]
     pub fn delete(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         batch: &mut BatchBuilder,
@@ -506,7 +516,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEventNotification>> {
             .with_document(document_id)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_access_token(access_token)
+                    .with_changed_by(changed_by)
                     .with_current(self.0),
             )
             .caused_by(trc::location!())?
@@ -570,13 +580,13 @@ impl ArchivedCalendarEvent {
     pub async fn webcal_uri(
         &self,
         server: &Server,
-        access_token: &AccessToken,
+        account_info: &AccountInfo,
     ) -> trc::Result<String> {
         for event_name in self.names.iter() {
             if let Some(calendar_) = server
                 .store()
                 .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
-                    access_token.account_id,
+                    account_info.account_id(),
                     Collection::Calendar,
                     event_name.parent_id.to_native(),
                 ))
@@ -590,7 +600,7 @@ impl ArchivedCalendarEvent {
                     "webcal://{}{}/{}/{}/{}",
                     server.core.network.server_name,
                     DavResourceName::Cal.base_path(),
-                    percent_encoding::utf8_percent_encode(&access_token.name, RFC_3986),
+                    percent_encoding::utf8_percent_encode(account_info.name(), RFC_3986),
                     calendar.name,
                     event_name.name
                 ));

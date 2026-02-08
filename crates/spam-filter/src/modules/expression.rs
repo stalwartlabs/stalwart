@@ -5,12 +5,13 @@
  */
 
 use common::{
-    config::spamfilter::*,
-    expr::{Expression, StringCow, Variable, functions::ResolveVariable},
+    config::mailstore::spamfilter::*,
+    expr::{StringCow, Variable, functions::ResolveVariable},
 };
 use compact_str::{CompactString, ToCompactString, format_compact};
 use mail_parser::{Header, HeaderValue};
 use nlp::tokenizers::types::TokenType;
+use registry::schema::enums::ExpressionVariable;
 
 use crate::{Recipient, SpamFilterContext, TextPart, analysis::url::UrlParts};
 
@@ -312,33 +313,43 @@ impl ResolveVariable for EmailHeader<'_> {
                         })
                         .collect(),
                 ),
-                HeaderValue::Address(address) => Variable::Array(if variable == 1 {
-                    address
-                        .iter()
-                        .filter_map(|a| {
-                            a.address.as_ref().map(|text| {
-                                Variable::String(if variable == ExpressionVariable::ValueLower {
-                                    StringCow::Owned(CompactString::from_str_to_lowercase(text))
-                                } else {
-                                    StringCow::Borrowed(text.as_ref())
+                HeaderValue::Address(address) => {
+                    Variable::Array(if matches!(variable, ExpressionVariable::ValueLower) {
+                        address
+                            .iter()
+                            .filter_map(|a| {
+                                a.address.as_ref().map(|text| {
+                                    Variable::String(
+                                        if variable == ExpressionVariable::ValueLower {
+                                            StringCow::Owned(CompactString::from_str_to_lowercase(
+                                                text,
+                                            ))
+                                        } else {
+                                            StringCow::Borrowed(text.as_ref())
+                                        },
+                                    )
                                 })
                             })
-                        })
-                        .collect()
-                } else {
-                    address
-                        .iter()
-                        .filter_map(|a| {
-                            a.name.as_ref().map(|text| {
-                                Variable::String(if variable == ExpressionVariable::ValueLower {
-                                    StringCow::Owned(CompactString::from_str_to_lowercase(text))
-                                } else {
-                                    StringCow::Borrowed(text.as_ref())
+                            .collect()
+                    } else {
+                        address
+                            .iter()
+                            .filter_map(|a| {
+                                a.name.as_ref().map(|text| {
+                                    Variable::String(
+                                        if variable == ExpressionVariable::ValueLower {
+                                            StringCow::Owned(CompactString::from_str_to_lowercase(
+                                                text,
+                                            ))
+                                        } else {
+                                            StringCow::Borrowed(text.as_ref())
+                                        },
+                                    )
                                 })
                             })
-                        })
-                        .collect()
-                }),
+                            .collect()
+                    })
+                }
                 HeaderValue::DateTime(date_time) => {
                     CompactString::new(date_time.to_rfc3339()).into()
                 }

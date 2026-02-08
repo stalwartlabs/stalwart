@@ -54,7 +54,7 @@ impl SieveScriptDelete for Server {
                             obj_.to_unarchived::<SieveScript>()
                                 .caused_by(trc::location!())?,
                         )
-                        .with_access_token(access_token),
+                        .with_changed_by(access_token.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?
                 .commit_point();

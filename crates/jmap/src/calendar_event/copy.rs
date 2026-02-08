@@ -61,7 +61,7 @@ impl JmapCalendarEventCopy for Server {
                 .details("From accountId is equal to fromAccountId"));
         }
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
             .await
             .caused_by(trc::location!())?;
         let old_state = cache.assert_state(false, &request.if_in_state)?;
@@ -75,7 +75,7 @@ impl JmapCalendarEventCopy for Server {
         };
 
         let from_cache = self
-            .fetch_dav_resources(access_token, from_account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(access_token.account_id(), from_account_id, SyncCollection::Calendar)
             .await
             .caused_by(trc::location!())?;
         let from_calendar_event_ids = if access_token.is_member(from_account_id) {

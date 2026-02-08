@@ -10,10 +10,9 @@ pub mod response;
 
 pub use form_urlencoded;
 
-use std::{net::IpAddr, sync::Arc};
-
-use common::listener::ServerInstance;
+use common::network::ServerInstance;
 use hyper::StatusCode;
+use std::{net::IpAddr, sync::Arc};
 
 pub type HttpRequest = hyper::Request<hyper::body::Incoming>;
 

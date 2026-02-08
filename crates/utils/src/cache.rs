@@ -54,6 +54,14 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     }
 
     #[inline(always)]
+    pub fn peek<Q>(&self, key: &Q) -> Option<V>
+    where
+        Q: Hash + Equivalent<K> + ?Sized,
+    {
+        self.0.peek(key)
+    }
+
+    #[inline(always)]
     pub async fn get_value_or_guard_async<'a, Q>(
         &'a self,
         key: &Q,

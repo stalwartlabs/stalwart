@@ -11,7 +11,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use common::config::spamfilter::PyzorConfig;
+use common::config::mailstore::spamfilter::PyzorConfig;
 use mail_parser::{Message, PartType, decoders::html::add_html_token};
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 use sha1::{Digest, Sha1};

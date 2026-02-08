@@ -6,7 +6,7 @@
 
 use super::{ArchivedFileNode, FileNode};
 use crate::DestroyArchive;
-use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
+use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive, BatchBuilder, now},
@@ -15,13 +15,13 @@ use trc::AddContext;
 use types::collection::{Collection, VanishedCollection};
 
 impl FileNode {
-    pub fn insert<'x>(
+    pub fn insert(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
         // Build node
         let mut node = self;
         let now = now() as i64;
@@ -36,13 +36,13 @@ impl FileNode {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
     pub fn update<'x>(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         node: Archive<&ArchivedFileNode>,
         account_id: u32,
         document_id: u32,
@@ -59,7 +59,7 @@ impl FileNode {
                 ObjectIndexBuilder::new()
                     .with_current(node)
                     .with_changes(new_node)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
@@ -68,7 +68,7 @@ impl FileNode {
 impl DestroyArchive<Archive<&ArchivedFileNode>> {
     pub fn delete(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         batch: &mut BatchBuilder,
@@ -82,7 +82,7 @@ impl DestroyArchive<Archive<&ArchivedFileNode>> {
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
                     .with_current(self.0)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )?
             .log_vanished_item(VanishedCollection::FileNode, path)
             .commit_point();
@@ -94,13 +94,13 @@ impl DestroyArchive<Vec<u32>> {
     pub async fn delete(
         self,
         server: &Server,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         delete_path: Option<String>,
     ) -> trc::Result<()> {
         // Process deletions
         let mut batch = BatchBuilder::new();
-        self.delete_batch(server, access_token, account_id, delete_path, &mut batch)
+        self.delete_batch(server, changed_by, account_id, delete_path, &mut batch)
             .await?;
         // Write changes
         if !batch.is_empty() {
@@ -116,7 +116,7 @@ impl DestroyArchive<Vec<u32>> {
     pub async fn delete_batch(
         self,
         server: &Server,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
@@ -140,7 +140,7 @@ impl DestroyArchive<Vec<u32>> {
                     .with_document(document_id)
                     .custom(
                         ObjectIndexBuilder::<_, ()>::new()
-                            .with_access_token(access_token)
+                            .with_changed_by(changed_by)
                             .with_current(
                                 node.to_unarchived::<FileNode>()
                                     .caused_by(trc::location!())?,

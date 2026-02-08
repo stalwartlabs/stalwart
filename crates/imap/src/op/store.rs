@@ -11,7 +11,7 @@ use crate::{
 };
 use ahash::AHashSet;
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::{
     mailbox::TRASH_ID,
     message::{ingest::EmailIngest, metadata::MessageData},

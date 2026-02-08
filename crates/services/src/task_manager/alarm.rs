@@ -17,7 +17,7 @@ use common::{
     ipc::{CalendarAlert, PushNotification},
     listener::{ServerInstance, stream::NullIo},
 };
-use directory::Permission;
+use registry::schema::enums::Permission;
 use groupware::calendar::{
     ArchivedCalendarEvent, CalendarEvent,
     alarm::{CalendarAlarm, CalendarAlarmType},

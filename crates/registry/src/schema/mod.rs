@@ -7,7 +7,7 @@
 use crate::{
     schema::{
         enums::{TracingLevel, TracingLevelOpt},
-        prelude::{Duration, HttpAuth, NodeRange, Property},
+        prelude::{Account, Duration, HttpAuth, NodeRange, Property, UserAccount},
     },
     types::EnumType,
 };
@@ -51,6 +51,16 @@ impl From<prelude::Cron> for SimpleCron {
 impl NodeRange {
     pub fn contains(&self, node_id: u64) -> bool {
         node_id >= self.from_node_id && node_id <= self.to_node_id
+    }
+}
+
+impl Account {
+    pub fn into_user(self) -> Option<UserAccount> {
+        if let Account::User(user) = self {
+            Some(user)
+        } else {
+            None
+        }
     }
 }
 

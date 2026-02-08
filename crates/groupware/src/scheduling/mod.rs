@@ -235,15 +235,15 @@ impl Attendee<'_> {
 }
 
 impl Email {
-    pub fn new(email: &str, local_addresses: &[String]) -> Option<Self> {
+    pub fn new(email: &str, local_addresses: &[&str]) -> Option<Self> {
         email.contains('@').then(|| {
             let email = email.trim().trim_start_matches("mailto:").to_lowercase();
-            let is_local = local_addresses.contains(&email);
+            let is_local = local_addresses.contains(&email.as_str());
             Email { email, is_local }
         })
     }
 
-    pub fn from_uri(uri: &Uri, local_addresses: &[String]) -> Option<Self> {
+    pub fn from_uri(uri: &Uri, local_addresses: &[&str]) -> Option<Self> {
         if let Uri::Location(uri) = uri {
             Email::new(uri.as_str(), local_addresses)
         } else {

@@ -16,7 +16,7 @@ use calcard::icalendar::{
 
 pub fn itip_snapshot<'x, 'y>(
     ical: &'x ICalendar,
-    account_emails: &'y [String],
+    account_emails: &'y [&str],
     force_add_client_scheduling: bool,
 ) -> Result<ItipSnapshots<'x>, ItipError> {
     if !ical.components.iter().any(|comp| {

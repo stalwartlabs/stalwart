@@ -39,7 +39,7 @@ impl MailboxFnc for Server {
 
         // Create mailboxes
         let mut last_document_id = ARCHIVE_ID;
-        for folder in &self.core.jmap.default_folders {
+        for folder in &self.core.email.default_folders {
             let document_id = match folder.special_use {
                 SpecialUse::Inbox => INBOX_ID,
                 SpecialUse::Trash => TRASH_ID,
@@ -124,7 +124,7 @@ impl MailboxFnc for Server {
         if !create_paths.is_empty() {
             if create_paths
                 .iter()
-                .any(|name| name.len() > self.core.jmap.mailbox_name_max_len)
+                .any(|name| name.len() > self.core.email.mailbox_name_max_len)
             {
                 return Ok(None);
             }

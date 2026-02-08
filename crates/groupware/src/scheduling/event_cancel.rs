@@ -21,7 +21,7 @@ use calcard::{
 
 pub fn itip_cancel(
     ical: &ICalendar,
-    account_emails: &[String],
+    account_emails: &[&str],
     is_deletion: bool,
 ) -> Result<ItipMessage<ICalendar>, ItipError> {
     // Prepare iTIP message

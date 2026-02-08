@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{auth::AccessToken, sharing::notification::ShareNotification};
+use crate::{
+    auth::{AccessToken, AccountInfo, AccountTenantIds},
+    sharing::notification::ShareNotification,
+};
 use rkyv::{
     option::ArchivedOption,
     primitive::{ArchivedU32, ArchivedU64},
@@ -299,9 +302,9 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
         self.current.as_ref()
     }
 
-    pub fn with_access_token(mut self, access_token: &AccessToken) -> Self {
-        self.tenant_id = access_token.tenant_id();
-        self.changed_by = access_token.account_id();
+    pub fn with_changed_by(mut self, ids: AccountTenantIds) -> Self {
+        self.tenant_id = ids.tenant_id;
+        self.changed_by = ids.account_id;
         self
     }
 

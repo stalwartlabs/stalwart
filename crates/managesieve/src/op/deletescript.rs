@@ -6,7 +6,7 @@
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::sieve::{delete::SieveScriptDelete, ingest::SieveScriptIngest};
 use imap_proto::receiver::Request;
 use std::time::Instant;

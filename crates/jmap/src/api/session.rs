@@ -5,7 +5,7 @@
  */
 
 use common::{Server, auth::AccessToken};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use jmap_proto::request::capability::{
     Account, Capabilities, Capability, EmptyCapabilities, Session,
 };

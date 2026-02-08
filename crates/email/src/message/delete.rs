@@ -6,10 +6,11 @@
 
 use super::metadata::MessageData;
 use common::{KV_LOCK_PURGE_ACCOUNT, Server, storage::index::ObjectIndexBuilder};
-use directory::backend::internal::manage::ManageDirectory;
 use groupware::calendar::storage::ItipAutoExpunge;
+use registry::schema::prelude::Object;
 use std::future::Future;
 use store::rand::prelude::SliceRandom;
+use store::registry::RegistryQuery;
 use store::write::key::DeserializeBigEndian;
 use store::write::{IndexPropertyClass, SearchIndex, TaskEpoch, TaskQueueClass, now};
 use store::{IterateParams, SerializeInfallible, U32_LEN, U64_LEN, ValueKey};
@@ -110,25 +111,30 @@ impl EmailDeletion for Server {
     }
 
     async fn purge_accounts(&self, use_roles: bool) {
-        if let Ok(account_ids) = self.store().principal_ids(None, None).await {
-            let mut account_ids: Vec<u32> = account_ids
-                .into_iter()
-                .filter(|id| {
-                    !use_roles
+        match self
+            .registry()
+            .query::<Vec<u32>>(RegistryQuery::new(Object::Account))
+            .await
+        {
+            Ok(mut account_ids) => {
+                // Shuffle account ids
+                account_ids.shuffle(&mut store::rand::rng());
+
+                for account_id in account_ids {
+                    if !use_roles
                         || self
                             .core
                             .network
                             .roles
                             .purge_accounts
-                            .is_enabled_for_integer(*id)
-                })
-                .collect();
-
-            // Shuffle account ids
-            account_ids.shuffle(&mut store::rand::rng());
-
-            for account_id in account_ids {
-                self.purge_account(account_id).await;
+                            .is_enabled_for_integer(account_id)
+                    {
+                        self.purge_account(account_id).await;
+                    }
+                }
+            }
+            Err(err) => {
+                trc::error!(err.caused_by(trc::location!()));
             }
         }
     }
@@ -136,9 +142,7 @@ impl EmailDeletion for Server {
     async fn purge_account(&self, account_id: u32) {
         // Lock account
         match self
-            .core
-            .storage
-            .lookup
+            .in_memory_store()
             .try_lock(KV_LOCK_PURGE_ACCOUNT, &account_id.to_be_bytes(), 3600)
             .await
         {
@@ -157,7 +161,7 @@ impl EmailDeletion for Server {
         }
 
         // Auto-expunge deleted and junk messages
-        if let Some(hold_period) = self.core.jmap.mail_autoexpunge_after
+        if let Some(hold_period) = self.core.email.mail_autoexpunge_after
             && let Err(err) = self.emails_auto_expunge(account_id, hold_period).await
         {
             trc::error!(
@@ -177,7 +181,7 @@ impl EmailDeletion for Server {
         }
 
         // Delete old e-mail submissions
-        if let Some(hold_period) = self.core.jmap.email_submission_autoexpunge_after
+        if let Some(hold_period) = self.core.email.email_submission_autoexpunge_after
             && let Err(err) = self.purge_email_submissions(account_id, hold_period).await
         {
             trc::error!(
@@ -190,8 +194,8 @@ impl EmailDeletion for Server {
         if let Err(err) = self
             .delete_changes(
                 account_id,
-                self.core.jmap.changes_max_history,
-                self.core.jmap.share_notification_max_history,
+                self.core.email.changes_max_history,
+                self.core.email.share_notification_max_history,
             )
             .await
         {
@@ -258,11 +262,10 @@ impl EmailDeletion for Server {
         // Delete messages
         let mut batch = BatchBuilder::new();
         let tenant_id = self
-            .store()
-            .get_principal(account_id)
+            .account_info(account_id)
             .await
             .caused_by(trc::location!())?
-            .and_then(|p| p.tenant());
+            .tenant_id();
         self.emails_delete(account_id, tenant_id, &mut batch, destroy_ids)
             .await?;
         self.commit_batch(batch).await?;

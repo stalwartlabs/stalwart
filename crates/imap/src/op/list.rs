@@ -12,7 +12,7 @@ use crate::{
 };
 use common::listener::SessionStream;
 
-use directory::Permission;
+use registry::schema::enums::Permission;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{

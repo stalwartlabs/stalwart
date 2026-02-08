@@ -6,7 +6,7 @@
 
 use crate::core::{Session, State, StatusResponse};
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 
 pub mod authenticate;
 pub mod capability;

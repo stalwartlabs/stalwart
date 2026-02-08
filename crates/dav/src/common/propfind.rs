@@ -28,7 +28,10 @@ use crate::{
     },
 };
 use calcard::{common::timezone::Tz, icalendar::ICalendarComponentType};
-use common::{DavResourcePath, DavResources, Server, auth::AccessToken};
+use common::{
+    DavResourcePath, DavResources, Server,
+    auth::{AccessToken, AccountInfo},
+};
 use dav_proto::{
     Depth, RequestHeaders,
     parser::header::dav_base_uri,
@@ -47,16 +50,20 @@ use dav_proto::{
         },
     },
 };
-use directory::{Permission, Type, backend::internal::manage::ManageDirectory};
 use groupware::calendar::{SCHEDULE_INBOX_ID, SupportedComponent};
 use groupware::{
     DavCalendarResource, DavResourceName, cache::GroupwareCache, calendar::ArchivedTimezone,
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::{
+    enums::Permission,
+    prelude::{Object, Property},
+};
 use std::sync::Arc;
 use store::{
     ValueKey,
+    registry::RegistryQuery,
     write::{AlignedBytes, Archive},
 };
 use store::{
@@ -88,7 +95,6 @@ pub(crate) trait PropFindRequestHandler: Sync + Send {
 
     fn dav_quota(
         &self,
-        access_token: &AccessToken,
         account_id: u32,
     ) -> impl Future<Output = trc::Result<PropFindAccountQuota>> + Send;
 }
@@ -161,7 +167,7 @@ impl PropFindRequestHandler for Server {
                 | Collection::AddressBook
                 | Collection::CalendarEventNotification => {
                     // Validate permissions
-                    access_token.assert_has_permission(match resource.collection {
+                    access_token.enforce_permission(match resource.collection {
                         Collection::FileNode => Permission::DavFilePropFind,
                         Collection::Calendar
                         | Collection::CalendarEvent
@@ -237,7 +243,7 @@ impl PropFindRequestHandler for Server {
             if return_children {
                 let ids = if !matches!(resource.collection, Collection::Principal) {
                     // Validate permissions
-                    access_token.assert_has_permission(match resource.collection {
+                    access_token.enforce_permission(match resource.collection {
                         Collection::FileNode => Permission::DavFilePropFind,
                         Collection::Calendar
                         | Collection::CalendarEvent
@@ -255,20 +261,13 @@ impl PropFindRequestHandler for Server {
                     || access_token.has_permission(Permission::IndividualList)
                 {
                     // Return all principals
-                    let principals = self
-                        .store()
-                        .list_principals(
-                            None,
-                            access_token.tenant_id(),
-                            &[Type::Individual, Type::Group],
-                            false,
-                            0,
-                            0,
+                    self.registry()
+                        .query::<RoaringBitmap>(
+                            RegistryQuery::new(Object::Account)
+                                .equal_opt(Property::MemberTenantId, access_token.tenant_id()),
                         )
                         .await
-                        .caused_by(trc::location!())?;
-
-                    RoaringBitmap::from_iter(principals.items.into_iter().map(|p| p.id()))
+                        .caused_by(trc::location!())?
                 } else {
                     RoaringBitmap::from_iter(access_token.all_ids())
                 };
@@ -417,6 +416,10 @@ impl PropFindRequestHandler for Server {
         };
 
         let is_scheduling = collection_container == Collection::CalendarEventNotification;
+        let account_info = self
+            .account_info(access_token.account_id())
+            .await
+            .caused_by(trc::location!())?;
         'outer: for item in paths {
             let account_id = item.account_id;
             let document_id = item.document_id;
@@ -614,7 +617,7 @@ impl PropFindRequestHandler for Server {
                             if !query.expand {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
-                                    vec![access_token.current_user_principal()],
+                                    vec![account_info.current_user_principal()],
                                 ));
                             } else {
                                 fields.push(DavPropertyValue::new(
@@ -634,7 +637,7 @@ impl PropFindRequestHandler for Server {
                             if item.is_container {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
-                                    data.quota(self, access_token, account_id)
+                                    data.quota(self, account_id)
                                         .await
                                         .caused_by(trc::location!())?
                                         .available,
@@ -647,7 +650,7 @@ impl PropFindRequestHandler for Server {
                             if item.is_container {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
-                                    data.quota(self, access_token, account_id)
+                                    data.quota(self, account_id)
                                         .await
                                         .caused_by(trc::location!())?
                                         .used,
@@ -661,7 +664,7 @@ impl PropFindRequestHandler for Server {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
                                     vec![
-                                        data.owner(self, access_token, account_id)
+                                        data.owner(self, &account_info, account_id)
                                             .await
                                             .caused_by(trc::location!())?,
                                     ],
@@ -1130,19 +1133,20 @@ impl PropFindRequestHandler for Server {
         }
     }
 
-    async fn dav_quota(
-        &self,
-        access_token: &AccessToken,
-        account_id: u32,
-    ) -> trc::Result<PropFindAccountQuota> {
-        let resource_token = self
-            .get_resource_token(access_token, account_id)
-            .await
-            .caused_by(trc::location!())?;
-        let quota = if resource_token.quota > 0 {
-            resource_token.quota
-        } else if let Some(tenant) = resource_token.tenant.filter(|t| t.quota > 0) {
-            tenant.quota
+    async fn dav_quota(&self, account_id: u32) -> trc::Result<PropFindAccountQuota> {
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
+        let quota = if account.quota_disk > 0 {
+            account.quota_disk
+        } else if account.id_tenant != u32::MAX {
+            let tenant = self
+                .tenant(account.id_tenant)
+                .await
+                .caused_by(trc::location!())?;
+            if tenant.quota_disk > 0 {
+                tenant.quota_disk
+            } else {
+                u32::MAX as u64
+            }
         } else {
             u32::MAX as u64
         };
@@ -1588,13 +1592,12 @@ impl PropFindData {
     pub async fn quota(
         &mut self,
         server: &Server,
-        access_token: &AccessToken,
         account_id: u32,
     ) -> trc::Result<PropFindAccountQuota> {
         let data = self.accounts.entry(account_id).or_default();
 
         if data.quota.is_none() {
-            data.quota = server.dav_quota(access_token, account_id).await?.into();
+            data.quota = server.dav_quota(account_id).await?.into();
         }
 
         Ok(data.quota.clone().unwrap())
@@ -1603,14 +1606,14 @@ impl PropFindData {
     pub async fn owner(
         &mut self,
         server: &Server,
-        access_token: &AccessToken,
+        account_info: &AccountInfo,
         account_id: u32,
     ) -> trc::Result<Href> {
         let data = self.accounts.entry(account_id).or_default();
 
         if data.owner.is_none() {
             data.owner = server
-                .owner_href(access_token, account_id)
+                .owner_href(account_info, account_id)
                 .await
                 .caused_by(trc::location!())?
                 .into();
@@ -1630,7 +1633,7 @@ impl PropFindData {
 
         if data.resources.is_none() {
             let resources = server
-                .fetch_dav_resources(access_token, account_id, sync_collection)
+                .fetch_dav_resources(access_token.account_id(), account_id, sync_collection)
                 .await
                 .caused_by(trc::location!())?;
             data.resources = resources.into();
@@ -1725,6 +1728,10 @@ async fn add_base_collection_response(
 
     let mut fields = Vec::with_capacity(properties.len());
     let mut fields_not_found = Vec::new();
+    let account_info = server
+        .account_info(access_token.account_id())
+        .await
+        .caused_by(trc::location!())?;
 
     for prop in properties {
         match &prop {
@@ -1737,15 +1744,15 @@ async fn add_base_collection_response(
             DavProperty::WebDav(WebDavProperty::CurrentUserPrincipal) => {
                 fields.push(DavPropertyValue::new(
                     prop.clone(),
-                    vec![access_token.current_user_principal()],
+                    vec![account_info.current_user_principal()],
                 ));
             }
             DavProperty::Principal(PrincipalProperty::CalendarHomeSet) => {
                 let hrefs = build_home_set(
                     server,
                     access_token,
-                    &access_token.name,
-                    access_token.account_id,
+                    account_info.name(),
+                    access_token.account_id(),
                     true,
                 )
                 .await
@@ -1758,8 +1765,8 @@ async fn add_base_collection_response(
                 let hrefs = build_home_set(
                     server,
                     access_token,
-                    &access_token.name,
-                    access_token.account_id,
+                    account_info.name(),
+                    access_token.account_id(),
                     false,
                 )
                 .await

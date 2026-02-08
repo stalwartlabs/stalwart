@@ -10,7 +10,7 @@ use crate::{
     spawn_op,
 };
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,

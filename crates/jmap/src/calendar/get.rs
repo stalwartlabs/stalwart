@@ -55,7 +55,7 @@ impl CalendarGet for Server {
         ]);
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
             .await?;
         let is_owner = access_token.is_member(account_id);
         let calendar_ids = if is_owner {

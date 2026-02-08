@@ -51,7 +51,7 @@ impl AddressBookSet for Server {
     ) -> trc::Result<SetResponse<addressbook::AddressBook>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::AddressBook)
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();

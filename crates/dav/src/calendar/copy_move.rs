@@ -57,7 +57,11 @@ impl CalendarCopyMoveRequestHandler for Server {
             .into_owned_uri()?;
         let from_account_id = from_resource_.account_id;
         let from_resources = self
-            .fetch_dav_resources(access_token, from_account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                from_account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let from_resource_name = from_resource_
@@ -116,9 +120,13 @@ impl CalendarCopyMoveRequestHandler for Server {
         let to_resources = if to_account_id == from_account_id {
             from_resources.clone()
         } else {
-            self.fetch_dav_resources(access_token, to_account_id, SyncCollection::Calendar)
-                .await
-                .caused_by(trc::location!())?
+            self.fetch_dav_resources(
+                access_token.account_id(),
+                to_account_id,
+                SyncCollection::Calendar,
+            )
+            .await
+            .caused_by(trc::location!())?
         };
 
         // Validate headers
@@ -477,7 +485,11 @@ async fn copy_event(
     assert_is_unique_uid(
         server,
         server
-            .fetch_dav_resources(access_token, to_account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                to_account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?
             .as_ref(),
@@ -487,6 +499,7 @@ async fn copy_event(
     )
     .await?;
 
+    let changed_by = access_token.account_tenant_ids();
     if from_account_id == to_account_id {
         let mut new_event = event
             .deserialize::<CalendarEvent>()
@@ -497,7 +510,7 @@ async fn copy_event(
         });
         new_event
             .update(
-                access_token,
+                changed_by,
                 event,
                 from_account_id,
                 from_document_id,
@@ -520,7 +533,7 @@ async fn copy_event(
             .caused_by(trc::location!())?;
         new_event
             .insert(
-                access_token,
+                changed_by,
                 to_account_id,
                 to_document_id,
                 next_email_alarm,
@@ -544,10 +557,14 @@ async fn copy_event(
             let event = event_
                 .to_unarchived::<CalendarEvent>()
                 .caused_by(trc::location!())?;
+            let account_info = server
+                .account_info(access_token.account_id())
+                .await
+                .caused_by(trc::location!())?;
 
             DestroyArchive(event)
                 .delete(
-                    access_token,
+                    &account_info,
                     to_account_id,
                     to_document_id,
                     to_calendar_id,
@@ -616,7 +633,11 @@ async fn move_event(
         assert_is_unique_uid(
             server,
             server
-                .fetch_dav_resources(access_token, to_account_id, SyncCollection::Calendar)
+                .fetch_dav_resources(
+                    access_token.account_id(),
+                    to_account_id,
+                    SyncCollection::Calendar,
+                )
                 .await
                 .caused_by(trc::location!())?
                 .as_ref(),
@@ -627,6 +648,10 @@ async fn move_event(
         .await?;
     }
 
+    let account_info = server
+        .account_info(access_token.account_id())
+        .await
+        .caused_by(trc::location!())?;
     let mut batch = BatchBuilder::new();
     if from_account_id == to_account_id {
         let mut name_idx = None;
@@ -653,7 +678,7 @@ async fn move_event(
         });
         new_event
             .update(
-                access_token,
+                access_token.account_tenant_ids(),
                 event.clone(),
                 from_account_id,
                 from_document_id,
@@ -673,7 +698,7 @@ async fn move_event(
 
         DestroyArchive(event)
             .delete(
-                access_token,
+                &account_info,
                 from_account_id,
                 from_document_id,
                 from_calendar_id,
@@ -690,7 +715,7 @@ async fn move_event(
             .caused_by(trc::location!())?;
         new_event
             .insert(
-                access_token,
+                access_token.account_tenant_ids(),
                 to_account_id,
                 to_document_id,
                 next_email_alarm,
@@ -717,7 +742,7 @@ async fn move_event(
 
             DestroyArchive(event)
                 .delete(
-                    access_token,
+                    &account_info,
                     to_account_id,
                     to_document_id,
                     to_calendar_id,
@@ -780,7 +805,13 @@ async fn rename_event(
 
     let mut batch = BatchBuilder::new();
     new_event
-        .update(access_token, event, account_id, document_id, &mut batch)
+        .update(
+            access_token.account_tenant_ids(),
+            event,
+            account_id,
+            document_id,
+            &mut batch,
+        )
         .caused_by(trc::location!())?;
     batch.log_vanished_item(VanishedCollection::Calendar, from_resource_path);
     server
@@ -830,7 +861,7 @@ async fn copy_container(
     if remove_source {
         DestroyArchive(old_calendar)
             .delete(
-                access_token,
+                access_token.account_tenant_ids(),
                 from_account_id,
                 from_document_id,
                 from_resource_path.into(),
@@ -853,6 +884,10 @@ async fn copy_container(
         time_zone: Timezone::Default,
     }];
 
+    let account_info = server
+        .account_info(access_token.account_id())
+        .await
+        .caused_by(trc::location!())?;
     let is_overwrite = to_document_id.is_some();
     let to_document_id = if let Some(to_document_id) = to_document_id {
         // Overwrite destination
@@ -873,7 +908,7 @@ async fn copy_container(
             DestroyArchive(calendar)
                 .delete_with_events(
                     server,
-                    access_token,
+                    &account_info,
                     to_account_id,
                     to_document_id,
                     to_children_ids,
@@ -894,7 +929,12 @@ async fn copy_container(
             .caused_by(trc::location!())?
     };
     calendar
-        .insert(access_token, to_account_id, to_document_id, &mut batch)
+        .insert(
+            access_token.account_tenant_ids(),
+            to_account_id,
+            to_document_id,
+            &mut batch,
+        )
         .caused_by(trc::location!())?;
 
     // Copy children
@@ -946,7 +986,7 @@ async fn copy_container(
                 new_event.names.push(new_name);
                 new_event
                     .update(
-                        access_token,
+                        access_token.account_tenant_ids(),
                         event,
                         from_account_id,
                         from_child_document_id,
@@ -958,7 +998,7 @@ async fn copy_container(
                 if remove_source {
                     DestroyArchive(event)
                         .delete(
-                            access_token,
+                            &account_info,
                             from_account_id,
                             from_child_document_id,
                             from_document_id,
@@ -977,7 +1017,7 @@ async fn copy_container(
                 required_space += new_event.size as u64;
                 new_event
                     .insert(
-                        access_token,
+                        access_token.account_tenant_ids(),
                         to_account_id,
                         to_document_id,
                         next_email_alarm,
@@ -1037,7 +1077,13 @@ async fn rename_container(
 
     let mut batch = BatchBuilder::new();
     new_calendar
-        .update(access_token, calendar, account_id, document_id, &mut batch)
+        .update(
+            access_token.account_tenant_ids(),
+            calendar,
+            account_id,
+            document_id,
+            &mut batch,
+        )
         .caused_by(trc::location!())?;
     batch.log_vanished_item(VanishedCollection::Calendar, from_resource_path);
     server

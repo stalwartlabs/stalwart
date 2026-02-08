@@ -38,7 +38,6 @@ pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
 #[derive(Debug, Clone, Copy)]
 pub enum EmailCache {
     Account(u32),
-    Group(u32),
     MailingList(u32),
 }
 
@@ -69,6 +68,7 @@ pub struct AccountCache {
     pub quota_objects: Option<Box<ObjectQuota>>,
     pub description: Option<Box<str>>,
     pub locale: Locale,
+    pub is_user: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -113,30 +113,43 @@ pub struct AccessToken {
 
 #[derive(Debug, Default)]
 pub struct AccessTokenInner {
-    pub account_id: u32,
-    pub tenant_id: Option<u32>,
-    pub member_of: TinyVec<[u32; 3]>,
-    pub access_to: Box<[AccessTo]>,
-    pub scopes: Box<[AccessScope]>,
-    pub concurrent_http_requests: Option<ConcurrencyLimiter>,
-    pub concurrent_imap_requests: Option<ConcurrencyLimiter>,
-    pub concurrent_uploads: Option<ConcurrencyLimiter>,
-    pub revision_account: u64,
-    pub revision: u64,
-    pub obj_size: u64,
+    pub(crate) account_id: u32,
+    pub(crate) tenant_id: Option<u32>,
+    pub(crate) member_of: TinyVec<[u32; 3]>,
+    pub(crate) access_to: Box<[AccessTo]>,
+    pub(crate) scopes: Box<[AccessScope]>,
+    pub(crate) concurrent_http_requests: Option<ConcurrencyLimiter>,
+    pub(crate) concurrent_imap_requests: Option<ConcurrencyLimiter>,
+    pub(crate) concurrent_uploads: Option<ConcurrencyLimiter>,
+    pub(crate) revision_account: u64,
+    pub(crate) revision: u64,
+    pub(crate) obj_size: u64,
 }
 
 #[derive(Debug, Default, Hash)]
-struct AccessScope {
+pub(crate) struct AccessScope {
     pub permissions: Permissions,
     pub credential_id: u32,
     pub expires_at: u64,
 }
 
 #[derive(Debug, Default, Hash, PartialEq, Eq)]
-pub struct AccessTo {
+pub(crate) struct AccessTo {
     pub account_id: u32,
     pub collections: Bitmap<Collection>,
+}
+
+#[derive(Clone)]
+pub struct AccountInfo {
+    pub(crate) account_id: u32,
+    pub(crate) account: Arc<AccountCache>,
+    pub(crate) member_of: Vec<Arc<AccountCache>>,
+}
+
+#[derive(Clone, Copy)]
+pub struct AccountTenantIds {
+    pub account_id: u32,
+    pub tenant_id: Option<u32>,
 }
 
 pub struct AuthRequest {
@@ -201,5 +214,18 @@ impl CacheItemWeight for TenantCache {
 impl CacheItemWeight for PermissionsGroup {
     fn weight(&self) -> u64 {
         std::mem::size_of::<PermissionsGroup>() as u64
+    }
+}
+
+pub trait BuildAccessToken {
+    fn build(self) -> AccessToken;
+}
+
+impl BuildAccessToken for Arc<AccessTokenInner> {
+    fn build(self) -> AccessToken {
+        AccessToken {
+            scope_idx: 0,
+            inner: self,
+        }
     }
 }

@@ -80,7 +80,11 @@ impl CardPropPatchRequestHandler for Server {
         let uri = headers.uri;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource = resource_
@@ -184,7 +188,13 @@ impl CardPropPatchRequestHandler for Server {
 
             if is_success {
                 new_book
-                    .update(access_token, book, account_id, document_id, &mut batch)
+                    .update(
+                        access_token.account_tenant_ids(),
+                        book,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?
                     .etag()
             } else {
@@ -218,7 +228,13 @@ impl CardPropPatchRequestHandler for Server {
 
             if is_success {
                 new_card
-                    .update(access_token, card, account_id, document_id, &mut batch)
+                    .update(
+                        access_token.account_tenant_ids(),
+                        card,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?
                     .etag()
             } else {

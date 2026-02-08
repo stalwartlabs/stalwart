@@ -8,7 +8,7 @@ use std::future::Future;
 
 use common::{
     Server,
-    config::spamfilter::{IpResolver, Location},
+    config::mailstore::spamfilter::{IpResolver, Location},
 };
 
 use crate::{

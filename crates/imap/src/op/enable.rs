@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use crate::core::Session;
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{ImapResponse, ProtocolVersion, capability::Capability, enable},

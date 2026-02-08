@@ -6,7 +6,7 @@
 
 use super::download::BlobDownload;
 use common::{Server, auth::AccessToken};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::copy::{CopyBlobRequest, CopyBlobResponse},

@@ -78,7 +78,7 @@ impl CalendarEventNotificationHandler for Server {
         let account_id = resource_.account_id;
         let resources = self
             .fetch_dav_resources(
-                access_token,
+                access_token.account_id(),
                 account_id,
                 SyncCollection::CalendarEventNotification,
             )
@@ -164,7 +164,7 @@ impl CalendarEventNotificationHandler for Server {
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         let resources = self
             .fetch_dav_resources(
-                access_token,
+                access_token.account_id(),
                 account_id,
                 SyncCollection::CalendarEventNotification,
             )
@@ -220,7 +220,12 @@ impl CalendarEventNotificationHandler for Server {
         // Delete event
         let mut batch = BatchBuilder::new();
         DestroyArchive(event)
-            .delete(access_token, account_id, document_id, &mut batch)
+            .delete(
+                access_token.account_tenant_ids(),
+                account_id,
+                document_id,
+                &mut batch,
+            )
             .caused_by(trc::location!())?;
 
         self.commit_batch(batch).await.caused_by(trc::location!())?;
@@ -362,14 +367,13 @@ impl CalendarEventNotificationHandler for Server {
         let mut response = ScheduleResponse::default();
 
         for (email, attendee) in attendees {
-            if let Some(account_id) = self
-                .directory()
-                .email_to_id(&email)
-                .await
-                .caused_by(trc::location!())?
-            {
+            if let Some(account_id) = self.account_id(&email).await.caused_by(trc::location!())? {
                 let resources = self
-                    .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+                    .fetch_dav_resources(
+                        access_token.account_id(),
+                        account_id,
+                        SyncCollection::Calendar,
+                    )
                     .await
                     .caused_by(trc::location!())?;
                 if let Some(resource) = self

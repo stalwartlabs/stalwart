@@ -61,7 +61,11 @@ impl FileUpdateRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::FileNode,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource_name = resource
@@ -162,11 +166,7 @@ impl FileUpdateRequestHandler for Server {
             let extra_bytes = (bytes.len() as u64)
                 .saturating_sub(u32::from(node.inner.file.as_ref().unwrap().size) as u64);
             if extra_bytes > 0 {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    extra_bytes,
-                )
-                .await?;
+                self.has_available_quota(account_id, extra_bytes).await?;
             }
 
             // Write blob
@@ -197,7 +197,7 @@ impl FileUpdateRequestHandler for Server {
                     ObjectIndexBuilder::new()
                         .with_current(node)
                         .with_changes(new_node)
-                        .with_access_token(access_token),
+                        .with_changed_by(access_token.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?;
             let etag = batch.etag();
@@ -242,11 +242,8 @@ impl FileUpdateRequestHandler for Server {
 
             // Validate quota
             if !bytes.is_empty() {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    bytes.len() as u64,
-                )
-                .await?;
+                self.has_available_quota(account_id, bytes.len() as u64)
+                    .await?;
             }
 
             // Write blob
@@ -292,7 +289,7 @@ impl FileUpdateRequestHandler for Server {
                 .custom(
                     ObjectIndexBuilder::<(), _>::new()
                         .with_changes(node)
-                        .with_access_token(access_token),
+                        .with_changed_by(access_token.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?;
             let etag = batch.etag();

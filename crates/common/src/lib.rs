@@ -43,6 +43,7 @@ use mail_auth::{MX, Txt};
 use manager::webadmin::{Resource, WebAdminManager};
 use parking_lot::{Mutex, RwLock};
 use rustls::sign::CertifiedKey;
+use std::sync::atomic::AtomicU64;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::{Arc, atomic::AtomicBool},
@@ -141,6 +142,7 @@ pub struct Inner {
     pub ipc: Ipc,
 }
 
+#[allow(clippy::type_complexity)]
 pub struct Data {
     pub spam_classifier: ArcSwap<SpamClassifier>,
 
@@ -202,7 +204,7 @@ pub struct Caches {
 pub struct MessageStoreCache {
     pub emails: Arc<MessagesCache>,
     pub mailboxes: Arc<MailboxesCache>,
-    pub update_lock: Arc<Semaphore>,
+    pub update_lock: Arc<UpdateLock>,
     pub last_change_id: u64,
     pub size: u64,
 }
@@ -286,7 +288,13 @@ pub struct DavResources {
     pub container_change_id: u64,
     pub highest_change_id: u64,
     pub size: u64,
-    pub update_lock: Arc<Semaphore>,
+    pub update_lock: Arc<UpdateLock>,
+}
+
+#[derive(Debug)]
+pub struct UpdateLock {
+    pub semaphore: Semaphore,
+    pub revision: AtomicU64,
 }
 
 #[derive(Debug, Clone)]

@@ -12,7 +12,7 @@ use common::{
     listener::{SessionStream, limiter::LimiterResult},
 };
 
-use directory::Permission;
+use registry::schema::enums::Permission;
 use imap_proto::{
     protocol::authenticate::Mechanism,
     receiver::{self, Request},

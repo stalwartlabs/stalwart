@@ -28,7 +28,7 @@ use common::{
     manager::webadmin::Resource,
 };
 use dav::{DavMethod, request::DavRequestHandler};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use groupware::{DavResourceName, calendar::itip::ItipIngest};
 use http_proto::{
     DownloadResponse, HtmlResponse, HttpContext, HttpRequest, HttpResponse, HttpResponseBody,

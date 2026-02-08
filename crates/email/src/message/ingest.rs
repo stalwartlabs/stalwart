@@ -15,7 +15,6 @@ use crate::{
     },
 };
 use common::{Server, auth::AccessToken};
-use directory::Permission;
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
@@ -24,6 +23,7 @@ use mail_parser::{
     DateTime, Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
     parsers::fields::thread::thread_name,
 };
+use registry::schema::prelude::Permission;
 use std::{borrow::Cow, cmp::Ordering, fmt::Write, time::Instant};
 use std::{future::Future, hash::Hasher};
 use store::write::{AlignedBytes, Archive};
@@ -131,11 +131,10 @@ impl EmailIngest for Server {
     async fn email_ingest(&self, mut params: IngestEmail<'_>) -> trc::Result<IngestedEmail> {
         // Check quota
         let start_time = Instant::now();
-        let account_id = params.access_token.account_id;
-        let tenant_id = params.access_token.tenant.map(|t| t.id);
+        let account_id = params.access_token.account_id();
+        let tenant_id = params.access_token.tenant_id();
         let mut raw_message_len = params.raw_message.len() as u64;
-        let resource_token = params.access_token.as_resource_token();
-        self.has_available_quota(&resource_token, raw_message_len)
+        self.has_available_quota(account_id, raw_message_len)
             .await
             .caused_by(trc::location!())?;
 
@@ -355,6 +354,10 @@ impl EmailIngest for Server {
                         .access_token
                         .has_permission(Permission::CalendarSchedulingReceive)
                 {
+                    let account_info = self
+                        .account_info(account_id)
+                        .await
+                        .caused_by(trc::location!())?;
                     let mut sender = None;
                     for part in &message.parts {
                         if part.content_type().is_some_and(|ct| {
@@ -375,8 +378,7 @@ impl EmailIngest for Server {
                                 }) {
                                     match self
                                         .itip_ingest(
-                                            params.access_token,
-                                            &resource_token,
+                                            &account_info,
                                             sender,
                                             deliver_to,
                                             itip_message,
@@ -479,9 +481,9 @@ impl EmailIngest for Server {
         // Encrypt message
         let do_encrypt = match params.source {
             IngestSource::Jmap { .. } | IngestSource::Imap { .. } => {
-                self.core.jmap.encrypt && self.core.jmap.encrypt_append
+                self.core.email.encrypt && self.core.email.encrypt_append
             }
-            IngestSource::Smtp { .. } => self.core.jmap.encrypt,
+            IngestSource::Smtp { .. } => self.core.email.encrypt,
             IngestSource::Restore => false,
         };
         let is_encrypted = if do_encrypt

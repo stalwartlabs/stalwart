@@ -9,7 +9,7 @@ use crate::{
     spawn_op,
 };
 use common::{listener::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::rename::Arguments, receiver::Request,
 };

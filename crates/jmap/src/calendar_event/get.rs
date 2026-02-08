@@ -67,7 +67,7 @@ impl CalendarEventGet for Server {
         let properties = request.unwrap_properties(&[]);
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
             .await?;
         let calendar_event_ids = if access_token.is_member(account_id) {
             cache.document_ids(false).collect::<RoaringBitmap>()

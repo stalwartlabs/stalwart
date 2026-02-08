@@ -16,12 +16,10 @@ use crate::{
 use calcard::common::timezone::Tz;
 use common::{
     DavName, DavPath, DavResource, DavResourceMetadata, DavResources, Server,
-    TinyCalendarPreferences, auth::AccessToken,
+    TinyCalendarPreferences, UpdateLock,
 };
-use directory::backend::internal::manage::ManageDirectory;
 use std::sync::Arc;
 use store::ahash::{AHashMap, AHashSet};
-use tokio::sync::Semaphore;
 use trc::AddContext;
 use types::{
     acl::AclGrant,
@@ -31,20 +29,20 @@ use utils::map::bitmap::Bitmap;
 
 pub(super) async fn build_calcard_resources(
     server: &Server,
-    access_token: &AccessToken,
+    access_account_id: u32,
     account_id: u32,
     sync_collection: SyncCollection,
     container_collection: Collection,
     item_collection: Collection,
-    update_lock: Arc<Semaphore>,
+    update_lock: Arc<UpdateLock>,
 ) -> trc::Result<DavResources> {
     let is_calendar = matches!(sync_collection, SyncCollection::Calendar);
-    let name = server
-        .store()
-        .get_principal_name(account_id)
-        .await
-        .caused_by(trc::location!())?
-        .unwrap_or_else(|| format!("_{account_id}"));
+    let owner_account_info = server.account_info(account_id).await?;
+    let access_account_info = if account_id == access_account_id {
+        owner_account_info.clone()
+    } else {
+        server.account_info(access_account_id).await?
+    };
     let mut cache = DavResources {
         base_path: format!(
             "{}/{}/",
@@ -54,7 +52,7 @@ pub(super) async fn build_calcard_resources(
                 DavResourceName::Card
             }
             .base_path(),
-            percent_encoding::utf8_percent_encode(&name, RFC_3986),
+            percent_encoding::utf8_percent_encode(owner_account_info.name(), RFC_3986),
         ),
         paths: AHashSet::with_capacity(16),
         resources: Vec::with_capacity(16),
@@ -78,6 +76,7 @@ pub(super) async fn build_calcard_resources(
         cache.item_change_id = last_change_id;
         cache.container_change_id = last_change_id;
         cache.highest_change_id = last_change_id;
+        cache.update_lock.set_revision(last_change_id);
 
         server
             .archives(
@@ -113,11 +112,11 @@ pub(super) async fn build_calcard_resources(
             if is_first_check {
                 if is_calendar {
                     server
-                        .create_default_calendar(access_token, account_id, &name)
+                        .create_default_calendar(&access_account_info, &owner_account_info)
                         .await?;
                 } else {
                     server
-                        .create_default_addressbook(access_token, account_id, &name)
+                        .create_default_addressbook(&access_account_info, &owner_account_info)
                         .await?;
                 }
                 is_first_check = false;
@@ -171,7 +170,7 @@ pub(super) async fn build_calcard_resources(
 pub(super) async fn build_scheduling_resources(
     server: &Server,
     account_id: u32,
-    update_lock: Arc<Semaphore>,
+    update_lock: Arc<UpdateLock>,
 ) -> trc::Result<DavResources> {
     let last_change_id = server
         .core
@@ -182,23 +181,18 @@ pub(super) async fn build_scheduling_resources(
         .caused_by(trc::location!())?
         .unwrap_or_default();
 
-    let name = server
-        .store()
-        .get_principal_name(account_id)
-        .await
-        .caused_by(trc::location!())?
-        .unwrap_or_else(|| format!("_{account_id}"));
-
+    let account_info = server.account_info(account_id).await?;
     let item_ids = server
         .itip_ids(account_id)
         .await
         .caused_by(trc::location!())?;
 
+    update_lock.set_revision(last_change_id);
     let mut cache = DavResources {
         base_path: format!(
             "{}/{}/",
             DavResourceName::Scheduling.base_path(),
-            percent_encoding::utf8_percent_encode(&name, RFC_3986),
+            percent_encoding::utf8_percent_encode(account_info.name(), RFC_3986),
         ),
         paths: AHashSet::with_capacity((2 + item_ids.len()) as usize),
         resources: Vec::with_capacity((2 + item_ids.len()) as usize),

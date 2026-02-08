@@ -7,7 +7,7 @@
 use crate::{
     Recipient, SpamFilterContext, SpamFilterInput, SpamFilterOutput, SpamFilterResult, TextPart,
 };
-use common::{Server, config::spamfilter::Location};
+use common::{Server, config::mailstore::spamfilter::Location};
 use mail_parser::{Header, parsers::MessageStream};
 use std::{
     borrow::Cow,
@@ -119,7 +119,7 @@ impl<T> ElementLocation<T> {
 }
 
 pub(crate) async fn is_trusted_domain(server: &Server, domain: &str, span_id: u64) -> bool {
-    if let Some(store) = server.core.storage.lookups.get("trusted-domains") {
+    if let Some(store) = server.get_lookup_store("trusted-domains") {
         match store.key_exists(domain).await {
             Ok(true) => return true,
             Ok(false) => (),
@@ -129,8 +129,8 @@ pub(crate) async fn is_trusted_domain(server: &Server, domain: &str, span_id: u6
         }
     }
 
-    match server.core.storage.directory.is_local_domain(domain).await {
-        Ok(result) => result,
+    match server.domain(domain).await {
+        Ok(result) => result.is_some(),
         Err(err) => {
             trc::error!(err.span_id(span_id).caused_by(trc::location!()));
             false
@@ -139,7 +139,7 @@ pub(crate) async fn is_trusted_domain(server: &Server, domain: &str, span_id: u6
 }
 
 pub(crate) async fn is_url_redirector(server: &Server, url: &str, span_id: u64) -> bool {
-    if let Some(store) = server.core.storage.lookups.get("url-redirectors") {
+    if let Some(store) = server.get_lookup_store("url-redirectors") {
         match store.key_exists(url).await {
             Ok(result) => result,
             Err(err) => {

@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::message::delete::EmailDeletion;
 use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;

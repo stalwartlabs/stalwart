@@ -59,7 +59,11 @@ impl FileCopyMoveRequestHandler for Server {
             .into_owned_uri()?;
         let from_account_id = from_resource_.account_id;
         let from_resources = self
-            .fetch_dav_resources(access_token, from_account_id, SyncCollection::FileNode)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                from_account_id,
+                SyncCollection::FileNode,
+            )
             .await
             .caused_by(trc::location!())?;
         let from_resource = from_resources.map_resource::<FileItemId>(&from_resource_)?;
@@ -103,9 +107,13 @@ impl FileCopyMoveRequestHandler for Server {
         let to_resources = if to_account_id == from_account_id {
             from_resources.clone()
         } else {
-            self.fetch_dav_resources(access_token, to_account_id, SyncCollection::FileNode)
-                .await
-                .caused_by(trc::location!())?
+            self.fetch_dav_resources(
+                access_token.account_id(),
+                to_account_id,
+                SyncCollection::FileNode,
+            )
+            .await
+            .caused_by(trc::location!())?
         };
 
         // Map file item
@@ -232,11 +240,8 @@ impl FileCopyMoveRequestHandler for Server {
                 .subtree(from_resource_name)
                 .map(|a| a.size() as u64)
                 .sum::<u64>();
-            self.has_available_quota(
-                &self.get_resource_token(access_token, to_account_id).await?,
-                space_needed,
-            )
-            .await?;
+            self.has_available_quota(to_account_id, space_needed)
+                .await?;
         }
 
         // Delete collection
@@ -254,7 +259,12 @@ impl FileCopyMoveRequestHandler for Server {
                 let mut sorted_ids = Vec::with_capacity(ids.len());
                 sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
                 DestroyArchive(sorted_ids)
-                    .delete(self, access_token, destination.account_id, None)
+                    .delete(
+                        self,
+                        access_token.account_tenant_ids(),
+                        destination.account_id,
+                        None,
+                    )
                     .await
                     .caused_by(trc::location!())?;
             }
@@ -382,7 +392,7 @@ async fn move_container(
         let mut batch = BatchBuilder::new();
         let etag = new_node
             .update(
-                access_token,
+                access_token.account_tenant_ids(),
                 node,
                 from_account_id,
                 from_document_id,
@@ -509,7 +519,7 @@ async fn copy_container(
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
-                    .with_access_token(access_token),
+                    .with_changed_by(access_token.account_tenant_ids()),
             )
             .caused_by(trc::location!())?
             .commit_point();
@@ -526,7 +536,7 @@ async fn copy_container(
                 .with_document(document_id)
                 .custom(
                     ObjectIndexBuilder::<_, ()>::new()
-                        .with_access_token(access_token)
+                        .with_changed_by(access_token.account_tenant_ids())
                         .with_current(node),
                 )
                 .caused_by(trc::location!())?
@@ -605,7 +615,7 @@ async fn overwrite_and_delete_item(
     let mut batch = BatchBuilder::new();
     let etag = source_node
         .update(
-            access_token,
+            access_token.account_tenant_ids(),
             dest_node,
             to_account_id,
             to_document_id,
@@ -615,7 +625,7 @@ async fn overwrite_and_delete_item(
         .etag();
     DestroyArchive(source_node_)
         .delete(
-            access_token,
+            access_token.account_tenant_ids(),
             from_account_id,
             from_document_id,
             &mut batch,
@@ -680,7 +690,7 @@ async fn overwrite_item(
     let mut batch = BatchBuilder::new();
     let etag = source_node
         .update(
-            access_token,
+            access_token.account_tenant_ids(),
             dest_node,
             to_account_id,
             to_document_id,
@@ -734,7 +744,7 @@ async fn move_item(
         batch.log_vanished_item(VanishedCollection::FileNode, from_resource_path);
         new_node
             .update(
-                access_token,
+                access_token.account_tenant_ids(),
                 node,
                 from_account_id,
                 from_document_id,
@@ -750,12 +760,17 @@ async fn move_item(
             .await
             .caused_by(trc::location!())?;
         let etag = new_node
-            .insert(access_token, to_account_id, to_document_id, &mut batch)
+            .insert(
+                access_token.account_tenant_ids(),
+                to_account_id,
+                to_document_id,
+                &mut batch,
+            )
             .caused_by(trc::location!())?
             .etag();
         DestroyArchive(node)
             .delete(
-                access_token,
+                access_token.account_tenant_ids(),
                 from_account_id,
                 from_document_id,
                 &mut batch,
@@ -807,7 +822,12 @@ async fn copy_item(
         .await
         .caused_by(trc::location!())?;
     let etag = node
-        .insert(access_token, to_account_id, to_document_id, &mut batch)
+        .insert(
+            access_token.account_tenant_ids(),
+            to_account_id,
+            to_document_id,
+            &mut batch,
+        )
         .caused_by(trc::location!())?
         .etag();
     server
@@ -849,7 +869,7 @@ async fn rename_item(
     let mut batch = BatchBuilder::new();
     let etag = new_node
         .update(
-            access_token,
+            access_token.account_tenant_ids(),
             node,
             from_account_id,
             from_document_id,

@@ -26,7 +26,6 @@ use dav_proto::{
     RequestHeaders, Return,
     schema::{property::Rfc1123DateTime, response::CalCondition},
 };
-use directory::Permission;
 use groupware::{
     cache::GroupwareCache,
     calendar::{CalendarEvent, CalendarEventData},
@@ -34,6 +33,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::Permission;
 use std::collections::HashSet;
 use store::write::{BatchBuilder, now};
 use store::{
@@ -71,7 +71,11 @@ impl CalendarUpdateRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource_name = fix_percent_encoding(
@@ -108,6 +112,11 @@ impl CalendarUpdateRequestHandler for Server {
                 ));
             }
         };
+        let account_info = self
+            .account_info(access_token.account_id())
+            .await
+            .caused_by(trc::location!())?;
+        let account_emails = account_info.addresses().collect::<Vec<_>>();
 
         if let Some(resource) = resources.by_path(resource_name.as_ref()) {
             if resource.is_container() {
@@ -214,7 +223,7 @@ impl CalendarUpdateRequestHandler for Server {
             // Scheduling
             let mut itip_messages = None;
             if self.core.groupware.itip_enabled
-                && !access_token.emails.is_empty()
+                && !account_emails.is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
                 && new_event.data.event_range_end() > now
             {
@@ -222,10 +231,10 @@ impl CalendarUpdateRequestHandler for Server {
                     itip_update(
                         &mut new_event.data.event,
                         &old_ical,
-                        access_token.emails.as_slice(),
+                        account_emails.as_slice(),
                     )
                 } else {
-                    itip_create(&mut new_event.data.event, access_token.emails.as_slice())
+                    itip_create(&mut new_event.data.event, account_emails.as_slice())
                 };
 
                 match result {
@@ -279,18 +288,20 @@ impl CalendarUpdateRequestHandler for Server {
             let extra_bytes =
                 (bytes.len() as u64).saturating_sub(u32::from(event.inner.size) as u64);
             if extra_bytes > 0 {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    extra_bytes,
-                )
-                .await?;
+                self.has_available_quota(account_id, extra_bytes).await?;
             }
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
             let schedule_tag = new_event.schedule_tag;
             let etag = new_event
-                .update(access_token, event, account_id, document_id, &mut batch)
+                .update(
+                    access_token.account_tenant_ids(),
+                    event,
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?
                 .etag();
             if prev_email_alarm != next_email_alarm {
@@ -374,11 +385,11 @@ impl CalendarUpdateRequestHandler for Server {
             // Scheduling
             let mut itip_messages = None;
             if self.core.groupware.itip_enabled
-                && !access_token.emails.is_empty()
+                && !account_emails.is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
                 && event.data.event_range_end() > now() as i64
             {
-                match itip_create(&mut event.data.event, access_token.emails.as_slice()) {
+                match itip_create(&mut event.data.event, account_emails.as_slice()) {
                     Ok(messages) => {
                         if messages.iter().map(|r| r.to.len()).sum::<usize>()
                             < self.core.groupware.itip_outbound_max_recipients
@@ -408,11 +419,8 @@ impl CalendarUpdateRequestHandler for Server {
 
             // Validate quota
             if !bytes.is_empty() {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    bytes.len() as u64,
-                )
-                .await?;
+                self.has_available_quota(account_id, bytes.len() as u64)
+                    .await?;
             }
 
             // Prepare write batch
@@ -425,7 +433,7 @@ impl CalendarUpdateRequestHandler for Server {
             let schedule_tag = event.schedule_tag;
             let etag = event
                 .insert(
-                    access_token,
+                    access_token.account_tenant_ids(),
                     account_id,
                     document_id,
                     next_email_alarm,

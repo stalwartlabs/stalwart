@@ -74,9 +74,7 @@ impl Server {
                     return if verify_secret_hash(fallback_hash, secret.as_bytes()).await? {
                         if username.is_master() {
                             let address = username.account().address();
-                            if let Some(EmailCache::Account(account_id)) =
-                                self.email(address).await?
-                            {
+                            if let Some(account_id) = self.account_id(address).await? {
                                 trc::event!(
                                     Auth(trc::AuthEvent::Success),
                                     AccountName = address.to_string(),
@@ -115,9 +113,7 @@ impl Server {
                 // Authenticate app passwords
                 if let Some(app_pass) = AppPassword::parse(secret) {
                     let account_name = auth_as.address();
-                    return if let Some(EmailCache::Account(account_id)) =
-                        self.email(account_name).await?
-                    {
+                    return if let Some(account_id) = self.account_id(account_name).await? {
                         self.validate_credential(
                             account_id,
                             app_pass.credential_id,
@@ -144,12 +140,13 @@ impl Server {
                 let token = if let Some(directory) = directory {
                     let directory_account = directory.authenticate(&req.credentials).await?;
                     is_alias_login = directory_account.email != address;
-                    self.update_registry(directory_account).await
-                } else if let Some(EmailCache::Account(account_id)) = self.email(address).await? {
+                    self.synchronize_directory(directory_account).await
+                } else if let Some(account_id) = self.account_id(address).await? {
                     if let Some(account) = self
                         .registry()
                         .object::<structs::Account>(account_id)
                         .await?
+                        .and_then(|account| account.into_user())
                     {
                         if verify_mfa_secret_hash(
                             account.otp_auth.as_deref(),
@@ -200,7 +197,7 @@ impl Server {
                     ])?;
                     let address = username.account().address();
                     let master_address = username.account().address();
-                    if let Some(EmailCache::Account(account_id)) = self.email(address).await? {
+                    if let Some(account_id) = self.account_id(address).await? {
                         trc::event!(
                             Auth(trc::AuthEvent::Success),
                             AccountName = address.to_string(),
@@ -256,7 +253,7 @@ impl Server {
                 {
                     match directory.authenticate(&req.credentials).await {
                         Ok(result) => {
-                            return self.update_registry(result).await;
+                            return self.synchronize_directory(result).await;
                         }
                         Err(err) => {
                             if !err.matches(trc::EventType::Auth(trc::AuthEvent::Failed)) {
@@ -288,6 +285,7 @@ impl Server {
             .registry()
             .object::<structs::Account>(account_id)
             .await?
+            .and_then(|account| account.into_user())
         {
             // Find credential by credential_id
             for credential in account.credentials.iter() {
@@ -328,7 +326,9 @@ impl Server {
                         }
                     );
 
-                    let token = self.access_token_from_account(account_id, account).await?;
+                    let token = self
+                        .access_token_from_account(account_id, structs::Account::User(account))
+                        .await?;
                     let scope_idx = token
                         .scopes
                         .iter()
@@ -408,7 +408,7 @@ impl Server {
         Ok(self.get_default_directory())
     }
 
-    async fn update_registry(&self, account: directory::Account) -> trc::Result<AccessToken> {
+    async fn synchronize_directory(&self, account: directory::Account) -> trc::Result<AccessToken> {
         todo!()
     }
 }

@@ -9,7 +9,7 @@ use common::{
     auth::AccessToken,
     ipc::{BroadcastEvent, HousekeeperEvent},
 };
-use directory::Permission;
+use registry::schema::enums::Permission;
 use hyper::Method;
 use serde_json::json;
 use std::future::Future;

@@ -5,7 +5,7 @@
  */
 
 use common::{Server, auth::AccessToken};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use hyper::Method;
 use serde_json::json;
 use store::ahash::AHashMap;

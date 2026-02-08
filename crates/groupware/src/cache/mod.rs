@@ -15,7 +15,7 @@ use calcard::{
     build_calcard_resources, build_simple_hierarchy, resource_from_addressbook,
     resource_from_calendar, resource_from_card, resource_from_event,
 };
-use common::{CacheSwap, DavResource, DavResources, Server, auth::AccessToken};
+use common::{DavResource, DavResources, Server, UpdateLock, auth::AccountInfo, cache::LockResult};
 use file::{build_file_resources, build_nested_hierarchy, resource_from_file};
 use std::{sync::Arc, time::Instant};
 use store::{
@@ -24,7 +24,6 @@ use store::{
     query::log::{Change, Query},
     write::{AlignedBytes, Archive, BatchBuilder, ValueClass},
 };
-use tokio::sync::Semaphore;
 use trc::{AddContext, StoreEvent};
 use types::{
     collection::{Collection, SyncCollection},
@@ -37,28 +36,26 @@ pub mod file;
 pub trait GroupwareCache: Sync + Send {
     fn fetch_dav_resources(
         &self,
-        access_token: &AccessToken,
+        access_account_id: u32,
         account_id: u32,
         collection: SyncCollection,
     ) -> impl Future<Output = trc::Result<Arc<DavResources>>> + Send;
 
     fn create_default_addressbook(
         &self,
-        access_token: &AccessToken,
-        account_id: u32,
-        account_name: &str,
+        account_info_access: &AccountInfo,
+        account_info_owner: &AccountInfo,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
     fn create_default_calendar(
         &self,
-        access_token: &AccessToken,
-        account_id: u32,
-        account_name: &str,
+        account_info_access: &AccountInfo,
+        account_info_owner: &AccountInfo,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
     fn get_or_create_default_calendar(
         &self,
-        access_token: &AccessToken,
+        access_account_id: u32,
         account_id: u32,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
@@ -72,7 +69,7 @@ pub trait GroupwareCache: Sync + Send {
 impl GroupwareCache for Server {
     async fn fetch_dav_resources(
         &self,
-        access_token: &AccessToken,
+        access_account_id: u32,
         account_id: u32,
         collection: SyncCollection,
     ) -> trc::Result<Arc<DavResources>> {
@@ -83,7 +80,7 @@ impl GroupwareCache for Server {
             SyncCollection::CalendarEventNotification => &self.inner.cache.scheduling,
             _ => unreachable!(),
         };
-        let cache_ = match cache_store.get_value_or_guard_async(&account_id).await {
+        let mut cache = match cache_store.get_value_or_guard_async(&account_id).await {
             Ok(cache) => cache,
             Err(guard) => {
                 let start_time = Instant::now();
@@ -91,13 +88,13 @@ impl GroupwareCache for Server {
                     self,
                     account_id,
                     collection,
-                    Arc::new(Semaphore::new(1)),
-                    access_token,
+                    Arc::new(UpdateLock::new()),
+                    access_account_id,
                 )
                 .await?;
 
-                if guard.insert(CacheSwap::new(cache.clone())).is_err() {
-                    cache_store.insert(account_id, CacheSwap::new(cache.clone()));
+                if guard.insert(cache.clone()).is_err() {
+                    cache_store.update(account_id, cache.clone());
                 }
 
                 trc::event!(
@@ -114,7 +111,6 @@ impl GroupwareCache for Server {
         };
 
         // Obtain current state
-        let cache = cache_.load_full();
         let start_time = Instant::now();
         let changes = self
             .core
@@ -135,10 +131,10 @@ impl GroupwareCache for Server {
                 account_id,
                 collection,
                 cache.update_lock.clone(),
-                access_token,
+                access_account_id,
             )
             .await?;
-            cache_.update(cache.clone());
+            cache_store.update(account_id, cache.clone());
 
             trc::event!(
                 Store(StoreEvent::CacheStale),
@@ -166,19 +162,25 @@ impl GroupwareCache for Server {
         }
 
         // Lock for updates
-        let _permit = cache.update_lock.acquire().await;
-        let cache = cache_.load_full();
-        if cache.highest_change_id >= changes.to_change_id {
-            trc::event!(
-                Store(StoreEvent::CacheHit),
-                AccountId = account_id,
-                Collection = collection.as_str(),
-                ChangeId = cache.highest_change_id,
-                Elapsed = start_time.elapsed(),
-            );
+        let lock = cache.update_lock.clone();
+        let _permit = match lock.acquire(cache.highest_change_id).await? {
+            LockResult::Acquired(permit) => permit,
+            LockResult::Stale(permit) => {
+                cache = cache_store.peek(&account_id).unwrap_or(cache.clone());
+                if cache.highest_change_id >= changes.to_change_id {
+                    trc::event!(
+                        Store(StoreEvent::CacheHit),
+                        AccountId = account_id,
+                        Collection = collection.as_str(),
+                        ChangeId = cache.highest_change_id,
+                        Elapsed = start_time.elapsed(),
+                    );
+                    return Ok(cache);
+                }
 
-            return Ok(cache);
-        }
+                permit
+            }
+        };
 
         let num_changes = changes.changes.len();
         let cache = if !matches!(collection, SyncCollection::CalendarEventNotification) {
@@ -233,7 +235,7 @@ impl GroupwareCache for Server {
                         .unwrap_or(cache.container_change_id),
                     highest_change_id: changes.to_change_id,
                     size: std::mem::size_of::<DavResources>() as u64,
-                    update_lock: cache.update_lock.clone(),
+                    update_lock: lock.clone(),
                 };
 
                 if matches!(collection, SyncCollection::FileNode) {
@@ -253,7 +255,7 @@ impl GroupwareCache for Server {
                         .unwrap_or(cache.container_change_id),
                     highest_change_id: changes.to_change_id,
                     size: cache.size,
-                    update_lock: cache.update_lock.clone(),
+                    update_lock: lock.clone(),
                 }
             }
         } else {
@@ -300,8 +302,9 @@ impl GroupwareCache for Server {
             }
         };
 
+        cache.update_lock.set_revision(cache.highest_change_id);
         let cache = Arc::new(cache);
-        cache_.update(cache.clone());
+        cache_store.update(account_id, cache.clone());
 
         trc::event!(
             Store(StoreEvent::CacheUpdate),
@@ -318,12 +321,13 @@ impl GroupwareCache for Server {
 
     async fn create_default_addressbook(
         &self,
-        access_token: &AccessToken,
-        account_id: u32,
-        account_name: &str,
+        account_info_access: &AccountInfo,
+        account_info_owner: &AccountInfo,
     ) -> trc::Result<Option<u32>> {
         if let Some(name) = &self.core.groupware.default_addressbook_name {
             let mut batch = BatchBuilder::new();
+            let account_id = account_info_owner.account_id();
+            let account_name = account_info_owner.name();
             let document_id = self
                 .store()
                 .assign_document_ids(account_id, Collection::AddressBook, 1)
@@ -345,7 +349,12 @@ impl GroupwareCache for Server {
                 }],
                 ..Default::default()
             }
-            .insert(access_token, account_id, document_id, &mut batch)?;
+            .insert(
+                account_info_access.account_tenant_ids(),
+                account_id,
+                document_id,
+                &mut batch,
+            )?;
             self.commit_batch(batch).await?;
             Ok(Some(document_id))
         } else {
@@ -355,12 +364,13 @@ impl GroupwareCache for Server {
 
     async fn create_default_calendar(
         &self,
-        access_token: &AccessToken,
-        account_id: u32,
-        account_name: &str,
+        account_info_access: &AccountInfo,
+        account_info_owner: &AccountInfo,
     ) -> trc::Result<Option<u32>> {
         if let Some(name) = &self.core.groupware.default_calendar_name {
             let mut batch = BatchBuilder::new();
+            let account_id = account_info_owner.account_id();
+            let account_name = account_info_owner.name();
             let document_id = self
                 .store()
                 .assign_document_ids(account_id, Collection::Calendar, 1)
@@ -382,7 +392,12 @@ impl GroupwareCache for Server {
                 }],
                 ..Default::default()
             }
-            .insert(access_token, account_id, document_id, &mut batch)?;
+            .insert(
+                account_info_access.account_tenant_ids(),
+                account_id,
+                document_id,
+                &mut batch,
+            )?;
 
             // Set default calendar
             batch
@@ -399,7 +414,7 @@ impl GroupwareCache for Server {
 
     async fn get_or_create_default_calendar(
         &self,
-        access_token: &AccessToken,
+        access_account_id: u32,
         account_id: u32,
     ) -> trc::Result<Option<u32>> {
         let default_calendar_id = self
@@ -415,12 +430,13 @@ impl GroupwareCache for Server {
         if default_calendar_id.is_some() {
             Ok(default_calendar_id)
         } else {
-            self.fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            self.fetch_dav_resources(access_account_id, account_id, SyncCollection::Calendar)
                 .await
                 .map(|c| c.document_ids(true).next())
         }
     }
 
+    #[inline(always)]
     fn cached_dav_resources(
         &self,
         account_id: u32,
@@ -433,7 +449,6 @@ impl GroupwareCache for Server {
             _ => unreachable!(),
         })
         .get(&account_id)
-        .map(|cache| cache.load_full())
     }
 }
 
@@ -513,14 +528,14 @@ async fn full_cache_build(
     server: &Server,
     account_id: u32,
     collection: SyncCollection,
-    update_lock: Arc<Semaphore>,
-    access_token: &AccessToken,
+    update_lock: Arc<UpdateLock>,
+    access_account_id: u32,
 ) -> trc::Result<Arc<DavResources>> {
     match collection {
         SyncCollection::Calendar => {
             build_calcard_resources(
                 server,
-                access_token,
+                access_account_id,
                 account_id,
                 SyncCollection::Calendar,
                 Collection::Calendar,
@@ -532,7 +547,7 @@ async fn full_cache_build(
         SyncCollection::AddressBook => {
             build_calcard_resources(
                 server,
-                access_token,
+                access_account_id,
                 account_id,
                 SyncCollection::AddressBook,
                 Collection::AddressBook,

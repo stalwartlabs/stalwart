@@ -51,7 +51,7 @@ impl FileNodeSet for Server {
     ) -> trc::Result<SetResponse<file_node::FileNode>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::FileNode)
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();

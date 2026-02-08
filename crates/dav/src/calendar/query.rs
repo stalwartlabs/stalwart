@@ -68,7 +68,11 @@ impl CalendarQueryRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let Some(resource) = resources.by_path(
@@ -562,32 +566,35 @@ impl CalendarQueryHandler {
                 } else if entries.peek().is_some() {
                     let _ = write!(&mut out, "BEGIN:{component_name}\r\n");
 
-                    if data.limit_freebusy.is_none()
-                        || component.component_type != ICalendarComponentType::VFreebusy
-                    {
-                        for (entry, with_value) in entries {
-                            let _ = entry.write_to(&mut out, with_value);
-                        }
-                    } else {
-                        // Filter freebusy
-                        let range = data.limit_freebusy.unwrap();
-                        for (entry, with_value) in entries {
-                            if matches!(entry.name, ArchivedICalendarProperty::Freebusy) {
-                                let mut fb_in_range =
-                                    freebusy_in_range(entry, &range, self.default_tz).peekable();
-                                if fb_in_range.peek().is_none() {
-                                    continue;
-                                } else {
-                                    let _ = ICalendarEntry {
-                                        name: ICalendarProperty::Freebusy,
-                                        params: rkyv_deserialize(&entry.params)
-                                            .ok()
-                                            .unwrap_or_default(),
-                                        values: fb_in_range.collect(),
+                    match data.limit_freebusy {
+                        Some(range)
+                            if component.component_type == ICalendarComponentType::VFreebusy =>
+                        {
+                            // Filter freebusy
+                            for (entry, with_value) in entries {
+                                if matches!(entry.name, ArchivedICalendarProperty::Freebusy) {
+                                    let mut fb_in_range =
+                                        freebusy_in_range(entry, &range, self.default_tz)
+                                            .peekable();
+                                    if fb_in_range.peek().is_none() {
+                                        continue;
+                                    } else {
+                                        let _ = ICalendarEntry {
+                                            name: ICalendarProperty::Freebusy,
+                                            params: rkyv_deserialize(&entry.params)
+                                                .ok()
+                                                .unwrap_or_default(),
+                                            values: fb_in_range.collect(),
+                                        }
+                                        .write_to(&mut out);
                                     }
-                                    .write_to(&mut out);
+                                } else {
+                                    let _ = entry.write_to(&mut out, with_value);
                                 }
-                            } else {
+                            }
+                        }
+                        _ => {
+                            for (entry, with_value) in entries {
                                 let _ = entry.write_to(&mut out, with_value);
                             }
                         }

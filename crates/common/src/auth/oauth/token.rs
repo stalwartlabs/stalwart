@@ -221,7 +221,7 @@ impl Server {
                 .object::<Account>(account_id)
                 .await
                 .caused_by(trc::location!())?
-                .map(|account| account.secret)
+                .and_then(|account| account.into_user().map(|account| account.secret))
                 .ok_or_else(|| {
                     trc::AuthEvent::Error
                         .into_err()

@@ -98,7 +98,7 @@ impl RunScript for Server {
                     } => {
                         input = false.into();
                         'outer: for list in lists {
-                            if let Some(store) = self.core.storage.lookups.get(&list) {
+                            if let Some(store) = self.get_lookup_store(&list) {
                                 for value in &values {
                                     if let Ok(true) = store
                                         .key_exists(if !matches!(match_as, MatchAs::Lowercase) {

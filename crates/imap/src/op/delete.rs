@@ -10,7 +10,7 @@ use crate::{
     spawn_op,
 };
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::mailbox::destroy::{MailboxDestroy, MailboxDestroyError};
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::delete::Arguments, receiver::Request,

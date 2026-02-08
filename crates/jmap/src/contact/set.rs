@@ -61,7 +61,7 @@ impl ContactCardSet for Server {
     ) -> trc::Result<SetResponse<contact::ContactCard>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::AddressBook)
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
@@ -254,7 +254,7 @@ impl ContactCardSet for Server {
             if extra_bytes > 0 {
                 match self
                     .has_available_quota(
-                        &self.get_resource_token(access_token, account_id).await?,
+                        account_id,
                         extra_bytes,
                     )
                     .await
@@ -408,7 +408,7 @@ impl ContactCardSet for Server {
         }
         match self
             .has_available_quota(
-                &self.get_resource_token(access_token, account_id).await?,
+                account_id,
                 size as u64,
             )
             .await

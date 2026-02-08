@@ -18,7 +18,7 @@ use crate::{
         },
     },
 };
-use common::{Server, auth::ResourceToken, storage::index::ObjectIndexBuilder};
+use common::{Server, storage::index::ObjectIndexBuilder};
 use mail_parser::parsers::fields::thread::thread_name;
 use store::write::{
     BatchBuilder, IndexPropertyClass, SearchIndex, TaskEpoch, TaskQueueClass, ValueClass,
@@ -47,7 +47,7 @@ pub trait EmailCopy: Sync + Send {
         &self,
         from_account_id: u32,
         from_message_id: u32,
-        resource_token: &ResourceToken,
+        to_account_id: u32,
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
         received_at: Option<u64>,
@@ -61,14 +61,13 @@ impl EmailCopy for Server {
         &self,
         from_account_id: u32,
         from_message_id: u32,
-        resource_token: &ResourceToken,
+        to_account_id: u32,
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
         received_at: Option<u64>,
         session_id: u64,
     ) -> trc::Result<Result<IngestedEmail, CopyMessageError>> {
         // Obtain metadata
-        let account_id = resource_token.account_id;
         let mut metadata = if let Some(metadata) = self
             .store()
             .get_value::<Archive<AlignedBytes>>(ValueKey::property(
@@ -88,13 +87,13 @@ impl EmailCopy for Server {
 
         // Check quota
         let size = metadata.root_part().offset_end;
-        match self.has_available_quota(resource_token, size as u64).await {
+        match self.has_available_quota(to_account_id, size as u64).await {
             Ok(_) => (),
             Err(err) => {
                 if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota))
                     || err.matches(trc::EventType::Limit(trc::LimitEvent::TenantQuota))
                 {
-                    trc::error!(err.account_id(account_id).span_id(session_id));
+                    trc::error!(err.account_id(to_account_id).span_id(session_id));
                     return Ok(Err(CopyMessageError::OverQuota));
                 } else {
                     return Err(err);
@@ -144,7 +143,7 @@ impl EmailCopy for Server {
 
         // Obtain threadId
         let thread_result = self
-            .find_thread_id(account_id, subject, &message_ids)
+            .find_thread_id(to_account_id, subject, &message_ids)
             .await
             .caused_by(trc::location!())?;
 
@@ -159,7 +158,7 @@ impl EmailCopy for Server {
         let mut mailbox_ids = Vec::with_capacity(mailboxes.len());
         email.imap_uids = Vec::with_capacity(mailboxes.len());
         let mut ids = self
-            .assign_email_ids(account_id, mailboxes.iter().copied(), true)
+            .assign_email_ids(to_account_id, mailboxes.iter().copied(), true)
             .await
             .caused_by(trc::location!())?;
         let document_id = ids.next().unwrap();
@@ -170,9 +169,10 @@ impl EmailCopy for Server {
 
         // Prepare batch
         let mut batch = BatchBuilder::new();
-        batch.with_account_id(account_id);
+        batch.with_account_id(to_account_id);
 
         // Determine thread id
+        let tenant_id = self.account_info(to_account_id).await?.tenant_id();
         let thread_id = if let Some(thread_id) = thread_result.thread_id {
             thread_id
         } else {
@@ -187,7 +187,7 @@ impl EmailCopy for Server {
             .with_document(document_id)
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
-                    .with_tenant_id(resource_token.tenant.map(|t| t.id))
+                    .with_tenant_id(tenant_id)
                     .with_changes(MessageData {
                         mailboxes: mailbox_ids.into_boxed_slice(),
                         keywords: keywords.into_boxed_slice(),
@@ -232,7 +232,7 @@ impl EmailCopy for Server {
             .write(batch.build_all())
             .await
             .caused_by(trc::location!())?
-            .last_change_id(account_id)?;
+            .last_change_id(to_account_id)?;
 
         // Request indexing
         self.notify_task_queue();
@@ -244,7 +244,7 @@ impl EmailCopy for Server {
         email.blob_id = BlobId::new(
             blob_hash,
             BlobClass::Linked {
-                account_id,
+                account_id: to_account_id,
                 collection: Collection::Email.into(),
                 document_id,
             },

@@ -16,7 +16,7 @@ use calcard::{
 };
 use chrono::DateTime;
 use common::{DavName, DavResources, Server, auth::AccessToken};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
@@ -82,7 +82,7 @@ impl CalendarEventSet for Server {
     ) -> trc::Result<SetResponse<calendar_event::CalendarEvent>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
@@ -383,7 +383,7 @@ impl CalendarEventSet for Server {
             if extra_bytes > 0 {
                 match self
                     .has_available_quota(
-                        &self.get_resource_token(access_token, account_id).await?,
+                        account_id,
                         extra_bytes,
                     )
                     .await
@@ -650,7 +650,7 @@ impl CalendarEventSet for Server {
         // Validate quota
         match self
             .has_available_quota(
-                &self.get_resource_token(access_token, account_id).await?,
+                account_id,
                 size as u64,
             )
             .await

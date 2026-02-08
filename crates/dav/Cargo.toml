@@ -10,6 +10,7 @@ store = { path = "../store" }
 utils = { path = "../utils" }
 groupware = { path = "../groupware" }
 directory = { path = "../directory" }
+registry = { path = "../registry" }
 http_proto = { path = "../http-proto" }
 types = { path = "../types" }
 trc = { path = "../trc" }

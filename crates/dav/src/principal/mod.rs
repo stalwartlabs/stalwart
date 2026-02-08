@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::auth::AccessToken;
+use common::auth::AccountInfo;
 use dav_proto::schema::response::Href;
 use groupware::RFC_3986;
 
@@ -18,12 +18,12 @@ pub trait CurrentUserPrincipal {
     fn current_user_principal(&self) -> Href;
 }
 
-impl CurrentUserPrincipal for AccessToken {
+impl CurrentUserPrincipal for AccountInfo {
     fn current_user_principal(&self) -> Href {
         Href(format!(
             "{}/{}/",
             DavResourceName::Principal.base_path(),
-            percent_encoding::utf8_percent_encode(&self.name, RFC_3986)
+            percent_encoding::utf8_percent_encode(self.name(), RFC_3986)
         ))
     }
 }

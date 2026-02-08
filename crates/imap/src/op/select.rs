@@ -7,7 +7,7 @@
 use super::{ImapContext, ToModSeq};
 use crate::core::{SavedSearch, SelectedMailbox, Session, State};
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{

@@ -9,7 +9,10 @@ use crate::{
     DavResourceName,
     common::propfind::{PropFindRequestHandler, SyncTokenUrn},
 };
-use common::{Server, auth::AccessToken};
+use common::{
+    Server,
+    auth::{AccessToken, AccountInfo},
+};
 use dav_proto::schema::{
     Namespace,
     property::{
@@ -19,7 +22,6 @@ use dav_proto::schema::{
     request::{DavPropertyValue, PropFind},
     response::{Href, MultiStatus, PropStat, Response},
 };
-use directory::{PrincipalData, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use groupware::RFC_3986;
 use groupware::cache::GroupwareCache;
 use hyper::StatusCode;
@@ -46,7 +48,7 @@ pub(crate) trait PrincipalPropFind: Sync + Send {
 
     fn owner_href(
         &self,
-        access_token: &AccessToken,
+        account_info: &AccountInfo,
         account_id: u32,
     ) -> impl Future<Output = trc::Result<Href>> + Send;
 }
@@ -60,12 +62,16 @@ impl PrincipalPropFind for Server {
         request: &PropFind,
         response: &mut MultiStatus,
     ) -> crate::Result<()> {
+        let access_account_info = self
+            .account_info(access_token.account_id())
+            .await
+            .caused_by(trc::location!())?;
         let properties = match request {
             PropFind::PropName => {
                 let props = all_props(collection, None);
                 for account_id in account_ids {
                     response.add_response(Response::new_propstat(
-                        self.owner_href(access_token, account_id)
+                        self.owner_href(&access_account_info, account_id)
                             .await
                             .caused_by(trc::location!())?,
                         vec![PropStat::new_list(
@@ -106,66 +112,14 @@ impl PrincipalPropFind for Server {
             let mut fields = Vec::with_capacity(properties.len());
             let mut fields_not_found = Vec::new();
 
-            let (name, description, emails, typ) = if access_token.account_id() == account_id {
-                (
-                    Cow::Borrowed(access_token.name.as_str()),
-                    access_token
-                        .description
-                        .as_deref()
-                        .unwrap_or(&access_token.name)
-                        .to_string(),
-                    Cow::Borrowed(access_token.emails.as_slice()),
-                    Type::Individual,
-                )
-            } else {
-                self.directory()
-                    .query(QueryParams::id(account_id).with_return_member_of(false))
-                    .await
-                    .caused_by(trc::location!())?
-                    .map(|p| {
-                        let name = p.name;
-                        let mut description = None;
-                        let mut emails = Vec::new();
-                        for data in p.data {
-                            match data {
-                                PrincipalData::Description(desc) => {
-                                    description = Some(desc);
-                                }
-                                PrincipalData::PrimaryEmail(email) => {
-                                    if emails.is_empty() {
-                                        emails.push(email);
-                                    } else {
-                                        emails.insert(0, email);
-                                    }
-                                }
-                                PrincipalData::EmailAlias(email) => {
-                                    emails.push(email);
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        let description = description.unwrap_or_else(|| name.clone());
-                        (
-                            Cow::Owned(name.to_string()),
-                            description,
-                            Cow::Owned(emails),
-                            p.typ,
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        (
-                            Cow::Owned(format!("_{}", account_id)),
-                            format!("_{}", account_id),
-                            Cow::Owned(vec![]),
-                            Type::Individual,
-                        )
-                    })
-            };
+            let account = self
+                .account_info(account_id)
+                .await
+                .caused_by(trc::location!())?;
 
             // Fetch quota
             let quota = if needs_quota {
-                self.dav_quota(access_token, account_id)
+                self.dav_quota(account_id)
                     .await
                     .caused_by(trc::location!())?
             } else {
@@ -176,8 +130,10 @@ impl PrincipalPropFind for Server {
                 match property {
                     DavProperty::WebDav(dav_property) => match dav_property {
                         WebDavProperty::DisplayName => {
-                            fields
-                                .push(DavPropertyValue::new(property.clone(), description.clone()));
+                            fields.push(DavPropertyValue::new(
+                                property.clone(),
+                                account.description().unwrap_or(account.name()).to_string(),
+                            ));
                         }
                         WebDavProperty::ResourceType => {
                             let resource_type = if !is_principal {
@@ -205,7 +161,7 @@ impl PrincipalPropFind for Server {
                         WebDavProperty::CurrentUserPrincipal => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                vec![access_token.current_user_principal()],
+                                vec![access_account_info.current_user_principal()],
                             ));
                         }
                         WebDavProperty::QuotaAvailableBytes if !is_principal => {
@@ -216,7 +172,11 @@ impl PrincipalPropFind for Server {
                         }
                         WebDavProperty::SyncToken if !is_principal => {
                             let sync_token = self
-                                .fetch_dav_resources(access_token, account_id, collection.into())
+                                .fetch_dav_resources(
+                                    access_token.account_id(),
+                                    account_id,
+                                    collection.into(),
+                                )
                                 .await
                                 .caused_by(trc::location!())?
                                 .sync_token();
@@ -225,7 +185,11 @@ impl PrincipalPropFind for Server {
                         }
                         WebDavProperty::GetCTag if !is_principal => {
                             let ctag = self
-                                .fetch_dav_resources(access_token, account_id, collection.into())
+                                .fetch_dav_resources(
+                                    access_token.account_id(),
+                                    account_id,
+                                    collection.into(),
+                                )
                                 .await
                                 .caused_by(trc::location!())?
                                 .highest_change_id;
@@ -241,7 +205,7 @@ impl PrincipalPropFind for Server {
                                 vec![Href(format!(
                                     "{}/{}/",
                                     DavResourceName::Principal.base_path(),
-                                    percent_encoding::utf8_percent_encode(&name, RFC_3986),
+                                    percent_encoding::utf8_percent_encode(account.name(), RFC_3986),
                                 ))],
                             ));
                         }
@@ -286,15 +250,20 @@ impl PrincipalPropFind for Server {
                                 vec![Href(format!(
                                     "{}/{}/",
                                     DavResourceName::Principal.base_path(),
-                                    percent_encoding::utf8_percent_encode(&name, RFC_3986),
+                                    percent_encoding::utf8_percent_encode(account.name(), RFC_3986),
                                 ))],
                             ));
                         }
                         PrincipalProperty::CalendarHomeSet => {
-                            let hrefs =
-                                build_home_set(self, access_token, name.as_ref(), account_id, true)
-                                    .await
-                                    .caused_by(trc::location!())?;
+                            let hrefs = build_home_set(
+                                self,
+                                access_token,
+                                account.name(),
+                                account_id,
+                                true,
+                            )
+                            .await
+                            .caused_by(trc::location!())?;
 
                             fields.push(DavPropertyValue::new(property.clone(), hrefs));
                             response.set_namespace(Namespace::CalDav);
@@ -303,7 +272,7 @@ impl PrincipalPropFind for Server {
                             let hrefs = build_home_set(
                                 self,
                                 access_token,
-                                name.as_ref(),
+                                account.name(),
                                 account_id,
                                 false,
                             )
@@ -321,19 +290,18 @@ impl PrincipalPropFind for Server {
                         PrincipalProperty::CalendarUserAddressSet => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                emails
-                                    .iter()
-                                    .filter(|email| !email.starts_with("@"))
-                                    .take(1)
-                                    .map(|email| Href(format!("mailto:{email}",)))
-                                    .collect::<Vec<_>>(),
+                                vec![Href(format!("mailto:{}", account.name()))],
                             ));
                             response.set_namespace(Namespace::CalDav);
                         }
                         PrincipalProperty::CalendarUserType => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                typ.as_str().to_uppercase(),
+                                if account.is_user_account() {
+                                    DavValue::String("INDIVIDUAL".to_string())
+                                } else {
+                                    DavValue::String("GROUP".to_string())
+                                },
                             ));
                             response.set_namespace(Namespace::CalDav);
                         }
@@ -343,7 +311,7 @@ impl PrincipalPropFind for Server {
                                 vec![Href(format!(
                                     "{}/{}/inbox/",
                                     DavResourceName::Scheduling.base_path(),
-                                    percent_encoding::utf8_percent_encode(&name, RFC_3986),
+                                    percent_encoding::utf8_percent_encode(account.name(), RFC_3986),
                                 ))],
                             ));
                             response.set_namespace(Namespace::CalDav);
@@ -354,7 +322,7 @@ impl PrincipalPropFind for Server {
                                 vec![Href(format!(
                                     "{}/{}/outbox/",
                                     DavResourceName::Scheduling.base_path(),
-                                    percent_encoding::utf8_percent_encode(&name, RFC_3986),
+                                    percent_encoding::utf8_percent_encode(account.name(), RFC_3986),
                                 ))],
                             ));
                             response.set_namespace(Namespace::CalDav);
@@ -382,7 +350,7 @@ impl PrincipalPropFind for Server {
                 Href(format!(
                     "{}/{}/",
                     base_path,
-                    percent_encoding::utf8_percent_encode(&name, RFC_3986),
+                    percent_encoding::utf8_percent_encode(account.name(), RFC_3986),
                 )),
                 prop_stats,
             ));
@@ -410,20 +378,18 @@ impl PrincipalPropFind for Server {
         Ok(status.response.0.into_iter().next())
     }
 
-    async fn owner_href(&self, access_token: &AccessToken, account_id: u32) -> trc::Result<Href> {
-        if access_token.account_id() == account_id {
-            Ok(access_token.current_user_principal())
+    async fn owner_href(&self, account_info: &AccountInfo, account_id: u32) -> trc::Result<Href> {
+        if account_info.account_id() == account_id {
+            Ok(account_info.current_user_principal())
         } else {
-            let name = self
-                .store()
-                .get_principal_name(account_id)
+            let account_info = self
+                .account_info(account_id)
                 .await
-                .caused_by(trc::location!())?
-                .unwrap_or_else(|| format!("_{account_id}"));
+                .caused_by(trc::location!())?;
             Ok(Href(format!(
                 "{}/{}/",
                 DavResourceName::Principal.base_path(),
-                percent_encoding::utf8_percent_encode(&name, RFC_3986),
+                percent_encoding::utf8_percent_encode(account_info.name(), RFC_3986),
             )))
         }
     }
@@ -452,17 +418,15 @@ pub(crate) async fn build_home_set(
     if !server.core.groupware.assisted_discovery && account_id == access_token.account_id() {
         for account_id in access_token.all_ids_by_collection(collection) {
             if account_id != access_token.account_id() {
-                let other_name = server
-                    .store()
-                    .get_principal_name(account_id)
+                let other = server
+                    .account_info(account_id)
                     .await
-                    .caused_by(trc::location!())?
-                    .unwrap_or_else(|| format!("_{account_id}"));
+                    .caused_by(trc::location!())?;
 
                 hrefs.push(Href(format!(
                     "{}/{}/",
                     resource_name.base_path(),
-                    percent_encoding::utf8_percent_encode(&other_name, RFC_3986),
+                    percent_encoding::utf8_percent_encode(other.name(), RFC_3986),
                 )));
             }
         }

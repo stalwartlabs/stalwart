@@ -6,7 +6,7 @@
 
 use crate::core::{Session, StatusResponse};
 use common::listener::SessionStream;
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use std::time::Instant;
 use store::{

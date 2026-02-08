@@ -151,7 +151,7 @@ impl ManageStore for Server {
                 access_token.assert_has_permission(Permission::PurgeInMemoryStore)?;
 
                 let store = if let Some(id) = id.filter(|id| *id != "default") {
-                    if let Some(store) = self.core.storage.lookups.get(id) {
+                    if let Some(store) = self.get_lookup_store(id) {
                         store.clone()
                     } else {
                         return Err(trc::ResourceEvent::NotFound.into_err());

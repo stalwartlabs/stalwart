@@ -260,7 +260,7 @@ impl VacationResponseSet for Server {
             let mut obj = ObjectIndexBuilder::new()
                 .with_current_opt(prev_sieve)
                 .with_changes(sieve)
-                .with_access_token(access_token);
+                .with_account_info(&account_info);
 
             // Update id
             let document_id = if let Some(document_id) = document_id {

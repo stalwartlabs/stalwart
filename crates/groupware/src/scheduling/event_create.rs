@@ -12,7 +12,7 @@ use calcard::icalendar::ICalendar;
 
 pub fn itip_create(
     ical: &mut ICalendar,
-    account_emails: &[String],
+    account_emails: &[&str],
 ) -> Result<Vec<ItipMessage<ICalendar>>, ItipError> {
     let itip = itip_snapshot(ical, account_emails, false)?;
     if !itip.organizer.is_server_scheduling {

@@ -29,7 +29,7 @@ impl TlsaLookup for Server {
         &self,
         key: impl IntoFqdn<'x> + Sync + Send,
     ) -> mail_auth::Result<Option<Arc<Tlsa>>> {
-        let key = key.into_fqdn();
+        let key = key.to_fqdn();
         if let Some(value) = self.inner.cache.dns_tlsa.get(key.as_ref()) {
             return Ok(Some(value));
         }

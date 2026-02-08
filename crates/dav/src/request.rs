@@ -47,10 +47,10 @@ use dav_proto::{
         },
     },
 };
-use directory::Permission;
 use http_proto::{HttpRequest, HttpResponse, HttpSessionData, request::fetch_body};
 use hyper::{StatusCode, header};
-use std::{sync::Arc, time::Instant};
+use registry::schema::enums::Permission;
+use std::time::Instant;
 use trc::{EventType, LimitEvent, StoreEvent, WebDavEvent};
 use types::collection::Collection;
 
@@ -58,7 +58,7 @@ pub trait DavRequestHandler: Sync + Send {
     fn handle_dav_request(
         &self,
         request: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: &HttpSessionData,
         resource: DavResourceName,
         method: DavMethod,
@@ -69,7 +69,7 @@ pub(crate) trait DavRequestDispatcher: Sync + Send {
     fn dispatch_dav_request(
         &self,
         headers: &RequestHeaders<'_>,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         resource: DavResourceName,
         method: DavMethod,
         body: Vec<u8>,
@@ -80,7 +80,7 @@ impl DavRequestDispatcher for Server {
     async fn dispatch_dav_request(
         &self,
         headers: &RequestHeaders<'_>,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         resource: DavResourceName,
         method: DavMethod,
         body: Vec<u8>,
@@ -96,7 +96,8 @@ impl DavRequestDispatcher for Server {
             DavMethod::GET | DavMethod::HEAD => match resource {
                 DavResourceName::Card => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCardGet)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCardGet)?;
 
                     self.handle_card_get_request(
                         &access_token,
@@ -107,7 +108,7 @@ impl DavRequestDispatcher for Server {
                 }
                 DavResourceName::Cal => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalGet)?;
+                    let access_token = access_token.assert_has_permission(Permission::DavCalGet)?;
 
                     self.handle_calendar_get_request(
                         &access_token,
@@ -118,7 +119,8 @@ impl DavRequestDispatcher for Server {
                 }
                 DavResourceName::File => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavFileGet)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavFileGet)?;
 
                     // Deal with Litmus bug
                     /*self.handle_file_get_request(
@@ -137,7 +139,7 @@ impl DavRequestDispatcher for Server {
                 }
                 DavResourceName::Scheduling => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalGet)?;
+                    let access_token = access_token.assert_has_permission(Permission::DavCalGet)?;
 
                     self.handle_scheduling_get_request(
                         &access_token,
@@ -151,7 +153,8 @@ impl DavRequestDispatcher for Server {
             DavMethod::REPORT => match Report::parse(&mut Tokenizer::new(&body))? {
                 Report::SyncCollection(sync_collection) => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavSyncCollection)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavSyncCollection)?;
 
                     let uri = self
                         .validate_uri(&access_token, headers.uri)
@@ -186,7 +189,8 @@ impl DavRequestDispatcher for Server {
                             .with_details("The administrator has disabled directory queries."),
                         ));
                     }
-                    access_token.assert_has_permission(Permission::DavPrincipalAcl)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavPrincipalAcl)?;
 
                     self.handle_acl_prop_set(&access_token, headers, report)
                         .await
@@ -204,7 +208,8 @@ impl DavRequestDispatcher for Server {
                             .with_details("The administrator has disabled directory queries."),
                         ));
                     }
-                    access_token.assert_has_permission(Permission::DavPrincipalMatch)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavPrincipalMatch)?;
 
                     self.handle_principal_match(&access_token, headers, report)
                         .await
@@ -224,7 +229,8 @@ impl DavRequestDispatcher for Server {
                             ));
                         }
 
-                        access_token.assert_has_permission(Permission::DavPrincipalSearch)?;
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavPrincipalSearch)?;
 
                         self.handle_principal_property_search(&access_token, report)
                             .await
@@ -251,14 +257,16 @@ impl DavRequestDispatcher for Server {
                 }
                 Report::AddressbookQuery(report) => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCardQuery)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCardQuery)?;
 
                     self.handle_card_query_request(&access_token, headers, report)
                         .await
                 }
                 Report::AddressbookMultiGet(report) => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCardMultiGet)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCardMultiGet)?;
 
                     self.handle_dav_query(
                         &access_token,
@@ -268,14 +276,16 @@ impl DavRequestDispatcher for Server {
                 }
                 Report::CalendarQuery(report) => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalQuery)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCalQuery)?;
 
                     self.handle_calendar_query_request(&access_token, headers, report)
                         .await
                 }
                 Report::CalendarMultiGet(report) => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalMultiGet)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCalMultiGet)?;
 
                     self.handle_dav_query(
                         &access_token,
@@ -285,7 +295,8 @@ impl DavRequestDispatcher for Server {
                 }
                 Report::FreeBusyQuery(report) => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalFreeBusyQuery)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCalFreeBusyQuery)?;
 
                     self.handle_calendar_freebusy_request(&access_token, headers, report)
                         .await
@@ -297,7 +308,8 @@ impl DavRequestDispatcher for Server {
                         .and_then(|d| d.into_owned_uri())?;
 
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavExpandProperty)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavExpandProperty)?;
 
                     match resource {
                         DavResourceName::Card | DavResourceName::Cal | DavResourceName::File => {
@@ -318,21 +330,24 @@ impl DavRequestDispatcher for Server {
                 match resource {
                     DavResourceName::Card => {
                         // Validate permissions
-                        access_token.assert_has_permission(Permission::DavCardPropPatch)?;
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavCardPropPatch)?;
 
                         self.handle_card_proppatch_request(&access_token, headers, request)
                             .await
                     }
                     DavResourceName::Cal => {
                         // Validate permissions
-                        access_token.assert_has_permission(Permission::DavCalPropPatch)?;
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavCalPropPatch)?;
 
                         self.handle_calendar_proppatch_request(&access_token, headers, request)
                             .await
                     }
                     DavResourceName::File => {
                         // Validate permissions
-                        access_token.assert_has_permission(Permission::DavFilePropPatch)?;
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavFilePropPatch)?;
 
                         self.handle_file_proppatch_request(&access_token, headers, request)
                             .await
@@ -352,21 +367,24 @@ impl DavRequestDispatcher for Server {
                 match resource {
                     DavResourceName::Card => {
                         // Validate permissions
-                        access_token.assert_has_permission(Permission::DavCardMkCol)?;
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavCardMkCol)?;
 
                         self.handle_card_mkcol_request(&access_token, headers, request)
                             .await
                     }
                     DavResourceName::Cal => {
                         // Validate permissions
-                        access_token.assert_has_permission(Permission::DavCalMkCol)?;
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavCalMkCol)?;
 
                         self.handle_calendar_mkcol_request(&access_token, headers, request)
                             .await
                     }
                     DavResourceName::File => {
                         // Validate permissions
-                        access_token.assert_has_permission(Permission::DavFileMkCol)?;
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavFileMkCol)?;
 
                         self.handle_file_mkcol_request(&access_token, headers, request)
                             .await
@@ -379,28 +397,32 @@ impl DavRequestDispatcher for Server {
             DavMethod::DELETE => match resource {
                 DavResourceName::Card => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCardDelete)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCardDelete)?;
 
                     self.handle_card_delete_request(&access_token, headers)
                         .await
                 }
                 DavResourceName::Cal => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalDelete)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCalDelete)?;
 
                     self.handle_calendar_delete_request(&access_token, headers)
                         .await
                 }
                 DavResourceName::File => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavFileDelete)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavFileDelete)?;
 
                     self.handle_file_delete_request(&access_token, headers)
                         .await
                 }
                 DavResourceName::Scheduling => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalDelete)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCalDelete)?;
 
                     self.handle_scheduling_delete_request(&access_token, headers)
                         .await
@@ -410,7 +432,8 @@ impl DavRequestDispatcher for Server {
             DavMethod::PUT | DavMethod::POST | DavMethod::PATCH => match resource {
                 DavResourceName::Card => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCardPut)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCardPut)?;
 
                     self.handle_card_update_request(
                         &access_token,
@@ -422,7 +445,7 @@ impl DavRequestDispatcher for Server {
                 }
                 DavResourceName::Cal => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalPut)?;
+                    let access_token = access_token.assert_has_permission(Permission::DavCalPut)?;
 
                     self.handle_calendar_update_request(
                         &access_token,
@@ -434,7 +457,8 @@ impl DavRequestDispatcher for Server {
                 }
                 DavResourceName::File => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavFilePut)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavFilePut)?;
 
                     self.handle_file_update_request(
                         &access_token,
@@ -446,7 +470,8 @@ impl DavRequestDispatcher for Server {
                 }
                 DavResourceName::Scheduling => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalFreeBusyQuery)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCalFreeBusyQuery)?;
 
                     self.handle_scheduling_post_request(&access_token, headers, body)
                         .await
@@ -458,7 +483,7 @@ impl DavRequestDispatcher for Server {
                 match resource {
                     DavResourceName::Card => {
                         // Validate permissions
-                        access_token.assert_has_permission(if is_move {
+                        let access_token = access_token.assert_has_permission(if is_move {
                             Permission::DavCardMove
                         } else {
                             Permission::DavCardCopy
@@ -469,7 +494,7 @@ impl DavRequestDispatcher for Server {
                     }
                     DavResourceName::Cal => {
                         // Validate permissions
-                        access_token.assert_has_permission(if is_move {
+                        let access_token = access_token.assert_has_permission(if is_move {
                             Permission::DavCalMove
                         } else {
                             Permission::DavCalCopy
@@ -479,7 +504,7 @@ impl DavRequestDispatcher for Server {
                     }
                     DavResourceName::File => {
                         // Validate permissions
-                        access_token.assert_has_permission(if is_move {
+                        let access_token = access_token.assert_has_permission(if is_move {
                             Permission::DavFileMove
                         } else {
                             Permission::DavFileCopy
@@ -496,7 +521,8 @@ impl DavRequestDispatcher for Server {
             DavMethod::MKCALENDAR => match resource {
                 DavResourceName::Cal => {
                     // Validate permissions
-                    access_token.assert_has_permission(Permission::DavCalMkCol)?;
+                    let access_token =
+                        access_token.assert_has_permission(Permission::DavCalMkCol)?;
 
                     self.handle_calendar_mkcol_request(
                         &access_token,
@@ -509,7 +535,7 @@ impl DavRequestDispatcher for Server {
             },
             DavMethod::LOCK => {
                 // Validate permissions
-                access_token.assert_has_permission(match resource {
+                let access_token = access_token.assert_has_permission(match resource {
                     DavResourceName::File => Permission::DavFileLock,
                     DavResourceName::Cal => Permission::DavCalLock,
                     DavResourceName::Card => Permission::DavCardLock,
@@ -529,7 +555,7 @@ impl DavRequestDispatcher for Server {
             }
             DavMethod::UNLOCK => {
                 // Validate permissions
-                access_token.assert_has_permission(match resource {
+                let access_token = access_token.assert_has_permission(match resource {
                     DavResourceName::File => Permission::DavFileLock,
                     DavResourceName::Cal => Permission::DavCalLock,
                     DavResourceName::Card => Permission::DavCardLock,
@@ -541,7 +567,7 @@ impl DavRequestDispatcher for Server {
             }
             DavMethod::ACL => {
                 // Validate permissions
-                access_token.assert_has_permission(match resource {
+                let access_token = access_token.assert_has_permission(match resource {
                     DavResourceName::File => Permission::DavFileAcl,
                     DavResourceName::Cal => Permission::DavCalAcl,
                     DavResourceName::Card => Permission::DavCardAcl,
@@ -564,7 +590,7 @@ impl DavRequestHandler for Server {
     async fn handle_dav_request(
         &self,
         mut request: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: &HttpSessionData,
         resource: DavResourceName,
         method: DavMethod,

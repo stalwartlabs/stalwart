@@ -68,7 +68,11 @@ impl FilePropPatchRequestHandler for Server {
         let uri = headers.uri;
         let account_id = resource_.account_id;
         let files = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::FileNode,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource = files.map_resource(&resource_)?;
@@ -145,7 +149,7 @@ impl FilePropPatchRequestHandler for Server {
             let mut batch = BatchBuilder::new();
             let etag = new_node
                 .update(
-                    access_token,
+                    access_token.account_tenant_ids(),
                     node,
                     account_id,
                     resource.resource,

@@ -55,7 +55,7 @@ impl CardQueryRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::AddressBook)
             .await
             .caused_by(trc::location!())?;
         let Some(resource) = resources.by_path(

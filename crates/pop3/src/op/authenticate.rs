@@ -11,7 +11,7 @@ use common::{
     },
     listener::{SessionStream, limiter::LimiterResult},
 };
-use directory::Permission;
+use registry::schema::enums::Permission;
 use mail_parser::decoders::base64::base64_decode;
 use mail_send::Credentials;
 

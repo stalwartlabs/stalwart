@@ -8,7 +8,7 @@ use super::ElementLocation;
 use crate::{IpParts, SpamFilterContext, TextPart, modules::dnsbl::check_dnsbl};
 use common::{
     Server,
-    config::spamfilter::{Element, IpResolver, Location},
+    config::mailstore::spamfilter::{Element, IpResolver, Location},
 };
 use mail_auth::IprevResult;
 use mail_parser::{HeaderName, HeaderValue, Host};

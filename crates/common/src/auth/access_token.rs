@@ -8,7 +8,8 @@ use super::AccessToken;
 use crate::{
     Server,
     auth::{
-        AccessScope, AccessTo, AccessTokenInner, FALLBACK_ADMIN_ID, Permissions, PermissionsGroup,
+        AccessScope, AccessTo, AccessTokenInner, AccountTenantIds, FALLBACK_ADMIN_ID, Permissions,
+        PermissionsGroup,
     },
     network::limiter::{ConcurrencyLimiter, LimiterResult},
 };
@@ -38,178 +39,281 @@ impl Server {
         revision: u64,
         revision_account: u64,
     ) -> trc::Result<AccessTokenInner> {
-        // Calculate effective permissions
-        let (mut permissions, roles) = match account.permissions {
-            structs::Permissions::Inherit => {
-                (PermissionsGroup::default(), account.role_ids.as_slice())
-            }
-            structs::Permissions::Merge(permissions) => (
-                PermissionsGroup::from(permissions),
-                account.role_ids.as_slice(),
-            ),
-            structs::Permissions::Replace(permissions) => {
-                (PermissionsGroup::from(permissions), &[][..])
-            }
-        };
-        if !roles.is_empty() {
-            permissions = self
-                .add_role_permissions(permissions, roles.into_iter().map(|v| v.id() as u32))
-                .await
-                .caused_by(trc::location!())?
-        }
-
-        let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
-
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-
-        #[cfg(feature = "enterprise")]
-        {
-            if let Some(tenant_id) = tenant_id {
-                if self.is_enterprise_edition() {
-                    // Limit tenant permissions
-                    let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
-                    let (mut tenant_permissions, tenant_roles) =
-                        if let Some(permissions) = &tenant.permissions {
-                            if permissions.merge {
-                                ((**permissions).clone(), tenant.id_roles.as_slice())
-                            } else {
-                                ((**permissions).clone(), &[][..])
-                            }
-                        } else {
-                            (PermissionsGroup::default(), tenant.id_roles.as_slice())
-                        };
-                    if !tenant_roles.is_empty() {
-                        tenant_permissions = self
-                            .add_role_permissions(tenant_permissions, tenant_roles.iter().copied())
-                            .await
-                            .caused_by(trc::location!())?
+        match account {
+            Account::User(account) => {
+                // Calculate effective permissions
+                let (mut permissions, roles) = match account.permissions {
+                    structs::Permissions::Inherit => {
+                        (PermissionsGroup::default(), account.role_ids.as_slice())
                     }
-
-                    permissions.restrict(&tenant_permissions);
-                } else {
-                    // Enterprise edition downgrade, remove any tenant administrator permissions
-                    permissions.restrict(&PermissionsGroup::user());
+                    structs::Permissions::Merge(permissions) => (
+                        PermissionsGroup::from(permissions),
+                        account.role_ids.as_slice(),
+                    ),
+                    structs::Permissions::Replace(permissions) => {
+                        (PermissionsGroup::from(permissions), &[][..])
+                    }
+                };
+                if !roles.is_empty() {
+                    permissions = self
+                        .add_role_permissions(permissions, roles.iter().map(|v| v.id() as u32))
+                        .await
+                        .caused_by(trc::location!())?
                 }
-            }
-        }
 
-        // SPDX-SnippetEnd
+                let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
 
-        let can_impersonate = permissions.enabled.get(Permission::Impersonate as usize)
-            && !permissions.disabled.get(Permission::Impersonate as usize);
-        let member_of = account
-            .role_ids
-            .iter()
-            .map(|m| m.id() as u32)
-            .collect::<TinyVec<[u32; 3]>>();
-        let mut access_to: Vec<AccessTo> = Vec::new();
-        for grant_account_id in [account_id].into_iter().chain(member_of.iter().copied()) {
-            for acl_item in self
-                .store()
-                .acl_query(AclQuery::HasAccess { grant_account_id })
-                .await
-                .caused_by(trc::location!())?
-            {
-                if acl_item.to_account_id != account_id
-                    && !member_of.contains(&acl_item.to_account_id)
-                    && !can_impersonate
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+
+                #[cfg(feature = "enterprise")]
                 {
-                    let acl = Bitmap::<Acl>::from(acl_item.permissions);
-                    let collection = acl_item.to_collection;
-                    if !collection.is_valid() {
-                        return Err(trc::StoreEvent::DataCorruption
-                            .ctx(trc::Key::Reason, "Corrupted collection found in ACL key.")
-                            .details(format!("{acl_item:?}"))
-                            .account_id(grant_account_id)
-                            .caused_by(trc::location!()));
-                    }
+                    if let Some(tenant_id) = tenant_id {
+                        if self.is_enterprise_edition() {
+                            // Limit tenant permissions
+                            let tenant =
+                                self.tenant(tenant_id).await.caused_by(trc::location!())?;
+                            let (mut tenant_permissions, tenant_roles) =
+                                if let Some(permissions) = &tenant.permissions {
+                                    if permissions.merge {
+                                        ((**permissions).clone(), tenant.id_roles.as_slice())
+                                    } else {
+                                        ((**permissions).clone(), &[][..])
+                                    }
+                                } else {
+                                    (PermissionsGroup::default(), tenant.id_roles.as_slice())
+                                };
+                            if !tenant_roles.is_empty() {
+                                tenant_permissions = self
+                                    .add_role_permissions(
+                                        tenant_permissions,
+                                        tenant_roles.iter().copied(),
+                                    )
+                                    .await
+                                    .caused_by(trc::location!())?
+                            }
 
-                    let mut collections: Bitmap<Collection> = Bitmap::new();
-                    if acl.contains(Acl::Read) {
-                        collections.insert(collection);
-                    }
-                    if acl.contains(Acl::ReadItems)
-                        && let Some(child_col) = collection.child_collection()
-                    {
-                        collections.insert(child_col);
-                    }
-
-                    if !collections.is_empty() {
-                        if let Some(idx) = access_to
-                            .iter()
-                            .position(|a| a.account_id == acl_item.to_account_id)
-                        {
-                            access_to[idx].collections.union(&collections);
+                            permissions.restrict(&tenant_permissions);
                         } else {
-                            access_to.push(AccessTo {
-                                account_id: acl_item.to_account_id,
-                                collections,
-                            });
+                            // Enterprise edition downgrade, remove any tenant administrator permissions
+                            permissions.restrict(&PermissionsGroup::user());
                         }
                     }
                 }
+
+                // SPDX-SnippetEnd
+
+                let can_impersonate = permissions.enabled.get(Permission::Impersonate as usize)
+                    && !permissions.disabled.get(Permission::Impersonate as usize);
+                let member_of = account
+                    .member_group_ids
+                    .iter()
+                    .map(|m| m.id() as u32)
+                    .collect::<TinyVec<[u32; 3]>>();
+                let mut access_to: Vec<AccessTo> = Vec::new();
+                for grant_account_id in [account_id].into_iter().chain(member_of.iter().copied()) {
+                    for acl_item in self
+                        .store()
+                        .acl_query(AclQuery::HasAccess { grant_account_id })
+                        .await
+                        .caused_by(trc::location!())?
+                    {
+                        if acl_item.to_account_id != account_id
+                            && !member_of.contains(&acl_item.to_account_id)
+                            && !can_impersonate
+                        {
+                            let acl = Bitmap::<Acl>::from(acl_item.permissions);
+                            let collection = acl_item.to_collection;
+                            if !collection.is_valid() {
+                                return Err(trc::StoreEvent::DataCorruption
+                                    .ctx(trc::Key::Reason, "Corrupted collection found in ACL key.")
+                                    .details(format!("{acl_item:?}"))
+                                    .account_id(grant_account_id)
+                                    .caused_by(trc::location!()));
+                            }
+
+                            let mut collections: Bitmap<Collection> = Bitmap::new();
+                            if acl.contains(Acl::Read) {
+                                collections.insert(collection);
+                            }
+                            if acl.contains(Acl::ReadItems)
+                                && let Some(child_col) = collection.child_collection()
+                            {
+                                collections.insert(child_col);
+                            }
+
+                            if !collections.is_empty() {
+                                if let Some(idx) = access_to
+                                    .iter()
+                                    .position(|a| a.account_id == acl_item.to_account_id)
+                                {
+                                    access_to[idx].collections.union(&collections);
+                                } else {
+                                    access_to.push(AccessTo {
+                                        account_id: acl_item.to_account_id,
+                                        collections,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let now = now();
+                let credential_scopes = account
+                    .credentials
+                    .into_iter()
+                    .filter_map(|pass| {
+                        let expires_at = pass
+                            .expires_at
+                            .map(|v| v.timestamp() as u64)
+                            .unwrap_or(u64::MAX);
+                        if expires_at > now {
+                            let permissions = match pass.permissions {
+                                structs::Permissions::Inherit => permissions.clone().finalize(),
+                                structs::Permissions::Merge(merge) => {
+                                    let mut permissions = permissions.clone();
+                                    permissions.union(&PermissionsGroup::from(merge));
+                                    permissions.finalize()
+                                }
+                                structs::Permissions::Replace(replace) => {
+                                    PermissionsGroup::from(replace).finalize()
+                                }
+                            };
+                            Some(AccessScope {
+                                credential_id: pass.credential_id as u32,
+                                permissions,
+                                expires_at,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                Ok(AccessTokenInner {
+                    concurrent_imap_requests: self
+                        .core
+                        .imap
+                        .rate_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_http_requests: self
+                        .core
+                        .jmap
+                        .request_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_uploads: self
+                        .core
+                        .jmap
+                        .upload_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    obj_size: 0,
+                    revision,
+                    revision_account,
+                    account_id,
+                    tenant_id,
+                    member_of,
+                    access_to: access_to.into_boxed_slice(),
+                    scopes: [AccessScope::new(permissions.finalize(), u32::MAX)]
+                        .into_iter()
+                        .chain(credential_scopes)
+                        .collect::<Box<[AccessScope]>>(),
+                }
+                .update_size())
+            }
+            Account::Group(account) => {
+                // Calculate effective permissions
+                let (mut permissions, roles) = match account.permissions {
+                    structs::Permissions::Inherit => {
+                        (PermissionsGroup::default(), account.role_ids.as_slice())
+                    }
+                    structs::Permissions::Merge(permissions) => (
+                        PermissionsGroup::from(permissions),
+                        account.role_ids.as_slice(),
+                    ),
+                    structs::Permissions::Replace(permissions) => {
+                        (PermissionsGroup::from(permissions), &[][..])
+                    }
+                };
+                if !roles.is_empty() {
+                    permissions = self
+                        .add_role_permissions(permissions, roles.iter().map(|v| v.id() as u32))
+                        .await
+                        .caused_by(trc::location!())?
+                }
+
+                let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
+
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+
+                #[cfg(feature = "enterprise")]
+                {
+                    if let Some(tenant_id) = tenant_id {
+                        if self.is_enterprise_edition() {
+                            // Limit tenant permissions
+                            let tenant =
+                                self.tenant(tenant_id).await.caused_by(trc::location!())?;
+                            let (mut tenant_permissions, tenant_roles) =
+                                if let Some(permissions) = &tenant.permissions {
+                                    if permissions.merge {
+                                        ((**permissions).clone(), tenant.id_roles.as_slice())
+                                    } else {
+                                        ((**permissions).clone(), &[][..])
+                                    }
+                                } else {
+                                    (PermissionsGroup::default(), tenant.id_roles.as_slice())
+                                };
+                            if !tenant_roles.is_empty() {
+                                tenant_permissions = self
+                                    .add_role_permissions(
+                                        tenant_permissions,
+                                        tenant_roles.iter().copied(),
+                                    )
+                                    .await
+                                    .caused_by(trc::location!())?
+                            }
+
+                            permissions.restrict(&tenant_permissions);
+                        } else {
+                            // Enterprise edition downgrade, remove any tenant administrator permissions
+                            permissions.restrict(&PermissionsGroup::user());
+                        }
+                    }
+                }
+
+                // SPDX-SnippetEnd
+
+                Ok(AccessTokenInner {
+                    concurrent_imap_requests: self
+                        .core
+                        .imap
+                        .rate_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_http_requests: self
+                        .core
+                        .jmap
+                        .request_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_uploads: self
+                        .core
+                        .jmap
+                        .upload_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    obj_size: 0,
+                    revision,
+                    revision_account,
+                    account_id,
+                    tenant_id,
+                    member_of: Default::default(),
+                    access_to: Default::default(),
+                    scopes: Box::new([AccessScope::new(permissions.finalize(), u32::MAX)]),
+                }
+                .update_size())
             }
         }
-
-        let now = now();
-        let credential_scopes = account
-            .credentials
-            .into_iter()
-            .filter_map(|pass| {
-                let expires_at = pass
-                    .expires_at
-                    .map(|v| v.timestamp() as u64)
-                    .unwrap_or(u64::MAX);
-                if expires_at > now {
-                    let permissions = match pass.permissions {
-                        structs::Permissions::Inherit => permissions.clone().finalize(),
-                        structs::Permissions::Merge(merge) => {
-                            let mut permissions = permissions.clone();
-                            permissions.union(&PermissionsGroup::from(merge));
-                            permissions.finalize()
-                        }
-                        structs::Permissions::Replace(replace) => {
-                            PermissionsGroup::from(replace).finalize()
-                        }
-                    };
-                    Some(AccessScope {
-                        credential_id: pass.credential_id as u32,
-                        permissions,
-                        expires_at,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Ok(AccessTokenInner {
-            concurrent_imap_requests: self.core.imap.rate_concurrent.map(ConcurrencyLimiter::new),
-            concurrent_http_requests: self
-                .core
-                .jmap
-                .request_max_concurrent
-                .map(ConcurrencyLimiter::new),
-            concurrent_uploads: self
-                .core
-                .jmap
-                .upload_max_concurrent
-                .map(ConcurrencyLimiter::new),
-            obj_size: 0,
-            revision,
-            revision_account,
-            account_id,
-            tenant_id,
-            member_of,
-            access_to: access_to.into_boxed_slice(),
-            scopes: [AccessScope::new(permissions.finalize(), u32::MAX)]
-                .into_iter()
-                .chain(credential_scopes)
-                .collect::<Box<[AccessScope]>>(),
-        }
-        .update_size())
     }
 
     pub async fn access_token(&self, account_id: u32) -> trc::Result<Arc<AccessTokenInner>> {
@@ -370,7 +474,7 @@ impl AccessToken {
         self.inner
             .scopes
             .get(self.scope_idx)
-            .map_or(false, |scope| scope.permissions.get(permission as usize))
+            .is_some_and(|scope| scope.permissions.get(permission as usize))
     }
 
     pub fn is_valid(&self) -> bool {
@@ -378,7 +482,7 @@ impl AccessToken {
         self.inner
             .scopes
             .get(self.scope_idx)
-            .map_or(false, |scope| scope.expires_at > now())
+            .is_some_and(|scope| scope.expires_at > now())
     }
 
     pub fn assert_has_permissions(self, permissions: &[Permission]) -> trc::Result<Self> {
@@ -397,6 +501,17 @@ impl AccessToken {
     pub fn assert_has_permission(self, permission: Permission) -> trc::Result<Self> {
         if self.has_permission(permission) {
             Ok(self)
+        } else {
+            Err(trc::SecurityEvent::Unauthorized
+                .into_err()
+                .details(permission.as_str())
+                .account_id(self.account_id()))
+        }
+    }
+
+    pub fn enforce_permission(&self, permission: Permission) -> trc::Result<()> {
+        if self.has_permission(permission) {
+            Ok(())
         } else {
             Err(trc::SecurityEvent::Unauthorized
                 .into_err()
@@ -492,6 +607,13 @@ impl AccessToken {
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
     }
 
+    pub fn account_tenant_ids(&self) -> AccountTenantIds {
+        AccountTenantIds {
+            account_id: self.account_id(),
+            tenant_id: self.tenant_id(),
+        }
+    }
+
     pub fn new_admin() -> AccessToken {
         AccessToken {
             scope_idx: 0,
@@ -527,13 +649,6 @@ impl AccessTokenInner {
         }
     }
 
-    pub fn with_scopes(self, scopes: impl IntoIterator<Item = AccessScope>) -> Self {
-        Self {
-            scopes: scopes.into_iter().collect(),
-            ..self
-        }
-    }
-
     pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
         self.tenant_id = tenant_id;
         self
@@ -546,10 +661,6 @@ impl AccessTokenInner {
             + (self.scopes.len() * std::mem::size_of::<AccessScope>()))
             as u64;
         self
-    }
-
-    pub fn is_fresh(&self, account: &Account) -> bool {
-        self.member_of.len() == account.member_group_ids.len()
     }
 }
 
@@ -570,14 +681,25 @@ impl AccessScope {
 
 fn hash_account(account: &Account) -> u64 {
     let mut s = AHasher::default();
-    account.member_tenant_id.hash(&mut s);
-    account.role_ids.hash(&mut s);
-    hash_permissions(&mut s, &account.permissions);
-    for credential in &account.credentials {
-        credential.credential_id.hash(&mut s);
-        credential.expires_at.hash(&mut s);
-        hash_permissions(&mut s, &credential.permissions);
+
+    match account {
+        Account::User(account) => {
+            account.member_tenant_id.hash(&mut s);
+            account.role_ids.hash(&mut s);
+            hash_permissions(&mut s, &account.permissions);
+            for credential in &account.credentials {
+                credential.credential_id.hash(&mut s);
+                credential.expires_at.hash(&mut s);
+                hash_permissions(&mut s, &credential.permissions);
+            }
+        }
+        Account::Group(account) => {
+            account.member_tenant_id.hash(&mut s);
+            account.role_ids.hash(&mut s);
+            hash_permissions(&mut s, &account.permissions);
+        }
     }
+
     s.finish()
 }
 

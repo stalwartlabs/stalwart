@@ -29,7 +29,7 @@ use calcard::{
 };
 use common::{
     DavName, Server,
-    auth::{AccessToken, ResourceToken, oauth::GrantType},
+    auth::{AccountInfo, oauth::GrantType},
     config::groupware::CalendarTemplateVariable,
     i18n,
 };
@@ -55,8 +55,7 @@ pub struct ItipRsvpUrl(String);
 pub trait ItipIngest: Sync + Send {
     fn itip_ingest(
         &self,
-        access_token: &AccessToken,
-        resource_token: &ResourceToken,
+        account_info: &AccountInfo,
         sender: &str,
         recipient: &str,
         itip_message: &str,
@@ -79,8 +78,7 @@ pub trait ItipIngest: Sync + Send {
 impl ItipIngest for Server {
     async fn itip_ingest(
         &self,
-        access_token: &AccessToken,
-        resource_token: &ResourceToken,
+        account_info: &AccountInfo,
         sender: &str,
         recipient: &str,
         itip_message: &str,
@@ -134,7 +132,8 @@ impl ItipIngest for Server {
             }
         }
 
-        let itip_snapshots = itip_snapshot(&itip, access_token.emails.as_slice(), false)?;
+        let emails = account_info.addresses().collect::<Vec<_>>();
+        let itip_snapshots = itip_snapshot(&itip, emails.as_slice(), false)?;
         if !itip_snapshots.sender_is_organizer_or_attendee(sender) {
             return Err(ItipIngestError::Message(
                 ItipError::SenderIsNotOrganizerNorAttendee,
@@ -142,14 +141,14 @@ impl ItipIngest for Server {
         }
 
         // Obtain changedBy
-        let changed_by = if let Some(id) = self.email_to_id(self.directory(), sender, 0).await? {
+        let changed_by = if let Some(id) = self.account_id(sender).await? {
             ChangedBy::PrincipalId(id)
         } else {
             ChangedBy::CalendarAddress(sender.into())
         };
 
         // Find event by UID
-        let account_id = access_token.account_id;
+        let account_id = account_info.account_id();
         let document_id = self
             .document_ids_matching(
                 account_id,
@@ -181,8 +180,7 @@ impl ItipIngest for Server {
                     .caused_by(trc::location!())?;
 
                 // Process the iTIP message
-                let snapshots =
-                    itip_snapshot(&event.data.event, access_token.emails.as_slice(), false)?;
+                let snapshots = itip_snapshot(&event.data.event, emails.as_slice(), false)?;
                 let is_organizer_update = !itip_snapshots.organizer.email.is_local;
                 match itip_process_message(
                     &event.data.event,
@@ -206,7 +204,7 @@ impl ItipIngest for Server {
                             .saturating_sub(event_.inner.size.to_native() as u64);
                         if extra_bytes > 0
                             && self
-                                .has_available_quota(resource_token, extra_bytes)
+                                .has_available_quota(account_id, extra_bytes)
                                 .await
                                 .is_err()
                         {
@@ -253,7 +251,13 @@ impl ItipIngest for Server {
                         // Prepare write batch
                         let mut batch = BatchBuilder::new();
                         event
-                            .update(access_token, event_, account_id, document_id, &mut batch)
+                            .update(
+                                account_info.account_tenant_ids(),
+                                event_,
+                                account_id,
+                                document_id,
+                                &mut batch,
+                            )
                             .caused_by(trc::location!())?;
                         if prev_email_alarm != next_email_alarm {
                             if let Some(prev_alarm) = prev_email_alarm {
@@ -264,7 +268,12 @@ impl ItipIngest for Server {
                             }
                         }
                         itip_message
-                            .insert(access_token, account_id, itip_document_id, &mut batch)
+                            .insert(
+                                account_info.account_tenant_ids(),
+                                account_id,
+                                itip_document_id,
+                                &mut batch,
+                            )
                             .caused_by(trc::location!())?;
                         self.commit_batch(batch).await.caused_by(trc::location!())?;
 
@@ -301,7 +310,7 @@ impl ItipIngest for Server {
 
             // Validate quota
             if self
-                .has_available_quota(resource_token, itip_message.len() as u64)
+                .has_available_quota(account_id, itip_message.len() as u64)
                 .await
                 .is_err()
             {
@@ -310,7 +319,7 @@ impl ItipIngest for Server {
 
             // Obtain parent calendar
             let Some(parent_id) = self
-                .get_or_create_default_calendar(access_token, account_id)
+                .get_or_create_default_calendar(account_id, account_id)
                 .await
                 .caused_by(trc::location!())?
             else {
@@ -359,7 +368,7 @@ impl ItipIngest for Server {
             let mut batch = BatchBuilder::new();
             event
                 .insert(
-                    access_token,
+                    account_info.account_tenant_ids(),
                     account_id,
                     document_id,
                     next_email_alarm,
@@ -367,7 +376,12 @@ impl ItipIngest for Server {
                 )
                 .caused_by(trc::location!())?;
             itip_message
-                .insert(access_token, account_id, itip_document_id, &mut batch)
+                .insert(
+                    account_info.account_tenant_ids(),
+                    account_id,
+                    itip_document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
             self.commit_batch(batch).await.caused_by(trc::location!())?;
 
@@ -481,14 +495,14 @@ impl ItipIngest for Server {
 
                 if did_change {
                     // Prepare write batch
-                    let access_token = self
-                        .get_access_token(rsvp.account_id)
+                    let account_info = self
+                        .account_info(rsvp.account_id)
                         .await
                         .caused_by(trc::location!())?;
                     let mut batch = BatchBuilder::new();
                     new_event
                         .update(
-                            &access_token,
+                            account_info.account_tenant_ids(),
                             event,
                             rsvp.account_id,
                             rsvp.document_id,

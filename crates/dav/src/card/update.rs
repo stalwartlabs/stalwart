@@ -60,7 +60,11 @@ impl CardUpdateRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource_name = fix_percent_encoding(
@@ -177,11 +181,7 @@ impl CardUpdateRequestHandler for Server {
             let extra_bytes =
                 (bytes.len() as u64).saturating_sub(u32::from(card.inner.size) as u64);
             if extra_bytes > 0 {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    extra_bytes,
-                )
-                .await?;
+                self.has_available_quota(account_id, extra_bytes).await?;
             }
 
             // Build node
@@ -194,7 +194,13 @@ impl CardUpdateRequestHandler for Server {
             // Prepare write batch
             let mut batch = BatchBuilder::new();
             let etag = new_card
-                .update(access_token, card, account_id, document_id, &mut batch)
+                .update(
+                    access_token.account_tenant_ids(),
+                    card,
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?
                 .etag();
             self.commit_batch(batch).await.caused_by(trc::location!())?;
@@ -245,11 +251,8 @@ impl CardUpdateRequestHandler for Server {
 
             // Validate quota
             if !bytes.is_empty() {
-                self.has_available_quota(
-                    &self.get_resource_token(access_token, account_id).await?,
-                    bytes.len() as u64,
-                )
-                .await?;
+                self.has_available_quota(account_id, bytes.len() as u64)
+                    .await?;
             }
 
             // Build node
@@ -271,7 +274,12 @@ impl CardUpdateRequestHandler for Server {
                 .await
                 .caused_by(trc::location!())?;
             let etag = card
-                .insert(access_token, account_id, document_id, &mut batch)
+                .insert(
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?
                 .etag();
             self.commit_batch(batch).await.caused_by(trc::location!())?;

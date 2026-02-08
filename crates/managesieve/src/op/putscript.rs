@@ -6,7 +6,7 @@
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use registry::schema::enums::Permission;
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
 use sieve::compiler::ErrorType;
@@ -142,7 +142,7 @@ impl<T: SessionStream> Session<T> {
                                 .with_blob_hash(blob_hash.clone()),
                         )
                         .with_current(script)
-                        .with_access_token(access_token),
+                        .with_account_info(&account_info),
                 )
                 .caused_by(trc::location!())?
                 .clear(blob_hold);
@@ -185,7 +185,7 @@ impl<T: SessionStream> Session<T> {
                             SieveScript::new(name.clone(), blob_hash.clone())
                                 .with_size(script_size as u32),
                         )
-                        .with_access_token(access_token),
+                        .with_account_info(&account_info),
                 )
                 .caused_by(trc::location!())?
                 .clear(blob_hold);

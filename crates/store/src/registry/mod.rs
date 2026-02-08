@@ -5,10 +5,41 @@
  */
 
 pub mod bootstrap;
+pub mod query;
 
-use registry::types::{ObjectType, id::Id};
+use registry::{
+    schema::prelude::{Object, Property},
+    types::{ObjectType, id::Id},
+};
 
 pub struct RegistryObject<T: ObjectType> {
     pub id: Id,
     pub object: T,
+}
+
+pub struct RegistryQuery {
+    pub object_type: Object,
+    pub filters: Vec<RegistryFilter>,
+}
+
+pub struct RegistryFilter {
+    pub property: Property,
+    pub op: RegistryFilterOp,
+    pub value: RegistryFilterValue,
+}
+
+pub enum RegistryFilterOp {
+    Equal,
+    NotEqual,
+    GreaterThan,
+    LessThan,
+    GreaterThanOrEqual,
+    LessThanOrEqual,
+    TextMatch,
+}
+
+pub enum RegistryFilterValue {
+    String(String),
+    Integer(u64),
+    Boolean(bool),
 }

@@ -18,7 +18,7 @@ use crate::{
         url::SpamFilterAnalyzeUrl,
     },
 };
-use common::{Server, config::spamfilter::SpamFilterAction};
+use common::{Server, config::mailstore::spamfilter::SpamFilterAction};
 use std::{fmt::Write, future::Future, vec};
 
 // SPDX-SnippetBegin
