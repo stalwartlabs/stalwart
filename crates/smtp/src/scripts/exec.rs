@@ -6,7 +6,7 @@
 
 use std::{sync::Arc, time::SystemTime};
 
-use common::listener::SessionStream;
+use common::network::SessionStream;
 
 use mail_auth::common::resolver::ToReverseName;
 use sieve::{Envelope, Sieve, runtime::Variable};

@@ -4,22 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
+use super::{ImapSessionManager, Session, State};
+use crate::{GREETING_WITH_TLS, GREETING_WITHOUT_TLS};
 use common::{
-    core::BuildServer,
-    listener::{SessionData, SessionManager, SessionResult, SessionStream, stream::NullIo},
+    BuildServer,
+    network::{SessionData, SessionManager, SessionResult, SessionStream, stream::NullIo},
 };
 use imap_proto::{
     protocol::{ProtocolVersion, SerializeResponse},
     receiver::Receiver,
 };
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::server::TlsStream;
-
-use crate::{GREETING_WITH_TLS, GREETING_WITHOUT_TLS};
-
-use super::{ImapSessionManager, Session, State};
 
 impl SessionManager for ImapSessionManager {
     #[allow(clippy::manual_async_fn)]

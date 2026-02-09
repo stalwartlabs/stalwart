@@ -7,11 +7,10 @@
 use crate::{inbound::auth::SaslToken, queue::QueueId};
 use common::{
     Inner, Server,
-    auth::AccessToken,
+    auth::AccountInfo,
     config::smtp::auth::VerifyStrategy,
-    listener::{ServerInstance, asn::AsnGeoLookupResult},
+    network::{ServerInstance, asn::AsnGeoLookupResult},
 };
-use directory::Directory;
 use mail_auth::{IprevOutput, SpfOutput};
 use smtp_proto::request::receiver::{
     BdatReceiver, DataReceiver, DummyDataReceiver, DummyLineReceiver, LineReceiver, RequestReceiver,
@@ -77,7 +76,7 @@ pub struct SessionData {
     pub rcpt_oks: usize,
     pub message: Vec<u8>,
 
-    pub authenticated_as: Option<Arc<AccessToken>>,
+    pub authenticated_as: Option<AccountInfo>,
     pub auth_errors: usize,
 
     pub priority: i16,
@@ -113,7 +112,6 @@ pub struct SessionParameters {
     pub ehlo_reject_non_fqdn: bool,
 
     // Auth parameters
-    pub auth_directory: Option<Arc<Directory>>,
     pub auth_require: bool,
     pub auth_errors_max: usize,
     pub auth_errors_wait: Duration,
@@ -208,7 +206,7 @@ impl PartialOrd for SessionAddress {
     }
 }
 
-impl Session<common::listener::stream::NullIo> {
+impl Session<common::network::stream::NullIo> {
     pub fn local(
         server: Server,
         instance: std::sync::Arc<ServerInstance>,
@@ -219,13 +217,12 @@ impl Session<common::listener::stream::NullIo> {
             state: State::None,
             instance,
             server,
-            stream: common::listener::stream::NullIo::default(),
+            stream: common::network::stream::NullIo::default(),
             data,
             params: SessionParameters {
                 timeout: Default::default(),
                 ehlo_require: Default::default(),
                 ehlo_reject_non_fqdn: Default::default(),
-                auth_directory: Default::default(),
                 auth_require: Default::default(),
                 auth_errors_max: Default::default(),
                 auth_errors_wait: Default::default(),
@@ -260,7 +257,7 @@ impl Session<common::listener::stream::NullIo> {
 
 impl SessionData {
     pub fn local(
-        authenticated_as: Arc<AccessToken>,
+        authenticated_as: AccountInfo,
         mail_from: Option<SessionAddress>,
         rcpt_to: Vec<SessionAddress>,
         message: Vec<u8>,
@@ -297,11 +294,11 @@ impl SessionData {
     }
 }
 
-impl Default for SessionData {
+/*impl Default for SessionData {
     fn default() -> Self {
-        Self::local(Arc::new(AccessToken::from_id(0)), None, vec![], vec![], 0)
+        Self::local(AccessToken::from_id(0), None, vec![], vec![], 0)
     }
-}
+}*/
 
 impl SessionAddress {
     pub fn new(address: String) -> Self {

@@ -31,7 +31,7 @@ use jmap_proto::{
     request::{IntoValid, reference::MaybeResultReference},
 };
 use jmap_tools::{Key, Map, Value};
-use std::{str::FromStr, sync::Arc};
+use std::{borrow::Cow, str::FromStr};
 use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
@@ -67,7 +67,11 @@ impl CalendarEventGet for Server {
         let properties = request.unwrap_properties(&[]);
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
         let calendar_event_ids = if access_token.is_member(account_id) {
             cache.document_ids(false).collect::<RoaringBitmap>()
@@ -153,14 +157,23 @@ impl CalendarEventGet for Server {
                 vec![],
             )
         };
+        let current_account_info = self
+            .account_info(access_token.account_id())
+            .await
+            .caused_by(trc::location!())?;
         let return_is_origin = if return_is_origin {
-            if access_token.account_id() == account_id {
-                OriginAddresses::Ref(access_token)
+            if account_id == access_token.account_id() {
+                Some(Cow::Borrowed(&current_account_info))
             } else {
-                OriginAddresses::Owned(self.get_access_token(account_id).await?)
+                Some(
+                    self.account_info(account_id)
+                        .await
+                        .map(Cow::Owned)
+                        .caused_by(trc::location!())?,
+                )
             }
         } else {
-            OriginAddresses::None
+            None
         };
 
         // Sort by baseId
@@ -255,9 +268,8 @@ impl CalendarEventGet for Server {
                                         ),
                                     )
                                 }) || entry.calendar_address().is_some_and(|addr| {
-                                    access_token
-                                        .emails
-                                        .iter()
+                                    current_account_info
+                                        .addresses()
                                         .any(|a| a.eq_ignore_ascii_case(addr))
                                 })
                             }
@@ -464,13 +476,13 @@ impl CalendarEventGet for Server {
             }
 
             for (id, ical, expansion) in results {
-                let is_origin = return_is_origin.addresses().is_some_and(|addresses| {
+                let is_origin = return_is_origin.as_ref().is_some_and(|account| {
                     ical.components
                         .iter()
                         .find(|c| c.component_type.is_scheduling_object())
                         .and_then(|c| c.property(&ICalendarProperty::Organizer))
                         .and_then(|v| v.calendar_address())
-                        .is_none_or(|v| addresses.iter().any(|a| a.eq_ignore_ascii_case(v)))
+                        .is_none_or(|v| account.addresses().any(|a| a.eq_ignore_ascii_case(v)))
                 });
 
                 let jscal = ical
@@ -599,21 +611,5 @@ impl CalendarEventGet for Server {
         }
 
         Ok(response)
-    }
-}
-
-enum OriginAddresses<'x> {
-    Owned(Arc<AccessToken>),
-    Ref(&'x AccessToken),
-    None,
-}
-
-impl<'x> OriginAddresses<'x> {
-    fn addresses(&self) -> Option<&[String]> {
-        match self {
-            OriginAddresses::Owned(t) if !t.emails.is_empty() => Some(&t.emails),
-            OriginAddresses::Ref(t) if !t.emails.is_empty() => Some(&t.emails),
-            _ => None,
-        }
     }
 }

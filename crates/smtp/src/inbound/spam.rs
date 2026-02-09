@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{config::spamfilter::SpamFilterAction, listener::SessionStream};
+use crate::core::Session;
+use common::{config::mailstore::spamfilter::SpamFilterAction, network::SessionStream};
 use mail_auth::{ArcOutput, DkimOutput, DmarcResult, dmarc::Policy};
 use mail_parser::Message;
 use spam_filter::{
@@ -14,8 +15,6 @@ use spam_filter::{
         score::{SpamFilterAnalyzeScore, SpamFilterScore},
     },
 };
-
-use crate::core::Session;
 
 impl<T: SessionStream> Session<T> {
     pub async fn spam_classify<'x>(
@@ -64,7 +63,7 @@ impl<T: SessionStream> Session<T> {
             iprev_result: self.data.iprev.as_ref(),
             remote_ip: self.data.remote_ip,
             ehlo_domain: self.data.helo_domain.as_str().into(),
-            authenticated_as: self.data.authenticated_as.as_ref().map(|a| a.name.as_str()),
+            authenticated_as: self.data.authenticated_as.as_ref().map(|a| a.name()),
             asn: self.data.asn_geo_data.asn.as_ref().map(|a| a.id),
             country: self.data.asn_geo_data.country.as_ref().map(|c| c.as_str()),
             is_tls: self.stream.is_tls(),

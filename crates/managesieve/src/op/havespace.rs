@@ -6,9 +6,9 @@
 
 use std::time::Instant;
 
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use imap_proto::receiver::Request;
+use registry::schema::enums::Permission;
 use trc::AddContext;
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
@@ -44,19 +44,19 @@ impl<T: SessionStream> Session<T> {
             })?;
 
         // Validate name
-        let access_token = self.state.access_token();
-        let account_id = access_token.account_id();
+        let account_id = self.state.access_token().account_id();
+        let account = self.server.account(account_id).await?;
         self.validate_name(account_id, &name).await?;
 
         // Validate quota
-        if access_token.quota == 0
+        if account.disk_quota() == 0
             || size as i64
                 + self
                     .server
-                    .get_used_quota(account_id)
+                    .get_used_quota_account(account_id)
                     .await
                     .caused_by(trc::location!())?
-                <= access_token.quota as i64
+                <= account.disk_quota() as i64
         {
             trc::event!(
                 ManageSieve(trc::ManageSieveEvent::HaveSpace),

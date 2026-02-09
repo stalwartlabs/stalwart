@@ -8,15 +8,16 @@ use crate::{
     core::{Session, SessionAddress},
     scripts::ScriptResult,
 };
-use common::{config::smtp::session::Stage, listener::SessionStream, scripts::ScriptModification};
+use common::{config::smtp::session::Stage, network::SessionStream, scripts::ScriptModification};
 use mail_auth::{IprevOutput, IprevResult, SpfOutput, SpfResult, spf::verify::SpfParameters};
+use registry::schema::structs::Rate;
 use smtp_proto::{MAIL_BY_NOTIFY, MAIL_BY_RETURN, MAIL_REQUIRETLS, MailFrom, MtPriority};
 use std::{
     borrow::Cow,
     time::{Duration, Instant, SystemTime},
 };
 use trc::SmtpEvent;
-use utils::{DomainPart, config::Rate};
+use utils::DomainPart;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_mail_from(&mut self, from: MailFrom<Cow<'_, str>>) -> Result<(), ()> {
@@ -244,10 +245,7 @@ impl<T: SessionStream> Session<T> {
             {
                 let address_lcase = self.data.mail_from.as_ref().unwrap().address_lcase.as_str();
                 if authenticated_as != address_lcase
-                    && !self.authenticated_emails().iter().any(|e| {
-                        e == address_lcase
-                            || (e.starts_with('@') && address_lcase.ends_with(e.as_str()))
-                    })
+                    && !self.authenticated_emails().any(|e| e == address_lcase)
                 {
                     trc::event!(
                         Smtp(SmtpEvent::MailFromUnauthorized),
@@ -257,8 +255,7 @@ impl<T: SessionStream> Session<T> {
                             .into_iter()
                             .chain(
                                 self.authenticated_emails()
-                                    .iter()
-                                    .map(|e| trc::Value::String(e.as_str().into()))
+                                    .map(|e| trc::Value::String(e.into()))
                             )
                             .collect::<Vec<_>>()
                     );
@@ -559,16 +556,9 @@ impl<T: SessionStream> Session<T> {
                 .await,
         ) {
             // Do not send SPF auth failures to local domains, as they are likely relay attempts (which are blocked later on)
-            match self
-                .server
-                .core
-                .storage
-                .directory
-                .is_local_domain(recipient.domain_part())
-                .await
-            {
-                Ok(true) => return Ok(result),
-                Ok(false) => (),
+            match self.server.domain(recipient.domain_part()).await {
+                Ok(Some(_)) => return Ok(result),
+                Ok(None) => (),
                 Err(err) => {
                     trc::error!(
                         err.caused_by(trc::location!())

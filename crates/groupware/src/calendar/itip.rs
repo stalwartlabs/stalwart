@@ -496,13 +496,13 @@ impl ItipIngest for Server {
                 if did_change {
                     // Prepare write batch
                     let account_info = self
-                        .account_info(rsvp.account_id)
+                        .account(rsvp.account_id)
                         .await
                         .caused_by(trc::location!())?;
                     let mut batch = BatchBuilder::new();
                     new_event
                         .update(
-                            account_info.account_tenant_ids(),
+                            account_info.account_tenant_ids(rsvp.account_id),
                             event,
                             rsvp.account_id,
                             rsvp.document_id,

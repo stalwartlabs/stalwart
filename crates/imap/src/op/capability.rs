@@ -7,8 +7,7 @@
 use std::time::Instant;
 
 use crate::core::Session;
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{
@@ -17,6 +16,7 @@ use imap_proto::{
     },
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_capability(&mut self, request: Request<Command>) -> trc::Result<()> {

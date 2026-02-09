@@ -18,6 +18,7 @@ trc = { path = "../trc" }
 spam-filter = { path = "../spam-filter" }
 email = { path = "../email" }
 groupware = { path = "../groupware" }
+registry = { path = "../registry" }
 calcard = { version = "0.3" }
 smtp-proto = { version = "0.2" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 

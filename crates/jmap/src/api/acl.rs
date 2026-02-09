@@ -5,12 +5,13 @@
  */
 
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
-use directory::backend::internal::manage::ManageDirectory;
 use jmap_proto::{
     error::set::SetError,
     object::{JmapRight, JmapSharedObject},
 };
 use jmap_tools::{JsonPointerIter, Key, Map, Property, Value};
+use registry::schema::prelude::Object;
+use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use types::{
     acl::{Acl, AclGrant},
     id::Id,
@@ -240,8 +241,8 @@ impl JmapAcl for Server {
         }
 
         let principal_ids = self
-            .store()
-            .principal_ids(None, None)
+            .registry()
+            .query::<RoaringBitmap>(RegistryQuery::new(Object::Account))
             .await
             .unwrap_or_default();
 

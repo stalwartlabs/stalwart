@@ -10,8 +10,7 @@ use crate::{
     op::ImapContext,
     spawn_op,
 };
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -19,6 +18,7 @@ use imap_proto::{
     protocol::status::{Status, StatusItem, StatusItemType},
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use trc::AddContext;
 use types::{id::Id, keyword::Keyword};
@@ -89,11 +89,11 @@ impl<T: SessionStream> SessionData<T> {
             mailbox
         } else {
             // Some IMAP clients will try to get the status of a mailbox with the NoSelect flag
-            return if mailbox_name == self.server.core.jmap.shared_folder
+            return if mailbox_name == self.server.core.email.shared_folder
                 || mailbox_name
                     .split_once('/')
                     .is_some_and(|(base_name, path)| {
-                        base_name == self.server.core.jmap.shared_folder && !path.contains('/')
+                        base_name == self.server.core.email.shared_folder && !path.contains('/')
                     })
             {
                 Ok(StatusItem {

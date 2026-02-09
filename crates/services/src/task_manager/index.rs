@@ -5,14 +5,15 @@
  */
 
 use crate::task_manager::{IndexAction, Task};
-use common::{Server, auth::AccessToken};
-use directory::{Type, backend::internal::manage::ManageDirectory};
+use common::Server;
 use email::{cache::MessageCacheFetch, message::metadata::MessageMetadata};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent, contact::ContactCard};
+use registry::schema::prelude::{Object, Property};
 use std::cmp::Ordering;
 use store::{
     IterateParams, SerializeInfallible, ValueKey,
     ahash::AHashMap,
+    registry::RegistryQuery,
     roaring::RoaringBitmap,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
@@ -277,26 +278,13 @@ impl ReindexIndexTask for Server {
         let accounts = if let Some(account_id) = account_id {
             RoaringBitmap::from_sorted_iter([account_id]).unwrap()
         } else {
-            let mut accounts = RoaringBitmap::new();
-            for principal in self
-                .core
-                .storage
-                .data
-                .list_principals(
-                    None,
-                    tenant_id,
-                    &[Type::Individual, Type::Group],
-                    false,
-                    0,
-                    0,
+            self.registry()
+                .query(
+                    RegistryQuery::new(Object::Account)
+                        .equal_opt(Property::MemberTenantId, tenant_id),
                 )
                 .await
                 .caused_by(trc::location!())?
-                .items
-            {
-                accounts.insert(principal.id());
-            }
-            accounts
         };
         let due = TaskEpoch::now();
 
@@ -344,7 +332,7 @@ impl ReindexIndexTask for Server {
                 for account_id in accounts {
                     let cache = self
                         .fetch_dav_resources(
-                            &AccessToken::from_id(account_id).with_tenant_id(tenant_id),
+                            account_id,
                             account_id,
                             if index == SearchIndex::Calendar {
                                 SyncCollection::Calendar
@@ -438,7 +426,7 @@ async fn build_email_document(
     account_id: u32,
     document_id: u32,
 ) -> trc::Result<Option<IndexDocument>> {
-    let Some(index_fields) = server.core.jmap.index_fields.get(&SearchIndex::Email) else {
+    let Some(index_fields) = server.core.email.index_fields.get(&SearchIndex::Email) else {
         return Ok(None);
     };
 
@@ -473,7 +461,7 @@ async fn build_email_document(
                 document_id,
                 &raw_message,
                 index_fields,
-                server.core.jmap.default_language,
+                server.core.email.default_language,
             )))
         }
         None => Ok(None),
@@ -485,7 +473,7 @@ async fn build_calendar_document(
     account_id: u32,
     document_id: u32,
 ) -> trc::Result<Option<IndexDocument>> {
-    let Some(index_fields) = server.core.jmap.index_fields.get(&SearchIndex::Calendar) else {
+    let Some(index_fields) = server.core.email.index_fields.get(&SearchIndex::Calendar) else {
         return Ok(None);
     };
 
@@ -506,7 +494,7 @@ async fn build_calendar_document(
                     account_id,
                     document_id,
                     index_fields,
-                    server.core.jmap.default_language,
+                    server.core.email.default_language,
                 ),
         )),
         None => Ok(None),
@@ -518,7 +506,7 @@ async fn build_contact_document(
     account_id: u32,
     document_id: u32,
 ) -> trc::Result<Option<IndexDocument>> {
-    let Some(index_fields) = server.core.jmap.index_fields.get(&SearchIndex::Contacts) else {
+    let Some(index_fields) = server.core.email.index_fields.get(&SearchIndex::Contacts) else {
         return Ok(None);
     };
 
@@ -539,7 +527,7 @@ async fn build_contact_document(
                     account_id,
                     document_id,
                     index_fields,
-                    server.core.jmap.default_language,
+                    server.core.email.default_language,
                 ),
         )),
         None => Ok(None),
@@ -558,7 +546,7 @@ async fn build_tracing_span_document(
 ) -> trc::Result<Option<IndexDocument>> {
     use common::telemetry::tracers::store::{TracingStore, build_span_document};
 
-    let Some(index_fields) = server.core.jmap.index_fields.get(&SearchIndex::Tracing) else {
+    let Some(index_fields) = server.core.email.index_fields.get(&SearchIndex::Tracing) else {
         return Ok(None);
     };
 

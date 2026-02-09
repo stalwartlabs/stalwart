@@ -11,7 +11,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Map, Value};
-use std::{future::Future, sync::Arc};
+use std::{borrow::Cow, future::Future};
 use trc::AddContext;
 use types::{id::Id, type_state::DataType};
 
@@ -43,7 +43,8 @@ impl QuotaGet for Server {
             QuotaProperty::Types,
         ]);
         let account_id = request.account_id.document_id();
-        let quota_ids = if access_token.quota > 0 {
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
+        let quota_ids = if account.disk_quota() > 0 {
             vec![0u32]
         } else {
             vec![]
@@ -60,14 +61,10 @@ impl QuotaGet for Server {
             not_found: vec![],
         };
 
-        let access_token = if account_id == access_token.account_id() {
-            AccessTokenRef::Borrowed(access_token)
+        let account = if account_id == access_token.account_id() {
+            Cow::Borrowed(&account)
         } else {
-            AccessTokenRef::Owned(
-                self.get_access_token(account_id)
-                    .await
-                    .caused_by(trc::location!())?,
-            )
+            Cow::Owned(self.account(account_id).await.caused_by(trc::location!())?)
         };
 
         for id in ids {
@@ -83,11 +80,13 @@ impl QuotaGet for Server {
                 let value = match property {
                     QuotaProperty::Id => Value::Element(id.into()),
                     QuotaProperty::ResourceType => "octets".to_string().into(),
-                    QuotaProperty::Used => (self.get_used_quota(account_id).await? as u64).into(),
-                    QuotaProperty::HardLimit => access_token.as_ref().quota.into(),
+                    QuotaProperty::Used => {
+                        (self.get_used_quota_account(account_id).await? as u64).into()
+                    }
+                    QuotaProperty::HardLimit => account.as_ref().disk_quota().into(),
                     QuotaProperty::Scope => "account".to_string().into(),
-                    QuotaProperty::Name => access_token.as_ref().name.to_string().into(),
-                    QuotaProperty::Description => access_token
+                    QuotaProperty::Name => account.as_ref().name().to_string().into(),
+                    QuotaProperty::Description => account
                         .as_ref()
                         .description
                         .as_ref()
@@ -110,19 +109,5 @@ impl QuotaGet for Server {
         }
 
         Ok(response)
-    }
-}
-
-enum AccessTokenRef<'x> {
-    Owned(Arc<AccessToken>),
-    Borrowed(&'x AccessToken),
-}
-
-impl AccessTokenRef<'_> {
-    fn as_ref(&self) -> &AccessToken {
-        match self {
-            AccessTokenRef::Owned(token) => token,
-            AccessTokenRef::Borrowed(token) => token,
-        }
     }
 }

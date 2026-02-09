@@ -4,25 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::core::{Session, SessionData, State};
 use common::{
-    auth::{
-        AuthRequest,
-        sasl::{sasl_decode_challenge_oauth, sasl_decode_challenge_plain},
-    },
-    listener::{SessionStream, limiter::LimiterResult},
+    auth::AuthRequest,
+    network::{SessionStream, limiter::LimiterResult},
 };
-
-use registry::schema::enums::Permission;
+use directory::Credentials;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{authenticate::Mechanism, capability::Capability},
     receiver::{self, Request},
 };
 use mail_parser::decoders::base64::base64_decode;
-use mail_send::Credentials;
+use registry::schema::enums::Permission;
 use std::sync::Arc;
-
-use crate::core::{Session, SessionData, State};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_authenticate(&mut self, request: Request<Command>) -> trc::Result<()> {
@@ -41,9 +36,9 @@ impl<T: SessionStream> Session<T> {
                         })?;
 
                     let credentials = if args.mechanism == Mechanism::Plain {
-                        sasl_decode_challenge_plain(&challenge)
+                        Credentials::decode_sasl_challenge_plain(&challenge)
                     } else {
-                        sasl_decode_challenge_oauth(&challenge)
+                        Credentials::decode_sasl_challenge_oauth(&challenge)
                     }
                     .ok_or_else(|| {
                         trc::AuthEvent::Error
@@ -71,11 +66,7 @@ impl<T: SessionStream> Session<T> {
         }
     }
 
-    pub async fn authenticate(
-        &mut self,
-        credentials: Credentials<String>,
-        tag: String,
-    ) -> trc::Result<()> {
+    pub async fn authenticate(&mut self, credentials: Credentials, tag: String) -> trc::Result<()> {
         // Authenticate
         let access_token = self
             .server
@@ -99,11 +90,7 @@ impl<T: SessionStream> Session<T> {
 
                 err.id(tag.clone())
             })
-            .and_then(|token| {
-                token
-                    .assert_has_permission(Permission::ImapAuthenticate)
-                    .map(|_| token)
-            })?;
+            .and_then(|token| token.assert_has_permission(Permission::ImapAuthenticate))?;
 
         // Enforce concurrency limits
         let in_flight = match access_token.is_imap_request_allowed() {

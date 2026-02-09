@@ -35,12 +35,14 @@ pub mod stream;
 pub mod tls;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub enum RcptExpansion {
-    Mailbox(u32),
-    List(Arc<[ArcStr]>),
-    External(ArcStr),
+pub enum RcptResolution {
+    Accept,
+    Expand(Arc<[ArcStr]>),
+    Rewrite(String),
+    Forward(String),
     #[default]
-    Invalid,
+    UnknownRecipient,
+    UnknownDomain,
 }
 
 pub struct ServerInstance {

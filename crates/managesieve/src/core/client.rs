@@ -7,7 +7,7 @@
 use super::{Command, ResponseCode, SerializeResponse, Session, State};
 use common::{
     KV_RATE_LIMIT_IMAP,
-    listener::{SessionResult, SessionStream},
+    network::{SessionResult, SessionStream},
 };
 use imap_proto::receiver::{self, Request};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -183,9 +183,7 @@ impl<T: SessionStream> Session<T> {
                     if let Some(rate) = &self.server.core.imap.rate_requests {
                         if self
                             .server
-                            .core
-                            .storage
-                            .lookup
+                            .in_memory_store()
                             .is_rate_allowed(
                                 KV_RATE_LIMIT_IMAP,
                                 &access_token.account_id().to_be_bytes(),

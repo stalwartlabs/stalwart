@@ -9,6 +9,7 @@ use common::{
     expr::{self, functions::ResolveVariable, *},
 };
 use compact_str::ToCompactString;
+use registry::schema::enums::ExpressionVariable;
 use smtp_proto::Response;
 use std::{
     fmt::Display,

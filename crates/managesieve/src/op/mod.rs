@@ -5,7 +5,7 @@
  */
 
 use crate::core::{Session, State, StatusResponse};
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use registry::schema::enums::Permission;
 
 pub mod authenticate;
@@ -35,7 +35,7 @@ impl<T: SessionStream> Session<T> {
     pub fn assert_has_permission(&self, permission: Permission) -> trc::Result<bool> {
         match &self.state {
             State::Authenticated { access_token, .. } => {
-                access_token.assert_has_permission(permission)
+                access_token.enforce_permission(permission).map(|_| true)
             }
             State::NotAuthenticated { .. } => Ok(false),
         }

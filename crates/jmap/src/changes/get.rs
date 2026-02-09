@@ -112,7 +112,7 @@ impl ChangesLookup for Server {
                 .max_changes
                 .filter(|n| *n != 0)
                 .unwrap_or(usize::MAX),
-            self.core.jmap.changes_max_results.unwrap_or(usize::MAX),
+            self.core.jmap.changes_max_results,
         );
         let mut response: ChangesResponse<NullObject> = ChangesResponse {
             account_id: request.account_id,

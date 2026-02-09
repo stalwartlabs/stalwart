@@ -52,7 +52,7 @@ impl CalendarEventNotificationQuery for Server {
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
             .fetch_dav_resources(
-                access_token,
+                access_token.account_id(),
                 account_id,
                 SyncCollection::CalendarEventNotification,
             )

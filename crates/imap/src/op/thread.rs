@@ -9,7 +9,7 @@ use crate::{
     spawn_op,
 };
 use ahash::AHashMap;
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use registry::schema::enums::Permission;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{

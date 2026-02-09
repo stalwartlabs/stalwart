@@ -5,9 +5,9 @@
  */
 
 use crate::{Session, protocol::response::Response};
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use email::message::metadata::MessageMetadata;
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
@@ -22,7 +22,7 @@ impl<T: SessionStream> Session<T> {
         // Validate access
         self.state
             .access_token()
-            .assert_has_permission(Permission::Pop3Retr)?;
+            .enforce_permission(Permission::Pop3Retr)?;
 
         let op_start = Instant::now();
         let mailbox = self.state.mailbox();

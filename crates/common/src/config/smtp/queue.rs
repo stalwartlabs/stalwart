@@ -170,7 +170,7 @@ pub struct QueueQuotas {
 
 #[derive(Clone)]
 pub struct QueueQuota {
-    pub id: String,
+    pub id: Id,
     pub expr: Expression,
     pub keys: u16,
     pub size: Option<u64>,
@@ -402,7 +402,7 @@ impl QueueRateLimiters {
 
             let limiter = QueueRateLimiter {
                 expr: bp.compile_expr(obj.id, &obj.object.ctx_match_()).default,
-                id: obj.object.name,
+                id: obj.id,
                 keys: obj
                     .object
                     .key
@@ -471,7 +471,7 @@ impl QueueRateLimiters {
 
             let limiter = QueueRateLimiter {
                 expr: bp.compile_expr(obj.id, &obj.object.ctx_match_()).default,
-                id: obj.object.name,
+                id: obj.id,
                 keys: obj
                     .object
                     .key
@@ -532,7 +532,7 @@ impl QueueQuotas {
 
             let quota = QueueQuota {
                 expr: bp.compile_expr(obj.id, &obj.object.ctx_match_()).default,
-                id: obj.object.name,
+                id: obj.id,
                 keys: obj
                     .object
                     .key

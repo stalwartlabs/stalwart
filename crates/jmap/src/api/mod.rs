@@ -98,7 +98,7 @@ impl ToRequestError for trc::Error {
             },
             trc::EventType::Auth(cause) => match cause {
                 trc::AuthEvent::MissingTotp => {
-                    RequestError::blank(402, "TOTP code required", cause.message())
+                    RequestError::blank(402, "TOTP code required", self.as_ref().message())
                 }
                 trc::AuthEvent::TooManyAttempts => RequestError::too_many_auth_attempts(),
                 _ => RequestError::unauthorized(),
@@ -110,6 +110,9 @@ impl ToRequestError for trc::Error {
                 | trc::SecurityEvent::LoiterBan
                 | trc::SecurityEvent::IpBlocked => RequestError::too_many_auth_attempts(),
                 trc::SecurityEvent::Unauthorized => RequestError::forbidden(),
+                trc::SecurityEvent::IpBlockExpired | trc::SecurityEvent::IpAllowExpired => {
+                    RequestError::internal_server_error()
+                }
             },
             trc::EventType::Resource(cause) => match cause {
                 trc::ResourceEvent::NotFound => RequestError::not_found(),

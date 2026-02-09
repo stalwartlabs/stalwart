@@ -9,8 +9,7 @@ use crate::{
     core::{ImapId, SavedSearch, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, StatusResponse,
@@ -22,6 +21,7 @@ use imap_proto::{
 };
 use mail_parser::HeaderName;
 use nlp::language::Language;
+use registry::schema::enums::Permission;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use store::{
     query::log::Query,
@@ -449,7 +449,7 @@ impl<T: SessionStream> SessionData<T> {
                     filters.push(SearchFilter::has_text_detect(
                         EmailSearchField::Body,
                         text,
-                        self.server.core.jmap.default_language,
+                        self.server.core.email.default_language,
                     ));
                 }
                 Filter::Cc(text) => {
@@ -473,7 +473,7 @@ impl<T: SessionStream> SessionData<T> {
                                 filters.push(SearchFilter::has_text_detect(
                                     EmailSearchField::Subject,
                                     value,
-                                    self.server.core.jmap.default_language,
+                                    self.server.core.email.default_language,
                                 ));
                             }
                             header @ (HeaderName::From
@@ -522,12 +522,12 @@ impl<T: SessionStream> SessionData<T> {
                     filters.push(SearchFilter::has_text_detect(
                         EmailSearchField::Subject,
                         text,
-                        self.server.core.jmap.default_language,
+                        self.server.core.email.default_language,
                     ));
                 }
                 Filter::Text(text) => {
                     let (text, language) =
-                        Language::detect(text, self.server.core.jmap.default_language);
+                        Language::detect(text, self.server.core.email.default_language);
 
                     filters.push(SearchFilter::Or);
                     filters.push(SearchFilter::has_text(

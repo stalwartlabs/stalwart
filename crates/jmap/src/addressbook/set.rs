@@ -51,7 +51,11 @@ impl AddressBookSet for Server {
     ) -> trc::Result<SetResponse<addressbook::AddressBook>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
@@ -107,7 +111,12 @@ impl AddressBookSet for Server {
                 .await
                 .caused_by(trc::location!())?;
             address_book
-                .insert(access_token, account_id, document_id, &mut batch)
+                .insert(
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
 
             if let Some(MaybeIdReference::Reference(id_ref)) =
@@ -188,7 +197,7 @@ impl AddressBookSet for Server {
             // Update record
             new_address_book
                 .update(
-                    access_token,
+                    access_token.account_tenant_ids(),
                     address_book,
                     account_id,
                     document_id,
@@ -274,7 +283,13 @@ impl AddressBookSet for Server {
 
                 // Delete record
                 DestroyArchive(address_book)
-                    .delete(access_token, account_id, document_id, None, &mut batch)
+                    .delete(
+                        access_token.account_tenant_ids(),
+                        account_id,
+                        document_id,
+                        None,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?;
 
                 if default_address_book_id == Some(document_id) {
@@ -308,7 +323,7 @@ impl AddressBookSet for Server {
                         {
                             // Card only belongs to address books being deleted, delete it
                             DestroyArchive(card).delete_all(
-                                access_token,
+                                access_token.account_tenant_ids(),
                                 account_id,
                                 document_id,
                                 &mut batch,
@@ -322,7 +337,7 @@ impl AddressBookSet for Server {
                                 .names
                                 .retain(|n| !destroy_parents.contains(&n.parent_id));
                             new_card.update(
-                                access_token,
+                                access_token.account_tenant_ids(),
                                 card,
                                 account_id,
                                 document_id,

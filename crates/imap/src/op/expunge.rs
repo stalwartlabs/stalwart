@@ -7,8 +7,7 @@
 use super::{ImapContext, ToModSeq};
 use crate::core::{ImapId, SavedSearch, SelectedMailbox, Session, SessionData};
 use ahash::AHashMap;
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use registry::schema::enums::Permission;
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::metadata::MessageData,
@@ -18,6 +17,7 @@ use imap_proto::{
     parser::parse_sequence_set,
     receiver::{Request, Token},
 };
+use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use store::{
     SerializeInfallible,
@@ -194,7 +194,7 @@ impl<T: SessionStream> SessionData<T> {
                             batch
                                 .custom(
                                     ObjectIndexBuilder::<_, ()>::new()
-                                        .with_access_token(&self.access_token)
+                                        .with_changed_by(self.access_token.account_tenant_ids())
                                         .with_current(metadata),
                                 )
                                 .caused_by(trc::location!())?

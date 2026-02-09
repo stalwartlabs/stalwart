@@ -404,8 +404,31 @@ impl AccessToken {
         }
     }
 
-    pub fn scoped(inner: Arc<AccessTokenInner>, scope_idx: usize) -> Self {
-        AccessToken { scope_idx, inner }
+    pub fn scoped(inner: Arc<AccessTokenInner>, credential_id: u32) -> trc::Result<Self> {
+        inner
+            .scopes
+            .iter()
+            .position(|scope| scope.credential_id == credential_id)
+            .ok_or_else(|| {
+                trc::SecurityEvent::Unauthorized
+                    .into_err()
+                    .ctx(trc::Key::AccountId, inner.account_id)
+                    .ctx(trc::Key::Id, credential_id)
+                    .reason("Credential expired or removed.")
+            })
+            .map(|scope_idx| AccessToken { scope_idx, inner })
+            .and_then(|token| token.assert_is_valid())
+    }
+
+    pub fn renew(inner: Arc<AccessTokenInner>, credential_id: Option<u32>) -> trc::Result<Self> {
+        if let Some(credential_id) = credential_id {
+            Self::scoped(inner, credential_id)
+        } else {
+            Ok(AccessToken {
+                scope_idx: 0,
+                inner,
+            })
+        }
     }
 
     pub fn state(&self) -> u32 {
@@ -477,12 +500,28 @@ impl AccessToken {
             .is_some_and(|scope| scope.permissions.get(permission as usize))
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub fn assert_is_valid(self) -> trc::Result<Self> {
         let todo = "use this function";
-        self.inner
+        if self
+            .inner
             .scopes
             .get(self.scope_idx)
             .is_some_and(|scope| scope.expires_at > now())
+        {
+            Ok(self)
+        } else {
+            Err(trc::SecurityEvent::Unauthorized
+                .into_err()
+                .ctx(trc::Key::AccountId, self.inner.account_id)
+                .reason("Access token expired."))
+        }
+    }
+
+    pub fn credential_id(&self) -> Option<u32> {
+        self.inner
+            .scopes
+            .get(self.scope_idx)
+            .map(|scope| scope.credential_id)
     }
 
     pub fn assert_has_permissions(self, permissions: &[Permission]) -> trc::Result<Self> {
@@ -632,20 +671,19 @@ impl AccessToken {
             }),
         }
     }
+
+    #[cfg(feature = "test_mode")]
+    pub fn from_id(account_id: u32) -> Self {
+        AccessToken::new(Arc::new(AccessTokenInner::from_id(account_id)))
+    }
 }
 
 impl AccessTokenInner {
+    #[cfg(feature = "test_mode")]
     pub fn from_id(account_id: u32) -> Self {
         Self {
             account_id,
             ..Default::default()
-        }
-    }
-
-    pub fn with_access_to(self, access_to: impl IntoIterator<Item = AccessTo>) -> Self {
-        Self {
-            access_to: access_to.into_iter().collect(),
-            ..self
         }
     }
 

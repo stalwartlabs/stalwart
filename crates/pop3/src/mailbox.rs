@@ -5,7 +5,7 @@
  */
 
 use crate::Session;
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::INBOX_ID,

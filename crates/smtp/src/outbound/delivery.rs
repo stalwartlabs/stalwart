@@ -187,7 +187,7 @@ impl QueuedMessage {
             {
                 trc::event!(
                     Delivery(DeliveryEvent::RateLimitExceeded),
-                    Id = throttle.id.clone(),
+                    Id = throttle.id.to_string(),
                     SpanId = span_id,
                     NextRetry = trc::Value::Timestamp(retry_at)
                 );
@@ -262,7 +262,7 @@ impl QueuedMessage {
                 {
                     trc::event!(
                         Delivery(DeliveryEvent::RateLimitExceeded),
-                        Id = throttle.id.clone(),
+                        Id = throttle.id.to_string(),
                         SpanId = span_id,
                         Domain = domain.to_string(),
                     );
@@ -512,7 +512,7 @@ impl QueuedMessage {
                             Elapsed = time.elapsed(),
                         );
 
-                        Arc::new(vec![])
+                        Arc::new([])
                     }
                     Err(err) => {
                         trc::event!(
@@ -844,7 +844,7 @@ impl QueuedMessage {
                             trc::event!(
                                 Delivery(DeliveryEvent::RateLimitExceeded),
                                 SpanId = message.span_id,
-                                Id = throttle.id.clone(),
+                                Id = throttle.id.to_string(),
                                 RemoteIp = remote_ip,
                             );
                             delivery_results

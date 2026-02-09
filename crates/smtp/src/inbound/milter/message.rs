@@ -12,7 +12,7 @@ use crate::{
 use common::{
     DAEMON_NAME,
     config::smtp::session::{Milter, Stage},
-    listener::SessionStream,
+    network::SessionStream,
 };
 use mail_auth::AuthenticatedMessage;
 use smtp_proto::{IntoString, request::parser::Rfc5321Parser};
@@ -194,7 +194,7 @@ impl<T: SessionStream> Session<T> {
             .as_ref()
             .and_then(|ip_rev| ip_rev.ptr.as_ref())
             .and_then(|ptrs| ptrs.first())
-            .map(|s| s.as_str());
+            .map(|s| s.as_ref());
         client
             .connection(
                 client_ptr.unwrap_or(self.data.helo_domain.as_str()),

@@ -4,17 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{
-    KV_RATE_LIMIT_IMAP,
-    listener::{SessionResult, SessionStream},
-};
-use mail_send::Credentials;
-use trc::{AddContext, SecurityEvent};
-
 use crate::{
     Session, State,
     protocol::{Command, Mechanism, request::Error},
 };
+use common::{
+    KV_RATE_LIMIT_IMAP,
+    network::{SessionResult, SessionStream},
+};
+use directory::Credentials;
+use trc::{AddContext, SecurityEvent};
 
 impl<T: SessionStream> Session<T> {
     pub async fn ingest(&mut self, bytes: &[u8]) -> SessionResult {
@@ -101,7 +100,7 @@ impl<T: SessionStream> Session<T> {
                                 } else {
                                     unreachable!()
                                 };
-                            self.handle_auth(Credentials::Plain {
+                            self.handle_auth(Credentials::Basic {
                                 username,
                                 secret: string,
                             })
@@ -239,9 +238,7 @@ impl<T: SessionStream> Session<T> {
                     if let Some(rate) = &self.server.core.imap.rate_requests {
                         if self
                             .server
-                            .core
-                            .storage
-                            .lookup
+                            .in_memory_store()
                             .is_rate_allowed(
                                 KV_RATE_LIMIT_IMAP,
                                 &mailbox.account_id.to_be_bytes(),

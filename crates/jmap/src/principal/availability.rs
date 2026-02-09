@@ -14,8 +14,10 @@ use calcard::{
     },
     jscalendar::{JSCalendar, JSCalendarProperty, JSCalendarValue},
 };
-use common::{Server, TinyCalendarPreferences, auth::AccessToken};
-use registry::schema::enums::Permission;
+use common::{
+    Server, TinyCalendarPreferences,
+    auth::{AccessToken, BuildAccessToken},
+};
 use groupware::{
     cache::GroupwareCache,
     calendar::{CALENDAR_SUBSCRIBED, CalendarEvent},
@@ -29,8 +31,13 @@ use jmap_proto::{
     types::date::UTCDate,
 };
 use jmap_tools::{Key, Map, Value};
+use registry::schema::enums::Permission;
 use std::{collections::hash_map::Entry, future::Future};
-use store::{ValueKey, ahash::AHashMap, write::{AlignedBytes, Archive}};
+use store::{
+    ValueKey,
+    ahash::AHashMap,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     TimeRange,
@@ -88,14 +95,23 @@ impl PrincipalGetAvailability for Server {
         };
         let principal_id = request.id.document_id();
         let principal = self
-            .get_access_token(principal_id)
+            .access_token(principal_id)
+            .await
+            .caused_by(trc::location!())?
+            .build();
+        let principal_account = self
+            .account_info(principal_id)
             .await
             .caused_by(trc::location!())?;
         let mut periods = Vec::new();
 
         for account_id in principal.all_ids_by_collection(Collection::Calendar) {
             let resources = self
-                .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
+                .fetch_dav_resources(
+                    access_token.account_id(),
+                    account_id,
+                    SyncCollection::Calendar,
+                )
                 .await
                 .caused_by(trc::location!())?;
 
@@ -247,7 +263,7 @@ impl PrincipalGetAvailability for Server {
                                     )
                                 }) {
                                     // Condition: the Principal is a participant of the event, and has a "participationStatus" of "accepted" or "tentative".
-                                    if principal.emails.contains(&attendee) {
+                                    if principal_account.addresses().any(|e| e == attendee) {
                                         busy_status = Some(
                                             entry
                                                 .parameters(&ICalendarParameterName::Partstat)

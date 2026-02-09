@@ -146,7 +146,7 @@ pub fn spawn_push_router(inner: Arc<Inner>, mut change_rx: mpsc::Receiver<PushEv
                     if broadcast
                         && let Some(broadcast_tx) = &inner.ipc.broadcast_tx.clone()
                         && broadcast_tx
-                            .send(BroadcastEvent::ReloadPushServers(account_id))
+                            .send(BroadcastEvent::PushServerUpdate(account_id))
                             .await
                             .is_err()
                     {

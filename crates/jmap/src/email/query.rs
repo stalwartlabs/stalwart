@@ -52,7 +52,7 @@ impl EmailQuery for Server {
                 Filter::Property(cond) => match cond {
                     EmailFilter::Text(text) => {
                         let (text, language) =
-                            Language::detect(text, self.core.jmap.default_language);
+                            Language::detect(text, self.core.email.default_language);
 
                         filters.push(SearchFilter::Or);
                         filters.push(SearchFilter::has_text(
@@ -115,12 +115,12 @@ impl EmailQuery for Server {
                     EmailFilter::Subject(text) => filters.push(SearchFilter::has_text_detect(
                         EmailSearchField::Subject,
                         text,
-                        self.core.jmap.default_language,
+                        self.core.email.default_language,
                     )),
                     EmailFilter::Body(text) => filters.push(SearchFilter::has_text_detect(
                         EmailSearchField::Body,
                         text,
-                        self.core.jmap.default_language,
+                        self.core.email.default_language,
                     )),
                     EmailFilter::Header(header) => {
                         let mut header = header.into_iter();

@@ -88,7 +88,7 @@ impl MtaStsLookup for Server {
         )?);
 
         self.inner.cache.dns_mta_sts.insert(
-            domain.to_string(),
+            domain.into(),
             policy.clone(),
             Duration::from_secs(if (3600..31557600).contains(&policy.max_age) {
                 policy.max_age

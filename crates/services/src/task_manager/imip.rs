@@ -15,10 +15,10 @@ use calcard::{
 use chrono::{DateTime, Locale};
 use common::{
     DEFAULT_LOGO_BASE64, Server,
-    auth::AccessToken,
+    auth::AccountInfo,
     config::groupware::CalendarTemplateVariable,
     i18n,
-    listener::{ServerInstance, stream::NullIo},
+    network::{ServerInstance, stream::NullIo},
 };
 use groupware::{
     calendar::itip::ItipIngest,
@@ -30,6 +30,7 @@ use mail_builder::{
     mime::{BodyPart, MimePart},
 };
 use mail_parser::decoders::html::html_to_text;
+use registry::types::EnumType;
 use smtp::core::{Session, SessionData};
 use smtp_proto::{MailFrom, RcptTo};
 use std::{str::FromStr, sync::Arc, time::Duration};
@@ -82,12 +83,6 @@ async fn send_imip(
     due: TaskEpoch,
     server_instance: Arc<ServerInstance>,
 ) -> trc::Result<bool> {
-    // Obtain access token
-    let access_token = server
-        .get_access_token(account_id)
-        .await
-        .caused_by(trc::location!())?;
-
     // Obtain iMIP payload
     let Some(archive) = server
         .store()
@@ -149,12 +144,17 @@ async fn send_imip(
     .inline()
     .cid(&logo_cid);
 
+    let account_info = server
+        .account_info(account_id)
+        .await
+        .caused_by(trc::location!())?;
+
     for itip_message in imip.messages.iter() {
         for recipient in itip_message.to.iter() {
             // Build template
             let tpl = build_itip_template(
                 server,
-                &access_token,
+                &account_info,
                 account_id,
                 document_id,
                 itip_message.from.as_str(),
@@ -168,10 +168,10 @@ async fn send_imip(
             // Build message
             let message = MessageBuilder::new()
                 .from((
-                    access_token
-                        .description
+                    account_info
+                        .description()
                         .as_deref()
-                        .unwrap_or(access_token.name.as_str()),
+                        .unwrap_or(account_info.name()),
                     itip_message.from.as_str(),
                 ))
                 .to(recipient.as_str())
@@ -218,14 +218,14 @@ async fn send_imip(
             // Send message
             let server_ = server.clone();
             let server_instance = server_instance.clone();
-            let access_token = access_token.clone();
+            let account_info = account_info.clone();
             let from = itip_message.from.to_string();
             let to = recipient.to_string();
             tokio::spawn(async move {
                 let mut session = Session::<NullIo>::local(
                     server_,
                     server_instance,
-                    SessionData::local(access_token, None, vec![], vec![], 0),
+                    SessionData::local(account_info, None, vec![], vec![], 0),
                 );
 
                 // MAIL FROM
@@ -312,7 +312,7 @@ pub struct Details {
 #[allow(clippy::too_many_arguments)]
 pub async fn build_itip_template(
     server: &Server,
-    access_token: &AccessToken,
+    account_info: &AccountInfo,
     account_id: u32,
     document_id: u32,
     from: &str,
@@ -333,12 +333,8 @@ pub async fn build_itip_template(
     // SPDX-SnippetEnd
     #[cfg(not(feature = "enterprise"))]
     let template = &server.core.groupware.itip_template;
-    let locale = i18n::locale_or_default(access_token.locale.as_deref().unwrap_or("en"));
-    let chrono_locale = access_token
-        .locale
-        .as_deref()
-        .and_then(|locale| Locale::from_str(locale).ok())
-        .unwrap_or(Locale::en_US);
+    let locale = i18n::locale_or_default(account_info.locale().as_str());
+    let chrono_locale = Locale::from_str(account_info.locale().as_str()).unwrap_or(Locale::en_US);
 
     let mut variables = Variables::new();
     let mut subject;

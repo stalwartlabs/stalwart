@@ -1137,11 +1137,8 @@ impl PropFindRequestHandler for Server {
         let account = self.account(account_id).await.caused_by(trc::location!())?;
         let quota = if account.quota_disk > 0 {
             account.quota_disk
-        } else if account.id_tenant != u32::MAX {
-            let tenant = self
-                .tenant(account.id_tenant)
-                .await
-                .caused_by(trc::location!())?;
+        } else if let Some(tenant_id) = account.id_tenant {
+            let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
             if tenant.quota_disk > 0 {
                 tenant.quota_disk
             } else {
@@ -1151,7 +1148,7 @@ impl PropFindRequestHandler for Server {
             u32::MAX as u64
         };
         let used = self
-            .get_used_quota(account_id)
+            .get_used_quota_account(account_id)
             .await
             .caused_by(trc::location!())? as u64;
 

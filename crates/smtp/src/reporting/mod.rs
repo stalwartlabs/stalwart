@@ -202,14 +202,15 @@ impl SmtpReporting for Server {
         config: &IfBlock,
         bytes: &[u8],
     ) -> Option<Vec<u8>> {
-        let signers = self
-            .eval_if::<Vec<String>, _>(config, &message.message, message.span_id)
-            .await
-            .unwrap_or_default();
-        if !signers.is_empty() {
-            let mut headers = Vec::with_capacity(64);
-            for signer in signers.iter() {
-                if let Some(signer) = self.get_dkim_signer(signer, message.span_id) {
+        let sign_with_domain = self
+            .eval_if::<String, _>(config, &message.message, message.span_id)
+            .await?;
+
+        match self.dkim_signers(&sign_with_domain).await {
+            Ok(Some(signers)) => {
+                let mut headers = Vec::with_capacity(64);
+
+                for signer in signers.as_ref() {
                     match signer.sign(bytes) {
                         Ok(signature) => {
                             signature.write_header(&mut headers);
@@ -224,12 +225,18 @@ impl SmtpReporting for Server {
                         }
                     }
                 }
+
+                Some(headers)
             }
-            if !headers.is_empty() {
-                return Some(headers);
+            Ok(None) => None,
+            Err(err) => {
+                trc::error!(
+                    err.span_id(message.span_id)
+                        .details("Failed to retrieve DKIM signers")
+                );
+                None
             }
         }
-        None
     }
 }
 

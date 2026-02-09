@@ -4,15 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use registry::schema::{enums::Locale, prelude::Object};
 use store::write::now;
 
 use crate::{
     Server,
     auth::{
         AccountCache, AccountInfo, AccountTenantIds, DomainCache, EmailCache, RoleCache,
-        TemporaryAddress, TenantCache,
+        TenantCache,
     },
     config::smtp::auth::DkimSigner,
+    storage::ObjectQuota,
 };
 use std::sync::Arc;
 
@@ -64,6 +66,7 @@ impl Server {
 }
 
 impl AccountInfo {
+    #[inline(always)]
     pub fn account_id(&self) -> u32 {
         self.account_id
     }
@@ -73,58 +76,94 @@ impl AccountInfo {
             .addresses
             .first()
             .map(|s| s.as_ref())
-            .unwrap_or("")
+            .unwrap_or_default()
     }
 
+    #[inline(always)]
     pub fn description(&self) -> Option<&str> {
         self.account.description.as_deref()
     }
 
+    #[inline(always)]
     pub fn tenant_id(&self) -> Option<u32> {
-        if self.account.id_tenant != u32::MAX {
-            Some(self.account.id_tenant)
-        } else {
-            None
-        }
+        self.account.id_tenant
     }
 
+    #[inline(always)]
     pub fn account_tenant_ids(&self) -> AccountTenantIds {
         AccountTenantIds {
             account_id: self.account_id,
-            tenant_id: self.tenant_id(),
+            tenant_id: self.account.id_tenant,
         }
     }
 
     pub fn addresses(&self) -> impl Iterator<Item = &str> {
-        let now = now();
-        self.account.addresses(now).chain(
-            self.member_of
-                .iter()
-                .flat_map(move |member| member.addresses(now)),
-        )
+        self.account
+            .addresses
+            .iter()
+            .chain(
+                self.member_of
+                    .iter()
+                    .flat_map(move |member| member.addresses.iter()),
+            )
+            .map(|a| a.as_str())
     }
 
+    #[inline(always)]
     pub fn is_user_account(&self) -> bool {
         self.account.is_user
+    }
+
+    #[inline(always)]
+    pub fn locale(&self) -> Locale {
+        self.account.locale
+    }
+
+    #[inline(always)]
+    pub fn object_quotas(&self) -> Option<&ObjectQuota> {
+        self.account.quota_objects.as_deref()
     }
 }
 
 impl AccountCache {
-    fn addresses(&self, now: u64) -> impl Iterator<Item = &str> {
-        self.addresses.iter().map(|s| s.as_ref()).chain(
-            self.addresses_temporary
-                .iter()
-                .filter_map(move |a| a.validate(now)),
-        )
+    #[inline(always)]
+    pub fn name(&self) -> &str {
+        self.addresses
+            .first()
+            .map(|s| s.as_ref())
+            .unwrap_or_default()
     }
-}
 
-impl TemporaryAddress {
-    pub fn validate(&self, now: u64) -> Option<&str> {
-        if self.expires_at > now {
-            Some(self.address.as_ref())
-        } else {
-            None
+    #[inline(always)]
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    #[inline(always)]
+    pub fn tenant_id(&self) -> Option<u32> {
+        self.id_tenant
+    }
+
+    #[inline(always)]
+    pub fn is_user_account(&self) -> bool {
+        self.is_user
+    }
+
+    #[inline(always)]
+    pub fn disk_quota(&self) -> u64 {
+        self.quota_disk
+    }
+
+    #[inline(always)]
+    pub fn object_quotas(&self) -> Option<&ObjectQuota> {
+        self.quota_objects.as_deref()
+    }
+
+    #[inline(always)]
+    pub fn account_tenant_ids(&self, account_id: u32) -> AccountTenantIds {
+        AccountTenantIds {
+            account_id,
+            tenant_id: self.id_tenant,
         }
     }
 }

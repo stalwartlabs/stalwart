@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
+/*use crate::{
     blob::migrate_blobs_v014,
     queue_v1::{migrate_queue_v011, migrate_queue_v012},
     queue_v2::migrate_queue_v014,
@@ -12,7 +12,7 @@ use crate::{
     v012::migrate_v0_12,
     v013::migrate_v0_13,
     v014::{SUBSPACE_BITMAP_ID, migrate_principal_v0_14, migrate_v0_14},
-};
+};*/
 use common::{DATABASE_SCHEMA_VERSION, Server, manager::boot::DEFAULT_SETTINGS};
 use std::time::Duration;
 use store::{
@@ -28,7 +28,7 @@ use store::{
 use trc::AddContext;
 use types::collection::Collection;
 
-pub mod addressbook_v2;
+/*pub mod addressbook_v2;
 pub mod blob;
 pub mod calendar_v2;
 pub mod changelog;
@@ -58,171 +58,173 @@ pub mod threads;
 pub mod v011;
 pub mod v012;
 pub mod v013;
-pub mod v014;
+pub mod v014;*/
 
 const LOCK_WAIT_TIME_ACCOUNT: u64 = 3 * 60;
 const LOCK_WAIT_TIME_CORE: u64 = 5 * 60;
 const LOCK_RETRY_TIME: Duration = Duration::from_secs(30);
 
 pub async fn try_migrate(server: &Server) -> trc::Result<()> {
-    for var in [
-        "FORCE_MIGRATE_QUEUE",
-        "FORCE_MIGRATE_BLOBS",
-        "FORCE_MIGRATE_ACCOUNT",
-        "FORCE_MIGRATE",
-    ] {
-        let Some(version) = std::env::var(var).ok().and_then(|s| s.parse::<u32>().ok()) else {
-            continue;
-        };
-        match var {
-            "FORCE_MIGRATE_QUEUE" => match version {
-                1 => {
-                    migrate_queue_v011(server)
+    /*for var in [
+            "FORCE_MIGRATE_QUEUE",
+            "FORCE_MIGRATE_BLOBS",
+            "FORCE_MIGRATE_ACCOUNT",
+            "FORCE_MIGRATE",
+        ] {
+            let Some(version) = std::env::var(var).ok().and_then(|s| s.parse::<u32>().ok()) else {
+                continue;
+            };
+            match var {
+                "FORCE_MIGRATE_QUEUE" => match version {
+                    1 => {
+                        migrate_queue_v011(server)
+                            .await
+                            .caused_by(trc::location!())?;
+                    }
+                    2 => {
+                        migrate_queue_v012(server)
+                            .await
+                            .caused_by(trc::location!())?;
+                    }
+                    4 => {
+                        migrate_queue_v014(server)
+                            .await
+                            .caused_by(trc::location!())?;
+                    }
+                    _ => {
+                        panic!("Unknown migration queue version: {version}");
+                    }
+                },
+                "FORCE_MIGRATE_BLOBS" => {
+                    migrate_blobs_v014(server)
                         .await
                         .caused_by(trc::location!())?;
                 }
-                2 => {
-                    migrate_queue_v012(server)
+                "FORCE_MIGRATE" => match version {
+                    1 => {
+                        migrate_v0_12(server, true)
+                            .await
+                            .caused_by(trc::location!())?;
+                        migrate_v0_13(server).await.caused_by(trc::location!())?;
+                        migrate_v0_14(server).await.caused_by(trc::location!())?;
+                    }
+                    2 => {
+                        migrate_v0_12(server, false)
+                            .await
+                            .caused_by(trc::location!())?;
+                        migrate_v0_13(server).await.caused_by(trc::location!())?;
+                        migrate_v0_14(server).await.caused_by(trc::location!())?;
+                    }
+                    3 => {
+                        migrate_v0_13(server).await.caused_by(trc::location!())?;
+                        migrate_v0_14(server).await.caused_by(trc::location!())?;
+                    }
+                    4 => {
+                        migrate_v0_14(server).await.caused_by(trc::location!())?;
+                    }
+                    _ => {
+                        panic!("Unknown migration version: {version}");
+                    }
+                },
+                "FORCE_MIGRATE_ACCOUNT" => {
+                    migrate_principal_v0_14(server, version)
                         .await
                         .caused_by(trc::location!())?;
                 }
-                4 => {
-                    migrate_queue_v014(server)
-                        .await
-                        .caused_by(trc::location!())?;
-                }
-                _ => {
-                    panic!("Unknown migration queue version: {version}");
-                }
-            },
-            "FORCE_MIGRATE_BLOBS" => {
-                migrate_blobs_v014(server)
-                    .await
-                    .caused_by(trc::location!())?;
+                _ => unreachable!(),
             }
-            "FORCE_MIGRATE" => match version {
-                1 => {
-                    migrate_v0_12(server, true)
-                        .await
-                        .caused_by(trc::location!())?;
-                    migrate_v0_13(server).await.caused_by(trc::location!())?;
-                    migrate_v0_14(server).await.caused_by(trc::location!())?;
-                }
-                2 => {
-                    migrate_v0_12(server, false)
-                        .await
-                        .caused_by(trc::location!())?;
-                    migrate_v0_13(server).await.caused_by(trc::location!())?;
-                    migrate_v0_14(server).await.caused_by(trc::location!())?;
-                }
-                3 => {
-                    migrate_v0_13(server).await.caused_by(trc::location!())?;
-                    migrate_v0_14(server).await.caused_by(trc::location!())?;
-                }
-                4 => {
-                    migrate_v0_14(server).await.caused_by(trc::location!())?;
-                }
-                _ => {
-                    panic!("Unknown migration version: {version}");
-                }
-            },
-            "FORCE_MIGRATE_ACCOUNT" => {
-                migrate_principal_v0_14(server, version)
-                    .await
-                    .caused_by(trc::location!())?;
-            }
-            _ => unreachable!(),
-        }
 
-        return Ok(());
-    }
-
-    let add_v013_config = match server
-        .store()
-        .get_value::<u32>(AnyKey {
-            subspace: SUBSPACE_PROPERTY,
-            key: vec![0u8],
-        })
-        .await
-        .caused_by(trc::location!())?
-    {
-        Some(DATABASE_SCHEMA_VERSION) => {
             return Ok(());
         }
-        Some(1) => {
-            migrate_v0_12(server, true)
-                .await
-                .caused_by(trc::location!())?;
-            migrate_v0_13(server).await.caused_by(trc::location!())?;
-            migrate_v0_14(server).await.caused_by(trc::location!())?;
-            true
-        }
-        Some(2) => {
-            migrate_v0_12(server, false)
-                .await
-                .caused_by(trc::location!())?;
-            migrate_v0_13(server).await.caused_by(trc::location!())?;
-            migrate_v0_14(server).await.caused_by(trc::location!())?;
-            true
-        }
-        Some(3) => {
-            migrate_v0_13(server).await.caused_by(trc::location!())?;
-            migrate_v0_14(server).await.caused_by(trc::location!())?;
-            false
-        }
-        Some(4) => {
-            migrate_v0_14(server).await.caused_by(trc::location!())?;
-            false
-        }
-        Some(version) => {
-            panic!(
-                "Unknown database schema version, expected {} or below, found {}",
-                DATABASE_SCHEMA_VERSION, version
-            );
-        }
-        _ => {
-            if !is_new_install(server).await.caused_by(trc::location!())? {
-                migrate_v0_11(server).await.caused_by(trc::location!())?;
+
+        let add_v013_config = match server
+            .store()
+            .get_value::<u32>(AnyKey {
+                subspace: SUBSPACE_PROPERTY,
+                key: vec![0u8],
+            })
+            .await
+            .caused_by(trc::location!())?
+        {
+            Some(DATABASE_SCHEMA_VERSION) => {
+                return Ok(());
+            }
+            Some(1) => {
+                migrate_v0_12(server, true)
+                    .await
+                    .caused_by(trc::location!())?;
+                migrate_v0_13(server).await.caused_by(trc::location!())?;
+                migrate_v0_14(server).await.caused_by(trc::location!())?;
                 true
-            } else {
+            }
+            Some(2) => {
+                migrate_v0_12(server, false)
+                    .await
+                    .caused_by(trc::location!())?;
+                migrate_v0_13(server).await.caused_by(trc::location!())?;
+                migrate_v0_14(server).await.caused_by(trc::location!())?;
+                true
+            }
+            Some(3) => {
+                migrate_v0_13(server).await.caused_by(trc::location!())?;
+                migrate_v0_14(server).await.caused_by(trc::location!())?;
                 false
             }
-        }
-    };
-
-    let mut batch = BatchBuilder::new();
-    batch.set(
-        ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_PROPERTY,
-            key: vec![0u8],
-        }),
-        DATABASE_SCHEMA_VERSION.serialize(),
-    );
-
-    if add_v013_config {
-        for (key, value) in DEFAULT_SETTINGS {
-            if key
-                .strip_prefix("queue.")
-                .is_some_and(|s| !s.starts_with("limiter.") && !s.starts_with("quota."))
-            {
-                batch.set(
-                    ValueClass::Any(AnyClass {
-                        subspace: SUBSPACE_SETTINGS,
-                        key: key.as_bytes().to_vec(),
-                    }),
-                    value.as_bytes().to_vec(),
+            Some(4) => {
+                migrate_v0_14(server).await.caused_by(trc::location!())?;
+                false
+            }
+            Some(version) => {
+                panic!(
+                    "Unknown database schema version, expected {} or below, found {}",
+                    DATABASE_SCHEMA_VERSION, version
                 );
             }
+            _ => {
+                if !is_new_install(server).await.caused_by(trc::location!())? {
+                    migrate_v0_11(server).await.caused_by(trc::location!())?;
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        let mut batch = BatchBuilder::new();
+        batch.set(
+            ValueClass::Any(AnyClass {
+                subspace: SUBSPACE_PROPERTY,
+                key: vec![0u8],
+            }),
+            DATABASE_SCHEMA_VERSION.serialize(),
+        );
+
+        if add_v013_config {
+            for (key, value) in DEFAULT_SETTINGS {
+                if key
+                    .strip_prefix("queue.")
+                    .is_some_and(|s| !s.starts_with("limiter.") && !s.starts_with("quota."))
+                {
+                    batch.set(
+                        ValueClass::Any(AnyClass {
+                            subspace: SUBSPACE_SETTINGS,
+                            key: key.as_bytes().to_vec(),
+                        }),
+                        value.as_bytes().to_vec(),
+                    );
+                }
+            }
         }
-    }
 
-    server
-        .store()
-        .write(batch.build_all())
-        .await
-        .caused_by(trc::location!())?;
-
+        server
+            .store()
+            .write(batch.build_all())
+            .await
+            .caused_by(trc::location!())?;
     Ok(())
+        */
+
+    todo!()
 }
 
 async fn is_new_install(server: &Server) -> trc::Result<bool> {
@@ -319,7 +321,7 @@ where
         .map(|_| results)
 }
 
-pub async fn get_document_ids(
+/*pub async fn get_document_ids(
     server: &Server,
     account_id: u32,
     collection: Collection,
@@ -345,7 +347,7 @@ pub async fn get_document_ids(
         },
     )
     .await
-}
+}*/
 
 pub async fn get_bitmap(
     server: &Server,

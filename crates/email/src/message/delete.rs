@@ -262,7 +262,7 @@ impl EmailDeletion for Server {
         // Delete messages
         let mut batch = BatchBuilder::new();
         let tenant_id = self
-            .account_info(account_id)
+            .account(account_id)
             .await
             .caused_by(trc::location!())?
             .tenant_id();

@@ -39,7 +39,7 @@ pub struct ScriptParameters<'x> {
     from_addr: String,
     from_name: String,
     return_path: String,
-    sign: Vec<String>,
+    sign_domain: Option<String>,
     access_token: Option<&'x AccessToken>,
     session_id: u64,
 }
@@ -54,7 +54,7 @@ impl<'x> ScriptParameters<'x> {
             from_addr: Default::default(),
             from_name: Default::default(),
             return_path: Default::default(),
-            sign: Default::default(),
+            sign_domain: Default::default(),
             access_token: None,
             session_id: Default::default(),
         }
@@ -75,12 +75,9 @@ impl<'x> ScriptParameters<'x> {
                 *variable = value;
             }
         }
-        if let Some(value) = server
+        self.sign_domain = server
             .eval_if(&server.core.sieve.sign, vars, session_id)
-            .await
-        {
-            self.sign = value;
-        }
+            .await;
         self
     }
 

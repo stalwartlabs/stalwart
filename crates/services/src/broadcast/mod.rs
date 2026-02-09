@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::ipc::{BroadcastEvent, CalendarAlert, EmailPush, PushNotification};
+use common::ipc::{
+    BroadcastEvent, CacheInvalidation, CalendarAlert, PushNotification, RegistryChange,
+};
+use registry::{
+    schema::prelude::Object,
+    types::{EnumType, id::Id},
+};
 use std::{borrow::Borrow, io::Write};
 use types::type_state::StateChange;
 use utils::{
@@ -66,32 +72,44 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                         let _ = serialized.write_leb128(email_push.change_id);
                     }
                 },
-                BroadcastEvent::InvalidateAccessTokens(items) => {
+                BroadcastEvent::PushServerUpdate(account_id) => {
                     serialized.push(3u8);
-                    let _ = serialized.write_leb128(items.len());
-                    for item in items {
-                        let _ = serialized.write_leb128(*item);
-                    }
-                }
-                BroadcastEvent::InvalidateGroupwareCache(items) => {
-                    serialized.push(4u8);
-                    let _ = serialized.write_leb128(items.len());
-                    for item in items {
-                        let _ = serialized.write_leb128(*item);
-                    }
-                }
-                BroadcastEvent::ReloadSettings => {
-                    serialized.push(5u8);
-                }
-                BroadcastEvent::ReloadBlockedIps => {
-                    serialized.push(6u8);
-                }
-                BroadcastEvent::ReloadPushServers(account_id) => {
-                    serialized.push(7u8);
                     let _ = serialized.write_leb128(*account_id);
                 }
-                BroadcastEvent::ReloadSpamFilter => {
-                    serialized.push(8u8);
+                BroadcastEvent::RegistryChange(items) => match items {
+                    RegistryChange::Insert(id) => {
+                        serialized.push(4u8);
+                        let _ = serialized.write_leb128(id.object().to_id());
+                        let _ = serialized.write_leb128(id.id());
+                    }
+                    RegistryChange::Delete(id) => {
+                        serialized.push(5u8);
+                        let _ = serialized.write_leb128(id.object().to_id());
+                        let _ = serialized.write_leb128(id.id());
+                    }
+                    RegistryChange::Reload(object) => {
+                        serialized.push(6u8);
+                        let _ = serialized.write_leb128(object.to_id());
+                    }
+                },
+                BroadcastEvent::CacheInvalidation(items) => {
+                    serialized.push(7u8);
+                    let _ = serialized.write_leb128(items.len());
+                    for item in items {
+                        let (marker, id) = match item {
+                            CacheInvalidation::AccessToken(id) => (0u8, *id),
+                            CacheInvalidation::DavResources(id) => (1u8, *id),
+                            CacheInvalidation::Domain(id) => (2u8, *id),
+                            CacheInvalidation::Account(id) => (3u8, *id),
+                            CacheInvalidation::Group(id) => (4u8, *id),
+                            CacheInvalidation::Tenant(id) => (5u8, *id),
+                            CacheInvalidation::Role(id) => (6u8, *id),
+                            CacheInvalidation::List(id) => (7u8, *id),
+                        };
+
+                        serialized.push(marker);
+                        let _ = serialized.write_leb128(id);
+                    }
                 }
             }
         }
@@ -153,43 +171,50 @@ where
                         }),
                     )))
                 }
-
-                2 => Ok(Some(BroadcastEvent::PushNotification(
-                    PushNotification::EmailPush(EmailPush {
-                        account_id: self.messages.next_leb128().ok_or(())?,
-                        email_id: self.messages.next_leb128().ok_or(())?,
-                        change_id: self.messages.next_leb128().ok_or(())?,
-                    }),
-                ))),
-
                 3 => {
-                    let count = self.messages.next_leb128::<usize>().ok_or(())?;
-                    let mut items = Vec::with_capacity(count);
-                    for _ in 0..count {
-                        items.push(self.messages.next_leb128().ok_or(())?);
-                    }
-                    Ok(Some(BroadcastEvent::InvalidateAccessTokens(items)))
-                }
-
-                4 => {
-                    let count = self.messages.next_leb128::<usize>().ok_or(())?;
-                    let mut items = Vec::with_capacity(count);
-                    for _ in 0..count {
-                        items.push(self.messages.next_leb128().ok_or(())?);
-                    }
-                    Ok(Some(BroadcastEvent::InvalidateGroupwareCache(items)))
-                }
-
-                5 => Ok(Some(BroadcastEvent::ReloadSettings)),
-
-                6 => Ok(Some(BroadcastEvent::ReloadBlockedIps)),
-
-                7 => {
                     let account_id = self.messages.next_leb128().ok_or(())?;
-                    Ok(Some(BroadcastEvent::ReloadPushServers(account_id)))
+                    Ok(Some(BroadcastEvent::PushServerUpdate(account_id)))
                 }
-
-                8 => Ok(Some(BroadcastEvent::ReloadSpamFilter)),
+                4 => {
+                    let object_id = self.messages.next_leb128().ok_or(())?;
+                    let id = self.messages.next_leb128::<u64>().ok_or(())?;
+                    Ok(Some(BroadcastEvent::RegistryChange(
+                        RegistryChange::Insert(Id::new(Object::from_id(object_id).ok_or(())?, id)),
+                    )))
+                }
+                5 => {
+                    let object_id = self.messages.next_leb128().ok_or(())?;
+                    let id = self.messages.next_leb128::<u64>().ok_or(())?;
+                    Ok(Some(BroadcastEvent::RegistryChange(
+                        RegistryChange::Delete(Id::new(Object::from_id(object_id).ok_or(())?, id)),
+                    )))
+                }
+                6 => {
+                    let object_id = self.messages.next_leb128().ok_or(())?;
+                    Ok(Some(BroadcastEvent::RegistryChange(
+                        RegistryChange::Reload(Object::from_id(object_id).ok_or(())?),
+                    )))
+                }
+                7 => {
+                    let count = self.messages.next_leb128::<usize>().ok_or(())?;
+                    let mut items = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        let marker = self.messages.next().ok_or(())?.borrow().to_owned();
+                        let id = self.messages.next_leb128::<u32>().ok_or(())?;
+                        items.push(match marker {
+                            0 => CacheInvalidation::AccessToken(id),
+                            1 => CacheInvalidation::DavResources(id),
+                            2 => CacheInvalidation::Domain(id),
+                            3 => CacheInvalidation::Account(id),
+                            4 => CacheInvalidation::Group(id),
+                            5 => CacheInvalidation::Tenant(id),
+                            6 => CacheInvalidation::Role(id),
+                            7 => CacheInvalidation::List(id),
+                            _ => return Err(()),
+                        });
+                    }
+                    Ok(Some(BroadcastEvent::CacheInvalidation(items)))
+                }
 
                 _ => Err(()),
             }

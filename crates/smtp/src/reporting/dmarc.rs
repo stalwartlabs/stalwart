@@ -11,7 +11,7 @@ use common::{
     Server,
     config::smtp::report::AggregateFrequency,
     ipc::{DmarcEvent, ToHash},
-    listener::SessionStream,
+    network::SessionStream,
 };
 use compact_str::ToCompactString;
 use mail_auth::{
@@ -21,13 +21,14 @@ use mail_auth::{
     dmarc::{self, URI},
     report::{AuthFailureType, IdentityAlignment, PolicyPublished, Record, Report, SPFDomainScope},
 };
+use registry::schema::structs::Rate;
 use std::{collections::hash_map::Entry, future::Future};
 use store::{
     Deserialize, IterateParams, Serialize, ValueKey,
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, QueueClass, ReportEvent, ValueClass},
 };
 use trc::{AddContext, OutgoingReportEvent};
-use utils::{DomainPart, config::Rate};
+use utils::DomainPart;
 
 #[derive(
     Debug,
@@ -251,8 +252,8 @@ impl<T: SessionStream> Session<T> {
                     OutgoingReport(OutgoingReportEvent::DmarcRateLimited),
                     SpanId = self.data.session_id,
                     Limit = vec![
-                        trc::Value::from(failure_rate.requests),
-                        trc::Value::from(failure_rate.period)
+                        trc::Value::from(failure_rate.count),
+                        trc::Value::from(failure_rate.period.into_inner())
                     ],
                 );
             }

@@ -31,7 +31,7 @@ pub(super) async fn build_file_resources(
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
-    let account_info = server.account_info(account_id).await?;
+    let account_info = server.account(account_id).await?;
 
     let mut resources = Vec::with_capacity(16);
     server

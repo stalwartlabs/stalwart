@@ -12,6 +12,7 @@ utils = { path = "../utils" }
 trc = { path = "../trc" }
 types = { path = "../types" }
 email = { path = "../email" }
+registry = { path = "../registry" }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
 mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
 rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }

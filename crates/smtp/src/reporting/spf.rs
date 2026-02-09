@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::listener::SessionStream;
-
-use mail_auth::{AuthenticationResults, SpfOutput, report::AuthFailureType};
-use trc::OutgoingReportEvent;
-use utils::config::Rate;
-
 use crate::{core::Session, reporting::SmtpReporting};
+use common::network::SessionStream;
+use mail_auth::{AuthenticationResults, SpfOutput, report::AuthFailureType};
+use registry::schema::structs::Rate;
+use trc::OutgoingReportEvent;
 
 impl<T: SessionStream> Session<T> {
     pub async fn send_spf_report(
@@ -27,8 +25,8 @@ impl<T: SessionStream> Session<T> {
                 SpanId = self.data.session_id,
                 To = rcpt.to_string(),
                 Limit = vec![
-                    trc::Value::from(rate.requests),
-                    trc::Value::from(rate.period)
+                    trc::Value::from(rate.count),
+                    trc::Value::from(rate.period.into_inner())
                 ],
             );
 

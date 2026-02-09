@@ -29,6 +29,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Map, Value};
+use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
     ValueKey,
@@ -89,6 +90,7 @@ impl MailboxSet for Server {
             will_destroy: request.unwrap_destroy().into_valid().collect(),
         };
         let mut change_id = None;
+        let account_info = self.account_info(account_id).await?;
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -98,7 +100,10 @@ impl MailboxSet for Server {
             };
 
             // Validate quota
-            if ctx.mailbox_ids.len() >= access_token.object_quota(Collection::Mailbox) as u64 {
+            if ctx.mailbox_ids.len()
+                >= self.object_quota(account_info.object_quotas(), StorageQuota::MaxMailboxes)
+                    as u64
+            {
                 ctx.response.not_created.append(
                     id,
                     SetError::new(SetErrorType::OverQuota).with_description(concat!(
@@ -341,7 +346,7 @@ impl MailboxSet for Server {
             match (&property, value) {
                 (Key::Property(MailboxProperty::Name), Value::Str(value)) => {
                     let value = value.trim();
-                    if !value.is_empty() && value.len() < self.core.jmap.mailbox_name_max_len {
+                    if !value.is_empty() && value.len() < self.core.email.mailbox_name_max_len {
                         changes.name = value.into();
                     } else {
                         return Ok(Err(SetError::invalid_properties()
@@ -448,7 +453,7 @@ impl MailboxSet for Server {
                 .as_ref()
                 .map_or(u32::MAX, |(mailbox_id, _)| *mailbox_id + 1);
             let mut success = false;
-            for depth in 0..self.core.jmap.mailbox_max_depth {
+            for depth in 0..self.core.email.mailbox_max_depth {
                 if mailbox_parent_id == current_mailbox_id {
                     return Ok(Err(SetError::invalid_properties()
                         .with_property(MailboxProperty::ParentId)

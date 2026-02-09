@@ -9,9 +9,9 @@ use email::cache::MessageCacheFetch;
 use email::cache::email::MessageCacheAccess;
 use email::message::metadata::MessageMetadata;
 use groupware::cache::GroupwareCache;
+use std::future::Future;
 use store::ValueKey;
 use store::write::{AlignedBytes, Archive};
-use std::future::Future;
 use trc::AddContext;
 use types::acl::Acl;
 use types::blob::{BlobClass, BlobId};
@@ -125,7 +125,7 @@ impl BlobDownload for Server {
                             | Collection::ContactCard
                             | Collection::CalendarEvent) => self
                                 .fetch_dav_resources(
-                                    access_token,
+                                    access_token.account_id(),
                                     *account_id,
                                     SyncCollection::from(collection),
                                 )

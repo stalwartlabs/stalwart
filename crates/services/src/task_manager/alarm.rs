@@ -11,13 +11,12 @@ use calcard::{
 use chrono::{DateTime, Locale};
 use common::{
     DEFAULT_LOGO_BASE64, Server,
-    auth::AccessToken,
+    auth::{AccountInfo, BuildAccessToken},
     config::groupware::CalendarTemplateVariable,
     i18n,
     ipc::{CalendarAlert, PushNotification},
-    listener::{ServerInstance, stream::NullIo},
+    network::{ServerInstance, stream::NullIo},
 };
-use registry::schema::enums::Permission;
 use groupware::calendar::{
     ArchivedCalendarEvent, CalendarEvent,
     alarm::{CalendarAlarm, CalendarAlarmType},
@@ -28,6 +27,7 @@ use mail_builder::{
     mime::{BodyPart, MimePart},
 };
 use mail_parser::decoders::html::html_to_text;
+use registry::{schema::enums::Permission, types::EnumType};
 use smtp::core::{Session, SessionData};
 use smtp_proto::{MailFrom, RcptTo};
 use std::{str::FromStr, sync::Arc, time::Duration};
@@ -100,9 +100,10 @@ async fn send_email_alarm(
 ) -> trc::Result<bool> {
     // Obtain access token
     let access_token = server
-        .get_access_token(account_id)
+        .access_token(account_id)
         .await
-        .caused_by(trc::location!())?;
+        .caused_by(trc::location!())?
+        .build();
 
     if !access_token.has_permission(Permission::CalendarAlarms) {
         trc::event!(
@@ -112,7 +113,13 @@ async fn send_email_alarm(
             DocumentId = document_id,
         );
         return Ok(true);
-    } else if access_token.emails.is_empty() {
+    }
+    let account_info = server
+        .account_info(account_id)
+        .await
+        .caused_by(trc::location!())?;
+
+    if account_info.name().is_empty() {
         trc::event!(
             Calendar(trc::CalendarEvent::AlarmFailed),
             Reason = "Account does not have any email addresses",
@@ -149,12 +156,12 @@ async fn send_email_alarm(
         .caused_by(trc::location!())?;
 
     // Build message body
-    let account_main_email = access_token.emails.first().unwrap();
+    let account_main_email = account_info.name();
     let account_main_domain = account_main_email.rsplit('@').next().unwrap_or("localhost");
     let logo_cid = format!("logo.{}@{account_main_domain}", now());
     let Some(tpl) = build_template(
         server,
-        &access_token,
+        &account_info,
         account_id,
         document_id,
         alarm,
@@ -238,7 +245,7 @@ async fn send_email_alarm(
         let mut session = Session::<NullIo>::local(
             server_,
             server_instance,
-            SessionData::local(access_token, None, vec![], vec![], 0),
+            SessionData::local(account_info, None, vec![], vec![], 0),
         );
 
         // MAIL FROM
@@ -434,7 +441,7 @@ struct Details {
 
 async fn build_template(
     server: &Server,
-    access_token: &AccessToken,
+    account_info: &AccountInfo,
     account_id: u32,
     document_id: u32,
     alarm: &CalendarAlarm,
@@ -455,7 +462,7 @@ async fn build_template(
     };
 
     // Build webcal URI
-    let webcal_uri = match event.webcal_uri(server, access_token).await {
+    let webcal_uri = match event.webcal_uri(server, account_info).await {
         Ok(uri) => uri,
         Err(err) => {
             trc::error!(
@@ -536,7 +543,7 @@ async fn build_template(
     // Validate recipient
     let rcpt_to = if let Some(rcpt_to) = rcpt_to {
         if server.core.groupware.alarms_allow_external_recipients
-            || access_token.emails.iter().any(|email| email == &rcpt_to)
+            || account_info.addresses().any(|email| email == &rcpt_to)
         {
             rcpt_to
         } else {
@@ -548,10 +555,10 @@ async fn build_template(
                 DocumentId = document_id,
             );
 
-            access_token.emails.first().unwrap().to_string()
+            account_info.name().to_string()
         }
     } else {
-        access_token.emails.first().unwrap().to_string()
+        account_info.name().to_string()
     };
 
     // SPDX-SnippetBegin
@@ -568,12 +575,8 @@ async fn build_template(
 
     #[cfg(not(feature = "enterprise"))]
     let template = &server.core.groupware.alarms_template;
-    let locale = i18n::locale_or_default(access_token.locale.as_deref().unwrap_or("en"));
-    let chrono_locale = access_token
-        .locale
-        .as_deref()
-        .and_then(|locale| Locale::from_str(locale).ok())
-        .unwrap_or(Locale::en_US);
+    let locale = i18n::locale_or_default(account_info.locale().as_str());
+    let chrono_locale = Locale::from_str(account_info.locale().as_str()).unwrap_or(Locale::en_US);
     let (event_start, event_start_tz, event_end, event_end_tz) = match alarm.typ {
         CalendarAlarmType::Email {
             event_start,
@@ -617,7 +620,7 @@ async fn build_template(
             (None, Some(name)) => name.to_string(),
             _ => unreachable!(),
         })
-        .unwrap_or_else(|| access_token.name.clone());
+        .unwrap_or_else(|| account_info.name().to_string());
     let mut variables = Variables::new();
     variables.insert_single(CalendarTemplateVariable::PageTitle, subject.as_str());
     variables.insert_single(

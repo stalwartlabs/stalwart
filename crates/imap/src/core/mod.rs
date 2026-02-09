@@ -4,23 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    collections::BTreeMap,
-    net::IpAddr,
-    sync::{Arc, atomic::AtomicU32},
-};
-
 use ahash::AHashMap;
 use common::{
     Inner, Server,
     auth::AccessToken,
-    listener::{ServerInstance, SessionStream, limiter::InFlight},
+    network::{ServerInstance, SessionStream, limiter::InFlight},
 };
-
 use imap_proto::{
     Command,
     protocol::{ProtocolVersion, list::Attribute},
     receiver::Receiver,
+};
+use std::{
+    collections::BTreeMap,
+    net::IpAddr,
+    sync::{Arc, atomic::AtomicU32},
 };
 use tokio::{
     io::{ReadHalf, WriteHalf},
@@ -63,7 +61,7 @@ pub struct Session<T: SessionStream> {
 
 pub struct SessionData<T: SessionStream> {
     pub account_id: u32,
-    pub access_token: Arc<AccessToken>,
+    pub access_token: AccessToken,
     pub server: Server,
     pub session_id: u64,
     pub mailboxes: parking_lot::Mutex<Vec<Account>>,
@@ -78,12 +76,6 @@ pub struct SelectedMailbox {
     pub saved_search: parking_lot::Mutex<SavedSearch>,
     pub is_select: bool,
     pub is_condstore: bool,
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub struct AccountId {
-    pub account_id: u32,
-    pub account_id: u32,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -198,10 +190,11 @@ impl<T: SessionStream> State<T> {
 }
 
 impl<T: SessionStream> SessionData<T> {
-    pub async fn get_access_token(&self) -> trc::Result<Arc<AccessToken>> {
+    pub async fn refresh_access_token(&self) -> trc::Result<AccessToken> {
         self.server
-            .get_access_token(self.account_id)
+            .access_token(self.account_id)
             .await
+            .and_then(|inner| AccessToken::renew(inner, self.access_token.credential_id()))
             .caused_by(trc::location!())
     }
 

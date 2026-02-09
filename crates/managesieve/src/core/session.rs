@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{ManageSieveSessionManager, Session, State};
+use crate::SERVER_GREETING;
 use common::{
-    core::BuildServer,
-    listener::{SessionData, SessionManager, SessionResult, SessionStream},
+    BuildServer,
+    network::{SessionData, SessionManager, SessionResult, SessionStream},
 };
 use imap_proto::receiver::{self, Receiver};
 use tokio_rustls::server::TlsStream;
-
-use crate::SERVER_GREETING;
-
-use super::{ManageSieveSessionManager, Session, State};
 
 impl SessionManager for ManageSieveSessionManager {
     #[allow(clippy::manual_async_fn)]

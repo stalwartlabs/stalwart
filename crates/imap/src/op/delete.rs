@@ -9,12 +9,12 @@ use crate::{
     core::{Session, SessionData},
     spawn_op,
 };
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use email::mailbox::destroy::{MailboxDestroy, MailboxDestroyError};
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::delete::Arguments, receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::time::Instant;
 
 impl<T: SessionStream> Session<T> {
@@ -68,7 +68,7 @@ impl<T: SessionStream> SessionData<T> {
 
         // Delete message
         let access_token = self
-            .get_access_token()
+            .refresh_access_token()
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 

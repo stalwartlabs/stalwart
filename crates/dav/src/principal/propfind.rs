@@ -112,10 +112,7 @@ impl PrincipalPropFind for Server {
             let mut fields = Vec::with_capacity(properties.len());
             let mut fields_not_found = Vec::new();
 
-            let account = self
-                .account_info(account_id)
-                .await
-                .caused_by(trc::location!())?;
+            let account = self.account(account_id).await.caused_by(trc::location!())?;
 
             // Fetch quota
             let quota = if needs_quota {
@@ -382,10 +379,7 @@ impl PrincipalPropFind for Server {
         if account_info.account_id() == account_id {
             Ok(account_info.current_user_principal())
         } else {
-            let account_info = self
-                .account_info(account_id)
-                .await
-                .caused_by(trc::location!())?;
+            let account_info = self.account(account_id).await.caused_by(trc::location!())?;
             Ok(Href(format!(
                 "{}/{}/",
                 DavResourceName::Principal.base_path(),
@@ -419,7 +413,7 @@ pub(crate) async fn build_home_set(
         for account_id in access_token.all_ids_by_collection(collection) {
             if account_id != access_token.account_id() {
                 let other = server
-                    .account_info(account_id)
+                    .account(account_id)
                     .await
                     .caused_by(trc::location!())?;
 

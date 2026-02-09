@@ -56,6 +56,8 @@ pub struct EmailConfig {
     pub max_objects: ObjectQuota,
 
     pub account_purge_frequency: SimpleCron,
+    pub data_purge_frequency: SimpleCron,
+    pub blob_purge_frequency: SimpleCron,
 }
 
 #[derive(Clone, Debug)]
@@ -79,11 +81,12 @@ impl EmailConfig {
         let oidc = bp.setting_infallible::<OidcProvider>().await;
 
         // Parse default object quotas
+        let todo = "make sure all are configurable";
         let mut max_objects = ObjectQuota::default();
         for (item, max) in [
             (StorageQuota::MaxMailboxes, email.max_mailboxes),
             (StorageQuota::MaxSieveScripts, sieve.max_scripts),
-            (StorageQuota::MaxIdentities, email.max_identities),
+            (StorageQuota::MaxEmailIdentities, email.max_identities),
             (StorageQuota::MaxEmailSubmissions, email.max_submissions),
             (StorageQuota::MaxMaskedAddresses, email.max_masked_addresses),
             (StorageQuota::MaxAppPasswords, oidc.max_app_passwords),
@@ -242,9 +245,11 @@ impl EmailConfig {
             index_batch_size: search.index_batch_size as usize,
             index_fields,
             max_objects,
-            account_purge_frequency: dr.expunge_schedule.into(),
             default_folders,
             shared_folder,
+            account_purge_frequency: dr.expunge_schedule.into(),
+            data_purge_frequency: dr.data_cleanup_schedule.into(),
+            blob_purge_frequency: dr.blob_cleanup_schedule.into(),
         }
     }
 }

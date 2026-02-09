@@ -9,14 +9,14 @@ use crate::{
     op::ImapContext,
     spawn_op,
 };
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use registry::schema::enums::Permission;
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{create::Arguments, list::Attribute},
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::write::BatchBuilder;
 use trc::AddContext;
@@ -155,7 +155,7 @@ impl<T: SessionStream> SessionData<T> {
                     return Err(trc::ImapEvent::Error
                         .into_err()
                         .details("Invalid empty path item."));
-                } else if path_item.len() > self.server.core.jmap.mailbox_name_max_len {
+                } else if path_item.len() > self.server.core.email.mailbox_name_max_len {
                     return Err(trc::ImapEvent::Error
                         .into_err()
                         .details("Mailbox name is too long."));
@@ -163,7 +163,7 @@ impl<T: SessionStream> SessionData<T> {
                 path.push(path_item);
             }
 
-            if path.len() > self.server.core.jmap.mailbox_max_depth {
+            if path.len() > self.server.core.email.mailbox_max_depth {
                 return Err(trc::ImapEvent::Error
                     .into_err()
                     .details("Mailbox path is too deep."));
@@ -178,7 +178,7 @@ impl<T: SessionStream> SessionData<T> {
         let (account_id, path) = {
             let mailboxes = self.mailboxes.lock();
             let (account, full_path, prefix) =
-                if path.first() == Some(&self.server.core.jmap.shared_folder.as_str()) {
+                if path.first() == Some(&self.server.core.email.shared_folder.as_str()) {
                     // Shared Folders/<username>/<folder>
                     if path.len() < 3 {
                         return Err(trc::ImapEvent::Error
@@ -272,7 +272,7 @@ impl<T: SessionStream> SessionData<T> {
             }
         } else if self.account_id != account_id
             && !self
-                .get_access_token()
+                .refresh_access_token()
                 .await
                 .caused_by(trc::location!())?
                 .is_member(account_id)

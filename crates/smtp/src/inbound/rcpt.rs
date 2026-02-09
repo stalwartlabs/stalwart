@@ -9,9 +9,11 @@ use crate::{
     scripts::ScriptResult,
 };
 use common::{
-    KV_GREYLIST, config::smtp::session::Stage, listener::SessionStream, scripts::ScriptModification,
+    KV_GREYLIST,
+    config::smtp::session::Stage,
+    network::{RcptResolution, SessionStream},
+    scripts::ScriptModification,
 };
-use directory::backend::RcptType;
 use smtp_proto::{
     RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, RcptTo,
 };
@@ -191,97 +193,73 @@ impl<T: SessionStream> Session<T> {
         // Verify address
         let rcpt = self.data.rcpt_to.last().unwrap();
         let mut rcpt_members = None;
-        if let Some(directory) = self
-            .server
-            .eval_if::<String, _>(&rcpt_config.directory, self, self.data.session_id)
-            .await
-            .and_then(|name| self.server.get_directory(&name))
-        {
-            match directory.is_local_domain(&rcpt.domain).await {
-                Ok(true) => {
-                    match self
-                        .server
-                        .rcpt(directory, &rcpt.address_lcase, self.data.session_id)
-                        .await
-                    {
-                        Ok(RcptType::Mailbox) => {}
-                        Ok(RcptType::List(members)) => {
-                            rcpt_members = Some(members);
-                        }
-                        Ok(RcptType::Invalid) => {
-                            trc::event!(
-                                Smtp(SmtpEvent::MailboxDoesNotExist),
-                                SpanId = self.data.session_id,
-                                To = rcpt.address_lcase.clone(),
-                            );
 
-                            let rcpt_to = self.data.rcpt_to.pop().unwrap().address_lcase;
-                            return self
-                                .rcpt_error(b"550 5.1.2 Mailbox does not exist.\r\n", rcpt_to)
-                                .await;
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.span_id(self.data.session_id)
-                                    .caused_by(trc::location!())
-                                    .details("Failed to verify address.")
-                            );
+        match self.server.rcpt_resolve(&rcpt.address_lcase).await {
+            Ok(RcptResolution::Accept) => {}
+            Ok(RcptResolution::Forward(address) | RcptResolution::Rewrite(address)) => {
+                let orig_addr = self.data.rcpt_to.pop().unwrap();
+                let mut new_addr = SessionAddress::new(address);
 
-                            self.data.rcpt_to.pop();
-                            return self
-                                .write(b"451 4.4.3 Unable to verify address at this time.\r\n")
-                                .await;
-                        }
-                    }
+                if !self.data.rcpt_to.contains(&new_addr) {
+                    new_addr.dsn_info = format!("rfc822;{}", orig_addr.address_lcase).into();
+                    new_addr.flags = orig_addr.flags;
+                    self.data.rcpt_to.push(new_addr);
+                } else {
+                    trc::event!(
+                        Smtp(SmtpEvent::RcptToDuplicate),
+                        SpanId = self.data.session_id,
+                        To = new_addr.address_lcase.clone(),
+                    );
+                    self.data.rcpt_oks += 1;
+                    return self.write(b"250 2.1.5 OK\r\n").await;
                 }
-                Ok(false) => {
-                    if !self
-                        .server
-                        .eval_if(&rcpt_config.relay, self, self.data.session_id)
-                        .await
-                        .unwrap_or(false)
-                    {
-                        trc::event!(
-                            Smtp(SmtpEvent::RelayNotAllowed),
-                            SpanId = self.data.session_id,
-                            To = rcpt.address_lcase.clone(),
-                        );
+            }
+            Ok(RcptResolution::Expand(members)) => {
+                rcpt_members = Some(members);
+            }
+            Ok(RcptResolution::UnknownRecipient) => {
+                trc::event!(
+                    Smtp(SmtpEvent::MailboxDoesNotExist),
+                    SpanId = self.data.session_id,
+                    To = rcpt.address_lcase.clone(),
+                );
 
-                        let rcpt_to = self.data.rcpt_to.pop().unwrap().address_lcase;
-                        return self
-                            .rcpt_error(b"550 5.1.2 Relay not allowed.\r\n", rcpt_to)
-                            .await;
-                    }
-                }
-                Err(err) => {
-                    trc::error!(
-                        err.span_id(self.data.session_id)
-                            .caused_by(trc::location!())
-                            .details("Failed to verify address.")
+                let rcpt_to = self.data.rcpt_to.pop().unwrap().address_lcase;
+                return self
+                    .rcpt_error(b"550 5.1.2 Mailbox does not exist.\r\n", rcpt_to)
+                    .await;
+            }
+            Ok(RcptResolution::UnknownDomain) => {
+                if !self
+                    .server
+                    .eval_if(&rcpt_config.relay, self, self.data.session_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    trc::event!(
+                        Smtp(SmtpEvent::RelayNotAllowed),
+                        SpanId = self.data.session_id,
+                        To = rcpt.address_lcase.clone(),
                     );
 
-                    self.data.rcpt_to.pop();
+                    let rcpt_to = self.data.rcpt_to.pop().unwrap().address_lcase;
                     return self
-                        .write(b"451 4.4.3 Unable to verify address at this time.\r\n")
+                        .rcpt_error(b"550 5.1.2 Relay not allowed.\r\n", rcpt_to)
                         .await;
                 }
             }
-        } else if !self
-            .server
-            .eval_if(&rcpt_config.relay, self, self.data.session_id)
-            .await
-            .unwrap_or(false)
-        {
-            trc::event!(
-                Smtp(SmtpEvent::RelayNotAllowed),
-                SpanId = self.data.session_id,
-                To = rcpt.address_lcase.clone(),
-            );
+            Err(err) => {
+                trc::error!(
+                    err.span_id(self.data.session_id)
+                        .caused_by(trc::location!())
+                        .details("Failed to verify address.")
+                );
 
-            let rcpt_to = self.data.rcpt_to.pop().unwrap().address_lcase;
-            return self
-                .rcpt_error(b"550 5.1.2 Relay not allowed.\r\n", rcpt_to)
-                .await;
+                self.data.rcpt_to.pop();
+                return self
+                    .write(b"451 4.4.3 Unable to verify address at this time.\r\n")
+                    .await;
+            }
         }
 
         if self.is_allowed().await {
@@ -375,8 +353,8 @@ impl<T: SessionStream> Session<T> {
         if let Some(members) = rcpt_members {
             let list_addr = self.data.rcpt_to.pop().unwrap();
             let orcpt = format!("rfc822;{}", list_addr.address_lcase);
-            for member in members {
-                let mut member_addr = SessionAddress::new(member);
+            for member in members.as_ref() {
+                let mut member_addr = SessionAddress::new(member.to_string());
                 if !self.data.rcpt_to.contains(&member_addr)
                     && member_addr.address_lcase != list_addr.address_lcase
                 {

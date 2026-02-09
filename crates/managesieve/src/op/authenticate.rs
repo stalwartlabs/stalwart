@@ -4,22 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::core::{Command, Session, State, StatusResponse};
 use common::{
-    auth::{
-        AuthRequest,
-        sasl::{sasl_decode_challenge_oauth, sasl_decode_challenge_plain},
-    },
-    listener::{SessionStream, limiter::LimiterResult},
+    auth::AuthRequest,
+    network::{SessionStream, limiter::LimiterResult},
 };
-
-use registry::schema::enums::Permission;
+use directory::Credentials;
 use imap_proto::{
     protocol::authenticate::Mechanism,
     receiver::{self, Request},
 };
 use mail_parser::decoders::base64::base64_decode;
-
-use crate::core::{Command, Session, State, StatusResponse};
+use registry::schema::enums::Permission;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_authenticate(&mut self, request: Request<Command>) -> trc::Result<Vec<u8>> {
@@ -42,9 +38,9 @@ impl<T: SessionStream> Session<T> {
                     base64_decode(params.pop().unwrap().as_bytes())
                         .and_then(|challenge| {
                             if mechanism == Mechanism::Plain {
-                                sasl_decode_challenge_plain(&challenge)
+                                Credentials::decode_sasl_challenge_plain(&challenge)
                             } else {
-                                sasl_decode_challenge_oauth(&challenge)
+                                Credentials::decode_sasl_challenge_oauth(&challenge)
                             }
                         })
                         .ok_or_else(|| {
@@ -96,11 +92,7 @@ impl<T: SessionStream> Session<T> {
 
                 err
             })
-            .and_then(|token| {
-                token
-                    .assert_has_permission(Permission::SieveAuthenticate)
-                    .map(|_| token)
-            })?;
+            .and_then(|token| token.assert_has_permission(Permission::SieveAuthenticate))?;
 
         // Enforce concurrency limits
         let in_flight = match access_token.is_imap_request_allowed() {

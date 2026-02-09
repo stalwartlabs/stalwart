@@ -50,7 +50,11 @@ impl ContactCardQuery for Server {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await?;
         let mut created_to_updated = Vec::new();
 
@@ -154,7 +158,7 @@ impl ContactCardQuery for Server {
                         filters.push(SearchFilter::has_text_detect(
                             ContactSearchField::Note,
                             value,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     ContactCardFilter::HasMember(value) => {
@@ -203,7 +207,7 @@ impl ContactCardQuery for Server {
                         filters.push(SearchFilter::has_text_detect(
                             ContactSearchField::Note,
                             value,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                         filters.push(SearchFilter::End);
                     }

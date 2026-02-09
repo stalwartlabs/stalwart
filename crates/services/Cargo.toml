@@ -15,6 +15,7 @@ spam-filter = { path = "../spam-filter" }
 types = { path = "../types" }
 jmap_proto = { path = "../jmap-proto" }
 directory = { path =  "../directory" }
+registry = { path =  "../registry" }
 smtp-proto = { version = "0.2", features = ["rkyv", "serde"] }
 tokio = { version = "1.47", features = ["rt"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }

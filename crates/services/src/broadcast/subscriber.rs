@@ -6,11 +6,10 @@
 
 use crate::broadcast::{BROADCAST_TOPIC, BroadcastBatch};
 use common::{
-    Inner,
-    core::BuildServer,
-    ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, PushNotification},
+    BuildServer, Inner,
+    ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, PushNotification, RegistryChange},
 };
-use compact_str::CompactString;
+use registry::types::EnumType;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 use trc::{ClusterEvent, ServerEvent};
@@ -18,7 +17,7 @@ use trc::{ClusterEvent, ServerEvent};
 pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Receiver<bool>) {
     let this_node_id = {
         let _core = inner.shared_core.load();
-        if _core.storage.pubsub.is_none() {
+        if _core.storage.coordinator.is_none() {
             return;
         }
         _core.network.node_id as u16
@@ -30,16 +29,16 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
         trc::event!(Cluster(ClusterEvent::SubscriberStart));
 
         loop {
-            let pubsub = inner.shared_core.load().storage.pubsub.clone();
-            if pubsub.is_none() {
+            let coordinator = inner.shared_core.load().storage.coordinator.clone();
+            if coordinator.is_none() {
                 trc::event!(
                     Cluster(ClusterEvent::SubscriberError),
-                    Details = "PubSub is no longer configured"
+                    Details = "Coordinator is no longer configured"
                 );
                 break;
             }
 
-            let mut stream = match pubsub.subscribe(BROADCAST_TOPIC).await {
+            let mut stream = match coordinator.subscribe(BROADCAST_TOPIC).await {
                 Ok(stream) => {
                     retry_count = 0;
                     stream
@@ -122,7 +121,7 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                     );
                                                 }
                                             }
-                                            BroadcastEvent::ReloadPushServers(account_id) => {
+                                            BroadcastEvent::PushServerUpdate(account_id) => {
                                                 if inner
                                                     .ipc
                                                     .push_tx
@@ -137,22 +136,12 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                     );
                                                 }
                                             }
-                                            BroadcastEvent::InvalidateAccessTokens(ids) => {
-                                                for id in &ids {
-                                                    inner.cache.permissions.remove(id);
-                                                    inner.cache.access_tokens.remove(id);
-                                                }
+                                            BroadcastEvent::CacheInvalidation(changes) => {
+                                                inner.build_server().invalidate_caches(changes, false).await;
+
                                             }
-                                            BroadcastEvent::InvalidateGroupwareCache(ids) => {
-                                                for id in &ids {
-                                                    inner.cache.files.remove(id);
-                                                    inner.cache.contacts.remove(id);
-                                                    inner.cache.events.remove(id);
-                                                    inner.cache.scheduling.remove(id);
-                                                }
-                                            }
-                                            BroadcastEvent::ReloadSettings => {
-                                                match inner.build_server().reload().await {
+                                            BroadcastEvent::RegistryChange(change) => {
+                                                match inner.build_server().reload_registry(change).await {
                                                     Ok(result) => {
                                                         if let Some(new_core) = result.new_core {
                                                             // Update core
@@ -179,22 +168,6 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                                 .caused_by(trc::location!())
                                                         );
                                                     }
-                                                }
-                                            }
-                                            BroadcastEvent::ReloadBlockedIps => {
-                                                if let Err(err) = inner.build_server().reload_blocked_ips().await {
-                                                    trc::error!(
-                                                        err.details("Failed to reload settings")
-                                                            .caused_by(trc::location!())
-                                                    );
-                                                }
-                                            }
-                                            BroadcastEvent::ReloadSpamFilter => {
-                                                if let Err(err) = inner.build_server().spam_model_reload().await {
-                                                    trc::error!(
-                                                        err.details("Failed to reload spam filter model")
-                                                            .caused_by(trc::location!())
-                                                    );
                                                 }
                                             }
                                         }
@@ -251,27 +224,31 @@ fn log_event(event: &BroadcastEvent) -> trc::Value {
                 email_push.change_id.into(),
             ]),
         },
-        BroadcastEvent::ReloadSettings => CompactString::const_new("ReloadSettings").into(),
-        BroadcastEvent::ReloadBlockedIps => CompactString::const_new("ReloadBlockedIps").into(),
-        BroadcastEvent::InvalidateAccessTokens(items) => {
+        BroadcastEvent::PushServerUpdate(account_id) => {
+            trc::Value::Array(vec!["PushServerUpdate".into(), (*account_id).into()])
+        }
+        BroadcastEvent::RegistryChange(change) => match change {
+            RegistryChange::Insert(id) => trc::Value::Array(vec![
+                "RegistryInsert".into(),
+                id.object().as_str().into(),
+                id.id().into(),
+            ]),
+            RegistryChange::Delete(id) => trc::Value::Array(vec![
+                "RegistryDelete".into(),
+                id.object().as_str().into(),
+                id.id().into(),
+            ]),
+            RegistryChange::Reload(object) => {
+                trc::Value::Array(vec!["RegistryReload".into(), object.as_str().into()])
+            }
+        },
+        BroadcastEvent::CacheInvalidation(items) => {
             let mut array = Vec::with_capacity(items.len() + 1);
-            array.push("InvalidateAccessTokens".into());
+            array.push("CacheInvalidation".into());
             for item in items {
-                array.push((*item).into());
+                array.push(format!("{:?}", item).into());
             }
             trc::Value::Array(array)
         }
-        BroadcastEvent::InvalidateGroupwareCache(items) => {
-            let mut array = Vec::with_capacity(items.len() + 1);
-            array.push("InvalidateGroupwareCache".into());
-            for item in items {
-                array.push((*item).into());
-            }
-            trc::Value::Array(array)
-        }
-        BroadcastEvent::ReloadPushServers(account_id) => {
-            trc::Value::Array(vec!["ReloadPushServers".into(), (*account_id).into()])
-        }
-        BroadcastEvent::ReloadSpamFilter => CompactString::const_new("ReloadSpamFilter").into(),
     }
 }

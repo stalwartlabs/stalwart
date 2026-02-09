@@ -6,9 +6,9 @@
 
 use std::time::Instant;
 
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use email::message::delete::EmailDeletion;
+use registry::schema::enums::Permission;
 use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 
@@ -19,7 +19,7 @@ impl<T: SessionStream> Session<T> {
         // Validate access
         self.state
             .access_token()
-            .assert_has_permission(Permission::Pop3Dele)?;
+            .enforce_permission(Permission::Pop3Dele)?;
 
         let op_start = Instant::now();
         let mailbox = self.state.mailbox_mut();

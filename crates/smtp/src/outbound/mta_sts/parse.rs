@@ -27,8 +27,8 @@ impl ParsePolicy for Policy {
                     data = "";
                     next_data.trim()
                 };
-                match key.trim() {
-                    "mx" => {
+                hashify::fnc_map!(key.trim().as_bytes(),
+                    b"mx" => {
                         if let Some(suffix) = value.strip_prefix("*.") {
                             if !suffix.is_empty() {
                                 mx.push(MxPattern::StartsWith(suffix.to_lowercase()));
@@ -36,27 +36,27 @@ impl ParsePolicy for Policy {
                         } else if !value.is_empty() {
                             mx.push(MxPattern::Equals(value.to_lowercase()));
                         }
-                    }
-                    "max_age" => {
+                    },
+                    b"max_age" => {
                         if let Ok(value) = value.parse() {
                             max_age = value;
                         }
-                    }
-                    "mode" => {
+                    },
+                    b"mode" => {
                         mode = match value {
                             "enforce" => Mode::Enforce,
                             "testing" => Mode::Testing,
                             "none" => Mode::None,
                             _ => return Err(format!("Unsupported mode {value:?}.")),
                         };
-                    }
-                    "version" => {
+                    },
+                    b"version" => {
                         if !value.eq_ignore_ascii_case("STSv1") {
                             return Err(format!("Unsupported version {value:?}."));
                         }
-                    }
-                    _ => (),
-                }
+                    },
+                    _ => {}
+                );
             } else {
                 break;
             }
@@ -66,7 +66,7 @@ impl ParsePolicy for Policy {
             Ok(Policy {
                 id,
                 mode,
-                mx,
+                mx: mx.into_boxed_slice(),
                 max_age,
             })
         } else {

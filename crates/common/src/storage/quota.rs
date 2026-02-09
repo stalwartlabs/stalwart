@@ -13,11 +13,12 @@ use trc::AddContext;
 
 use crate::{
     Server,
+    auth::AccountCache,
     storage::{ObjectQuota, TenantQuota},
 };
 
 impl Server {
-    pub async fn get_used_quota(&self, account_id: u32) -> trc::Result<i64> {
+    pub async fn get_used_quota_account(&self, account_id: u32) -> trc::Result<i64> {
         self.core
             .storage
             .data
@@ -26,10 +27,20 @@ impl Server {
             .add_context(|err| err.caused_by(trc::location!()).account_id(account_id))
     }
 
+    pub async fn get_used_quota_tenant(&self, tenant_id: u32) -> trc::Result<i64> {
+        let todo = "use correct counter";
+        self.core
+            .storage
+            .data
+            .get_counter(DirectoryClass::UsedQuota(tenant_id))
+            .await
+            .add_context(|err| err.caused_by(trc::location!()))
+    }
+
     pub async fn has_available_quota(&self, account_id: u32, item_size: u64) -> trc::Result<()> {
         let account = self.account(account_id).await.caused_by(trc::location!())?;
         if account.quota_disk != 0 {
-            let used_quota = self.get_used_quota(account_id).await? as u64;
+            let used_quota = self.get_used_quota_account(account_id).await? as u64;
 
             if used_quota + item_size > account.quota_disk {
                 return Err(trc::LimitEvent::Quota
@@ -44,14 +55,13 @@ impl Server {
         // SPDX-License-Identifier: LicenseRef-SEL
 
         #[cfg(feature = "enterprise")]
-        if self.core.is_enterprise_edition() && account.id_tenant != u32::MAX {
-            let tenant = self
-                .tenant(account.id_tenant)
-                .await
-                .caused_by(trc::location!())?;
+        if self.core.is_enterprise_edition()
+            && let Some(tenant_id) = account.id_tenant
+        {
+            let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
 
             if tenant.quota_disk != 0 {
-                let used_quota = self.get_used_quota(account.id_tenant).await? as u64;
+                let used_quota = self.get_used_quota_tenant(tenant_id).await? as u64;
 
                 if used_quota + item_size > tenant.quota_disk {
                     return Err(trc::LimitEvent::TenantQuota
@@ -65,6 +75,11 @@ impl Server {
         // SPDX-SnippetEnd
 
         Ok(())
+    }
+
+    #[inline(always)]
+    pub fn object_quota(&self, user_quotas: Option<&ObjectQuota>, object: StorageQuota) -> u32 {
+        user_quotas.unwrap_or(&self.core.email.max_objects).0[object as usize]
     }
 }
 

@@ -8,9 +8,8 @@ use super::{Message, QueueId, Status, spool::SmtpSpool};
 use crate::queue::{Recipient, spool::LOCK_EXPIRY};
 use ahash::AHashMap;
 use common::{
-    Inner,
+    BuildServer, Inner,
     config::smtp::queue::{QueueExpiry, QueueName},
-    core::BuildServer,
     ipc::{QueueEvent, QueueEventStatus},
 };
 use rand::{Rng, seq::SliceRandom};

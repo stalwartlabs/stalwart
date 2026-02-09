@@ -7,10 +7,11 @@
 use common::{
     config::{server::ServerProtocol, smtp::session::Mechanism},
     expr::{self, functions::ResolveVariable, *},
-    listener::SessionStream,
+    network::SessionStream,
 };
 
 use compact_str::ToCompactString;
+use registry::schema::enums::ExpressionVariable;
 use smtp_proto::{
     request::receiver::{
         BdatReceiver, DataReceiver, DummyDataReceiver, DummyLineReceiver, LineReceiver,
@@ -95,7 +96,7 @@ impl<T: SessionStream> Session<T> {
                                     .await
                                     .unwrap_or_default()
                                     .into();
-                                if auth == 0 || self.params.auth_directory.is_none() {
+                                if auth == 0 {
                                     trc::event!(
                                         Smtp(SmtpEvent::AuthNotAllowed),
                                         SpanId = self.data.session_id,

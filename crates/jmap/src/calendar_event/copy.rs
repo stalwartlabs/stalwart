@@ -26,7 +26,11 @@ use jmap_proto::{
     },
     types::state::State,
 };
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -61,7 +65,11 @@ impl JmapCalendarEventCopy for Server {
                 .details("From accountId is equal to fromAccountId"));
         }
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let old_state = cache.assert_state(false, &request.if_in_state)?;
@@ -75,7 +83,11 @@ impl JmapCalendarEventCopy for Server {
         };
 
         let from_cache = self
-            .fetch_dav_resources(access_token.account_id(), from_account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                from_account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let from_calendar_event_ids = if access_token.is_member(from_account_id) {
@@ -94,7 +106,14 @@ impl JmapCalendarEventCopy for Server {
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
 
-        // Obtain quota
+        // Obtain account info
+        let account_info = self
+            .account_info(access_token.account_id())
+            .await
+            .caused_by(trc::location!())?;
+        let account_emails = account_info.addresses().collect::<Vec<_>>();
+
+        // Prepare batch
         let mut batch = BatchBuilder::new();
 
         'create: for (id, create) in request.create.into_valid() {
@@ -151,6 +170,7 @@ impl JmapCalendarEventCopy for Server {
                     &mut batch,
                     access_token,
                     account_id,
+                    &account_emails,
                     false,
                     &can_add_calendars,
                     calendar_event.data.event.into_jscalendar(),

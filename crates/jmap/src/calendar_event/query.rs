@@ -17,7 +17,10 @@ use jmap_proto::{
 use nlp::language::Language;
 use std::{cmp::Ordering, sync::Arc};
 use store::{
-    ValueKey, roaring::RoaringBitmap, search::{CalendarSearchField, SearchComparator, SearchFilter, SearchQuery}, write::{AlignedBytes, Archive, SearchIndex}
+    ValueKey,
+    roaring::RoaringBitmap,
+    search::{CalendarSearchField, SearchComparator, SearchFilter, SearchQuery},
+    write::{AlignedBytes, Archive, SearchIndex},
 };
 use trc::AddContext;
 use types::{
@@ -43,7 +46,11 @@ impl CalendarEventQuery for Server {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
         let default_tz = request.arguments.time_zone.unwrap_or(Tz::UTC);
         let mut filter: Option<TimeRange> = None;
@@ -74,7 +81,7 @@ impl CalendarEventQuery for Server {
                     }
                     CalendarEventFilter::Text(value) => {
                         let (text, language) =
-                            Language::detect(value, self.core.jmap.default_language);
+                            Language::detect(value, self.core.email.default_language);
                         filters.push(SearchFilter::Or);
                         filters.push(SearchFilter::has_text(
                             CalendarSearchField::Title,
@@ -107,21 +114,21 @@ impl CalendarEventQuery for Server {
                         filters.push(SearchFilter::has_text_detect(
                             CalendarSearchField::Title,
                             title,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     CalendarEventFilter::Description(description) => {
                         filters.push(SearchFilter::has_text_detect(
                             CalendarSearchField::Description,
                             description,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     CalendarEventFilter::Location(location) => {
                         filters.push(SearchFilter::has_text_detect(
                             CalendarSearchField::Location,
                             location,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     CalendarEventFilter::Owner(owner) => {

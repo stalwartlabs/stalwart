@@ -32,7 +32,7 @@ impl QuotaQuery for Server {
             query_state: State::Initial,
             can_calculate_changes: false,
             position: 0,
-            ids: if access_token.quota > 0 {
+            ids: if self.account(access_token.account_id()).await?.disk_quota() > 0 {
                 vec![Id::new(0)]
             } else {
                 vec![]

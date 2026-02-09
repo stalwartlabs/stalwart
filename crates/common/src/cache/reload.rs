@@ -7,6 +7,7 @@
 use crate::{
     Core, Server,
     config::{server::Listeners, telemetry::Telemetry},
+    ipc::RegistryChange,
 };
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
@@ -19,7 +20,7 @@ pub struct ReloadResult {
 }
 
 impl Server {
-    pub async fn reload_blocked_ips(&self) -> trc::Result<ReloadResult> {
+    async fn reload_blocked_ips(&self) -> trc::Result<ReloadResult> {
         todo!()
         /*let mut config = self
             .core
@@ -32,7 +33,7 @@ impl Server {
         Ok(config.into())*/
     }
 
-    pub async fn reload_certificates(&self) -> trc::Result<ReloadResult> {
+    async fn reload_certificates(&self) -> trc::Result<ReloadResult> {
         todo!()
         /*let mut config = self.core.storage.config.build_config("certificate").await?;
         let mut certificates = self.inner.data.tls_certificates.load().as_ref().clone();
@@ -44,7 +45,7 @@ impl Server {
         Ok(config.into())*/
     }
 
-    pub async fn reload_lookups(&self) -> trc::Result<ReloadResult> {
+    async fn reload_lookups(&self) -> trc::Result<ReloadResult> {
         todo!()
         /*let mut config = self.core.storage.config.build_config("lookup").await?;
         let mut stores = Stores::default();
@@ -62,7 +63,8 @@ impl Server {
         })*/
     }
 
-    pub async fn reload(&self) -> trc::Result<ReloadResult> {
+    pub async fn reload_registry(&self, change: RegistryChange) -> trc::Result<ReloadResult> {
+        // TODO: check the different events triggering this, spam filter reload, etc.
         todo!()
         /*let mut config = self.core.storage.config.build_config("").await?;
 

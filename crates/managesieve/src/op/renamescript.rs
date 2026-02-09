@@ -5,7 +5,7 @@
  */
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use registry::schema::enums::Permission;
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;

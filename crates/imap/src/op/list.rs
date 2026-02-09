@@ -10,9 +10,8 @@ use crate::{
     core::{Session, SessionData},
     spawn_op,
 };
-use common::listener::SessionStream;
+use common::network::SessionStream;
 
-use registry::schema::enums::Permission;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{
@@ -23,6 +22,7 @@ use imap_proto::{
     },
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use trc::StoreEvent;
 
 use super::ImapContext;
@@ -182,10 +182,10 @@ impl<T: SessionStream> SessionData<T> {
             if let Some(prefix) = &account.prefix {
                 if !added_shared_folder {
                     if !filter_subscribed
-                        && matches_pattern(&patterns, &self.server.core.jmap.shared_folder)
+                        && matches_pattern(&patterns, &self.server.core.email.shared_folder)
                     {
                         list_items.push(ListItem {
-                            mailbox_name: self.server.core.jmap.shared_folder.as_str().into(),
+                            mailbox_name: self.server.core.email.shared_folder.as_str().into(),
                             attributes: if include_children {
                                 vec![Attribute::HasChildren, Attribute::NoSelect]
                             } else {

@@ -49,7 +49,7 @@ impl EmailSearchSnippet for Server {
         let mut include_term = true;
         let mut terms = vec![];
         let mut is_exact = false;
-        let mut language = self.core.jmap.default_language;
+        let mut language = self.core.email.default_language;
 
         for cond in request.filter {
             match cond {
@@ -60,7 +60,7 @@ impl EmailSearchSnippet for Server {
                         && include_term
                     {
                         let (text, language_) =
-                            Language::detect(text, self.core.jmap.default_language);
+                            Language::detect(text, self.core.email.default_language);
                         language = language_;
                         if (text.starts_with('"') && text.ends_with('"'))
                             || (text.starts_with('\'') && text.ends_with('\''))

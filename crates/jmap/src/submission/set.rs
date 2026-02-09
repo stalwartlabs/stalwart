@@ -7,7 +7,7 @@
 use common::{
     Server,
     config::smtp::queue::QueueName,
-    listener::{ServerInstance, stream::NullIo},
+    network::{ServerInstance, stream::NullIo},
     storage::index::ObjectIndexBuilder,
 };
 use email::{
@@ -615,11 +615,11 @@ impl EmailSubmissionSet for Server {
             .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
             .await?
         {
-            if message.len() > self.core.jmap.mail_max_size {
+            if message.len() > self.core.email.mail_max_size {
                 return Ok(Err(SetError::new(SetErrorType::InvalidEmail)
                     .with_description(format!(
                         "Message exceeds maximum size of {} bytes.",
-                        self.core.jmap.mail_max_size
+                        self.core.email.mail_max_size
                     ))));
             }
 
@@ -644,7 +644,7 @@ impl EmailSubmissionSet for Server {
             self.clone(),
             instance.clone(),
             SessionData::local(
-                self.get_access_token(account_id)
+                self.account_info(account_id)
                     .await
                     .caused_by(trc::location!())?,
                 None,

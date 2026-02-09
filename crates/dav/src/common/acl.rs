@@ -473,7 +473,7 @@ impl DavAclHandler for Server {
                         })
                 } else {
                     let grant_account = self
-                        .account_info(grant_account_id)
+                        .account(grant_account_id)
                         .await
                         .caused_by(trc::location!())?;
 

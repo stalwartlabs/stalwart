@@ -329,20 +329,9 @@ impl Server {
                     let token = self
                         .access_token_from_account(account_id, structs::Account::User(account))
                         .await?;
-                    let scope_idx = token
-                        .scopes
-                        .iter()
-                        .position(|scope| scope.credential_id == credential_id)
-                        .ok_or_else(|| {
-                            trc::AuthEvent::Error
-                                .into_err()
-                                .ctx(trc::Key::AccountId, account_id)
-                                .ctx(trc::Key::Id, credential_id)
-                                .ctx(trc::Key::SpanId, span_id)
-                                .reason("Credential not found in access token scopes")
-                        })?;
 
-                    return Ok(AccessToken::scoped(token, scope_idx));
+                    return AccessToken::scoped(token, credential_id)
+                        .add_context(|ctx| ctx.span_id(span_id));
                 }
             }
 

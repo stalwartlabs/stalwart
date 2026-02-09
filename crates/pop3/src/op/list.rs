@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use registry::schema::enums::Permission;
 
 use crate::{Session, protocol::response::Response};
@@ -16,7 +16,7 @@ impl<T: SessionStream> Session<T> {
         // Validate access
         self.state
             .access_token()
-            .assert_has_permission(Permission::Pop3List)?;
+            .enforce_permission(Permission::Pop3List)?;
 
         let op_start = Instant::now();
         let mailbox = self.state.mailbox();
@@ -57,7 +57,7 @@ impl<T: SessionStream> Session<T> {
         // Validate access
         self.state
             .access_token()
-            .assert_has_permission(Permission::Pop3Uidl)?;
+            .enforce_permission(Permission::Pop3Uidl)?;
 
         let op_start = Instant::now();
         let mailbox = self.state.mailbox();
@@ -106,7 +106,7 @@ impl<T: SessionStream> Session<T> {
         // Validate access
         self.state
             .access_token()
-            .assert_has_permission(Permission::Pop3Stat)?;
+            .enforce_permission(Permission::Pop3Stat)?;
 
         let op_start = Instant::now();
         let mailbox = self.state.mailbox();

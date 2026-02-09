@@ -42,7 +42,6 @@ impl Server {
                 CacheInvalidation::List(id) => {
                     cache.lists.remove(id);
                 }
-                CacheInvalidation::PushServers(_) => {}
             }
         }
 

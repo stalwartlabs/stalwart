@@ -5,8 +5,7 @@
  */
 
 use crate::participant_identity::get::ParticipantIdentityGet;
-use common::{Server, auth::AccessToken};
-use directory::QueryParams;
+use common::Server;
 use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
@@ -15,6 +14,7 @@ use jmap_proto::{
     request::{IntoValid, reference::MaybeIdReference},
 };
 use jmap_tools::{Key, Value};
+use registry::schema::prelude::StorageQuota;
 use store::{
     Serialize,
     ahash::AHashSet,
@@ -28,7 +28,6 @@ pub trait ParticipantIdentitySet: Sync + Send {
     fn participant_identity_set(
         &self,
         request: SetRequest<'_, participant_identity::ParticipantIdentity>,
-        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<participant_identity::ParticipantIdentity>>> + Send;
 }
 
@@ -36,7 +35,6 @@ impl ParticipantIdentitySet for Server {
     async fn participant_identity_set(
         &self,
         mut request: SetRequest<'_, participant_identity::ParticipantIdentity>,
-        access_token: &AccessToken,
     ) -> trc::Result<SetResponse<participant_identity::ParticipantIdentity>> {
         let account_id = request.account_id.document_id();
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
@@ -53,13 +51,13 @@ impl ParticipantIdentitySet for Server {
                 None => (None, ParticipantIdentities::default()),
             };
 
+        let account_info = self
+            .account_info(account_id)
+            .await
+            .caused_by(trc::location!())?;
+
         // Obtain allowed emails
-        let allowed_emails = self
-            .directory()
-            .query(QueryParams::id(account_id).with_return_member_of(false))
-            .await?
-            .map(|p| p.into_email_addresses().collect::<AHashSet<_>>())
-            .unwrap_or_default();
+        let allowed_emails = account_info.addresses().collect::<AHashSet<_>>();
 
         // Process creates
         let mut has_changes = false;
@@ -87,7 +85,10 @@ impl ParticipantIdentitySet for Server {
 
             // Validate quota
             if identities.identities.len()
-                >= access_token.object_quota(Collection::Identity) as usize
+                >= self.object_quota(
+                    account_info.object_quotas(),
+                    StorageQuota::MaxParticipantIdentities,
+                ) as usize
             {
                 response.not_created.append(
                     id,
@@ -197,7 +198,7 @@ impl ParticipantIdentitySet for Server {
 fn validate_identity_value(
     update: Value<'_, ParticipantIdentityProperty, ParticipantIdentityValue>,
     identity: &mut ParticipantIdentity,
-    allowed_emails: &AHashSet<String>,
+    allowed_emails: &AHashSet<&str>,
 ) -> Result<(), SetError<ParticipantIdentityProperty>> {
     for (property, value) in update.into_expanded_object() {
         let Key::Property(property) = property else {

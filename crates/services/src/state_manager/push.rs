@@ -7,8 +7,8 @@
 use super::{Event, http::http_request};
 use crate::state_manager::PushRegistration;
 use common::{
-    IPC_CHANNEL_BUFFER, Inner, LONG_1Y_SLUMBER, Server,
-    core::BuildServer,
+    BuildServer, IPC_CHANNEL_BUFFER, Inner, LONG_1Y_SLUMBER, Server,
+    auth::BuildAccessToken,
     ipc::{PushEvent, PushNotification},
 };
 use email::push::PushSubscriptions;
@@ -482,9 +482,10 @@ async fn load_push_subscriptions(
     account_id: u32,
 ) -> trc::Result<(PushSubscriptions, Vec<u32>)> {
     let member_of = server
-        .get_access_token(account_id)
+        .access_token(account_id)
         .await
         .caused_by(trc::location!())?
+        .build()
         .member_ids()
         .collect::<Vec<_>>();
 

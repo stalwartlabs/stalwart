@@ -10,7 +10,6 @@ use crate::{
     tasks_v2::migrate_tasks_v014,
 };
 use common::Server;
-use directory::backend::internal::manage::ManageDirectory;
 use email::submission::EmailSubmission;
 use groupware::{calendar::CalendarEventNotification, contact::ContactCard};
 use std::sync::Arc;

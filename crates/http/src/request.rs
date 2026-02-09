@@ -22,13 +22,11 @@ use crate::{
 use common::{
     Inner, KV_ACME, Server,
     auth::{AccessToken, oauth::GrantType},
-    core::BuildServer,
     ipc::PushEvent,
-    listener::{SessionData, SessionManager, SessionStream},
     manager::webadmin::Resource,
+    network::{SessionData, SessionManager, SessionStream},
 };
 use dav::{DavMethod, request::DavRequestHandler};
-use registry::schema::enums::Permission;
 use groupware::{DavResourceName, calendar::itip::ItipIngest};
 use http_proto::{
     DownloadResponse, HtmlResponse, HttpContext, HttpRequest, HttpResponse, HttpResponseBody,
@@ -50,6 +48,7 @@ use jmap::{
     websocket::upgrade::WebSocketUpgrade,
 };
 use jmap_proto::request::{Request, capability::Session};
+use registry::schema::enums::Permission;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use store::dispatch::lookup::KeyValue;
 use trc::SecurityEvent;

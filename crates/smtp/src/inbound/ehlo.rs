@@ -7,7 +7,7 @@
 use crate::{core::Session, scripts::ScriptResult};
 use common::{
     config::smtp::session::{Mechanism, Stage},
-    listener::SessionStream,
+    network::SessionStream,
 };
 use mail_auth::{
     SpfResult,

@@ -374,7 +374,11 @@ impl MessageWrapper {
         }
         if let Err(err) = server
             .blob_store()
-            .put_blob(self.message.blob_hash.as_slice(), message.as_ref())
+            .put_blob(
+                self.message.blob_hash.as_slice(),
+                message.as_ref(),
+                server.core.storage.compression,
+            )
             .await
         {
             trc::error!(

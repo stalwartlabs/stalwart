@@ -5,9 +5,8 @@
  */
 
 use common::{
-    Inner, KV_LOCK_HOUSEKEEPER, LONG_1D_SLUMBER, Server,
-    config::{spamfilter, telemetry::OtelMetrics},
-    core::BuildServer,
+    BuildServer, Inner, KV_LOCK_HOUSEKEEPER, LONG_1D_SLUMBER, Server,
+    config::{mailstore::spamfilter, telemetry::OtelMetrics},
     ipc::{BroadcastEvent, HousekeeperEvent, PurgeType},
 };
 use email::message::delete::EmailDeletion;
@@ -19,7 +18,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
-use store::{PurgeStore, write::now};
+use store::write::now;
 use tokio::sync::mpsc;
 use trc::{Collector, MetricType, PurgeEvent};
 
@@ -41,8 +40,9 @@ struct Action {
 
 #[derive(PartialEq, Eq, Debug)]
 enum ActionClass {
-    Account,
-    Store(usize),
+    PurgeAccount,
+    PurgeDataStore,
+    PurgeBlobStore,
     Acme(String),
     OtelMetrics,
     CalculateMetrics,
@@ -85,19 +85,21 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
             // Account purge
             if roles.purge_accounts.is_enabled_or_sharded() {
                 queue.schedule(
-                    Instant::now() + server.core.jmap.account_purge_frequency.time_to_next(),
-                    ActionClass::Account,
+                    Instant::now() + server.core.email.account_purge_frequency.time_to_next(),
+                    ActionClass::PurgeAccount,
                 );
             }
 
             // Store purges
             if roles.purge_stores.is_enabled_or_sharded() {
-                for (idx, schedule) in server.core.storage.purge_schedules.iter().enumerate() {
-                    queue.schedule(
-                        Instant::now() + schedule.cron.time_to_next(),
-                        ActionClass::Store(idx),
-                    );
-                }
+                queue.schedule(
+                    Instant::now() + server.core.email.data_purge_frequency.time_to_next(),
+                    ActionClass::PurgeDataStore,
+                );
+                queue.schedule(
+                    Instant::now() + server.core.email.blob_purge_frequency.time_to_next(),
+                    ActionClass::PurgeBlobStore,
+                );
             }
 
             // Spam classifier training
@@ -137,7 +139,8 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
             queue.schedule(Instant::now(), ActionClass::CalculateMetrics);
 
             // Add all ACME renewals to heap
-            for provider in server.core.acme.providers.values() {
+            let todo = "fix";
+            /*for provider in server.core.acme.providers.values() {
                 if roles.renew_acme.is_enabled_for_hash(&provider.id) {
                     match server.init_acme(provider).await {
                         Ok(renew_at) => {
@@ -153,7 +156,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                         }
                     };
                 }
-            }
+            }*/
 
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -254,7 +257,8 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                 .ok();
 
                             // Reload ACME certificates
-                            tokio::spawn(async move {
+                            let todo = "fix";
+                            /*tokio::spawn(async move {
                                 for provider in server.core.acme.providers.values() {
                                     match server.init_acme(provider).await {
                                         Ok(renew_at) => {
@@ -276,7 +280,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                         }
                                     };
                                 }
-                            });
+                            });*/
                         }
                         HousekeeperEvent::AcmeReschedule {
                             provider_id,
@@ -289,7 +293,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                         HousekeeperEvent::Purge(purge) => {
                             let server = inner.build_server();
                             tokio::spawn(async move {
-                                server.purge(purge, 0).await;
+                                server.purge(purge).await;
                             });
                         }
                         HousekeeperEvent::Exit => {
@@ -316,7 +320,8 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                             ActionClass::Acme(provider_id) => {
                                 trc::event!(Housekeeper(trc::HousekeeperEvent::Run), Type = "acme");
 
-                                let server = server.clone();
+                                let todo = "fix";
+                                /*let server = server.clone();
                                 tokio::spawn(async move {
                                     if let Some(provider) =
                                         server.core.acme.providers.get(&provider_id)
@@ -362,9 +367,9 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                             .await
                                             .ok();
                                     }
-                                });
+                                });*/
                             }
-                            ActionClass::Account => {
+                            ActionClass::PurgeAccount => {
                                 trc::event!(
                                     Housekeeper(trc::HousekeeperEvent::Run),
                                     Type = "purge_account"
@@ -373,59 +378,63 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                 let server = server.clone();
                                 queue.schedule(
                                     Instant::now()
-                                        + server.core.jmap.account_purge_frequency.time_to_next(),
-                                    ActionClass::Account,
+                                        + server.core.email.account_purge_frequency.time_to_next(),
+                                    ActionClass::PurgeAccount,
                                 );
                                 tokio::spawn(async move {
                                     server
-                                        .purge(
-                                            PurgeType::Account {
-                                                account_id: None,
-                                                use_roles: true,
-                                            },
-                                            0,
-                                        )
+                                        .purge(PurgeType::Account {
+                                            account_id: None,
+                                            use_roles: true,
+                                        })
                                         .await;
                                 });
                             }
-                            ActionClass::Store(idx) => {
-                                if let Some(schedule) =
-                                    server.core.storage.purge_schedules.get(idx).cloned()
-                                {
-                                    trc::event!(
-                                        Housekeeper(trc::HousekeeperEvent::Run),
-                                        Type = "purge_store",
-                                        Id = idx
-                                    );
+                            ActionClass::PurgeDataStore => {
+                                trc::event!(
+                                    Housekeeper(trc::HousekeeperEvent::Run),
+                                    Type = "purge_data_store"
+                                );
 
-                                    queue.schedule(
-                                        Instant::now() + schedule.cron.time_to_next(),
-                                        ActionClass::Store(idx),
-                                    );
+                                queue.schedule(
+                                    Instant::now()
+                                        + server.core.email.data_purge_frequency.time_to_next(),
+                                    ActionClass::PurgeDataStore,
+                                );
+                                let server_ = server.clone();
+                                let store = server.store().clone();
+                                tokio::spawn(async move {
+                                    server_.purge(PurgeType::Data(store)).await;
+                                });
 
-                                    let server = server.clone();
-                                    tokio::spawn(async move {
-                                        server
-                                            .purge(
-                                                match schedule.store {
-                                                    PurgeStore::Data(store) => {
-                                                        PurgeType::Data(store)
-                                                    }
-                                                    PurgeStore::Blobs { store, blob_store } => {
-                                                        PurgeType::Blobs { store, blob_store }
-                                                    }
-                                                    PurgeStore::Lookup(in_memory_store) => {
-                                                        PurgeType::Lookup {
-                                                            store: in_memory_store,
-                                                            prefix: None,
-                                                        }
-                                                    }
-                                                },
-                                                idx as u32,
-                                            )
-                                            .await;
-                                    });
-                                }
+                                let server = server.clone();
+                                let store = server.in_memory_store().clone();
+                                tokio::spawn(async move {
+                                    server
+                                        .purge(PurgeType::Lookup {
+                                            store,
+                                            prefix: None,
+                                        })
+                                        .await;
+                                });
+                            }
+                            ActionClass::PurgeBlobStore => {
+                                trc::event!(
+                                    Housekeeper(trc::HousekeeperEvent::Run),
+                                    Type = "purge_blob_store"
+                                );
+
+                                queue.schedule(
+                                    Instant::now()
+                                        + server.core.email.blob_purge_frequency.time_to_next(),
+                                    ActionClass::PurgeBlobStore,
+                                );
+                                let server = server.clone();
+                                let store = server.store().clone();
+                                let blob_store = server.blob_store().clone();
+                                tokio::spawn(async move {
+                                    server.purge(PurgeType::Blobs { store, blob_store }).await;
+                                });
                             }
                             ActionClass::OtelMetrics => {
                                 if let Some(otel) = &server.core.metrics.otel {
@@ -664,14 +673,22 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
 
                             #[cfg(feature = "enterprise")]
                             ActionClass::RenewLicense => {
+                                use common::ipc::RegistryChange;
+                                use registry::schema::prelude::Object;
+
                                 trc::event!(
                                     Housekeeper(trc::HousekeeperEvent::Run),
                                     Type = "renew_license"
                                 );
 
-                                match server.reload().await {
+                                match server
+                                    .reload_registry(RegistryChange::Reload(Object::Enterprise))
+                                    .await
+                                {
                                     Ok(result) => {
                                         if let Some(new_core) = result.new_core {
+                                            use registry::schema::prelude::Object;
+
                                             if let Some(enterprise) = &new_core.enterprise {
                                                 let renew_in =
                                                     if enterprise.license.is_near_expiration() {
@@ -698,7 +715,9 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                             server.inner.shared_core.store(new_core.into());
 
                                             server
-                                                .cluster_broadcast(BroadcastEvent::ReloadSettings)
+                                                .cluster_broadcast(BroadcastEvent::reload(
+                                                    Object::Enterprise,
+                                                ))
                                                 .await;
                                         }
                                     }
@@ -716,45 +735,22 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
 }
 
 pub trait Purge: Sync + Send {
-    fn purge(&self, purge: PurgeType, store_idx: u32) -> impl Future<Output = ()> + Send;
+    fn purge(&self, purge: PurgeType) -> impl Future<Output = ()> + Send;
 }
 
 impl Purge for Server {
-    async fn purge(&self, purge: PurgeType, store_idx: u32) {
+    async fn purge(&self, purge: PurgeType) {
         // Lock task
         let (lock_type, lock_name) = match &purge {
-            PurgeType::Data(_) => (
-                "data",
-                [0u8]
-                    .into_iter()
-                    .chain(store_idx.to_be_bytes().into_iter())
-                    .collect::<Vec<_>>()
-                    .into(),
-            ),
-            PurgeType::Blobs { .. } => (
-                "blob",
-                [1u8]
-                    .into_iter()
-                    .chain(store_idx.to_be_bytes().into_iter())
-                    .collect::<Vec<_>>()
-                    .into(),
-            ),
-            PurgeType::Lookup { prefix: None, .. } => (
-                "in-memory",
-                [2u8]
-                    .into_iter()
-                    .chain(store_idx.to_be_bytes().into_iter())
-                    .collect::<Vec<_>>()
-                    .into(),
-            ),
+            PurgeType::Data(_) => ("data", [0u8].into()),
+            PurgeType::Blobs { .. } => ("blob", [1u8].into()),
+            PurgeType::Lookup { prefix: None, .. } => ("in-memory", [2u8].into()),
             PurgeType::Lookup { .. } => ("in-memory-prefix", None),
             PurgeType::Account { .. } => ("account", None),
         };
         if let Some(lock_name) = &lock_name {
             match self
-                .core
-                .storage
-                .lookup
+                .in_memory_store()
                 .try_lock(KV_LOCK_HOUSEKEEPER, lock_name, 3600)
                 .await
             {
@@ -770,7 +766,7 @@ impl Purge for Server {
             }
         }
 
-        trc::event!(Purge(PurgeEvent::Started), Type = lock_type, Id = store_idx);
+        trc::event!(Purge(PurgeEvent::Started), Type = lock_type);
         let time = Instant::now();
 
         match purge {
@@ -850,7 +846,6 @@ impl Purge for Server {
         trc::event!(
             Purge(PurgeEvent::Finished),
             Type = lock_type,
-            Id = store_idx,
             Elapsed = time.elapsed()
         );
 

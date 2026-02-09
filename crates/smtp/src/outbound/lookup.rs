@@ -9,10 +9,11 @@ use crate::queue::{Error, ErrorDetails, HostResponse, Status};
 use common::{
     Server,
     config::smtp::queue::{ConnectionStrategy, IpAndHost, MxConfig},
-    expr::{ExpressionVariable::Mx, functions::ResolveVariable},
+    expr::functions::ResolveVariable,
 };
 use mail_auth::{IpLookupStrategy, MX};
 use rand::{Rng, seq::SliceRandom};
+use registry::schema::enums::ExpressionVariable;
 use std::{future::Future, net::IpAddr, sync::Arc};
 
 pub struct IpLookupResult {
@@ -57,11 +58,11 @@ impl DnsLookup for Server {
                 .await
             {
                 Ok(addrs) => addrs,
-                Err(_) if has_ipv6 => Arc::new(Vec::new()),
+                Err(_) if has_ipv6 => Arc::new([]),
                 Err(err) => return Err(err),
             }
         } else {
-            Arc::new(Vec::new())
+            Arc::new([])
         };
 
         if has_ipv6 {
@@ -74,7 +75,7 @@ impl DnsLookup for Server {
                 .await
             {
                 Ok(addrs) => addrs,
-                Err(_) if !ipv4_addrs.is_empty() => Arc::new(Vec::new()),
+                Err(_) if !ipv4_addrs.is_empty() => Arc::new([]),
                 Err(err) => return Err(err),
             };
             if v4_first {
@@ -203,7 +204,7 @@ pub trait ToNextHop {
     ) -> Option<Vec<NextHop<'x>>>;
 }
 
-impl ToNextHop for Vec<MX> {
+impl ToNextHop for Arc<[MX]> {
     fn to_remote_hosts<'x, 'y: 'x>(
         &'x self,
         domain: &'y str,
@@ -219,7 +220,7 @@ impl ToNextHop for Vec<MX> {
                     slice.shuffle(&mut rand::rng());
                     for remote_host in slice {
                         remote_hosts.push(NextHop::MX {
-                            host: remote_host.as_str(),
+                            host: remote_host.as_ref(),
                             is_implicit: false,
                             config,
                         });
@@ -229,11 +230,11 @@ impl ToNextHop for Vec<MX> {
                     }
                 } else if let Some(remote_host) = mx.exchanges.first() {
                     // Check for Null MX
-                    if mx.preference == 0 && remote_host == "." {
+                    if mx.preference == 0 && remote_host.as_ref() == "." {
                         return None;
                     }
                     remote_hosts.push(NextHop::MX {
-                        host: remote_host.as_str(),
+                        host: remote_host.as_ref(),
                         is_implicit: false,
                         config,
                     });

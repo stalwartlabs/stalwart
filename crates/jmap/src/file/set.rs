@@ -51,7 +51,11 @@ impl FileNodeSet for Server {
     ) -> trc::Result<SetResponse<file_node::FileNode>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::FileNode)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::FileNode,
+            )
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
@@ -172,7 +176,12 @@ impl FileNodeSet for Server {
                 created_folders.insert(document_id, file_node.acls.clone());
             }
             file_node
-                .insert(access_token, account_id, document_id, &mut batch)
+                .insert(
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
             response.created(id, document_id);
         }
@@ -295,7 +304,13 @@ impl FileNodeSet for Server {
 
             // Update record
             new_file_node
-                .update(access_token, file_node, account_id, document_id, &mut batch)
+                .update(
+                    access_token.account_tenant_ids(),
+                    file_node,
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
             response.updated.append(id, None);
         }
@@ -370,7 +385,7 @@ impl FileNodeSet for Server {
             DestroyArchive(sorted_ids)
                 .delete_batch(
                     self,
-                    access_token,
+                    access_token.account_tenant_ids(),
                     account_id,
                     cache.format_resource(file_node).into(),
                     &mut batch,

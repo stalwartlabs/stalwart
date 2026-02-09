@@ -88,9 +88,6 @@ impl JmapEmailCopy for Server {
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
 
-        // Obtain quota
-        let resource_token = self.get_resource_token(access_token, account_id).await?;
-
         'create: for (id, create) in request.create.into_valid() {
             let from_message_id = id.document_id();
             if !from_message_ids.contains(from_message_id) {
@@ -203,7 +200,7 @@ impl JmapEmailCopy for Server {
                 .copy_message(
                     from_account_id,
                     from_message_id,
-                    &resource_token,
+                    account_id,
                     mailboxes,
                     keywords,
                     received_at.map(|dt| dt.timestamp() as u64),

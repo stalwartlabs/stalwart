@@ -5,13 +5,12 @@
  */
 
 use common::auth::AccessToken;
-use common::{HttpAuthCache, Server, auth::AuthRequest, listener::limiter::InFlight};
+use common::{HttpAuthCache, Server, auth::AuthRequest, network::limiter::InFlight};
 use http_proto::{HttpRequest, HttpSessionData};
 use hyper::header;
 use mail_parser::decoders::base64::base64_decode;
 use mail_send::Credentials;
 use std::future::Future;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub trait Authenticator: Sync + Send {
@@ -20,7 +19,7 @@ pub trait Authenticator: Sync + Send {
         req: &HttpRequest,
         session: &HttpSessionData,
         allow_api_access: bool,
-    ) -> impl Future<Output = trc::Result<(Option<InFlight>, Arc<AccessToken>)>> + Send;
+    ) -> impl Future<Output = trc::Result<(Option<InFlight>, AccessToken)>> + Send;
 }
 
 impl Authenticator for Server {
@@ -29,7 +28,7 @@ impl Authenticator for Server {
         req: &HttpRequest,
         session: &HttpSessionData,
         allow_api_access: bool,
-    ) -> trc::Result<(Option<InFlight>, Arc<AccessToken>)> {
+    ) -> trc::Result<(Option<InFlight>, AccessToken)> {
         if let Some((mechanism, token)) = req.authorization() {
             // Check if the credentials are cached
             if let Some(http_cache) = self.inner.cache.http_auth.get(token) {

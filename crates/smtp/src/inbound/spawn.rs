@@ -4,24 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
-use common::{
-    config::smtp::session::Stage,
-    core::BuildServer,
-    listener::{self, SessionManager, SessionStream},
-};
-
-use tokio_rustls::server::TlsStream;
-use trc::{SecurityEvent, SmtpEvent};
-
 use crate::{
     core::{Session, SessionData, SessionParameters, SmtpSessionManager, State},
     scripts::ScriptResult,
 };
+use common::{
+    BuildServer,
+    config::smtp::session::Stage,
+    network::{self, SessionManager, SessionStream},
+};
+use std::time::Instant;
+use tokio_rustls::server::TlsStream;
+use trc::{SecurityEvent, SmtpEvent};
 
 impl SessionManager for SmtpSessionManager {
-    async fn handle<T: SessionStream>(self, session: listener::SessionData<T>) {
+    async fn handle<T: SessionStream>(self, session: network::SessionData<T>) {
         // Build server and create session
         let server = self.inner.build_server();
         let _in_flight = session.in_flight;

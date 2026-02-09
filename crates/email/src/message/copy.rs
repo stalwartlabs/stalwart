@@ -172,7 +172,7 @@ impl EmailCopy for Server {
         batch.with_account_id(to_account_id);
 
         // Determine thread id
-        let tenant_id = self.account_info(to_account_id).await?.tenant_id();
+        let tenant_id = self.account(to_account_id).await?.tenant_id();
         let thread_id = if let Some(thread_id) = thread_result.thread_id {
             thread_id
         } else {

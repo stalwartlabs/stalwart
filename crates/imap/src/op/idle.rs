@@ -9,7 +9,7 @@ use crate::{
     op::ImapContext,
 };
 use ahash::AHashSet;
-use common::{ipc::PushNotification, listener::SessionStream};
+use common::{ipc::PushNotification, network::SessionStream};
 use registry::schema::enums::Permission;
 use imap_proto::{
     Command, StatusResponse,

@@ -56,7 +56,11 @@ impl CalendarSet for Server {
     ) -> trc::Result<SetResponse<calendar::Calendar>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
@@ -112,7 +116,12 @@ impl CalendarSet for Server {
                 .await
                 .caused_by(trc::location!())?;
             calendar
-                .insert(access_token, account_id, document_id, &mut batch)
+                .insert(
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
 
             if let Some(MaybeIdReference::Reference(id_ref)) =
@@ -188,7 +197,13 @@ impl CalendarSet for Server {
 
             // Update record
             new_calendar
-                .update(access_token, calendar, account_id, document_id, &mut batch)
+                .update(
+                    access_token.account_tenant_ids(),
+                    calendar,
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
             response.updated.append(id, None);
         }
@@ -265,7 +280,13 @@ impl CalendarSet for Server {
 
                 // Delete record
                 DestroyArchive(calendar)
-                    .delete(access_token, account_id, document_id, None, &mut batch)
+                    .delete(
+                        access_token.account_tenant_ids(),
+                        account_id,
+                        document_id,
+                        None,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?;
 
                 if default_calendar_id == Some(document_id) {
@@ -277,6 +298,10 @@ impl CalendarSet for Server {
 
             // Delete children
             if !destroy_children.is_empty() {
+                let account_info = self
+                    .account_info(access_token.account_id())
+                    .await
+                    .caused_by(trc::location!())?;
                 for document_id in destroy_children {
                     if let Some(event_) = self
                         .store()
@@ -299,7 +324,7 @@ impl CalendarSet for Server {
                         {
                             // Event only belongs to calendars being deleted, delete it
                             DestroyArchive(event).delete_all(
-                                access_token,
+                                &account_info,
                                 account_id,
                                 document_id,
                                 false,
@@ -314,7 +339,7 @@ impl CalendarSet for Server {
                                 .names
                                 .retain(|n| !destroy_parents.contains(&n.parent_id));
                             new_event.update(
-                                access_token,
+                                access_token.account_tenant_ids(),
                                 event,
                                 account_id,
                                 document_id,

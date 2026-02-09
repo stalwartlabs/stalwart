@@ -14,7 +14,10 @@ use jmap_proto::{
     request::IntoValid,
     types::state::State,
 };
-use store::{ValueKey, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
 
@@ -39,7 +42,7 @@ impl CalendarEventNotificationSet for Server {
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_dav_resources(
-                access_token,
+                access_token.account_id(),
                 account_id,
                 SyncCollection::CalendarEventNotification,
             )
@@ -90,7 +93,12 @@ impl CalendarEventNotificationSet for Server {
                 .caused_by(trc::location!())?;
 
             DestroyArchive(event)
-                .delete(access_token, account_id, document_id, &mut batch)
+                .delete(
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
 
             response.destroyed.push(id);

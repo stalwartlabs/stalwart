@@ -91,7 +91,6 @@ pub struct Mail {
 pub struct Rcpt {
     pub script: IfBlock,
     pub relay: IfBlock,
-    pub is_local: IfBlock,
     pub rewrite: IfBlock,
     pub errors_max: IfBlock,
     pub errors_wait: IfBlock,
@@ -239,7 +238,6 @@ impl SessionConfig {
                 script: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_script()),
                 relay: bp
                     .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_allow_relaying()),
-                is_local: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_is_local()),
                 rewrite: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_rewrite()),
                 errors_max: bp
                     .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_max_failures()),

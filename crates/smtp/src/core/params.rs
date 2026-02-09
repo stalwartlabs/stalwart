@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use common::{config::smtp::auth::VerifyStrategy, listener::SessionStream};
-
 use super::Session;
+use common::{config::smtp::auth::VerifyStrategy, network::SessionStream};
+use std::time::Duration;
 
 impl<T: SessionStream> Session<T> {
     pub async fn eval_session_params(&mut self) {
@@ -72,12 +70,6 @@ impl<T: SessionStream> Session<T> {
 
         // Auth parameters
         let ac = &self.server.core.smtp.session.auth;
-        self.params.auth_directory = self
-            .server
-            .eval_if::<String, _>(&ac.directory, self, self.data.session_id)
-            .await
-            .and_then(|name| self.server.get_directory(&name))
-            .cloned();
         self.params.auth_require = self
             .server
             .eval_if(&ac.require, self, self.data.session_id)

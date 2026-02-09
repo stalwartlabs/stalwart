@@ -5,12 +5,12 @@
  */
 
 use common::{Server, auth::AccessToken};
-use registry::schema::enums::Permission;
 use jmap_proto::request::capability::{
     Account, Capabilities, Capability, EmptyCapabilities, Session,
 };
+use registry::schema::enums::Permission;
 use std::future::Future;
-use std::sync::Arc;
+use trc::AddContext;
 use types::id::Id;
 use utils::map::vec_map::VecMap;
 
@@ -18,7 +18,7 @@ pub trait SessionHandler: Sync + Send {
     fn handle_session_resource(
         &self,
         base_url: String,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<Session>> + Send;
 }
 
@@ -26,17 +26,21 @@ impl SessionHandler for Server {
     async fn handle_session_resource(
         &self,
         base_url: String,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
     ) -> trc::Result<Session> {
         let mut session = Session::new(base_url, &self.core.jmap.capabilities);
         session.set_state(access_token.state());
         let account_capabilities = &self.core.jmap.capabilities.account;
 
         // Set primary account
-        session.username = access_token.name.to_string();
+        let account = self
+            .account(access_token.account_id())
+            .await
+            .caused_by(trc::location!())?;
+        session.username = account.name().to_string();
         let account_id = Id::from(access_token.account_id());
         let mut account = Account {
-            name: access_token.name.to_string(),
+            name: account.name().to_string(),
             is_personal: true,
             is_read_only: false,
             account_capabilities: VecMap::with_capacity(account_capabilities.len()),
@@ -56,20 +60,11 @@ impl SessionHandler for Server {
         // Add secondary accounts
         for &account_id in access_token.secondary_ids() {
             let is_owner = access_token.is_member(account_id);
-            let access_token = match self.get_access_token(account_id).await {
-                Ok(token) => token,
-                Err(err) => {
-                    if err.matches(trc::EventType::Auth(trc::AuthEvent::Error)) {
-                        continue;
-                    } else {
-                        return Err(err.caused_by(trc::location!()));
-                    }
-                }
-            };
+            let account = self.account(account_id).await.caused_by(trc::location!())?;
 
             let account_id = Id::from(account_id);
             let mut account = Account {
-                name: access_token.name.to_string(),
+                name: account.name().to_string(),
                 is_personal: false,
                 is_read_only: false,
                 account_capabilities: VecMap::with_capacity(account_capabilities.len()),

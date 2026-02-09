@@ -9,7 +9,7 @@ use std::{net::IpAddr, sync::Arc};
 use common::{
     Inner, Server,
     auth::AccessToken,
-    listener::{ServerInstance, SessionStream, limiter::InFlight},
+    network::{ServerInstance, SessionStream, limiter::InFlight},
 };
 use mailbox::Mailbox;
 use protocol::request::Parser;
@@ -52,7 +52,7 @@ pub enum State {
     Authenticated {
         mailbox: Mailbox,
         in_flight: Option<InFlight>,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
     },
 }
 
@@ -71,7 +71,7 @@ impl State {
         }
     }
 
-    pub fn access_token(&self) -> &Arc<AccessToken> {
+    pub fn access_token(&self) -> &AccessToken {
         match self {
             State::Authenticated { access_token, .. } => access_token,
             _ => unreachable!(),

@@ -102,6 +102,7 @@ pub struct CalendarAlert {
 #[derive(Debug)]
 pub enum BroadcastEvent {
     PushNotification(PushNotification),
+    PushServerUpdate(u32),
     RegistryChange(RegistryChange),
     CacheInvalidation(Vec<CacheInvalidation>),
 }
@@ -123,7 +124,6 @@ pub enum CacheInvalidation {
     Tenant(u32),
     Role(u32),
     List(u32),
-    PushServers(u32),
 }
 
 #[derive(Debug)]

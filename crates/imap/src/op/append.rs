@@ -9,8 +9,7 @@ use crate::{
     core::{ImapUidToId, MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::{ipc::PushNotification, listener::SessionStream};
-use registry::schema::enums::Permission;
+use common::{auth::BuildAccessToken, ipc::PushNotification, network::SessionStream};
 use email::message::ingest::{EmailIngest, IngestEmail, IngestSource};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -18,6 +17,7 @@ use imap_proto::{
     receiver::Request,
 };
 use mail_parser::MessageParser;
+use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use types::{
     acl::Acl,
@@ -89,11 +89,17 @@ impl<T: SessionStream> SessionData<T> {
         }
 
         // Obtain access token
-        let access_token = self
-            .server
-            .get_access_token(mailbox.account_id)
-            .await
-            .imap_ctx(&arguments.tag, trc::location!())?;
+        let access_token = if mailbox.account_id == self.account_id {
+            self.refresh_access_token()
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?
+        } else {
+            self.server
+                .access_token(mailbox.account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?
+                .build()
+        };
 
         // Append messages
         let mut response = StatusResponse::completed(Command::Append);

@@ -17,7 +17,7 @@ use crate::{
         },
     },
     manager::SPAM_CLASSIFIER_KEY,
-    network::RcptExpansion,
+    network::RcptResolution,
 };
 use mail_auth::IpLookupStrategy;
 use sieve::Sieve;
@@ -32,8 +32,8 @@ use store::{
 use trc::{AddContext, SpamEvent};
 
 impl Server {
-    pub async fn rcpt_expand(&self, address: &str) -> trc::Result<RcptExpansion> {
-        let todo = "TODO: RcptExpansion implementation";
+    pub async fn rcpt_resolve(&self, address: &str) -> trc::Result<RcptResolution> {
+        let todo = "TODO: RcptResolution implementation";
         todo!()
     }
 

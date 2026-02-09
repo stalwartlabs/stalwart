@@ -8,11 +8,11 @@ use crate::{
     core::{Session, SessionData},
     spawn_op,
 };
-use common::{listener::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
-use registry::schema::enums::Permission;
+use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::rename::Arguments, receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
@@ -110,7 +110,7 @@ impl<T: SessionStream> SessionData<T> {
 
         // Validate ACL
         let access_token = self
-            .get_access_token()
+            .refresh_access_token()
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
         if access_token.is_shared(params.account_id)

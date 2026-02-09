@@ -5,9 +5,9 @@
  */
 
 use crate::core::{Session, StatusResponse};
-use common::listener::SessionStream;
-use registry::schema::enums::Permission;
+use common::network::SessionStream;
 use email::sieve::{SieveScript, ingest::SieveScriptIngest};
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,

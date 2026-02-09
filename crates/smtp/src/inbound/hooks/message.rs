@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use common::{
     DAEMON_NAME,
     config::smtp::session::{MTAHook, Stage},
-    listener::SessionStream,
+    network::SessionStream,
 };
 
 use mail_auth::AuthenticatedMessage;
@@ -192,7 +192,7 @@ impl<T: SessionStream> Session<T> {
                         .as_ref()
                         .and_then(|ip_rev| ip_rev.ptr.as_ref())
                         .and_then(|ptrs| ptrs.first())
-                        .map(Into::into),
+                        .map(|ip| ip.to_string()),
                     helo: (!self.data.helo_domain.is_empty())
                         .then(|| self.data.helo_domain.clone()),
                     active_connections: 1,

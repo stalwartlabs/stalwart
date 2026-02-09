@@ -11,10 +11,6 @@ use crate::{
     submission::migrate_email_submissions, threads::migrate_threads,
 };
 use common::Server;
-use directory::{
-    Permission, Principal, PrincipalData, ROLE_ADMIN, ROLE_USER, Type,
-    backend::internal::{PrincipalField, PrincipalSet, SpecialSecrets},
-};
 use nlp::tokenizers::word::WordTokenizer;
 use std::{slice::Iter, time::Instant};
 use store::{

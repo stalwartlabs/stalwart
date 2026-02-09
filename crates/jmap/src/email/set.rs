@@ -613,9 +613,9 @@ impl EmailSet for Server {
                                 // Check attachment sizes
                                 if !is_multipart {
                                     size_attachments += parts.last().unwrap().size();
-                                    if self.core.jmap.mail_attachments_max_size > 0
+                                    if self.core.email.mail_attachments_max_size > 0
                                         && size_attachments
-                                            > self.core.jmap.mail_attachments_max_size
+                                            > self.core.email.mail_attachments_max_size
                                     {
                                         response.not_created.append(
                                             id,
@@ -623,7 +623,7 @@ impl EmailSet for Server {
                                                 .with_property(property)
                                                 .with_description(format!(
                                                     "Message exceeds maximum size of {} bytes.",
-                                                    self.core.jmap.mail_attachments_max_size
+                                                    self.core.email.mail_attachments_max_size
                                                 )),
                                         );
                                         continue 'create;

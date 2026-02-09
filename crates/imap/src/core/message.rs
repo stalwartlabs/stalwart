@@ -9,7 +9,7 @@ use super::{
 };
 use crate::core::ImapId;
 use ahash::AHashMap;
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use email::cache::MessageCacheFetch;
 use imap_proto::protocol::{Sequence, expunge, select::Exists};
 use std::collections::BTreeMap;

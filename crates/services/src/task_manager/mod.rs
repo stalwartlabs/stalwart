@@ -9,11 +9,11 @@ use crate::task_manager::index::SearchIndexTask;
 use crate::task_manager::lock::{TaskLock, TaskLockManager};
 use crate::task_manager::merge_threads::MergeThreadsTask;
 use alarm::SendAlarmTask;
-use common::IPC_CHANNEL_BUFFER;
 use common::config::server::ServerProtocol;
-use common::listener::limiter::ConcurrencyLimiter;
-use common::listener::{ServerInstance, TcpAcceptor};
-use common::{Inner, KV_LOCK_TASK, Server, core::BuildServer};
+use common::network::limiter::ConcurrencyLimiter;
+use common::network::{ServerInstance, TcpAcceptor};
+use common::{BuildServer, IPC_CHANNEL_BUFFER};
+use common::{Inner, KV_LOCK_TASK, Server};
 use email::message::ingest::MergeThreadIds;
 use groupware::calendar::alarm::{CalendarAlarm, CalendarAlarmType};
 use std::collections::hash_map::Entry;
@@ -111,7 +111,7 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
         tokio::spawn(async move {
             while let Some(task) = rx_index_1.recv().await {
                 let server = inner.build_server();
-                let batch_size = server.core.jmap.index_batch_size;
+                let batch_size = server.core.email.index_batch_size;
                 let mut batch = Vec::with_capacity(batch_size);
                 batch.push(task);
 

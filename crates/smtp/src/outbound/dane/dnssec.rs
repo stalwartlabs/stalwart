@@ -9,7 +9,7 @@ use common::{
     config::smtp::resolver::{Tlsa, TlsaEntry},
 };
 use mail_auth::{
-    common::resolver::IntoFqdn,
+    common::resolver::ToFqdn,
     hickory_resolver::{
         Name,
         proto::rr::rdata::tlsa::{CertUsage, Matching, Selector},
@@ -18,16 +18,16 @@ use mail_auth::{
 use std::{future::Future, sync::Arc};
 
 pub trait TlsaLookup: Sync + Send {
-    fn tlsa_lookup<'x>(
+    fn tlsa_lookup(
         &self,
-        key: impl IntoFqdn<'x> + Sync + Send,
+        key: impl ToFqdn + Sync + Send,
     ) -> impl Future<Output = mail_auth::Result<Option<Arc<Tlsa>>>> + Send;
 }
 
 impl TlsaLookup for Server {
-    async fn tlsa_lookup<'x>(
+    async fn tlsa_lookup(
         &self,
-        key: impl IntoFqdn<'x> + Sync + Send,
+        key: impl ToFqdn + Sync + Send,
     ) -> mail_auth::Result<Option<Arc<Tlsa>>> {
         let key = key.to_fqdn();
         if let Some(value) = self.inner.cache.dns_tlsa.get(key.as_ref()) {
@@ -94,7 +94,7 @@ impl TlsaLookup for Server {
             });
 
             self.inner.cache.dns_tlsa.insert_with_expiry(
-                key.into_owned(),
+                key,
                 tlsa.clone(),
                 tlsa_lookup.valid_until(),
             );

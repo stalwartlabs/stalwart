@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{ArcSeal, AuthResult, DkimSign};
+use super::{AuthResult, DkimSign};
 use crate::{
     core::{Session, SessionAddress, State},
     inbound::milter::Modification,
@@ -17,14 +17,14 @@ use crate::{
 };
 use common::{
     config::{
+        mailstore::spamfilter::SpamFilterAction,
         smtp::{
             auth::VerifyStrategy,
             queue::{QueueExpiry, QueueName},
             session::Stage,
         },
-        spamfilter::SpamFilterAction,
     },
-    listener::SessionStream,
+    network::SessionStream,
     psl,
     scripts::ScriptModification,
 };
@@ -35,6 +35,7 @@ use mail_auth::{
 };
 use mail_builder::headers::{date::Date, message_id::generate_message_id_header};
 use mail_parser::MessageParser;
+use registry::schema::structs::Rate;
 use sieve::runtime::Variable;
 use smtp_proto::{
     MAIL_BY_RETURN, RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS,
@@ -44,7 +45,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 use trc::SmtpEvent;
-use utils::{DomainPart, config::Rate};
+use utils::DomainPart;
 
 impl<T: SessionStream> Session<T> {
     pub async fn queue_message(&mut self) -> Cow<'static, [u8]> {
@@ -170,12 +171,7 @@ impl<T: SessionStream> Session<T> {
             .eval_if(&ac.arc.verify, self, self.data.session_id)
             .await
             .unwrap_or(VerifyStrategy::Relaxed);
-        let arc_sealer = self
-            .server
-            .eval_if::<String, _>(&ac.arc.seal, self, self.data.session_id)
-            .await
-            .and_then(|name| self.server.get_arc_sealer(&name, self.data.session_id));
-        let arc_output = if arc.verify() || arc_sealer.is_some() {
+        let arc_output = if arc.verify() {
             let time = Instant::now();
             let arc_output = self
                 .server
@@ -405,25 +401,6 @@ impl<T: SessionStream> Session<T> {
             .write_header(&mut headers);
         }
 
-        // ARC Seal
-        if let (Some(arc_sealer), Some(arc_output)) = (arc_sealer, &arc_output)
-            && !dkim_output.is_empty()
-            && arc_output.can_be_sealed()
-        {
-            match arc_sealer.seal(&auth_message, &auth_results, arc_output) {
-                Ok(set) => {
-                    set.write_header(&mut headers);
-                }
-                Err(err) => {
-                    trc::error!(
-                        trc::Error::from(err)
-                            .span_id(self.data.session_id)
-                            .details("Failed to ARC seal message")
-                    );
-                }
-            }
-        }
-
         // Run SPAM filter
         let mut train_spam = None;
         if self.server.core.spam.enabled
@@ -647,24 +624,34 @@ impl<T: SessionStream> Session<T> {
 
         // DKIM sign
         let raw_message = edited_message.as_deref().unwrap_or(raw_message.as_slice());
-        for signer in self
+        if let Some(sign_with_domain) = self
             .server
-            .eval_if::<Vec<String>, _>(&ac.dkim.sign, self, self.data.session_id)
+            .eval_if::<String, _>(&ac.dkim.sign, self, self.data.session_id)
             .await
-            .unwrap_or_default()
         {
-            if let Some(signer) = self.server.get_dkim_signer(&signer, self.data.session_id) {
-                match signer.sign_chained(&[headers.as_ref(), raw_message]) {
-                    Ok(signature) => {
-                        signature.write_header(&mut headers);
+            match self.server.dkim_signers(&sign_with_domain).await {
+                Ok(Some(signers)) => {
+                    for signer in signers.as_ref() {
+                        match signer.sign_chained(&[headers.as_ref(), raw_message]) {
+                            Ok(signature) => {
+                                signature.write_header(&mut headers);
+                            }
+                            Err(err) => {
+                                trc::error!(
+                                    trc::Error::from(err)
+                                        .span_id(self.data.session_id)
+                                        .details("Failed to DKIM sign message")
+                                );
+                            }
+                        }
                     }
-                    Err(err) => {
-                        trc::error!(
-                            trc::Error::from(err)
-                                .span_id(self.data.session_id)
-                                .details("Failed to DKIM sign message")
-                        );
-                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    trc::error!(
+                        err.span_id(self.data.session_id)
+                            .details("Failed to retrieve DKIM signers")
+                    );
                 }
             }
         }

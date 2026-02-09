@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
-use directory::QueryParams;
+use common::{Server, storage::index::ObjectIndexBuilder};
 use email::identity::{EmailAddress, Identity};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
@@ -16,8 +15,12 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Key, Value};
+use registry::schema::enums::StorageQuota;
 use std::future::Future;
-use store::{ValueKey, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
@@ -29,7 +32,6 @@ pub trait IdentitySet: Sync + Send {
     fn identity_set(
         &self,
         request: SetRequest<'_, identity::Identity>,
-        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<identity::Identity>>> + Send;
 }
 
@@ -37,7 +39,6 @@ impl IdentitySet for Server {
     async fn identity_set(
         &self,
         mut request: SetRequest<'_, identity::Identity>,
-        access_token: &AccessToken,
     ) -> trc::Result<SetResponse<identity::Identity>> {
         let account_id = request.account_id.document_id();
         let identity_ids = self
@@ -45,6 +46,10 @@ impl IdentitySet for Server {
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let account_info = self
+            .account_info(account_id)
+            .await
+            .caused_by(trc::location!())?;
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -63,12 +68,7 @@ impl IdentitySet for Server {
 
             // Validate email address
             if !identity.email.is_empty() {
-                if self
-                    .directory()
-                    .query(QueryParams::id(account_id).with_return_member_of(false))
-                    .await?
-                    .is_none_or(|p| !p.email_addresses().any(|e| e == identity.email))
-                {
+                if !account_info.addresses().any(|e| e == identity.email) {
                     response.not_created.append(
                         id,
                         SetError::invalid_properties()
@@ -90,7 +90,12 @@ impl IdentitySet for Server {
             }
 
             // Validate quota
-            if identity_ids.len() >= access_token.object_quota(Collection::Identity) as u64 {
+            if identity_ids.len()
+                >= self.object_quota(
+                    account_info.object_quotas(),
+                    StorageQuota::MaxEmailIdentities,
+                ) as u64
+            {
                 response.not_created.append(
                     id,
                     SetError::new(SetErrorType::OverQuota).with_description(concat!(

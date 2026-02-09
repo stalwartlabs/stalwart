@@ -17,6 +17,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Map, Value};
 use rand::distr::Alphanumeric;
+use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
     Serialize, ValueKey,
@@ -76,13 +77,15 @@ impl PushSubscriptionSet for Server {
         // Prepare response
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
 
         // Process creates
         'create: for (id, object) in request.unwrap_create() {
             let mut push = PushSubscription::default();
 
             if subscriptions.subscriptions.len()
-                >= access_token.object_quota(Collection::PushSubscription) as usize
+                >= self.object_quota(account.object_quotas(), StorageQuota::MaxPushSubscriptions)
+                    as usize
             {
                 response.not_created.append(id, SetError::new(SetErrorType::OverQuota).with_description(
                     "There are too many subscriptions, please delete some before adding a new one.",

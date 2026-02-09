@@ -14,7 +14,6 @@ use crate::{
     sieve_v2::migrate_sieve_v013,
 };
 use common::Server;
-use directory::{Principal, PrincipalData, Type, backend::internal::SpecialSecrets};
 use proc_macros::EnumMethods;
 use std::time::Instant;
 use store::{

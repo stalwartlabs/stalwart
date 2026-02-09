@@ -61,20 +61,13 @@ pub const DOMAIN_FLAG_ALIAS_LOGIN: u8 = 1 << 4;
 #[derive(Debug, Clone)]
 pub struct AccountCache {
     pub addresses: Box<[ArcStr]>,
-    pub addresses_temporary: Box<[TemporaryAddress]>,
-    pub id_tenant: u32,
+    pub id_tenant: Option<u32>,
     pub id_member_of: TinyVec<[u32; 3]>,
     pub quota_disk: u64,
     pub quota_objects: Option<Box<ObjectQuota>>,
     pub description: Option<Box<str>>,
     pub locale: Locale,
     pub is_user: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct TemporaryAddress {
-    pub address: ArcStr,
-    pub expires_at: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +79,6 @@ pub struct RoleCache {
 #[derive(Debug, Clone)]
 pub struct MailingListCache {
     pub addresses: Box<[ArcStr]>,
-    pub addresses_temporary: Box<[TemporaryAddress]>,
     pub recipients: Arc<[ArcStr]>,
 }
 

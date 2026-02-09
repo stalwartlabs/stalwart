@@ -16,7 +16,6 @@ use calcard::{
 };
 use chrono::DateTime;
 use common::{DavName, DavResources, Server, auth::AccessToken};
-use registry::schema::enums::Permission;
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
@@ -36,6 +35,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Map, Value};
+use registry::schema::enums::Permission;
 use std::{borrow::Cow, str::FromStr};
 use store::{
     ValueKey,
@@ -66,6 +66,7 @@ pub trait CalendarEventSet: Sync + Send {
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,
+        account_emails: &[&str],
         send_scheduling_messages: bool,
         can_add_calendars: &Option<RoaringBitmap>,
         js_calendar_event: JSCalendar<'_, Id, BlobId>,
@@ -82,8 +83,17 @@ impl CalendarEventSet for Server {
     ) -> trc::Result<SetResponse<calendar_event::CalendarEvent>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token.account_id(), account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
+        let account_info = self
+            .account_info(access_token.account_id())
+            .await
+            .caused_by(trc::location!())?;
+        let account_emails = account_info.addresses().collect::<Vec<_>>();
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
 
@@ -115,6 +125,7 @@ impl CalendarEventSet for Server {
                     &mut batch,
                     access_token,
                     account_id,
+                    &account_emails,
                     send_scheduling_messages,
                     &can_add_calendars,
                     JSCalendar::default(),
@@ -303,7 +314,7 @@ impl CalendarEventSet for Server {
             let mut itip_messages = None;
             if send_scheduling_messages
                 && self.core.groupware.itip_enabled
-                && !access_token.emails.is_empty()
+                && !account_emails.is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
                 && new_calendar_event.data.event_range_end() > now
             {
@@ -314,12 +325,12 @@ impl CalendarEventSet for Server {
                     itip_update(
                         &mut new_calendar_event.data.event,
                         &old_ical,
-                        access_token.emails.as_slice(),
+                        account_emails.as_slice(),
                     )
                 } else {
                     itip_create(
                         &mut new_calendar_event.data.event,
-                        access_token.emails.as_slice(),
+                        account_emails.as_slice(),
                     )
                 };
 
@@ -381,13 +392,7 @@ impl CalendarEventSet for Server {
             let extra_bytes = (new_calendar_event.size as u64)
                 .saturating_sub(u32::from(calendar_event.inner.size) as u64);
             if extra_bytes > 0 {
-                match self
-                    .has_available_quota(
-                        account_id,
-                        extra_bytes,
-                    )
-                    .await
-                {
+                match self.has_available_quota(account_id, extra_bytes).await {
                     Ok(_) => {}
                     Err(err) if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota)) => {
                         response.not_updated.append(id, SetError::over_quota());
@@ -400,7 +405,7 @@ impl CalendarEventSet for Server {
             // Update record
             new_calendar_event
                 .update(
-                    access_token,
+                    access_token.account_tenant_ids(),
                     calendar_event,
                     account_id,
                     document_id,
@@ -479,7 +484,7 @@ impl CalendarEventSet for Server {
             // Delete event
             DestroyArchive(calendar_event)
                 .delete_all(
-                    access_token,
+                    &account_info,
                     account_id,
                     document_id,
                     send_scheduling_messages,
@@ -511,6 +516,7 @@ impl CalendarEventSet for Server {
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,
+        account_emails: &[&str],
         send_scheduling_messages: bool,
         can_add_calendars: &Option<RoaringBitmap>,
         mut js_calendar_group: JSCalendar<'_, Id, BlobId>,
@@ -617,11 +623,11 @@ impl CalendarEventSet for Server {
         let mut itip_messages = None;
         if send_scheduling_messages
             && self.core.groupware.itip_enabled
-            && !access_token.emails.is_empty()
+            && !account_emails.is_empty()
             && access_token.has_permission(Permission::CalendarSchedulingSend)
             && event.data.event_range_end() > now() as i64
         {
-            match itip_create(&mut event.data.event, access_token.emails.as_slice()) {
+            match itip_create(&mut event.data.event, account_emails) {
                 Ok(messages) => {
                     if messages.iter().map(|r| r.to.len()).sum::<usize>()
                         < self.core.groupware.itip_outbound_max_recipients
@@ -648,13 +654,7 @@ impl CalendarEventSet for Server {
         }
 
         // Validate quota
-        match self
-            .has_available_quota(
-                account_id,
-                size as u64,
-            )
-            .await
-        {
+        match self.has_available_quota(account_id, size as u64).await {
             Ok(_) => {}
             Err(err) if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota)) => {
                 return Ok(Err(SetError::over_quota()));
@@ -670,7 +670,7 @@ impl CalendarEventSet for Server {
             .caused_by(trc::location!())?;
         event
             .insert(
-                access_token,
+                access_token.account_tenant_ids(),
                 account_id,
                 document_id,
                 next_email_alarm,

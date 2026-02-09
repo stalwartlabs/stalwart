@@ -9,8 +9,7 @@ use crate::{
     core::{MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::{ipc::PushNotification, listener::SessionStream, storage::index::ObjectIndexBuilder};
-use registry::schema::enums::Permission;
+use common::{ipc::PushNotification, network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{JUNK_ID, TRASH_ID, UidMailbox},
@@ -24,6 +23,7 @@ use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse, protocol::copy_move::Arguments,
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use store::{
     ValueKey,
@@ -195,11 +195,6 @@ impl<T: SessionStream> SessionData<T> {
         });
         let mut did_move = false;
         let mut copied_ids = Vec::with_capacity(ids.len());
-        let access_token = self
-            .server
-            .get_access_token(dest_mailbox.account_id)
-            .await
-            .imap_ctx(&arguments.tag, trc::location!())?;
 
         if src_mailbox.id.account_id == dest_mailbox.account_id {
             // Mailboxes are in the same account
@@ -352,7 +347,6 @@ impl<T: SessionStream> SessionData<T> {
             let src_account_id = src_mailbox.id.account_id;
             let mut dest_change_id = None;
             let dest_account_id = dest_mailbox.account_id;
-            let resource_token = access_token.as_resource_token();
             let mut destroy_ids = RoaringBitmap::new();
             let cache = self
                 .server
@@ -365,7 +359,7 @@ impl<T: SessionStream> SessionData<T> {
                     .copy_message(
                         src_account_id,
                         id,
-                        &resource_token,
+                        dest_account_id,
                         vec![dest_mailbox_id],
                         cache
                             .email_by_id(&id)

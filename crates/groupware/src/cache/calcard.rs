@@ -181,7 +181,7 @@ pub(super) async fn build_scheduling_resources(
         .caused_by(trc::location!())?
         .unwrap_or_default();
 
-    let account_info = server.account_info(account_id).await?;
+    let account_info = server.account(account_id).await?;
     let item_ids = server
         .itip_ids(account_id)
         .await

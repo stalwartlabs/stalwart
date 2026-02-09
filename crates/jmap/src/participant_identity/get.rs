@@ -5,7 +5,6 @@
  */
 
 use common::Server;
-use directory::{PrincipalData, QueryParams};
 use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
@@ -128,32 +127,13 @@ impl ParticipantIdentityGet for Server {
             return Ok(Some(identities));
         }
 
-        // Obtain principal
-        let principal = if let Some(principal) = self
-            .core
-            .storage
-            .directory
-            .query(QueryParams::id(account_id).with_return_member_of(false))
+        // Obtain account info
+        let account = self
+            .account_info(account_id)
             .await
-            .caused_by(trc::location!())?
-        {
-            principal
-        } else {
-            return Ok(None);
-        };
-        let mut emails = Vec::new();
-        let mut description = None;
-        for data in principal.data {
-            match data {
-                PrincipalData::PrimaryEmail(v) | PrincipalData::EmailAlias(v) => emails.push(v),
-                PrincipalData::Description(v) => description = Some(v),
-                _ => {}
-            }
-        }
-        let num_emails = emails.len();
-        if num_emails == 0 {
-            return Ok(None);
-        }
+            .caused_by(trc::location!())?;
+        let name = account.description().unwrap_or(account.name());
+        let emails = account.addresses().collect::<Vec<_>>();
 
         // Build identities
         let identities = ParticipantIdentities {
@@ -167,7 +147,7 @@ impl ParticipantIdentityGet for Server {
                 })
                 .collect(),
             default: 0,
-            default_name: description.unwrap_or(principal.name),
+            default_name: name.to_string(),
         };
 
         let mut batch = BatchBuilder::new();

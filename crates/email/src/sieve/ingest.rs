@@ -117,10 +117,7 @@ impl SieveScriptIngest for Server {
         let mut instance = self.core.sieve.untrusted_runtime.filter_parsed(message);
 
         // Set account name and email
-        let account_info = self
-            .account_info(account_id)
-            .await
-            .caused_by(trc::location!())?;
+        let account_info = self.account(account_id).await.caused_by(trc::location!())?;
         let mail_from = account_info.name().to_string();
         instance.set_user_full_name(
             account_info

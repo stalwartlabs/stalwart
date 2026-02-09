@@ -274,32 +274,45 @@ impl RunScript for Server {
                             instance.message().raw_message().into()
                         };
                         if let Some(raw_message) = raw_message.filter(|m| !m.is_empty()) {
-                            let headers = if !params.sign.is_empty() {
-                                let mut headers = Vec::new();
+                            let headers = if let Some(sign_domain) = &params.sign_domain {
+                                match self.dkim_signers(sign_domain).await {
+                                    Ok(Some(signers)) => {
+                                        let mut headers = Vec::new();
 
-                                for dkim in &params.sign {
-                                    if let Some(dkim) = self.get_dkim_signer(dkim, session_id) {
-                                        match dkim.sign(raw_message) {
-                                            Ok(signature) => {
-                                                signature.write_header(&mut headers);
-                                            }
-                                            Err(err) => {
-                                                trc::error!(
-                                                    trc::Error::from(err)
-                                                        .span_id(session_id)
-                                                        .caused_by(trc::location!())
-                                                        .details("DKIM sign failed")
-                                                );
+                                        for signer in signers.as_ref() {
+                                            match signer.sign(raw_message) {
+                                                Ok(signature) => {
+                                                    signature.write_header(&mut headers);
+                                                }
+                                                Err(err) => {
+                                                    trc::error!(
+                                                        trc::Error::from(err)
+                                                            .span_id(session_id)
+                                                            .caused_by(trc::location!())
+                                                            .details("DKIM sign failed")
+                                                    );
+                                                }
                                             }
                                         }
+
+                                        if is_forward {
+                                            headers.extend_from_slice(
+                                                params.headers.unwrap_or_default(),
+                                            );
+                                        }
+
+                                        Some(Cow::Owned(headers))
+                                    }
+                                    Ok(None) => None,
+                                    Err(err) => {
+                                        trc::error!(
+                                            err.details("Failed to obtain DKIM signers")
+                                                .caused_by(trc::location!())
+                                        );
+
+                                        None
                                     }
                                 }
-
-                                if is_forward {
-                                    headers.extend_from_slice(params.headers.unwrap_or_default());
-                                }
-
-                                Some(Cow::Owned(headers))
                             } else if is_forward {
                                 params.headers.map(Cow::Borrowed)
                             } else {

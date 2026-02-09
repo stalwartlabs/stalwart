@@ -5,7 +5,7 @@
  */
 
 use super::*;
-use crate::{Server, expr::StringCow, network::RcptExpansion};
+use crate::{Server, expr::StringCow, network::RcptResolution};
 use compact_str::{CompactString, ToCompactString};
 use mail_auth::IpLookupStrategy;
 use std::{cmp::Ordering, net::IpAddr, vec::IntoIter};
@@ -33,10 +33,18 @@ impl Server {
             F_IS_LOCAL_ADDRESS => {
                 let address = params.next_as_string();
 
-                self.rcpt_expand(address.as_ref())
+                self.rcpt_resolve(address.as_ref())
                     .await
                     .caused_by(trc::location!())
-                    .map(|v| (v != RcptExpansion::Invalid).into())
+                    .map(|v| {
+                        (!matches!(
+                            v,
+                            RcptResolution::UnknownRecipient
+                                | RcptResolution::UnknownDomain
+                                | RcptResolution::Forward(_)
+                        ))
+                        .into()
+                    })
             }
             F_KEY_GET => {
                 let Some(store) = self.get_lookup_store(params.next_as_string().as_str()) else {

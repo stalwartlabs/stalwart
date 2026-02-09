@@ -12,7 +12,7 @@ use std::{borrow::Cow, net::IpAddr, sync::Arc};
 use common::{
     Inner, Server,
     auth::AccessToken,
-    listener::{ServerInstance, limiter::InFlight},
+    network::{ServerInstance, limiter::InFlight},
 };
 
 use compact_str::CompactString;
@@ -35,7 +35,7 @@ pub enum State {
         auth_failures: u32,
     },
     Authenticated {
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         in_flight: Option<InFlight>,
     },
 }

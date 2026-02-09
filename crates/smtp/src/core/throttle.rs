@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::Session;
 use common::{
-    KV_RATE_LIMIT_SMTP, ThrottleKey,
-    config::smtp::*,
-    expr::{functions::ResolveVariable, *},
-    listener::SessionStream,
+    KV_RATE_LIMIT_SMTP, ThrottleKey, config::smtp::*, expr::functions::ResolveVariable,
+    network::SessionStream,
 };
 use queue::QueueQuota;
+use registry::schema::{enums::ExpressionVariable, prelude::Property, structs::Rate};
 use trc::SmtpEvent;
-use utils::config::Rate;
-
-use super::Session;
 
 pub trait NewKey: Sized {
     fn new_key(&self, e: &impl ResolveVariable, context: &str) -> ThrottleKey;
@@ -148,13 +145,21 @@ impl NewKey for QueueRateLimiter {
             );
         }
         if (self.keys & THROTTLE_REMOTE_IP) != 0 {
-            hasher.update(e.resolve_variable(ExpressionVariable::RemoteIp).to_string().as_bytes());
+            hasher.update(
+                e.resolve_variable(ExpressionVariable::RemoteIp)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         if (self.keys & THROTTLE_LOCAL_IP) != 0 {
-            hasher.update(e.resolve_variable(ExpressionVariable::LocalIp).to_string().as_bytes());
+            hasher.update(
+                e.resolve_variable(ExpressionVariable::LocalIp)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         hasher.update(&self.rate.period.as_secs().to_be_bytes()[..]);
-        hasher.update(&self.rate.requests.to_be_bytes()[..]);
+        hasher.update(&self.rate.count.to_be_bytes()[..]);
         hasher.update(context.as_bytes());
 
         ThrottleKey {
@@ -177,7 +182,7 @@ impl<T: SessionStream> Session<T> {
             if t.expr.is_empty()
                 || self
                     .server
-                    .eval_expr(&t.expr, self, "throttle", self.data.session_id)
+                    .eval_expr(&t.expr, self, t.id, Property::Match, self.data.session_id)
                     .await
                     .unwrap_or(false)
             {
@@ -200,9 +205,7 @@ impl<T: SessionStream> Session<T> {
                 // Check rate
                 match self
                     .server
-                    .core
-                    .storage
-                    .lookup
+                    .in_memory_store()
                     .is_rate_allowed(KV_RATE_LIMIT_SMTP, key.hash.as_slice(), &t.rate, false)
                     .await
                 {
@@ -210,10 +213,10 @@ impl<T: SessionStream> Session<T> {
                         trc::event!(
                             Smtp(SmtpEvent::RateLimitExceeded),
                             SpanId = self.data.session_id,
-                            Id = t.id.clone(),
+                            Id = t.id.to_string(),
                             Limit = vec![
-                                trc::Value::from(t.rate.requests),
-                                trc::Value::from(t.rate.period)
+                                trc::Value::from(t.rate.count),
+                                trc::Value::from(t.rate.period.into_inner())
                             ],
                         );
 
@@ -238,13 +241,11 @@ impl<T: SessionStream> Session<T> {
         hasher.update(rcpt.as_bytes());
         hasher.update(ctx.as_bytes());
         hasher.update(&rate.period.as_secs().to_ne_bytes()[..]);
-        hasher.update(&rate.requests.to_ne_bytes()[..]);
+        hasher.update(&rate.count.to_ne_bytes()[..]);
 
         match self
             .server
-            .core
-            .storage
-            .lookup
+            .in_memory_store()
             .is_rate_allowed(
                 KV_RATE_LIMIT_SMTP,
                 hasher.finalize().as_bytes(),

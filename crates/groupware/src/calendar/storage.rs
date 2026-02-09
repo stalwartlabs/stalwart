@@ -134,10 +134,10 @@ impl ItipAutoExpunge for Server {
         // Tombstone messages
         let mut batch = BatchBuilder::new();
         let changed_by = self
-            .account_info(account_id)
+            .account(account_id)
             .await
             .caused_by(trc::location!())?
-            .account_tenant_ids();
+            .account_tenant_ids(account_id);
 
         for document_id in destroy_ids {
             // Fetch event

@@ -56,15 +56,17 @@ impl EmailImport for Server {
         let import_access_token = if account_id != access_token.account_id() {
             #[cfg(feature = "test_mode")]
             {
-                std::sync::Arc::new(AccessToken::from_id(account_id)).into()
+                AccessToken::from_id(account_id).into()
             }
 
             #[cfg(not(feature = "test_mode"))]
             {
+                use common::auth::BuildAccessToken;
                 use trc::AddContext;
-                self.get_access_token(account_id)
+                self.access_token(account_id)
                     .await
                     .caused_by(trc::location!())?
+                    .build()
                     .into()
             }
         } else {
@@ -149,7 +151,7 @@ impl EmailImport for Server {
                     raw_message: &raw_message,
                     message: MessageParser::new().parse(&raw_message),
                     blob_hash: Some(&blob_id.hash),
-                    access_token: import_access_token.as_deref().unwrap_or(access_token),
+                    access_token: import_access_token.as_ref().unwrap_or(access_token),
                     source: IngestSource::Jmap {
                         train_classifier: email
                             .keywords
