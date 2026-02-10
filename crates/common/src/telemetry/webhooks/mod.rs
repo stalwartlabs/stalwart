@@ -71,12 +71,18 @@ pub(crate) fn spawn_webhook_tracer(builder: SubscriberBuilder, settings: Webhook
                 if !pending_events.is_empty() {
                     next_delivery = now + settings.throttle;
                     if !in_flight.load(Ordering::Relaxed) {
+                        let batch_size = pending_events.len().min(settings.batch_size);
+                        let batch = pending_events.drain(..batch_size).collect();
                         spawn_webhook_handler(
                             settings.clone(),
                             in_flight.clone(),
-                            std::mem::take(&mut pending_events),
+                            batch,
                             tx.clone(),
                         );
+                    }
+                    // Schedule next batch if there are remaining events
+                    if !pending_events.is_empty() {
+                        next_retry = Some(settings.throttle);
                     }
                 }
             } else if !pending_events.is_empty() {
