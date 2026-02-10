@@ -6,10 +6,10 @@
 
 use common::auth::AccessToken;
 use common::{HttpAuthCache, Server, auth::AuthRequest, network::limiter::InFlight};
+use directory::Credentials;
 use http_proto::{HttpRequest, HttpSessionData};
 use hyper::header;
 use mail_parser::decoders::base64::base64_decode;
-use mail_send::Credentials;
 use std::future::Future;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,6 @@ pub trait Authenticator: Sync + Send {
         &self,
         req: &HttpRequest,
         session: &HttpSessionData,
-        allow_api_access: bool,
     ) -> impl Future<Output = trc::Result<(Option<InFlight>, AccessToken)>> + Send;
 }
 
@@ -27,15 +26,18 @@ impl Authenticator for Server {
         &self,
         req: &HttpRequest,
         session: &HttpSessionData,
-        allow_api_access: bool,
     ) -> trc::Result<(Option<InFlight>, AccessToken)> {
         if let Some((mechanism, token)) = req.authorization() {
             // Check if the credentials are cached
             if let Some(http_cache) = self.inner.cache.http_auth.get(token) {
                 // Make sure the revision is still valid
                 if http_cache.expires <= Instant::now() {
-                    let access_token = self.get_access_token(http_cache.account_id).await?;
-                    if access_token.revision == http_cache.revision {
+                    let access_token = AccessToken::renew(
+                        self.access_token(http_cache.account_id).await?,
+                        http_cache.credential_id,
+                    )?;
+
+                    if access_token.revision() == http_cache.revision {
                         // Enforce authenticated rate limit
                         return self
                             .is_http_authenticated_request_allowed(&access_token)
@@ -62,13 +64,10 @@ impl Authenticator for Server {
                 self.is_http_anonymous_request_allowed(&session.remote_ip)
                     .await?;
 
-                decode_bearer_token(token, allow_api_access).ok_or_else(|| {
-                    trc::AuthEvent::Error
-                        .into_err()
-                        .details("Failed to decode Bearer token.")
-                        .id(token.to_string())
-                        .caused_by(trc::location!())
-                })?
+                Credentials::Bearer {
+                    username: None,
+                    token: token.to_string(),
+                }
             } else {
                 // Enforce anonymous rate limit
                 self.is_http_anonymous_request_allowed(&session.remote_ip)
@@ -83,22 +82,20 @@ impl Authenticator for Server {
 
             // Authenticate
             let access_token = self
-                .authenticate(
-                    &AuthRequest::from_credentials(
-                        credentials,
-                        session.session_id,
-                        session.remote_ip,
-                    )
-                    .with_api_access(allow_api_access),
-                )
+                .authenticate(&AuthRequest::from_credentials(
+                    credentials,
+                    session.session_id,
+                    session.remote_ip,
+                ))
                 .await?;
 
             // Cache credentials
             self.inner.cache.http_auth.insert(
-                token.to_string(),
+                token.into(),
                 HttpAuthCache {
                     account_id: access_token.account_id(),
-                    revision: access_token.revision,
+                    revision: access_token.revision(),
+                    credential_id: access_token.credential_id(),
                     expires: Instant::now()
                         + Duration::from_secs(self.core.oauth.oauth_expiry_token),
                 },
@@ -145,26 +142,15 @@ impl HttpHeaders for HttpRequest {
     }
 }
 
-fn decode_plain_auth(token: &str) -> Option<Credentials<String>> {
+fn decode_plain_auth(token: &str) -> Option<Credentials> {
     base64_decode(token.as_bytes())
         .and_then(|token| String::from_utf8(token).ok())
         .and_then(|token| {
             token
                 .split_once(':')
-                .map(|(login, secret)| Credentials::Plain {
+                .map(|(login, secret)| Credentials::Basic {
                     username: login.trim().to_lowercase(),
                     secret: secret.to_string(),
                 })
         })
-}
-
-fn decode_bearer_token(token: &str, allow_api_access: bool) -> Option<Credentials<String>> {
-    if allow_api_access && let Some(token) = token.strip_prefix("api_").and_then(decode_plain_auth)
-    {
-        return Some(token);
-    }
-
-    Some(Credentials::OAuthBearer {
-        token: token.to_string(),
-    })
 }

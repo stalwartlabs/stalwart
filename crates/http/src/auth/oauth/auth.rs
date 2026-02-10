@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{DeviceAuthResponse, FormData, MAX_POST_LEN, OAuthCode, OAuthCodeRequest};
 use crate::auth::oauth::OAuthStatus;
 use common::{
     KV_OAUTH, Server,
@@ -16,7 +17,6 @@ use http_proto::*;
 use serde::Deserialize;
 use serde_json::json;
 use std::future::Future;
-use std::sync::Arc;
 use store::{
     Serialize,
     dispatch::lookup::KeyValue,
@@ -31,8 +31,6 @@ use store::{
     write::AlignedBytes,
 };
 use trc::AddContext;
-
-use super::{DeviceAuthResponse, FormData, MAX_POST_LEN, OAuthCode, OAuthCodeRequest};
 
 #[derive(Debug, serde::Serialize, Deserialize)]
 pub struct OAuthMetadata {
@@ -50,7 +48,7 @@ pub struct OAuthMetadata {
 pub trait OAuthApiHandler: Sync + Send {
     fn handle_oauth_api_request(
         &self,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
         body: Option<Vec<u8>>,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
 
@@ -70,7 +68,7 @@ pub trait OAuthApiHandler: Sync + Send {
 impl OAuthApiHandler for Server {
     async fn handle_oauth_api_request(
         &self,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
         body: Option<Vec<u8>>,
     ) -> trc::Result<HttpResponse> {
         let request =
@@ -119,9 +117,7 @@ impl OAuthApiHandler for Server {
                 .caused_by(trc::location!())?;
 
                 // Insert client code
-                self.core
-                    .storage
-                    .lookup
+                self.in_memory_store()
                     .key_set(
                         KeyValue::with_prefix(KV_OAUTH, client_code.as_bytes(), value)
                             .expires(self.core.oauth.oauth_expiry_auth_code),
@@ -152,9 +148,7 @@ impl OAuthApiHandler for Server {
 
                 // Obtain code
                 if let Some(auth_code_) = self
-                    .core
-                    .storage
-                    .lookup
+                    .in_memory_store()
                     .key_get::<Archive<AlignedBytes>>(KeyValue::<()>::build_key(
                         KV_OAUTH,
                         code.as_bytes(),
@@ -175,16 +169,12 @@ impl OAuthApiHandler for Server {
                         success = true;
 
                         // Delete issued user code
-                        self.core
-                            .storage
-                            .lookup
+                        self.in_memory_store()
                             .key_delete(KeyValue::<()>::build_key(KV_OAUTH, code.as_bytes()))
                             .await?;
 
                         // Update device code status
-                        self.core
-                            .storage
-                            .lookup
+                        self.in_memory_store()
                             .key_set(
                                 KeyValue::with_prefix(
                                     KV_OAUTH,
@@ -260,9 +250,7 @@ impl OAuthApiHandler for Server {
         .caused_by(trc::location!())?;
 
         // Insert device code
-        self.core
-            .storage
-            .lookup
+        self.in_memory_store()
             .key_set(
                 KeyValue::with_prefix(KV_OAUTH, device_code.as_bytes(), oauth_code.clone())
                     .expires(self.core.oauth.oauth_expiry_user_code),
@@ -270,9 +258,7 @@ impl OAuthApiHandler for Server {
             .await?;
 
         // Insert user code
-        self.core
-            .storage
-            .lookup
+        self.in_memory_store()
             .key_set(
                 KeyValue::with_prefix(KV_OAUTH, user_code.as_bytes(), oauth_code)
                     .expires(self.core.oauth.oauth_expiry_user_code),

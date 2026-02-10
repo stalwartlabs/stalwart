@@ -259,6 +259,7 @@ pub struct MailboxCache {
 pub struct HttpAuthCache {
     pub account_id: u32,
     pub revision: u64,
+    pub credential_id: Option<u32>,
     pub expires: Instant,
 }
 

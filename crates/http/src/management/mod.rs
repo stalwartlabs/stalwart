@@ -4,53 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-pub mod crypto;
-pub mod dkim;
-pub mod dns;
-pub mod log;
-pub mod principal;
-pub mod queue;
-pub mod reload;
-pub mod report;
-pub mod settings;
-pub mod spam;
-pub mod stores;
-pub mod troubleshoot;
-
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
 // SPDX-License-Identifier: LicenseRef-SEL
 #[cfg(feature = "enterprise")]
-pub mod enterprise;
-
-#[cfg(feature = "enterprise")]
-use enterprise::telemetry::TelemetryApi;
+pub mod telemetry;
 // SPDX-SnippetEnd
+pub mod diagnose;
 
-use crate::auth::oauth::auth::OAuthApiHandler;
+use crate::management::diagnose::TroubleshootApi;
 use common::{Server, auth::AccessToken};
-use crypto::CryptoHandler;
-use directory::{Permission, backend::internal::manage};
-use dkim::DkimManagement;
-use dns::DnsManagement;
-use http_proto::{request::fetch_body, *};
-use hyper::{Method, StatusCode, header};
+use http_proto::{
+    HttpRequest, HttpResponse, HttpSessionData, JsonResponse, ToHttpResponse, request::fetch_body,
+};
+use hyper::{StatusCode, header};
 use jmap::api::{ToJmapHttpResponse, ToRequestError};
 use jmap_proto::error::request::RequestError;
-use log::LogManagement;
-use mail_parser::DateTime;
-use principal::PrincipalManager;
-use queue::QueueManagement;
-use reload::ManageReload;
-use report::ManageReports;
+use registry::schema::enums::Permission;
 use serde::Serialize;
-use settings::ManageSettings;
-use spam::ManageSpamHandler;
-use std::future::Future;
-use std::{str::FromStr, sync::Arc};
-use store::write::now;
-use stores::ManageStore;
-use troubleshoot::TroubleshootApi;
 
 #[derive(Serialize)]
 #[serde(tag = "error")]
@@ -80,7 +51,7 @@ pub trait ManagementApi: Sync + Send {
     fn handle_api_manage_request(
         &self,
         req: &mut HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
 }
@@ -90,85 +61,18 @@ impl ManagementApi for Server {
     async fn handle_api_manage_request(
         &self,
         req: &mut HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> trc::Result<HttpResponse> {
         let body = fetch_body(req, 1024 * 1024, session.session_id).await;
         let path = req.uri().path().split('/').skip(2).collect::<Vec<_>>();
 
         match path.first().copied().unwrap_or_default() {
-            "queue" => self.handle_manage_queue(req, path, &access_token).await,
-            "settings" => {
-                self.handle_manage_settings(req, path, body, &access_token)
-                    .await
-            }
-            "reports" => self.handle_manage_reports(req, path, &access_token).await,
-            "principal" => {
-                self.handle_manage_principal(req, path, body, &access_token)
-                    .await
-            }
-            "dns" => self.handle_manage_dns(req, path, &access_token).await,
-            "store" => {
-                self.handle_manage_store(req, path, body, session, &access_token)
-                    .await
-            }
-            "reload" => self.handle_manage_reload(req, path, &access_token).await,
-            "dkim" => {
-                self.handle_manage_dkim(req, path, body, &access_token)
-                    .await
-            }
-            "update" => self.handle_manage_update(req, path, &access_token).await,
-            "logs" if req.method() == Method::GET => {
-                self.handle_view_logs(req, &access_token).await
-            }
-            "spam-filter" => {
-                self.handle_manage_spam(req, path, body, session, &access_token)
-                    .await
-            }
-            "restart" if req.method() == Method::GET => {
+            "diagnose" => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::Restart)?;
+                access_token.enforce_permission(Permission::Troubleshoot)?;
 
-                Err(manage::unsupported("Restart is not yet supported"))
-            }
-            "oauth" => {
-                // Validate the access token
-                access_token.assert_has_permission(Permission::AuthenticateOauth)?;
-
-                self.handle_oauth_api_request(access_token, body).await
-            }
-            "account" => match (path.get(1).copied().unwrap_or_default(), req.method()) {
-                ("crypto", &Method::POST) => {
-                    // Validate the access token
-                    access_token.assert_has_permission(Permission::ManageEncryption)?;
-
-                    self.handle_crypto_post(access_token, body).await
-                }
-                ("crypto", &Method::GET) => {
-                    // Validate the access token
-                    access_token.assert_has_permission(Permission::ManageEncryption)?;
-
-                    self.handle_crypto_get(access_token).await
-                }
-                ("auth", &Method::GET) => {
-                    // Validate the access token
-                    access_token.assert_has_permission(Permission::ManagePasswords)?;
-
-                    self.handle_account_auth_get(access_token).await
-                }
-                ("auth", &Method::POST) => {
-                    // Validate the access token
-                    access_token.assert_has_permission(Permission::ManagePasswords)?;
-
-                    self.handle_account_auth_post(req, access_token, body).await
-                }
-                _ => Err(trc::ResourceEvent::NotFound.into_err()),
-            },
-            "troubleshoot" => {
-                // Validate the access token
-                access_token.assert_has_permission(Permission::Troubleshoot)?;
-
-                self.handle_troubleshoot_api_request(req, path, &access_token, body)
+                self.handle_diagnose_api_request(req, path, access_token, body)
                     .await
             }
             // SPDX-SnippetBegin
@@ -186,57 +90,17 @@ impl ManagementApi for Server {
                 // for copyright infringement, breach of contract, and fraud.
 
                 if self.core.is_enterprise_edition() {
-                    self.handle_telemetry_api_request(req, path, &access_token)
+                    use crate::management::telemetry::TelemetryApi;
+
+                    self.handle_telemetry_api_request(req, path, access_token)
                         .await
                 } else {
-                    Err(manage::enterprise())
+                    Err(trc::ManageEvent::NotSupported.ctx(trc::Key::Details, "Enterprise feature"))
                 }
             }
             // SPDX-SnippetEnd
             _ => Err(trc::ResourceEvent::NotFound.into_err()),
         }
-    }
-}
-
-pub(super) struct FutureTimestamp(u64);
-pub(super) struct Timestamp(u64);
-
-impl FromStr for Timestamp {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(dt) = DateTime::parse_rfc3339(s) {
-            Ok(Timestamp(dt.to_timestamp() as u64))
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl FromStr for FutureTimestamp {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(dt) = DateTime::parse_rfc3339(s) {
-            let instant = dt.to_timestamp() as u64;
-            if instant >= now() {
-                return Ok(FutureTimestamp(instant));
-            }
-        }
-
-        Err(())
-    }
-}
-
-impl FutureTimestamp {
-    pub fn into_inner(self) -> u64 {
-        self.0
-    }
-}
-
-impl Timestamp {
-    pub fn into_inner(self) -> u64 {
-        self.0
     }
 }
 

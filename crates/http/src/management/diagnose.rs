@@ -19,7 +19,6 @@ use common::{
     },
     psl,
 };
-use directory::backend::internal::manage;
 use http_body_util::{StreamBody, combinators::BoxBody};
 use hyper::{
     Method, StatusCode,
@@ -46,7 +45,7 @@ use utils::url_params::UrlParams;
 use http_proto::{request::decode_path_element, *};
 
 pub trait TroubleshootApi: Sync + Send {
-    fn handle_troubleshoot_api_request(
+    fn handle_diagnose_api_request(
         &self,
         req: &HttpRequest,
         path: Vec<&str>,
@@ -56,7 +55,7 @@ pub trait TroubleshootApi: Sync + Send {
 }
 
 impl TroubleshootApi for Server {
-    async fn handle_troubleshoot_api_request(
+    async fn handle_diagnose_api_request(
         &self,
         req: &HttpRequest,
         path: Vec<&str>,
@@ -74,7 +73,7 @@ impl TroubleshootApi for Server {
             ("token", None, &Method::GET) => {
                 // Issue a live telemetry token valid for 60 seconds
                 Ok(JsonResponse::new(json!({
-                    "data": self.encode_access_token(GrantType::Troubleshoot, account_id,  "web", 60).await?,
+                    "data": self.encode_access_token(GrantType::Diagnose, account_id,  "web", 60).await?,
             }))
             .into_http_response())
             }
@@ -86,7 +85,7 @@ impl TroubleshootApi for Server {
                         .unwrap_or(30),
                 );
 
-                let mut rx = spawn_delivery_troubleshoot(
+                let mut rx = spawn_delivery_diagnose(
                     self.clone(),
                     decode_path_element(target).to_lowercase(),
                     timeout,
@@ -109,11 +108,9 @@ impl TroubleshootApi for Server {
                 .map_err(|err| {
                     trc::EventType::Resource(trc::ResourceEvent::BadParameters).from_json_error(err)
                 })?;
-                let response = dmarc_troubleshoot(self, request).await.ok_or_else(|| {
-                    manage::error(
-                        "Invalid message body",
-                        "Failed to parse message body".into(),
-                    )
+                let response = dmarc_diagnose(self, request).await.ok_or_else(|| {
+                    trc::EventType::Resource(trc::ResourceEvent::BadParameters)
+                        .reason("Failed to parse message body")
                 })?;
 
                 Ok(JsonResponse::new(json!({
@@ -288,7 +285,7 @@ impl ElapsedMs for Instant {
         self.elapsed().as_millis() as u64
     }
 }
-fn spawn_delivery_troubleshoot(
+fn spawn_delivery_diagnose(
     server: Server,
     domain_or_email: String,
     timeout: Duration,
@@ -296,13 +293,13 @@ fn spawn_delivery_troubleshoot(
     let (tx, rx) = mpsc::channel(10);
 
     tokio::spawn(async move {
-        let _ = delivery_troubleshoot(tx, server, domain_or_email, timeout).await;
+        let _ = delivery_diagnose(tx, server, domain_or_email, timeout).await;
     });
 
     rx
 }
 
-async fn delivery_troubleshoot(
+async fn delivery_diagnose(
     tx: mpsc::Sender<DeliveryStage>,
     server: Server,
     domain_or_email: String,
@@ -354,7 +351,7 @@ async fn delivery_troubleshoot(
             mxs: mxs
                 .iter()
                 .map(|mx| MX {
-                    exchanges: mx.exchanges.clone(),
+                    exchanges: mx.exchanges.iter().map(|e| e.to_string()).collect(),
                     preference: mx.preference,
                 })
                 .collect(),
@@ -882,7 +879,7 @@ pub enum DmarcPolicy {
     Unspecified,
 }
 
-async fn dmarc_troubleshoot(
+async fn dmarc_diagnose(
     server: &Server,
     request: DmarcTroubleshootRequest,
 ) -> Option<DmarcTroubleshootResponse> {
@@ -1005,7 +1002,7 @@ async fn dmarc_troubleshoot(
         ip_rev_ptr: iprev
             .ptr
             .as_ref()
-            .map(|ptr| ptr.as_ref().clone())
+            .map(|ptr| ptr.iter().map(|s| s.to_string()).collect())
             .unwrap_or_default(),
         ip_rev_result: (&iprev).into(),
         dkim_pass,

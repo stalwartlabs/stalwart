@@ -5,13 +5,13 @@
  */
 
 use common::{Server, manager::webadmin::Resource};
-use directory::QueryParams;
 use http_proto::*;
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use registry::schema::enums::NetworkListenerProtocol;
+use registry::schema::structs::NetworkListener;
 use std::fmt::Write;
 use std::future::Future;
-use trc::AddContext;
 use utils::url_params::UrlParams;
 
 pub trait Autoconfig: Sync + Send {
@@ -23,11 +23,6 @@ pub trait Autoconfig: Sync + Send {
         &self,
         body: Option<Vec<u8>>,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
-    fn autoconfig_parameters<'x>(
-        &'x self,
-        emailaddress: &'x str,
-        fail_if_invalid: bool,
-    ) -> impl Future<Output = trc::Result<(String, String, &'x str)>> + Send;
 }
 
 impl Autoconfig for Server {
@@ -38,9 +33,13 @@ impl Autoconfig for Server {
             .get("emailaddress")
             .unwrap_or_default()
             .to_lowercase();
-        let (account_name, server_name, domain) =
-            self.autoconfig_parameters(&emailaddress, false).await?;
-        let services = self.core.storage.config.get_services().await?;
+        let Some((_, domain)) = emailaddress.rsplit_once('@') else {
+            return Err(trc::ResourceEvent::BadParameters
+                .into_err()
+                .details("Missing domain in email address"));
+        };
+        let listeners = self.registry().list::<NetworkListener>().await?;
+        let server_name = &self.core.network.server_name;
 
         // Build XML response
         let mut config = String::with_capacity(1024);
@@ -53,10 +52,15 @@ impl Autoconfig for Server {
             &mut config,
             "\t\t<displayShortName>{domain}</displayShortName>"
         );
-        for (protocol, port, is_tls) in services {
-            let tag = match protocol.as_str() {
-                "imap" | "pop3" => "incomingServer",
-                "smtp" if port != 25 => "outgoingServer",
+        for listener in listeners {
+            let listener = listener.object;
+            let Some(port) = listener.bind.first().map(|l| l.0.port()) else {
+                continue;
+            };
+            let (protocol, tag) = match listener.protocol {
+                NetworkListenerProtocol::Smtp if port != 25 => ("smtp", "outgoingServer"),
+                NetworkListenerProtocol::Imap => ("imap", "incomingServer"),
+                NetworkListenerProtocol::Pop3 => ("pop3", "incomingServer"),
                 _ => continue,
             };
             let _ = writeln!(&mut config, "\t\t<{tag} type=\"{protocol}\">");
@@ -65,9 +69,13 @@ impl Autoconfig for Server {
             let _ = writeln!(
                 &mut config,
                 "\t\t\t<socketType>{}</socketType>",
-                if is_tls { "SSL" } else { "STARTTLS" }
+                if listener.tls_implicit {
+                    "SSL"
+                } else {
+                    "STARTTLS"
+                }
             );
-            let _ = writeln!(&mut config, "\t\t\t<username>{account_name}</username>");
+            let _ = writeln!(&mut config, "\t\t\t<username>{emailaddress}</username>");
             let _ = writeln!(
                 &mut config,
                 "\t\t\t<authentication>password-cleartext</authentication>"
@@ -83,7 +91,7 @@ impl Autoconfig for Server {
             ("fileShare", "webdav", "file"),
         ] {
             let _ = writeln!(&mut config, "\t<{tag} type=\"{protocol}\">");
-            let _ = writeln!(&mut config, "\t\t<username>{account_name}</username>");
+            let _ = writeln!(&mut config, "\t\t<username>{emailaddress}</username>");
             let _ = writeln!(
                 &mut config,
                 "\t\t<authentication>http-basic</authentication>"
@@ -119,9 +127,8 @@ impl Autoconfig for Server {
                     .details("Failed to parse autodiscover request")
                     .ctx(trc::Key::Reason, err)
             })?;
-        let (account_name, server_name, _) =
-            self.autoconfig_parameters(&emailaddress, true).await?;
-        let services = self.core.storage.config.get_services().await?;
+        let listeners = self.registry().list::<NetworkListener>().await?;
+        let server_name = &self.core.network.server_name;
 
         // Build XML response
         let mut config = String::with_capacity(1024);
@@ -152,31 +159,33 @@ impl Autoconfig for Server {
         let _ = writeln!(&mut config, "\t\t<Account>");
         let _ = writeln!(&mut config, "\t\t\t<AccountType>email</AccountType>");
         let _ = writeln!(&mut config, "\t\t\t<Action>settings</Action>");
-        for (protocol, port, is_tls) in services {
-            match protocol.as_str() {
-                "imap" | "pop3" => (),
-                "smtp" if port != 25 => (),
+        for listener in listeners {
+            let listener = listener.object;
+            let Some(port) = listener.bind.first().map(|l| l.0.port()) else {
+                continue;
+            };
+
+            let protocol = match listener.protocol {
+                NetworkListenerProtocol::Imap => "IMAP",
+                NetworkListenerProtocol::Pop3 => "POP3",
+                NetworkListenerProtocol::Smtp if port != 25 => "SMTP",
                 _ => continue,
-            }
+            };
 
             let _ = writeln!(&mut config, "\t\t\t<Protocol>");
-            let _ = writeln!(
-                &mut config,
-                "\t\t\t\t<Type>{}</Type>",
-                protocol.to_uppercase()
-            );
+            let _ = writeln!(&mut config, "\t\t\t\t<Type>{protocol}</Type>",);
             let _ = writeln!(&mut config, "\t\t\t\t<Server>{server_name}</Server>");
             let _ = writeln!(&mut config, "\t\t\t\t<Port>{port}</Port>");
-            let _ = writeln!(&mut config, "\t\t\t\t<LoginName>{account_name}</LoginName>");
+            let _ = writeln!(&mut config, "\t\t\t\t<LoginName>{emailaddress}</LoginName>");
             let _ = writeln!(&mut config, "\t\t\t\t<AuthRequired>on</AuthRequired>");
             let _ = writeln!(&mut config, "\t\t\t\t<DirectoryPort>0</DirectoryPort>");
             let _ = writeln!(&mut config, "\t\t\t\t<ReferralPort>0</ReferralPort>");
             let _ = writeln!(
                 &mut config,
                 "\t\t\t\t<SSL>{}</SSL>",
-                if is_tls { "on" } else { "off" }
+                if listener.tls_implicit { "on" } else { "off" }
             );
-            if is_tls {
+            if listener.tls_implicit {
                 let _ = writeln!(&mut config, "\t\t\t\t<Encryption>TLS</Encryption>");
             }
             let _ = writeln!(&mut config, "\t\t\t\t<SPA>off</SPA>");
@@ -191,51 +200,6 @@ impl Autoconfig for Server {
             Resource::new("application/xml; charset=utf-8", config.into_bytes())
                 .into_http_response(),
         )
-    }
-
-    async fn autoconfig_parameters<'x>(
-        &'x self,
-        emailaddress: &'x str,
-        fail_if_invalid: bool,
-    ) -> trc::Result<(String, String, &'x str)> {
-        // Return EMAILADDRESS
-        let Some((_, domain)) = emailaddress.rsplit_once('@') else {
-            return if !fail_if_invalid {
-                Ok((
-                    "%EMAILADDRESS%".to_string(),
-                    self.core.network.server_name.clone(),
-                    &self.core.network.report_domain,
-                ))
-            } else {
-                Err(trc::ResourceEvent::BadParameters
-                    .into_err()
-                    .details("Missing domain in email address"))
-            };
-        };
-
-        // Find the account name by e-mail address
-        let mut account_name = emailaddress.into();
-        if let Some(id) = self
-            .core
-            .storage
-            .directory
-            .email_to_id(emailaddress)
-            .await
-            .caused_by(trc::location!())?
-            && let Ok(Some(principal)) = self
-                .core
-                .storage
-                .directory
-                .query(QueryParams::id(id).with_return_member_of(false))
-                .await
-            && principal
-                .primary_email()
-                .is_some_and(|email| email.eq_ignore_ascii_case(emailaddress))
-        {
-            account_name = principal.name;
-        }
-
-        Ok((account_name, self.core.network.server_name.clone(), domain))
     }
 }
 

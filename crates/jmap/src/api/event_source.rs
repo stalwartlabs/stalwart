@@ -13,11 +13,8 @@ use hyper::{
     body::{Bytes, Frame},
 };
 use jmap_proto::{response::status::PushObject, types::state::State};
+use std::time::{Duration, Instant};
 use std::{future::Future, str::FromStr};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
 use types::{id::Id, type_state::DataType};
 use utils::map::{bitmap::Bitmap, vec_map::VecMap};
 
@@ -31,7 +28,7 @@ pub trait EventSourceHandler: Sync + Send {
     fn handle_event_source(
         &self,
         req: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
 }
 
@@ -39,7 +36,7 @@ impl EventSourceHandler for Server {
     async fn handle_event_source(
         &self,
         req: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
     ) -> trc::Result<HttpResponse> {
         // Parse query
         let mut ping = 0;

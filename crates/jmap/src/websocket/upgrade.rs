@@ -4,25 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
+use super::stream::WebSocketHandler;
 use common::{Server, auth::AccessToken};
+use http_proto::*;
 use hyper::StatusCode;
 use hyper_util::rt::TokioIo;
+use std::future::Future;
 use tokio_tungstenite::WebSocketStream;
 use trc::JmapEvent;
 use tungstenite::{handshake::derive_accept_key, protocol::Role};
-
-use http_proto::*;
-use std::future::Future;
-
-use super::stream::WebSocketHandler;
 
 pub trait WebSocketUpgrade: Sync + Send {
     fn upgrade_websocket_connection(
         &self,
         req: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: HttpSessionData,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
 }
@@ -31,7 +27,7 @@ impl WebSocketUpgrade for Server {
     async fn upgrade_websocket_connection(
         &self,
         req: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: HttpSessionData,
     ) -> trc::Result<HttpResponse> {
         let headers = req.headers();

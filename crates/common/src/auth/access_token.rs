@@ -14,6 +14,7 @@ use crate::{
     network::limiter::{ConcurrencyLimiter, LimiterResult},
 };
 use ahash::AHasher;
+use chrono::format::Item;
 use registry::{
     schema::{
         enums::Permission,
@@ -517,11 +518,17 @@ impl AccessToken {
         }
     }
 
+    #[inline(always)]
     pub fn credential_id(&self) -> Option<u32> {
         self.inner
             .scopes
             .get(self.scope_idx)
             .map(|scope| scope.credential_id)
+    }
+
+    #[inline(always)]
+    pub fn revision(&self) -> u64 {
+        self.inner.revision
     }
 
     pub fn assert_has_permissions(self, permissions: &[Permission]) -> trc::Result<Self> {
@@ -672,14 +679,38 @@ impl AccessToken {
         }
     }
 
-    #[cfg(feature = "test_mode")]
+    pub fn from_permissions(
+        account_id: u32,
+        set_permissions: impl IntoIterator<Item = Permission>,
+    ) -> AccessToken {
+        let mut permissions = Permissions::new();
+        for permission in set_permissions {
+            permissions.set(permission as usize);
+        }
+        AccessToken {
+            scope_idx: 0,
+            inner: Arc::new(AccessTokenInner {
+                account_id,
+                tenant_id: Default::default(),
+                member_of: Default::default(),
+                access_to: Default::default(),
+                scopes: Box::new([AccessScope::new(permissions, u32::MAX)]),
+                concurrent_http_requests: Default::default(),
+                concurrent_imap_requests: Default::default(),
+                concurrent_uploads: Default::default(),
+                revision: Default::default(),
+                revision_account: Default::default(),
+                obj_size: Default::default(),
+            }),
+        }
+    }
+
     pub fn from_id(account_id: u32) -> Self {
         AccessToken::new(Arc::new(AccessTokenInner::from_id(account_id)))
     }
 }
 
 impl AccessTokenInner {
-    #[cfg(feature = "test_mode")]
     pub fn from_id(account_id: u32) -> Self {
         Self {
             account_id,

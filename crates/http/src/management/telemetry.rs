@@ -8,11 +8,6 @@
  *
  */
 
-use std::{
-    fmt::Write,
-    time::{Duration, Instant},
-};
-
 use common::{
     Server,
     auth::{AccessToken, oauth::GrantType},
@@ -21,7 +16,6 @@ use common::{
         tracers::store::TracingStore,
     },
 };
-use directory::{Permission, backend::internal::manage};
 use http_body_util::{StreamBody, combinators::BoxBody};
 use http_proto::*;
 use hyper::{
@@ -29,8 +23,13 @@ use hyper::{
     body::{Bytes, Frame},
 };
 use mail_parser::DateTime;
+use registry::schema::enums::Permission;
 use serde_json::json;
-use std::future::Future;
+use std::{
+    fmt::Write,
+    time::{Duration, Instant},
+};
+use std::{future::Future, str::FromStr};
 use store::{
     ahash::{AHashMap, AHashSet},
     search::{SearchComparator, SearchField, SearchFilter, SearchQuery, TracingSearchField},
@@ -42,8 +41,6 @@ use trc::{
     serializers::json::JsonEventSerializer,
 };
 use utils::{snowflake::SnowflakeIdGenerator, url_params::UrlParams};
-
-use crate::management::Timestamp;
 
 pub trait TelemetryApi: Sync + Send {
     fn handle_telemetry_api_request(
@@ -71,14 +68,17 @@ impl TelemetryApi for Server {
         ) {
             ("traces", None, &Method::GET) => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::TracingList)?;
+                access_token.enforce_permission(Permission::TracingList)?;
 
                 let page: usize = params.parse("page").unwrap_or(0);
                 let limit: usize = params.parse("limit").unwrap_or(0);
                 let mut tracing_query = Vec::new();
                 tracing_query.push(SearchFilter::And);
                 if let Some(typ) = params.parse::<EventType>("type") {
-                    tracing_query.push(SearchFilter::eq(TracingSearchField::EventType, typ.code()));
+                    tracing_query.push(SearchFilter::eq(
+                        TracingSearchField::EventType,
+                        typ.to_id() as u64,
+                    ));
                 }
                 if let Some(queue_id) = params.parse::<u64>("queue_id") {
                     tracing_query.push(SearchFilter::eq(TracingSearchField::QueueId, queue_id));
@@ -159,7 +159,10 @@ impl TelemetryApi for Server {
                     .enterprise
                     .as_ref()
                     .and_then(|e| e.trace_store.as_ref())
-                    .ok_or_else(|| manage::unsupported("No tracing store has been configured"))?
+                    .ok_or_else(|| {
+                        trc::ManageEvent::NotSupported
+                            .ctx(trc::Key::Details, "No tracing store has been configured")
+                    })?
                     .store;
 
                 let span_ids = self
@@ -222,7 +225,7 @@ impl TelemetryApi for Server {
             }
             ("traces", Some("live"), &Method::GET) => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::TracingLive)?;
+                access_token.enforce_permission(Permission::TracingLive)?;
 
                 let mut key_filters = AHashMap::new();
                 let mut filter = None;
@@ -349,14 +352,17 @@ impl TelemetryApi for Server {
             }
             ("trace", id, &Method::GET) => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::TracingGet)?;
+                access_token.enforce_permission(Permission::TracingGet)?;
 
                 let store = &self
                     .core
                     .enterprise
                     .as_ref()
                     .and_then(|e| e.trace_store.as_ref())
-                    .ok_or_else(|| manage::unsupported("No tracing store has been configured"))?
+                    .ok_or_else(|| {
+                        trc::ManageEvent::NotSupported
+                            .ctx(trc::Key::Details, "No tracing store has been configured")
+                    })?
                     .store;
 
                 let mut events = Vec::new();
@@ -390,7 +396,7 @@ impl TelemetryApi for Server {
             }
             ("live", Some("tracing-token"), &Method::GET) => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::TracingLive)?;
+                access_token.enforce_permission(Permission::TracingLive)?;
 
                 // Issue a live telemetry token valid for 60 seconds
                 Ok(JsonResponse::new(json!({
@@ -400,7 +406,7 @@ impl TelemetryApi for Server {
             }
             ("live", Some("metrics-token"), &Method::GET) => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::MetricsLive)?;
+                access_token.enforce_permission(Permission::MetricsLive)?;
 
                 // Issue a live telemetry token valid for 60 seconds
                 Ok(JsonResponse::new(json!({
@@ -410,7 +416,7 @@ impl TelemetryApi for Server {
             }
             ("metrics", None, &Method::GET) => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::MetricsList)?;
+                access_token.enforce_permission(Permission::MetricsList)?;
 
                 let before = params
                     .parse::<Timestamp>("before")
@@ -426,11 +432,15 @@ impl TelemetryApi for Server {
                     .as_ref()
                     .and_then(|e| e.metrics_store.as_ref())
                     .ok_or_else(|| {
-                        manage::error(
-                            "No metrics store has been defined",
-                            "You need to configure a metrics store in order to use this feature."
-                                .into(),
-                        )
+                        trc::ManageEvent::Error
+                            .ctx(trc::Key::Details, "No metrics store has been defined")
+                            .ctx(
+                                trc::Key::Reason,
+                                concat!(
+                                    "You need to configure a metrics ",
+                                    "store in order to use this feature."
+                                ),
+                            )
                     })?
                     .store
                     .query_metrics(after, before)
@@ -444,7 +454,7 @@ impl TelemetryApi for Server {
                             timestamp,
                             value,
                         } => Metric::Counter {
-                            id: id.name(),
+                            id: id.as_str().to_string(),
                             timestamp: DateTime::from_timestamp(timestamp as i64).to_rfc3339(),
                             value,
                         },
@@ -454,7 +464,7 @@ impl TelemetryApi for Server {
                             count,
                             sum,
                         } => Metric::Histogram {
-                            id: id.name(),
+                            id: id.as_str(),
                             timestamp: DateTime::from_timestamp(timestamp as i64).to_rfc3339(),
                             count,
                             sum,
@@ -464,7 +474,7 @@ impl TelemetryApi for Server {
                             timestamp,
                             value,
                         } => Metric::Gauge {
-                            id: id.name(),
+                            id: id.as_str(),
                             timestamp: DateTime::from_timestamp(timestamp as i64).to_rfc3339(),
                             value,
                         },
@@ -478,7 +488,7 @@ impl TelemetryApi for Server {
             }
             ("metrics", Some("live"), &Method::GET) => {
                 // Validate the access token
-                access_token.assert_has_permission(Permission::MetricsLive)?;
+                access_token.enforce_permission(Permission::MetricsLive)?;
 
                 let interval = Duration::from_secs(
                     params
@@ -491,9 +501,9 @@ impl TelemetryApi for Server {
                 for metric_name in params.get("metrics").unwrap_or_default().split(',') {
                     let metric_name = metric_name.trim();
                     if !metric_name.is_empty() {
-                        if let Some(event_type) = EventType::try_parse(metric_name) {
+                        if let Some(event_type) = EventType::parse(metric_name) {
                             event_types.insert(event_type);
-                        } else if let Some(metric_type) = MetricType::try_parse(metric_name) {
+                        } else if let Some(metric_type) = MetricType::parse(metric_name) {
                             metric_types.insert(metric_type);
                         }
                     }
@@ -536,7 +546,7 @@ impl TelemetryApi for Server {
                                     let _ = write!(
                                         &mut metrics,
                                         "{{\"id\":\"{}\",\"type\":\"counter\",\"value\":{}}}",
-                                        counter.id().name(),
+                                        counter.id().as_str(),
                                         counter.value()
                                     );
                                 }
@@ -551,7 +561,7 @@ impl TelemetryApi for Server {
                                     let _ = write!(
                                         &mut metrics,
                                         "{{\"id\":\"{}\",\"type\":\"gauge\",\"value\":{}}}",
-                                        gauge.id().name(),
+                                        gauge.id().as_str(),
                                         gauge.get()
                                     );
                                 }
@@ -566,7 +576,7 @@ impl TelemetryApi for Server {
                                     let _ = write!(
                                         &mut metrics,
                                         "{{\"id\":\"{}\",\"type\":\"histogram\",\"count\":{},\"sum\":{}}}",
-                                        histogram.id().name(),
+                                        histogram.id().as_str(),
                                         histogram.count(),
                                         histogram.sum()
                                     );
@@ -582,5 +592,25 @@ impl TelemetryApi for Server {
             }
             _ => Err(trc::ResourceEvent::NotFound.into_err()),
         }
+    }
+}
+
+pub(super) struct Timestamp(u64);
+
+impl FromStr for Timestamp {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(dt) = DateTime::parse_rfc3339(s) {
+            Ok(Timestamp(dt.to_timestamp() as u64))
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl Timestamp {
+    pub fn into_inner(self) -> u64 {
+        self.0
     }
 }

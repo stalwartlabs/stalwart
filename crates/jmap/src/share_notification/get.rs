@@ -204,7 +204,6 @@ fn build_share_notification(
                     Value::Str(
                         changed_by
                             .description()
-                            .as_deref()
                             .unwrap_or(changed_by.name())
                             .to_string()
                             .into(),

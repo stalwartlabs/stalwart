@@ -15,12 +15,10 @@ use crate::{
     },
     autoconfig::Autoconfig,
     form::FormHandler,
-    management::{
-        ManagementApi, ToManageHttpResponse, UnauthorizedResponse, troubleshoot::TroubleshootApi,
-    },
+    management::{ManagementApi, ToManageHttpResponse},
 };
 use common::{
-    Inner, KV_ACME, Server,
+    BuildServer, Inner, KV_ACME, Server,
     auth::{AccessToken, oauth::GrantType},
     ipc::PushEvent,
     manager::webadmin::Resource,
@@ -90,7 +88,7 @@ impl ParseHttp for Server {
                     ("", &Method::POST) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         let bytes = fetch_body(
                             &mut req,
@@ -111,7 +109,7 @@ impl ParseHttp for Server {
                                     self.core.jmap.request_max_calls,
                                     self.core.jmap.request_max_size,
                                 )?,
-                                access_token,
+                                &access_token,
                                 &session,
                             )
                             .await
@@ -120,7 +118,7 @@ impl ParseHttp for Server {
                     ("download", &Method::GET) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         if let (Some(_), Some(blob_id), Some(name)) = (
                             path.next().and_then(|p| Id::from_str(p).ok()),
@@ -149,7 +147,7 @@ impl ParseHttp for Server {
                     ("upload", &Method::POST) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         if let Some(account_id) = path.next().and_then(|p| Id::from_str(p).ok()) {
                             return match fetch_body(
@@ -171,7 +169,7 @@ impl ParseHttp for Server {
                                             .and_then(|h| h.to_str().ok())
                                             .unwrap_or("application/octet-stream"),
                                         &bytes,
-                                        access_token,
+                                        &access_token,
                                     )
                                     .await?
                                     .into_http_response()),
@@ -182,14 +180,14 @@ impl ParseHttp for Server {
                     ("eventsource", &Method::GET) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         return self.handle_event_source(req, access_token).await;
                     }
                     ("ws", &Method::GET) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         return self
                             .upgrade_websocket_connection(req, access_token, session)
@@ -199,11 +197,11 @@ impl ParseHttp for Server {
                         return if req.headers().contains_key(header::AUTHORIZATION) {
                             // Authenticate request
                             let (_in_flight, access_token) =
-                                self.authenticate_headers(&req, &session, false).await?;
+                                self.authenticate_headers(&req, &session).await?;
 
                             self.handle_session_resource(
                                 ctx.resolve_response_url(self).await,
-                                access_token,
+                                &access_token,
                             )
                             .await
                             .map(|s| s.into_http_response())
@@ -244,7 +242,7 @@ impl ParseHttp for Server {
                     (Some(resource), Some(method)) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         self.handle_dav_request(req, access_token, &session, resource, method)
                             .await
@@ -288,9 +286,7 @@ impl ParseHttp for Server {
                 ("acme-challenge", &Method::GET) if self.has_acme_http_providers() => {
                     if let Some(token) = path.next() {
                         return match self
-                            .core
-                            .storage
-                            .lookup
+                            .in_memory_store()
                             .key_get::<String>(KeyValue::<()>::build_key(KV_ACME, token))
                             .await?
                         {
@@ -351,7 +347,7 @@ impl ParseHttp for Server {
                 ("introspect", &Method::POST) => {
                     // Authenticate request
                     let (_in_flight, access_token) =
-                        self.authenticate_headers(&req, &session, false).await?;
+                        self.authenticate_headers(&req, &session).await?;
 
                     return self
                         .handle_token_introspect(&mut req, &access_token, session.session_id)
@@ -360,9 +356,11 @@ impl ParseHttp for Server {
                 ("userinfo", &Method::GET) => {
                     // Authenticate request
                     let (_in_flight, access_token) =
-                        self.authenticate_headers(&req, &session, false).await?;
+                        self.authenticate_headers(&req, &session).await?;
 
-                    return self.handle_userinfo_request(&access_token).await;
+                    return self
+                        .handle_userinfo_request(access_token.account_id())
+                        .await;
                 }
                 ("register", &Method::POST) => {
                     return self
@@ -387,81 +385,45 @@ impl ParseHttp for Server {
                     return Ok(JsonProblemResponse(StatusCode::NO_CONTENT).into_http_response());
                 }
 
-                // Authenticate user
-                match self.authenticate_headers(&req, &session, true).await {
-                    Ok((_, access_token)) => {
-                        return self
-                            .handle_api_manage_request(&mut req, access_token, &session)
-                            .await;
+                let params = UrlParams::new(req.uri().query());
+                let access_token = if let Some(token) = params.get("token") {
+                    // SPDX-SnippetBegin
+                    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                    // SPDX-License-Identifier: LicenseRef-SEL
+                    #[cfg(feature = "enterprise")]
+                    if self.core.is_enterprise_edition() {
+                        let path = req.uri().path();
+                        let (grant_type, permissions) = if path.starts_with("/api/telemetry/traces")
+                        {
+                            (GrantType::LiveTracing, Permission::TracingLive)
+                        } else if path.starts_with("/api/telemetry/metrics") {
+                            (GrantType::LiveMetrics, Permission::MetricsLive)
+                        } else if path.starts_with("/api/diagnose") {
+                            (GrantType::Diagnose, Permission::Troubleshoot)
+                        } else {
+                            return Err(trc::ResourceEvent::NotFound.into_err());
+                        };
+                        AccessToken::from_permissions(
+                            self.validate_access_token(grant_type.into(), token)
+                                .await?
+                                .account_id,
+                            [permissions],
+                        )
+                    } else {
+                        self.authenticate_headers(&req, &session).await?.1
                     }
-                    Err(err) => {
-                        if err.matches(trc::EventType::Auth(trc::AuthEvent::Failed)) {
-                            let params = UrlParams::new(req.uri().query());
-                            let path = req.uri().path().split('/').skip(2).collect::<Vec<_>>();
-
-                            let (grant_type, token) = match (
-                                path.first().copied(),
-                                path.get(1).copied(),
-                                params.get("token"),
-                            ) {
-                                // SPDX-SnippetBegin
-                                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                                // SPDX-License-Identifier: LicenseRef-SEL
-                                #[cfg(feature = "enterprise")]
-                                (Some("telemetry"), Some("traces"), Some(token))
-                                    if self.core.is_enterprise_edition() =>
-                                {
-                                    (GrantType::LiveTracing, token)
-                                }
-                                #[cfg(feature = "enterprise")]
-                                (Some("telemetry"), Some("metrics"), Some(token))
-                                    if self.core.is_enterprise_edition() =>
-                                {
-                                    (GrantType::LiveMetrics, token)
-                                }
-                                // SPDX-SnippetEnd
-                                (Some("troubleshoot"), _, Some(token)) => {
-                                    (GrantType::Troubleshoot, token)
-                                }
-                                _ => return Ok(HttpResponse::unauthorized(false)),
-                            };
-                            let token_info =
-                                self.validate_access_token(grant_type.into(), token).await?;
-
-                            return match grant_type {
-                                // SPDX-SnippetBegin
-                                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                                // SPDX-License-Identifier: LicenseRef-SEL
-                                #[cfg(feature = "enterprise")]
-                                GrantType::LiveTracing | GrantType::LiveMetrics => {
-                                    use crate::management::enterprise::telemetry::TelemetryApi;
-                                    self.handle_telemetry_api_request(
-                                        &req,
-                                        path,
-                                        &AccessToken::from_id(token_info.account_id)
-                                            .with_permission(Permission::MetricsLive)
-                                            .with_permission(Permission::TracingLive),
-                                    )
-                                    .await
-                                }
-                                // SPDX-SnippetEnd
-                                GrantType::Troubleshoot => {
-                                    self.handle_troubleshoot_api_request(
-                                        &req,
-                                        path,
-                                        &AccessToken::from_id(token_info.account_id)
-                                            .with_permission(Permission::Troubleshoot),
-                                        None,
-                                    )
-                                    .await
-                                }
-                                _ => unreachable!(),
-                            };
-                        }
-
-                        return Err(err);
+                    // SPDX-SnippetEnd
+                    #[cfg(not(feature = "enterprise"))]
+                    {
+                        self.authenticate_headers(&req, &session).await?.1
                     }
-                }
+                } else {
+                    self.authenticate_headers(&req, &session).await?.1
+                };
+
+                return self
+                    .handle_api_manage_request(&mut req, &access_token, &session)
+                    .await;
             }
             "mail" => {
                 if req.method() == Method::GET
@@ -678,7 +640,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                     let server = inner.build_server();
 
                     // Obtain remote IP
-                    let remote_ip = if !server.core.jmap.http_use_forwarded {
+                    let remote_ip = if !server.core.network.http.use_forwarded {
                         trc::event!(
                             Http(trc::HttpEvent::RequestUrl),
                             SpanId = session.session_id,
@@ -797,10 +759,10 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                     let mut response = response.build();
 
                     // Add custom headers
-                    if !server.core.jmap.http_headers.is_empty() {
+                    if !server.core.network.http.response_headers.is_empty() {
                         let headers = response.headers_mut();
 
-                        for (header, value) in &server.core.jmap.http_headers {
+                        for (header, value) in &server.core.network.http.response_headers {
                             headers.insert(header.clone(), value.clone());
                         }
                     }
@@ -814,7 +776,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
     {
         if http_err.is_parse() {
             let server = inner.build_server();
-            if !server.core.jmap.http_use_forwarded {
+            if !server.core.network.http.use_forwarded {
                 match server.is_scanner_fail2banned(session.remote_ip).await {
                     Ok(true) => {
                         trc::event!(

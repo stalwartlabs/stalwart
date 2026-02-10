@@ -9,7 +9,8 @@ use chrono::Utc;
 use common::{
     KV_RATE_LIMIT_CONTACT, Server,
     config::network::{ContactForm, FieldOrDefault},
-    ip_to_bytes, psl,
+    network::ip_to_bytes,
+    psl,
 };
 use email::message::delivery::{IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery};
 use http_proto::*;
@@ -48,9 +49,7 @@ impl FormHandler for Server {
         if let Some(rate) = &form.rate
             && !session.remote_ip.is_loopback()
             && self
-                .core
-                .storage
-                .lookup
+                .in_memory_store()
                 .is_rate_allowed(
                     KV_RATE_LIMIT_CONTACT,
                     &ip_to_bytes(&session.remote_ip),

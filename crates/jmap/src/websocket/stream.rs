@@ -17,7 +17,7 @@ use jmap_proto::{
     },
 };
 use std::future::Future;
-use std::{sync::Arc, time::Instant};
+use std::time::Instant;
 use tokio_tungstenite::WebSocketStream;
 use trc::JmapEvent;
 use tungstenite::Message;
@@ -28,7 +28,7 @@ pub trait WebSocketHandler: Sync + Send {
     fn handle_websocket_stream(
         &self,
         stream: WebSocketStream<TokioIo<Upgraded>>,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: HttpSessionData,
     ) -> impl Future<Output = ()> + Send;
 }
@@ -38,7 +38,7 @@ impl WebSocketHandler for Server {
     async fn handle_websocket_stream(
         &self,
         mut stream: WebSocketStream<TokioIo<Upgraded>>,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: HttpSessionData,
     ) {
         trc::event!(
@@ -98,7 +98,7 @@ impl WebSocketHandler for Server {
                                             let response = self
                                                 .handle_jmap_request(
                                                     request.request,
-                                                    access_token.clone(),
+                                                    &access_token,
                                                     &session,
                                                 )
                                                 .await;

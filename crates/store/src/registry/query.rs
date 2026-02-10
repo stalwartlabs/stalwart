@@ -185,6 +185,12 @@ impl From<String> for RegistryFilterValue {
     }
 }
 
+impl From<&str> for RegistryFilterValue {
+    fn from(value: &str) -> Self {
+        RegistryFilterValue::String(value.to_string())
+    }
+}
+
 impl From<u64> for RegistryFilterValue {
     fn from(value: u64) -> Self {
         RegistryFilterValue::Integer(value)

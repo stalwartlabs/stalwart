@@ -74,9 +74,7 @@ impl TokenHandler for Server {
             ) {
                 // Obtain code
                 match self
-                    .core
-                    .storage
-                    .lookup
+                    .in_memory_store()
                     .key_get::<Archive<AlignedBytes>>(KeyValue::<()>::build_key(
                         KV_OAUTH,
                         code.as_bytes(),
@@ -102,9 +100,7 @@ impl TokenHandler for Server {
                                 TokenResponse::error(error)
                             } else {
                                 // Mark this token as issued
-                                self.core
-                                    .storage
-                                    .lookup
+                                self.in_memory_store()
                                     .key_delete(KeyValue::<()>::build_key(
                                         KV_OAUTH,
                                         code.as_bytes(),
@@ -146,9 +142,7 @@ impl TokenHandler for Server {
             {
                 // Obtain code
                 if let Some(auth_code_) = self
-                    .core
-                    .storage
-                    .lookup
+                    .in_memory_store()
                     .key_get::<Archive<AlignedBytes>>(KeyValue::<()>::build_key(
                         KV_OAUTH,
                         device_code.as_bytes(),
@@ -174,9 +168,7 @@ impl TokenHandler for Server {
                                     TokenResponse::error(error)
                                 } else {
                                     // Mark this token as issued
-                                    self.core
-                                        .storage
-                                        .lookup
+                                    self.in_memory_store()
                                         .key_delete(KeyValue::<()>::build_key(
                                             KV_OAUTH,
                                             device_code.as_bytes(),
@@ -315,11 +307,8 @@ impl TokenHandler for Server {
                 None
             },
             id_token: if with_id_token {
-                // Obtain access token
-                let access_token = self
-                    .get_access_token(account_id)
-                    .await
-                    .caused_by(trc::location!())?;
+                // Obtain account
+                let account = self.account(account_id).await.caused_by(trc::location!())?;
 
                 match self.issue_id_token(
                     account_id.to_string(),
@@ -327,9 +316,9 @@ impl TokenHandler for Server {
                     client_id,
                     StandardClaims {
                         nonce,
-                        preferred_username: access_token.name.clone().into(),
-                        email: access_token.emails.first().cloned(),
-                        description: access_token.description.clone(),
+                        preferred_username: account.name().to_string().into(),
+                        email: account.name().to_string().into(),
+                        description: account.description().map(|d| d.to_string()),
                     },
                 ) {
                     Ok(id_token) => Some(id_token),

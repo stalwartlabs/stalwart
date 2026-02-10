@@ -54,7 +54,7 @@ use jmap_proto::{
     response::{Response, ResponseMethod, SetResponseMethod},
 };
 use std::future::Future;
-use std::{sync::Arc, time::Instant};
+use std::time::Instant;
 use trc::JmapEvent;
 use types::{collection::Collection, id::Id};
 
@@ -62,7 +62,7 @@ pub trait RequestHandler: Sync + Send {
     fn handle_jmap_request<'x>(
         &self,
         request: Request<'x>,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> impl Future<Output = Response<'x>> + Send;
 
@@ -81,7 +81,7 @@ impl RequestHandler for Server {
     async fn handle_jmap_request<'x>(
         &self,
         request: Request<'x>,
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> Response<'x> {
         let add_created_ids = request.created_ids.is_some();
@@ -111,7 +111,7 @@ impl RequestHandler for Server {
                     .handle_method_call(
                         call.method,
                         call.name,
-                        &access_token,
+                        access_token,
                         &mut next_call,
                         session,
                     )

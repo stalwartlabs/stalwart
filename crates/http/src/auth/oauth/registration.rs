@@ -6,24 +6,29 @@
 
 use std::future::Future;
 
+use super::ErrorType;
+use crate::auth::authenticate::Authenticator;
 use common::{
     Server,
-    auth::oauth::registration::{ClientRegistrationRequest, ClientRegistrationResponse},
-};
-
-use directory::{
-    Permission, QueryParams, Type,
-    backend::internal::{
-        PrincipalField, PrincipalSet, lookup::DirectoryStore, manage::ManageDirectory,
+    auth::{
+        BuildAccessToken,
+        oauth::registration::{ClientRegistrationRequest, ClientRegistrationResponse},
     },
 };
-use store::rand::{Rng, distr::Alphanumeric, rng};
-use trc::{AddContext, AuthEvent};
-
-use crate::auth::authenticate::Authenticator;
 use http_proto::{request::fetch_body, *};
-
-use super::ErrorType;
+use registry::{
+    schema::{
+        enums::Permission,
+        prelude::{Object, Property},
+        structs::OAuthClient,
+    },
+    types::datetime::UTCDateTime,
+};
+use store::{
+    rand::{Rng, distr::Alphanumeric, rng},
+    registry::RegistryQuery,
+};
+use trc::{AddContext, AuthEvent};
 
 pub trait ClientRegistrationHandler: Sync + Send {
     fn handle_oauth_registration_request(
@@ -45,16 +50,18 @@ impl ClientRegistrationHandler for Server {
         req: &mut HttpRequest,
         session: HttpSessionData,
     ) -> trc::Result<HttpResponse> {
-        if !self.core.oauth.allow_anonymous_client_registration {
+        let tenant_id = if !self.core.oauth.allow_anonymous_client_registration {
             // Authenticate request
-            let (_, access_token) = self.authenticate_headers(req, &session, true).await?;
+            let (_, access_token) = self.authenticate_headers(req, &session).await?;
 
             // Validate permissions
-            access_token.assert_has_permission(Permission::OauthClientRegistration)?;
+            access_token.enforce_permission(Permission::OauthClientRegistration)?;
+            access_token.tenant_id()
         } else {
             self.is_http_anonymous_request_allowed(&session.remote_ip)
                 .await?;
-        }
+            None
+        };
 
         // Parse request
         let body = fetch_body(req, 20 * 1024, session.session_id).await;
@@ -71,17 +78,18 @@ impl ClientRegistrationHandler for Server {
             .take(20)
             .map(|ch| char::from(ch.to_ascii_lowercase()))
             .collect::<String>();
-        self.store()
-            .create_principal(
-                PrincipalSet::new(u32::MAX, Type::OauthClient)
-                    .with_field(PrincipalField::Name, client_id.clone())
-                    .with_field(PrincipalField::Urls, request.redirect_uris.clone())
-                    .with_opt_field(PrincipalField::Description, request.client_name.clone())
-                    .with_field(PrincipalField::Emails, request.contacts.clone())
-                    .with_opt_field(PrincipalField::Picture, request.logo_uri.clone()),
-                None,
-                None,
-            )
+
+        self.registry()
+            .insert(&OAuthClient {
+                client_id: client_id.clone(),
+                created_at: UTCDateTime::now(),
+                description: request.client_name.clone(),
+                contacts: request.contacts.clone(),
+                member_tenant_id: tenant_id.map(|id| Object::Tenant.id(id as u64)),
+                redirect_uris: request.redirect_uris.clone(),
+                logo: request.logo_uri.clone(),
+                ..Default::default()
+            })
             .await
             .caused_by(trc::location!())?;
 
@@ -111,15 +119,27 @@ impl ClientRegistrationHandler for Server {
         }
 
         // Fetch client registration
-        let found_registration = if let Some(client) = self
-            .store()
-            .query(QueryParams::name(client_id).with_return_member_of(false))
-            .await
-            .caused_by(trc::location!())?
-            .filter(|p| p.typ() == Type::OauthClient)
+        let found_registration = if let Some(client_id) = self
+            .registry()
+            .query::<Vec<u64>>(
+                RegistryQuery::new(Object::OAuthClient).equal(Property::ClientId, client_id),
+            )
+            .await?
+            .first()
         {
             if let Some(redirect_uri) = redirect_uri {
-                if client.urls().any(|uri| uri == redirect_uri) {
+                let client = self
+                    .registry()
+                    .object::<OAuthClient>(*client_id)
+                    .await?
+                    .ok_or_else(|| {
+                        trc::StoreEvent::UnexpectedError
+                            .into_err()
+                            .details("OAuth client not found.")
+                            .caused_by(trc::location!())
+                            .ctx(trc::Key::Id, *client_id)
+                    })?;
+                if client.redirect_uris.iter().any(|uri| uri == redirect_uri) {
                     return Ok(None);
                 }
             } else {
@@ -135,9 +155,10 @@ impl ClientRegistrationHandler for Server {
 
         // Check if the account is allowed to override client registration
         if self
-            .get_access_token(account_id)
+            .access_token(account_id)
             .await
             .caused_by(trc::location!())?
+            .build()
             .has_permission(Permission::OauthClientOverride)
         {
             return Ok(None);

@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use super::{UploadResponse, download::BlobDownload};
 use common::{Server, auth::AccessToken};
-use registry::schema::enums::Permission;
 use jmap_proto::{
     error::set::SetError,
     method::upload::{
@@ -16,6 +15,7 @@ use jmap_proto::{
     },
     request::reference::MaybeIdReference,
 };
+use registry::schema::enums::Permission;
 use std::future::Future;
 use trc::AddContext;
 use types::id::Id;
@@ -36,7 +36,7 @@ pub trait BlobUpload: Sync + Send {
         account_id: Id,
         content_type: &str,
         data: &[u8],
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<UploadResponse>> + Send;
 }
 
@@ -210,11 +210,11 @@ impl BlobUpload for Server {
         account_id: Id,
         content_type: &str,
         data: &[u8],
-        access_token: Arc<AccessToken>,
+        access_token: &AccessToken,
     ) -> trc::Result<UploadResponse> {
         // Limit concurrent uploads
         let _in_flight = self
-            .is_upload_allowed(&access_token)
+            .is_upload_allowed(access_token)
             .caused_by(trc::location!())?;
 
         #[cfg(feature = "test_mode")]

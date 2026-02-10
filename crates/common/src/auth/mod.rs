@@ -97,7 +97,7 @@ pub struct PermissionsGroup {
     pub merge: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct AccessToken {
     scope_idx: usize,
     inner: Arc<AccessTokenInner>,

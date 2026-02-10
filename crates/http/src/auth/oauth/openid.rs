@@ -4,15 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
-use common::{
-    Server,
-    auth::{AccessToken, oauth::oidc::Userinfo},
-};
-use serde::{Deserialize, Serialize};
-
+use common::{Server, auth::oauth::oidc::Userinfo};
 use http_proto::*;
+use serde::{Deserialize, Serialize};
+use std::future::Future;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OpenIdMetadata {
@@ -34,7 +29,7 @@ pub struct OpenIdMetadata {
 pub trait OpenIdHandler: Sync + Send {
     fn handle_userinfo_request(
         &self,
-        access_token: &AccessToken,
+        account_id: u32,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
 
     fn handle_oidc_metadata(
@@ -45,16 +40,15 @@ pub trait OpenIdHandler: Sync + Send {
 }
 
 impl OpenIdHandler for Server {
-    async fn handle_userinfo_request(
-        &self,
-        access_token: &AccessToken,
-    ) -> trc::Result<HttpResponse> {
+    async fn handle_userinfo_request(&self, account_id: u32) -> trc::Result<HttpResponse> {
+        let account = self.account(account_id).await?;
+
         Ok(JsonResponse::new(Userinfo {
-            sub: Some(access_token.account_id.to_string()),
-            name: access_token.description.clone(),
-            preferred_username: Some(access_token.name.clone()),
-            email: access_token.emails.first().cloned(),
-            email_verified: !access_token.emails.is_empty(),
+            sub: Some(account_id.to_string()),
+            name: account.description().map(|d| d.to_string()),
+            preferred_username: Some(account.name().to_string()),
+            email: account.name().to_string().into(),
+            email_verified: true,
             ..Default::default()
         })
         .no_cache()
