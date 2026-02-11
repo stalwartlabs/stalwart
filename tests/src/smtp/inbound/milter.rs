@@ -11,7 +11,7 @@ use common::{
     Core,
     config::smtp::session::{Milter, MilterVersion, Stage},
     expr::if_block::IfBlock,
-    manager::webadmin::Resource,
+    manager::application::Resource,
 };
 
 use http_proto::{ToHttpResponse, request::fetch_body};

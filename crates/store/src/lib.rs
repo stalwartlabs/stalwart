@@ -5,7 +5,7 @@
  */
 
 pub mod backend;
-pub mod bootstrap;
+pub mod build;
 pub mod dispatch;
 pub mod query;
 pub mod registry;
@@ -126,7 +126,7 @@ pub struct IterateParams<T: Key> {
 
 #[derive(Clone, Default)]
 pub struct LookupStores {
-    pub stores: AHashMap<String, InMemoryStore>,
+    pub stores: AHashMap<Box<str>, InMemoryStore>,
 }
 
 #[derive(Clone, Default)]
@@ -258,6 +258,12 @@ impl From<Store> for SearchStore {
 impl From<Store> for InMemoryStore {
     fn from(store: Store) -> Self {
         Self::Store(store)
+    }
+}
+
+impl Default for BlobStore {
+    fn default() -> Self {
+        Self::Store(Store::None)
     }
 }
 
@@ -604,6 +610,11 @@ impl Store {
     }
 
     #[inline(always)]
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    #[inline(always)]
     pub fn is_sql(&self) -> bool {
         match self {
             #[cfg(feature = "sqlite")]
@@ -646,7 +657,16 @@ impl Store {
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
-    pub fn is_enterprise_store(&self) -> bool {
+    pub fn downgrade_store(self) -> Self {
+        match self {
+            #[cfg(any(feature = "postgres", feature = "mysql"))]
+            Store::SQLReadReplica(store) => store.primary_store().clone(),
+            other => other,
+        }
+    }
+
+    #[cfg(feature = "enterprise")]
+    pub fn is_enterprise(&self) -> bool {
         match self {
             #[cfg(any(feature = "postgres", feature = "mysql"))]
             Store::SQLReadReplica(_) => true,
@@ -654,11 +674,6 @@ impl Store {
         }
     }
     // SPDX-SnippetEnd
-
-    #[cfg(not(feature = "enterprise"))]
-    pub fn is_enterprise_store(&self) -> bool {
-        false
-    }
 }
 
 impl std::fmt::Debug for Store {

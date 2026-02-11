@@ -14,7 +14,6 @@ use self::{
     auth::MailAuthConfig, queue::QueueConfig, report::ReportConfig, resolver::Resolvers,
     session::SessionConfig,
 };
-use super::*;
 use crate::expr::Expression;
 use registry::{schema::structs::Rate, types::id::Id};
 use store::registry::bootstrap::Bootstrap;

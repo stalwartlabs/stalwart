@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{
+    Server,
+    storage::{ObjectQuota, TenantQuota},
+};
 use registry::{
     schema::enums::{StorageQuota, TenantStorageQuota},
     types::EnumType,
 };
 use store::write::DirectoryClass;
 use trc::AddContext;
-
-use crate::{
-    Server,
-    auth::AccountCache,
-    storage::{ObjectQuota, TenantQuota},
-};
 
 impl Server {
     pub async fn get_used_quota_account(&self, account_id: u32) -> trc::Result<i64> {

@@ -4,18 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
-use ahash::AHashMap;
-use common::{
-    DAEMON_NAME,
-    config::smtp::session::{MTAHook, Stage},
-    network::SessionStream,
-};
-
-use mail_auth::AuthenticatedMessage;
-use trc::MtaHookEvent;
-
+use super::{Action, Queue, Response, client::send_mta_hook_request};
 use crate::{
     core::Session,
     inbound::{
@@ -27,8 +16,15 @@ use crate::{
     },
     queue::QueueId,
 };
-
-use super::{Action, Queue, Response, client::send_mta_hook_request};
+use ahash::AHashMap;
+use common::{
+    DAEMON_NAME,
+    config::smtp::session::{MTAHook, Stage},
+    network::SessionStream,
+};
+use mail_auth::AuthenticatedMessage;
+use std::time::Instant;
+use trc::MtaHookEvent;
 
 impl<T: SessionStream> Session<T> {
     pub async fn run_mta_hooks(
@@ -65,7 +61,7 @@ impl<T: SessionStream> Session<T> {
                             Action::Quarantine => MtaHookEvent::ActionQuarantine,
                         }),
                         SpanId = self.data.session_id,
-                        Id = mta_hook.id.clone(),
+                        Id = mta_hook.id.to_string(),
                         Elapsed = time.elapsed(),
                     );
 
@@ -156,7 +152,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         MtaHook(MtaHookEvent::Error),
                         SpanId = self.data.session_id,
-                        Id = mta_hook.id.clone(),
+                        Id = mta_hook.id.to_string(),
                         Reason = err,
                         Elapsed = time.elapsed(),
                     );

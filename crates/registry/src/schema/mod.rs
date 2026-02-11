@@ -11,11 +11,12 @@ use crate::{
     },
     types::EnumType,
 };
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 use utils::{
     Client, HeaderMap,
     cron::SimpleCron,
     http::{build_http_client, build_http_headers},
+    map::vec_map::VecMap,
 };
 
 #[allow(clippy::derivable_impls)]
@@ -67,7 +68,7 @@ impl Account {
 impl HttpAuth {
     pub fn build_headers(
         &self,
-        extra_headers: HashMap<String, String>,
+        extra_headers: VecMap<String, String>,
         content_type: Option<&str>,
     ) -> Result<HeaderMap, String> {
         match self {
@@ -93,7 +94,7 @@ impl HttpAuth {
 
     pub fn build_http_client(
         &self,
-        extra_headers: HashMap<String, String>,
+        extra_headers: VecMap<String, String>,
         content_type: Option<&str>,
         timeout: Duration,
         allow_invalid_certs: bool,

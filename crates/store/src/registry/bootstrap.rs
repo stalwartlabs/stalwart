@@ -174,4 +174,12 @@ impl Bootstrap {
     pub fn hostname(&self) -> &str {
         &self.node.hostname
     }
+
+    pub fn log_errors(&self) {
+        let todo = "implement";
+    }
+
+    pub fn log_warnings(&self) {
+        let todo = "implement";
+    }
 }

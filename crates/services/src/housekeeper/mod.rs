@@ -170,9 +170,9 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                     ActionClass::RenewLicense,
                 );
 
-                if let Some(metrics_store) = enterprise.metrics_store.as_ref() {
+                if server.core.storage.metrics.is_active() {
                     queue.schedule(
-                        Instant::now() + metrics_store.interval.time_to_next(),
+                        Instant::now() + enterprise.metrics_interval.time_to_next(),
                         ActionClass::InternalMetrics,
                     );
                 }
@@ -230,11 +230,11 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                     );
                                 }
 
-                                if let Some(metrics_store) = enterprise.metrics_store.as_ref()
+                                if server.core.storage.metrics.is_active()
                                     && !queue.has_action(&ActionClass::InternalMetrics)
                                 {
                                     queue.schedule(
-                                        Instant::now() + metrics_store.interval.time_to_next(),
+                                        Instant::now() + enterprise.metrics_interval.time_to_next(),
                                         ActionClass::InternalMetrics,
                                     );
                                 }
@@ -402,20 +402,13 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                     ActionClass::PurgeDataStore,
                                 );
                                 let server_ = server.clone();
-                                let store = server.store().clone();
                                 tokio::spawn(async move {
-                                    server_.purge(PurgeType::Data(store)).await;
+                                    server_.purge(PurgeType::Data).await;
                                 });
 
                                 let server = server.clone();
-                                let store = server.in_memory_store().clone();
                                 tokio::spawn(async move {
-                                    server
-                                        .purge(PurgeType::Lookup {
-                                            store,
-                                            prefix: None,
-                                        })
-                                        .await;
+                                    server.purge(PurgeType::Lookup { prefix: None }).await;
                                 });
                             }
                             ActionClass::PurgeBlobStore => {
@@ -430,10 +423,8 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                     ActionClass::PurgeBlobStore,
                                 );
                                 let server = server.clone();
-                                let store = server.store().clone();
-                                let blob_store = server.blob_store().clone();
                                 tokio::spawn(async move {
-                                    server.purge(PurgeType::Blobs { store, blob_store }).await;
+                                    server.purge(PurgeType::Blob).await;
                                 });
                             }
                             ActionClass::OtelMetrics => {
@@ -615,23 +606,25 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                             // SPDX-License-Identifier: LicenseRef-SEL
                             #[cfg(feature = "enterprise")]
                             ActionClass::InternalMetrics => {
-                                if let Some(metrics_store) = &server
-                                    .core
-                                    .enterprise
-                                    .as_ref()
-                                    .and_then(|e| e.metrics_store.as_ref())
-                                {
+                                if server.core.storage.metrics.is_active() {
                                     trc::event!(
                                         Housekeeper(trc::HousekeeperEvent::Run),
                                         Type = "metrics_internal"
                                     );
 
                                     queue.schedule(
-                                        Instant::now() + metrics_store.interval.time_to_next(),
+                                        Instant::now()
+                                            + server
+                                                .core
+                                                .enterprise
+                                                .as_ref()
+                                                .unwrap()
+                                                .metrics_interval
+                                                .time_to_next(),
                                         ActionClass::InternalMetrics,
                                     );
 
-                                    let metrics_store = metrics_store.store.clone();
+                                    let metrics_store = server.core.storage.metrics.clone();
                                     let metrics_history = metrics_history.clone();
                                     let core = server.core.clone();
                                     tokio::spawn(async move {
@@ -742,9 +735,9 @@ impl Purge for Server {
     async fn purge(&self, purge: PurgeType) {
         // Lock task
         let (lock_type, lock_name) = match &purge {
-            PurgeType::Data(_) => ("data", [0u8].into()),
-            PurgeType::Blobs { .. } => ("blob", [1u8].into()),
-            PurgeType::Lookup { prefix: None, .. } => ("in-memory", [2u8].into()),
+            PurgeType::Data => ("data", [0u8].into()),
+            PurgeType::Blob => ("blob", [1u8].into()),
+            PurgeType::Lookup { prefix: None } => ("in-memory", [2u8].into()),
             PurgeType::Lookup { .. } => ("in-memory-prefix", None),
             PurgeType::Account { .. } => ("account", None),
         };
@@ -770,27 +763,8 @@ impl Purge for Server {
         let time = Instant::now();
 
         match purge {
-            PurgeType::Data(store) => {
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(feature = "enterprise")]
-                let trace_retention = self
-                    .core
-                    .enterprise
-                    .as_ref()
-                    .and_then(|e| e.trace_store.as_ref())
-                    .and_then(|t| t.retention);
-                #[cfg(feature = "enterprise")]
-                let metrics_retention = self
-                    .core
-                    .enterprise
-                    .as_ref()
-                    .and_then(|e| e.metrics_store.as_ref())
-                    .and_then(|m| m.retention);
-                // SPDX-SnippetEnd
-
-                if let Err(err) = store.purge_store().await {
+            PurgeType::Data => {
+                if let Err(err) = self.store().purge_store().await {
                     trc::error!(err.details("Failed to purge data store"));
                 }
 
@@ -798,8 +772,14 @@ impl Purge for Server {
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                 // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(feature = "enterprise")]
-                if let Some(trace_retention) = trace_retention
-                    && let Err(err) = store
+                if let Some(trace_retention) = self
+                    .core
+                    .enterprise
+                    .as_ref()
+                    .and_then(|e| e.trace_retention)
+                    && self.tracing_store().is_active()
+                    && let Err(err) = self
+                        .tracing_store()
                         .purge_spans(trace_retention, self.search_store().into())
                         .await
                 {
@@ -807,27 +787,32 @@ impl Purge for Server {
                 }
 
                 #[cfg(feature = "enterprise")]
-                if let Some(metrics_retention) = metrics_retention
-                    && let Err(err) = store.purge_metrics(metrics_retention).await
+                if let Some(metrics_retention) = self
+                    .core
+                    .enterprise
+                    .as_ref()
+                    .and_then(|e| e.metrics_retention)
+                    && self.metrics_store().is_active()
+                    && let Err(err) = self.metrics_store().purge_metrics(metrics_retention).await
                 {
                     trc::error!(err.details("Failed to purge metrics"));
                 }
                 // SPDX-SnippetEnd
             }
-            PurgeType::Blobs { store, blob_store } => {
-                if let Err(err) = store.purge_blobs(blob_store).await {
+            PurgeType::Blob => {
+                if let Err(err) = self.store().purge_blobs(self.blob_store().clone()).await {
                     trc::error!(err.details("Failed to purge blob store"));
                 }
             }
-            PurgeType::Lookup { store, prefix } => {
+            PurgeType::Lookup { prefix } => {
                 if let Some(prefix) = prefix {
-                    if let Err(err) = store.key_delete_prefix(&prefix).await {
+                    if let Err(err) = self.in_memory_store().key_delete_prefix(&prefix).await {
                         trc::error!(
                             err.details("Failed to delete key prefix")
                                 .ctx(trc::Key::Key, prefix)
                         );
                     }
-                } else if let Err(err) = store.purge_in_memory_store().await {
+                } else if let Err(err) = self.in_memory_store().purge_in_memory_store().await {
                     trc::error!(err.details("Failed to purge in-memory store"));
                 }
             }

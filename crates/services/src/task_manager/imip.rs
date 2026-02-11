@@ -168,10 +168,7 @@ async fn send_imip(
             // Build message
             let message = MessageBuilder::new()
                 .from((
-                    account_info
-                        .description()
-                        .as_deref()
-                        .unwrap_or(account_info.name()),
+                    account_info.description().unwrap_or(account_info.name()),
                     itip_message.from.as_str(),
                 ))
                 .to(recipient.as_str())

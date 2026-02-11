@@ -49,12 +49,22 @@ impl Server {
 
     #[inline(always)]
     pub fn search_store(&self) -> &SearchStore {
-        &self.core.storage.fts
+        &self.core.storage.search
     }
 
     #[inline(always)]
     pub fn in_memory_store(&self) -> &InMemoryStore {
         &self.core.storage.memory
+    }
+
+    #[inline(always)]
+    pub fn tracing_store(&self) -> &Store {
+        &self.core.storage.tracing
+    }
+
+    #[inline(always)]
+    pub fn metrics_store(&self) -> &Store {
+        &self.core.storage.metrics
     }
 
     #[inline(always)]
@@ -88,7 +98,7 @@ impl Server {
     pub async fn logo_resource(
         &self,
         _: &str,
-    ) -> trc::Result<Option<crate::manager::webadmin::Resource<Vec<u8>>>> {
+    ) -> trc::Result<Option<crate::manager::application::Resource<Vec<u8>>>> {
         Ok(None)
     }
 }

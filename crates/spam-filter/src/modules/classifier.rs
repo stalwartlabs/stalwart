@@ -493,7 +493,7 @@ impl SpamClassifier for Server {
                 &Archiver::new(trainer)
                     .serialize()
                     .caused_by(trc::location!())?,
-                self.core.storage.compression,
+                self.core.email.compression,
             )
             .await
             .caused_by(trc::location!())?;
@@ -501,7 +501,7 @@ impl SpamClassifier for Server {
             .put_blob(
                 SPAM_CLASSIFIER_KEY,
                 &classifier.serialize().caused_by(trc::location!())?,
-                self.core.storage.compression,
+                self.core.email.compression,
             )
             .await
             .caused_by(trc::location!())?;

@@ -468,23 +468,17 @@ impl ClusterRole {
     }
 
     fn is_seen_role(&self) -> bool {
-        match self {
-            ClusterRole::Sharded {
+        matches!(self, ClusterRole::Sharded {
                 shard_id,
                 total_shards,
-            } if *shard_id == u32::MAX && *total_shards == 0 => true,
-            _ => false,
-        }
+            } if *shard_id == u32::MAX && *total_shards == 0)
     }
 
     fn is_uninit(&self) -> bool {
-        match self {
-            ClusterRole::Sharded {
+        matches!(self, ClusterRole::Sharded {
                 shard_id,
                 total_shards,
-            } if *shard_id == u32::MAX && *total_shards == u32::MAX => true,
-            _ => false,
-        }
+            } if *shard_id == u32::MAX && *total_shards == u32::MAX)
     }
 
     fn finalize(&mut self) {

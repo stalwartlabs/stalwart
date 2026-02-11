@@ -8,7 +8,10 @@ use crate::{
     RegistryStore,
     registry::{RegistryFilter, RegistryFilterOp, RegistryFilterValue, RegistryQuery},
 };
-use registry::schema::prelude::{Object, Property};
+use registry::{
+    schema::prelude::{Object, Property},
+    types::EnumType,
+};
 use roaring::RoaringBitmap;
 
 impl RegistryStore {
@@ -193,12 +196,18 @@ impl From<&str> for RegistryFilterValue {
 
 impl From<u64> for RegistryFilterValue {
     fn from(value: u64) -> Self {
-        RegistryFilterValue::Integer(value)
+        RegistryFilterValue::U64(value)
     }
 }
 
 impl From<u32> for RegistryFilterValue {
     fn from(value: u32) -> Self {
-        RegistryFilterValue::Integer(value as u64)
+        RegistryFilterValue::U64(value as u64)
+    }
+}
+
+impl From<u16> for RegistryFilterValue {
+    fn from(value: u16) -> Self {
+        RegistryFilterValue::U16(value)
     }
 }

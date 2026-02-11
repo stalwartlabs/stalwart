@@ -98,7 +98,7 @@ impl BootstrapExprExt for Bootstrap {
             return IfBlock::empty(id, expr_ctx.property);
         }
 
-        if let Some(if_block) = self.try_compile_expr(id, expr_ctx, &expr_ctx.expr) {
+        if let Some(if_block) = self.try_compile_expr(id, expr_ctx, expr_ctx.expr) {
             if_block
         } else {
             self.compile_default_expr(id, expr_ctx)
@@ -122,7 +122,6 @@ impl BootstrapExprExt for Bootstrap {
     ) -> Option<IfBlock> {
         // Parse conditions
         let mut if_then = Vec::with_capacity(expr.match_.len());
-        let default;
 
         if expr.else_.is_empty() {
             if !expr.match_.is_empty() {
@@ -152,19 +151,17 @@ impl BootstrapExprExt for Bootstrap {
             .with_variables(expr_ctx.allowed_variables)
             .with_constants(expr_ctx.allowed_constants);
 
-        match ExpressionParser::new(Tokenizer::new(&expr.else_, &token_map)).parse() {
-            Ok(expr) => {
-                default = expr;
-            }
+        let default = match ExpressionParser::new(Tokenizer::new(&expr.else_, &token_map)).parse() {
+            Ok(expr) => expr,
             Err(err) => {
                 self.invalid_property(
                     id,
                     expr_ctx.property,
-                    &format!("Error parsing 'else' expression: {}", err),
+                    format!("Error parsing 'else' expression: {}", err),
                 );
                 return None;
             }
-        }
+        };
 
         for (num, match_) in expr.match_.iter().enumerate() {
             match ExpressionParser::new(Tokenizer::new(&match_.if_, &token_map)).parse() {
@@ -180,7 +177,7 @@ impl BootstrapExprExt for Bootstrap {
                             self.invalid_property(
                                 id,
                                 expr_ctx.property,
-                                &format!(
+                                format!(
                                     "Error parsing 'then' expression in condition #{}: {}",
                                     num + 1,
                                     err
@@ -194,7 +191,7 @@ impl BootstrapExprExt for Bootstrap {
                     self.invalid_property(
                         id,
                         expr_ctx.property,
-                        &format!(
+                        format!(
                             "Error parsing 'if' expression in condition #{}: {}",
                             num + 1,
                             err

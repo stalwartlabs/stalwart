@@ -6,7 +6,10 @@
 
 use self::resolver::Policy;
 use super::*;
-use crate::expr::if_block::{BootstrapExprExt, IfBlock};
+use crate::expr::{
+    Variable,
+    if_block::{BootstrapExprExt, IfBlock},
+};
 use ahash::AHashSet;
 use hyper::HeaderMap;
 use registry::schema::{
@@ -124,7 +127,7 @@ pub struct Data {
 #[derive(Clone)]
 pub struct Milter {
     pub enable: IfBlock,
-    pub id: Arc<String>,
+    pub id: Id,
     pub addrs: Vec<SocketAddr>,
     pub hostname: String,
     pub port: u16,
@@ -150,7 +153,7 @@ pub enum MilterVersion {
 #[derive(Clone)]
 pub struct MTAHook {
     pub enable: IfBlock,
-    pub id: String,
+    pub id: Id,
     pub url: String,
     pub timeout: Duration,
     pub headers: HeaderMap,
@@ -317,7 +320,7 @@ impl SessionConfig {
 
                     Some(Milter {
                         enable: bp.compile_expr(id, &milter.ctx_enable()),
-                        id: Arc::new(milter.name.into()),
+                        id,
                         addrs: format!("{}:{}", milter.hostname, milter.port)
                             .to_socket_addrs()
                             .map_err(|err| {
@@ -360,7 +363,7 @@ impl SessionConfig {
 
                     Some(MTAHook {
                         enable: bp.compile_expr(id, &hook.ctx_enable()),
-                        id: hook.name,
+                        id,
                         url: hook.url,
                         timeout: hook.timeout.into_inner(),
                         headers: hook

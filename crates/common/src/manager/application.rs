@@ -15,7 +15,7 @@ use std::{
 };
 use store::BlobStore;
 
-pub struct WebAdminManager {
+pub struct WebApplicationManager {
     bundle_path: TempDir,
     routes: ArcSwap<AHashMap<String, Resource<PathBuf>>>,
 }
@@ -35,7 +35,7 @@ impl<T> Resource<T> {
     }
 }
 
-impl WebAdminManager {
+impl WebApplicationManager {
     pub fn new(base_path: PathBuf) -> Self {
         Self {
             bundle_path: TempDir::new(base_path),
@@ -193,7 +193,7 @@ fn unpack_error(err: std::io::Error) -> trc::Error {
         .details("Failed to unpack webadmin bundle")
 }
 
-impl Default for WebAdminManager {
+impl Default for WebApplicationManager {
     fn default() -> Self {
         Self::new(std::env::temp_dir())
     }

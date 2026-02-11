@@ -14,7 +14,6 @@ use crate::{
     network::limiter::{ConcurrencyLimiter, LimiterResult},
 };
 use ahash::AHasher;
-use chrono::format::Item;
 use registry::{
     schema::{
         enums::Permission,
@@ -165,13 +164,13 @@ impl Server {
                 let credential_scopes = account
                     .credentials
                     .into_iter()
-                    .filter_map(|pass| {
-                        let expires_at = pass
+                    .filter_map(|(credential_id, credential)| {
+                        let expires_at = credential
                             .expires_at
                             .map(|v| v.timestamp() as u64)
                             .unwrap_or(u64::MAX);
                         if expires_at > now {
-                            let permissions = match pass.permissions {
+                            let permissions = match credential.permissions {
                                 structs::Permissions::Inherit => permissions.clone().finalize(),
                                 structs::Permissions::Merge(merge) => {
                                     let mut permissions = permissions.clone();
@@ -183,7 +182,7 @@ impl Server {
                                 }
                             };
                             Some(AccessScope {
-                                credential_id: pass.credential_id as u32,
+                                credential_id,
                                 permissions,
                                 expires_at,
                             })
@@ -502,7 +501,6 @@ impl AccessToken {
     }
 
     pub fn assert_is_valid(self) -> trc::Result<Self> {
-        let todo = "use this function";
         if self
             .inner
             .scopes
@@ -514,7 +512,7 @@ impl AccessToken {
             Err(trc::SecurityEvent::Unauthorized
                 .into_err()
                 .ctx(trc::Key::AccountId, self.inner.account_id)
-                .reason("Access token expired."))
+                .reason("Credential expired."))
         }
     }
 
@@ -741,11 +739,6 @@ impl AccessScope {
             expires_at: u64::MAX,
         }
     }
-
-    pub fn expires_at(mut self, expires_at: u64) -> Self {
-        self.expires_at = expires_at;
-        self
-    }
 }
 
 fn hash_account(account: &Account) -> u64 {
@@ -756,8 +749,8 @@ fn hash_account(account: &Account) -> u64 {
             account.member_tenant_id.hash(&mut s);
             account.role_ids.hash(&mut s);
             hash_permissions(&mut s, &account.permissions);
-            for credential in &account.credentials {
-                credential.credential_id.hash(&mut s);
+            for (credential_id, credential) in &account.credentials {
+                credential_id.hash(&mut s);
                 credential.expires_at.hash(&mut s);
                 hash_permissions(&mut s, &credential.permissions);
             }

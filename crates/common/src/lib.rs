@@ -40,7 +40,7 @@ use config::{
 };
 use ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEvent};
 use mail_auth::{MX, Txt};
-use manager::webadmin::{Resource, WebAdminManager};
+use manager::application::{Resource, WebApplicationManager};
 use parking_lot::{Mutex, RwLock};
 use rustls::sign::CertifiedKey;
 use std::sync::atomic::AtomicU64;
@@ -159,7 +159,7 @@ pub struct Data {
     pub span_id_gen: SnowflakeIdGenerator,
     pub queue_status: AtomicBool,
 
-    pub webadmin: WebAdminManager,
+    pub applications: WebApplicationManager,
     pub logos: Mutex<AHashMap<Box<str>, Option<Resource<Vec<u8>>>>>,
 
     pub smtp_connectors: TlsConnectors,

@@ -11,7 +11,7 @@ use registry::{
     types::{id::Id, ipmask::IpAddrOrMask},
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, net::SocketAddr, sync::Arc, time::Duration};
+use std::{fmt::Display, net::SocketAddr, sync::Arc};
 use store::registry::RegistryObject;
 use tokio::net::TcpSocket;
 use utils::snowflake::SnowflakeIdGenerator;
@@ -46,7 +46,6 @@ pub struct TcpListener {
 
     // TCP options
     pub ttl: Option<u32>,
-    pub linger: Option<Duration>,
     pub nodelay: bool,
 }
 

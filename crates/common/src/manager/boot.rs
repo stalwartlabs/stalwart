@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{WEBADMIN_KEY, backup::BackupParams, console::store_console};
+use super::{backup::BackupParams, console::store_console};
 use crate::{
-    Caches, Core, Data, IPC_CHANNEL_BUFFER, Inner, Ipc,
-    config::{network::AsnGeoLookupConfig, server::Listeners, telemetry::Telemetry},
+    BuildServer, Caches, Core, Data, IPC_CHANNEL_BUFFER, Inner, Ipc,
+    config::{
+        network::AsnGeoLookupConfig, server::Listeners, storage::Storage, telemetry::Telemetry,
+    },
     ipc::{
         BroadcastEvent, HousekeeperEvent, PushEvent, QueueEvent, ReportingEvent,
         TrainTaskController,
@@ -21,6 +23,7 @@ use std::{
     sync::Arc,
 };
 use store::{
+    RegistryStore,
     rand::{Rng, distr::Alphanumeric, rng},
     registry::bootstrap::Bootstrap,
 };
@@ -28,7 +31,7 @@ use tokio::sync::{Notify, mpsc};
 use utils::{UnwrapFailure, failed};
 
 pub struct BootManager {
-    pub bp: Bootstrap,
+    pub bootstrap: Bootstrap,
     pub inner: Arc<Inner>,
     pub servers: Listeners,
     pub ipc_rxs: IpcReceivers,
@@ -69,6 +72,7 @@ enum StoreOp {
 }
 
 pub const DEFAULT_SETTINGS: &[(&str, &str)] = &[
+    ("oauth.key", "abc"),
     ("queue.quota.size.messages", "100000"),
     ("queue.quota.size.size", "10737418240"),
     ("queue.quota.size.enable", "true"),
@@ -170,8 +174,7 @@ pub const DEFAULT_SETTINGS: &[(&str, &str)] = &[
 
 impl BootManager {
     pub async fn init() -> Self {
-        todo!()
-        /*let mut config_path = std::env::var("CONFIG_PATH").ok();
+        let mut config_path = std::env::var("CONFIG_PATH").ok();
         let mut import_export = StoreOp::None;
 
         if config_path.is_none() {
@@ -232,193 +235,28 @@ impl BootManager {
             }
         }
 
-        // Read main configuration file
-        let cfg_local_path = PathBuf::from(config_path.unwrap());
-        let mut config = Config::default();
-        match std::fs::read_to_string(&cfg_local_path) {
-            Ok(value) => {
-                config.parse(&value).failed("Invalid configuration file");
-            }
-            Err(err) => {
-                config.new_build_error("*", format!("Could not read configuration file: {err}"));
-            }
-        }
-        let cfg_local = config.keys.clone();
+        // Initialize registry
+        let registry = RegistryStore::init(PathBuf::from(config_path.unwrap()));
+        let mut bootstrap = Bootstrap::new(registry);
 
-        // Resolve environment macros
-        config.resolve_macros(&["env"]).await;
+        // Start listeners
+        let mut servers = Listeners::parse(&mut bootstrap).await;
+        servers.bind_and_drop_priv(&mut bootstrap);
 
-        // Parser servers
-        let mut servers = Listeners::parse(&mut config).await;
-
-        // Bind ports and drop privileges
-        servers.bind_and_drop_priv(&mut config);
-
-        // Resolve file and configuration macros
-        config.resolve_macros(&["file", "cfg"]).await;
-
-        // Load stores
-        let mut stores = Stores::parse(&mut config).await;
-        let local_patterns = Patterns::parse(&mut config);
-
-        // Build local keys and warn about database keys defined in the local configuration
-        let mut warn_keys = Vec::new();
-        for key in config.keys.keys() {
-            if !local_patterns.is_local_key(key) {
-                warn_keys.push(key.clone());
-            }
-        }
-        for warn_key in warn_keys {
-            config.new_build_warning(
-                warn_key,
-                concat!(
-                    "Database key defined in local configuration, this might cause issues. ",
-                    "See https://stalw.art/docs/configuration/overview/#loc",
-                    "al-and-database-settings"
-                ),
-            );
-        }
-
-        // Build manager
-        let manager = ConfigManager {
-            cfg_local: ArcSwap::from_pointee(cfg_local),
-            cfg_local_path,
-            cfg_local_patterns: local_patterns.into(),
-            cfg_store: config
-                .value("storage.data")
-                .and_then(|id| stores.stores.get(id))
-                .cloned()
-                .unwrap_or_default(),
-        };
-
-        // Extend configuration with settings stored in the db
-        if !manager.cfg_store.is_none() {
-            for (key, value) in manager
-                .db_list("", false)
-                .await
-                .failed("Failed to read database configuration")
-            {
-                if manager.cfg_local_patterns.is_local_key(&key) {
-                    config.new_build_warning(
-                        &key,
-                        concat!(
-                            "Local key defined in database, this might cause issues. ",
-                            "See https://stalw.art/docs/configuration/overview/#loc",
-                            "al-and-database-settings"
-                        ),
-                    );
-                }
-
-                config.keys.entry(key).or_insert(value);
-            }
-        }
+        // Parse storage
+        let storage = Storage::parse(&mut bootstrap).await;
 
         // Parse telemetry
-        let telemetry = Telemetry::parse(&mut config);
+        let telemetry = Telemetry::parse(&mut bootstrap, &storage).await;
 
         match import_export {
             StoreOp::None => {
-                // Add hostname lookup if missing
-                let mut insert_keys = Vec::new();
+                let todo = "add default settings, hostname, download filter rules, webadmin";
 
-                // Generate an OAuth key if missing
-                if config
-                    .value("oauth.key")
-                    .filter(|v| !v.is_empty())
-                    .is_none()
-                {
-                    insert_keys.push(ConfigKey::from((
-                        "oauth.key",
-                        rng()
-                            .sample_iter(Alphanumeric)
-                            .take(64)
-                            .map(char::from)
-                            .collect::<String>(),
-                    )));
-                }
-
-                // Download Spam filter rules if missing
-                if config.value("version.spam-filter").is_none() {
-                    match manager.fetch_spam_rules().await {
-                        Ok(external_config) => {
-                            trc::event!(
-                                Config(trc::ConfigEvent::ImportExternal),
-                                Version = external_config.version.to_string(),
-                                Id = "spam-filter"
-                            );
-                            insert_keys.extend(external_config.keys);
-                        }
-                        Err(err) => {
-                            config.new_build_error(
-                                "*",
-                                format!("Failed to fetch spam filter: {err}"),
-                            );
-                        }
-                    }
-
-                    // Add default settings
-                    for key in DEFAULT_SETTINGS {
-                        insert_keys.push(ConfigKey::from(*key));
-                    }
-                }
-
-                // Download webadmin if missing
-                if let Some(blob_store) = config
-                    .value("storage.blob")
-                    .and_then(|id| stores.blob_stores.get(id))
-                {
-                    match blob_store.get_blob(WEBADMIN_KEY, 0..usize::MAX).await {
-                        Ok(Some(_)) => (),
-                        Ok(None) => match manager.fetch_resource("webadmin").await {
-                            Ok(bytes) => match blob_store.put_blob(WEBADMIN_KEY, &bytes).await {
-                                Ok(_) => {
-                                    trc::event!(
-                                        Resource(trc::ResourceEvent::DownloadExternal),
-                                        Id = "webadmin"
-                                    );
-                                }
-                                Err(err) => {
-                                    config.new_build_error(
-                                        "*",
-                                        format!("Failed to store webadmin blob: {err}"),
-                                    );
-                                }
-                            },
-                            Err(err) => {
-                                config.new_build_error(
-                                    "*",
-                                    format!("Failed to download webadmin: {err}"),
-                                );
-                            }
-                        },
-                        Err(err) => config
-                            .new_build_error("*", format!("Failed to access webadmin blob: {err}")),
-                    }
-                }
-
-                // Add missing settings
-                if !insert_keys.is_empty() {
-                    for item in &insert_keys {
-                        config.keys.insert(item.key.clone(), item.value.clone());
-                    }
-
-                    if let Err(err) = manager.set(insert_keys, true).await {
-                        config
-                            .new_build_error("*", format!("Failed to update configuration: {err}"));
-                    }
-                }
-
-                // Parse in-memory stores
-                stores.parse_in_memory(&mut config, false).await;
-
-                // Parse settings
-                let core = Box::pin(Core::parse(&mut config, stores, manager)).await;
-
-                // Parse data
-                let data = Data::parse(&mut config);
-
-                // Parse caches
-                let cache = Caches::parse(&mut config);
+                // Parse components
+                let core = Box::pin(Core::parse(&mut bootstrap, storage)).await;
+                let data = Data::parse(&mut bootstrap).await;
+                let cache = Caches::parse(&mut bootstrap).await;
 
                 // Enable telemetry
 
@@ -437,40 +275,12 @@ impl BootManager {
                     Version = env!("CARGO_PKG_VERSION"),
                 );
 
-                // Webadmin auto-update
-                // Disabled temporarily until selective updates are implemented
-                /*if config
-                    .property_or_default::<bool>("webadmin.auto-update", "false")
-                    .unwrap_or_default()
-                {
-                    if let Err(err) = data.webadmin.update(&core).await {
-                        trc::event!(
-                            Resource(trc::ResourceEvent::Error),
-                            Details = "Failed to update webadmin",
-                            CausedBy = err
-                        );
-                    }
-                }*/
-
-                // Spam filter auto-update
-                if config
-                    .property_or_default::<bool>("spam-filter.auto-update", "false")
-                    .unwrap_or_default()
-                    && let Err(err) = core.storage.config.update_spam_rules(false, false).await
-                {
-                    trc::event!(
-                        Resource(trc::ResourceEvent::Error),
-                        Details = "Failed to update spam-filter",
-                        CausedBy = err
-                    );
-                }
-
                 // Build shared inner
                 let has_remote_asn = matches!(
                     core.network.asn_geo_lookup,
                     AsnGeoLookupConfig::Resource { .. }
                 );
-                let (ipc, ipc_rxs) = build_ipc(!core.storage.pubsub.is_none());
+                let (ipc, ipc_rxs) = build_ipc(!core.storage.coordinator.is_none());
                 let inner = Arc::new(Inner {
                     shared_core: ArcSwap::from_pointee(core),
                     data,
@@ -495,11 +305,13 @@ impl BootManager {
                 }
 
                 // Parse TCP acceptors
-                servers.parse_tcp_acceptors(&mut config, inner.clone());
+                servers
+                    .parse_tcp_acceptors(&mut bootstrap, inner.clone())
+                    .await;
 
                 BootManager {
                     inner,
-                    config,
+                    bootstrap,
                     servers,
                     ipc_rxs,
                 }
@@ -509,7 +321,7 @@ impl BootManager {
                 telemetry.enable(false);
 
                 // Parse settings and backup
-                Box::pin(Core::parse(&mut config, stores, manager))
+                Box::pin(Core::parse(&mut bootstrap, storage))
                     .await
                     .backup(path)
                     .await;
@@ -520,7 +332,7 @@ impl BootManager {
                 telemetry.enable(false);
 
                 // Parse settings and restore
-                Box::pin(Core::parse(&mut config, stores, manager))
+                Box::pin(Core::parse(&mut bootstrap, storage))
                     .await
                     .restore(path)
                     .await;
@@ -529,7 +341,7 @@ impl BootManager {
             StoreOp::Console => {
                 // Store console
                 store_console(
-                    Box::pin(Core::parse(&mut config, stores, manager))
+                    Box::pin(Core::parse(&mut bootstrap, storage))
                         .await
                         .storage
                         .data,
@@ -537,7 +349,7 @@ impl BootManager {
                 .await;
                 std::process::exit(0);
             }
-        }*/
+        }
     }
 }
 
@@ -591,7 +403,7 @@ fn quickstart(path: impl Into<PathBuf>) {
     });
 
     std::fs::write(
-        path.join("etc").join("config.toml"),
+        path.join("etc").join("registry.json"),
         QUICKSTART_CONFIG
             .replace("_P_", &path.to_string_lossy())
             .replace("_S_", &sha512_crypt::hash(&admin_pass).unwrap()),
@@ -599,7 +411,7 @@ fn quickstart(path: impl Into<PathBuf>) {
     .failed("Failed to write configuration file");
 
     eprintln!(
-        "✅ Configuration file written to {}/etc/config.toml",
+        "✅ Local registry initialized at {}/etc/registry.json",
         path.to_string_lossy()
     );
     eprintln!("🔑 Your administrator account is 'admin' with password '{admin_pass}'.");

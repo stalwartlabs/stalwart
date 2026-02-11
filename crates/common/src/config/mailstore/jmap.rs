@@ -83,7 +83,7 @@ impl JmapConfig {
         };
 
         // Add capabilities
-        jmap.add_capabilities(bp);
+        jmap.add_capabilities(bp).await;
         jmap
     }
 }

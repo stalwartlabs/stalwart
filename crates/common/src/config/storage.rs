@@ -5,10 +5,11 @@
  */
 
 use coordinator::Coordinator;
-use directory::Directory;
-use registry::schema::enums::CompressionAlgo;
+use directory::{Directories, Directory};
 use std::{collections::HashMap, sync::Arc};
-use store::{BlobStore, InMemoryStore, RegistryStore, SearchStore, Store};
+use store::{
+    BlobStore, InMemoryStore, RegistryStore, SearchStore, Store, registry::bootstrap::Bootstrap,
+};
 
 pub type IdMap<V> = HashMap<u32, Arc<V>, nohash_hasher::BuildNoHashHasher<u32>>;
 
@@ -17,10 +18,31 @@ pub struct Storage {
     pub registry: RegistryStore,
     pub data: Store,
     pub blob: BlobStore,
-    pub fts: SearchStore,
+    pub search: SearchStore,
     pub memory: InMemoryStore,
+    pub metrics: Store,
+    pub tracing: Store,
     pub coordinator: Coordinator,
     pub directory: Option<Arc<Directory>>,
     pub directories: IdMap<Directory>,
-    pub compression: CompressionAlgo,
+}
+
+impl Storage {
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let memory = InMemoryStore::build(bp).await.unwrap_or_default();
+        let directory = Directories::build(bp).await;
+
+        Storage {
+            registry: bp.registry.clone(),
+            data: bp.data_store.clone(),
+            blob: BlobStore::build(bp).await.unwrap_or_default(),
+            search: SearchStore::build(bp).await.unwrap_or_default(),
+            coordinator: Coordinator::build(bp, &memory).await.unwrap_or_default(),
+            memory,
+            tracing: Store::build_tracing(bp).await.unwrap_or_default(),
+            metrics: Store::build_metrics(bp).await.unwrap_or_default(),
+            directory: directory.default_directory,
+            directories: directory.directories,
+        }
+    }
 }

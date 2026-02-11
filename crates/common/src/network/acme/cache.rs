@@ -6,7 +6,6 @@
 
 use super::AcmeProvider;
 use crate::Server;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use trc::AddContext;
 
 impl Server {

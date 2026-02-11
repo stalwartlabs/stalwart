@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::config::storage::Storage;
 use ahash::{AHashMap, AHashSet};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::HeaderMap;
@@ -139,9 +140,9 @@ pub struct PrometheusMetrics {
 }
 
 impl Telemetry {
-    pub async fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap, storage: &Storage) -> Self {
         let mut telemetry = Telemetry {
-            tracers: Tracers::parse(bp).await,
+            tracers: Tracers::parse(bp, storage).await,
             metrics: Interests::default(),
         };
 
@@ -159,7 +160,7 @@ impl Telemetry {
 }
 
 impl Tracers {
-    pub async fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap, storage: &Storage) -> Self {
         // Parse custom logging levels
         let mut custom_levels = AHashMap::new();
         for level in bp.list_infallible::<EventTracingLevel>().await {
@@ -428,32 +429,22 @@ impl Tracers {
 
         // Parse tracing history
         #[cfg(feature = "enterprise")]
-        {
-            use registry::schema::structs::TelemetryHistory;
+        if storage.tracing.is_active() {
+            let mut tracer = TelemetrySubscriber {
+                id: "history".to_string(),
+                interests: Default::default(),
+                lossy: false,
+                typ: TelemetrySubscriberType::StoreTracer(StoreTracer {
+                    store: storage.tracing.clone(),
+                }),
+            };
 
-            let todo = "update store";
-
-            if bp
-                .setting_infallible::<TelemetryHistory>()
-                .await
-                .enable_tracing_history
-            {
-                let mut tracer = TelemetrySubscriber {
-                    id: "history".to_string(),
-                    interests: Default::default(),
-                    lossy: false,
-                    typ: TelemetrySubscriberType::StoreTracer(StoreTracer {
-                        store: store::Store::None,
-                    }),
-                };
-
-                for event_type in StoreTracer::default_events() {
-                    tracer.interests.set(event_type);
-                    global_interests.set(event_type);
-                }
-
-                tracers.push(tracer);
+            for event_type in StoreTracer::default_events() {
+                tracer.interests.set(event_type);
+                global_interests.set(event_type);
             }
+
+            tracers.push(tracer);
         }
         // SPDX-SnippetEnd
 

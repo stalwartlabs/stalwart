@@ -8,17 +8,15 @@ use self::{mailstore::jmap::JmapConfig, smtp::SmtpConfig, storage::Storage};
 use crate::{
     Core, Network,
     auth::oauth::config::OAuthConfig,
-    config::mailstore::{imap::ImapConfig, scripts::Scripting, spamfilter::SpamFilterConfig},
-    expr::*,
+    config::mailstore::{
+        email::EmailConfig, imap::ImapConfig, scripts::Scripting, spamfilter::SpamFilterConfig,
+    },
 };
 use arc_swap::ArcSwap;
-use coordinator::Coordinator;
-use directory::{Directories, Directory};
 use groupware::GroupwareConfig;
 use hyper::HeaderMap;
 use ring::signature::{EcdsaKeyPair, RsaKeyPair};
-use std::sync::Arc;
-use store::{BlobStore, InMemoryStore, SearchStore, Store, registry::bootstrap::Bootstrap};
+use store::registry::bootstrap::Bootstrap;
 use telemetry::Metrics;
 
 pub mod groupware;
@@ -31,138 +29,44 @@ pub mod storage;
 pub mod telemetry;
 
 impl Core {
-    pub async fn parse(bp: &mut Bootstrap) -> Self {
-        todo!()
-        /*let mut data = config
-            .value_require("storage.data")
-            .map(|id| id.to_string())
-            .and_then(|id| {
-                if let Some(store) = stores.stores.get(&id) {
-                    store.clone().into()
-                } else {
-                    config.new_parse_error("storage.data", format!("Data store {id:?} not found"));
-                    None
-                }
-            })
-            .unwrap_or_default();
-
-        #[cfg(not(feature = "enterprise"))]
-        let is_enterprise = false;
-
+    pub async fn parse(bp: &mut Bootstrap, mut storage: Storage) -> Self {
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
         // SPDX-License-Identifier: LicenseRef-SEL
         #[cfg(feature = "enterprise")]
-        let enterprise =
-            crate::enterprise::Enterprise::parse(config, &config_manager, &stores, &data).await;
+        let enterprise = {
+            let enterprise = crate::enterprise::Enterprise::parse(bp).await;
+            if enterprise.is_none() {
+                use registry::schema::prelude::Object;
+                use store::Store;
 
-        #[cfg(feature = "enterprise")]
-        let is_enterprise = enterprise.is_some();
-
-        #[cfg(feature = "enterprise")]
-        if !is_enterprise {
-            if data.is_enterprise_store() {
-                config
-                    .new_build_error("storage.data", "SQL read replicas is an Enterprise feature");
-                data = Store::None;
+                if storage.data.is_enterprise() {
+                    bp.build_error(
+                        Object::DataStore.singleton(),
+                        "Disabling enterprise-only data store.",
+                    );
+                    storage.data = storage.data.downgrade_store();
+                }
+                if storage.blob.is_enterprise() {
+                    bp.build_error(
+                        Object::BlobStore.singleton(),
+                        "Disabling enterprise-only blob store.",
+                    );
+                    storage.blob = storage.blob.downgrade_store();
+                }
+                if storage.memory.is_enterprise() {
+                    bp.build_error(
+                        Object::InMemoryStore.singleton(),
+                        "Disabling enterprise-only in-memory store.",
+                    );
+                    storage.memory = storage.memory.downgrade_store();
+                }
+                storage.metrics = Store::None;
+                storage.metrics = Store::None;
             }
-            stores.disable_enterprise_only();
-        }
+            enterprise
+        };
         // SPDX-SnippetEnd
-
-        let mut blob = config
-            .value_require("storage.blob")
-            .map(|id| id.to_string())
-            .and_then(|id| {
-                if let Some(store) = stores.blob_stores.get(&id) {
-                    store.clone().into()
-                } else {
-                    config.new_parse_error("storage.blob", format!("Blob store {id:?} not found"));
-                    None
-                }
-            })
-            .unwrap_or_default();
-        let mut lookup = config
-            .value_require("storage.lookup")
-            .map(|id| id.to_string())
-            .and_then(|id| {
-                if let Some(store) = stores.in_memory_stores.get(&id) {
-                    store.clone().into()
-                } else {
-                    config.new_parse_error(
-                        "storage.lookup",
-                        format!("In-memory store {id:?} not found"),
-                    );
-                    None
-                }
-            })
-            .unwrap_or_default();
-        let mut fts = config
-            .value_require("storage.fts")
-            .map(|id| id.to_string())
-            .and_then(|id| {
-                if let Some(store) = stores.search_stores.get(&id) {
-                    store.clone().into()
-                } else {
-                    config.new_parse_error(
-                        "storage.fts",
-                        format!("Full-text store {id:?} not found"),
-                    );
-                    None
-                }
-            })
-            .unwrap_or_default();
-        let pubsub = Coordinator::None; /*config
-        .value("cluster.coordinator")
-        .map(|id| id.to_string())
-        .and_then(|id| {
-        if let Some(store) = stores.pubsub_stores.get(&id) {
-        store.clone().into()
-        } else {
-        config.new_parse_error(
-        "cluster.coordinator",
-        format!("Coordinator backend {id:?} not found"),
-        );
-        None
-        }
-        })
-        .unwrap_or_default();*/
-        let mut directories =
-            Directories::parse(config, &stores, data.clone(), is_enterprise).await;
-        let directory = config
-            .value_require("storage.directory")
-            .map(|id| id.to_string())
-            .and_then(|id| {
-                if let Some(directory) = directories.directories.get(&id) {
-                    directory.clone().into()
-                } else {
-                    config.new_parse_error(
-                        "storage.directory",
-                        format!("Directory {id:?} not found"),
-                    );
-                    None
-                }
-            })
-            .unwrap_or_else(|| Arc::new(Directory::default()));
-        directories
-            .directories
-            .insert("*".to_string(), directory.clone());
-
-        // If any of the stores are missing, disable all stores to avoid data loss
-        if matches!(data, Store::None)
-            || matches!(&blob.backend, BlobBackend::Store(Store::None))
-            || matches!(lookup, InMemoryStore::Store(Store::None))
-            || matches!(fts, SearchStore::Store(Store::None))
-        {
-            data = Store::default();
-            blob = BlobStore::default();
-            lookup = InMemoryStore::default();
-            fts = SearchStore::default();
-            config.new_build_error(
-                "storage.*",
-                "One or more stores are missing, disabling all stores",
-            )
-        }
 
         Self {
             // SPDX-SnippetBegin
@@ -177,24 +81,12 @@ impl Core {
             jmap: JmapConfig::parse(bp).await,
             imap: ImapConfig::parse(bp).await,
             oauth: OAuthConfig::parse(bp).await,
-            metrics: Metrics::parse(bp.await),
+            metrics: Metrics::parse(bp).await,
             spam: SpamFilterConfig::parse(bp).await,
+            email: EmailConfig::parse(bp).await,
             groupware: GroupwareConfig::parse(bp).await,
-            storage: Storage {
-                data,
-                blob,
-                fts,
-                lookup,
-                pubsub,
-                directory,
-                directories: directories.directories,
-                purge_schedules: stores.purge_schedules,
-                stores: stores.stores,
-                lookups: stores.in_memory_stores,
-                blobs: stores.blob_stores,
-                ftss: stores.search_stores,
-            },
-        }*/
+            storage,
+        }
     }
 
     pub fn into_shared(self) -> ArcSwap<Self> {

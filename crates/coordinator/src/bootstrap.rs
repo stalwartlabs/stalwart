@@ -61,6 +61,7 @@ impl Coordinator {
     }
 }
 
+#[cfg(feature = "redis")]
 fn unwrap_redis(store: InMemoryStore) -> Coordinator {
     if let InMemoryStore::Redis(redis) = store {
         Coordinator::Redis(redis)

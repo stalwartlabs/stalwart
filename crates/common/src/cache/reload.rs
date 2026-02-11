@@ -6,133 +6,140 @@
 
 use crate::{
     Core, Server,
-    config::{server::Listeners, telemetry::Telemetry},
+    config::{
+        server::{Listeners, tls::parse_certificates},
+        storage::Storage,
+        telemetry::Telemetry,
+    },
     ipc::RegistryChange,
 };
 use ahash::AHashMap;
-use arc_swap::ArcSwap;
-use store::registry::bootstrap::Bootstrap;
+use directory::Directories;
+use registry::schema::{prelude::Object, structs::BlockedIp};
+use std::sync::Arc;
+use store::{InMemoryStore, LookupStores, registry::bootstrap::Bootstrap, write::now};
 
 pub struct ReloadResult {
-    pub bp: Bootstrap,
+    pub bootstrap: Bootstrap,
     pub new_core: Option<Core>,
     pub tracers: Option<Telemetry>,
 }
 
 impl Server {
-    async fn reload_blocked_ips(&self) -> trc::Result<ReloadResult> {
-        todo!()
-        /*let mut config = self
-            .core
-            .storage
-            .config
-            .build_config(BLOCKED_IP_KEY)
-            .await?;
-        *self.inner.data.blocked_ips.write() = BlockedIps::parse(&mut config).blocked_ip_addresses;
-
-        Ok(config.into())*/
-    }
-
-    async fn reload_certificates(&self) -> trc::Result<ReloadResult> {
-        todo!()
-        /*let mut config = self.core.storage.config.build_config("certificate").await?;
-        let mut certificates = self.inner.data.tls_certificates.load().as_ref().clone();
-
-        parse_certificates(&mut config, &mut certificates, &mut Default::default());
-
-        self.inner.data.tls_certificates.store(certificates.into());
-
-        Ok(config.into())*/
-    }
-
-    async fn reload_lookups(&self) -> trc::Result<ReloadResult> {
-        todo!()
-        /*let mut config = self.core.storage.config.build_config("lookup").await?;
-        let mut stores = Stores::default();
-        stores.parse_static_stores(&mut config, true);
-
-        let mut core = self.core.as_ref().clone();
-        for (id, store) in stores.in_memory_stores {
-            core.storage.lookups.insert(id, store);
-        }
-
-        Ok(ReloadResult {
-            config,
-            new_core: core.into(),
-            tracers: None,
-        })*/
-    }
-
     pub async fn reload_registry(&self, change: RegistryChange) -> trc::Result<ReloadResult> {
         // TODO: check the different events triggering this, spam filter reload, etc.
-        todo!()
-        /*let mut config = self.core.storage.config.build_config("").await?;
-
-        // Load stores
-        let mut stores = Stores {
-            stores: self.core.storage.stores.clone(),
-            blob_stores: self.core.storage.blobs.clone(),
-            search_stores: self.core.storage.ftss.clone(),
-            in_memory_stores: self.core.storage.lookups.clone(),
-            purge_schedules: Default::default(),
-        };
-        stores.parse_stores(&mut config).await;
-        stores.parse_in_memory(&mut config, true).await;
-
-        // Parse tracers
-        let tracers = Telemetry::parse(&mut config, &stores);
-
-        if !config.errors.is_empty() {
-            return Ok(config.into());
-        }
-
-        // Build manager
-        let manager = ConfigManager {
-            cfg_local: ArcSwap::from_pointee(
-                self.core.storage.config.cfg_local.load().as_ref().clone(),
-            ),
-            cfg_local_path: self.core.storage.config.cfg_local_path.clone(),
-            cfg_local_patterns: Patterns::parse(&mut config).into(),
-            cfg_store: config
-                .value("storage.data")
-                .and_then(|id| stores.stores.get(id))
-                .cloned()
-                .unwrap_or_default(),
-        };
-
-        // Parse settings and build shared core
-        let core = Box::pin(Core::parse(&mut config, stores, manager)).await;
-        if !config.errors.is_empty() {
-            return Ok(config.into());
-        }
-
-        // Update TLS certificates
-        let mut new_certificates = AHashMap::new();
-        parse_certificates(&mut config, &mut new_certificates, &mut Default::default());
-        let mut current_certificates = self.inner.data.tls_certificates.load().as_ref().clone();
-        for (cert_id, cert) in new_certificates {
-            current_certificates.insert(cert_id, cert);
-        }
-        self.inner
-            .data
-            .tls_certificates
-            .store(current_certificates.into());
-
-        // Update blocked IPs
-        *self.inner.data.blocked_ips.write() = BlockedIps::parse(&mut config).blocked_ip_addresses;
-
-        // Parser servers
-        let mut servers = Listeners::parse(&mut config);
-        servers.parse_tcp_acceptors(&mut config, self.inner.clone());
-
-        Ok(if config.errors.is_empty() {
-            ReloadResult {
-                config,
-                new_core: core.into(),
-                tracers: tracers.into(),
+        let mut bootstrap = Bootstrap::new(self.registry().clone());
+        let object = match change {
+            RegistryChange::Insert(id) => {
+                if matches!(id.object(), Object::BlockedIp) {
+                    if let Some(ip) = bootstrap.get_infallible::<BlockedIp>(id).await
+                        && ip.expires_at.is_none_or(|ip| ip.timestamp() > now() as i64)
+                    {
+                        let mut ips = self.inner.data.blocked_ips.write();
+                        if let Some(ip) = ip.address.try_to_ip() {
+                            ips.blocked_ip_addresses.insert(ip);
+                        } else {
+                            ips.blocked_ip_networks.push(ip.address);
+                        }
+                    }
+                    return Ok(ReloadResult {
+                        bootstrap,
+                        new_core: None,
+                        tracers: None,
+                    });
+                } else {
+                    id.object()
+                }
             }
-        } else {
-            config.into()
-        })*/
+            RegistryChange::Delete(id) => id.object(),
+            RegistryChange::Reload(object) => object,
+        };
+
+        let mut result = ReloadResult {
+            bootstrap,
+            new_core: None,
+            tracers: None,
+        };
+
+        match object {
+            Object::Certificate => {
+                let mut certificates = AHashMap::new();
+                parse_certificates(
+                    &mut result.bootstrap,
+                    &mut certificates,
+                    &mut Default::default(),
+                )
+                .await;
+                self.inner
+                    .data
+                    .tls_certificates
+                    .store(Arc::new(certificates));
+            }
+            Object::MemoryLookupKey | Object::MemoryLookupKeyValue => {
+                let mut lookup = LookupStores {
+                    stores: self.inner.data.lookup_stores.load().as_ref().clone(),
+                };
+                lookup
+                    .stores
+                    .retain(|_, store| !matches!(store, InMemoryStore::Static(_)));
+                lookup.parse_static(&mut result.bootstrap).await;
+            }
+            Object::HttpLookup => {
+                let mut lookup = LookupStores {
+                    stores: self.inner.data.lookup_stores.load().as_ref().clone(),
+                };
+                lookup
+                    .stores
+                    .retain(|_, store| !matches!(store, InMemoryStore::Http(_)));
+                lookup.parse_http(&mut result.bootstrap).await;
+            }
+            Object::LookupStore => {
+                let mut lookup = LookupStores {
+                    stores: self.inner.data.lookup_stores.load().as_ref().clone(),
+                };
+                lookup.stores.retain(|_, store| {
+                    matches!(store, InMemoryStore::Static(_) | InMemoryStore::Http(_))
+                });
+                lookup.parse_stores(&mut result.bootstrap).await;
+            }
+            _ => {
+                // Load stores
+                let directory = Directories::build(&mut result.bootstrap).await;
+                let storage = &self.core.storage;
+                let storage = Storage {
+                    registry: storage.registry.clone(),
+                    data: storage.data.clone(),
+                    blob: storage.blob.clone(),
+                    search: storage.search.clone(),
+                    metrics: storage.metrics.clone(),
+                    tracing: storage.tracing.clone(),
+                    memory: storage.memory.clone(),
+                    coordinator: storage.coordinator.clone(),
+                    directory: directory.default_directory,
+                    directories: directory.directories,
+                };
+
+                // Parse tracers
+                let tracers = Telemetry::parse(&mut result.bootstrap, &storage).await;
+
+                if result.bootstrap.errors.is_empty() {
+                    let core = Box::pin(Core::parse(&mut result.bootstrap, storage)).await;
+
+                    if result.bootstrap.errors.is_empty() {
+                        let mut servers = Listeners::parse(&mut result.bootstrap).await;
+                        servers
+                            .parse_tcp_acceptors(&mut result.bootstrap, self.inner.clone())
+                            .await;
+
+                        if result.bootstrap.errors.is_empty() {
+                            result.new_core = Some(core);
+                            result.tracers = Some(tracers);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
     }
 }

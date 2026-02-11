@@ -4,12 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{pickle::Pickle, schema::prelude::Object, types::error::ValidationError};
+use crate::{
+    pickle::Pickle,
+    schema::prelude::Object,
+    types::{error::ValidationError, index::IndexBuilder},
+};
 
 pub mod datetime;
 pub mod duration;
 pub mod error;
 pub mod id;
+pub mod index;
 pub mod ipaddr;
 pub mod ipmask;
 pub mod socketaddr;
@@ -26,4 +31,8 @@ pub trait EnumType: Sized {
 pub trait ObjectType: Pickle + Default + Clone + Send + Sync {
     fn object() -> Object;
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool;
+}
+
+pub trait ObjectIndex<'x>: Send + Sync {
+    fn index(&'x self, builder: &mut IndexBuilder<'x>);
 }

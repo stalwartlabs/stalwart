@@ -8,11 +8,11 @@
  *
  */
 
-use std::{future::Future, sync::Arc, time::Duration};
-
+use crate::Core;
 use ahash::AHashMap;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::{future::Future, sync::Arc, time::Duration};
 use store::{
     IterateParams, Store, U32_LEN, U64_LEN, ValueKey,
     write::{
@@ -23,8 +23,6 @@ use store::{
 };
 use trc::*;
 use utils::codec::leb128::Leb128Reader;
-
-use crate::Core;
 
 pub trait MetricsStore: Sync + Send {
     fn write_metrics(

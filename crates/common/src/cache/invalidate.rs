@@ -26,12 +26,13 @@ impl Server {
                 }
                 CacheInvalidation::Domain(id) => {
                     cache.domains.remove(id);
+                    cache.dkim_signers.remove(id);
                 }
                 CacheInvalidation::Account(id) => {
                     cache.accounts.remove(id);
                 }
-                CacheInvalidation::Group(id) => {
-                    cache.accounts.remove(id);
+                CacheInvalidation::DkimSignature(id) => {
+                    cache.dkim_signers.remove(id);
                 }
                 CacheInvalidation::Tenant(id) => {
                     cache.tenants.remove(id);

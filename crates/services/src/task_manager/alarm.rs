@@ -543,7 +543,7 @@ async fn build_template(
     // Validate recipient
     let rcpt_to = if let Some(rcpt_to) = rcpt_to {
         if server.core.groupware.alarms_allow_external_recipients
-            || account_info.addresses().any(|email| email == &rcpt_to)
+            || account_info.addresses().any(|email| email == rcpt_to)
         {
             rcpt_to
         } else {

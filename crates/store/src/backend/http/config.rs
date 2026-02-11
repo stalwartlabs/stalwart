@@ -45,7 +45,7 @@ impl LookupStores {
                 id: http.namespace,
             };
 
-            match self.stores.entry(http_config.id.clone()) {
+            match self.stores.entry(http_config.id.as_str().into()) {
                 Entry::Vacant(entry) => {
                     let store = HttpStore {
                         entries: ArcSwap::from_pointee(AHashMap::new()),

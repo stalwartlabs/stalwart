@@ -57,4 +57,21 @@ impl BlobStore {
             }
         }
     }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    pub fn downgrade_store(self) -> BlobStore {
+        match self {
+            BlobStore::Sharded(_) => BlobStore::default(),
+            other => other,
+        }
+    }
+
+    #[cfg(feature = "enterprise")]
+    pub fn is_enterprise(&self) -> bool {
+        matches!(self, BlobStore::Sharded(_))
+    }
+    // SPDX-SnippetEnd
 }

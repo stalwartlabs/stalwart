@@ -92,25 +92,25 @@ impl Listeners {
                 return;
             }
 
-            if let Some(send_size) = listener.socket_send_buffer_size {
-                if let Err(err) = socket.set_send_buffer_size(send_size as u32) {
-                    bp.build_error(id, format!("Failed to set SO_SNDBUF: {err}"));
-                    return;
-                }
+            if let Some(send_size) = listener.socket_send_buffer_size
+                && let Err(err) = socket.set_send_buffer_size(send_size as u32)
+            {
+                bp.build_error(id, format!("Failed to set SO_SNDBUF: {err}"));
+                return;
             }
 
-            if let Some(recv_size) = listener.socket_receive_buffer_size {
-                if let Err(err) = socket.set_recv_buffer_size(recv_size as u32) {
-                    bp.build_error(id, format!("Failed to set SO_RCVBUF: {err}"));
-                    return;
-                }
+            if let Some(recv_size) = listener.socket_receive_buffer_size
+                && let Err(err) = socket.set_recv_buffer_size(recv_size as u32)
+            {
+                bp.build_error(id, format!("Failed to set SO_RCVBUF: {err}"));
+                return;
             }
 
-            if let Some(tos) = listener.socket_tos_v4 {
-                if let Err(err) = socket.set_tos_v4(tos as u32) {
-                    bp.build_error(id, format!("Failed to set IP_TOS: {err}"));
-                    return;
-                }
+            if let Some(tos) = listener.socket_tos_v4
+                && let Err(err) = socket.set_tos_v4(tos as u32)
+            {
+                bp.build_error(id, format!("Failed to set IP_TOS: {err}"));
+                return;
             }
 
             listeners.push(TcpListener {
@@ -118,7 +118,6 @@ impl Listeners {
                 addr,
                 ttl: listener.socket_ttl.map(|v| v as u32),
                 backlog: listener.socket_backlog.map(|v| v as u32),
-                linger: listener.socket_linger.map(|d| d.into_inner()),
                 nodelay: listener.socket_no_delay,
             });
         }

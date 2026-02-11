@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, manager::webadmin::Resource};
+use common::{Server, manager::application::Resource};
 use http_proto::*;
 use quick_xml::Reader;
 use quick_xml::events::Event;

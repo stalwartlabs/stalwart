@@ -157,7 +157,7 @@ impl TracingStore for Store {
 impl StoreTracer {
     pub fn default_events() -> impl IntoIterator<Item = EventType> {
         EventType::variants()
-            .into_iter()
+            .iter()
             .filter(|event| {
                 !event.is_raw_io()
                     && matches!(

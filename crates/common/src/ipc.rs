@@ -23,7 +23,6 @@ use std::{
     },
     time::Instant,
 };
-use store::{BlobStore, InMemoryStore, Store};
 use tokio::sync::{Semaphore, SemaphorePermit, mpsc};
 use types::type_state::{DataType, StateChange};
 use utils::map::bitmap::Bitmap;
@@ -39,13 +38,9 @@ pub enum HousekeeperEvent {
 }
 
 pub enum PurgeType {
-    Data(Store),
-    Blobs {
-        store: Store,
-        blob_store: BlobStore,
-    },
+    Data,
+    Blob,
     Lookup {
-        store: InMemoryStore,
         prefix: Option<Vec<u8>>,
     },
     Account {
@@ -120,7 +115,7 @@ pub enum CacheInvalidation {
     DavResources(u32),
     Domain(u32),
     Account(u32),
-    Group(u32),
+    DkimSignature(u32),
     Tenant(u32),
     Role(u32),
     List(u32),

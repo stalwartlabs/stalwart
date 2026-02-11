@@ -32,9 +32,6 @@ pub const FALLBACK_ADMIN_ID: u32 = u32::MAX;
 const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
 pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
 
-//pub type IdMap<V> = HashMap<u32, Arc<V>, nohash_hasher::BuildNoHashHasher<u32>>;
-//pub type NameMap<V> = AHashMap<ArcStr, Arc<V>>;
-
 #[derive(Debug, Clone, Copy)]
 pub enum EmailCache {
     Account(u32),

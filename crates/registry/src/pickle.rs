@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use utils::map::vec_map::VecMap;
+
 use crate::types::EnumType;
 use std::collections::HashMap;
 
@@ -45,8 +47,8 @@ impl Pickle for u16 {
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; 2];
-        arr.copy_from_slice(stream.read_bytes(2)?);
+        let mut arr = [0u8; std::mem::size_of::<u16>()];
+        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u16>())?);
         Some(u16::from_le_bytes(arr))
     }
 }
@@ -57,9 +59,21 @@ impl Pickle for u64 {
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; 8];
-        arr.copy_from_slice(stream.read_bytes(8)?);
+        let mut arr = [0u8; std::mem::size_of::<u64>()];
+        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u64>())?);
         Some(u64::from_le_bytes(arr))
+    }
+}
+
+impl Pickle for u32 {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.to_le_bytes());
+    }
+
+    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
+        let mut arr = [0u8; std::mem::size_of::<u32>()];
+        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u32>())?);
+        Some(u32::from_le_bytes(arr))
     }
 }
 
@@ -69,8 +83,8 @@ impl Pickle for i64 {
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; 8];
-        arr.copy_from_slice(stream.read_bytes(8)?);
+        let mut arr = [0u8; std::mem::size_of::<i64>()];
+        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<i64>())?);
         Some(i64::from_le_bytes(arr))
     }
 }
@@ -81,8 +95,8 @@ impl Pickle for f64 {
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; 8];
-        arr.copy_from_slice(stream.read_bytes(8)?);
+        let mut arr = [0u8; std::mem::size_of::<f64>()];
+        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<f64>())?);
         Some(f64::from_le_bytes(arr))
     }
 }
@@ -198,6 +212,33 @@ where
             let key = K::unpickle(stream)?;
             let value = V::unpickle(stream)?;
             map.insert(key, value);
+        }
+        Some(map)
+    }
+}
+
+impl<K, V> Pickle for VecMap<K, V>
+where
+    K: Pickle + std::hash::Hash + Eq,
+    V: Pickle,
+{
+    fn pickle(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&(self.len() as u32).to_le_bytes());
+        for (key, value) in self {
+            key.pickle(out);
+            value.pickle(out);
+        }
+    }
+
+    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
+        let mut len_arr = [0u8; 4];
+        len_arr.copy_from_slice(stream.read_bytes(4)?);
+        let len = u32::from_le_bytes(len_arr) as usize;
+        let mut map = VecMap::with_capacity(len);
+        for _ in 0..len {
+            let key = K::unpickle(stream)?;
+            let value = V::unpickle(stream)?;
+            map.append(key, value);
         }
         Some(map)
     }

@@ -69,7 +69,6 @@ impl Server {
     }
 
     pub async fn cluster_broadcast(&self, event: BroadcastEvent) {
-        let todo = "refactor event names";
         if let Some(broadcast_tx) = &self.inner.ipc.broadcast_tx.clone()
             && broadcast_tx.send(event).await.is_err()
         {

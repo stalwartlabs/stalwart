@@ -238,8 +238,4 @@ impl SQLReadReplica {
     pub fn primary_store(&self) -> &Store {
         &self.primary
     }
-
-    pub fn into_primary(self) -> Store {
-        self.primary
-    }
 }

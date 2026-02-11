@@ -7,7 +7,7 @@
 use crate::{
     Server,
     auth::{
-        AccessToken, AuthRequest, EmailCache,
+        AccessToken, AuthRequest,
         credential::{ApiKey, AppPassword},
         oauth::GrantType,
     },
@@ -288,8 +288,8 @@ impl Server {
             .and_then(|account| account.into_user())
         {
             // Find credential by credential_id
-            for credential in account.credentials.iter() {
-                if credential.credential_id as u32 == credential_id {
+            for (id, credential) in &account.credentials {
+                if *id == credential_id {
                     if !verify_secret_hash(&credential.secret, secret).await? {
                         return Err(trc::AuthEvent::Failed
                             .into_err()

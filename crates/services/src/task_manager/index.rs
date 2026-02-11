@@ -551,7 +551,7 @@ async fn build_tracing_span_document(
     };
 
     let span_id = ((account_id as u64) << 32) | document_id as u64;
-    let span = server.store().get_span(span_id).await?;
+    let span = server.tracing_store().get_span(span_id).await?;
 
     if !span.is_empty() {
         Ok(Some(build_span_document(span_id, span, index_fields)))
@@ -607,11 +607,11 @@ async fn delete_email_metadata(
                 use common::enterprise::undelete::DeletedItemType;
                 use email::message::metadata::ArchivedMetadataHeaderName;
 
-                if let Some(undelete) = server
+                if let Some(undelete_retention) = server
                     .core
                     .enterprise
                     .as_ref()
-                    .and_then(|e| e.undelete.as_ref())
+                    .and_then(|e| e.undelete_retention.as_ref())
                 {
                     use common::enterprise::undelete::DeletedItem;
                     use email::message::metadata::MESSAGE_RECEIVED_MASK;
@@ -645,7 +645,7 @@ async fn delete_email_metadata(
                         }
                     });
                     let now = now();
-                    let until = now + undelete.retention.as_secs();
+                    let until = now + undelete_retention.as_secs();
                     let blob_hash = BlobHash::from(&metadata.blob_hash);
                     batch
                         .set(

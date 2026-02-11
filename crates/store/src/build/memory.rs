@@ -41,4 +41,21 @@ impl InMemoryStore {
             }
         }
     }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    pub fn downgrade_store(self) -> InMemoryStore {
+        match self {
+            InMemoryStore::Sharded(_) => InMemoryStore::default(),
+            other => other,
+        }
+    }
+
+    #[cfg(feature = "enterprise")]
+    pub fn is_enterprise(&self) -> bool {
+        matches!(self, InMemoryStore::Sharded(_))
+    }
+    // SPDX-SnippetEnd
 }

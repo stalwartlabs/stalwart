@@ -29,7 +29,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
-use store::registry::bootstrap::Bootstrap;
+use store::{LookupStores, registry::bootstrap::Bootstrap};
 use utils::{
     cache::{Cache, CacheWithTtl},
     snowflake::SnowflakeIdGenerator,
@@ -40,7 +40,7 @@ impl Data {
         // Parse certificates
         let mut certificates = AHashMap::new();
         let mut subject_names = AHashSet::new();
-        parse_certificates(bp, &mut certificates, &mut subject_names);
+        parse_certificates(bp, &mut certificates, &mut subject_names).await;
         if subject_names.is_empty() {
             subject_names.insert("localhost".into());
         }
@@ -52,7 +52,10 @@ impl Data {
             panic!("Invalid system time, panicking to avoid data corruption");
         }
 
-        let todo = "TODO: WebAdminManager initialization";
+        let todo = "TODO: WebApplicationManager initialization";
+
+        let blocked_ips = BlockedIps::parse(bp).await;
+        let lookup_stores = LookupStores::build(bp).await;
 
         Data {
             spam_classifier: ArcSwap::from_pointee(SpamClassifier::default()),
@@ -72,19 +75,16 @@ impl Data {
             })
             .ok()
             .map(Arc::new),
-            blocked_ips: RwLock::new(BlockedIps::parse(bp).await),
+            lookup_stores: ArcSwap::from_pointee(lookup_stores.stores),
+            blocked_ips: RwLock::new(blocked_ips),
             jmap_id_gen: id_generator.clone(),
             queue_id_gen: id_generator.clone(),
             span_id_gen: id_generator,
             queue_status: true.into(),
-            webadmin: Default::default(), /*config
-                                          .value("webadmin.path")
-                                          .map(|path| WebAdminManager::new(path.into()))
-                                          .unwrap_or_default(),*/
+            applications: Default::default(),
             logos: Default::default(),
             smtp_connectors: TlsConnectors::default(),
             asn_geo_data: Default::default(),
-            lookup_stores: Default::default(),
         }
     }
 }
@@ -220,7 +220,7 @@ impl Default for Data {
             queue_id_gen: Default::default(),
             span_id_gen: Default::default(),
             queue_status: true.into(),
-            webadmin: Default::default(),
+            applications: Default::default(),
             logos: Default::default(),
             smtp_connectors: Default::default(),
             asn_geo_data: Default::default(),

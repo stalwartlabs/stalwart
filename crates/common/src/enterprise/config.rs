@@ -9,8 +9,8 @@
  */
 
 use super::{
-    AlertContent, AlertContentToken, AlertMethod, Enterprise, MetricAlert, MetricStore,
-    SpamFilterLlmConfig, TraceStore, Undelete, license::LicenseKey, llm::AiApiConfig,
+    AlertContent, AlertContentToken, AlertMethod, Enterprise, MetricAlert, SpamFilterLlmConfig,
+    license::LicenseKey, llm::AiApiConfig,
 };
 use crate::{enterprise::llm::ApiType, expr::if_block::BootstrapExprExt};
 use ahash::AHashMap;
@@ -20,13 +20,12 @@ use registry::{
         prelude::{Object, Property},
         structs::{
             self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SpamLlm,
-            TelemetryHistory,
         },
     },
     types::id::Id,
 };
 use std::sync::Arc;
-use store::{Store, registry::bootstrap::Bootstrap};
+use store::registry::bootstrap::Bootstrap;
 use trc::MetricType;
 use utils::template::Template;
 
@@ -118,34 +117,13 @@ impl Enterprise {
             _ => (),
         }
 
-        let telemetry = bp.setting_infallible::<TelemetryHistory>().await;
         let dr = bp.setting_infallible::<DataRetention>().await;
-        let todo = "map stores";
-        let trace_store = if telemetry.enable_tracing_history {
-            TraceStore {
-                retention: dr.hold_traces_for.map(|d| d.into_inner()),
-                store: Store::None,
-            }
-            .into()
-        } else {
-            None
-        };
-        let metrics_store = if telemetry.enable_metric_history {
-            MetricStore {
-                retention: dr.hold_metrics_for.map(|d| d.into_inner()),
-                store: Store::None,
-                interval: telemetry.metrics_collection_interval.into(),
-            }
-            .into()
-        } else {
-            None
-        };
 
         // Parse AI APIs
         let mut ai_apis = AHashMap::new();
         let mut ai_apis_ids = AHashMap::new();
         for api in bp.list_infallible::<AiModel>().await {
-            let id = api.id.clone();
+            let id = api.id;
             let api = api.object;
             let api = Arc::new(AiApiConfig {
                 id: api.name,
@@ -173,18 +151,17 @@ impl Enterprise {
         // Build the enterprise configuration
         let mut enterprise = Enterprise {
             license,
-            undelete: dr.hold_deleted_for.map(|retention| Undelete {
-                retention: retention.into_inner(),
-            }),
+            undelete_retention: dr.hold_deleted_for.map(|retention| retention.into_inner()),
             logo_url: enterprise.logo_url,
-            trace_store,
-            metrics_store,
             metrics_alerts: Default::default(),
             spam_filter_llm: SpamFilterLlmConfig::parse(bp, &ai_apis_ids).await,
             ai_apis,
             template_calendar_alarm: None,
             template_scheduling_email: None,
             template_scheduling_web: None,
+            trace_retention: dr.hold_traces_for.map(|d| d.into_inner()),
+            metrics_retention: dr.hold_metrics_for.map(|d| d.into_inner()),
+            metrics_interval: dr.metrics_collection_interval.into(),
         };
 
         // Parse metric alerts

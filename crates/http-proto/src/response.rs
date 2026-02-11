@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::manager::webadmin::Resource;
+use common::manager::application::Resource;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     StatusCode,

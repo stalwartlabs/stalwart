@@ -14,7 +14,7 @@ use std::{
 
 use crate::jmap::JMAPTest;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use common::manager::webadmin::Resource;
+use common::manager::application::Resource;
 use http_proto::{ToHttpResponse, request::fetch_body};
 use hyper::{body, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;

@@ -21,7 +21,7 @@ use common::{
     BuildServer, Inner, KV_ACME, Server,
     auth::{AccessToken, oauth::GrantType},
     ipc::PushEvent,
-    manager::webadmin::Resource,
+    manager::application::Resource,
     network::{SessionData, SessionManager, SessionStream},
 };
 use dav::{DavMethod, request::DavRequestHandler};
@@ -565,7 +565,7 @@ impl ParseHttp for Server {
                     }
                 }
 
-                let resource = self.inner.data.webadmin.get("logo.svg").await?;
+                let resource = self.inner.data.applications.get("logo.svg").await?;
 
                 if !resource.is_empty() {
                     return Ok(resource.into_http_response());
@@ -599,7 +599,7 @@ impl ParseHttp for Server {
                 let resource = self
                     .inner
                     .data
-                    .webadmin
+                    .applications
                     .get(path.strip_prefix('/').unwrap_or(path))
                     .await?;
 

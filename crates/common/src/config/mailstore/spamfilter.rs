@@ -316,49 +316,49 @@ impl DnsBlServer {
                 zone: bp.compile_expr(obj.id, &server.ctx_zone()),
                 tags: bp.compile_expr(obj.id, &server.ctx_tag()),
                 scope: Element::Any,
-                id: server.name,
+                id: server.description,
             }
             .into(),
             SpamDnsblServer::Url(server) if server.enable => DnsBlServer {
                 zone: bp.compile_expr(obj.id, &server.ctx_zone()),
                 tags: bp.compile_expr(obj.id, &server.ctx_tag()),
                 scope: Element::Url,
-                id: server.name,
+                id: server.description,
             }
             .into(),
             SpamDnsblServer::Domain(server) if server.enable => DnsBlServer {
                 zone: bp.compile_expr(obj.id, &server.ctx_zone()),
                 tags: bp.compile_expr(obj.id, &server.ctx_tag()),
                 scope: Element::Domain,
-                id: server.name,
+                id: server.description,
             }
             .into(),
             SpamDnsblServer::Email(server) if server.enable => DnsBlServer {
                 zone: bp.compile_expr(obj.id, &server.ctx_zone()),
                 tags: bp.compile_expr(obj.id, &server.ctx_tag()),
                 scope: Element::Email,
-                id: server.name,
+                id: server.description,
             }
             .into(),
             SpamDnsblServer::Ip(server) if server.enable => DnsBlServer {
                 zone: bp.compile_expr(obj.id, &server.ctx_zone()),
                 tags: bp.compile_expr(obj.id, &server.ctx_tag()),
                 scope: Element::Ip,
-                id: server.name,
+                id: server.description,
             }
             .into(),
             SpamDnsblServer::Header(server) if server.enable => DnsBlServer {
                 zone: bp.compile_expr(obj.id, &server.ctx_zone()),
                 tags: bp.compile_expr(obj.id, &server.ctx_tag()),
                 scope: Element::Header,
-                id: server.name,
+                id: server.description,
             }
             .into(),
             SpamDnsblServer::Body(server) if server.enable => DnsBlServer {
                 zone: bp.compile_expr(obj.id, &server.ctx_zone()),
                 tags: bp.compile_expr(obj.id, &server.ctx_tag()),
                 scope: Element::Body,
-                id: server.name,
+                id: server.description,
             }
             .into(),
             _ => None,

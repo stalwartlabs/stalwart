@@ -6,7 +6,7 @@
 
 use crate::{
     config::{build_ecdsa_pem, build_rsa_keypair},
-    manager::webadmin::Resource,
+    manager::application::Resource,
 };
 use biscuit::{
     jwa::{Algorithm, SignatureAlgorithm},

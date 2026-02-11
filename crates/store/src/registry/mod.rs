@@ -40,6 +40,7 @@ pub enum RegistryFilterOp {
 
 pub enum RegistryFilterValue {
     String(String),
-    Integer(u64),
+    U64(u64),
+    U16(u16),
     Boolean(bool),
 }

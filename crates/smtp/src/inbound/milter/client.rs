@@ -49,7 +49,7 @@ impl MilterClient<TcpStream> {
                                     | SMFIF_ADDRCPT_PAR,
                             ),
                             flags_protocol: config.flags_protocol.unwrap_or(0x42),
-                            id: config.id.clone(),
+                            id: config.id,
                         });
                     }
                     Err(err) => {

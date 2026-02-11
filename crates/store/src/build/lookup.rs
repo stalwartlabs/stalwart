@@ -8,8 +8,16 @@ use crate::{InMemoryStore, LookupStores, registry::bootstrap::Bootstrap};
 use registry::schema::structs::{LookupStore, StoreLookup};
 use std::collections::hash_map::Entry;
 
-#[allow(unreachable_patterns)]
 impl LookupStores {
+    pub async fn build(bp: &mut Bootstrap) -> Self {
+        let mut stores = LookupStores::default();
+        stores.parse_stores(bp).await;
+        stores.parse_static(bp).await;
+        stores.parse_http(bp).await;
+        stores
+    }
+
+    #[allow(unreachable_patterns)]
     pub async fn parse_stores(&mut self, bp: &mut Bootstrap) {
         for store in bp.list_infallible::<StoreLookup>().await {
             let id = store.id;
@@ -53,7 +61,7 @@ impl LookupStores {
             };
 
             match result {
-                Ok(lookup) => match self.stores.entry(store.namespace.clone()) {
+                Ok(lookup) => match self.stores.entry(store.namespace.as_str().into()) {
                     Entry::Vacant(entry) => {
                         entry.insert(lookup);
                     }
@@ -61,7 +69,7 @@ impl LookupStores {
                         bp.build_error(
                             id,
                             format!(
-                                "An lookup store with the {} namespace already exists",
+                                "A lookup store with the {} namespace already exists",
                                 store.namespace
                             ),
                         );

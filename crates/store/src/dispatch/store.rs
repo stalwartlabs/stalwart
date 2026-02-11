@@ -469,7 +469,7 @@ impl Store {
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
             Store::SQLReadReplica(store) => Box::pin(store.primary_store().create_tables()).await,
             // SPDX-SnippetEnd
             _ => Ok(()),

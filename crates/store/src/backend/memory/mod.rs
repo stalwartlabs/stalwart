@@ -56,8 +56,10 @@ impl LookupStores {
         }
 
         for (namespace, store) in lookups {
-            self.stores
-                .insert(namespace, InMemoryStore::Static(store.into()));
+            self.stores.insert(
+                namespace.into_boxed_str(),
+                InMemoryStore::Static(store.into()),
+            );
         }
     }
 }

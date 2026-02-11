@@ -9,7 +9,7 @@
 #![warn(clippy::cast_possible_wrap)]
 #![warn(clippy::cast_sign_loss)]
 
-use common::{config::server::ServerProtocol, core::BuildServer, manager::boot::BootManager};
+use common::{BuildServer, config::server::ServerProtocol, manager::boot::BootManager};
 use http::HttpSessionManager;
 use imap::core::ImapSessionManager;
 use managesieve::core::ManageSieveSessionManager;
@@ -47,8 +47,8 @@ async fn main() -> std::io::Result<()> {
     init.start_queue_manager();
 
     // Log configuration errors
-    init.config.log_errors();
-    init.config.log_warnings();
+    init.bootstrap.log_errors();
+    init.bootstrap.log_warnings();
 
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>

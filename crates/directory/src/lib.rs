@@ -7,12 +7,10 @@
 #![warn(clippy::large_futures)]
 
 use crate::backend::oidc::OpenIdDirectory;
-use ahash::AHashMap;
 use backend::{ldap::LdapDirectory, sql::SqlDirectory};
 use deadpool::managed::PoolError;
 use ldap3::LdapError;
-use registry::types::id::Id;
-use std::{fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 pub mod backend;
 pub mod core;
@@ -57,10 +55,10 @@ pub struct Group {
     pub description: Option<String>,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Directories {
     pub default_directory: Option<Arc<Directory>>,
-    pub directories: AHashMap<Id, Arc<Directory>>,
+    pub directories: HashMap<u32, Arc<Directory>, nohash_hasher::BuildNoHashHasher<u32>>,
 }
 
 impl Debug for Directory {

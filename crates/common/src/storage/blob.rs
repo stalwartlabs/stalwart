@@ -63,7 +63,7 @@ impl Server {
             self.core
                 .storage
                 .blob
-                .put_blob(hash.as_ref(), data, self.core.storage.compression)
+                .put_blob(hash.as_ref(), data, self.core.email.compression)
                 .await
                 .caused_by(trc::location!())?;
 
@@ -126,7 +126,7 @@ impl Server {
             self.core
                 .storage
                 .blob
-                .put_blob(hash.as_ref(), data, self.core.storage.compression)
+                .put_blob(hash.as_ref(), data, self.core.email.compression)
                 .await
                 .caused_by(trc::location!())?;
 

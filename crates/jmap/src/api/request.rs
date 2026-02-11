@@ -369,10 +369,9 @@ impl RequestHandler for Server {
 
                     self.sieve_script_query(req).await?.into()
                 }
-                QueryRequestMethod::Principal(req) => self
-                    .principal_query(req, access_token, session)
-                    .await?
-                    .into(),
+                QueryRequestMethod::Principal(req) => {
+                    self.principal_query(req, access_token).await?.into()
+                }
                 QueryRequestMethod::Quota(mut req) => {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;

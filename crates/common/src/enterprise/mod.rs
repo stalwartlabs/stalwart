@@ -16,7 +16,7 @@ pub mod undelete;
 
 use crate::{
     Core, Server, config::groupware::CalendarTemplateVariable, expr::Expression,
-    manager::webadmin::Resource,
+    manager::application::Resource,
 };
 use ahash::{AHashMap, AHashSet};
 use license::LicenseKey;
@@ -27,7 +27,6 @@ use registry::{
     types::id::Id,
 };
 use std::{sync::Arc, time::Duration};
-use store::Store;
 use trc::{AddContext, MetricType};
 use utils::{HttpLimitResponse, cron::SimpleCron, template::Template};
 
@@ -35,9 +34,10 @@ use utils::{HttpLimitResponse, cron::SimpleCron, template::Template};
 pub struct Enterprise {
     pub license: LicenseKey,
     pub logo_url: Option<String>,
-    pub undelete: Option<Undelete>,
-    pub trace_store: Option<TraceStore>,
-    pub metrics_store: Option<MetricStore>,
+    pub undelete_retention: Option<Duration>,
+    pub trace_retention: Option<Duration>,
+    pub metrics_retention: Option<Duration>,
+    pub metrics_interval: SimpleCron,
     pub metrics_alerts: Vec<MetricAlert>,
     pub ai_apis: AHashMap<String, Arc<AiApiConfig>>,
     pub spam_filter_llm: Option<SpamFilterLlmConfig>,
@@ -57,24 +57,6 @@ pub struct SpamFilterLlmConfig {
     pub index_explanation: Option<usize>,
     pub categories: AHashSet<String>,
     pub confidence: AHashSet<String>,
-}
-
-#[derive(Clone)]
-pub struct Undelete {
-    pub retention: Duration,
-}
-
-#[derive(Clone)]
-pub struct TraceStore {
-    pub retention: Option<Duration>,
-    pub store: Store,
-}
-
-#[derive(Clone)]
-pub struct MetricStore {
-    pub retention: Option<Duration>,
-    pub store: Store,
-    pub interval: SimpleCron,
 }
 
 #[derive(Clone, Debug)]

@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::pickle::{Pickle, PickledStream};
 use std::{
     fmt::{Display, Formatter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
-
-use crate::pickle::{Pickle, PickledStream};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IpAddrOrMask {

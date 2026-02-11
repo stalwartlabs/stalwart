@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
 use super::{UploadResponse, download::BlobDownload};
 use common::{Server, auth::AccessToken};
 use jmap_proto::{

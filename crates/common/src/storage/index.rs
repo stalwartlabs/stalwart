@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    auth::{AccessToken, AccountInfo, AccountTenantIds},
-    sharing::notification::ShareNotification,
-};
+use crate::{auth::AccountTenantIds, sharing::notification::ShareNotification};
 use rkyv::{
     option::ArchivedOption,
     primitive::{ArchivedU32, ArchivedU64},

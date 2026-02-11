@@ -8,17 +8,16 @@ use crate::{
     Directories,
     backend::{ldap::LdapDirectory, oidc::OpenIdDirectory, sql::SqlDirectory},
 };
-use ahash::AHashMap;
 use registry::schema::{
     prelude::Object,
     structs::{self, Authentication},
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use store::registry::bootstrap::Bootstrap;
 
 impl Directories {
     pub async fn build(bp: &mut Bootstrap) -> Self {
-        let mut directories = AHashMap::new();
+        let mut directories = HashMap::default();
 
         for directory in bp.list_infallible::<structs::Directory>().await {
             let id = directory.id;
@@ -32,7 +31,7 @@ impl Directories {
 
             match result {
                 Ok(directory) => {
-                    directories.insert(id, Arc::new(directory));
+                    directories.insert(id.id() as u32, Arc::new(directory));
                 }
                 Err(err) => {
                     bp.build_error(id, err);

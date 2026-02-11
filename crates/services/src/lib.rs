@@ -33,14 +33,14 @@ impl StartServices for BootManager {
         if let Err(err) = self
             .inner
             .data
-            .webadmin
+            .applications
             .unpack(&self.inner.shared_core.load().storage.blob)
             .await
         {
             trc::event!(
                 Resource(trc::ResourceEvent::Error),
                 Reason = err,
-                Details = "Failed to unpack webadmin bundle"
+                Details = "Failed to unpack application bundle"
             );
         }
 

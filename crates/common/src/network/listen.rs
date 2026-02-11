@@ -17,7 +17,6 @@ use rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
-    time::Duration,
 };
 use store::registry::bootstrap::Bootstrap;
 use tokio::{net::TcpStream, sync::watch};
@@ -55,7 +54,6 @@ impl Listener {
             let opts = SocketOpts {
                 nodelay: listener.nodelay,
                 ttl: listener.ttl,
-                linger: listener.linger,
             };
 
             // Bind socket
@@ -263,7 +261,6 @@ impl BuildSession for Arc<ServerInstance> {
 pub struct SocketOpts {
     pub nodelay: bool,
     pub ttl: Option<u32>,
-    pub linger: Option<Duration>,
 }
 
 impl SocketOpts {
@@ -283,15 +280,6 @@ impl SocketOpts {
                 Network(trc::NetworkEvent::SetOptError),
                 Reason = err.to_string(),
                 Details = "Failed to set TTL",
-            );
-        }
-        if self.linger.is_some()
-            && let Err(err) = stream.set_linger(self.linger)
-        {
-            trc::event!(
-                Network(trc::NetworkEvent::SetOptError),
-                Reason = err.to_string(),
-                Details = "Failed to set LINGER",
             );
         }
     }

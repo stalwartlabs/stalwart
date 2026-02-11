@@ -154,16 +154,12 @@ impl TelemetryApi for Server {
 
                 tracing_query.push(SearchFilter::End);
 
-                let store = &self
-                    .core
-                    .enterprise
-                    .as_ref()
-                    .and_then(|e| e.trace_store.as_ref())
-                    .ok_or_else(|| {
-                        trc::ManageEvent::NotSupported
-                            .ctx(trc::Key::Details, "No tracing store has been configured")
-                    })?
-                    .store;
+                let store = self.tracing_store();
+
+                if !store.is_active() {
+                    return Err(trc::ManageEvent::NotSupported
+                        .ctx(trc::Key::Details, "No tracing store has been configured"));
+                }
 
                 let span_ids = self
                     .search_store()
@@ -354,16 +350,11 @@ impl TelemetryApi for Server {
                 // Validate the access token
                 access_token.enforce_permission(Permission::TracingGet)?;
 
-                let store = &self
-                    .core
-                    .enterprise
-                    .as_ref()
-                    .and_then(|e| e.trace_store.as_ref())
-                    .ok_or_else(|| {
-                        trc::ManageEvent::NotSupported
-                            .ctx(trc::Key::Details, "No tracing store has been configured")
-                    })?
-                    .store;
+                let store = self.tracing_store();
+                if !store.is_active() {
+                    return Err(trc::ManageEvent::NotSupported
+                        .ctx(trc::Key::Details, "No tracing store has been configured"));
+                }
 
                 let mut events = Vec::new();
                 for span_id in id
@@ -415,6 +406,7 @@ impl TelemetryApi for Server {
             .into_http_response())
             }
             ("metrics", None, &Method::GET) => {
+                let todo = "move to registry";
                 // Validate the access token
                 access_token.enforce_permission(Permission::MetricsList)?;
 
@@ -426,25 +418,20 @@ impl TelemetryApi for Server {
                     .parse::<Timestamp>("after")
                     .map(|t| t.into_inner())
                     .unwrap_or(0);
-                let results = self
-                    .core
-                    .enterprise
-                    .as_ref()
-                    .and_then(|e| e.metrics_store.as_ref())
-                    .ok_or_else(|| {
-                        trc::ManageEvent::Error
-                            .ctx(trc::Key::Details, "No metrics store has been defined")
-                            .ctx(
-                                trc::Key::Reason,
-                                concat!(
-                                    "You need to configure a metrics ",
-                                    "store in order to use this feature."
-                                ),
-                            )
-                    })?
-                    .store
-                    .query_metrics(after, before)
-                    .await?;
+
+                if !self.metrics_store().is_active() {
+                    return Err(trc::ManageEvent::Error
+                        .ctx(trc::Key::Details, "No metrics store has been defined")
+                        .ctx(
+                            trc::Key::Reason,
+                            concat!(
+                                "You need to configure a metrics ",
+                                "store in order to use this feature."
+                            ),
+                        ));
+                }
+
+                let results = self.metrics_store().query_metrics(after, before).await?;
                 let mut metrics = Vec::with_capacity(results.len());
 
                 for metric in results {
