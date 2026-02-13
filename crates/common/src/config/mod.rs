@@ -63,6 +63,7 @@ impl Core {
                 }
                 storage.metrics = Store::None;
                 storage.metrics = Store::None;
+                storage.directories.clear();
             }
             enterprise
         };

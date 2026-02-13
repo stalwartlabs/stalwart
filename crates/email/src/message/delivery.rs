@@ -118,7 +118,7 @@ impl MailDelivery for Server {
         };
 
         for rcpt in message.recipients {
-            let account_id = match self.account_id(&rcpt.address).await {
+            let account_id = match self.account_id_from_email(&rcpt.address, false).await {
                 Ok(Some(account_id)) => account_id,
                 Ok(None) => {
                     // Something went wrong

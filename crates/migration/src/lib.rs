@@ -16,8 +16,8 @@
 use common::{DATABASE_SCHEMA_VERSION, Server, manager::boot::DEFAULT_SETTINGS};
 use std::time::Duration;
 use store::{
-    Deserialize, IterateParams, SUBSPACE_PROPERTY, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_REPORT_IN,
-    SUBSPACE_REPORT_OUT, SUBSPACE_SETTINGS, SerializeInfallible, U32_LEN, Value, ValueKey,
+    Deserialize, IterateParams, SUBSPACE_PROPERTY, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_REGISTRY,
+    SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT, SerializeInfallible, U32_LEN, Value, ValueKey,
     dispatch::DocumentSet,
     roaring::RoaringBitmap,
     write::{
@@ -207,7 +207,7 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
                 {
                     batch.set(
                         ValueClass::Any(AnyClass {
-                            subspace: SUBSPACE_SETTINGS,
+                            subspace: SUBSPACE_REGISTRY,
                             key: key.as_bytes().to_vec(),
                         }),
                         value.as_bytes().to_vec(),

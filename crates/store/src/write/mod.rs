@@ -169,9 +169,8 @@ pub enum ValueClass {
     Acl(u32),
     InMemory(InMemoryClass),
     TaskQueue(TaskQueueClass),
-    Directory(DirectoryClass),
     Blob(BlobOp),
-    Config(Vec<u8>),
+    Registry(RegistryClass),
     Queue(QueueClass),
     Report(ReportClass),
     Telemetry(TelemetryClass),
@@ -183,6 +182,8 @@ pub enum ValueClass {
     },
     DocumentId,
     ChangeId,
+    Quota,
+    TenantQuota(u32),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -265,17 +266,6 @@ pub struct AnyClass {
 pub enum InMemoryClass {
     Key(Vec<u8>),
     Counter(Vec<u8>),
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub enum DirectoryClass {
-    NameToId(Vec<u8>),
-    EmailToId(Vec<u8>),
-    Index { word: Vec<u8>, principal_id: u32 },
-    MemberOf { principal_id: u32, member_of: u32 },
-    Members { principal_id: u32, has_member: u32 },
-    Principal(u32),
-    UsedQuota(u32),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]

@@ -24,9 +24,8 @@ pub(super) const MAGIC_MARKER: u8 = 123;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(super) enum Family {
     Data = 0,
-    Directory = 1,
     Blob = 2,
-    Config = 3,
+    Registry = 3,
     Changelog = 4,
     Queue = 5,
     Report = 6,
@@ -66,9 +65,8 @@ impl Core {
         if params.families.is_empty() {
             params.families = [
                 Family::Data,
-                Family::Directory,
+                Family::Registry,
                 Family::Blob,
-                Family::Config,
                 Family::Changelog,
                 Family::Queue,
                 Family::Report,
@@ -314,9 +312,8 @@ impl Family {
                 SUBSPACE_COUNTER,
                 SUBSPACE_PROPERTY,
             ],
-            Family::Directory => &[SUBSPACE_DIRECTORY],
             Family::Blob => &[SUBSPACE_BLOBS, SUBSPACE_BLOB_EXTRA, SUBSPACE_BLOB_LINK],
-            Family::Config => &[SUBSPACE_SETTINGS],
+            Family::Registry => &[SUBSPACE_REGISTRY],
             Family::Changelog => &[SUBSPACE_LOGS],
             Family::Queue => &[SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUEUE_EVENT],
             Family::Report => &[SUBSPACE_REPORT_OUT, SUBSPACE_REPORT_IN],
@@ -328,9 +325,8 @@ impl Family {
     pub fn parse(family: &str) -> Result<Self, String> {
         match family {
             "data" => Ok(Family::Data),
-            "directory" => Ok(Family::Directory),
+            "registry" => Ok(Family::Registry),
             "blob" => Ok(Family::Blob),
-            "config" => Ok(Family::Config),
             "changelog" => Ok(Family::Changelog),
             "queue" => Ok(Family::Queue),
             "report" => Ok(Family::Report),

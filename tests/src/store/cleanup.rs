@@ -17,7 +17,6 @@ pub async fn store_destroy(store: &Store) {
 
     for subspace in [
         SUBSPACE_ACL,
-        SUBSPACE_DIRECTORY,
         SUBSPACE_TASK_QUEUE,
         SUBSPACE_INDEXES,
         SUBSPACE_BLOB_EXTRA,
@@ -27,7 +26,7 @@ pub async fn store_destroy(store: &Store) {
         SUBSPACE_IN_MEMORY_VALUE,
         SUBSPACE_COUNTER,
         SUBSPACE_PROPERTY,
-        SUBSPACE_SETTINGS,
+        SUBSPACE_REGISTRY,
         SUBSPACE_BLOBS,
         SUBSPACE_QUEUE_MESSAGE,
         SUBSPACE_QUEUE_EVENT,
@@ -250,12 +249,11 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
 
     for (subspace, with_values) in [
         (SUBSPACE_ACL, true),
-        (SUBSPACE_DIRECTORY, true),
         (SUBSPACE_TASK_QUEUE, true),
         (SUBSPACE_IN_MEMORY_VALUE, true),
         (SUBSPACE_IN_MEMORY_COUNTER, false),
         (SUBSPACE_PROPERTY, true),
-        (SUBSPACE_SETTINGS, true),
+        (SUBSPACE_REGISTRY, true),
         (SUBSPACE_QUEUE_MESSAGE, true),
         (SUBSPACE_QUEUE_EVENT, true),
         (SUBSPACE_REPORT_OUT, true),
@@ -271,7 +269,7 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
         (SUBSPACE_SEARCH_INDEX, true),
     ] {
         if (subspace == SUBSPACE_SEARCH_INDEX && store.is_pg_or_mysql())
-            || (subspace == SUBSPACE_DIRECTORY && !include_directory)
+        //|| (subspace == directory && !include_directory)
         {
             continue;
         }

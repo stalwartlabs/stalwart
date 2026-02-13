@@ -367,7 +367,11 @@ impl CalendarEventNotificationHandler for Server {
         let mut response = ScheduleResponse::default();
 
         for (email, attendee) in attendees {
-            if let Some(account_id) = self.account_id(&email).await.caused_by(trc::location!())? {
+            if let Some(account_id) = self
+                .account_id_from_email(&email, false)
+                .await
+                .caused_by(trc::location!())?
+            {
                 let resources = self
                     .fetch_dav_resources(
                         access_token.account_id(),

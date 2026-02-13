@@ -12,12 +12,13 @@ use trc::SmtpEvent;
 impl<T: SessionStream> Session<T> {
     pub async fn handle_vrfy(&mut self, address: Cow<'_, str>) -> Result<(), ()> {
         if self.params.can_vrfy {
-            match self.server.rcpt_resolve(&address.to_lowercase()).await {
+            match self
+                .server
+                .rcpt_resolve(&address.to_lowercase(), self.data.session_id)
+                .await
+            {
                 Ok(
-                    RcptResolution::Accept
-                    | RcptResolution::Forward(_)
-                    | RcptResolution::Rewrite(_)
-                    | RcptResolution::Expand(_),
+                    RcptResolution::Accept | RcptResolution::Rewrite(_) | RcptResolution::Expand(_),
                 ) => {
                     trc::event!(
                         Smtp(SmtpEvent::Vrfy),
@@ -61,7 +62,11 @@ impl<T: SessionStream> Session<T> {
 
     pub async fn handle_expn(&mut self, address: Cow<'_, str>) -> Result<(), ()> {
         if self.params.can_expn {
-            match self.server.rcpt_resolve(&address.to_lowercase()).await {
+            match self
+                .server
+                .rcpt_resolve(&address.to_lowercase(), self.data.session_id)
+                .await
+            {
                 Ok(RcptResolution::Expand(addresses)) => {
                     let mut result = String::with_capacity(32);
                     for (pos, value) in addresses.iter().enumerate() {

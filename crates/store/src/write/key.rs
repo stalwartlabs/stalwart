@@ -5,21 +5,26 @@
  */
 
 use super::{
-    AnyKey, BlobOp, DirectoryClass, InMemoryClass, QueueClass, ReportClass, ReportEvent,
-    TaskQueueClass, TelemetryClass, ValueClass,
+    AnyKey, BlobOp, InMemoryClass, QueueClass, ReportClass, ReportEvent, TaskQueueClass,
+    TelemetryClass, ValueClass,
 };
 use crate::{
     Deserialize, IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL, SUBSPACE_BLOB_EXTRA,
-    SUBSPACE_BLOB_LINK, SUBSPACE_COUNTER, SUBSPACE_DIRECTORY, SUBSPACE_IN_MEMORY_COUNTER,
-    SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY,
-    SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REPORT_IN,
-    SUBSPACE_REPORT_OUT, SUBSPACE_SEARCH_INDEX, SUBSPACE_SETTINGS, SUBSPACE_TASK_QUEUE,
-    SUBSPACE_TELEMETRY_METRIC, SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey,
-    WITH_SUBSPACE,
-    write::{BlobLink, IndexPropertyClass, SearchIndex, SearchIndexId, SearchIndexType},
+    SUBSPACE_BLOB_LINK, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_IN_MEMORY_VALUE,
+    SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY, SUBSPACE_QUEUE_EVENT,
+    SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REGISTRY, SUBSPACE_REPORT_IN,
+    SUBSPACE_REPORT_OUT, SUBSPACE_SEARCH_INDEX, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
+    SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
+    write::{
+        BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexId, SearchIndexType,
+    },
 };
 use std::convert::TryInto;
-use types::{blob_hash::BLOB_HASH_LEN, collection::SyncCollection, field::Field};
+use types::{
+    blob_hash::BLOB_HASH_LEN,
+    collection::{Collection, SyncCollection},
+    field::{Field, MailboxField},
+};
 use utils::codec::leb128::Leb128_;
 
 pub struct KeySerializer {
@@ -159,10 +164,6 @@ impl<T: AsRef<ValueClass>> ValueKey<T> {
             document_id,
             ..self
         }
-    }
-
-    pub fn is_counter(&self) -> bool {
-        self.class.as_ref().is_counter(self.collection)
     }
 }
 
@@ -368,32 +369,13 @@ impl ValueClass {
                     .write(account_id)
                     .write::<&[u8]>(hash.as_ref()),
             },
-            ValueClass::Config(key) => serializer.write(key.as_slice()),
             ValueClass::InMemory(lookup) => match lookup {
                 InMemoryClass::Key(key) => serializer.write(key.as_slice()),
                 InMemoryClass::Counter(key) => serializer.write(key.as_slice()),
             },
-            ValueClass::Directory(directory) => match directory {
-                DirectoryClass::NameToId(name) => serializer.write(0u8).write(name.as_slice()),
-                DirectoryClass::EmailToId(email) => serializer.write(1u8).write(email.as_slice()),
-                DirectoryClass::Principal(uid) => serializer.write(2u8).write_leb128(*uid),
-                DirectoryClass::UsedQuota(uid) => serializer.write(4u8).write_leb128(*uid),
-                DirectoryClass::MemberOf {
-                    principal_id,
-                    member_of,
-                } => serializer.write(5u8).write(*principal_id).write(*member_of),
-                DirectoryClass::Members {
-                    principal_id,
-                    has_member,
-                } => serializer
-                    .write(6u8)
-                    .write(*principal_id)
-                    .write(*has_member),
-                DirectoryClass::Index { word, principal_id } => serializer
-                    .write(7u8)
-                    .write(word.as_slice())
-                    .write(*principal_id),
-            },
+            ValueClass::Registry(registry) => {
+                todo!()
+            }
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(queue_id) => serializer.write(*queue_id),
                 QueueClass::MessageEvent(event) => serializer
@@ -453,6 +435,8 @@ impl ValueClass {
             },
             ValueClass::DocumentId => serializer.write(account_id).write(collection),
             ValueClass::ChangeId => serializer.write(account_id),
+            ValueClass::Quota => serializer.write(account_id).write(u8::MAX),
+            ValueClass::TenantQuota(tenant_id) => serializer.write(*tenant_id).write(u8::MAX - 1),
             ValueClass::ShareNotification {
                 notification_id,
                 notify_account_id,
@@ -577,14 +561,11 @@ impl ValueClass {
                 IndexPropertyClass::Integer { .. } => U32_LEN * 2 + 3 + U64_LEN,
             },
             ValueClass::Acl(_) => U32_LEN * 3 + 2,
-            ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v))
-            | ValueClass::Config(v) => v.len(),
-            ValueClass::Directory(d) => match d {
-                DirectoryClass::NameToId(v) | DirectoryClass::EmailToId(v) => v.len(),
-                DirectoryClass::Principal(_) | DirectoryClass::UsedQuota(_) => U32_LEN,
-                DirectoryClass::Members { .. } | DirectoryClass::MemberOf { .. } => U32_LEN * 2,
-                DirectoryClass::Index { word, .. } => word.len() + U32_LEN,
-            },
+            ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v)) => v.len(),
+            ValueClass::Registry(registry) => {
+                let todo = "implement";
+                todo!()
+            }
             ValueClass::Blob(op) => match op {
                 BlobOp::Commit { .. } => BLOB_HASH_LEN,
                 BlobOp::Link { to, .. } => {
@@ -629,7 +610,7 @@ impl ValueClass {
                 TelemetryClass::Span { .. } => U64_LEN + 1,
                 TelemetryClass::Metric { .. } => U64_LEN * 2 + 1,
             },
-            ValueClass::DocumentId => U32_LEN + 1,
+            ValueClass::DocumentId | ValueClass::Quota | ValueClass::TenantQuota(_) => U32_LEN + 1,
             ValueClass::ChangeId => U32_LEN,
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
             ValueClass::SearchIndex(v) => match &v.typ {
@@ -645,9 +626,12 @@ impl ValueClass {
     }
 
     pub fn subspace(&self, collection: u8) -> u8 {
+        const MAILBOX_COLLECTION: u8 = Collection::Mailbox as u8;
+        const MAILBOX_COUNTER_FIELD: u8 = MailboxField::UidCounter as u8;
+
         match self {
             ValueClass::Property(field) => {
-                if *field == 84 && collection == 1 {
+                if (collection == MAILBOX_COLLECTION && *field == MAILBOX_COUNTER_FIELD) {
                     SUBSPACE_COUNTER
                 } else {
                     SUBSPACE_PROPERTY
@@ -662,14 +646,10 @@ impl ValueClass {
                     SUBSPACE_BLOB_EXTRA
                 }
             },
-            ValueClass::Config(_) => SUBSPACE_SETTINGS,
+            ValueClass::Registry(_) => SUBSPACE_REGISTRY,
             ValueClass::InMemory(lookup) => match lookup {
                 InMemoryClass::Key(_) => SUBSPACE_IN_MEMORY_VALUE,
                 InMemoryClass::Counter(_) => SUBSPACE_IN_MEMORY_COUNTER,
-            },
-            ValueClass::Directory(directory) => match directory {
-                DirectoryClass::UsedQuota(_) => SUBSPACE_QUOTA,
-                _ => SUBSPACE_DIRECTORY,
             },
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(_) => SUBSPACE_QUEUE_MESSAGE,
@@ -685,22 +665,13 @@ impl ValueClass {
                 TelemetryClass::Span { .. } => SUBSPACE_TELEMETRY_SPAN,
                 TelemetryClass::Metric { .. } => SUBSPACE_TELEMETRY_METRIC,
             },
-            ValueClass::DocumentId | ValueClass::ChangeId => SUBSPACE_COUNTER,
+            ValueClass::DocumentId
+            | ValueClass::ChangeId
+            | ValueClass::Quota
+            | ValueClass::TenantQuota(_) => SUBSPACE_COUNTER,
             ValueClass::ShareNotification { .. } => SUBSPACE_LOGS,
             ValueClass::SearchIndex(_) => SUBSPACE_SEARCH_INDEX,
             ValueClass::Any(any) => any.subspace,
-        }
-    }
-
-    pub fn is_counter(&self, collection: u8) -> bool {
-        match self {
-            ValueClass::Directory(DirectoryClass::UsedQuota(_))
-            | ValueClass::InMemory(InMemoryClass::Counter(_))
-            | ValueClass::Queue(QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_))
-            | ValueClass::DocumentId
-            | ValueClass::ChangeId => true,
-            ValueClass::Property(84) if collection == 1 => true, // TODO: Find a more elegant way to do this
-            _ => false,
         }
     }
 }
@@ -716,20 +687,20 @@ impl From<ValueClass> for ValueKey<ValueClass> {
     }
 }
 
-impl From<DirectoryClass> for ValueKey<ValueClass> {
-    fn from(value: DirectoryClass) -> Self {
+impl From<RegistryClass> for ValueKey<ValueClass> {
+    fn from(value: RegistryClass) -> Self {
         ValueKey {
             account_id: 0,
             collection: 0,
             document_id: 0,
-            class: ValueClass::Directory(value),
+            class: ValueClass::Registry(value),
         }
     }
 }
 
-impl From<DirectoryClass> for ValueClass {
-    fn from(value: DirectoryClass) -> Self {
-        ValueClass::Directory(value)
+impl From<RegistryClass> for ValueClass {
+    fn from(value: RegistryClass) -> Self {
+        ValueClass::Registry(value)
     }
 }
 

@@ -32,7 +32,7 @@ impl Server {
         let object = match change {
             RegistryChange::Insert(id) => {
                 if matches!(id.object(), Object::BlockedIp) {
-                    if let Some(ip) = bootstrap.get_infallible::<BlockedIp>(id).await
+                    if let Some(ip) = bootstrap.get_infallible::<BlockedIp>(id.id()).await
                         && ip.expires_at.is_none_or(|ip| ip.timestamp() > now() as i64)
                     {
                         let mut ips = self.inner.data.blocked_ips.write();

@@ -7,13 +7,13 @@
 use crate::{
     Server,
     auth::{
-        AccessToken, AuthRequest,
+        AccessToken, AuthRequest, DomainCache,
         credential::{ApiKey, AppPassword},
         oauth::GrantType,
     },
 };
 use directory::{
-    Credentials, Directory,
+    Credentials,
     core::secret::{verify_mfa_secret_hash, verify_secret_hash},
 };
 use registry::schema::{
@@ -74,7 +74,9 @@ impl Server {
                     return if verify_secret_hash(fallback_hash, secret.as_bytes()).await? {
                         if username.is_master() {
                             let address = username.account().address();
-                            if let Some(account_id) = self.account_id(address).await? {
+                            if let Some(account_id) =
+                                self.account_id_from_email(address, false).await?
+                            {
                                 trc::event!(
                                     Auth(trc::AuthEvent::Success),
                                     AccountName = address.to_string(),
@@ -108,12 +110,20 @@ impl Server {
                     };
                 }
 
+                // Obtain domain
                 let auth_as = username.auth_as();
+                let auth_as_address = auth_as.address();
+                let auth_as_local = auth_as.local();
+                let auth_as_domain = auth_as.domain();
+                let domain = self
+                    .domain_or_default(auth_as_address, auth_as_domain)
+                    .await?;
 
                 // Authenticate app passwords
                 if let Some(app_pass) = AppPassword::parse(secret) {
-                    let account_name = auth_as.address();
-                    return if let Some(account_id) = self.account_id(account_name).await? {
+                    return if let Some(account_id) =
+                        self.account_id_from_parts(auth_as_local, domain.id).await?
+                    {
                         self.validate_credential(
                             account_id,
                             app_pass.credential_id,
@@ -124,24 +134,26 @@ impl Server {
                     } else {
                         Err(trc::AuthEvent::Failed
                             .into_err()
-                            .ctx(trc::Key::AccountName, account_name.to_string())
+                            .ctx(trc::Key::AccountName, auth_as_address.to_string())
                             .reason("App password authentication failed: account not found"))
                     };
                 }
 
                 // Obtain external directory, if any
-                let address = auth_as.address();
-                let directory = self
-                    .directory_for_domain(address, auth_as.domain())
-                    .await
-                    .caused_by(trc::location!())?;
+                let directory = domain
+                    .id_directory
+                    .and_then(|domain_id| self.core.storage.directories.get(&domain_id))
+                    .or_else(|| self.get_default_directory());
 
                 let mut is_alias_login = false;
                 let token = if let Some(directory) = directory {
                     let directory_account = directory.authenticate(&req.credentials).await?;
-                    is_alias_login = directory_account.email != address;
-                    self.synchronize_directory(directory_account).await
-                } else if let Some(account_id) = self.account_id(address).await? {
+
+                    is_alias_login = directory_account.email != auth_as_address;
+                    self.build_directory_token(directory_account).await
+                } else if let Some(account_id) =
+                    self.account_id_from_parts(auth_as_local, domain.id).await?
+                {
                     if let Some(account) = self
                         .registry()
                         .object::<structs::Account>(account_id)
@@ -155,12 +167,12 @@ impl Server {
                         )
                         .await?
                         {
-                            is_alias_login = account.name != address;
+                            is_alias_login = account.name != auth_as_address;
                             self.access_token(account_id).await.map(AccessToken::new)
                         } else {
                             Err(trc::AuthEvent::Failed
                                 .into_err()
-                                .ctx(trc::Key::AccountName, address.to_string())
+                                .ctx(trc::Key::AccountName, auth_as_address.to_string())
                                 .ctx(trc::Key::AccountId, account_id)
                                 .ctx(trc::Key::SpanId, req.session_id)
                                 .reason("Authentication failed"))
@@ -168,14 +180,14 @@ impl Server {
                     } else {
                         Err(trc::AuthEvent::Error
                             .into_err()
-                            .ctx(trc::Key::AccountName, address.to_string())
+                            .ctx(trc::Key::AccountName, auth_as_address.to_string())
                             .ctx(trc::Key::AccountId, account_id)
                             .reason("Account not found in registry"))
                     }
                 } else {
                     Err(trc::AuthEvent::Failed
                         .into_err()
-                        .ctx(trc::Key::AccountName, address.to_string())
+                        .ctx(trc::Key::AccountName, auth_as_address.to_string())
                         .reason("Account not found"))
                 }?;
 
@@ -183,7 +195,7 @@ impl Server {
                 if is_alias_login && !token.has_permission(Permission::AuthenticateAlias) {
                     return Err(trc::AuthEvent::Failed
                         .into_err()
-                        .ctx(trc::Key::AccountName, address.to_string())
+                        .ctx(trc::Key::AccountName, auth_as_address.to_string())
                         .ctx(trc::Key::AccountId, token.account_id())
                         .ctx(trc::Key::SpanId, req.session_id)
                         .reason("Authenticated using an email alias but account does not have AuthenticateAlias permission"));
@@ -197,7 +209,7 @@ impl Server {
                     ])?;
                     let address = username.account().address();
                     let master_address = username.account().address();
-                    if let Some(account_id) = self.account_id(address).await? {
+                    if let Some(account_id) = self.account_id_from_email(address, false).await? {
                         trc::event!(
                             Auth(trc::AuthEvent::Success),
                             AccountName = address.to_string(),
@@ -217,7 +229,7 @@ impl Server {
                 } else {
                     trc::event!(
                         Auth(trc::AuthEvent::Success),
-                        AccountName = address.to_string(),
+                        AccountName = auth_as_address.to_string(),
                         AccountId = token.account_id(),
                         SpanId = req.session_id,
                     );
@@ -241,10 +253,15 @@ impl Server {
                 // Obtain external directory, if any
                 let directory = if let Some(username) = username.as_deref().map(UsernameParts::new)
                 {
-                    let auth_as = username.auth_as();
-                    self.directory_for_domain(auth_as.address(), auth_as.domain())
-                        .await
-                        .caused_by(trc::location!())?
+                    if let Some(domain_name) = username.auth_as().domain() {
+                        self.domain(domain_name)
+                            .await
+                            .caused_by(trc::location!())?
+                            .and_then(|domain| self.core.storage.directories.get(&domain.id))
+                            .or_else(|| self.get_default_directory())
+                    } else {
+                        self.get_default_directory()
+                    }
                 } else {
                     self.get_default_directory()
                 };
@@ -253,7 +270,7 @@ impl Server {
                 {
                     match directory.authenticate(&req.credentials).await {
                         Ok(result) => {
-                            return self.synchronize_directory(result).await;
+                            return self.build_directory_token(result).await;
                         }
                         Err(err) => {
                             if !err.matches(trc::EventType::Auth(trc::AuthEvent::Failed)) {
@@ -350,55 +367,35 @@ impl Server {
         }
     }
 
-    async fn directory_for_domain(
+    async fn domain_or_default(
         &self,
         address: &str,
         domain_name: Option<&str>,
-    ) -> trc::Result<Option<&Arc<Directory>>> {
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
-        if self.core.is_enterprise_edition() {
-            if let Some(domain_name) = domain_name {
-                if let Some(domain) = self.domain(domain_name).await? {
-                    if domain.id_directory != u32::MAX {
-                        if let Some(directory) =
-                            self.core.storage.directories.get(&domain.id_directory)
-                        {
-                            return Ok(Some(directory));
-                        } else {
-                            trc::event!(
-                                Auth(trc::AuthEvent::Warning),
-                                AccountName = address.to_string(),
-                                Domain = domain_name.to_string(),
-                                Id = domain.id_directory,
-                                Reason = "Directory not found for domain",
-                            );
-                        }
-                    }
-                } else {
-                    trc::event!(
-                        Auth(trc::AuthEvent::Warning),
-                        AccountName = address.to_string(),
-                        Reason = "Domain not found",
-                    );
-                }
+    ) -> trc::Result<Arc<DomainCache>> {
+        if let Some(domain_name) = domain_name {
+            if let Some(domain) = self.domain(domain_name).await? {
+                Ok(domain)
             } else {
-                trc::event!(
-                    Auth(trc::AuthEvent::Warning),
-                    AccountName = address.to_string(),
-                    Reason = "No domain in username",
-                );
+                Err(trc::AuthEvent::Failed
+                    .into_err()
+                    .ctx(trc::Key::AccountName, address.to_string())
+                    .reason("Domain not found"))
             }
+        } else {
+            trc::event!(
+                Auth(trc::AuthEvent::Warning),
+                AccountName = address.to_string(),
+                Reason = "No domain in username",
+            );
+            self.domain_by_id(self.core.email.default_domain_id).await
         }
-        // SPDX-SnippetEnd
-
-        Ok(self.get_default_directory())
     }
 
-    async fn synchronize_directory(&self, account: directory::Account) -> trc::Result<AccessToken> {
-        todo!()
+    async fn build_directory_token(&self, account: directory::Account) -> trc::Result<AccessToken> {
+        let account = self.synchronize_account(account).await?;
+        self.access_token_from_account(account.id, account.account)
+            .await
+            .map(AccessToken::new)
     }
 }
 
@@ -451,6 +448,12 @@ impl UsernameParts {
 impl Username {
     pub fn address(&self) -> &str {
         self.name.as_str()
+    }
+
+    pub fn local(&self) -> &str {
+        self.name
+            .get(..self.domain_start.saturating_sub(1))
+            .unwrap_or_default()
     }
 
     pub fn domain(&self) -> Option<&str> {

@@ -11,6 +11,7 @@ use utils::cache::CacheItemWeight;
 
 pub mod directory;
 pub mod invalidate;
+pub mod principals;
 pub mod reload;
 
 impl MailboxCache {

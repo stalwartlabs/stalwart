@@ -29,6 +29,7 @@ pub mod asn;
 pub mod dns;
 pub mod limiter;
 pub mod listen;
+pub mod masked;
 pub mod mta;
 pub mod security;
 pub mod stream;
@@ -39,7 +40,6 @@ pub enum RcptResolution {
     Accept,
     Expand(Arc<[ArcStr]>),
     Rewrite(String),
-    Forward(String),
     #[default]
     UnknownRecipient,
     UnknownDomain,

@@ -87,7 +87,6 @@ pub const U32_LEN: usize = std::mem::size_of::<u32>();
 pub const U16_LEN: usize = std::mem::size_of::<u16>();
 
 pub const SUBSPACE_ACL: u8 = b'a';
-pub const SUBSPACE_DIRECTORY: u8 = b'd';
 pub const SUBSPACE_TASK_QUEUE: u8 = b'f';
 pub const SUBSPACE_INDEXES: u8 = b'i';
 pub const SUBSPACE_BLOB_EXTRA: u8 = b'j';
@@ -98,7 +97,7 @@ pub const SUBSPACE_COUNTER: u8 = b'n';
 pub const SUBSPACE_IN_MEMORY_VALUE: u8 = b'm';
 pub const SUBSPACE_IN_MEMORY_COUNTER: u8 = b'y';
 pub const SUBSPACE_PROPERTY: u8 = b'p';
-pub const SUBSPACE_SETTINGS: u8 = b's';
+pub const SUBSPACE_REGISTRY: u8 = b's';
 pub const SUBSPACE_QUEUE_MESSAGE: u8 = b'e';
 pub const SUBSPACE_QUEUE_EVENT: u8 = b'q';
 pub const SUBSPACE_QUOTA: u8 = b'u';
@@ -114,6 +113,7 @@ pub const LEGACY_SUBSPACE_BITMAP_TAG: u8 = b'c';
 pub const LEGACY_SUBSPACE_BITMAP_TEXT: u8 = b'v';
 pub const LEGACY_SUBSPACE_FTS_INDEX: u8 = b'g';
 pub const LEGACY_SUBSPACE_TELEMETRY_INDEX: u8 = b'w';
+pub const LEGACY_SUBSPACE_DIRECTORY: u8 = b'd';
 
 #[derive(Clone)]
 pub struct IterateParams<T: Key> {

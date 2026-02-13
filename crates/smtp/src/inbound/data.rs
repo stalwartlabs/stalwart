@@ -236,7 +236,7 @@ impl<T: SessionStream> Session<T> {
         }
 
         // Verify DMARC
-        let is_report = self.is_report();
+        let is_report = !self.is_authenticated() && self.is_report();
         let (dmarc_result, dmarc_policy) = match &self.data.spf_mail_from {
             Some(spf_output) if dmarc.verify() => {
                 let time = Instant::now();

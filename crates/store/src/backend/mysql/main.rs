@@ -86,13 +86,12 @@ impl MysqlStore {
 
         for table in [
             SUBSPACE_ACL,
-            SUBSPACE_DIRECTORY,
             SUBSPACE_TASK_QUEUE,
             SUBSPACE_BLOB_EXTRA,
             SUBSPACE_BLOB_LINK,
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,
-            SUBSPACE_SETTINGS,
+            SUBSPACE_REGISTRY,
             SUBSPACE_QUEUE_MESSAGE,
             SUBSPACE_QUEUE_EVENT,
             SUBSPACE_REPORT_OUT,

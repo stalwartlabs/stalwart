@@ -6,7 +6,7 @@
 
 #![warn(clippy::large_futures)]
 
-use crate::auth::AccessTokenInner;
+use crate::auth::{AccessTokenInner, EmailAddress};
 use crate::network::asn::AsnGeoLookupData;
 use crate::{
     auth::{AccountCache, DomainCache, EmailCache, MailingListCache, RoleCache, TenantCache},
@@ -175,7 +175,7 @@ pub struct Caches {
     pub events: Cache<u32, Arc<DavResources>>,
     pub scheduling: Cache<u32, Arc<DavResources>>,
 
-    pub emails: Cache<ArcStr, EmailCache>,
+    pub emails: Cache<EmailAddress, EmailCache>,
     pub emails_negative: CacheWithTtl<ArcStr, ()>,
     pub domain_names: Cache<ArcStr, u32>,
     pub domain_names_negative: CacheWithTtl<ArcStr, ()>,

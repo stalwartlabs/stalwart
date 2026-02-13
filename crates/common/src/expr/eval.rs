@@ -224,8 +224,7 @@ impl<'x, V: ResolveVariable> EvalContext<'x, V, Expression, &mut Vec<CompactStri
                         stack.push(self.core.core.network.server_name.as_str().into())
                     }
                     SystemVariable::Domain => {
-                        let todo = "implement domain retrieval";
-                        //stack.push(self.core.core.network.report_domain.as_str().into())
+                        stack.push(self.core.core.email.default_domain_name.as_str().into())
                     }
                     SystemVariable::NodeId => stack.push(self.core.core.network.node_id.into()),
                     SystemVariable::Metric(variable) => {

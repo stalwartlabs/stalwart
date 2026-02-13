@@ -11,11 +11,16 @@ use crate::{
 };
 use arcstr::ArcStr;
 use directory::Credentials;
+use quick_cache::Equivalent;
 use registry::{
     schema::enums::{Locale, Permission},
     types::EnumType,
 };
-use std::{net::IpAddr, sync::Arc};
+use std::{
+    hash::{Hash, Hasher},
+    net::IpAddr,
+    sync::Arc,
+};
 use tinyvec::TinyVec;
 use trc::ipc::bitset::Bitset;
 use types::collection::Collection;
@@ -32,6 +37,18 @@ pub const FALLBACK_ADMIN_ID: u32 = u32::MAX;
 const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
 pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct EmailAddress {
+    local_part: Box<str>,
+    id_domain: u32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct EmailAddressRef<'x> {
+    local_part: &'x str,
+    id_domain: u32,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum EmailCache {
     Account(u32),
@@ -40,20 +57,17 @@ pub enum EmailCache {
 
 #[derive(Debug, Clone)]
 pub struct DomainCache {
-    pub name: ArcStr,
+    pub names: Box<[ArcStr]>,
     pub id: u32,
-    pub id_directory: u32,
+    pub id_directory: Option<u32>,
     pub id_tenant: u32,
     pub catch_all: Option<ArcStr>,
     pub sub_addressing_custom: Option<Box<IfBlock>>,
     pub flags: u8,
 }
 
-pub const DOMAIN_FLAG_REMOTE: u8 = 1;
-pub const DOMAIN_FLAG_SYSTEM: u8 = 1 << 1;
-pub const DOMAIN_FLAG_SUB_ADDRESSING: u8 = 1 << 2;
-pub const DOMAIN_FLAG_WILDCARD: u8 = 1 << 3;
-pub const DOMAIN_FLAG_ALIAS_LOGIN: u8 = 1 << 4;
+pub const DOMAIN_FLAG_RELAY: u8 = 1;
+pub const DOMAIN_FLAG_SUB_ADDRESSING: u8 = 1 << 1;
 
 #[derive(Debug, Clone)]
 pub struct AccountCache {
@@ -153,6 +167,12 @@ impl CacheItemWeight for AccessTokenInner {
     }
 }
 
+impl CacheItemWeight for EmailAddress {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<EmailAddress>() as u64 + self.local_part.len() as u64
+    }
+}
+
 impl CacheItemWeight for EmailCache {
     fn weight(&self) -> u64 {
         std::mem::size_of::<EmailCache>() as u64
@@ -162,12 +182,32 @@ impl CacheItemWeight for EmailCache {
 impl CacheItemWeight for DomainCache {
     fn weight(&self) -> u64 {
         std::mem::size_of::<DomainCache>() as u64
-            + self.name.len() as u64
+            + self.names.iter().map(|s| s.len() as u64).sum::<u64>()
             + self.catch_all.as_ref().map_or(0, |s| s.len() as u64)
             + self
                 .sub_addressing_custom
                 .as_ref()
                 .map_or(0, |s| s.weight())
+    }
+}
+
+impl Equivalent<EmailAddress> for EmailAddressRef<'_> {
+    fn equivalent(&self, key: &EmailAddress) -> bool {
+        self.local_part == &*key.local_part && self.id_domain == key.id_domain
+    }
+}
+
+impl Hash for EmailAddress {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.local_part.as_ref().hash(state);
+        self.id_domain.hash(state);
+    }
+}
+
+impl Hash for EmailAddressRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.local_part.hash(state);
+        self.id_domain.hash(state);
     }
 }
 
@@ -215,6 +255,15 @@ impl BuildAccessToken for Arc<AccessTokenInner> {
         AccessToken {
             scope_idx: 0,
             inner: self,
+        }
+    }
+}
+
+impl<'x> EmailAddressRef<'x> {
+    pub fn new(local_part: &'x str, id_domain: u32) -> Self {
+        Self {
+            local_part,
+            id_domain,
         }
     }
 }

@@ -43,7 +43,7 @@ impl Bootstrap {
     pub async fn setting<T: ObjectType>(&mut self) -> trc::Result<T> {
         let object_id = T::object().singleton();
 
-        if let Some(setting) = self.registry.id::<T>(object_id).await? {
+        if let Some(setting) = self.registry.object::<T>(object_id.id()).await? {
             let mut errors = Vec::new();
             if setting.validate(&mut errors) {
                 return Ok(setting);
@@ -70,43 +70,37 @@ impl Bootstrap {
         }
     }
 
-    pub async fn get_infallible<T: ObjectType>(&mut self, id: Id) -> Option<T> {
-        if id.object() != T::object() {
-            match self.registry.id::<T>(id).await {
-                Ok(Some(setting)) => {
-                    let mut errors = Vec::new();
-                    if setting.validate(&mut errors) {
-                        Some(setting)
-                    } else {
-                        self.errors.push(Error::Validation {
-                            object_id: id,
-                            errors,
-                        });
-                        None
-                    }
-                }
-                Ok(None) => {
-                    self.errors.push(Error::NotFound { object_id: id });
-                    None
-                }
-                Err(err) => {
-                    if !self.has_fatal_errors {
-                        self.errors.push(Error::Internal {
-                            object_id: Some(id),
-                            error: err,
-                        });
-                        self.has_fatal_errors = true;
-                    }
+    pub async fn get_infallible<T: ObjectType>(&mut self, id: impl Into<u64>) -> Option<T> {
+        let id = id.into();
+        match self.registry.object::<T>(id).await {
+            Ok(Some(setting)) => {
+                let mut errors = Vec::new();
+                if setting.validate(&mut errors) {
+                    Some(setting)
+                } else {
+                    self.errors.push(Error::Validation {
+                        object_id: Id::new(T::object(), id),
+                        errors,
+                    });
                     None
                 }
             }
-        } else {
-            self.errors.push(Error::TypeMismatch {
-                object_id: id,
-                object_type: id.object(),
-                expected_type: T::object(),
-            });
-            None
+            Ok(None) => {
+                self.errors.push(Error::NotFound {
+                    object_id: Id::new(T::object(), id),
+                });
+                None
+            }
+            Err(err) => {
+                if !self.has_fatal_errors {
+                    self.errors.push(Error::Internal {
+                        object_id: Some(Id::new(T::object(), id)),
+                        error: err,
+                    });
+                    self.has_fatal_errors = true;
+                }
+                None
+            }
         }
     }
 

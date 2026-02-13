@@ -6,7 +6,7 @@
 
 use crate::{
     schema::prelude::{Object, Property},
-    types::ipmask::IpAddrOrMask,
+    types::{id::Id, ipmask::IpAddrOrMask},
 };
 use ahash::AHashSet;
 use std::borrow::Cow;
@@ -16,7 +16,7 @@ pub enum IndexType {
     Unique,
     Search,
     TextSearch,
-    GlobalUnique,
+    Global,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -26,6 +26,7 @@ pub enum IndexValue<'x> {
     U64(u64),
     I64(i64),
     U16(u16),
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -33,6 +34,7 @@ pub struct IndexKey<'x> {
     pub property: Property,
     pub typ: IndexType,
     pub value: IndexValue<'x>,
+    pub value_composite: IndexValue<'x>,
 }
 
 #[derive(Debug, Default)]
@@ -54,6 +56,7 @@ impl<'x> IndexBuilder<'x> {
             property: Property::Type,
             typ: IndexType::Search,
             value: IndexValue::U16(typ),
+            value_composite: IndexValue::None,
         });
     }
 
@@ -62,6 +65,7 @@ impl<'x> IndexBuilder<'x> {
             property,
             typ: IndexType::Unique,
             value: value.into(),
+            value_composite: IndexValue::None,
         });
     }
 
@@ -70,6 +74,7 @@ impl<'x> IndexBuilder<'x> {
             property,
             typ: IndexType::Search,
             value: value.into(),
+            value_composite: IndexValue::None,
         });
     }
 
@@ -86,22 +91,39 @@ impl<'x> IndexBuilder<'x> {
                     property,
                     typ: IndexType::TextSearch,
                     value: IndexValue::Text(Cow::Borrowed(word)),
+                    value_composite: IndexValue::None,
                 });
             } else {
                 self.keys.insert(IndexKey {
                     property,
                     typ: IndexType::TextSearch,
                     value: IndexValue::Text(Cow::Owned(word.to_lowercase())),
+                    value_composite: IndexValue::Text(Cow::Borrowed(word)),
                 });
             }
         }
     }
 
-    pub fn global_unique(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
+    pub fn global(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
         self.keys.insert(IndexKey {
             property,
-            typ: IndexType::GlobalUnique,
+            typ: IndexType::Global,
             value: value.into(),
+            value_composite: IndexValue::None,
+        });
+    }
+
+    pub fn composite(
+        &mut self,
+        property: Property,
+        value: impl Into<IndexValue<'x>>,
+        composite: impl Into<IndexValue<'x>>,
+    ) {
+        self.keys.insert(IndexKey {
+            property,
+            typ: IndexType::Global,
+            value: value.into(),
+            value_composite: composite.into(),
         });
     }
 }
@@ -164,5 +186,11 @@ impl<'x> From<&'x str> for IndexValue<'x> {
 impl<'x> From<&'x String> for IndexValue<'x> {
     fn from(value: &'x String) -> Self {
         IndexValue::Text(Cow::Borrowed(value.as_str()))
+    }
+}
+
+impl<'x> From<&'x Id> for IndexValue<'x> {
+    fn from(value: &'x Id) -> Self {
+        IndexValue::U64(value.id())
     }
 }

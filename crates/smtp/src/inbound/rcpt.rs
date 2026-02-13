@@ -194,9 +194,13 @@ impl<T: SessionStream> Session<T> {
         let rcpt = self.data.rcpt_to.last().unwrap();
         let mut rcpt_members = None;
 
-        match self.server.rcpt_resolve(&rcpt.address_lcase).await {
+        match self
+            .server
+            .rcpt_resolve(&rcpt.address_lcase, self.data.session_id)
+            .await
+        {
             Ok(RcptResolution::Accept) => {}
-            Ok(RcptResolution::Forward(address) | RcptResolution::Rewrite(address)) => {
+            Ok(RcptResolution::Rewrite(address)) => {
                 let orig_addr = self.data.rcpt_to.pop().unwrap();
                 let mut new_addr = SessionAddress::new(address);
 

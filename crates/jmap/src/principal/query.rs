@@ -63,7 +63,7 @@ impl PrincipalQuery for Server {
             match cond {
                 Filter::Property(cond) => match cond {
                     PrincipalFilter::Name(name) | PrincipalFilter::Email(name) => {
-                        if let Some(account_id) = self.account_id(&name).await? {
+                        if let Some(account_id) = self.account_id_from_email(&name, false).await? {
                             filters.push(SearchFilter::is_in_set(
                                 RoaringBitmap::from_sorted_iter([account_id]).unwrap(),
                             ));

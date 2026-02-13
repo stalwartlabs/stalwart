@@ -12,12 +12,9 @@ use dns_update::{
 };
 use hickory_proto::rr::dnssec::KeyPair;
 use rcgen::generate_simple_self_signed;
-use registry::{
-    schema::{
-        enums,
-        structs::{self, Certificate, DnsServer},
-    },
-    types::id::Id,
+use registry::schema::{
+    enums,
+    structs::{self, Certificate, DnsServer},
 };
 use ring::signature::{EcdsaKeyPair, Ed25519KeyPair};
 use rustls::{
@@ -33,7 +30,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
-use store::registry::{RegistryObject, bootstrap::Bootstrap};
+use store::registry::bootstrap::Bootstrap;
 use trc::AddContext;
 use x509_parser::{
     certificate::X509Certificate,
@@ -45,14 +42,14 @@ pub static TLS13_VERSION: &[&SupportedProtocolVersion] = &[&TLS13];
 pub static TLS12_VERSION: &[&SupportedProtocolVersion] = &[&TLS12];
 
 impl Server {
-    pub async fn build_acme_provider(&self, id: Id) -> trc::Result<AcmeProvider> {
+    pub async fn build_acme_provider(&self, id: u64) -> trc::Result<AcmeProvider> {
         if let Some(server) = self
             .registry()
-            .id::<structs::AcmeProvider>(id)
+            .object::<structs::AcmeProvider>(id)
             .await
             .caused_by(trc::location!())?
         {
-            Ok(AcmeProvider::new(RegistryObject { id, object: server }))
+            Ok(AcmeProvider::new(server))
         } else {
             trc::bail!(
                 trc::AcmeEvent::Error
@@ -63,10 +60,10 @@ impl Server {
         }
     }
 
-    pub async fn build_dns_updater(&self, id: Id) -> trc::Result<DnsUpdater> {
+    pub async fn build_dns_updater(&self, id: u64) -> trc::Result<DnsUpdater> {
         let Some(server) = self
             .registry()
-            .id::<DnsServer>(id)
+            .object::<DnsServer>(id)
             .await
             .caused_by(trc::location!())?
         else {

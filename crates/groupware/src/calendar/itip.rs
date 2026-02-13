@@ -141,7 +141,7 @@ impl ItipIngest for Server {
         }
 
         // Obtain changedBy
-        let changed_by = if let Some(id) = self.account_id(sender).await? {
+        let changed_by = if let Some(id) = self.account_id_from_email(sender, false).await? {
             ChangedBy::PrincipalId(id)
         } else {
             ChangedBy::CalendarAddress(sender.into())

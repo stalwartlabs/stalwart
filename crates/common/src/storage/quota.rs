@@ -12,7 +12,7 @@ use registry::{
     schema::enums::{StorageQuota, TenantStorageQuota},
     types::EnumType,
 };
-use store::write::DirectoryClass;
+use store::{ValueKey, write::ValueClass};
 use trc::AddContext;
 
 impl Server {
@@ -20,17 +20,21 @@ impl Server {
         self.core
             .storage
             .data
-            .get_counter(DirectoryClass::UsedQuota(account_id))
+            .get_counter(ValueKey {
+                account_id,
+                collection: 0,
+                document_id: 0,
+                class: ValueClass::Quota,
+            })
             .await
             .add_context(|err| err.caused_by(trc::location!()).account_id(account_id))
     }
 
     pub async fn get_used_quota_tenant(&self, tenant_id: u32) -> trc::Result<i64> {
-        let todo = "use correct counter";
         self.core
             .storage
             .data
-            .get_counter(DirectoryClass::UsedQuota(tenant_id))
+            .get_counter(ValueKey::from(ValueClass::TenantQuota(tenant_id)))
             .await
             .add_context(|err| err.caused_by(trc::location!()))
     }

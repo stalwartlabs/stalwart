@@ -47,8 +47,8 @@ pub enum EmailField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MailboxField {
-    UidCounter,
-    Archive,
+    UidCounter = 84,
+    Archive = ARCHIVE_FIELD,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,13 +76,13 @@ pub enum IdentityField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PrincipalField {
-    Archive,
-    EncryptionKeys,
-    ParticipantIdentities,
-    DefaultCalendarId,
-    DefaultAddressBookId,
-    ActiveScriptId,
-    PushSubscriptions,
+    Archive = ARCHIVE_FIELD,
+    EncryptionKeys = 46,
+    ParticipantIdentities = 45,
+    DefaultCalendarId = 47,
+    DefaultAddressBookId = 48,
+    ActiveScriptId = 49,
+    PushSubscriptions = 44,
 }
 
 impl From<ContactField> for u8 {

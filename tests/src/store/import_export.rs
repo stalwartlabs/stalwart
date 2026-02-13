@@ -254,7 +254,6 @@ impl Snapshot {
 
         for (subspace, with_values) in [
             (SUBSPACE_ACL, true),
-            (SUBSPACE_DIRECTORY, true),
             (SUBSPACE_TASK_QUEUE, true),
             (SUBSPACE_INDEXES, false),
             (SUBSPACE_BLOB_EXTRA, true),
@@ -265,7 +264,7 @@ impl Snapshot {
             (SUBSPACE_IN_MEMORY_COUNTER, !is_sql),
             (SUBSPACE_IN_MEMORY_VALUE, true),
             (SUBSPACE_PROPERTY, true),
-            (SUBSPACE_SETTINGS, true),
+            (SUBSPACE_REGISTRY, true),
             (SUBSPACE_QUEUE_MESSAGE, true),
             (SUBSPACE_QUEUE_EVENT, true),
             (SUBSPACE_QUOTA, !is_sql),

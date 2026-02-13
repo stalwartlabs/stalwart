@@ -91,7 +91,7 @@ impl DavUriResource for Server {
                     .map_err(|_| DavError::Code(error_status))?
             } else {
                 let account = decode_path_element(account);
-                self.account_id(&account)
+                self.account_id_from_email(&account, false)
                     .await
                     .caused_by(trc::location!())?
                     .ok_or(DavError::Code(error_status))?

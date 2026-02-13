@@ -12,8 +12,9 @@ use registry::{
             CompressionAlgo, SearchCalendarField, SearchContactField, SearchEmailField,
             StorageQuota,
         },
+        prelude::Object,
         structs::{
-            AddressBook, Calendar, DataRetention, Email, Jmap, OidcProvider, Search,
+            AddressBook, Authentication, Calendar, DataRetention, Domain, Email, Jmap, Search,
             SieveUserInterpreter,
         },
     },
@@ -33,6 +34,8 @@ use crate::storage::ObjectQuota;
 #[derive(Clone)]
 pub struct EmailConfig {
     pub default_language: Language,
+    pub default_domain_id: u32,
+    pub default_domain_name: String,
 
     pub mailbox_max_depth: usize,
     pub mailbox_name_max_len: usize,
@@ -82,7 +85,24 @@ impl EmailConfig {
         let jmap = bp.setting_infallible::<Jmap>().await;
         let calendar = bp.setting_infallible::<Calendar>().await;
         let address_book = bp.setting_infallible::<AddressBook>().await;
-        let oidc = bp.setting_infallible::<OidcProvider>().await;
+        let auth = bp.setting_infallible::<Authentication>().await;
+
+        // Obtain default domain name
+        let default_domain_name = if let Some(default_domain) = bp
+            .get_infallible::<Domain>(auth.default_domain_id.id())
+            .await
+        {
+            default_domain.name
+        } else {
+            bp.build_error(
+                Object::Authentication.singleton(),
+                format!(
+                    "Default domain with ID {} not found",
+                    auth.default_domain_id
+                ),
+            );
+            "localhost.local".to_string()
+        };
 
         // Parse default object quotas
         let todo = "make sure all are configurable";
@@ -93,7 +113,7 @@ impl EmailConfig {
             (StorageQuota::MaxEmailIdentities, email.max_identities),
             (StorageQuota::MaxEmailSubmissions, email.max_submissions),
             (StorageQuota::MaxMaskedAddresses, email.max_masked_addresses),
-            (StorageQuota::MaxAppPasswords, oidc.max_app_passwords),
+            (StorageQuota::MaxAppPasswords, auth.max_app_passwords),
             (StorageQuota::MaxPushSubscriptions, jmap.max_subscriptions),
             (StorageQuota::MaxCalendars, calendar.max_calendars),
             (StorageQuota::MaxCalendarEvents, calendar.max_events),
@@ -255,6 +275,8 @@ impl EmailConfig {
             data_purge_frequency: dr.data_cleanup_schedule.into(),
             blob_purge_frequency: dr.blob_cleanup_schedule.into(),
             compression: email.compression_algorithm,
+            default_domain_id: auth.default_domain_id.id() as u32,
+            default_domain_name,
         }
     }
 }

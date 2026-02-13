@@ -1111,6 +1111,7 @@ dependencies = [
  "proxy-header",
  "psl",
  "pwhash",
+ "quick_cache",
  "rcgen 0.12.1",
  "regex",
  "registry",

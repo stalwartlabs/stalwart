@@ -39,23 +39,24 @@ impl Directories {
             }
         }
 
-        let default_directory = match bp.setting_infallible::<Authentication>().await {
-            Authentication::Internal => Ok(None),
-            Authentication::Ldap(directory) => LdapDirectory::open(directory).map(Some),
-            Authentication::Sql(directory) => SqlDirectory::open(directory, &bp.data_store)
-                .await
-                .map(Some),
-            Authentication::Oidc(directory) => OpenIdDirectory::open(directory).map(Some),
+        let auth = bp.setting_infallible::<Authentication>().await;
+        let default_directory = if let Some(directory_id) = auth.directory_id {
+            match directories.get(&(directory_id.id() as u32)) {
+                Some(default_directory) => default_directory.clone().into(),
+                None => {
+                    bp.build_error(
+                        Object::Authentication.singleton(),
+                        format!("Default directory with ID {} not found", directory_id),
+                    );
+                    None
+                }
+            }
+        } else {
+            None
         };
 
         Directories {
-            default_directory: match default_directory {
-                Ok(default_directory) => default_directory.map(Arc::new),
-                Err(err) => {
-                    bp.build_error(Object::Authentication.singleton(), err);
-                    None
-                }
-            },
+            default_directory,
             directories,
         }
     }

@@ -168,8 +168,7 @@ impl FdbStore {
                             ValueOp::Clear => {
                                 if matches!(
                                     key[0],
-                                    SUBSPACE_DIRECTORY
-                                        | SUBSPACE_TASK_QUEUE
+                                    SUBSPACE_TASK_QUEUE
                                         | SUBSPACE_IN_MEMORY_VALUE
                                         | SUBSPACE_PROPERTY
                                         | SUBSPACE_QUEUE_MESSAGE

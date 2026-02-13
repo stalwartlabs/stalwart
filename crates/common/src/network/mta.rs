@@ -6,6 +6,7 @@
 
 use crate::{
     Server,
+    auth::{DOMAIN_FLAG_RELAY, DOMAIN_FLAG_SUB_ADDRESSING, EmailAddressRef, EmailCache},
     config::{
         mailstore::spamfilter::SpamClassifier,
         smtp::{
@@ -16,25 +17,154 @@ use crate::{
             },
         },
     },
+    expr::{Variable, functions::ResolveVariable},
     manager::SPAM_CLASSIFIER_KEY,
-    network::RcptResolution,
+    network::{RcptResolution, masked::MaskedAddress},
 };
+use directory::Recipient;
 use mail_auth::IpLookupStrategy;
+use registry::schema::{enums::ExpressionVariable, structs::MaskedEmail};
 use sieve::Sieve;
 use std::{
+    borrow::Cow,
     sync::{Arc, LazyLock},
     time::Duration,
 };
 use store::{
     Deserialize, IterateParams, ValueKey,
-    write::{AlignedBytes, Archive, QueueClass, ValueClass},
+    write::{AlignedBytes, Archive, QueueClass, ValueClass, now},
 };
 use trc::{AddContext, SpamEvent};
+use types::id::Id;
 
 impl Server {
-    pub async fn rcpt_resolve(&self, address: &str) -> trc::Result<RcptResolution> {
-        let todo = "TODO: RcptResolution implementation";
-        todo!()
+    pub async fn rcpt_resolve(&self, rcpt: &str, session_id: u64) -> trc::Result<RcptResolution> {
+        // Obtain domain settings
+        let Some((local_part, domain_part)) = rcpt.rsplit_once('@') else {
+            return Ok(RcptResolution::UnknownDomain);
+        };
+        let Some(domain) = self.domain(domain_part).await? else {
+            return Ok(RcptResolution::UnknownDomain);
+        };
+
+        // Sub-addressing resolution
+        let local_part_orig = local_part;
+        let mut local_part = Cow::Borrowed(local_part);
+        if domain.flags & DOMAIN_FLAG_SUB_ADDRESSING != 0 {
+            if let Some(sub_addressing) = &domain.sub_addressing_custom {
+                // Custom sub-addressing resolution
+                if let Some(result) = self
+                    .eval_if::<String, _>(sub_addressing, &Address(local_part.as_ref()), session_id)
+                    .await
+                {
+                    local_part = Cow::Owned(result);
+                }
+            } else if let Some((new_local_part, _)) = rcpt.split_once('+') {
+                local_part = Cow::Borrowed(new_local_part);
+            }
+        }
+
+        // Masked email resolution
+        if let Cow::Borrowed(addr) = &local_part
+            && let Some(masked) = MaskedAddress::parse(addr)
+        {
+            return if !masked.has_expired
+                && let Some(masked_entry) = self
+                    .registry()
+                    .object::<MaskedEmail>(
+                        Id::from_parts(masked.account_id, masked.account_id).id(),
+                    )
+                    .await
+                    .caused_by(trc::location!())?
+                && masked_entry.enabled
+                && masked_entry
+                    .expires_at
+                    .is_none_or(|at| at.timestamp() > now() as i64)
+                && let Some(account) = self
+                    .try_account(masked.account_id)
+                    .await
+                    .caused_by(trc::location!())?
+                && account.addresses.iter().any(|addr| {
+                    addr.strip_suffix(domain_part)
+                        .is_some_and(|a| a.ends_with('@'))
+                }) {
+                Ok(RcptResolution::Rewrite(account.name().to_string()))
+            } else {
+                Ok(RcptResolution::UnknownRecipient)
+            };
+        }
+
+        // Try resolving address from registry
+        if let Some(address_type) = self
+            .rcpt_id_from_parts(local_part.as_ref(), domain.id)
+            .await?
+        {
+            match address_type {
+                EmailCache::Account(id) => {
+                    if self.try_account(id).await?.is_some() {
+                        return if local_part.as_ref() == local_part_orig {
+                            Ok(RcptResolution::Accept)
+                        } else {
+                            Ok(RcptResolution::Rewrite(format!(
+                                "{local_part}@{domain_part}"
+                            )))
+                        };
+                    } else {
+                        self.inner
+                            .cache
+                            .emails
+                            .remove(&EmailAddressRef::new(local_part.as_ref(), domain.id));
+                    }
+                }
+                EmailCache::MailingList(id) => {
+                    if let Some(list) = self.try_list(id).await? {
+                        return Ok(RcptResolution::Expand(list.recipients.clone()));
+                    } else {
+                        self.inner
+                            .cache
+                            .emails
+                            .remove(&EmailAddressRef::new(local_part.as_ref(), domain.id));
+                    }
+                }
+            }
+        }
+
+        // Obtain external directory, if configured
+        if let Some(directory) = domain
+            .id_directory
+            .and_then(|id| self.core.storage.directories.get(&id))
+            .or_else(|| self.get_default_directory())
+            .filter(|directory| directory.can_lookup_recipients())
+        {
+            let address = if local_part.as_ref() == local_part_orig {
+                Cow::Borrowed(rcpt)
+            } else {
+                Cow::Owned(format!("{local_part}@{domain_part}"))
+            };
+            match directory.recipient(address.as_ref()).await? {
+                Recipient::Account(account) => {
+                    self.synchronize_account(account).await?;
+                    return Ok(RcptResolution::Accept);
+                }
+                Recipient::Group(group) => {
+                    self.synchronize_group(group).await?;
+                    return Ok(RcptResolution::Accept);
+                }
+                Recipient::Invalid => {}
+            }
+        }
+
+        // Catch-all resolution
+        if let Some(catch_all) = &domain.catch_all {
+            return Ok(RcptResolution::Rewrite(catch_all.to_string()));
+        }
+
+        // Verify whether domain relaying is enabled
+        if domain.flags & DOMAIN_FLAG_RELAY != 0 {
+            Ok(RcptResolution::Accept)
+        } else {
+            Ok(RcptResolution::UnknownRecipient)
+        }
     }
 
     pub async fn get_dkim_signers(
@@ -264,5 +394,17 @@ impl Server {
             .await
             .caused_by(trc::location!())
             .map(|_| total)
+    }
+}
+
+struct Address<'x>(&'x str);
+
+impl ResolveVariable for Address<'_> {
+    fn resolve_variable(&'_ self, _: ExpressionVariable) -> crate::expr::Variable<'_> {
+        Variable::from(self.0)
+    }
+
+    fn resolve_global(&self, _: &str) -> Variable<'_> {
+        Variable::Integer(0)
     }
 }

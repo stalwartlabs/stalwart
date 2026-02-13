@@ -14,8 +14,8 @@ use std::{borrow::Cow, fmt::Debug};
 use store::{
     Serialize, SerializeInfallible,
     write::{
-        Archive, Archiver, BatchBuilder, BlobLink, BlobOp, DirectoryClass, IntoOperations, Params,
-        SearchIndex, TaskEpoch, TaskQueueClass, ValueClass,
+        Archive, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations, Params, SearchIndex,
+        TaskEpoch, TaskQueueClass, ValueClass,
     },
 };
 use types::{
@@ -499,12 +499,10 @@ fn build_index(
         IndexValue::Quota { used } => {
             let value = if set { used as i64 } else { -(used as i64) };
 
-            if let Some(account_id) = batch.last_account_id() {
-                batch.add(DirectoryClass::UsedQuota(account_id), value);
-            }
+            batch.add(ValueClass::Quota, value);
 
             if let Some(tenant_id) = tenant_id {
-                batch.add(DirectoryClass::UsedQuota(tenant_id), value);
+                batch.add(ValueClass::TenantQuota(tenant_id), value);
             }
         }
         IndexValue::LogItem {
@@ -722,12 +720,10 @@ fn merge_index(
         }
         (IndexValue::Quota { used: old_used }, IndexValue::Quota { used: new_used }) => {
             let value = new_used as i64 - old_used as i64;
-            if let Some(account_id) = batch.last_account_id() {
-                batch.add(DirectoryClass::UsedQuota(account_id), value);
-            }
+            batch.add(ValueClass::Quota, value);
 
             if let Some(tenant_id) = tenant_id {
-                batch.add(DirectoryClass::UsedQuota(tenant_id), value);
+                batch.add(ValueClass::TenantQuota(tenant_id), value);
             }
         }
         (

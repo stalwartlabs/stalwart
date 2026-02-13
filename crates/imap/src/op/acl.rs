@@ -275,7 +275,7 @@ impl<T: SessionStream> Session<T> {
             // Obtain principal id
             let acl_account_id = data
                 .server
-                .account_id(arguments.identifier.as_ref().unwrap())
+                .account_id_from_email(arguments.identifier.as_ref().unwrap(), false)
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .ok_or_else(|| {
