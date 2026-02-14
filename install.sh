@@ -304,7 +304,7 @@ EOF
 
 create_service_macos() {
     local _dir="$1"
-    cat <<EOF | sed "s|__PATH__|$_dir|g" > /Library/LaunchAgents/stalwart.mail.plist
+    cat <<EOF | sed "s|__PATH__|$_dir|g" > /Library/LaunchDaemons/stalwart.mail.plist
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN"
     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -326,9 +326,7 @@ create_service_macos() {
     </dict>
 </plist>
 EOF
-    launchctl load /Library/LaunchAgents/stalwart.mail.plist
-    launchctl enable system/stalwart.mail
-    launchctl start system/stalwart.mail
+    launchctl bootstrap system/ /Library/LaunchDaemons/stalwart.mail.plist
 }
 
 
