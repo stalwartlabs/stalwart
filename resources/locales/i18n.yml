@@ -14,6 +14,8 @@ calendar.alarm_subject_prefix:
   el: Ειδοποίηση
   sv: Notifikation
   pl: Powiadomienie
+  ru: Уведомление
+  kk: Хабарлама
 
 calendar.alarm_header:
   en: You have an upcoming event
@@ -28,6 +30,8 @@ calendar.alarm_header:
   el: Έχετε μία επερχόμενη εκδήλωση
   sv: Du har en kommande händelse
   pl: Masz nadchodzące wydarzenie
+  ru: У вас предстоящее событие
+  kk: Сізде алдағы оқиға бар
 
 calendar.alarm_footer:
   en: You are receiving this email because you have enabled calendar notifications. To stop receiving these emails, login to the self-service portal and disable event notifications.
@@ -42,6 +46,8 @@ calendar.alarm_footer:
   el: Λαμβάνεται αυτό το e-mail γιατί έχετε ένεργοποιήσει τις ειδοποιήσεις ημερολογίου. Για διακοπή της λήψης τους, μπείτε στη πύλη αυτοεξυπηρέτησης και απενεργοποιείστε τις ειδοποιήσεις εκδηλώσεων.
   sv: Du får det här mejlet för att du har slagit på kalendernotifikationer. För att sluta få dessa mejl, stäng av inställningen i självbetjäningsportalen.
   pl: Otrzymujesz tę wiadomość, ponieważ włączyłeś powiadomienia kalendarza. Aby przestać je otrzymywać, zaloguj się do portalu samoobsługowego i wyłącz powiadomienia o wydarzeniach.
+  ru: Вы получаете это письмо, потому что включили уведомления календаря. Чтобы прекратить получать эти письма, войдите в портал самообслуживания и отключите уведомления о событиях.
+  kk: Сіз бұл хатты күнтізбе хабарландыруларын қосқандықтан аласыз. Бұл хаттарды алуды тоқтату үшін өзіне-өзі қызмет көрсету порталына кіріп, оқиға хабарландыруларын өшіріңіз.
 
 calendar.alarm_open:
   en: View Event
@@ -56,6 +62,8 @@ calendar.alarm_open:
   el: Προβολή Εκδήλωσης
   sv: Visa händelse
   pl: Wyświetl wydarzenie
+  ru: Просмотреть событие
+  kk: Оқиғаны қарау
 
 calendar.organizer:
   en: Organizer
@@ -70,6 +78,8 @@ calendar.organizer:
   el: Διοργανωτής
   sv: Arrangör
   pl: Organizator
+  ru: Организатор
+  kk: Ұйымдастырушы
 
 calendar.attendees:
   en: Guests
@@ -84,6 +94,8 @@ calendar.attendees:
   el: Συμμετέχωντες
   sv: Gäster
   pl: Goście
+  ru: Гости
+  kk: Қонақтар
 
 calendar.start:
   en: Start
@@ -98,6 +110,8 @@ calendar.start:
   el: Έναρξη
   sv: Start
   pl: Start
+  ru: Начало
+  kk: Басталуы
 
 calendar.end:
   en: End
@@ -112,6 +126,8 @@ calendar.end:
   el: Λήξη
   sv: Slut
   pl: Koniec
+  ru: Конец
+  kk: Аяқталуы
 
 calendar.location:
   en: Location
@@ -126,6 +142,8 @@ calendar.location:
   el: Τοποθεσία
   sv: Plats
   pl: Lokalizacja
+  ru: Место
+  kk: Орны
 
 calendar.date_template:
   # English: "Sun May 25, 2025 9am"
@@ -152,6 +170,10 @@ calendar.date_template:
   sv: "%a %-d %b %Y kl. %-H"
   # Polish: "nie 25 maj 2025 09:00" (weekday day month year hour)
   pl: "%a %d %b %Y %H:%M"
+  # Russian: "вс 25 мая 2025 9:00" (weekday day month year hour)
+  ru: "%a %-d %b %Y %-H:%M"
+  # Kazakh: "жс 25 мам 2025 9:00" (weekday day month year hour)
+  kk: "%a %-d %b %Y %-H:%M"
 
 calendar.date_template_long:
   # English: "Sunday May 25, 2025 9am"
@@ -174,12 +196,14 @@ calendar.date_template_long:
   ca: "%A %-d %B %Y %-Hh"
   # Greek: "Κυριακή 25 Μαΐου 2025 9πμ" (day month year hour)
   el: "%A %-d %B %Y %-H η ώρα"
-
   # Svenska: "söndag 25 maj 2025 kl. 9" (weekday date month year hour)
   sv: "%A %-d. %B %Y kl. %-H"
-
   # Polish: "niedziela 25 maj 2025 09:00" (weekday day month year hour)
   pl: "%A %d %b %Y %H:%M"
+  # Russian: "воскресенье 25 мая 2025 9:00" (weekday day month year hour)
+  ru: "%A %-d %B %Y %-H:%M"
+  # Kazakh: "жексенбі 25 мамыр 2025 9:00" (weekday day month year hour)
+  kk: "%A %-d %B %Y %-H:%M"
 
 calendar.invitation:
   en: Invitation
@@ -194,6 +218,8 @@ calendar.invitation:
   el: Πρόσκληση
   sv: Inbjudan
   pl: Zaproszenie
+  ru: Приглашение
+  kk: Шақыру
 
 calendar.updated_invitation:
   en: Updated invitation
@@ -208,6 +234,8 @@ calendar.updated_invitation:
   el: Ενημερωμένη πρόσκληση
   sv: Uppdaterad inbjudan
   pl: Zaktualizowane zaproszenie
+  ru: Обновлённое приглашение
+  kk: Жаңартылған шақыру
 
 calendar.event_updated:
   en: This event has been updated
@@ -222,6 +250,8 @@ calendar.event_updated:
   el: Αυτή η εκδήλωση ενημερώθηκε
   sv: Den här händelsen har blivit uppdaterad
   pl: To wydarzenie zostało zaktualizowane
+  ru: Это событие было обновлено
+  kk: Бұл оқиға жаңартылды
 
 calendar.cancelled:
   en: Cancelled
@@ -236,6 +266,8 @@ calendar.cancelled:
   el: Ακυρώθηκε
   sv: Inställd
   pl: Anulowane
+  ru: Отменено
+  kk: Болдырылмады
 
 calendar.event_cancelled:
   en: This event has been canceled
@@ -250,6 +282,8 @@ calendar.event_cancelled:
   el: Αυτή η εκδήλωση ακυρώθηκε
   sv: Den här händelsen har blivit inställd
   pl: To wydarzenie zostało anulowane
+  ru: Это событие было отменено
+  kk: Бұл оқиға болдырылмады
 
 calendar.accepted:
   en: Accepted
@@ -264,6 +298,8 @@ calendar.accepted:
   el: Αποδοχή
   sv: Accepterat
   pl: Zaakceptowano
+  ru: Принято
+  kk: Қабылданды
 
 calendar.participant_accepted:
   en: Participant $name accepted the invitation
@@ -278,6 +314,8 @@ calendar.participant_accepted:
   el: Το συμμετέχων πρόσωπο $name αποδέχτηκε τη πρόσκληση
   sv: Deltagaren $name har tackat ja till inbjudan
   pl: Uczestnik $name zaakceptował zaproszenie
+  ru: Участник $name принял приглашение
+  kk: Қатысушы $name шақыруды қабылдады
 
 calendar.declined:
   en: Declined
@@ -292,6 +330,8 @@ calendar.declined:
   el: Απορρίφθηκε
   sv: Avböjt
   pl: Odrzucono
+  ru: Отклонено
+  kk: Қабылданбады
 
 calendar.participant_declined:
   en: Participant $name declined the invitation
@@ -306,6 +346,8 @@ calendar.participant_declined:
   el: Το συμμετέχων πρόσωπο $name απέρριψε τη πρόσκληση
   sv: Deltagaren $name har tackat nej till inbjudan
   pl: Uczestnik $name odrzucił zaproszenie
+  ru: Участник $name отклонил приглашение
+  kk: Қатысушы $name шақырудан бас тартты
 
 calendar.tentative:
   en: Tentative
@@ -320,6 +362,8 @@ calendar.tentative:
   el: Μη δεσμευτικά
   sv: Möjligen
   pl: Wstępnie
+  ru: Предварительно
+  kk: Алдын ала
 
 calendar.participant_tentative:
   en: Participant $name tentatively accepted the invitation
@@ -334,6 +378,8 @@ calendar.participant_tentative:
   el: Το συμμετέχων πρόσωπο $name αποδέχτηκε μη δεσμευτικά τη πρόσκληση
   sv: Deltagaren $name har preliminärt tackat ja till inbjudan
   pl: Uczestnik $name wstępnie zaakceptował zaproszenie
+  ru: Участник $name предварительно принял приглашение
+  kk: Қатысушы $name шақыруды алдын ала қабылдады
 
 calendar.delegated:
   en: Delegated
@@ -348,6 +394,8 @@ calendar.delegated:
   el: Ανατέθηκε
   sv: Delegerat
   pl: Delegowane
+  ru: Делегировано
+  kk: Тапсырылды
 
 calendar.participant_delegated:
   en: Participant $name delegated the invitation
@@ -362,6 +410,8 @@ calendar.participant_delegated:
   el: Το συμμετέχων πρόσωπο $name ανέθεσε τη πρόσκληση
   sv: Deltagaren $name delegerade inbjudan
   pl: Uczestnik $name przekazał zaproszenie
+  ru: Участник $name делегировал приглашение
+  kk: Қатысушы $name шақыруды тапсырды
 
 calendar.reply:
   en: Reply
@@ -376,6 +426,8 @@ calendar.reply:
   el: Απάντηση
   sv: Svar
   pl: Odpowiedź
+  ru: Ответ
+  kk: Жауап
 
 calendar.participant_reply:
   en: Participant $name replied to the invitation
@@ -390,6 +442,8 @@ calendar.participant_reply:
   el: Το συμμετέχων πρόσωπο $name απάντησε στη πρόσκληση
   sv: Deltagaren $name har svarat på inbjudan
   pl: Uczestnik $name odpowiedział na zaproszenie
+  ru: Участник $name ответил на приглашение
+  kk: Қатысушы $name шақыруға жауап берді
 
 calendar.summary:
   en: Summary
@@ -404,6 +458,8 @@ calendar.summary:
   el: Περίληψη
   sv: Sammanfattning
   pl: Podsumowanie
+  ru: Краткое описание
+  kk: Қысқаша сипаттама
 
 calendar.description:
   en: Description
@@ -418,6 +474,8 @@ calendar.description:
   el: Περιγραφή
   sv: Beskrivning
   pl: Opis
+  ru: Описание
+  kk: Сипаттама
 
 calendar.when:
   en: When
@@ -432,6 +490,8 @@ calendar.when:
   el: Πότε
   sv: När
   pl: Kiedy
+  ru: Когда
+  kk: Қашан
 
 calendar.changed:
   en: Changed
@@ -446,6 +506,8 @@ calendar.changed:
   el: Μεταβλήθηκε
   sv: Ändrat
   pl: Zmieniono
+  ru: Изменено
+  kk: Өзгертілді
 
 calendar.reply_as:
   en: Reply as $name for this event series
@@ -460,6 +522,8 @@ calendar.reply_as:
   el: Απάντηση ως $name για αυτή τη σειρά εκδηλώσεων
   sv: Svara som $name på den här inbjudan
   pl: Odpowiedz jako $name dla tej serii wydarzeń
+  ru: Ответить как $name для этой серии событий
+  kk: Осы оқиғалар сериясы үшін $name ретінде жауап беру
 
 calendar.yes:
   en: Yes
@@ -474,6 +538,8 @@ calendar.yes:
   el: Ναι
   sv: Ja
   pl: Tak
+  ru: Да
+  kk: Иә
 
 calendar.no:
   en: No
@@ -488,6 +554,8 @@ calendar.no:
   el: Όχι
   sv: Nej
   pl: Nie
+  ru: Нет
+  kk: Жоқ
 
 calendar.maybe:
   en: Maybe
@@ -502,6 +570,8 @@ calendar.maybe:
   el: Ίσως
   sv: Kanske
   pl: Może
+  ru: Возможно
+  kk: Мүмкін
 
 calendar.imip_footer_1:
   en: You're receiving this e-mail as you're listed as a participant for this event.
@@ -516,6 +586,8 @@ calendar.imip_footer_1:
   el: Λαμβάνετε αυτό το e-mail καθώς είστε στη λίστα συμμετεχόντων αυτής της εκδήλωσης.
   sv: Du får det här mejlet för att du är uppskriven som deltagare i den här händelsen
   pl: Otrzymujesz tego e-maila, ponieważ jesteś uczestnikiem tego wydarzenia.
+  ru: Вы получаете это письмо, потому что указаны как участник этого события.
+  kk: Сіз бұл хатты осы оқиғаның қатысушысы ретінде тіркелгендіктен аласыз.
 
 calendar.imip_footer_2:
   en: Forwarding this e-mail could allow any recipient to reply to the organizer, join the guest list, extend the invitation to others, or alter your RSVP.
@@ -530,6 +602,8 @@ calendar.imip_footer_2:
   el: Προωθόντας αυτό το e-mail μπορεί να επιτρέψει σε οποιοδήποτε παραλήπτη να απαντήση στον οργανωτή, να μπει στη λίστα επισκεπτών, να επεκτείνει τη πρόσκληση σε άλλους ή να αλλάξει την παρουσία σας.
   sv: Att vidarebefordra det här mejlet kan göra det möjligt för vilken mottagare som helst att skicka svar till arrangören, lägga till sig själv på gästlistan, skicka inbjudan vidare till andra, samt ändra ditt svar.
   pl: Przekazanie tej wiadomości e-mail może umożliwić każdemu odbiorcy odpowiedź do organizatora, dołączenie do listy gości, przesłanie zaproszenia innym osobom lub zmianę Twojej odpowiedzi RSVP.
+  ru: Пересылка этого письма может позволить любому получателю ответить организатору, присоединиться к списку гостей, распространить приглашение другим или изменить ваш ответ.
+  kk: Бұл хатты қайта жіберу кез келген алушыға ұйымдастырушыға жауап беруге, қонақтар тізіміне қосылуға, шақыруды басқаларға таратуға немесе сіздің жауабыңызды өзгертуге мүмкіндік береді.
 
 calendar.rsvp_recorded:
   en: Your RSVP has been recorded.
@@ -544,6 +618,8 @@ calendar.rsvp_recorded:
   el: Η κοινοποίηση της παρουσίας σας καταγράφηκε.
   sv: Ditt svar har registrerats.
   pl: Twoja odpowiedź RSVP została zarejestrowana.
+  ru: Ваш ответ был записан.
+  kk: Сіздің жауабыңыз тіркелді.
 
 calendar.rsvp_failed:
   en: Failed to record your RSVP.
@@ -558,6 +634,8 @@ calendar.rsvp_failed:
   el: Αποτυχία κατα τη καταγραφή της παρουσίας σας
   sv: Det gick inte att registrera ditt svar.
   pl: Nie udało się zarejestrować Twojej odpowiedzi RSVP.
+  ru: Не удалось записать ваш ответ.
+  kk: Сіздің жауабыңызды тіркеу сәтсіз аяқталды.
 
 calendar.event_not_found:
   en: The event you are trying to RSVP to was not found.
@@ -572,6 +650,8 @@ calendar.event_not_found:
   el: Η εκδήλωση που θέλετε να κοινοποιήσετε την παρουσία σας δεν υπάρχει.
   sv: Händelsen du försöker OSA till kunde inte hittas.
   pl: Wydarzenie, na które próbujesz odpowiedzieć RSVP, nie zostało znalezione.
+  ru: Событие, на которое вы пытаетесь ответить, не найдено.
+  kk: Сіз жауап бергіңіз келген оқиға табылмады.
 
 calendar.invalid_rsvp:
   en: The RSVP request was invalid or malformed.
@@ -586,6 +666,8 @@ calendar.invalid_rsvp:
   el: Η αίτητη για κοινοποίηση παρουσίας είναι άκυρη ή έχει πρόβλημα.
   sv: Svaret på inbjudan var ogiltigt eller i fel format.
   pl: Żądanie RSVP było nieprawidłowe lub źle sformułowane.
+  ru: Запрос на ответ был недействительным или неправильно сформирован.
+  kk: Жауап сұрауы жарамсыз немесе дұрыс емес форматта болды.
 
 calendar.not_participant:
   en: You are no longer a participant in this event.
@@ -600,3 +682,5 @@ calendar.not_participant:
   el: Δε συμμετέχετε πια σε αυτή την εκδήλωση.
   sv: Du är inte längre en deltagare i den här händelse.
   pl: Nie jesteś już uczestnikiem tego wydarzenia.
+  ru: Вы больше не являетесь участником этого события.
+  kk: Сіз енді бұл оқиғаның қатысушысы емессіз.
