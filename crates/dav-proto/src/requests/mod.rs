@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, RawElement, Token},
+    parser::{DavParser, RawElement, Token, tokenizer::Tokenizer},
     schema::Namespace,
 };
 use types::dead_property::{DeadElementTag, DeadProperty, DeadPropertyTag};
@@ -112,7 +112,7 @@ impl From<&RawElement<'_>> for DeadElementTag {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parser::{tokenizer::Tokenizer, DavParser},
+        parser::{DavParser, tokenizer::Tokenizer},
         schema::request::{Acl, LockInfo, MkCol, PropFind, PropertyUpdate, Report},
     };
 

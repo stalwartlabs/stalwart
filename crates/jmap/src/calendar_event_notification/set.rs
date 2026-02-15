@@ -14,7 +14,10 @@ use jmap_proto::{
     request::IntoValid,
     types::state::State,
 };
-use store::{ValueKey, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
 

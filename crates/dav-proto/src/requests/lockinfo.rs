@@ -7,11 +7,11 @@
 use types::dead_property::DeadProperty;
 
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, Token},
+    parser::{DavParser, Token, tokenizer::Tokenizer},
     schema::{
+        Element, NamedElement, Namespace,
         property::{LockScope, LockType},
         request::LockInfo,
-        Element, NamedElement, Namespace,
     },
 };
 

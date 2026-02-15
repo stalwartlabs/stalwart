@@ -19,7 +19,11 @@ use jmap_proto::{
     object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
 };
 use jmap_tools::{Key, Map, Value};
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, ValueClass}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, ValueClass},
+};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},

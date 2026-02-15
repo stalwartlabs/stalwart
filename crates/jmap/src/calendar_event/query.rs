@@ -17,7 +17,10 @@ use jmap_proto::{
 use nlp::language::Language;
 use std::{cmp::Ordering, sync::Arc};
 use store::{
-    ValueKey, roaring::RoaringBitmap, search::{CalendarSearchField, SearchComparator, SearchFilter, SearchQuery}, write::{AlignedBytes, Archive, SearchIndex}
+    ValueKey,
+    roaring::RoaringBitmap,
+    search::{CalendarSearchField, SearchComparator, SearchFilter, SearchQuery},
+    write::{AlignedBytes, Archive, SearchIndex},
 };
 use trc::AddContext;
 use types::{

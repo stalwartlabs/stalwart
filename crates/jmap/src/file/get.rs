@@ -13,7 +13,11 @@ use jmap_proto::{
     types::date::UTCDate,
 };
 use jmap_tools::{Map, Value};
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, now}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, now},
+};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},

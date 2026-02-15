@@ -7,8 +7,8 @@
 use std::fmt::Display;
 
 use crate::schema::{
-    response::{BaseCondition, CalCondition, CardCondition, Condition, ErrorResponse},
     Namespace, Namespaces,
+    response::{BaseCondition, CalCondition, CardCondition, Condition, ErrorResponse},
 };
 
 impl Display for ErrorResponse {

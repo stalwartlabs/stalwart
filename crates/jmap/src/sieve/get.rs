@@ -12,8 +12,11 @@ use jmap_proto::{
     object::sieve::{Sieve, SieveProperty, SieveValue},
 };
 use jmap_tools::{Map, Value};
-use store::{ValueKey, write::{AlignedBytes, Archive}};
 use std::future::Future;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId, BlobSection},

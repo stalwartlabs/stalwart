@@ -15,7 +15,10 @@ use jmap_proto::{
 use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::{
-    ValueKey, rkyv::{option::ArchivedOption, vec::ArchivedVec}, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}
+    ValueKey,
+    rkyv::{option::ArchivedOption, vec::ArchivedVec},
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, BatchBuilder},
 };
 use trc::AddContext;
 use types::{

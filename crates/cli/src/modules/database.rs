@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::collections::HashMap;
 use prettytable::{Attr, Cell, Row, Table};
 use reqwest::{Method, StatusCode};
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::modules::{Response, UnwrapResult};
 

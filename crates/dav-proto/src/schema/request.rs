@@ -5,9 +5,9 @@
  */
 
 use super::{
+    Collation, MatchType,
     property::{DavProperty, DavValue, LockScope, LockType},
     response::Ace,
-    Collation, MatchType,
 };
 use crate::Depth;
 use calcard::{
@@ -15,8 +15,8 @@ use calcard::{
     vcard::{VCardParameterName, VCardProperty},
 };
 use types::{
-    dead_property::{ArchivedDeadProperty, ArchivedDeadPropertyTag, DeadElementTag, DeadProperty},
     TimeRange,
+    dead_property::{ArchivedDeadProperty, ArchivedDeadPropertyTag, DeadElementTag, DeadProperty},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

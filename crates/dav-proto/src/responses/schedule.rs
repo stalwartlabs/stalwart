@@ -7,8 +7,8 @@
 use crate::{
     responses::{XmlCdataEscape, XmlEscape},
     schema::{
-        response::{ScheduleResponse, ScheduleResponseItem},
         Namespaces,
+        response::{ScheduleResponse, ScheduleResponseItem},
     },
 };
 use std::fmt::Display;

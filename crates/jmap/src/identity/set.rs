@@ -17,7 +17,10 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Value};
 use std::future::Future;
-use store::{ValueKey, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},

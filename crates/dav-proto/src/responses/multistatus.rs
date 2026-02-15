@@ -9,11 +9,11 @@ use std::fmt::Display;
 use hyper::StatusCode;
 
 use crate::schema::{
+    Namespace, Namespaces,
     response::{
         Condition, Href, List, Location, MultiStatus, PropStat, Response, ResponseDescription,
         ResponseType, Status, SyncToken,
     },
-    Namespace, Namespaces,
 };
 
 impl Display for MultiStatus {

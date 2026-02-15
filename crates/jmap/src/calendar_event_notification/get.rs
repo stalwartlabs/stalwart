@@ -25,7 +25,10 @@ use jmap_proto::{
     },
     types::date::UTCDate,
 };
-use store::{ValueKey, write::{AlignedBytes, Archive, serialize::rkyv_deserialize}};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, serialize::rkyv_deserialize},
+};
 use trc::AddContext;
 use types::{
     blob::BlobId,

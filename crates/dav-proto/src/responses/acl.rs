@@ -9,12 +9,12 @@ use std::fmt::Display;
 use crate::{
     responses::XmlEscape,
     schema::{
+        Namespace, Namespaces,
         property::{DavProperty, Privilege},
         response::{
             Ace, AclRestrictions, GrantDeny, Href, List, Principal, PrincipalSearchProperty,
             PrincipalSearchPropertySet, RequiredPrincipal, Resource, SupportedPrivilege,
         },
-        Namespace, Namespaces,
     },
 };
 

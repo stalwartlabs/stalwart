@@ -27,7 +27,9 @@ use rand::distr::Alphanumeric;
 use sieve::compiler::ErrorType;
 use std::future::Future;
 use store::{
-    Serialize, SerializeInfallible, ValueKey, rand::{Rng, rng}, write::{AlignedBytes, Archive, Archiver, BatchBuilder}
+    Serialize, SerializeInfallible, ValueKey,
+    rand::{Rng, rng},
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder},
 };
 use trc::AddContext;
 use types::{

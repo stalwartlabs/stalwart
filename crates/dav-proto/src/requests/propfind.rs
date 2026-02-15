@@ -5,8 +5,8 @@
  */
 
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, Token},
-    schema::{request::PropFind, Element, NamedElement, Namespace},
+    parser::{DavParser, Token, tokenizer::Tokenizer},
+    schema::{Element, NamedElement, Namespace, request::PropFind},
 };
 
 impl DavParser for PropFind {

@@ -16,9 +16,9 @@ pub mod schedule;
 use types::dead_property::{DeadProperty, DeadPropertyTag};
 
 use crate::schema::{
+    Namespaces,
     property::{Comp, ResourceType, SupportedCollation},
     response::{Href, List, Location, ResponseDescription, Status, SyncToken},
-    Namespaces,
 };
 use std::fmt::{Display, Write};
 
@@ -211,9 +211,11 @@ mod tests {
     use types::dead_property::{DeadElementTag, DeadProperty, DeadPropertyTag};
 
     use crate::{
-        parser::{tokenizer::Tokenizer, Token},
+        Depth,
+        parser::{Token, tokenizer::Tokenizer},
         responses::XmlCdataEscape,
         schema::{
+            Namespace,
             property::{
                 ActiveLock, CalDavProperty, CardDavProperty, DavValue, LockScope, Privilege,
                 ResourceType, Rfc1123DateTime, SupportedLock, WebDavProperty,
@@ -225,9 +227,7 @@ mod tests {
                 PrincipalSearchPropertySet, PropResponse, PropStat, RequiredPrincipal, Resource,
                 Response, ScheduleResponse, ScheduleResponseItem, SupportedPrivilege,
             },
-            Namespace,
         },
-        Depth,
     };
 
     impl<T: Display> List<T> {

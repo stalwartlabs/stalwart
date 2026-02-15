@@ -26,7 +26,11 @@ use jmap_proto::{
     },
     types::state::State,
 };
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,

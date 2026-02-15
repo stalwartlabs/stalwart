@@ -186,7 +186,7 @@ impl MethodName {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-       hashify::tiny_map!(s.as_bytes(), 
+        hashify::tiny_map!(s.as_bytes(),
             "PushSubscription/get" => (MethodObject::PushSubscription, MethodFunction::Get),
             "PushSubscription/set" => (MethodObject::PushSubscription, MethodFunction::Set),
 
@@ -295,7 +295,6 @@ impl MethodName {
 
         ).map(|(obj, fnc)| MethodName { obj, fnc })
     }
-
 }
 
 impl Display for MethodObject {
@@ -325,7 +324,6 @@ impl Display for MethodObject {
         })
     }
 }
-
 
 impl<'de> serde::Deserialize<'de> for MethodName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

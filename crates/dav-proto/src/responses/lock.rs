@@ -9,13 +9,13 @@ use std::fmt::Display;
 use types::dead_property::DeadProperty;
 
 use crate::{
+    Depth, Timeout,
     responses::DeadPropertyFormat,
     schema::{
         property::{ActiveLock, LockDiscovery, LockEntry, LockScope, LockType, SupportedLock},
         request::LockInfo,
         response::{Href, List},
     },
-    Depth, Timeout,
 };
 
 impl Display for SupportedLock {

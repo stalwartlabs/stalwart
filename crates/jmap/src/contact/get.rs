@@ -14,7 +14,11 @@ use jmap_proto::{
     request::reference::MaybeResultReference,
 };
 use jmap_tools::{Map, Value};
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,

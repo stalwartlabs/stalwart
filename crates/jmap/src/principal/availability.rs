@@ -30,7 +30,11 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Map, Value};
 use std::{collections::hash_map::Entry, future::Future};
-use store::{ValueKey, ahash::AHashMap, write::{AlignedBytes, Archive}};
+use store::{
+    ValueKey,
+    ahash::AHashMap,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     TimeRange,

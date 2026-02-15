@@ -5,8 +5,8 @@
  */
 
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, Token},
-    schema::{request::PropertyUpdate, Element, NamedElement, Namespace},
+    parser::{DavParser, Token, tokenizer::Tokenizer},
+    schema::{Element, NamedElement, Namespace, request::PropertyUpdate},
 };
 
 impl DavParser for PropertyUpdate {

@@ -19,8 +19,11 @@ use jmap_tools::{Map, Value};
 use mail_builder::encoders::base64::base64_encode;
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
-use store::{ValueKey, write::{AlignedBytes, Archive}};
 use std::future::Future;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{blob::BlobClass, collection::Collection, id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;

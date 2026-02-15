@@ -7,8 +7,8 @@
 use std::fmt::Display;
 
 use crate::schema::{
-    response::{List, MkColResponse, PropStat},
     Namespace, Namespaces,
+    response::{List, MkColResponse, PropStat},
 };
 
 impl Display for MkColResponse {

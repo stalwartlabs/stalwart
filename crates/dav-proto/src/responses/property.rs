@@ -8,6 +8,7 @@ use super::{XmlCdataEscape, XmlEscape};
 use crate::{
     responses::DeadPropertyFormat,
     schema::{
+        Namespace, Namespaces,
         property::{
             ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue,
             LockDiscovery, LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType,
@@ -15,13 +16,12 @@ use crate::{
         },
         request::DavPropertyValue,
         response::{Ace, AclRestrictions, Href, List, PropResponse, SupportedPrivilege},
-        Namespace, Namespaces,
     },
 };
 use calcard::icalendar::ICalendarComponentType;
 use mail_parser::{
-    parsers::fields::date::{DOW, MONTH},
     DateTime,
+    parsers::fields::date::{DOW, MONTH},
 };
 use std::fmt::Display;
 use types::dead_property::DeadProperty;

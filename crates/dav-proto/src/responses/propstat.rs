@@ -55,7 +55,7 @@ impl PropStat {
     }
 
     pub fn with_prop(mut self, prop: impl Into<DavPropertyValue>) -> Self {
-        self.prop.0 .0.push(prop.into());
+        self.prop.0.0.push(prop.into());
         self
     }
 

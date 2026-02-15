@@ -5,15 +5,15 @@
  */
 
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, Token},
+    parser::{DavParser, Token, tokenizer::Tokenizer},
     schema::{
+        Element, NamedElement, Namespace,
         property::{DavValue, Privilege},
         request::{
             Acl, AclPrincipalPropSet, DavPropertyValue, PrincipalMatch, PrincipalMatchProperties,
             PrincipalPropertySearch, PropertySearch,
         },
         response::{Ace, GrantDeny, Href, List, Principal},
-        Element, NamedElement, Namespace,
     },
 };
 

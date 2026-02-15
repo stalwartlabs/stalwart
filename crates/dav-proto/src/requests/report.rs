@@ -5,11 +5,13 @@
  */
 
 use crate::{
+    Depth,
     parser::{
-        property::TimeRangeFromRaw, tokenizer::Tokenizer, DavParser, RawElement, Token,
-        XmlValueParser,
+        DavParser, RawElement, Token, XmlValueParser, property::TimeRangeFromRaw,
+        tokenizer::Tokenizer,
     },
     schema::{
+        Attribute, Collation, Element, MatchType, NamedElement, Namespace,
         property::DavProperty,
         request::{
             AclPrincipalPropSet, AddressbookQuery, CalendarQuery, ExpandProperty,
@@ -17,15 +19,13 @@ use crate::{
             PrincipalPropertySearch, PropFind, Report, SyncCollection, TextMatch, Timezone,
             VCardPropertyWithGroup,
         },
-        Attribute, Collation, Element, MatchType, NamedElement, Namespace,
     },
-    Depth,
 };
 use calcard::{
     icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::VCardParameterName,
 };
-use types::{dead_property::DeadElementTag, TimeRange};
+use types::{TimeRange, dead_property::DeadElementTag};
 
 impl DavParser for Report {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {

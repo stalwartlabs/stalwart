@@ -5,9 +5,9 @@
  */
 
 use super::{
+    Collation, Namespace,
     request::DavPropertyValue,
     response::{Ace, AclRestrictions, Href, List, Response, SupportedPrivilege},
-    Collation, Namespace,
 };
 use crate::{Depth, Timeout};
 use calcard::{
@@ -15,8 +15,8 @@ use calcard::{
     vcard::{VCard, VCardProperty},
 };
 use types::{
-    dead_property::{DeadElementTag, DeadProperty},
     TimeRange,
+    dead_property::{DeadElementTag, DeadProperty},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

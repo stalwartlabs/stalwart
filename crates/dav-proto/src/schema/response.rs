@@ -13,9 +13,9 @@ use calcard::{
 use hyper::StatusCode;
 
 use super::{
+    Namespaces,
     property::{DavProperty, Privilege},
     request::{DavPropertyValue, Filter},
-    Namespaces,
 };
 
 pub struct MultiStatus {
