@@ -14,19 +14,15 @@ use super::{
 };
 use crate::{enterprise::llm::ApiType, expr::if_block::BootstrapExprExt};
 use ahash::AHashMap;
-use registry::{
-    schema::{
-        enums::AiModelType,
-        prelude::{Object, Property},
-        structs::{
-            self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SpamLlm,
-        },
-    },
-    types::id::Id,
+use registry::schema::{
+    enums::AiModelType,
+    prelude::{Object, Property},
+    structs::{self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SpamLlm},
 };
 use std::sync::Arc;
 use store::registry::bootstrap::Bootstrap;
 use trc::MetricType;
+use types::id::Id;
 use utils::template::Template;
 
 impl Enterprise {
@@ -84,11 +80,7 @@ impl Enterprise {
         // Update the license if a new one was obtained
         if let Some(license) = update_license {
             enterprise.license_key = Some(license);
-            if let Err(err) = bp
-                .registry
-                .update(Object::Enterprise.singleton(), &enterprise)
-                .await
-            {
+            if let Err(err) = bp.registry.update(Id::singleton(), &enterprise).await {
                 trc::error!(
                     err.caused_by(trc::location!())
                         .details("Failed to update license key")
@@ -145,7 +137,7 @@ impl Enterprise {
                 default_temperature: api.temperature,
             });
             ai_apis.insert(api.id.clone(), api.clone());
-            ai_apis_ids.insert(id, api);
+            ai_apis_ids.insert(id.id(), api);
         }
 
         // Build the enterprise configuration
@@ -237,14 +229,14 @@ impl Enterprise {
 impl SpamFilterLlmConfig {
     pub async fn parse(
         bp: &mut Bootstrap,
-        models: &AHashMap<Id, Arc<AiApiConfig>>,
+        models: &AHashMap<u64, Arc<AiApiConfig>>,
     ) -> Option<Self> {
         match bp.setting_infallible::<SpamLlm>().await {
             SpamLlm::Enable(llm) => {
-                let Some(model) = models.get(&llm.model).cloned() else {
+                let Some(model) = models.get(&llm.model_id.id()).cloned() else {
                     bp.build_error(
                         Object::SpamLlm.singleton(),
-                        format!("Model {:?} not found in AI API configuration", llm.model),
+                        format!("Model {:?} not found in AI API configuration", llm.model_id),
                     );
                     return None;
                 };

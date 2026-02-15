@@ -372,7 +372,7 @@ impl Tracers {
 
             // Create tracer
             let mut tracer = TelemetrySubscriber {
-                id: format!("t_{id}"),
+                id: format!("t_{}", id.id()),
                 interests: Default::default(),
                 lossy,
                 typ,
@@ -470,7 +470,7 @@ impl Tracers {
 
             // Build tracer
             let mut tracer = TelemetrySubscriber {
-                id: format!("w_{id}"),
+                id: format!("w_{}", id.id()),
                 interests: Default::default(),
                 lossy: hook.lossy,
                 typ: TelemetrySubscriberType::Webhook(WebhookTracer {

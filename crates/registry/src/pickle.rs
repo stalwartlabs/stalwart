@@ -122,8 +122,8 @@ impl Pickle for String {
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut len_arr = [0u8; 4];
-        len_arr.copy_from_slice(stream.read_bytes(4)?);
+        let mut len_arr = [0u8; std::mem::size_of::<u32>()];
+        len_arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u32>())?);
         let bytes = stream.read_bytes(u32::from_le_bytes(len_arr) as usize)?;
         String::from_utf8(bytes.to_vec()).ok()
     }
@@ -135,8 +135,8 @@ impl<T: EnumType> Pickle for T {
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut id_arr = [0u8; 2];
-        id_arr.copy_from_slice(stream.read_bytes(2)?);
+        let mut id_arr = [0u8; std::mem::size_of::<u16>()];
+        id_arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u16>())?);
         Self::from_id(u16::from_le_bytes(id_arr))
     }
 }
@@ -241,29 +241,5 @@ where
             map.append(key, value);
         }
         Some(map)
-    }
-}
-
-impl Pickle for trc::EventType {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_id().to_le_bytes());
-    }
-
-    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut id_arr = [0u8; 2];
-        id_arr.copy_from_slice(stream.read_bytes(2)?);
-        Self::from_id(u16::from_le_bytes(id_arr))
-    }
-}
-
-impl Pickle for trc::MetricType {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_id().to_le_bytes());
-    }
-
-    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut id_arr = [0u8; 2];
-        id_arr.copy_from_slice(stream.read_bytes(2)?);
-        Self::from_id(u16::from_le_bytes(id_arr))
     }
 }

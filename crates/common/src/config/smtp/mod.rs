@@ -15,7 +15,7 @@ use self::{
     session::SessionConfig,
 };
 use crate::expr::Expression;
-use registry::{schema::structs::Rate, types::id::Id};
+use registry::{schema::structs::Rate, types::id::ObjectId};
 use store::registry::bootstrap::Bootstrap;
 
 #[derive(Clone)]
@@ -30,7 +30,7 @@ pub struct SmtpConfig {
 #[derive(Debug, Default, Clone)]
 //#[cfg_attr(feature = "test_mode", derive(PartialEq, Eq))]
 pub struct QueueRateLimiter {
-    pub id: Id,
+    pub id: ObjectId,
     pub expr: Expression,
     pub keys: u16,
     pub rate: Rate,

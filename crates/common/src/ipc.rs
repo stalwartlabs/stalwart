@@ -15,7 +15,7 @@ use mail_auth::{
     mta_sts::TlsRpt,
     report::{Record, tlsrpt::FailureDetails},
 };
-use registry::{schema::prelude::Object, types::id::Id};
+use registry::{schema::prelude::Object, types::id::ObjectId};
 use std::{
     sync::{
         Arc,
@@ -104,8 +104,8 @@ pub enum BroadcastEvent {
 
 #[derive(Debug)]
 pub enum RegistryChange {
-    Insert(Id),
-    Delete(Id),
+    Insert(ObjectId),
+    Delete(ObjectId),
     Reload(Object),
 }
 

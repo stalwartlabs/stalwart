@@ -6,7 +6,7 @@
 
 use self::receiver::Receiver;
 use common::config::smtp::session::MilterVersion;
-use registry::types::id::Id;
+use registry::types::id::ObjectId;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt::Display, net::IpAddr, time::Duration};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -28,7 +28,7 @@ pub struct MilterClient<T: AsyncRead + AsyncWrite> {
     options: u32,
     flags_actions: u32,
     flags_protocol: u32,
-    id: Id,
+    id: ObjectId,
     session_id: u64,
 }
 

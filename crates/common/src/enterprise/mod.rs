@@ -24,7 +24,7 @@ use llm::AiApiConfig;
 use mail_parser::DateTime;
 use registry::{
     schema::structs::{Domain, Tenant},
-    types::id::Id,
+    types::id::ObjectId,
 };
 use std::{sync::Arc, time::Duration};
 use trc::{AddContext, MetricType};
@@ -61,7 +61,7 @@ pub struct SpamFilterLlmConfig {
 
 #[derive(Clone, Debug)]
 pub struct MetricAlert {
-    pub id: Id,
+    pub id: ObjectId,
     pub condition: Expression,
     pub method: Vec<AlertMethod>,
 }

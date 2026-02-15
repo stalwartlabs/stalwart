@@ -170,7 +170,7 @@ pub struct QueueQuotas {
 
 #[derive(Clone)]
 pub struct QueueQuota {
-    pub id: Id,
+    pub id: ObjectId,
     pub expr: Expression,
     pub keys: u16,
     pub size: Option<u64>,
@@ -233,7 +233,7 @@ impl QueueConfig {
         let mut queue_id_to_name = AHashMap::new();
         for obj in bp.list_infallible::<MtaVirtualQueue>().await {
             if let Some(queue_name) = QueueName::new(&obj.object.name) {
-                queue_id_to_name.insert(obj.id, queue_name);
+                queue_id_to_name.insert(obj.id.id(), queue_name);
                 queue.virtual_queues.insert(
                     queue_name,
                     VirtualQueue {
@@ -245,7 +245,8 @@ impl QueueConfig {
 
         // Parse queue strategies
         for obj in bp.list_infallible::<MtaDeliverySchedule>().await {
-            let virtual_queue = if let Some(name) = queue_id_to_name.get(&obj.object.queue_id) {
+            let virtual_queue = if let Some(name) = queue_id_to_name.get(&obj.object.queue_id.id())
+            {
                 *name
             } else {
                 bp.build_error(

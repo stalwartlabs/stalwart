@@ -13,9 +13,10 @@ use ahash::AHashSet;
 use registry::{
     schema::{
         enums::BlockReason,
+        prelude::Object,
         structs::{self, AllowedIp, BlockedIp, Rate},
     },
-    types::{datetime::UTCDateTime, ipmask::IpAddrOrMask},
+    types::{datetime::UTCDateTime, id::ObjectId, ipmask::IpAddrOrMask},
 };
 use std::{fmt::Debug, net::IpAddr};
 use store::{registry::bootstrap::Bootstrap, write::now};
@@ -251,8 +252,10 @@ impl Server {
             .caused_by(trc::location!())?;
 
         // Increment version
-        self.cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Insert(id)))
-            .await;
+        self.cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Insert(
+            Object::BlockedIp.id(id.id()),
+        )))
+        .await;
 
         Ok(())
     }

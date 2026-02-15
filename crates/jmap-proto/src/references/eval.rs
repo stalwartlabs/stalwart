@@ -84,6 +84,9 @@ impl Response<'_> {
                         GetResponseMethod::PrincipalAvailability(response) => {
                             response.eval_jptr(path, &mut results)
                         }
+                        GetResponseMethod::Registry(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
                     },
                     ResponseMethod::Changes(response) => match response {
                         ChangesResponseMethod::Email(response) => {

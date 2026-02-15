@@ -8,7 +8,7 @@ use crate::network::TcpAcceptor;
 use ahash::AHashMap;
 use registry::{
     schema::structs::NetworkListener,
-    types::{id::Id, ipmask::IpAddrOrMask},
+    types::{id::ObjectId, ipmask::IpAddrOrMask},
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, net::SocketAddr, sync::Arc};
@@ -29,7 +29,7 @@ pub struct Listeners {
 
 #[derive(Debug, Default)]
 pub struct Listener {
-    pub registry_id: Id,
+    pub registry_id: ObjectId,
     pub id: String,
     pub protocol: ServerProtocol,
     pub listeners: Vec<TcpListener>,

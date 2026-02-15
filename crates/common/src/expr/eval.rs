@@ -15,7 +15,7 @@ use compact_str::{CompactString, ToCompactString, format_compact};
 use hyper::StatusCode;
 use registry::{
     schema::prelude::Property,
-    types::{EnumType, id::Id},
+    types::{EnumType, id::ObjectId},
 };
 use std::{cmp::Ordering, fmt::Display};
 use trc::{Collector, EvalEvent};
@@ -91,7 +91,7 @@ impl Server {
         &'x self,
         expr: &'x Expression,
         resolver: &'x V,
-        obj_id: Id,
+        obj_id: ObjectId,
         property: Property,
         session_id: u64,
     ) -> Option<R> {

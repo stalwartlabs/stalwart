@@ -11,7 +11,8 @@ use crate::{
     },
     types::EnumType,
 };
-use std::fmt::Display;
+use std::{cmp::Ordering, fmt::Display};
+use trc::TOTAL_EVENT_COUNT;
 use utils::{
     Client, HeaderMap,
     cron::SimpleCron,
@@ -27,6 +28,9 @@ pub mod properties;
 pub mod properties_impl;
 #[allow(clippy::large_enum_variant)]
 pub mod structs;
+#[allow(clippy::needless_borrows_for_generic_args)]
+#[allow(clippy::len_zero)]
+#[allow(clippy::collapsible_if)]
 #[allow(clippy::derivable_impls)]
 pub mod structs_impl;
 
@@ -159,5 +163,57 @@ impl From<TracingLevel> for trc::Level {
             TracingLevel::Debug => trc::Level::Debug,
             TracingLevel::Trace => trc::Level::Trace,
         }
+    }
+}
+
+impl EnumType for trc::EventType {
+    const COUNT: usize = TOTAL_EVENT_COUNT;
+
+    fn parse(s: &str) -> Option<Self> {
+        trc::EventType::parse(s)
+    }
+
+    fn as_str(&self) -> &'static str {
+        trc::EventType::as_str(self)
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        trc::EventType::from_id(id)
+    }
+
+    fn to_id(&self) -> u16 {
+        trc::EventType::to_id(self)
+    }
+}
+
+impl EnumType for trc::MetricType {
+    const COUNT: usize = TOTAL_EVENT_COUNT;
+
+    fn parse(s: &str) -> Option<Self> {
+        trc::MetricType::parse(s)
+    }
+
+    fn as_str(&self) -> &'static str {
+        trc::MetricType::as_str(self)
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        trc::MetricType::from_id(id)
+    }
+
+    fn to_id(&self) -> u16 {
+        trc::MetricType::to_id(self)
+    }
+}
+
+impl PartialOrd for Property {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Property {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.to_id().cmp(&other.to_id())
     }
 }

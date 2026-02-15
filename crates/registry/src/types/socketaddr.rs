@@ -6,7 +6,11 @@
 
 use std::{fmt::Display, str::FromStr};
 
-use crate::pickle::{Pickle, PickledStream};
+use crate::{
+    jmap::{JsonPointerPatch, RegistryJsonPatch},
+    pickle::{Pickle, PickledStream},
+    types::error::PatchError,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SocketAddr(pub std::net::SocketAddr);
@@ -80,5 +84,31 @@ impl Pickle for SocketAddr {
         port_bytes.copy_from_slice(data.read_bytes(2)?);
         let port = u16::from_le_bytes(port_bytes);
         Some(SocketAddr(std::net::SocketAddr::new(ip, port)))
+    }
+}
+
+impl RegistryJsonPatch for SocketAddr {
+    fn patch(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+    ) -> Result<(), PatchError> {
+        match (value, pointer.next()) {
+            (jmap_tools::Value::Str(value), None) => {
+                if let Ok(new_value) = SocketAddr::from_str(value.as_ref()) {
+                    *self = new_value;
+                    Ok(())
+                } else {
+                    Err(PatchError::new(
+                        pointer,
+                        "Failed to parse SocketAddr from string",
+                    ))
+                }
+            }
+            _ => Err(PatchError::new(
+                pointer,
+                "Invalid path for SocketAddr, expected a string value",
+            )),
+        }
     }
 }

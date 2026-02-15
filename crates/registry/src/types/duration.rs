@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::pickle::{Pickle, PickledStream};
+use crate::{
+    jmap::{JsonPointerPatch, RegistryJsonPatch},
+    pickle::{Pickle, PickledStream},
+    types::error::PatchError,
+};
 use std::{fmt::Display, str::FromStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,7 +56,7 @@ impl serde::Serialize for Duration {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.to_string().as_str())
+        serializer.serialize_u64(self.0.as_millis() as u64)
     }
 }
 
@@ -130,5 +134,25 @@ impl Pickle for Duration {
         Some(Duration(std::time::Duration::from_millis(
             u64::from_le_bytes(arr),
         )))
+    }
+}
+
+impl RegistryJsonPatch for Duration {
+    fn patch(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+    ) -> Result<(), PatchError> {
+        match (value, pointer.next()) {
+            (jmap_tools::Value::Number(value), None) => {
+                if let Some(new_value) = value.as_u64().filter(|v| *v > 0) {
+                    *self = Duration::from_millis(new_value);
+                    Ok(())
+                } else {
+                    Err(PatchError::new(pointer, "Invalid duration value"))
+                }
+            }
+            _ => Err(PatchError::new(pointer, "Invalid path for Duration")),
+        }
     }
 }

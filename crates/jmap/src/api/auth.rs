@@ -5,11 +5,11 @@
  */
 
 use common::auth::AccessToken;
-use registry::schema::enums::Permission;
 use jmap_proto::request::{
     CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
     QueryRequestMethod, RequestMethod, SetRequestMethod, method::MethodObject,
 };
+use registry::schema::enums::Permission;
 use types::{collection::Collection, id::Id};
 
 pub trait JmapAuthorization {
@@ -80,6 +80,10 @@ impl JmapAuthorization for AccessToken {
                 }
                 GetRequestMethod::ParticipantIdentity(_) => Permission::JmapParticipantIdentityGet,
                 GetRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationGet,
+                GetRequestMethod::Registry(request) => {
+                    let todo = "map registry objects to permissions";
+                    Permission::JmapEmailGet
+                }
             },
             RequestMethod::Set(m) => match &m {
                 SetRequestMethod::Email(_) => Permission::JmapEmailSet,
@@ -99,6 +103,10 @@ impl JmapAuthorization for AccessToken {
                     Permission::JmapCalendarEventNotificationSet
                 }
                 SetRequestMethod::ParticipantIdentity(_) => Permission::JmapParticipantIdentitySet,
+                SetRequestMethod::Registry(other) => {
+                    let todo = "map registry objects to permissions";
+                    Permission::JmapEmailSet
+                }
             },
             RequestMethod::Changes(_) => match object {
                 MethodObject::Email => Permission::JmapEmailChanges,
@@ -123,7 +131,8 @@ impl JmapAuthorization for AccessToken {
                 | MethodObject::SearchSnippet
                 | MethodObject::VacationResponse
                 | MethodObject::SieveScript
-                | MethodObject::AddressBook => Permission::JmapEmailChanges,
+                | MethodObject::AddressBook
+                | MethodObject::Registry(_) => Permission::JmapEmailChanges,
             },
             RequestMethod::Copy(m) => match &m {
                 CopyRequestMethod::Email(_) => Permission::JmapEmailCopy,
@@ -174,6 +183,10 @@ impl JmapAuthorization for AccessToken {
                     Permission::JmapCalendarEventNotificationQuery
                 }
                 QueryRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationQuery,
+                QueryRequestMethod::Registry(other) => {
+                    let todo = "map registry objects to permissions";
+                    Permission::JmapShareNotificationQuery
+                }
             },
             RequestMethod::SearchSnippet(_) => Permission::JmapSearchSnippet,
             RequestMethod::ValidateScript(_) => Permission::JmapSieveScriptValidate,

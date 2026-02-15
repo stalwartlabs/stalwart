@@ -33,6 +33,7 @@ use crate::{
     principal::{availability::PrincipalGetAvailability, get::PrincipalGet, query::PrincipalQuery},
     push::{get::PushSubscriptionFetch, set::PushSubscriptionSet},
     quota::{get::QuotaGet, query::QuotaQuery},
+    registry::{get::RegistryGet, query::RegistryQuery, set::RegistrySet},
     share_notification::{
         get::ShareNotificationGet, query::ShareNotificationQuery, set::ShareNotificationSet,
     },
@@ -165,6 +166,9 @@ impl RequestHandler for Server {
                                         set_response.update_created_ids(&mut response);
                                     }
                                     SetResponseMethod::CalendarEventNotification(_) => {}
+                                    SetResponseMethod::Registry(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
                                 }
                             }
                             ResponseMethod::ImportEmail(import_response) => {
@@ -343,6 +347,12 @@ impl RequestHandler for Server {
 
                     self.share_notification_get(req).await?.into()
                 }
+                GetRequestMethod::Registry(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_is_member(req.account_id)?;
+
+                    self.registry_get(req, access_token).await?.into()
+                }
             },
             RequestMethod::Query(req) => match req {
                 QueryRequestMethod::Email(mut req) => {
@@ -409,6 +419,12 @@ impl RequestHandler for Server {
                     access_token.assert_is_member(req.account_id)?;
 
                     self.share_notification_query(req).await?.into()
+                }
+                QueryRequestMethod::Registry(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_is_member(req.account_id)?;
+
+                    self.registry_query(req, access_token).await?.into()
                 }
             },
             RequestMethod::Set(req) => match req {
@@ -511,6 +527,12 @@ impl RequestHandler for Server {
                     access_token.assert_is_member(req.account_id)?;
 
                     self.participant_identity_set(req).await?.into()
+                }
+                SetRequestMethod::Registry(mut req) => {
+                    set_account_id_if_missing(&mut req.account_id, access_token);
+                    access_token.assert_is_member(req.account_id)?;
+
+                    self.registry_set(req, access_token).await?.into()
                 }
             },
             RequestMethod::Changes(mut req) => {

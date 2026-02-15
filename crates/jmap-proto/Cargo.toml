@@ -7,6 +7,7 @@ edition = "2024"
 utils = { path = "../utils" }
 types = { path = "../types" }
 trc = { path = "../trc" }
+registry = { path = "../registry" }
 jmap-tools = { version = "0.1" }
 calcard = { version = "0.3" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 

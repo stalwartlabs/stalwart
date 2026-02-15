@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt, marker::PhantomData};
-
 use serde::{
     Deserializer,
     de::{self, MapAccess, Visitor},
 };
+use std::{fmt, marker::PhantomData};
 
 pub trait DeserializeArguments<'de> {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>

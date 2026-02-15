@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::pickle::{Pickle, PickledStream};
+use crate::{
+    jmap::{JsonPointerPatch, RegistryJsonPatch},
+    pickle::{Pickle, PickledStream},
+    types::error::PatchError,
+};
 use std::{
     fmt::{Display, Formatter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -239,6 +243,32 @@ impl Pickle for IpAddrOrMask {
                 })
             }
             _ => None,
+        }
+    }
+}
+
+impl RegistryJsonPatch for IpAddrOrMask {
+    fn patch(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+    ) -> Result<(), PatchError> {
+        match (value, pointer.next()) {
+            (jmap_tools::Value::Str(value), None) => {
+                if let Ok(new_value) = IpAddrOrMask::from_str(value.as_ref()) {
+                    *self = new_value;
+                    Ok(())
+                } else {
+                    Err(PatchError::new(
+                        pointer,
+                        "Failed to parse IpAddrOrMask from string",
+                    ))
+                }
+            }
+            _ => Err(PatchError::new(
+                pointer,
+                "Invalid path for IpAddrOrMask, expected a string value",
+            )),
         }
     }
 }

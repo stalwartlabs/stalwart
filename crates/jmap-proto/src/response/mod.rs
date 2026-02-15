@@ -44,6 +44,7 @@ use crate::{
         principal::Principal,
         push_subscription::PushSubscription,
         quota::Quota,
+        registry::Registry,
         share_notification::ShareNotification,
         sieve::Sieve,
         thread::Thread,
@@ -96,6 +97,7 @@ pub enum GetResponseMethod {
     CalendarEventNotification(CalendarEventNotificationGetResponse),
     ParticipantIdentity(GetResponse<ParticipantIdentity>),
     ShareNotification(GetResponse<ShareNotification>),
+    Registry(GetResponse<Registry>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -116,6 +118,7 @@ pub enum SetResponseMethod {
     CalendarEvent(SetResponse<CalendarEvent>),
     CalendarEventNotification(SetResponse<CalendarEventNotification>),
     ParticipantIdentity(SetResponse<ParticipantIdentity>),
+    Registry(SetResponse<Registry>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -295,6 +298,12 @@ impl<'x> From<GetResponse<AddressBook>> for ResponseMethod<'x> {
     }
 }
 
+impl<'x> From<GetResponse<Registry>> for ResponseMethod<'x> {
+    fn from(value: GetResponse<Registry>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::Registry(value))
+    }
+}
+
 impl<'x> From<SetResponse<Email>> for ResponseMethod<'x> {
     fn from(value: SetResponse<Email>) -> Self {
         ResponseMethod::Set(SetResponseMethod::Email(value))
@@ -346,6 +355,12 @@ impl<'x> From<SetResponse<AddressBook>> for ResponseMethod<'x> {
 impl<'x> From<SetResponse<ContactCard>> for ResponseMethod<'x> {
     fn from(value: SetResponse<ContactCard>) -> Self {
         ResponseMethod::Set(SetResponseMethod::ContactCard(value))
+    }
+}
+
+impl<'x> From<SetResponse<Registry>> for ResponseMethod<'x> {
+    fn from(value: SetResponse<Registry>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::Registry(value))
     }
 }
 

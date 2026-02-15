@@ -57,6 +57,7 @@ impl Response<'_> {
                     request.resolve_references(self)?
                 }
                 GetRequestMethod::PrincipalAvailability(_) => (),
+                GetRequestMethod::Registry(request) => request.resolve_references(self)?,
             },
             RequestMethod::Set(request) => match request {
                 SetRequestMethod::Email(request) => request.resolve_references(self)?,
@@ -78,6 +79,7 @@ impl Response<'_> {
                 SetRequestMethod::ParticipantIdentity(request) => {
                     request.resolve_references(self)?
                 }
+                SetRequestMethod::Registry(request) => request.resolve_references(self)?,
             },
             RequestMethod::Copy(request) => match request {
                 CopyRequestMethod::Email(request) => request.resolve_references(self)?,

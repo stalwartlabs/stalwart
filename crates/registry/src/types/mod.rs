@@ -9,6 +9,7 @@ use crate::{
     schema::prelude::Object,
     types::{error::ValidationError, index::IndexBuilder},
 };
+use std::fmt::Debug;
 
 pub mod datetime;
 pub mod duration;
@@ -19,7 +20,7 @@ pub mod ipaddr;
 pub mod ipmask;
 pub mod socketaddr;
 
-pub trait EnumType: Sized {
+pub trait EnumType: Sized + Debug + PartialEq + Eq {
     const COUNT: usize;
 
     fn parse(s: &str) -> Option<Self>;

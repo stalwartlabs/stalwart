@@ -248,6 +248,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Get, MethodObject::Registry(_)) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Registry(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Set, MethodObject::Email) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Email(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -357,6 +364,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Set, MethodObject::Registry(_)) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Registry(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Query, MethodObject::Email) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Email(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -435,6 +449,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                 Ok(Some(value)) => {
                     RequestMethod::Query(QueryRequestMethod::ShareNotification(value))
                 }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::Registry(_)) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Registry(value)),
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));

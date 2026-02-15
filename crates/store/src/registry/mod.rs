@@ -9,11 +9,11 @@ pub mod query;
 
 use registry::{
     schema::prelude::{Object, Property},
-    types::{ObjectType, id::Id},
+    types::{ObjectType, id::ObjectId},
 };
 
 pub struct RegistryObject<T: ObjectType> {
-    pub id: Id,
+    pub id: ObjectId,
     pub object: T,
 }
 

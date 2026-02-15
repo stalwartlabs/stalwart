@@ -5,10 +5,11 @@
  */
 
 use crate::{
+    jmap::JsonPointerPatch,
     schema::prelude::{Object, Property},
-    types::id::Id,
+    types::id::ObjectId,
 };
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationError {
@@ -23,30 +24,36 @@ pub enum ValidationError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     Validation {
-        object_id: Id,
+        object_id: ObjectId,
         errors: Vec<ValidationError>,
     },
     Build {
-        object_id: Id,
+        object_id: ObjectId,
         message: String,
     },
     Internal {
-        object_id: Option<Id>,
+        object_id: Option<ObjectId>,
         error: trc::Error,
     },
     TypeMismatch {
-        object_id: Id,
+        object_id: ObjectId,
         object_type: Object,
         expected_type: Object,
     },
     NotFound {
-        object_id: Id,
+        object_id: ObjectId,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchError {
+    pub path: String,
+    pub message: Cow<'static, str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning {
-    pub object_id: Id,
+    pub object_id: ObjectId,
     pub property: Option<Property>,
     pub message: String,
 }
@@ -89,7 +96,7 @@ impl ValidationError {
 }
 
 impl Warning {
-    pub fn new(object_id: Id, message: impl Display) -> Self {
+    pub fn new(object_id: ObjectId, message: impl Display) -> Self {
         Self {
             object_id,
             property: None,
@@ -97,7 +104,7 @@ impl Warning {
         }
     }
 
-    pub fn for_property(object_id: Id, property: Property, message: impl Display) -> Self {
+    pub fn for_property(object_id: ObjectId, property: Property, message: impl Display) -> Self {
         Self {
             object_id,
             property: Some(property),
@@ -143,6 +150,15 @@ impl Display for ValidationError {
                     property, required
                 )
             }
+        }
+    }
+}
+
+impl PatchError {
+    pub fn new(path: JsonPointerPatch<'_>, message: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            path: path.path(),
+            message: message.into(),
         }
     }
 }

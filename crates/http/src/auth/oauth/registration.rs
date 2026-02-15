@@ -29,6 +29,7 @@ use store::{
     registry::RegistryQuery,
 };
 use trc::{AddContext, AuthEvent};
+use types::id::Id;
 
 pub trait ClientRegistrationHandler: Sync + Send {
     fn handle_oauth_registration_request(
@@ -85,7 +86,7 @@ impl ClientRegistrationHandler for Server {
                 created_at: UTCDateTime::now(),
                 description: request.client_name.clone(),
                 contacts: request.contacts.clone(),
-                member_tenant_id: tenant_id.map(|id| Object::Tenant.id(id as u64)),
+                member_tenant_id: tenant_id.map(|id| Id::new(id as u64)),
                 redirect_uris: request.redirect_uris.clone(),
                 logo: request.logo_uri.clone(),
                 ..Default::default()

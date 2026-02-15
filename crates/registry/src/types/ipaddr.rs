@@ -6,7 +6,11 @@
 
 use std::{fmt::Display, net::Ipv4Addr, str::FromStr};
 
-use crate::pickle::{Pickle, PickledStream};
+use crate::{
+    jmap::{JsonPointerPatch, RegistryJsonPatch},
+    pickle::{Pickle, PickledStream},
+    types::error::PatchError,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(transparent)]
@@ -111,5 +115,31 @@ impl Pickle for IpAddr {
 
     fn unpickle(data: &mut PickledStream<'_>) -> Option<Self> {
         std::net::IpAddr::unpickle(data).map(IpAddr)
+    }
+}
+
+impl RegistryJsonPatch for IpAddr {
+    fn patch(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+    ) -> Result<(), PatchError> {
+        match (value, pointer.next()) {
+            (jmap_tools::Value::Str(value), None) => {
+                if let Ok(new_value) = IpAddr::from_str(value.as_ref()) {
+                    *self = new_value;
+                    Ok(())
+                } else {
+                    Err(PatchError::new(
+                        pointer,
+                        "Failed to parse IpAddr from string",
+                    ))
+                }
+            }
+            _ => Err(PatchError::new(
+                pointer,
+                "Invalid path for IpAddr, expected a string value",
+            )),
+        }
     }
 }

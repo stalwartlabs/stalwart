@@ -6,17 +6,44 @@
 
 use crate::{
     schema::prelude::{Object, Property},
-    types::{id::Id, ipmask::IpAddrOrMask},
+    types::ipmask::IpAddrOrMask,
 };
 use ahash::AHashSet;
 use std::borrow::Cow;
+use types::id::Id;
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
-pub enum IndexType {
-    Unique,
-    Search,
-    TextSearch,
-    Global,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum IndexKey<'x> {
+    Unique {
+        property: Property,
+        value: IndexValue<'x>,
+    },
+    Search {
+        property: Property,
+        value: IndexValue<'x>,
+    },
+    TextSearch {
+        property: Property,
+        value: IndexValue<'x>,
+    },
+    Global {
+        property: Property,
+        value_1: IndexValue<'x>,
+        value_2: IndexValue<'x>,
+    },
+    ForeignKey {
+        property: Property,
+        object: Object,
+        id: u64,
+        type_filter: IndexValue<'x>,
+        tenant_filter: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ObjectFilter<'x> {
+    pub property: Property,
+    pub value: IndexValue<'x>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -25,22 +52,16 @@ pub enum IndexValue<'x> {
     Bytes(Vec<u8>),
     U64(u64),
     I64(i64),
+    U32(u32),
     U16(u16),
     None,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct IndexKey<'x> {
-    pub property: Property,
-    pub typ: IndexType,
-    pub value: IndexValue<'x>,
-    pub value_composite: IndexValue<'x>,
 }
 
 #[derive(Debug, Default)]
 
 pub struct IndexBuilder<'x> {
     pub object: Option<Object>,
+    pub tenant_id: Option<u32>,
     pub keys: AHashSet<IndexKey<'x>>,
 }
 
@@ -52,29 +73,23 @@ impl<'x> IndexBuilder<'x> {
     }
 
     pub fn typ(&mut self, typ: u16) {
-        self.keys.insert(IndexKey {
+        self.keys.insert(IndexKey::Search {
             property: Property::Type,
-            typ: IndexType::Search,
             value: IndexValue::U16(typ),
-            value_composite: IndexValue::None,
         });
     }
 
     pub fn unique(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
-        self.keys.insert(IndexKey {
+        self.keys.insert(IndexKey::Unique {
             property,
-            typ: IndexType::Unique,
             value: value.into(),
-            value_composite: IndexValue::None,
         });
     }
 
     pub fn search(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
-        self.keys.insert(IndexKey {
+        self.keys.insert(IndexKey::Search {
             property,
-            typ: IndexType::Search,
             value: value.into(),
-            value_composite: IndexValue::None,
         });
     }
 
@@ -87,29 +102,24 @@ impl<'x> IndexBuilder<'x> {
                 .chars()
                 .all(|ch| ch.is_lowercase() || !ch.is_alphabetic())
             {
-                self.keys.insert(IndexKey {
+                self.keys.insert(IndexKey::TextSearch {
                     property,
-                    typ: IndexType::TextSearch,
                     value: IndexValue::Text(Cow::Borrowed(word)),
-                    value_composite: IndexValue::None,
                 });
             } else {
-                self.keys.insert(IndexKey {
+                self.keys.insert(IndexKey::TextSearch {
                     property,
-                    typ: IndexType::TextSearch,
                     value: IndexValue::Text(Cow::Owned(word.to_lowercase())),
-                    value_composite: IndexValue::Text(Cow::Borrowed(word)),
                 });
             }
         }
     }
 
     pub fn global(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
-        self.keys.insert(IndexKey {
+        self.keys.insert(IndexKey::Global {
             property,
-            typ: IndexType::Global,
-            value: value.into(),
-            value_composite: IndexValue::None,
+            value_1: value.into(),
+            value_2: IndexValue::None,
         });
     }
 
@@ -119,12 +129,30 @@ impl<'x> IndexBuilder<'x> {
         value: impl Into<IndexValue<'x>>,
         composite: impl Into<IndexValue<'x>>,
     ) {
-        self.keys.insert(IndexKey {
+        self.keys.insert(IndexKey::Global {
             property,
-            typ: IndexType::Global,
-            value: value.into(),
-            value_composite: composite.into(),
+            value_1: value.into(),
+            value_2: composite.into(),
         });
+    }
+
+    pub fn foreign_key(
+        &mut self,
+        property: Property,
+        object: Object,
+        id: Option<Id>,
+        type_filter: Option<u16>,
+        tenant_filter: bool,
+    ) {
+        if let Some(id) = id {
+            self.keys.insert(IndexKey::ForeignKey {
+                property,
+                object,
+                id: id.id(),
+                type_filter: type_filter.map(IndexValue::U16).unwrap_or(IndexValue::None),
+                tenant_filter,
+            });
+        }
     }
 }
 

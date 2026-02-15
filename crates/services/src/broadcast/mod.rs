@@ -9,7 +9,7 @@ use common::ipc::{
 };
 use registry::{
     schema::prelude::Object,
-    types::{EnumType, id::Id},
+    types::{EnumType, id::ObjectId},
 };
 use std::{borrow::Borrow, io::Write};
 use types::type_state::StateChange;
@@ -179,14 +179,20 @@ where
                     let object_id = self.messages.next_leb128().ok_or(())?;
                     let id = self.messages.next_leb128::<u64>().ok_or(())?;
                     Ok(Some(BroadcastEvent::RegistryChange(
-                        RegistryChange::Insert(Id::new(Object::from_id(object_id).ok_or(())?, id)),
+                        RegistryChange::Insert(ObjectId::new(
+                            Object::from_id(object_id).ok_or(())?,
+                            id,
+                        )),
                     )))
                 }
                 5 => {
                     let object_id = self.messages.next_leb128().ok_or(())?;
                     let id = self.messages.next_leb128::<u64>().ok_or(())?;
                     Ok(Some(BroadcastEvent::RegistryChange(
-                        RegistryChange::Delete(Id::new(Object::from_id(object_id).ok_or(())?, id)),
+                        RegistryChange::Delete(ObjectId::new(
+                            Object::from_id(object_id).ok_or(())?,
+                            id,
+                        )),
                     )))
                 }
                 6 => {

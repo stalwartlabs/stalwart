@@ -127,7 +127,7 @@ pub struct Data {
 #[derive(Clone)]
 pub struct Milter {
     pub enable: IfBlock,
-    pub id: Id,
+    pub id: ObjectId,
     pub addrs: Vec<SocketAddr>,
     pub hostname: String,
     pub port: u16,
@@ -153,7 +153,7 @@ pub enum MilterVersion {
 #[derive(Clone)]
 pub struct MTAHook {
     pub enable: IfBlock,
-    pub id: Id,
+    pub id: ObjectId,
     pub url: String,
     pub timeout: Duration,
     pub headers: HeaderMap,

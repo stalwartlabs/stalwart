@@ -7,8 +7,9 @@
 use crate::{RegistryStore, registry::RegistryObject};
 use registry::{
     schema::prelude::Object,
-    types::{ObjectType, id::Id},
+    types::{ObjectType, id::ObjectId},
 };
+use types::id::Id;
 
 impl RegistryStore {
     pub async fn object<T: ObjectType>(&self, id: impl Into<u64>) -> trc::Result<Option<T>> {
@@ -31,7 +32,7 @@ impl RegistryStore {
         todo!()
     }
 
-    pub async fn delete(&self, id: Id) -> trc::Result<()> {
+    pub async fn delete(&self, id: ObjectId) -> trc::Result<()> {
         todo!()
     }
 

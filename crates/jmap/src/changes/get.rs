@@ -329,7 +329,8 @@ impl IntermediateChangesResponse {
             | MethodObject::VacationResponse
             | MethodObject::SieveScript
             | MethodObject::Principal
-            | MethodObject::Quota => unreachable!(),
+            | MethodObject::Quota
+            | MethodObject::Registry(_) => unreachable!(),
         })
     }
 }

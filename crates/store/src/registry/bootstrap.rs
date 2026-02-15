@@ -13,7 +13,7 @@ use registry::{
     types::{
         ObjectType,
         error::{Error, ValidationError, Warning},
-        id::Id,
+        id::ObjectId,
     },
 };
 
@@ -79,7 +79,7 @@ impl Bootstrap {
                     Some(setting)
                 } else {
                     self.errors.push(Error::Validation {
-                        object_id: Id::new(T::object(), id),
+                        object_id: ObjectId::new(T::object(), id),
                         errors,
                     });
                     None
@@ -87,14 +87,14 @@ impl Bootstrap {
             }
             Ok(None) => {
                 self.errors.push(Error::NotFound {
-                    object_id: Id::new(T::object(), id),
+                    object_id: ObjectId::new(T::object(), id),
                 });
                 None
             }
             Err(err) => {
                 if !self.has_fatal_errors {
                     self.errors.push(Error::Internal {
-                        object_id: Some(Id::new(T::object(), id)),
+                        object_id: Some(ObjectId::new(T::object(), id)),
                         error: err,
                     });
                     self.has_fatal_errors = true;
@@ -123,14 +123,14 @@ impl Bootstrap {
         }
     }
 
-    pub fn build_error(&mut self, id: Id, message: impl Into<String>) {
+    pub fn build_error(&mut self, id: ObjectId, message: impl Into<String>) {
         self.errors.push(Error::Build {
             object_id: id,
             message: message.into(),
         });
     }
 
-    pub fn build_warning(&mut self, id: Id, message: impl Into<String>) {
+    pub fn build_warning(&mut self, id: ObjectId, message: impl Into<String>) {
         self.warnings.push(Warning {
             object_id: id,
             property: None,
@@ -138,7 +138,7 @@ impl Bootstrap {
         });
     }
 
-    pub fn invalid_property(&mut self, id: Id, property: Property, value: impl Into<String>) {
+    pub fn invalid_property(&mut self, id: ObjectId, property: Property, value: impl Into<String>) {
         self.errors.push(Error::Validation {
             object_id: id,
             errors: vec![ValidationError::Invalid {
@@ -148,7 +148,7 @@ impl Bootstrap {
         });
     }
 
-    pub fn validate(&mut self, id: Id, object: &impl ObjectType) -> bool {
+    pub fn validate(&mut self, id: ObjectId, object: &impl ObjectType) -> bool {
         let mut errors = Vec::new();
         if object.validate(&mut errors) {
             true

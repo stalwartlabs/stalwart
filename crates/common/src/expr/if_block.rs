@@ -16,7 +16,7 @@ use registry::{
         prelude::{ExpressionContext, Property},
         structs,
     },
-    types::id::Id,
+    types::id::ObjectId,
 };
 use store::registry::bootstrap::Bootstrap;
 
@@ -28,14 +28,14 @@ pub struct IfThen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfBlock {
-    pub id: Id,
+    pub id: ObjectId,
     pub property: Property,
     pub if_then: Box<[IfThen]>,
     pub default: Expression,
 }
 
 impl IfBlock {
-    pub fn new_default(id: Id, expr_ctx: ExpressionContext<'_>) -> Self {
+    pub fn new_default(id: ObjectId, expr_ctx: ExpressionContext<'_>) -> Self {
         let token_map = TokenMap::default();
 
         if let Some(default) = &expr_ctx.default {
@@ -57,7 +57,7 @@ impl IfBlock {
         }
     }
 
-    pub fn empty(id: Id, property: Property) -> Self {
+    pub fn empty(id: ObjectId, property: Property) -> Self {
         Self {
             id,
             property,
@@ -82,18 +82,18 @@ impl Expression {
 }
 
 pub(crate) trait BootstrapExprExt {
-    fn compile_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock;
-    fn compile_default_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock;
+    fn compile_expr(&mut self, id: ObjectId, expr_ctx: &ExpressionContext<'_>) -> IfBlock;
+    fn compile_default_expr(&mut self, id: ObjectId, expr_ctx: &ExpressionContext<'_>) -> IfBlock;
     fn try_compile_expr(
         &mut self,
-        id: Id,
+        id: ObjectId,
         expr_ctx: &ExpressionContext<'_>,
         expr: &structs::Expression,
     ) -> Option<IfBlock>;
 }
 
 impl BootstrapExprExt for Bootstrap {
-    fn compile_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
+    fn compile_expr(&mut self, id: ObjectId, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
         if expr_ctx.expr.else_.is_empty() && expr_ctx.expr.match_.is_empty() {
             return IfBlock::empty(id, expr_ctx.property);
         }
@@ -105,7 +105,7 @@ impl BootstrapExprExt for Bootstrap {
         }
     }
 
-    fn compile_default_expr(&mut self, id: Id, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
+    fn compile_default_expr(&mut self, id: ObjectId, expr_ctx: &ExpressionContext<'_>) -> IfBlock {
         if let Some(default) = &expr_ctx.default {
             self.try_compile_expr(id, expr_ctx, default)
                 .expect("Valid default expression")
@@ -116,7 +116,7 @@ impl BootstrapExprExt for Bootstrap {
 
     fn try_compile_expr(
         &mut self,
-        id: Id,
+        id: ObjectId,
         expr_ctx: &ExpressionContext<'_>,
         expr: &structs::Expression,
     ) -> Option<IfBlock> {
@@ -212,7 +212,7 @@ impl BootstrapExprExt for Bootstrap {
 }
 
 impl IfBlock {
-    pub fn into_default(self, id: Id, property: Property) -> IfBlock {
+    pub fn into_default(self, id: ObjectId, property: Property) -> IfBlock {
         IfBlock {
             id,
             property,

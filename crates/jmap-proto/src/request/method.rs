@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
+use registry::{schema::prelude::Object, types::EnumType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MethodName {
@@ -35,6 +36,7 @@ pub enum MethodObject {
     FileNode,
     ParticipantIdentity,
     ShareNotification,
+    Registry(Object),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +58,7 @@ pub enum MethodFunction {
 
 impl Display for MethodName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(self.as_str().as_ref())
     }
 }
 
@@ -72,7 +74,7 @@ impl MethodName {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> Cow<'static, str> {
         match (self.fnc, self.obj) {
             (MethodFunction::Get, MethodObject::PushSubscription) => "PushSubscription/get",
             (MethodFunction::Set, MethodObject::PushSubscription) => "PushSubscription/set",
@@ -181,8 +183,11 @@ impl MethodName {
             (MethodFunction::Set, MethodObject::ParticipantIdentity) => "ParticipantIdentity/set",
 
             (MethodFunction::Echo, MethodObject::Core) => "Core/echo",
+            (method, MethodObject::Registry(obj)) => {
+                return Cow::Owned(format!("x:{}/{}", obj.as_str(), method.as_str()));
+            }
             _ => "error",
-        }
+        }.into()
     }
 
     pub fn parse(s: &str) -> Option<Self> {
@@ -293,7 +298,16 @@ impl MethodName {
 
             "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
 
-        ).map(|(obj, fnc)| MethodName { obj, fnc })
+        ).or_else(|| {
+            let (obj, fnc) = s.strip_prefix("x:")?.split_once('/')?;
+            let obj = Object::parse(obj)?;
+            let fnc = hashify::tiny_map!(fnc.as_bytes(), 
+                "get" => MethodFunction::Get,
+                "set" => MethodFunction::Set,
+                "query" => MethodFunction::Query,
+            )?;
+            (MethodObject::Registry(obj), fnc).into()
+        }).map(|(obj, fnc)| MethodName { obj, fnc })
     }
 
 }
@@ -322,10 +336,33 @@ impl Display for MethodObject {
             MethodObject::CalendarEvent => "CalendarEvent",
             MethodObject::CalendarEventNotification => "CalendarEventNotification",
             MethodObject::ShareNotification => "ShareNotification",
+            MethodObject::Registry(obj) => {
+                f.write_str("x:")?;
+                return f.write_str(obj.as_str());
+            },
         })
     }
 }
 
+impl MethodFunction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MethodFunction::Get => "get",
+            MethodFunction::Set => "set",
+            MethodFunction::Changes => "changes",
+            MethodFunction::Query => "query",
+            MethodFunction::QueryChanges => "queryChanges",
+            MethodFunction::Copy => "copy",
+            MethodFunction::Import => "import",
+            MethodFunction::Parse => "parse",
+            MethodFunction::Validate => "validate",
+            MethodFunction::Lookup => "lookup",
+            MethodFunction::Upload => "upload",
+            MethodFunction::Echo => "echo",
+            MethodFunction::GetAvailability => "getAvailability",
+        }
+    }
+}
 
 impl<'de> serde::Deserialize<'de> for MethodName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -345,6 +382,6 @@ impl serde::Serialize for MethodName {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.as_str())
+        serializer.serialize_str(self.as_str().as_ref())
     }
 }

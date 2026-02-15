@@ -34,7 +34,7 @@ use crate::{
         contact::ContactCard, email::Email, email_submission::EmailSubmission, file_node::FileNode,
         identity::Identity, mailbox::Mailbox, participant_identity::ParticipantIdentity,
         principal::Principal, push_subscription::PushSubscription, quota::Quota,
-        share_notification::ShareNotification, sieve::Sieve, thread::Thread,
+        registry::Registry, share_notification::ShareNotification, sieve::Sieve, thread::Thread,
         vacation_response::VacationResponse,
     },
     request::{capability::CapabilityIds, reference::MaybeIdReference},
@@ -97,6 +97,7 @@ pub enum GetRequestMethod {
     CalendarEventNotification(GetRequest<CalendarEventNotification>),
     ParticipantIdentity(GetRequest<ParticipantIdentity>),
     ShareNotification(GetRequest<ShareNotification>),
+    Registry(GetRequest<Registry>),
 }
 
 #[derive(Debug)]
@@ -116,6 +117,7 @@ pub enum SetRequestMethod<'x> {
     CalendarEvent(SetRequest<'x, CalendarEvent>),
     CalendarEventNotification(SetRequest<'x, CalendarEventNotification>),
     ParticipantIdentity(SetRequest<'x, ParticipantIdentity>),
+    Registry(SetRequest<'x, Registry>),
 }
 
 #[derive(Debug)]
@@ -139,6 +141,7 @@ pub enum QueryRequestMethod {
     CalendarEvent(QueryRequest<CalendarEvent>),
     CalendarEventNotification(QueryRequest<CalendarEventNotification>),
     ShareNotification(QueryRequest<ShareNotification>),
+    Registry(QueryRequest<Registry>),
 }
 
 #[derive(Debug)]
