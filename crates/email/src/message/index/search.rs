@@ -8,7 +8,8 @@ use crate::message::{
     index::{MAX_MESSAGE_PARTS, extractors::VisitTextArchived},
     metadata::{
         ArchivedMessageMetadata, ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue,
-        ArchivedMetadataPartType, DecodedPartContent, MESSAGE_RECEIVED_MASK, MetadataHeaderName,
+        ArchivedMetadataPartType, DecodedPartContent, MESSAGE_HAS_ATTACHMENT,
+        MESSAGE_RECEIVED_MASK, MetadataHeaderName,
     },
 };
 use mail_parser::{DateTime, decoders::html::html_to_text, parsers::fields::thread::thread_name};
@@ -339,10 +340,10 @@ impl ArchivedMessageMetadata {
         #[cfg(feature = "test_mode")]
         document.set_unknown_language(default_language);
 
-        let has_attachment =
-            document.has_field(&(SearchField::Email(EmailSearchField::Attachment)));
-
-        document.index_bool(EmailSearchField::HasAttachment, has_attachment);
+        document.index_bool(
+            EmailSearchField::HasAttachment,
+            self.rcvd_attach.to_native() & MESSAGE_HAS_ATTACHMENT != 0,
+        );
         document
     }
 }
