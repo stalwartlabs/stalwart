@@ -46,7 +46,8 @@ impl<T: SessionStream> Session<T> {
                 SpanId = self.data.session_id,
             );
             return self.write(b"503 5.5.1 MAIL is required first.\r\n").await;
-        } else if self.data.rcpt_to.len() >= self.params.rcpt_max {
+        } else if std::cmp::min(self.data.rcpt_to.len(), self.data.rcpt_oks) >= self.params.rcpt_max
+        {
             trc::event!(
                 Smtp(SmtpEvent::TooManyRecipients),
                 SpanId = self.data.session_id,
