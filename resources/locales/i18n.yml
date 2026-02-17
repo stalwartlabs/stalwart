@@ -128,57 +128,57 @@ calendar.location:
   pl: Lokalizacja
 
 calendar.date_template:
-  # English: "Sun May 25, 2025 9am"
-  en: "%a %b %-d, %Y %-I%P"
-  # Spanish: "dom 25 may 2025 9h" (day month year hour)
-  es: "%a %-d %b %Y %-Hh"
-  # French: "dim 25 mai 2025 9h" (day month year hour)
-  fr: "%a %-d %b %Y %-Hh"
-  # German: "So 25. Mai 2025 9 Uhr" (day date month year hour)
-  de: "%a %-d. %b %Y %-H Uhr"
-  # Italian: "dom 25 mag 2025 ore 9" (day date month year hour)
-  it: "%a %-d %b %Y ore %-H"
-  # Portuguese: "dom 25 mai 2025 9h" (day date month year hour)
-  pt: "%a %-d %b %Y %-Hh"
-  # Dutch: "zo 25 mei 2025 9u" (weekday date month year hour)
-  nl: "%a %-d %b %Y %-Hu"
-  # Danish: "søn 25. maj 2025 kl. 9" (weekday date month year hour)
-  da: "%a %-d. %b %Y kl. %-H"
-  # Catalan: "diu 25 mai 2025 9h" (day month year hour)
-  ca: "%a %-d %b %Y %-Hh"
-  # Greek: "Κυρ 25 Μαϊ 2025 9πμ" (day month year hour)
-  el: "%a %-d %b %Y %-H η ώρα"
-  # Svenska: "sön 25 maj 2025 kl. 9" (weekday date month year hour)
-  sv: "%a %-d %b %Y kl. %-H"
-  # Polish: "nie 25 maj 2025 09:00" (weekday day month year hour)
+  # English: "Sun May 25, 2025 9:30am"
+  en: "%a %b %-d, %Y %-I:%M%P"
+  # Spanish: "dom 25 may 2025 9:30h" (day month year hour and minute)
+  es: "%a %-d %b %Y %-H:%Mh"
+  # French: "dim 25 mai 2025 9:30h" (day month year hour and minute)
+  fr: "%a %-d %b %Y %-H:%Mh"
+  # German: "So 25. Mai 2025 9:30 Uhr" (day date month year hour and minute)
+  de: "%a %-d. %b %Y %-H:%M Uhr"
+  # Italian: "dom 25 mag 2025 ore 9:30" (day date month year hour and minute)
+  it: "%a %-d %b %Y ore %-H:%M"
+  # Portuguese: "dom 25 mai 2025 9:30h" (day date month year hour and minute)
+  pt: "%a %-d %b %Y %-H:%Mh"
+  # Dutch: "zo 25 mei 2025 9:30u" (weekday date month year hour and minute)
+  nl: "%a %-d %b %Y %-H:%Mu"
+  # Danish: "søn 25. maj 2025 kl. 9:30" (weekday date month year hour and minute)
+  da: "%a %-d. %b %Y kl. %-H:%M"
+  # Catalan: "diu 25 mai 2025 9:30h" (day month year hour and minute)
+  ca: "%a %-d %b %Y %-H:%Mh"
+  # Greek: "Κυρ 25 Μαϊ 2025 9:30 η ώρα" (day month year hour and minute)
+  el: "%a %-d %b %Y %-H:%M η ώρα"
+  # Svenska: "sön 25 maj 2025 kl. 9:30" (weekday date month year hour and minute)
+  sv: "%a %-d %b %Y kl. %-H:%M"
+  # Polish: "nie 25 maj 2025 09:00" (weekday day month year hour and minute)
   pl: "%a %d %b %Y %H:%M"
 
 calendar.date_template_long:
-  # English: "Sunday May 25, 2025 9am"
-  en: "%A %B %-d, %Y %-I%P"
-  # Spanish: "domingo 25 mayo 2025 9h" (day month year hour)
-  es: "%A %-d %B %Y %-Hh"
-  # French: "dimanche 25 mai 2025 9h" (day month year hour)
-  fr: "%A %-d %B %Y %-Hh"
-  # German: "Sonntag 25. Mai 2025 9 Uhr" (day date month year hour)
-  de: "%A %-d. %B %Y %-H Uhr"
-  # Italian: "domenica 25 maggio 2025 ore 9" (day date month year hour)
-  it: "%A %-d %B %Y ore %-H"
-  # Portuguese: "domingo 25 maio 2025 9h" (day date month year hour)
-  pt: "%A %-d %B %Y %-Hh"
-  # Dutch: "zondag 25 mei 2025 9u" (weekday date month year hour)
-  nl: "%A %-d %B %Y %-Hu"
-  # Danish: "søndag 25. maj 2025 kl. 9" (weekday date month year hour)
-  da: "%A %-d. %B %Y kl. %-H"
-  # Catalan: "diumenge 25 maig 2025 9h" (day month year hour)
-  ca: "%A %-d %B %Y %-Hh"
-  # Greek: "Κυριακή 25 Μαΐου 2025 9πμ" (day month year hour)
-  el: "%A %-d %B %Y %-H η ώρα"
+  # English: "Sunday May 25, 2025 9:30am"
+  en: "%A %B %-d, %Y %-I:%M%P"
+  # Spanish: "domingo 25 mayo 2025 9:30h" (day month year hour and minute)
+  es: "%A %-d %B %Y %-H:%Mh"
+  # French: "dimanche 25 mai 2025 9:30h" (day month year hour and minute)
+  fr: "%A %-d %B %Y %-H:%Mh"
+  # German: "Sonntag 25. Mai 2025 9:30 Uhr" (day date month year hour and minute)
+  de: "%A %-d. %B %Y %-H:%M Uhr"
+  # Italian: "domenica 25 maggio 2025 ore 9:30" (day date month year hour and minute)
+  it: "%A %-d %B %Y ore %-H:%M"
+  # Portuguese: "domingo 25 maio 2025 9:30h" (day date month year hour and minute)
+  pt: "%A %-d %B %Y %-H:%Mh"
+  # Dutch: "zondag 25 mei 2025 9:30u" (weekday date month year hour and minute)
+  nl: "%A %-d %B %Y %-H:%Mu"
+  # Danish: "søndag 25. maj 2025 kl. 9:30" (weekday date month year hour and minute)
+  da: "%A %-d. %B %Y kl. %-H:%M"
+  # Catalan: "diumenge 25 maig 2025 9:30h" (day month year hour and minute)
+  ca: "%A %-d %B %Y %-H:%Mh"
+  # Greek: "Κυριακή 25 Μαΐου 2025 9:30 η ώρα" (day month year hour and minute)
+  el: "%A %-d %B %Y %-H:%M η ώρα"
 
-  # Svenska: "söndag 25 maj 2025 kl. 9" (weekday date month year hour)
-  sv: "%A %-d. %B %Y kl. %-H"
+  # Svenska: "söndag 25 maj 2025 kl. 9:30" (weekday date month year hour and minute)
+  sv: "%A %-d. %B %Y kl. %-H:%M"
 
-  # Polish: "niedziela 25 maj 2025 09:00" (weekday day month year hour)
+  # Polish: "niedziela 25 maj 2025 09:00" (weekday day month year hour and minute)
   pl: "%A %d %b %Y %H:%M"
 
 calendar.invitation:
