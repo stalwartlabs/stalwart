@@ -19,6 +19,7 @@ use crate::{
         BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexId, SearchIndexType,
     },
 };
+use registry::types::EnumType;
 use std::convert::TryInto;
 use types::{
     blob_hash::BLOB_HASH_LEN,
@@ -373,9 +374,43 @@ impl ValueClass {
                 InMemoryClass::Key(key) => serializer.write(key.as_slice()),
                 InMemoryClass::Counter(key) => serializer.write(key.as_slice()),
             },
-            ValueClass::Registry(registry) => {
-                todo!()
-            }
+            ValueClass::Registry(registry) => match registry {
+                RegistryClass::Item(object_id) => serializer
+                    .write(0u8)
+                    .write(object_id.object().to_id())
+                    .write_leb128(object_id.id()),
+                RegistryClass::Reference { to, from } => serializer
+                    .write(1u8)
+                    .write(to.object().to_id())
+                    .write(to.id())
+                    .write(from.object().to_id())
+                    .write_leb128(from.id()),
+                RegistryClass::Index {
+                    index_id,
+                    item_id,
+                    key,
+                } => serializer
+                    .write(2u8)
+                    .write(item_id.object().to_id())
+                    .write(*index_id)
+                    .write(key.as_slice())
+                    .write(item_id.id()),
+                RegistryClass::IndexGlobal {
+                    index_id,
+                    item_id,
+                    key,
+                } => serializer
+                    .write(3u8)
+                    .write(*index_id)
+                    .write(key.as_slice())
+                    .write(item_id.object().to_id())
+                    .write(item_id.id()),
+                RegistryClass::Id { item_id } => serializer
+                    .write(4u8)
+                    .write(item_id.object().to_id())
+                    .write(item_id.id()),
+                RegistryClass::IdCounter { object } => serializer.write(object.to_id()),
+            },
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(queue_id) => serializer.write(*queue_id),
                 QueueClass::MessageEvent(event) => serializer
@@ -562,10 +597,15 @@ impl ValueClass {
             },
             ValueClass::Acl(_) => U32_LEN * 3 + 2,
             ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v)) => v.len(),
-            ValueClass::Registry(registry) => {
-                let todo = "implement";
-                todo!()
-            }
+            ValueClass::Registry(registry) => match registry {
+                RegistryClass::Item(_) => U16_LEN + U64_LEN + 2,
+                RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 2,
+                RegistryClass::Index { key, .. } | RegistryClass::IndexGlobal { key, .. } => {
+                    (U16_LEN * 2) + U64_LEN + key.len() + 2
+                }
+                RegistryClass::Id { .. } => U16_LEN + U64_LEN + 1,
+                RegistryClass::IdCounter { .. } => U16_LEN + 1,
+            },
             ValueClass::Blob(op) => match op {
                 BlobOp::Commit { .. } => BLOB_HASH_LEN,
                 BlobOp::Link { to, .. } => {
@@ -631,7 +671,7 @@ impl ValueClass {
 
         match self {
             ValueClass::Property(field) => {
-                if (collection == MAILBOX_COLLECTION && *field == MAILBOX_COUNTER_FIELD) {
+                if collection == MAILBOX_COLLECTION && *field == MAILBOX_COUNTER_FIELD {
                     SUBSPACE_COUNTER
                 } else {
                     SUBSPACE_PROPERTY
@@ -646,7 +686,13 @@ impl ValueClass {
                     SUBSPACE_BLOB_EXTRA
                 }
             },
-            ValueClass::Registry(_) => SUBSPACE_REGISTRY,
+            ValueClass::Registry(registry) => {
+                if matches!(registry, RegistryClass::IdCounter { .. }) {
+                    SUBSPACE_COUNTER
+                } else {
+                    SUBSPACE_REGISTRY
+                }
+            }
             ValueClass::InMemory(lookup) => match lookup {
                 InMemoryClass::Key(_) => SUBSPACE_IN_MEMORY_VALUE,
                 InMemoryClass::Counter(_) => SUBSPACE_IN_MEMORY_COUNTER,

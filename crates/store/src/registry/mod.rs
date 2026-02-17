@@ -5,7 +5,9 @@
  */
 
 pub mod bootstrap;
+pub mod get;
 pub mod query;
+pub mod write;
 
 use registry::{
     schema::prelude::{Object, Property},
@@ -20,6 +22,8 @@ pub struct RegistryObject<T: ObjectType> {
 pub struct RegistryQuery {
     pub object_type: Object,
     pub filters: Vec<RegistryFilter>,
+    pub account_id: Option<u32>,
+    pub tenant_id: Option<u32>,
 }
 
 pub struct RegistryFilter {
@@ -28,13 +32,13 @@ pub struct RegistryFilter {
     pub value: RegistryFilterValue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegistryFilterOp {
     Equal,
-    NotEqual,
     GreaterThan,
-    LessThan,
-    GreaterThanOrEqual,
-    LessThanOrEqual,
+    GreaterEqualThan,
+    LowerThan,
+    LowerEqualThan,
     TextMatch,
 }
 

@@ -13,7 +13,7 @@ use dav_proto::schema::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use registry::schema::prelude::{Object, Property};
+use registry::schema::prelude::Object;
 use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::collection::Collection;
@@ -50,7 +50,7 @@ impl PrincipalPropSearch for Server {
                 .registry()
                 .query::<RoaringBitmap>(
                     RegistryQuery::new(Object::Account)
-                        .equal_opt(Property::MemberTenantId, access_token.tenant_id())
+                        .with_tenant(access_token.tenant_id())
                         .text(search_for),
                 )
                 .await

@@ -16,7 +16,6 @@ pub enum EventType {
     Auth(AuthEvent),
     Calendar(CalendarEvent),
     Cluster(ClusterEvent),
-    Config(ConfigEvent),
     Dane(DaneEvent),
     Delivery(DeliveryEvent),
     Dkim(DkimEvent),
@@ -43,6 +42,7 @@ pub enum EventType {
     Purge(PurgeEvent),
     PushSubscription(PushSubscriptionEvent),
     Queue(QueueEvent),
+    Registry(RegistryEvent),
     Resource(ResourceEvent),
     Security(SecurityEvent),
     Server(ServerEvent),
@@ -140,23 +140,6 @@ pub enum ClusterEvent {
     MessageReceived = 46,
     MessageSkipped = 47,
     MessageInvalid = 49,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u16)]
-pub enum ConfigEvent {
-    ParseError = 62,
-    BuildError = 54,
-    MacroError = 60,
-    WriteError = 65,
-    FetchError = 58,
-    DefaultApplied = 56,
-    MissingSetting = 61,
-    UnusedSetting = 64,
-    ParseWarning = 63,
-    BuildWarning = 55,
-    ImportExternal = 59,
-    AlreadyUpToDate = 53,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -609,6 +592,23 @@ pub enum QueueEvent {
     ConcurrencyLimitExceeded = 375,
     QuotaExceeded = 383,
     BackPressure = 48,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum RegistryEvent {
+    LocalReadError = 62,
+    LocalWriteError = 54,
+    LocalParseError = 60,
+    ReadError = 65,
+    WriteError = 58,
+    DeserializationError = 56,
+    BuildError = 61,
+    BuildWarning = 55,
+    NotSupported = 64,
+    ValidationError = 63,
+    Reserved03 = 59,
+    Reserved04 = 53,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

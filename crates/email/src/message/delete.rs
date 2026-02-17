@@ -9,7 +9,7 @@ use common::{KV_LOCK_PURGE_ACCOUNT, Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
 use registry::schema::prelude::Object;
 use std::future::Future;
-use store::rand::prelude::SliceRandom;
+use store::ahash::AHashSet;
 use store::registry::RegistryQuery;
 use store::write::key::DeserializeBigEndian;
 use store::write::{IndexPropertyClass, SearchIndex, TaskEpoch, TaskQueueClass, now};
@@ -113,14 +113,12 @@ impl EmailDeletion for Server {
     async fn purge_accounts(&self, use_roles: bool) {
         match self
             .registry()
-            .query::<Vec<u32>>(RegistryQuery::new(Object::Account))
+            .query::<AHashSet<u64>>(RegistryQuery::new(Object::Account))
             .await
         {
-            Ok(mut account_ids) => {
-                // Shuffle account ids
-                account_ids.shuffle(&mut store::rand::rng());
-
+            Ok(account_ids) => {
                 for account_id in account_ids {
+                    let account_id = account_id as u32;
                     if !use_roles
                         || self
                             .core

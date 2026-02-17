@@ -9,7 +9,6 @@ use roaring::RoaringBitmap;
 
 pub mod blob;
 pub mod lookup;
-pub mod registry;
 pub mod search;
 pub mod store;
 

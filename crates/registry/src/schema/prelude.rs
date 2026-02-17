@@ -12,7 +12,6 @@ pub use crate::schema::enums::*;
 pub use crate::schema::properties::*;
 pub use crate::schema::structs::*;
 pub use crate::types::EnumType;
-pub use crate::types::ObjectIndex;
 pub use crate::types::ObjectType;
 pub use crate::types::datetime::UTCDateTime;
 pub use crate::types::duration::Duration;
@@ -21,6 +20,7 @@ pub use crate::types::index::IndexBuilder;
 pub use crate::types::ipaddr::IpAddr;
 pub use crate::types::ipmask::IpAddrOrMask;
 pub use crate::types::socketaddr::SocketAddr;
+pub use crate::types::string::StringValidator;
 pub use serde::{Deserialize, Serialize};
 pub use std::str::FromStr;
 pub use types::id::Id;
@@ -34,3 +34,8 @@ pub struct ExpressionContext<'x> {
     pub allowed_variables: &'static [ExpressionVariable],
     pub allowed_constants: &'static [ExpressionConstant],
 }
+
+pub const OBJ_SINGLETON: u64 = 1;
+pub const OBJ_SEQ_ID: u64 = 1 << 1;
+pub const OBJ_FILTER_ACCOUNT: u64 = 1 << 2;
+pub const OBJ_FILTER_TENANT: u64 = 1 << 3;

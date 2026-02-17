@@ -8,6 +8,7 @@ use self::assert::AssertValue;
 use crate::backend::MAX_TOKEN_LENGTH;
 use log::ChangeLogBuilder;
 use nlp::tokenizers::word::WordTokenizer;
+use registry::{schema::prelude::Object, types::id::ObjectId};
 use rkyv::util::AlignedVec;
 use std::{
     collections::HashSet,
@@ -270,15 +271,26 @@ pub enum InMemoryClass {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum RegistryClass {
-    Item(u64),
-    Relation {
-        from: u64,
-        to: u64,
+    Item(ObjectId),
+    Reference {
+        to: ObjectId,
+        from: ObjectId,
     },
     Index {
         index_id: u16,
-        item_id: u64,
+        item_id: ObjectId,
         key: Vec<u8>,
+    },
+    IndexGlobal {
+        index_id: u16,
+        item_id: ObjectId,
+        key: Vec<u8>,
+    },
+    Id {
+        item_id: ObjectId,
+    },
+    IdCounter {
+        object: Object,
     },
 }
 

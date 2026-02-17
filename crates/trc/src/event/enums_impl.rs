@@ -67,18 +67,6 @@ impl EventType {
             b"cluster.message-received" => EventType::Cluster(ClusterEvent::MessageReceived),
             b"cluster.message-skipped" => EventType::Cluster(ClusterEvent::MessageSkipped),
             b"cluster.message-invalid" => EventType::Cluster(ClusterEvent::MessageInvalid),
-            b"config.parse-error" => EventType::Config(ConfigEvent::ParseError),
-            b"config.build-error" => EventType::Config(ConfigEvent::BuildError),
-            b"config.macro-error" => EventType::Config(ConfigEvent::MacroError),
-            b"config.write-error" => EventType::Config(ConfigEvent::WriteError),
-            b"config.fetch-error" => EventType::Config(ConfigEvent::FetchError),
-            b"config.default-applied" => EventType::Config(ConfigEvent::DefaultApplied),
-            b"config.missing-setting" => EventType::Config(ConfigEvent::MissingSetting),
-            b"config.unused-setting" => EventType::Config(ConfigEvent::UnusedSetting),
-            b"config.parse-warning" => EventType::Config(ConfigEvent::ParseWarning),
-            b"config.build-warning" => EventType::Config(ConfigEvent::BuildWarning),
-            b"config.import-external" => EventType::Config(ConfigEvent::ImportExternal),
-            b"config.already-up-to-date" => EventType::Config(ConfigEvent::AlreadyUpToDate),
             b"dane.authentication-success" => EventType::Dane(DaneEvent::AuthenticationSuccess),
             b"dane.authentication-failure" => EventType::Dane(DaneEvent::AuthenticationFailure),
             b"dane.no-certificates-found" => EventType::Dane(DaneEvent::NoCertificatesFound),
@@ -401,6 +389,18 @@ impl EventType {
             b"queue.concurrency-limit-exceeded" => EventType::Queue(QueueEvent::ConcurrencyLimitExceeded),
             b"queue.quota-exceeded" => EventType::Queue(QueueEvent::QuotaExceeded),
             b"queue.back-pressure" => EventType::Queue(QueueEvent::BackPressure),
+            b"registry.local-read-error" => EventType::Registry(RegistryEvent::LocalReadError),
+            b"registry.local-write-error" => EventType::Registry(RegistryEvent::LocalWriteError),
+            b"registry.local-parse-error" => EventType::Registry(RegistryEvent::LocalParseError),
+            b"registry.read-error" => EventType::Registry(RegistryEvent::ReadError),
+            b"registry.write-error" => EventType::Registry(RegistryEvent::WriteError),
+            b"registry.deserialization-error" => EventType::Registry(RegistryEvent::DeserializationError),
+            b"registry.build-error" => EventType::Registry(RegistryEvent::BuildError),
+            b"registry.build-warning" => EventType::Registry(RegistryEvent::BuildWarning),
+            b"registry.not-supported" => EventType::Registry(RegistryEvent::NotSupported),
+            b"registry.validation-error" => EventType::Registry(RegistryEvent::ValidationError),
+            b"registry.reserved03" => EventType::Registry(RegistryEvent::Reserved03),
+            b"registry.reserved04" => EventType::Registry(RegistryEvent::Reserved04),
             b"resource.not-found" => EventType::Resource(ResourceEvent::NotFound),
             b"resource.bad-parameters" => EventType::Resource(ResourceEvent::BadParameters),
             b"resource.error" => EventType::Resource(ResourceEvent::Error),
@@ -677,18 +677,6 @@ impl EventType {
             EventType::Cluster(ClusterEvent::MessageReceived) => "cluster.message-received",
             EventType::Cluster(ClusterEvent::MessageSkipped) => "cluster.message-skipped",
             EventType::Cluster(ClusterEvent::MessageInvalid) => "cluster.message-invalid",
-            EventType::Config(ConfigEvent::ParseError) => "config.parse-error",
-            EventType::Config(ConfigEvent::BuildError) => "config.build-error",
-            EventType::Config(ConfigEvent::MacroError) => "config.macro-error",
-            EventType::Config(ConfigEvent::WriteError) => "config.write-error",
-            EventType::Config(ConfigEvent::FetchError) => "config.fetch-error",
-            EventType::Config(ConfigEvent::DefaultApplied) => "config.default-applied",
-            EventType::Config(ConfigEvent::MissingSetting) => "config.missing-setting",
-            EventType::Config(ConfigEvent::UnusedSetting) => "config.unused-setting",
-            EventType::Config(ConfigEvent::ParseWarning) => "config.parse-warning",
-            EventType::Config(ConfigEvent::BuildWarning) => "config.build-warning",
-            EventType::Config(ConfigEvent::ImportExternal) => "config.import-external",
-            EventType::Config(ConfigEvent::AlreadyUpToDate) => "config.already-up-to-date",
             EventType::Dane(DaneEvent::AuthenticationSuccess) => "dane.authentication-success",
             EventType::Dane(DaneEvent::AuthenticationFailure) => "dane.authentication-failure",
             EventType::Dane(DaneEvent::NoCertificatesFound) => "dane.no-certificates-found",
@@ -1105,6 +1093,20 @@ impl EventType {
             }
             EventType::Queue(QueueEvent::QuotaExceeded) => "queue.quota-exceeded",
             EventType::Queue(QueueEvent::BackPressure) => "queue.back-pressure",
+            EventType::Registry(RegistryEvent::LocalReadError) => "registry.local-read-error",
+            EventType::Registry(RegistryEvent::LocalWriteError) => "registry.local-write-error",
+            EventType::Registry(RegistryEvent::LocalParseError) => "registry.local-parse-error",
+            EventType::Registry(RegistryEvent::ReadError) => "registry.read-error",
+            EventType::Registry(RegistryEvent::WriteError) => "registry.write-error",
+            EventType::Registry(RegistryEvent::DeserializationError) => {
+                "registry.deserialization-error"
+            }
+            EventType::Registry(RegistryEvent::BuildError) => "registry.build-error",
+            EventType::Registry(RegistryEvent::BuildWarning) => "registry.build-warning",
+            EventType::Registry(RegistryEvent::NotSupported) => "registry.not-supported",
+            EventType::Registry(RegistryEvent::ValidationError) => "registry.validation-error",
+            EventType::Registry(RegistryEvent::Reserved03) => "registry.reserved03",
+            EventType::Registry(RegistryEvent::Reserved04) => "registry.reserved04",
             EventType::Resource(ResourceEvent::NotFound) => "resource.not-found",
             EventType::Resource(ResourceEvent::BadParameters) => "resource.bad-parameters",
             EventType::Resource(ResourceEvent::Error) => "resource.error",
@@ -1386,18 +1388,6 @@ impl EventType {
             EventType::Cluster(ClusterEvent::MessageReceived) => 46,
             EventType::Cluster(ClusterEvent::MessageSkipped) => 47,
             EventType::Cluster(ClusterEvent::MessageInvalid) => 49,
-            EventType::Config(ConfigEvent::ParseError) => 62,
-            EventType::Config(ConfigEvent::BuildError) => 54,
-            EventType::Config(ConfigEvent::MacroError) => 60,
-            EventType::Config(ConfigEvent::WriteError) => 65,
-            EventType::Config(ConfigEvent::FetchError) => 58,
-            EventType::Config(ConfigEvent::DefaultApplied) => 56,
-            EventType::Config(ConfigEvent::MissingSetting) => 61,
-            EventType::Config(ConfigEvent::UnusedSetting) => 64,
-            EventType::Config(ConfigEvent::ParseWarning) => 63,
-            EventType::Config(ConfigEvent::BuildWarning) => 55,
-            EventType::Config(ConfigEvent::ImportExternal) => 59,
-            EventType::Config(ConfigEvent::AlreadyUpToDate) => 53,
             EventType::Dane(DaneEvent::AuthenticationSuccess) => 67,
             EventType::Dane(DaneEvent::AuthenticationFailure) => 66,
             EventType::Dane(DaneEvent::NoCertificatesFound) => 69,
@@ -1720,6 +1710,18 @@ impl EventType {
             EventType::Queue(QueueEvent::ConcurrencyLimitExceeded) => 375,
             EventType::Queue(QueueEvent::QuotaExceeded) => 383,
             EventType::Queue(QueueEvent::BackPressure) => 48,
+            EventType::Registry(RegistryEvent::LocalReadError) => 62,
+            EventType::Registry(RegistryEvent::LocalWriteError) => 54,
+            EventType::Registry(RegistryEvent::LocalParseError) => 60,
+            EventType::Registry(RegistryEvent::ReadError) => 65,
+            EventType::Registry(RegistryEvent::WriteError) => 58,
+            EventType::Registry(RegistryEvent::DeserializationError) => 56,
+            EventType::Registry(RegistryEvent::BuildError) => 61,
+            EventType::Registry(RegistryEvent::BuildWarning) => 55,
+            EventType::Registry(RegistryEvent::NotSupported) => 64,
+            EventType::Registry(RegistryEvent::ValidationError) => 63,
+            EventType::Registry(RegistryEvent::Reserved03) => 59,
+            EventType::Registry(RegistryEvent::Reserved04) => 53,
             EventType::Resource(ResourceEvent::NotFound) => 389,
             EventType::Resource(ResourceEvent::BadParameters) => 386,
             EventType::Resource(ResourceEvent::Error) => 388,
@@ -1987,18 +1989,6 @@ impl EventType {
             46 => Some(EventType::Cluster(ClusterEvent::MessageReceived)),
             47 => Some(EventType::Cluster(ClusterEvent::MessageSkipped)),
             49 => Some(EventType::Cluster(ClusterEvent::MessageInvalid)),
-            62 => Some(EventType::Config(ConfigEvent::ParseError)),
-            54 => Some(EventType::Config(ConfigEvent::BuildError)),
-            60 => Some(EventType::Config(ConfigEvent::MacroError)),
-            65 => Some(EventType::Config(ConfigEvent::WriteError)),
-            58 => Some(EventType::Config(ConfigEvent::FetchError)),
-            56 => Some(EventType::Config(ConfigEvent::DefaultApplied)),
-            61 => Some(EventType::Config(ConfigEvent::MissingSetting)),
-            64 => Some(EventType::Config(ConfigEvent::UnusedSetting)),
-            63 => Some(EventType::Config(ConfigEvent::ParseWarning)),
-            55 => Some(EventType::Config(ConfigEvent::BuildWarning)),
-            59 => Some(EventType::Config(ConfigEvent::ImportExternal)),
-            53 => Some(EventType::Config(ConfigEvent::AlreadyUpToDate)),
             67 => Some(EventType::Dane(DaneEvent::AuthenticationSuccess)),
             66 => Some(EventType::Dane(DaneEvent::AuthenticationFailure)),
             69 => Some(EventType::Dane(DaneEvent::NoCertificatesFound)),
@@ -2357,6 +2347,18 @@ impl EventType {
             375 => Some(EventType::Queue(QueueEvent::ConcurrencyLimitExceeded)),
             383 => Some(EventType::Queue(QueueEvent::QuotaExceeded)),
             48 => Some(EventType::Queue(QueueEvent::BackPressure)),
+            62 => Some(EventType::Registry(RegistryEvent::LocalReadError)),
+            54 => Some(EventType::Registry(RegistryEvent::LocalWriteError)),
+            60 => Some(EventType::Registry(RegistryEvent::LocalParseError)),
+            65 => Some(EventType::Registry(RegistryEvent::ReadError)),
+            58 => Some(EventType::Registry(RegistryEvent::WriteError)),
+            56 => Some(EventType::Registry(RegistryEvent::DeserializationError)),
+            61 => Some(EventType::Registry(RegistryEvent::BuildError)),
+            55 => Some(EventType::Registry(RegistryEvent::BuildWarning)),
+            64 => Some(EventType::Registry(RegistryEvent::NotSupported)),
+            63 => Some(EventType::Registry(RegistryEvent::ValidationError)),
+            59 => Some(EventType::Registry(RegistryEvent::Reserved03)),
+            53 => Some(EventType::Registry(RegistryEvent::Reserved04)),
             389 => Some(EventType::Resource(ResourceEvent::NotFound)),
             386 => Some(EventType::Resource(ResourceEvent::BadParameters)),
             388 => Some(EventType::Resource(ResourceEvent::Error)),
@@ -2580,11 +2582,6 @@ impl EventType {
             EventType::Cluster(ClusterEvent::SubscriberError) => Level::Error,
             EventType::Cluster(ClusterEvent::PublisherError) => Level::Error,
             EventType::Cluster(ClusterEvent::MessageInvalid) => Level::Error,
-            EventType::Config(ConfigEvent::ParseError) => Level::Error,
-            EventType::Config(ConfigEvent::BuildError) => Level::Error,
-            EventType::Config(ConfigEvent::MacroError) => Level::Error,
-            EventType::Config(ConfigEvent::WriteError) => Level::Error,
-            EventType::Config(ConfigEvent::FetchError) => Level::Error,
             EventType::Dkim(DkimEvent::BuildError) => Level::Error,
             EventType::Dns(DnsEvent::BuildError) => Level::Error,
             EventType::MessageIngest(MessageIngestEvent::Error) => Level::Error,
@@ -2593,6 +2590,14 @@ impl EventType {
             EventType::Network(NetworkEvent::SplitError) => Level::Error,
             EventType::Network(NetworkEvent::SetOptError) => Level::Error,
             EventType::Purge(PurgeEvent::Error) => Level::Error,
+            EventType::Registry(RegistryEvent::LocalReadError) => Level::Error,
+            EventType::Registry(RegistryEvent::LocalWriteError) => Level::Error,
+            EventType::Registry(RegistryEvent::LocalParseError) => Level::Error,
+            EventType::Registry(RegistryEvent::ReadError) => Level::Error,
+            EventType::Registry(RegistryEvent::WriteError) => Level::Error,
+            EventType::Registry(RegistryEvent::DeserializationError) => Level::Error,
+            EventType::Registry(RegistryEvent::BuildError) => Level::Error,
+            EventType::Registry(RegistryEvent::ValidationError) => Level::Error,
             EventType::Resource(ResourceEvent::BadParameters) => Level::Error,
             EventType::Resource(ResourceEvent::Error) => Level::Error,
             EventType::Server(ServerEvent::StartupError) => Level::Error,
@@ -2640,7 +2645,6 @@ impl EventType {
             EventType::Cluster(ClusterEvent::SubscriberStop) => Level::Info,
             EventType::Cluster(ClusterEvent::PublisherStart) => Level::Info,
             EventType::Cluster(ClusterEvent::PublisherStop) => Level::Info,
-            EventType::Config(ConfigEvent::ImportExternal) => Level::Info,
             EventType::Dane(DaneEvent::AuthenticationSuccess) => Level::Info,
             EventType::Dane(DaneEvent::AuthenticationFailure) => Level::Info,
             EventType::Dane(DaneEvent::NoCertificatesFound) => Level::Info,
@@ -2751,6 +2755,7 @@ impl EventType {
             EventType::Queue(QueueEvent::RateLimitExceeded) => Level::Info,
             EventType::Queue(QueueEvent::ConcurrencyLimitExceeded) => Level::Info,
             EventType::Queue(QueueEvent::QuotaExceeded) => Level::Info,
+            EventType::Registry(RegistryEvent::Reserved03) => Level::Info,
             EventType::Resource(ResourceEvent::DownloadExternal) => Level::Info,
             EventType::Resource(ResourceEvent::WebadminUnpacked) => Level::Info,
             EventType::Security(SecurityEvent::AuthenticationBan) => Level::Info,
@@ -2854,8 +2859,6 @@ impl EventType {
             EventType::Auth(AuthEvent::TooManyAttempts) => Level::Warn,
             EventType::Calendar(CalendarEvent::AlarmFailed) => Level::Warn,
             EventType::Cluster(ClusterEvent::SubscriberDisconnected) => Level::Warn,
-            EventType::Config(ConfigEvent::ParseWarning) => Level::Warn,
-            EventType::Config(ConfigEvent::BuildWarning) => Level::Warn,
             EventType::Delivery(DeliveryEvent::MissingOutboundHostname) => Level::Warn,
             EventType::Delivery(DeliveryEvent::ConcurrencyLimitExceeded) => Level::Warn,
             EventType::Delivery(DeliveryEvent::RateLimitExceeded) => Level::Warn,
@@ -2879,6 +2882,7 @@ impl EventType {
             EventType::MtaHook(MtaHookEvent::Error) => Level::Warn,
             EventType::Network(NetworkEvent::ProxyError) => Level::Warn,
             EventType::Queue(QueueEvent::BackPressure) => Level::Warn,
+            EventType::Registry(RegistryEvent::BuildWarning) => Level::Warn,
             EventType::Sieve(SieveEvent::MessageTooLarge) => Level::Warn,
             EventType::Sieve(SieveEvent::ScriptNotFound) => Level::Warn,
             EventType::Sieve(SieveEvent::ListNotFound) => Level::Warn,
@@ -2969,18 +2973,6 @@ impl EventType {
             EventType::Cluster(ClusterEvent::MessageReceived) => "PubSub message received",
             EventType::Cluster(ClusterEvent::MessageSkipped) => "PubSub message skipped",
             EventType::Cluster(ClusterEvent::MessageInvalid) => "Invalid PubSub message",
-            EventType::Config(ConfigEvent::ParseError) => "Configuration parse error",
-            EventType::Config(ConfigEvent::BuildError) => "Configuration build error",
-            EventType::Config(ConfigEvent::MacroError) => "Configuration macro error",
-            EventType::Config(ConfigEvent::WriteError) => "Configuration write error",
-            EventType::Config(ConfigEvent::FetchError) => "Configuration fetch error",
-            EventType::Config(ConfigEvent::DefaultApplied) => "Default configuration applied",
-            EventType::Config(ConfigEvent::MissingSetting) => "Missing configuration setting",
-            EventType::Config(ConfigEvent::UnusedSetting) => "Unused configuration setting",
-            EventType::Config(ConfigEvent::ParseWarning) => "Configuration parse warning",
-            EventType::Config(ConfigEvent::BuildWarning) => "Configuration build warning",
-            EventType::Config(ConfigEvent::ImportExternal) => "Importing external configuration",
-            EventType::Config(ConfigEvent::AlreadyUpToDate) => "Configuration already up to date",
             EventType::Dane(DaneEvent::AuthenticationSuccess) => "DANE authentication successful",
             EventType::Dane(DaneEvent::AuthenticationFailure) => "DANE authentication failed",
             EventType::Dane(DaneEvent::NoCertificatesFound) => "No certificates found for DANE",
@@ -3405,6 +3397,22 @@ impl EventType {
             EventType::Queue(QueueEvent::ConcurrencyLimitExceeded) => "Concurrency limit exceeded",
             EventType::Queue(QueueEvent::QuotaExceeded) => "Quota exceeded",
             EventType::Queue(QueueEvent::BackPressure) => "Queue backpressure detected",
+            EventType::Registry(RegistryEvent::LocalReadError) => "Local registry read error",
+            EventType::Registry(RegistryEvent::LocalWriteError) => "Local registry write error",
+            EventType::Registry(RegistryEvent::LocalParseError) => "Local registry parse error",
+            EventType::Registry(RegistryEvent::ReadError) => "Registry read error",
+            EventType::Registry(RegistryEvent::WriteError) => "Registry write error",
+            EventType::Registry(RegistryEvent::DeserializationError) => {
+                "Registry deserialization error"
+            }
+            EventType::Registry(RegistryEvent::BuildError) => "Configuration build error",
+            EventType::Registry(RegistryEvent::BuildWarning) => "Configuration build warning",
+            EventType::Registry(RegistryEvent::NotSupported) => {
+                "Operation not supported by local registry"
+            }
+            EventType::Registry(RegistryEvent::ValidationError) => "Object validation error",
+            EventType::Registry(RegistryEvent::Reserved03) => "Importing external configuration",
+            EventType::Registry(RegistryEvent::Reserved04) => "Configuration already up to date",
             EventType::Resource(ResourceEvent::NotFound) => "Resource not found",
             EventType::Resource(ResourceEvent::BadParameters) => "Bad resource parameters",
             EventType::Resource(ResourceEvent::Error) => "Resource error",
@@ -3723,38 +3731,6 @@ impl EventType {
             }
             EventType::Cluster(ClusterEvent::MessageInvalid) => {
                 "An invalid message was received from the PubSub server"
-            }
-            EventType::Config(ConfigEvent::ParseError) => {
-                "An error occurred while parsing the configuration"
-            }
-            EventType::Config(ConfigEvent::BuildError) => {
-                "An error occurred while building the configuration"
-            }
-            EventType::Config(ConfigEvent::MacroError) => {
-                "An error occurred with a configuration macro"
-            }
-            EventType::Config(ConfigEvent::WriteError) => {
-                "An error occurred while writing the configuration"
-            }
-            EventType::Config(ConfigEvent::FetchError) => {
-                "An error occurred while fetching the configuration"
-            }
-            EventType::Config(ConfigEvent::DefaultApplied) => {
-                "The default configuration has been applied"
-            }
-            EventType::Config(ConfigEvent::MissingSetting) => "A configuration setting is missing",
-            EventType::Config(ConfigEvent::UnusedSetting) => "A configuration setting is unused",
-            EventType::Config(ConfigEvent::ParseWarning) => {
-                "A warning occurred while parsing the configuration"
-            }
-            EventType::Config(ConfigEvent::BuildWarning) => {
-                "A warning occurred while building the configuration"
-            }
-            EventType::Config(ConfigEvent::ImportExternal) => {
-                "An external configuration is being imported"
-            }
-            EventType::Config(ConfigEvent::AlreadyUpToDate) => {
-                "The configuration is already up to date"
             }
             EventType::Dane(DaneEvent::AuthenticationSuccess) => "Successful DANE authentication",
             EventType::Dane(DaneEvent::AuthenticationFailure) => "Failed DANE authentication",
@@ -4342,6 +4318,42 @@ impl EventType {
             EventType::Queue(QueueEvent::BackPressure) => {
                 "Queue congested, processing can't keep up with incoming message rate"
             }
+            EventType::Registry(RegistryEvent::LocalReadError) => {
+                "An error occurred while reading the local registry file"
+            }
+            EventType::Registry(RegistryEvent::LocalWriteError) => {
+                "An error occurred while writing to the local registry file"
+            }
+            EventType::Registry(RegistryEvent::LocalParseError) => {
+                "An error occurred while parsing the local registry file"
+            }
+            EventType::Registry(RegistryEvent::ReadError) => {
+                "An error occurred while reading the registry file"
+            }
+            EventType::Registry(RegistryEvent::WriteError) => {
+                "An error occurred while writing to the registry file"
+            }
+            EventType::Registry(RegistryEvent::DeserializationError) => {
+                "An error occurred while deserializing a registry entry"
+            }
+            EventType::Registry(RegistryEvent::BuildError) => {
+                "An error occurred while building the configuration from the registry"
+            }
+            EventType::Registry(RegistryEvent::BuildWarning) => {
+                "A warning occurred while building the configuration from the registry"
+            }
+            EventType::Registry(RegistryEvent::NotSupported) => {
+                "The local registry does not support this operation"
+            }
+            EventType::Registry(RegistryEvent::ValidationError) => {
+                "An error occurred while validating a registry object"
+            }
+            EventType::Registry(RegistryEvent::Reserved03) => {
+                "An external configuration is being imported"
+            }
+            EventType::Registry(RegistryEvent::Reserved04) => {
+                "The configuration is already up to date"
+            }
             EventType::Resource(ResourceEvent::NotFound) => "The resource was not found",
             EventType::Resource(ResourceEvent::BadParameters) => "The resource parameters are bad",
             EventType::Resource(ResourceEvent::Error) => "An error occurred with the resource",
@@ -4742,18 +4754,6 @@ impl EventType {
             EventType::Auth(AuthEvent::TooManyAttempts) => "Too many authentication attempts",
             EventType::Auth(AuthEvent::ClientRegistration) => "Authentication error",
             EventType::Auth(AuthEvent::Error) => "Authentication error",
-            EventType::Config(ConfigEvent::ParseError) => "Configuration error",
-            EventType::Config(ConfigEvent::BuildError) => "Configuration error",
-            EventType::Config(ConfigEvent::MacroError) => "Configuration error",
-            EventType::Config(ConfigEvent::WriteError) => "Configuration error",
-            EventType::Config(ConfigEvent::FetchError) => "Configuration error",
-            EventType::Config(ConfigEvent::DefaultApplied) => "Configuration error",
-            EventType::Config(ConfigEvent::MissingSetting) => "Configuration error",
-            EventType::Config(ConfigEvent::UnusedSetting) => "Configuration error",
-            EventType::Config(ConfigEvent::ParseWarning) => "Configuration error",
-            EventType::Config(ConfigEvent::BuildWarning) => "Configuration error",
-            EventType::Config(ConfigEvent::ImportExternal) => "Configuration error",
-            EventType::Config(ConfigEvent::AlreadyUpToDate) => "Configuration error",
             EventType::Imap(ImapEvent::ConnectionStart) => "IMAP error",
             EventType::Imap(ImapEvent::ConnectionEnd) => "IMAP error",
             EventType::Imap(ImapEvent::GetAcl) => "IMAP error",
@@ -5071,18 +5071,6 @@ impl EventType {
             EventType::Cluster(ClusterEvent::MessageReceived),
             EventType::Cluster(ClusterEvent::MessageSkipped),
             EventType::Cluster(ClusterEvent::MessageInvalid),
-            EventType::Config(ConfigEvent::ParseError),
-            EventType::Config(ConfigEvent::BuildError),
-            EventType::Config(ConfigEvent::MacroError),
-            EventType::Config(ConfigEvent::WriteError),
-            EventType::Config(ConfigEvent::FetchError),
-            EventType::Config(ConfigEvent::DefaultApplied),
-            EventType::Config(ConfigEvent::MissingSetting),
-            EventType::Config(ConfigEvent::UnusedSetting),
-            EventType::Config(ConfigEvent::ParseWarning),
-            EventType::Config(ConfigEvent::BuildWarning),
-            EventType::Config(ConfigEvent::ImportExternal),
-            EventType::Config(ConfigEvent::AlreadyUpToDate),
             EventType::Dane(DaneEvent::AuthenticationSuccess),
             EventType::Dane(DaneEvent::AuthenticationFailure),
             EventType::Dane(DaneEvent::NoCertificatesFound),
@@ -5405,6 +5393,18 @@ impl EventType {
             EventType::Queue(QueueEvent::ConcurrencyLimitExceeded),
             EventType::Queue(QueueEvent::QuotaExceeded),
             EventType::Queue(QueueEvent::BackPressure),
+            EventType::Registry(RegistryEvent::LocalReadError),
+            EventType::Registry(RegistryEvent::LocalWriteError),
+            EventType::Registry(RegistryEvent::LocalParseError),
+            EventType::Registry(RegistryEvent::ReadError),
+            EventType::Registry(RegistryEvent::WriteError),
+            EventType::Registry(RegistryEvent::DeserializationError),
+            EventType::Registry(RegistryEvent::BuildError),
+            EventType::Registry(RegistryEvent::BuildWarning),
+            EventType::Registry(RegistryEvent::NotSupported),
+            EventType::Registry(RegistryEvent::ValidationError),
+            EventType::Registry(RegistryEvent::Reserved03),
+            EventType::Registry(RegistryEvent::Reserved04),
             EventType::Resource(ResourceEvent::NotFound),
             EventType::Resource(ResourceEvent::BadParameters),
             EventType::Resource(ResourceEvent::Error),

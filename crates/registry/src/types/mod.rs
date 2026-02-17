@@ -9,6 +9,7 @@ use crate::{
     schema::prelude::Object,
     types::{error::ValidationError, index::IndexBuilder},
 };
+use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 
 pub mod datetime;
@@ -19,6 +20,7 @@ pub mod index;
 pub mod ipaddr;
 pub mod ipmask;
 pub mod socketaddr;
+pub mod string;
 
 pub trait EnumType: Sized + Debug + PartialEq + Eq {
     const COUNT: usize;
@@ -29,11 +31,12 @@ pub trait EnumType: Sized + Debug + PartialEq + Eq {
     fn to_id(&self) -> u16;
 }
 
-pub trait ObjectType: Pickle + Default + Clone + Send + Sync {
+pub trait ObjectType:
+    Pickle + Serialize + DeserializeOwned + Default + Clone + Send + Sync
+{
+    const FLAGS: u64;
+
     fn object() -> Object;
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool;
-}
-
-pub trait ObjectIndex<'x>: Send + Sync {
-    fn index(&'x self, builder: &mut IndexBuilder<'x>);
+    fn index<'x>(&'x self, builder: &mut IndexBuilder<'x>);
 }

@@ -304,3 +304,58 @@ pub fn sanitize_email(email: &str) -> Option<String> {
         None
     }
 }
+
+pub fn sanitize_email_local(local: &str) -> Option<String> {
+    let mut result = String::with_capacity(local.len());
+    let mut last_ch = char::from(0);
+
+    for ch in local.chars() {
+        if !ch.is_whitespace() {
+            if ch.is_alphanumeric() {
+                for ch in ch.to_lowercase() {
+                    result.push(ch);
+                }
+            } else if result.is_empty() || !last_ch.is_alphanumeric() {
+                return None;
+            }
+
+            last_ch = ch;
+        }
+    }
+
+    if last_ch.is_alphanumeric() {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+pub fn sanitize_domain(domain: &str) -> Option<String> {
+    let mut result = String::with_capacity(domain.len());
+    let mut found_dot = false;
+    let mut last_ch = char::from(0);
+
+    for ch in domain.chars() {
+        if !ch.is_whitespace() {
+            if ch == '.' {
+                found_dot = true;
+                if !(last_ch.is_alphanumeric() || last_ch == '-' || last_ch == '_') {
+                    return None;
+                }
+            }
+            last_ch = ch;
+            for ch in ch.to_lowercase() {
+                result.push(ch);
+            }
+        }
+    }
+
+    if found_dot
+        && last_ch != '.'
+        && psl::domain(result.as_bytes()).is_some_and(|d| d.suffix().typ().is_some())
+    {
+        Some(result)
+    } else {
+        None
+    }
+}

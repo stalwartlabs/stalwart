@@ -12,7 +12,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Key, Map, Value};
-use registry::schema::prelude::{Object, Permission, Property};
+use registry::schema::prelude::{Object, Permission};
 use std::future::Future;
 use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use trc::AddContext;
@@ -52,8 +52,7 @@ impl PrincipalGet for Server {
         let principal_ids = self
             .registry()
             .query::<RoaringBitmap>(
-                RegistryQuery::new(Object::Account)
-                    .equal_opt(Property::MemberTenantId, access_token.tenant_id()),
+                RegistryQuery::new(Object::Account).with_tenant(access_token.tenant_id()),
             )
             .await
             .caused_by(trc::location!())?;

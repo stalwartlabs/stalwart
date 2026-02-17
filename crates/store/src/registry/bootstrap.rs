@@ -11,7 +11,7 @@ use registry::{
         structs::{LocalSettings, Node},
     },
     types::{
-        ObjectType,
+        EnumType, ObjectType,
         error::{Error, ValidationError, Warning},
         id::ObjectId,
     },
@@ -170,10 +170,56 @@ impl Bootstrap {
     }
 
     pub fn log_errors(&self) {
-        let todo = "implement";
+        for error in &self.errors {
+            match error {
+                Error::Validation { object_id, errors } => {
+                    trc::event!(
+                        Registry(trc::RegistryEvent::ValidationError),
+                        Source = object_id.object().as_str(),
+                        Id = object_id.id(),
+                        Reason = errors
+                            .iter()
+                            .map(|err| trc::Value::from(err.to_string()))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+                Error::Build { object_id, message } => {
+                    trc::event!(
+                        Registry(trc::RegistryEvent::BuildError),
+                        Source = object_id.object().as_str(),
+                        Id = object_id.id(),
+                        Reason = message.clone(),
+                    );
+                }
+                Error::Internal { object_id, error } => {
+                    trc::event!(
+                        Registry(trc::RegistryEvent::ReadError),
+                        Source = object_id.as_ref().map(|id| id.object().as_str()),
+                        Id = object_id.as_ref().map(|id| id.id()),
+                        CausedBy = error.clone(),
+                    );
+                }
+                Error::NotFound { object_id } => {
+                    trc::event!(
+                        Registry(trc::RegistryEvent::BuildError),
+                        Source = object_id.object().as_str(),
+                        Id = object_id.id(),
+                        Reason = "Object not found",
+                    );
+                }
+            }
+        }
     }
 
     pub fn log_warnings(&self) {
-        let todo = "implement";
+        for warning in &self.warnings {
+            trc::event!(
+                Registry(trc::RegistryEvent::BuildWarning),
+                Source = warning.object_id.object().as_str(),
+                Id = warning.object_id.id(),
+                Key = warning.property.map(|key| key.as_str()),
+                Reason = warning.message.clone(),
+            );
+        }
     }
 }

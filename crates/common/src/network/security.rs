@@ -16,10 +16,13 @@ use registry::{
         prelude::Object,
         structs::{self, AllowedIp, BlockedIp, Rate},
     },
-    types::{datetime::UTCDateTime, id::ObjectId, ipmask::IpAddrOrMask},
+    types::{datetime::UTCDateTime, ipmask::IpAddrOrMask},
 };
 use std::{fmt::Debug, net::IpAddr};
-use store::{registry::bootstrap::Bootstrap, write::now};
+use store::{
+    registry::{bootstrap::Bootstrap, write::RegistryWriteResult},
+    write::now,
+};
 use trc::AddContext;
 use utils::glob::{GlobPattern, MatchType};
 
@@ -71,7 +74,7 @@ impl Security {
 
         if !expired_allows.is_empty() {
             for (id, _) in &expired_allows {
-                if let Err(err) = bp.registry.delete(*id).await {
+                if let Err(err) = bp.registry.delete::<AllowedIp>(id.id()).await {
                     trc::error!(
                         err.details("Failed to delete expired allowed IP from registry.")
                             .caused_by(trc::location!())
@@ -235,7 +238,7 @@ impl Server {
 
         // Write blocked IP to config
         let now = now() as i64;
-        let id = self
+        let RegistryWriteResult::Success(id) = self
             .registry()
             .insert(&BlockedIp {
                 address: IpAddrOrMask::from_ip(ip),
@@ -249,7 +252,10 @@ impl Server {
                 reason,
             })
             .await
-            .caused_by(trc::location!())?;
+            .caused_by(trc::location!())?
+        else {
+            return Ok(());
+        };
 
         // Increment version
         self.cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Insert(
@@ -311,7 +317,7 @@ impl BlockedIps {
 
         if !expired_blocks.is_empty() {
             for (id, _) in &expired_blocks {
-                if let Err(err) = bp.registry.delete(*id).await {
+                if let Err(err) = bp.registry.delete::<BlockedIp>(id.id()).await {
                     trc::error!(
                         err.details("Failed to delete expired blocked IP from registry.")
                             .caused_by(trc::location!())

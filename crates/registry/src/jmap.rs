@@ -6,7 +6,11 @@
 
 use crate::{
     schema::prelude::Property,
-    types::{EnumType, error::PatchError},
+    types::{
+        EnumType,
+        error::PatchError,
+        string::{StringValidator, StringValidatorResult},
+    },
 };
 use jmap_tools::{JsonPointer, JsonPointerItem, Key, Value};
 use std::{borrow::Cow, fmt::Debug, str::FromStr};
@@ -24,6 +28,7 @@ pub enum RegistryValue {
 pub struct JsonPointerPatch<'x> {
     ptr: &'x JsonPointer<Property>,
     pos: usize,
+    validators: &'x [StringValidator],
 }
 
 pub trait RegistryJsonPatch: Debug + Default {
@@ -51,7 +56,16 @@ pub trait RegistryJsonEnumPatch: Debug {
 
 impl<'x> JsonPointerPatch<'x> {
     pub fn new(ptr: &'x JsonPointer<Property>) -> Self {
-        Self { ptr, pos: 0 }
+        Self {
+            ptr,
+            pos: 0,
+            validators: &[],
+        }
+    }
+
+    pub fn with_validators(mut self, validators: &'x [StringValidator]) -> Self {
+        self.validators = validators;
+        self
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -215,13 +229,22 @@ impl RegistryJsonPatch for String {
         value: Value<'_, Property, RegistryValue>,
     ) -> Result<(), PatchError> {
         if let Some(value) = value.into_string().filter(|v| !v.is_empty()) {
-            *self = value.into();
+            let mut value = value.into_owned();
+
+            for validator in pointer.validators {
+                match validator.validate(&value) {
+                    StringValidatorResult::Valid => {}
+                    StringValidatorResult::Replace(new_value) => value = new_value,
+                    StringValidatorResult::Invalid(err) => {
+                        return Err(PatchError::new(pointer, err));
+                    }
+                }
+            }
+
+            *self = value;
             pointer.assert_eof()
         } else {
-            Err(PatchError::new(
-                pointer,
-                "Invalid value for string property (expected non-empty string)",
-            ))
+            Err(PatchError::new(pointer, "Invalid value for property."))
         }
     }
 }

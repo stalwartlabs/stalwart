@@ -12,16 +12,20 @@ pub mod registry;
 pub mod search;
 pub mod write;
 
-use ::registry::schema::enums::CompressionAlgo;
+use ::registry::{
+    schema::{enums::CompressionAlgo, prelude::Object},
+    types::id::ObjectId,
+};
 pub use ahash;
 pub use blake3;
 pub use parking_lot;
 pub use rand;
 pub use rkyv;
 pub use roaring;
+use types::id::Id;
 pub use xxhash_rust;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use backend::{fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use write::ValueClass;
@@ -190,9 +194,12 @@ pub enum InMemoryStore {
 }
 
 #[derive(Clone)]
-pub enum RegistryStore {
-    Remote(Store),
-    Local(PathBuf),
+pub struct RegistryStore(pub(crate) Arc<RegistryStoreInner>);
+
+pub struct RegistryStoreInner {
+    pub(crate) local_path: PathBuf,
+    pub(crate) local_objects: AHashMap<Object, AHashMap<u64, serde_json::Value>>,
+    pub(crate) store: Store,
 }
 
 #[cfg(feature = "sqlite")]

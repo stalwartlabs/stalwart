@@ -25,6 +25,7 @@ use registry::{
     types::datetime::UTCDateTime,
 };
 use store::{
+    ahash::AHashSet,
     rand::{Rng, distr::Alphanumeric, rng},
     registry::RegistryQuery,
 };
@@ -122,11 +123,12 @@ impl ClientRegistrationHandler for Server {
         // Fetch client registration
         let found_registration = if let Some(client_id) = self
             .registry()
-            .query::<Vec<u64>>(
+            .query::<AHashSet<u64>>(
                 RegistryQuery::new(Object::OAuthClient).equal(Property::ClientId, client_id),
             )
             .await?
-            .first()
+            .iter()
+            .next()
         {
             if let Some(redirect_uri) = redirect_uri {
                 let client = self

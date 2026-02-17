@@ -52,8 +52,7 @@ impl PrincipalQuery for Server {
         let principal_ids = self
             .registry()
             .query::<RoaringBitmap>(
-                RegistryQuery::new(Object::Account)
-                    .equal_opt(Property::MemberTenantId, access_token.tenant_id()),
+                RegistryQuery::new(Object::Account).with_tenant(access_token.tenant_id()),
             )
             .await
             .caused_by(trc::location!())?;
@@ -88,10 +87,7 @@ impl PrincipalQuery for Server {
                             self.registry()
                                 .query::<RoaringBitmap>(
                                     RegistryQuery::new(Object::Account)
-                                        .equal_opt(
-                                            Property::MemberTenantId,
-                                            access_token.tenant_id(),
-                                        )
+                                        .with_tenant(access_token.tenant_id())
                                         .text(text),
                                 )
                                 .await
@@ -113,10 +109,7 @@ impl PrincipalQuery for Server {
                                 .query::<RoaringBitmap>(
                                     RegistryQuery::new(Object::Account)
                                         .equal(Property::Type, typ.to_id())
-                                        .equal_opt(
-                                            Property::MemberTenantId,
-                                            access_token.tenant_id(),
-                                        ),
+                                        .with_tenant(access_token.tenant_id()),
                                 )
                                 .await
                                 .caused_by(trc::location!())?,

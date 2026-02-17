@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    jmap::JsonPointerPatch,
-    schema::prelude::{Object, Property},
-    types::id::ObjectId,
-};
+use crate::{jmap::JsonPointerPatch, schema::prelude::Property, types::id::ObjectId};
 use std::{borrow::Cow, fmt::Display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,11 +30,6 @@ pub enum Error {
     Internal {
         object_id: Option<ObjectId>,
         error: trc::Error,
-    },
-    TypeMismatch {
-        object_id: ObjectId,
-        object_type: Object,
-        expected_type: Object,
     },
     NotFound {
         object_id: ObjectId,

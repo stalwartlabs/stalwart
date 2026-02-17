@@ -5,40 +5,185 @@
  */
 
 use crate::{
-    RegistryStore,
+    IterateParams, RegistryStore, SUBSPACE_REGISTRY, Store, U16_LEN, U64_LEN, ValueKey,
     registry::{RegistryFilter, RegistryFilterOp, RegistryFilterValue, RegistryQuery},
+    write::{
+        AnyClass, RegistryClass, ValueClass,
+        key::{DeserializeBigEndian, KeySerializer},
+    },
 };
+use ahash::AHashSet;
 use registry::{
-    schema::prelude::{Object, Property},
-    types::EnumType,
+    schema::prelude::{OBJ_FILTER_ACCOUNT, OBJ_FILTER_TENANT, OBJ_SINGLETON, Object, Property},
+    types::{EnumType, id::ObjectId},
 };
 use roaring::RoaringBitmap;
+use std::{borrow::Cow, ops::BitAndAssign};
+use trc::AddContext;
 
 impl RegistryStore {
     pub async fn query<T: RegistryQueryResults>(&self, query: RegistryQuery) -> trc::Result<T> {
-        todo!()
+        let flags = query.object_type.flags();
+        if flags & OBJ_SINGLETON != 0 {
+            return Err(trc::EventType::Registry(trc::RegistryEvent::NotSupported)
+                .into_err()
+                .details("Singletons do not support searching"));
+        } else if let Some(objects) = self.0.local_objects.get(&query.object_type) {
+            if !query.filters.is_empty() {
+                trc::event!(
+                    Registry(trc::RegistryEvent::NotSupported),
+                    Details = "Filtering is not supported for local registry"
+                );
+            }
+            let mut results = T::default();
+            for id in objects.keys() {
+                results.push(*id);
+            }
+            return Ok(results);
+        }
+        let mut results = if (flags & OBJ_FILTER_ACCOUNT != 0)
+            && let Some(account_id) = query.account_id
+        {
+            range_to_set::<T>(
+                &self.0.store,
+                query.object_type,
+                Property::AccountId.to_id(),
+                &account_id.to_be_bytes(),
+                RegistryFilterOp::Equal,
+            )
+            .await?
+        } else if (flags & OBJ_FILTER_TENANT != 0)
+            && let Some(tenant_id) = query.tenant_id
+        {
+            range_to_set::<T>(
+                &self.0.store,
+                query.object_type,
+                Property::MemberTenantId.to_id(),
+                &tenant_id.to_be_bytes(),
+                RegistryFilterOp::Equal,
+            )
+            .await?
+        } else {
+            all_ids::<T>(&self.0.store, query.object_type).await?
+        };
+
+        if !results.has_items() {
+            return Ok(results);
+        }
+
+        let mut u64_buffer;
+        let mut u16_buffer;
+        let mut bool_buffer = [0u8; 1];
+
+        for filter in query.filters {
+            if filter.op == RegistryFilterOp::TextMatch {
+                if let RegistryFilterValue::String(text) = filter.value {
+                    let mut matches = T::default();
+                    for word in text
+                        .split(|c: char| !c.is_alphanumeric())
+                        .filter(|s| s.len() > 1)
+                    {
+                        let word = if word
+                            .chars()
+                            .all(|ch| ch.is_lowercase() || !ch.is_alphabetic())
+                        {
+                            Cow::Borrowed(word)
+                        } else {
+                            Cow::Owned(word.to_lowercase())
+                        };
+
+                        let result = range_to_set(
+                            &self.0.store,
+                            query.object_type,
+                            filter.property.to_id(),
+                            word.as_bytes(),
+                            RegistryFilterOp::Equal,
+                        )
+                        .await?;
+
+                        if !matches.has_items() {
+                            matches = result;
+                        } else {
+                            matches.intersect(&result);
+                            if !matches.has_items() {
+                                break;
+                            }
+                        }
+                    }
+
+                    results.intersect(&matches);
+                } else {
+                    return Err(trc::EventType::Registry(trc::RegistryEvent::NotSupported)
+                        .into_err()
+                        .details("TextMatch operator only supports string values"));
+                }
+            } else {
+                let result = range_to_set(
+                    &self.0.store,
+                    query.object_type,
+                    filter.property.to_id(),
+                    match &filter.value {
+                        RegistryFilterValue::String(v) => v.as_bytes(),
+                        RegistryFilterValue::U64(v) => {
+                            u64_buffer = v.to_be_bytes();
+                            &u64_buffer
+                        }
+                        RegistryFilterValue::U16(v) => {
+                            u16_buffer = v.to_be_bytes();
+                            &u16_buffer
+                        }
+                        RegistryFilterValue::Boolean(v) => {
+                            bool_buffer[0] = *v as u8;
+                            &bool_buffer
+                        }
+                    },
+                    filter.op,
+                )
+                .await?;
+
+                results.intersect(&result);
+            }
+
+            if !results.has_items() {
+                return Ok(results);
+            }
+        }
+
+        Ok(results)
     }
 }
 
-pub trait RegistryQueryResults: Default {
+pub trait RegistryQueryResults: Default + Sized + Sync + Send {
     fn push(&mut self, id: u64);
+    fn has_items(&self) -> bool;
+    fn intersect(&mut self, other: &Self);
 }
 
-impl RegistryQueryResults for Vec<u64> {
+impl RegistryQueryResults for AHashSet<u64> {
     fn push(&mut self, id: u64) {
-        self.push(id);
+        self.insert(id);
     }
-}
 
-impl RegistryQueryResults for Vec<u32> {
-    fn push(&mut self, id: u64) {
-        self.push(id as u32);
+    fn has_items(&self) -> bool {
+        !self.is_empty()
+    }
+
+    fn intersect(&mut self, other: &Self) {
+        self.retain(|id| other.contains(id));
     }
 }
 
 impl RegistryQueryResults for RoaringBitmap {
     fn push(&mut self, id: u64) {
         self.insert(id as u32);
+    }
+
+    fn has_items(&self) -> bool {
+        !self.is_empty()
+    }
+
+    fn intersect(&mut self, other: &Self) {
+        self.bitand_assign(other);
     }
 }
 
@@ -47,7 +192,19 @@ impl RegistryQuery {
         Self {
             object_type,
             filters: Vec::new(),
+            account_id: None,
+            tenant_id: None,
         }
+    }
+
+    pub fn with_account(mut self, account_id: u32) -> Self {
+        self.account_id = Some(account_id);
+        self
+    }
+
+    pub fn with_tenant(mut self, tenant_id: Option<u32>) -> Self {
+        self.tenant_id = tenant_id;
+        self
     }
 
     pub fn equal(mut self, property: Property, value: impl Into<RegistryFilterValue>) -> Self {
@@ -63,12 +220,6 @@ impl RegistryQuery {
         if let Some(value) = value {
             self.filters.push(RegistryFilter::equal(property, value));
         }
-        self
-    }
-
-    pub fn not_equal(mut self, property: Property, value: impl Into<RegistryFilterValue>) -> Self {
-        self.filters
-            .push(RegistryFilter::not_equal(property, value));
         self
     }
 
@@ -138,14 +289,6 @@ impl RegistryFilter {
         }
     }
 
-    pub fn not_equal(property: Property, value: impl Into<RegistryFilterValue>) -> Self {
-        Self {
-            property,
-            op: RegistryFilterOp::NotEqual,
-            value: value.into(),
-        }
-    }
-
     pub fn greater_than(property: Property, value: impl Into<RegistryFilterValue>) -> Self {
         Self {
             property,
@@ -157,7 +300,7 @@ impl RegistryFilter {
     pub fn less_than(property: Property, value: impl Into<RegistryFilterValue>) -> Self {
         Self {
             property,
-            op: RegistryFilterOp::LessThan,
+            op: RegistryFilterOp::LowerThan,
             value: value.into(),
         }
     }
@@ -168,7 +311,7 @@ impl RegistryFilter {
     ) -> Self {
         Self {
             property,
-            op: RegistryFilterOp::GreaterThanOrEqual,
+            op: RegistryFilterOp::GreaterEqualThan,
             value: value.into(),
         }
     }
@@ -176,7 +319,7 @@ impl RegistryFilter {
     pub fn less_than_or_equal(property: Property, value: impl Into<RegistryFilterValue>) -> Self {
         Self {
             property,
-            op: RegistryFilterOp::LessThanOrEqual,
+            op: RegistryFilterOp::LowerEqualThan,
             value: value.into(),
         }
     }
@@ -210,4 +353,119 @@ impl From<u16> for RegistryFilterValue {
     fn from(value: u16) -> Self {
         RegistryFilterValue::U16(value)
     }
+}
+
+async fn all_ids<T: RegistryQueryResults>(store: &Store, object: Object) -> trc::Result<T> {
+    let mut bm = T::default();
+    store
+        .iterate(
+            IterateParams::new(
+                ValueKey::from(ValueClass::Registry(RegistryClass::Id {
+                    item_id: ObjectId::new(object, 0u64),
+                })),
+                ValueKey::from(ValueClass::Registry(RegistryClass::Id {
+                    item_id: ObjectId::new(object, u64::MAX),
+                })),
+            )
+            .no_values()
+            .ascending(),
+            |key, _| {
+                bm.push(key.deserialize_be_u64(key.len() - U64_LEN)?);
+
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+    Ok(bm)
+}
+
+async fn range_to_set<T: RegistryQueryResults>(
+    store: &Store,
+    object: Object,
+    index_id: u16,
+    match_value: &[u8],
+    op: RegistryFilterOp,
+) -> trc::Result<T> {
+    let object_id = object.to_id();
+    let ((from_value, from_doc_id, from_field), (end_value, end_doc_id, end_field)) = match op {
+        RegistryFilterOp::LowerThan => ((&[][..], 0, object_id), (match_value, 0, object_id)),
+        RegistryFilterOp::LowerEqualThan => {
+            ((&[][..], 0, object_id), (match_value, u64::MAX, object_id))
+        }
+        RegistryFilterOp::GreaterThan => (
+            (match_value, u64::MAX, object_id),
+            (&[][..], u64::MAX, object_id + 1),
+        ),
+        RegistryFilterOp::GreaterEqualThan => (
+            (match_value, 0, object_id),
+            (&[][..], u64::MAX, object_id + 1),
+        ),
+        RegistryFilterOp::Equal | RegistryFilterOp::TextMatch => (
+            (match_value, 0, object_id),
+            (match_value, u64::MAX, object_id),
+        ),
+    };
+
+    let begin = ValueKey::from(ValueClass::Any(AnyClass {
+        subspace: SUBSPACE_REGISTRY,
+        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + 1 + from_value.len())
+            .write(2u8)
+            .write(object_id)
+            .write(from_field)
+            .write(from_value)
+            .write(from_doc_id)
+            .finalize(),
+    }));
+    let end = ValueKey::from(ValueClass::Any(AnyClass {
+        subspace: SUBSPACE_REGISTRY,
+        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + 1 + end_value.len())
+            .write(2u8)
+            .write(object_id)
+            .write(end_field)
+            .write(end_value)
+            .write(end_doc_id)
+            .finalize(),
+    }));
+
+    let mut bm = T::default();
+    let prefix = KeySerializer::new((U16_LEN * 2) + 1)
+        .write(2u8)
+        .write(object_id)
+        .write(index_id)
+        .finalize();
+    let prefix_len = prefix.len();
+
+    store
+        .iterate(
+            IterateParams::new(begin, end).no_values().ascending(),
+            |key, _| {
+                if !key.starts_with(&prefix) {
+                    return Ok(false);
+                }
+
+                let id_pos = key.len() - U64_LEN;
+                let value = key
+                    .get(prefix_len..id_pos)
+                    .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))?;
+
+                let matches = match op {
+                    RegistryFilterOp::LowerThan => value < match_value,
+                    RegistryFilterOp::LowerEqualThan => value <= match_value,
+                    RegistryFilterOp::GreaterThan => value > match_value,
+                    RegistryFilterOp::GreaterEqualThan => value >= match_value,
+                    RegistryFilterOp::Equal | RegistryFilterOp::TextMatch => value == match_value,
+                };
+
+                if matches {
+                    bm.push(key.deserialize_be_u64(id_pos)?);
+                }
+
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+
+    Ok(bm)
 }

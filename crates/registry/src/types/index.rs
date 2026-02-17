@@ -6,7 +6,7 @@
 
 use crate::{
     schema::prelude::{Object, Property},
-    types::ipmask::IpAddrOrMask,
+    types::{id::ObjectId, ipmask::IpAddrOrMask},
 };
 use ahash::AHashSet;
 use std::borrow::Cow;
@@ -22,21 +22,14 @@ pub enum IndexKey<'x> {
         property: Property,
         value: IndexValue<'x>,
     },
-    TextSearch {
-        property: Property,
-        value: IndexValue<'x>,
-    },
     Global {
         property: Property,
         value_1: IndexValue<'x>,
         value_2: IndexValue<'x>,
     },
     ForeignKey {
-        property: Property,
-        object: Object,
-        id: u64,
+        object_id: ObjectId,
         type_filter: IndexValue<'x>,
-        tenant_filter: bool,
     },
 }
 
@@ -61,7 +54,6 @@ pub enum IndexValue<'x> {
 
 pub struct IndexBuilder<'x> {
     pub object: Option<Object>,
-    pub tenant_id: Option<u32>,
     pub keys: AHashSet<IndexKey<'x>>,
 }
 
@@ -102,12 +94,12 @@ impl<'x> IndexBuilder<'x> {
                 .chars()
                 .all(|ch| ch.is_lowercase() || !ch.is_alphabetic())
             {
-                self.keys.insert(IndexKey::TextSearch {
+                self.keys.insert(IndexKey::Search {
                     property,
                     value: IndexValue::Text(Cow::Borrowed(word)),
                 });
             } else {
-                self.keys.insert(IndexKey::TextSearch {
+                self.keys.insert(IndexKey::Search {
                     property,
                     value: IndexValue::Text(Cow::Owned(word.to_lowercase())),
                 });
@@ -136,21 +128,11 @@ impl<'x> IndexBuilder<'x> {
         });
     }
 
-    pub fn foreign_key(
-        &mut self,
-        property: Property,
-        object: Object,
-        id: Option<Id>,
-        type_filter: Option<u16>,
-        tenant_filter: bool,
-    ) {
+    pub fn foreign_key(&mut self, object: Object, id: Option<Id>, type_filter: Option<u16>) {
         if let Some(id) = id {
             self.keys.insert(IndexKey::ForeignKey {
-                property,
-                object,
-                id: id.id(),
+                object_id: ObjectId::new(object, id.id()),
                 type_filter: type_filter.map(IndexValue::U16).unwrap_or(IndexValue::None),
-                tenant_filter,
             });
         }
     }
