@@ -200,7 +200,7 @@ jobs:
           key: cargo-cache-${{ steps.cal-dep-shasum.outputs.checksum }}
 
       - name: Inject cache into docker
-        uses: reproducible-containers/buildkit-cache-dance@v3.3.0
+        uses: reproducible-containers/buildkit-cache-dance@v3.3.1
         with:
           cache-map: |
             {
