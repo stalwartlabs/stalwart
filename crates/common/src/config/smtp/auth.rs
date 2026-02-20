@@ -115,7 +115,7 @@ impl MailAuthConfig {
 }
 
 impl DkimSigner {
-    pub fn new(selector: String, domain: String, signature: DkimSignature) -> trc::Result<Self> {
+    pub fn new(domain: String, signature: DkimSignature) -> trc::Result<Self> {
         match signature {
             DkimSignature::Dkim1Ed25519Sha256(signature) => {
                 let mut errors = vec![];
@@ -143,7 +143,7 @@ impl DkimSigner {
                     })?;
 
                 Ok(DkimSigner::Ed25519Sha256(build_dkim1_signer(
-                    domain, selector, signature, key,
+                    domain, signature, key,
                 )))
             }
             DkimSignature::Dkim1RsaSha256(signature) => {
@@ -179,7 +179,7 @@ impl DkimSigner {
                     })?;
 
                 Ok(DkimSigner::RsaSha256(build_dkim1_signer(
-                    domain, selector, signature, key,
+                    domain, signature, key,
                 )))
             }
         }
@@ -289,13 +289,12 @@ pub fn simple_pem_parse(contents: &str) -> Option<Vec<u8>> {
 
 fn build_dkim1_signer<T: SigningKey>(
     domain: String,
-    selector: String,
     signature: Dkim1Signature,
     key: T,
 ) -> mail_auth::dkim::DkimSigner<T, Done> {
     let mut signer = mail_auth::dkim::DkimSigner::from_key(key)
         .domain(domain)
-        .selector(selector)
+        .selector(signature.selector)
         .headers(signature.headers)
         .reporting(signature.report);
 

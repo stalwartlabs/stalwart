@@ -218,7 +218,7 @@ impl Server {
     pub async fn password_hash(&self, account_id: u32) -> trc::Result<String> {
         if account_id != u32::MAX {
             self.registry()
-                .object::<Account>(account_id)
+                .object::<Account>(account_id.into())
                 .await
                 .caused_by(trc::location!())?
                 .and_then(|account| account.into_user().map(|account| account.secret))

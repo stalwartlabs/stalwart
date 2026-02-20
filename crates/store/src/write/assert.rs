@@ -12,6 +12,7 @@ pub enum AssertValue {
     U32(u32),
     U64(u64),
     Archive(ArchiveVersion),
+    Hash(u64),
     Some,
     None,
 }
@@ -77,6 +78,7 @@ impl AssertValue {
             },
             AssertValue::None => false,
             AssertValue::Some => true,
+            AssertValue::Hash(v) => xxhash_rust::xxh3::xxh3_64(bytes) == *v,
         }
     }
 

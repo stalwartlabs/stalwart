@@ -12,7 +12,7 @@ use registry::{
     types::{EnumType, id::ObjectId},
 };
 use std::{borrow::Borrow, io::Write};
-use types::type_state::StateChange;
+use types::{id::Id, type_state::StateChange};
 use utils::{
     codec::leb128::{Leb128Iterator, Leb128Writer},
     map::bitmap::Bitmap,
@@ -80,12 +80,12 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                     RegistryChange::Insert(id) => {
                         serialized.push(4u8);
                         let _ = serialized.write_leb128(id.object().to_id());
-                        let _ = serialized.write_leb128(id.id());
+                        let _ = serialized.write_leb128(id.id().id());
                     }
                     RegistryChange::Delete(id) => {
                         serialized.push(5u8);
                         let _ = serialized.write_leb128(id.object().to_id());
-                        let _ = serialized.write_leb128(id.id());
+                        let _ = serialized.write_leb128(id.id().id());
                     }
                     RegistryChange::Reload(object) => {
                         serialized.push(6u8);
@@ -181,7 +181,7 @@ where
                     Ok(Some(BroadcastEvent::RegistryChange(
                         RegistryChange::Insert(ObjectId::new(
                             Object::from_id(object_id).ok_or(())?,
-                            id,
+                            Id::new(id),
                         )),
                     )))
                 }
@@ -191,7 +191,7 @@ where
                     Ok(Some(BroadcastEvent::RegistryChange(
                         RegistryChange::Delete(ObjectId::new(
                             Object::from_id(object_id).ok_or(())?,
-                            id,
+                            Id::new(id),
                         )),
                     )))
                 }

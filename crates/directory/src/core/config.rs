@@ -31,7 +31,7 @@ impl Directories {
 
             match result {
                 Ok(directory) => {
-                    directories.insert(id.id() as u32, Arc::new(directory));
+                    directories.insert(id.id().id() as u32, Arc::new(directory));
                 }
                 Err(err) => {
                     bp.build_error(id, err);

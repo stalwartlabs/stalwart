@@ -30,7 +30,7 @@ use crate::{
 use calcard::{common::timezone::Tz, icalendar::ICalendarComponentType};
 use common::{
     DavResourcePath, DavResources, Server,
-    auth::{AccessToken, AccountInfo},
+    auth::{AccessToken, AccountCache},
 };
 use dav_proto::{
     Depth, RequestHeaders,
@@ -414,7 +414,7 @@ impl PropFindRequestHandler for Server {
 
         let is_scheduling = collection_container == Collection::CalendarEventNotification;
         let account_info = self
-            .account_info(access_token.account_id())
+            .account(access_token.account_id())
             .await
             .caused_by(trc::location!())?;
         'outer: for item in paths {
@@ -1600,7 +1600,7 @@ impl PropFindData {
     pub async fn owner(
         &mut self,
         server: &Server,
-        account_info: &AccountInfo,
+        account_info: &AccountCache,
         account_id: u32,
     ) -> trc::Result<Href> {
         let data = self.accounts.entry(account_id).or_default();
@@ -1723,7 +1723,7 @@ async fn add_base_collection_response(
     let mut fields = Vec::with_capacity(properties.len());
     let mut fields_not_found = Vec::new();
     let account_info = server
-        .account_info(access_token.account_id())
+        .account(access_token.account_id())
         .await
         .caused_by(trc::location!())?;
 

@@ -270,6 +270,7 @@ impl CalendarEventGet for Server {
                                 }) || entry.calendar_address().is_some_and(|addr| {
                                     current_account_info
                                         .addresses()
+                                        .iter()
                                         .any(|a| a.eq_ignore_ascii_case(addr))
                                 })
                             }
@@ -482,7 +483,12 @@ impl CalendarEventGet for Server {
                         .find(|c| c.component_type.is_scheduling_object())
                         .and_then(|c| c.property(&ICalendarProperty::Organizer))
                         .and_then(|v| v.calendar_address())
-                        .is_none_or(|v| account.addresses().any(|a| a.eq_ignore_ascii_case(v)))
+                        .is_none_or(|v| {
+                            account
+                                .addresses()
+                                .iter()
+                                .any(|a| a.eq_ignore_ascii_case(v))
+                        })
                 });
 
                 let jscal = ical

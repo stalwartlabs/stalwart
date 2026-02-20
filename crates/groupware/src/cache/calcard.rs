@@ -37,11 +37,11 @@ pub(super) async fn build_calcard_resources(
     update_lock: Arc<UpdateLock>,
 ) -> trc::Result<DavResources> {
     let is_calendar = matches!(sync_collection, SyncCollection::Calendar);
-    let owner_account_info = server.account_info(account_id).await?;
+    let owner_account_info = server.account(account_id).await?;
     let access_account_info = if account_id == access_account_id {
         owner_account_info.clone()
     } else {
-        server.account_info(access_account_id).await?
+        server.account(access_account_id).await?
     };
     let mut cache = DavResources {
         base_path: format!(

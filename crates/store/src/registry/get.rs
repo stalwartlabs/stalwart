@@ -6,43 +6,49 @@
 
 use crate::{
     Deserialize, IterateParams, RegistryStore, SUBSPACE_REGISTRY, U16_LEN, U64_LEN, ValueKey,
-    registry::{RegistryObject, RegistryQuery},
+    registry::RegistryObject,
     write::{AnyClass, RegistryClass, ValueClass, key::KeySerializer},
 };
 use registry::{
     pickle::PickledStream,
-    schema::prelude::Object,
     types::{EnumType, ObjectType, id::ObjectId},
 };
-use roaring::RoaringBitmap;
 use trc::AddContext;
+use types::id::Id;
 use utils::codec::leb128::Leb128Reader;
 
 impl RegistryStore {
-    pub async fn object<T: ObjectType>(&self, id: impl Into<u64>) -> trc::Result<Option<T>> {
-        let id = id.into();
+    pub async fn object<T: ObjectType>(&self, id: Id) -> trc::Result<Option<T>> {
+        let item_id = id.id();
         let object = T::object();
 
-        if let Some(objects) = self.0.local_objects.get(&object) {
-            let Some(item) = objects.get(&id) else {
+        if self.0.local_objects.contains(&object) {
+            let Some(item) = self
+                .0
+                .local_registry
+                .read()
+                .get(&ObjectId::new(object, id))
+                .cloned()
+            else {
                 return Ok(None);
             };
-            serde_json::from_value::<T>(item.clone())
-                .map(Some)
-                .map_err(|err| {
-                    trc::EventType::Registry(trc::RegistryEvent::LocalParseError)
-                        .into_err()
-                        .caused_by(trc::location!())
-                        .id(id)
-                        .details(object.as_str())
-                        .reason(err)
-                })
+            serde_json::from_value::<T>(item).map(Some).map_err(|err| {
+                trc::EventType::Registry(trc::RegistryEvent::LocalParseError)
+                    .into_err()
+                    .caused_by(trc::location!())
+                    .id(item_id)
+                    .details(object.as_str())
+                    .reason(err)
+            })
         } else {
             let Some(bytes) = self
                 .0
                 .store
                 .get_value::<PickledBytes>(ValueKey::from(ValueClass::Registry(
-                    RegistryClass::Item(ObjectId::new(object, id)),
+                    RegistryClass::Item {
+                        object_id: object.to_id(),
+                        item_id,
+                    },
                 )))
                 .await?
             else {
@@ -53,7 +59,7 @@ impl RegistryStore {
                     trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
                         .into_err()
                         .caused_by(trc::location!())
-                        .id(id)
+                        .id(item_id)
                         .details(object.as_str())
                         .ctx(trc::Key::Value, bytes.0)
                 })
@@ -64,22 +70,24 @@ impl RegistryStore {
     pub async fn list<T: ObjectType>(&self) -> trc::Result<Vec<RegistryObject<T>>> {
         let object = T::object();
 
-        if let Some(objects) = self.0.local_objects.get(&object) {
-            let mut results = Vec::with_capacity(objects.len());
+        if self.0.local_objects.contains(&object) {
+            let mut results = Vec::new();
 
-            for (id, item) in objects {
-                let item = serde_json::from_value::<T>(item.clone()).map_err(|err| {
-                    trc::EventType::Registry(trc::RegistryEvent::LocalParseError)
-                        .into_err()
-                        .caused_by(trc::location!())
-                        .id(*id)
-                        .details(object.as_str())
-                        .reason(err)
-                })?;
-                results.push(RegistryObject {
-                    id: ObjectId::new(object, *id),
-                    object: item,
-                });
+            for (id, item) in self.0.local_registry.read().iter() {
+                if id.object() == object {
+                    let item = serde_json::from_value::<T>(item.clone()).map_err(|err| {
+                        trc::EventType::Registry(trc::RegistryEvent::LocalParseError)
+                            .into_err()
+                            .caused_by(trc::location!())
+                            .id(id.id().id())
+                            .details(object.as_str())
+                            .reason(err)
+                    })?;
+                    results.push(RegistryObject {
+                        id: *id,
+                        object: item,
+                    });
+                }
             }
 
             Ok(results)
@@ -127,7 +135,7 @@ impl RegistryStore {
                                     .ctx(trc::Key::Value, value)
                             })?;
                         results.push(RegistryObject {
-                            id: ObjectId::new(object, id),
+                            id: ObjectId::new(object, Id::new(id)),
                             object: item,
                         });
 
@@ -138,16 +146,6 @@ impl RegistryStore {
                 .caused_by(trc::location!())?;
 
             Ok(results)
-        }
-    }
-
-    pub async fn count(&self, object: Object) -> trc::Result<u64> {
-        if let Some(objects) = self.0.local_objects.get(&object) {
-            Ok(objects.len() as u64)
-        } else {
-            self.query::<RoaringBitmap>(RegistryQuery::new(object))
-                .await
-                .map(|r| r.len())
         }
     }
 }

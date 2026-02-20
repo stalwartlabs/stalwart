@@ -236,8 +236,10 @@ impl BootManager {
         }
 
         // Initialize registry
-        let registry = RegistryStore::init(PathBuf::from(config_path.unwrap()));
-        let mut bootstrap = Bootstrap::new(registry);
+        let registry = RegistryStore::init(PathBuf::from(config_path.unwrap()))
+            .await
+            .failed("⚠️ Startup failed");
+        let mut bootstrap = Bootstrap::init(registry).await;
 
         // Start listeners
         let mut servers = Listeners::parse(&mut bootstrap).await;

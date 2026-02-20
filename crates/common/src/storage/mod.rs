@@ -14,7 +14,10 @@ use registry::{
     types::EnumType,
 };
 use std::sync::Arc;
-use store::{BlobStore, InMemoryStore, RegistryStore, SearchStore, Store};
+use store::{
+    BlobStore, InMemoryStore, RegistryStore, SearchStore, Store, registry::RegistryQuery,
+    roaring::RoaringBitmap,
+};
 
 pub mod archive;
 pub mod blob;
@@ -87,11 +90,17 @@ impl Server {
     }
 
     pub async fn total_accounts(&self) -> trc::Result<u64> {
-        self.registry().count(Object::Account).await
+        self.registry()
+            .query::<RoaringBitmap>(RegistryQuery::new(Object::Account))
+            .await
+            .map(|r| r.len())
     }
 
     pub async fn total_domains(&self) -> trc::Result<u64> {
-        self.registry().count(Object::Domain).await
+        self.registry()
+            .query::<RoaringBitmap>(RegistryQuery::new(Object::Domain))
+            .await
+            .map(|r| r.len())
     }
 
     #[cfg(not(feature = "enterprise"))]

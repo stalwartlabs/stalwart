@@ -7,7 +7,7 @@
 use crate::{
     schema::{
         enums::{TracingLevel, TracingLevelOpt},
-        prelude::{Account, Duration, HttpAuth, NodeRange, Property, UserAccount},
+        prelude::{Account, Duration, GroupAccount, HttpAuth, NodeRange, Property, UserAccount},
     },
     types::EnumType,
 };
@@ -63,6 +63,14 @@ impl Account {
     pub fn into_user(self) -> Option<UserAccount> {
         if let Account::User(user) = self {
             Some(user)
+        } else {
+            None
+        }
+    }
+
+    pub fn into_group(self) -> Option<GroupAccount> {
+        if let Account::Group(group) = self {
+            Some(group)
         } else {
             None
         }

@@ -146,7 +146,7 @@ impl<T: SessionStream> Session<T> {
                                 .with_blob_hash(blob_hash.clone()),
                         )
                         .with_current(script)
-                        .with_changed_by(account.account_tenant_ids(account_id)),
+                        .with_changed_by(account.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?
                 .clear(blob_hold);
@@ -189,7 +189,7 @@ impl<T: SessionStream> Session<T> {
                             SieveScript::new(name.clone(), blob_hash.clone())
                                 .with_size(script_size as u32),
                         )
-                        .with_changed_by(account.account_tenant_ids(account_id)),
+                        .with_changed_by(account.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?
                 .clear(blob_hold);

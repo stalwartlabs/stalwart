@@ -245,8 +245,7 @@ impl QueueConfig {
 
         // Parse queue strategies
         for obj in bp.list_infallible::<MtaDeliverySchedule>().await {
-            let virtual_queue = if let Some(name) = queue_id_to_name.get(&obj.object.queue_id.id())
-            {
+            let virtual_queue = if let Some(name) = queue_id_to_name.get(&obj.object.queue_id) {
                 *name
             } else {
                 bp.build_error(

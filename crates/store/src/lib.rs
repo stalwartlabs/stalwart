@@ -19,10 +19,11 @@ use ::registry::{
 pub use ahash;
 pub use blake3;
 pub use parking_lot;
+use parking_lot::RwLock;
 pub use rand;
 pub use rkyv;
 pub use roaring;
-use types::id::Id;
+use utils::snowflake::SnowflakeIdGenerator;
 pub use xxhash_rust;
 
 use ahash::{AHashMap, AHashSet};
@@ -198,8 +199,11 @@ pub struct RegistryStore(pub(crate) Arc<RegistryStoreInner>);
 
 pub struct RegistryStoreInner {
     pub(crate) local_path: PathBuf,
-    pub(crate) local_objects: AHashMap<Object, AHashMap<u64, serde_json::Value>>,
+    pub(crate) local_registry: RwLock<AHashMap<ObjectId, serde_json::Value>>,
+    pub(crate) local_objects: AHashSet<Object>,
     pub(crate) store: Store,
+    pub(crate) node_id: u64,
+    pub(crate) id_generator: SnowflakeIdGenerator,
 }
 
 #[cfg(feature = "sqlite")]

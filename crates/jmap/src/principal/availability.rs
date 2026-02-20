@@ -263,7 +263,7 @@ impl PrincipalGetAvailability for Server {
                                     )
                                 }) {
                                     // Condition: the Principal is a participant of the event, and has a "participationStatus" of "accepted" or "tentative".
-                                    if principal_account.addresses().any(|e| e == attendee) {
+                                    if principal_account.addresses().contains(&attendee) {
                                         busy_status = Some(
                                             entry
                                                 .parameters(&ICalendarParameterName::Partstat)

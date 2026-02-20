@@ -11,7 +11,7 @@ use crate::{
 };
 use common::{
     Server,
-    auth::{AccessToken, AccountInfo},
+    auth::{AccessToken, AccountCache},
 };
 use dav_proto::schema::{
     Namespace,
@@ -48,7 +48,7 @@ pub(crate) trait PrincipalPropFind: Sync + Send {
 
     fn owner_href(
         &self,
-        account_info: &AccountInfo,
+        account_info: &AccountCache,
         account_id: u32,
     ) -> impl Future<Output = trc::Result<Href>> + Send;
 }
@@ -63,7 +63,7 @@ impl PrincipalPropFind for Server {
         response: &mut MultiStatus,
     ) -> crate::Result<()> {
         let access_account_info = self
-            .account_info(access_token.account_id())
+            .account(access_token.account_id())
             .await
             .caused_by(trc::location!())?;
         let properties = match request {
@@ -375,7 +375,7 @@ impl PrincipalPropFind for Server {
         Ok(status.response.0.into_iter().next())
     }
 
-    async fn owner_href(&self, account_info: &AccountInfo, account_id: u32) -> trc::Result<Href> {
+    async fn owner_href(&self, account_info: &AccountCache, account_id: u32) -> trc::Result<Href> {
         if account_info.account_id() == account_id {
             Ok(account_info.current_user_principal())
         } else {

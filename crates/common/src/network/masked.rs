@@ -5,36 +5,29 @@
  */
 
 use store::write::now;
+use utils::snowflake::SnowflakeIdGenerator;
 
-pub struct MaskedAddress {
-    pub account_id: u32,
-    pub address_id: u32,
-    pub has_expired: bool,
-}
-
-const DEFAULT_EPOCH: u64 = 1632280000; // 52 years after UNIX_EPOCH
+pub struct MaskedAddress;
 
 impl MaskedAddress {
-    pub fn parse(local_part: &str) -> Option<Self> {
+    pub fn parse(local_part: &str) -> Option<u64> {
         let mut parts = local_part.split('.');
         let _prefix = parts.next().filter(|v| !v.is_empty())?;
         let ids = parts.next().filter(|v| !v.is_empty())?;
         if parts.next().is_some() {
             return None;
         }
-        // Format: <account_id (32)>.<address_id (32)>.<expires (32)>.<checksum (32)> encoded as base36
+        // Format: <address_id (64)>.<expires (32)>.<checksum (32)> encoded as base36
         let ids = u128::from_str_radix(ids, 36).ok()?;
-        let account_id = (ids >> 96) as u32;
-        let address_id = (ids >> 64) as u32;
+        let address_id = (ids >> 64) as u64;
         let expires = (ids >> 32) as u32;
         let checksum = ids as u32;
 
-        if checksum == (account_id ^ address_id ^ expires) {
-            Some(Self {
-                account_id,
-                address_id,
-                has_expired: (now().saturating_sub(DEFAULT_EPOCH) / 60) > expires as u64,
-            })
+        if checksum == ((address_id as u32) ^ (address_id >> 32) as u32 ^ expires)
+            && (expires == 0
+                || (SnowflakeIdGenerator::to_timestamp(address_id) + expires as u64 > now()))
+        {
+            Some(address_id)
         } else {
             None
         }

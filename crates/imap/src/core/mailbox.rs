@@ -260,7 +260,7 @@ impl<T: SessionStream> SessionData<T> {
                     "{}/{}",
                     self.server.core.email.shared_folder,
                     self.server
-                        .account_info(account_id)
+                        .account(account_id)
                         .await
                         .caused_by(trc::location!())?
                         .name()

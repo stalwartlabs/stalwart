@@ -99,6 +99,11 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     pub fn clear(&self) {
         self.0.clear();
     }
+
+    #[inline(always)]
+    pub fn inner(&self) -> &quick_cache::sync::Cache<K, V, CacheItemWeighter> {
+        &self.0
+    }
 }
 
 impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> CacheWithTtl<K, V> {

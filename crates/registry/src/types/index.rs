@@ -45,7 +45,6 @@ pub enum IndexValue<'x> {
     Bytes(Vec<u8>),
     U64(u64),
     I64(i64),
-    U32(u32),
     U16(u16),
     None,
 }
@@ -79,10 +78,10 @@ impl<'x> IndexBuilder<'x> {
     }
 
     pub fn search(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
-        self.keys.insert(IndexKey::Search {
-            property,
-            value: value.into(),
-        });
+        let value = value.into();
+        if value != IndexValue::None {
+            self.keys.insert(IndexKey::Search { property, value });
+        }
     }
 
     pub fn text(&mut self, property: Property, value: &'x str) {
@@ -131,7 +130,7 @@ impl<'x> IndexBuilder<'x> {
     pub fn foreign_key(&mut self, object: Object, id: Option<Id>, type_filter: Option<u16>) {
         if let Some(id) = id {
             self.keys.insert(IndexKey::ForeignKey {
-                object_id: ObjectId::new(object, id.id()),
+                object_id: ObjectId::new(object, id),
                 type_filter: type_filter.map(IndexValue::U16).unwrap_or(IndexValue::None),
             });
         }
@@ -202,5 +201,17 @@ impl<'x> From<&'x String> for IndexValue<'x> {
 impl<'x> From<&'x Id> for IndexValue<'x> {
     fn from(value: &'x Id) -> Self {
         IndexValue::U64(value.id())
+    }
+}
+
+impl<'x, T> From<&'x Option<T>> for IndexValue<'x>
+where
+    IndexValue<'x>: std::convert::From<&'x T>,
+{
+    fn from(value: &'x Option<T>) -> Self {
+        match value {
+            Some(id) => id.into(),
+            None => IndexValue::None,
+        }
     }
 }

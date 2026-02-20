@@ -15,20 +15,27 @@ use crate::{
 use ahash::AHashSet;
 use registry::{
     schema::prelude::{OBJ_FILTER_ACCOUNT, OBJ_FILTER_TENANT, OBJ_SINGLETON, Object, Property},
-    types::{EnumType, id::ObjectId},
+    types::EnumType,
 };
 use roaring::RoaringBitmap;
 use std::{borrow::Cow, ops::BitAndAssign};
 use trc::AddContext;
+use types::id::Id;
 
 impl RegistryStore {
     pub async fn query<T: RegistryQueryResults>(&self, query: RegistryQuery) -> trc::Result<T> {
         let flags = query.object_type.flags();
         if flags & OBJ_SINGLETON != 0 {
-            return Err(trc::EventType::Registry(trc::RegistryEvent::NotSupported)
-                .into_err()
-                .details("Singletons do not support searching"));
-        } else if let Some(objects) = self.0.local_objects.get(&query.object_type) {
+            if query.filters.is_empty() {
+                let mut results = T::default();
+                results.push(Id::singleton().id());
+                return Ok(results);
+            } else {
+                return Err(trc::EventType::Registry(trc::RegistryEvent::NotSupported)
+                    .into_err()
+                    .details("Singletons do not support searching"));
+            }
+        } else if self.0.local_objects.contains(&query.object_type) {
             if !query.filters.is_empty() {
                 trc::event!(
                     Registry(trc::RegistryEvent::NotSupported),
@@ -36,8 +43,10 @@ impl RegistryStore {
                 );
             }
             let mut results = T::default();
-            for id in objects.keys() {
-                results.push(*id);
+            for id in self.0.local_registry.read().keys() {
+                if id.object() == query.object_type {
+                    results.push(id.id().id());
+                }
             }
             return Ok(results);
         }
@@ -67,7 +76,7 @@ impl RegistryStore {
             all_ids::<T>(&self.0.store, query.object_type).await?
         };
 
-        if !results.has_items() {
+        if !results.has_items() || query.filters.is_empty() {
             return Ok(results);
         }
 
@@ -357,14 +366,17 @@ impl From<u16> for RegistryFilterValue {
 
 async fn all_ids<T: RegistryQueryResults>(store: &Store, object: Object) -> trc::Result<T> {
     let mut bm = T::default();
+    let object_id = object.to_id();
     store
         .iterate(
             IterateParams::new(
                 ValueKey::from(ValueClass::Registry(RegistryClass::Id {
-                    item_id: ObjectId::new(object, 0u64),
+                    object_id,
+                    item_id: 0u64,
                 })),
                 ValueKey::from(ValueClass::Registry(RegistryClass::Id {
-                    item_id: ObjectId::new(object, u64::MAX),
+                    object_id,
+                    item_id: u64::MAX,
                 })),
             )
             .no_values()
@@ -388,7 +400,8 @@ async fn range_to_set<T: RegistryQueryResults>(
     op: RegistryFilterOp,
 ) -> trc::Result<T> {
     let object_id = object.to_id();
-    let ((from_value, from_doc_id, from_field), (end_value, end_doc_id, end_field)) = match op {
+    let ((from_value, from_doc_id, from_index_id), (end_value, end_doc_id, end_index_id)) = match op
+    {
         RegistryFilterOp::LowerThan => ((&[][..], 0, object_id), (match_value, 0, object_id)),
         RegistryFilterOp::LowerEqualThan => {
             ((&[][..], 0, object_id), (match_value, u64::MAX, object_id))
@@ -412,7 +425,7 @@ async fn range_to_set<T: RegistryQueryResults>(
         key: KeySerializer::new((U16_LEN * 2) + U64_LEN + 1 + from_value.len())
             .write(2u8)
             .write(object_id)
-            .write(from_field)
+            .write(from_index_id)
             .write(from_value)
             .write(from_doc_id)
             .finalize(),
@@ -422,7 +435,7 @@ async fn range_to_set<T: RegistryQueryResults>(
         key: KeySerializer::new((U16_LEN * 2) + U64_LEN + 1 + end_value.len())
             .write(2u8)
             .write(object_id)
-            .write(end_field)
+            .write(end_index_id)
             .write(end_value)
             .write(end_doc_id)
             .finalize(),
@@ -465,7 +478,6 @@ async fn range_to_set<T: RegistryQueryResults>(
             },
         )
         .await
-        .caused_by(trc::location!())?;
-
-    Ok(bm)
+        .caused_by(trc::location!())
+        .map(|_| bm)
 }

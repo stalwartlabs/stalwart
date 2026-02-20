@@ -35,6 +35,11 @@ impl Server {
 }
 
 impl PermissionsGroup {
+    pub fn with_merge(mut self, merge: bool) -> Self {
+        self.merge = merge;
+        self
+    }
+
     pub fn union(&mut self, other: &PermissionsGroup) {
         self.enabled.union(&other.enabled);
         self.disabled.union(&other.disabled);

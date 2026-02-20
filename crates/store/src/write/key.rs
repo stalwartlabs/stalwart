@@ -19,7 +19,6 @@ use crate::{
         BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexId, SearchIndexType,
     },
 };
-use registry::types::EnumType;
 use std::convert::TryInto;
 use types::{
     blob_hash::BLOB_HASH_LEN,
@@ -375,41 +374,47 @@ impl ValueClass {
                 InMemoryClass::Counter(key) => serializer.write(key.as_slice()),
             },
             ValueClass::Registry(registry) => match registry {
-                RegistryClass::Item(object_id) => serializer
+                RegistryClass::Item { object_id, item_id } => serializer
                     .write(0u8)
-                    .write(object_id.object().to_id())
-                    .write_leb128(object_id.id()),
-                RegistryClass::Reference { to, from } => serializer
+                    .write(*object_id)
+                    .write_leb128(*item_id),
+                RegistryClass::Reference {
+                    to_object_id,
+                    to_item_id,
+                    from_object_id,
+                    from_item_id,
+                } => serializer
                     .write(1u8)
-                    .write(to.object().to_id())
-                    .write(to.id())
-                    .write(from.object().to_id())
-                    .write_leb128(from.id()),
+                    .write(*to_object_id)
+                    .write_leb128(*to_item_id)
+                    .write(*from_object_id)
+                    .write_leb128(*from_item_id),
                 RegistryClass::Index {
                     index_id,
+                    object_id,
                     item_id,
                     key,
                 } => serializer
                     .write(2u8)
-                    .write(item_id.object().to_id())
+                    .write(*object_id)
                     .write(*index_id)
                     .write(key.as_slice())
-                    .write(item_id.id()),
+                    .write(*item_id),
                 RegistryClass::IndexGlobal {
                     index_id,
+                    object_id,
                     item_id,
                     key,
                 } => serializer
                     .write(3u8)
                     .write(*index_id)
                     .write(key.as_slice())
-                    .write(item_id.object().to_id())
-                    .write(item_id.id()),
-                RegistryClass::Id { item_id } => serializer
-                    .write(4u8)
-                    .write(item_id.object().to_id())
-                    .write(item_id.id()),
-                RegistryClass::IdCounter { object } => serializer.write(object.to_id()),
+                    .write(*object_id)
+                    .write(*item_id),
+                RegistryClass::Id { object_id, item_id } => {
+                    serializer.write(4u8).write(*object_id).write(*item_id)
+                }
+                RegistryClass::IdCounter { object_id } => serializer.write(*object_id),
             },
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(queue_id) => serializer.write(*queue_id),
@@ -598,7 +603,7 @@ impl ValueClass {
             ValueClass::Acl(_) => U32_LEN * 3 + 2,
             ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v)) => v.len(),
             ValueClass::Registry(registry) => match registry {
-                RegistryClass::Item(_) => U16_LEN + U64_LEN + 2,
+                RegistryClass::Item { .. } => U16_LEN + U64_LEN + 2,
                 RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 2,
                 RegistryClass::Index { key, .. } | RegistryClass::IndexGlobal { key, .. } => {
                     (U16_LEN * 2) + U64_LEN + key.len() + 2

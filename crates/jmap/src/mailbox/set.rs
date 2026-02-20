@@ -90,7 +90,7 @@ impl MailboxSet for Server {
             will_destroy: request.unwrap_destroy().into_valid().collect(),
         };
         let mut change_id = None;
-        let account_info = self.account_info(account_id).await?;
+        let account_info = self.account(account_id).await?;
 
         // Process creates
         let mut batch = BatchBuilder::new();

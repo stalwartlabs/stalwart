@@ -66,7 +66,7 @@ pub trait CalendarEventSet: Sync + Send {
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,
-        account_emails: &[&str],
+        account_emails: &[String],
         send_scheduling_messages: bool,
         can_add_calendars: &Option<RoaringBitmap>,
         js_calendar_event: JSCalendar<'_, Id, BlobId>,
@@ -93,7 +93,6 @@ impl CalendarEventSet for Server {
             .account_info(access_token.account_id())
             .await
             .caused_by(trc::location!())?;
-        let account_emails = account_info.addresses().collect::<Vec<_>>();
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
 
@@ -125,7 +124,7 @@ impl CalendarEventSet for Server {
                     &mut batch,
                     access_token,
                     account_id,
-                    &account_emails,
+                    account_info.addresses(),
                     send_scheduling_messages,
                     &can_add_calendars,
                     JSCalendar::default(),
@@ -314,7 +313,7 @@ impl CalendarEventSet for Server {
             let mut itip_messages = None;
             if send_scheduling_messages
                 && self.core.groupware.itip_enabled
-                && !account_emails.is_empty()
+                && !account_info.addresses().is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
                 && new_calendar_event.data.event_range_end() > now
             {
@@ -325,13 +324,10 @@ impl CalendarEventSet for Server {
                     itip_update(
                         &mut new_calendar_event.data.event,
                         &old_ical,
-                        account_emails.as_slice(),
+                        account_info.addresses(),
                     )
                 } else {
-                    itip_create(
-                        &mut new_calendar_event.data.event,
-                        account_emails.as_slice(),
-                    )
+                    itip_create(&mut new_calendar_event.data.event, account_info.addresses())
                 };
 
                 match result {
@@ -516,7 +512,7 @@ impl CalendarEventSet for Server {
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,
-        account_emails: &[&str],
+        account_emails: &[String],
         send_scheduling_messages: bool,
         can_add_calendars: &Option<RoaringBitmap>,
         mut js_calendar_group: JSCalendar<'_, Id, BlobId>,

@@ -128,16 +128,16 @@ impl ParticipantIdentityGet for Server {
         }
 
         // Obtain account info
-        let account = self
+        let account_info = self
             .account_info(account_id)
             .await
             .caused_by(trc::location!())?;
-        let name = account.description().unwrap_or(account.name());
-        let emails = account.addresses().collect::<Vec<_>>();
+        let name = account_info.description().unwrap_or(account_info.name());
 
         // Build identities
         let identities = ParticipantIdentities {
-            identities: emails
+            identities: account_info
+                .addresses()
                 .iter()
                 .enumerate()
                 .map(|(id, email)| ParticipantIdentity {

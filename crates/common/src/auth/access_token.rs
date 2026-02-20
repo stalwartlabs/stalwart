@@ -328,7 +328,7 @@ impl Server {
             Err(guard) => {
                 let account = self
                     .registry()
-                    .object::<Account>(account_id)
+                    .object::<Account>(account_id.into())
                     .await?
                     .ok_or_else(|| {
                         trc::SecurityEvent::Unauthorized

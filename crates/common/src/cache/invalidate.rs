@@ -6,6 +6,7 @@
 
 use crate::{
     Server,
+    auth::EmailCache,
     ipc::{BroadcastEvent, CacheInvalidation},
 };
 
@@ -27,9 +28,13 @@ impl Server {
                 CacheInvalidation::Domain(id) => {
                     cache.domains.remove(id);
                     cache.dkim_signers.remove(id);
+                    cache.domain_names.inner().retain(|_, v| v != id);
                 }
                 CacheInvalidation::Account(id) => {
                     cache.accounts.remove(id);
+                    cache.emails.inner().retain(
+                        |_, v| !matches!(v, EmailCache::Account(account_id) if account_id == id),
+                    );
                 }
                 CacheInvalidation::DkimSignature(id) => {
                     cache.dkim_signers.remove(id);
@@ -42,6 +47,9 @@ impl Server {
                 }
                 CacheInvalidation::List(id) => {
                     cache.lists.remove(id);
+                    cache.emails.inner().retain(
+                        |_, v| !matches!(v, EmailCache::MailingList(list_id) if list_id == id),
+                    );
                 }
             }
         }

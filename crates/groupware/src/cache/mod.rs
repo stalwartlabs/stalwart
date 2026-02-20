@@ -15,7 +15,9 @@ use calcard::{
     build_calcard_resources, build_simple_hierarchy, resource_from_addressbook,
     resource_from_calendar, resource_from_card, resource_from_event,
 };
-use common::{DavResource, DavResources, Server, UpdateLock, auth::AccountInfo, cache::LockResult};
+use common::{
+    DavResource, DavResources, Server, UpdateLock, auth::AccountCache, cache::LockResult,
+};
 use file::{build_file_resources, build_nested_hierarchy, resource_from_file};
 use std::{sync::Arc, time::Instant};
 use store::{
@@ -43,14 +45,14 @@ pub trait GroupwareCache: Sync + Send {
 
     fn create_default_addressbook(
         &self,
-        account_info_access: &AccountInfo,
-        account_info_owner: &AccountInfo,
+        account_info_access: &AccountCache,
+        account_info_owner: &AccountCache,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
     fn create_default_calendar(
         &self,
-        account_info_access: &AccountInfo,
-        account_info_owner: &AccountInfo,
+        account_info_access: &AccountCache,
+        account_info_owner: &AccountCache,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
     fn get_or_create_default_calendar(
@@ -321,8 +323,8 @@ impl GroupwareCache for Server {
 
     async fn create_default_addressbook(
         &self,
-        account_info_access: &AccountInfo,
-        account_info_owner: &AccountInfo,
+        account_info_access: &AccountCache,
+        account_info_owner: &AccountCache,
     ) -> trc::Result<Option<u32>> {
         if let Some(name) = &self.core.groupware.default_addressbook_name {
             let mut batch = BatchBuilder::new();
@@ -364,8 +366,8 @@ impl GroupwareCache for Server {
 
     async fn create_default_calendar(
         &self,
-        account_info_access: &AccountInfo,
-        account_info_owner: &AccountInfo,
+        account_info_access: &AccountCache,
+        account_info_owner: &AccountCache,
     ) -> trc::Result<Option<u32>> {
         if let Some(name) = &self.core.groupware.default_calendar_name {
             let mut batch = BatchBuilder::new();

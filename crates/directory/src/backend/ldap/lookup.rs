@@ -60,7 +60,8 @@ impl LdapDirectory {
                 match result {
                     Ok(Some(mut result)) => {
                         if result.account.email.is_empty() {
-                            result.account.email = username.into();
+                            result.account.email =
+                                sanitize_email(username).unwrap_or_else(|| username.to_lowercase());
                         }
                         result.account
                     }
@@ -106,7 +107,8 @@ impl LdapDirectory {
                         .is_ok()
                     {
                         if result.account.email.is_empty() {
-                            result.account.email = username.into();
+                            result.account.email =
+                                sanitize_email(username).unwrap_or_else(|| username.to_lowercase());
                         }
                         result.account
                     } else {
@@ -124,7 +126,7 @@ impl LdapDirectory {
             }
             AuthBind::None => {
                 let filter = self.mappings.filter_login.build(username);
-                if let Some(result) = self.find_object(&mut conn, &filter).await? {
+                if let Some(mut result) = self.find_object(&mut conn, &filter).await? {
                     if let Some(account_secret) = &result.account.secret {
                         if !verify_secret_hash(account_secret, secret.as_bytes()).await? {
                             return Err(trc::AuthEvent::Failed
@@ -138,7 +140,10 @@ impl LdapDirectory {
                             .details("Account does not have a secret")
                             .details(vec![filter]));
                     }
-
+                    if result.account.email.is_empty() {
+                        result.account.email =
+                            sanitize_email(username).unwrap_or_else(|| username.to_lowercase());
+                    }
                     result.account
                 } else {
                     return Err(trc::AuthEvent::Failed

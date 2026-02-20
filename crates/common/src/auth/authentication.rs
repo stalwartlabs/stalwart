@@ -156,7 +156,7 @@ impl Server {
                 {
                     if let Some(account) = self
                         .registry()
-                        .object::<structs::Account>(account_id)
+                        .object::<structs::Account>(account_id.into())
                         .await?
                         .and_then(|account| account.into_user())
                     {
@@ -300,7 +300,7 @@ impl Server {
     ) -> trc::Result<AccessToken> {
         if let Some(account) = self
             .registry()
-            .object::<structs::Account>(account_id)
+            .object::<structs::Account>(account_id.into())
             .await?
             .and_then(|account| account.into_user())
         {
@@ -387,7 +387,14 @@ impl Server {
                 AccountName = address.to_string(),
                 Reason = "No domain in username",
             );
-            self.domain_by_id(self.core.email.default_domain_id).await
+            self.domain_by_id(self.core.email.default_domain_id)
+                .await?
+                .ok_or_else(|| {
+                    trc::AuthEvent::Error
+                        .into_err()
+                        .details("Default domain does not exist or has been disabled")
+                        .ctx(trc::Key::Id, self.core.email.default_domain_id)
+                })
         }
     }
 

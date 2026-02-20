@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::auth::AccountInfo;
+use common::auth::AccountCache;
 use dav_proto::schema::response::Href;
 use groupware::RFC_3986;
 
@@ -18,7 +18,7 @@ pub trait CurrentUserPrincipal {
     fn current_user_principal(&self) -> Href;
 }
 
-impl CurrentUserPrincipal for AccountInfo {
+impl CurrentUserPrincipal for AccountCache {
     fn current_user_principal(&self) -> Href {
         Href(format!(
             "{}/{}/",

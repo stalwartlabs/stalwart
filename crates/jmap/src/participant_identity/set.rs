@@ -57,7 +57,11 @@ impl ParticipantIdentitySet for Server {
             .caused_by(trc::location!())?;
 
         // Obtain allowed emails
-        let allowed_emails = account_info.addresses().collect::<AHashSet<_>>();
+        let allowed_emails = account_info
+            .addresses()
+            .iter()
+            .map(|v| v.as_str())
+            .collect::<AHashSet<_>>();
 
         // Process creates
         let mut has_changes = false;

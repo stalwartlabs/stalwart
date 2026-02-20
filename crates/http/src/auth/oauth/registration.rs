@@ -27,7 +27,7 @@ use registry::{
 use store::{
     ahash::AHashSet,
     rand::{Rng, distr::Alphanumeric, rng},
-    registry::RegistryQuery,
+    registry::{RegistryQuery, write::RegistryWrite},
 };
 use trc::{AddContext, AuthEvent};
 use types::id::Id;
@@ -82,7 +82,7 @@ impl ClientRegistrationHandler for Server {
             .collect::<String>();
 
         self.registry()
-            .insert(&OAuthClient {
+            .write(RegistryWrite::insert(&OAuthClient {
                 client_id: client_id.clone(),
                 created_at: UTCDateTime::now(),
                 description: request.client_name.clone(),
@@ -91,7 +91,7 @@ impl ClientRegistrationHandler for Server {
                 redirect_uris: request.redirect_uris.clone(),
                 logo: request.logo_uri.clone(),
                 ..Default::default()
-            })
+            }))
             .await
             .caused_by(trc::location!())?;
 
@@ -133,7 +133,7 @@ impl ClientRegistrationHandler for Server {
             if let Some(redirect_uri) = redirect_uri {
                 let client = self
                     .registry()
-                    .object::<OAuthClient>(*client_id)
+                    .object::<OAuthClient>(Id::new(*client_id))
                     .await?
                     .ok_or_else(|| {
                         trc::StoreEvent::UnexpectedError

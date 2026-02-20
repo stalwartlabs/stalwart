@@ -132,8 +132,7 @@ impl ItipIngest for Server {
             }
         }
 
-        let emails = account_info.addresses().collect::<Vec<_>>();
-        let itip_snapshots = itip_snapshot(&itip, emails.as_slice(), false)?;
+        let itip_snapshots = itip_snapshot(&itip, account_info.addresses(), false)?;
         if !itip_snapshots.sender_is_organizer_or_attendee(sender) {
             return Err(ItipIngestError::Message(
                 ItipError::SenderIsNotOrganizerNorAttendee,
@@ -141,7 +140,7 @@ impl ItipIngest for Server {
         }
 
         // Obtain changedBy
-        let changed_by = if let Some(id) = self.account_id_from_email(sender, false).await? {
+        let changed_by = if let Some(id) = self.account_id_from_email(sender, true).await? {
             ChangedBy::PrincipalId(id)
         } else {
             ChangedBy::CalendarAddress(sender.into())
@@ -180,7 +179,7 @@ impl ItipIngest for Server {
                     .caused_by(trc::location!())?;
 
                 // Process the iTIP message
-                let snapshots = itip_snapshot(&event.data.event, emails.as_slice(), false)?;
+                let snapshots = itip_snapshot(&event.data.event, account_info.addresses(), false)?;
                 let is_organizer_update = !itip_snapshots.organizer.email.is_local;
                 match itip_process_message(
                     &event.data.event,
@@ -502,7 +501,7 @@ impl ItipIngest for Server {
                     let mut batch = BatchBuilder::new();
                     new_event
                         .update(
-                            account_info.account_tenant_ids(rsvp.account_id),
+                            account_info.account_tenant_ids(),
                             event,
                             rsvp.account_id,
                             rsvp.document_id,

@@ -176,9 +176,9 @@ pub struct Caches {
     pub scheduling: Cache<u32, Arc<DavResources>>,
 
     pub emails: Cache<EmailAddress, EmailCache>,
-    pub emails_negative: CacheWithTtl<ArcStr, ()>,
+    pub emails_negative: CacheWithTtl<EmailAddress, ()>,
     pub domain_names: Cache<ArcStr, u32>,
-    pub domain_names_negative: CacheWithTtl<ArcStr, ()>,
+    pub domain_names_negative: CacheWithTtl<Box<str>, ()>,
 
     pub domains: Cache<u32, Arc<DomainCache>>,
     pub accounts: Cache<u32, Arc<AccountCache>>,

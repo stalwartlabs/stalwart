@@ -91,7 +91,7 @@ impl Server {
                     AlertMethod::Event { message } => {
                         trc::event!(
                             Telemetry(TelemetryEvent::Alert),
-                            Id = alert.id.id(),
+                            Id = alert.id.id().id(),
                             Details = message.as_ref().map(|m| m.build())
                         );
 

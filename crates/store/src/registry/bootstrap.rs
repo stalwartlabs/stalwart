@@ -4,11 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{RegistryStore, Store, registry::RegistryObject};
+use crate::{
+    RegistryStore, Store,
+    registry::{RegistryObject, RegistryQuery},
+};
+use ahash::AHashSet;
 use registry::{
     schema::{
-        prelude::Property,
-        structs::{LocalSettings, Node},
+        prelude::{Object, Property},
+        structs::Node,
     },
     types::{
         EnumType, ObjectType,
@@ -16,6 +20,7 @@ use registry::{
         id::ObjectId,
     },
 };
+use types::id::Id;
 
 pub struct Bootstrap {
     pub registry: RegistryStore,
@@ -24,19 +29,62 @@ pub struct Bootstrap {
     pub warnings: Vec<Warning>,
     pub has_fatal_errors: bool,
     pub node: Node,
-    pub local: LocalSettings,
 }
 
 impl Bootstrap {
+    pub async fn init(registry: RegistryStore) -> Self {
+        let mut bp = Self::new(registry);
+        bp.load_node_settings().await;
+        bp
+    }
+
     pub fn new(registry: RegistryStore) -> Self {
         Self {
+            data_store: registry.0.store.clone(),
+            node: Node {
+                node_id: registry.0.node_id,
+                ..Default::default()
+            },
             registry,
             errors: Vec::new(),
             warnings: Vec::new(),
             has_fatal_errors: false,
-            node: Node::default(),
-            local: LocalSettings::default(),
-            data_store: Store::None,
+        }
+    }
+
+    async fn load_node_settings(&mut self) {
+        let ids = match self
+            .registry
+            .query::<AHashSet<u64>>(
+                RegistryQuery::new(Object::Node).equal(Property::NodeId, self.node_id()),
+            )
+            .await
+        {
+            Ok(ids) => ids,
+            Err(err) => {
+                self.errors.push(Error::Internal {
+                    object_id: None,
+                    error: err,
+                });
+                self.has_fatal_errors = true;
+                Default::default()
+            }
+        };
+        let id = ids.into_iter().next();
+        if let Some(id) = id
+            && let Some(node) = self.get_infallible::<Node>(Id::new(id)).await
+        {
+            self.node = node;
+        } else {
+            self.warnings.push(Warning {
+                object_id: ObjectId::new(Object::Node, id.map(Id::new).unwrap_or(Id::singleton())),
+                property: Some(Property::NodeId),
+                message: format!(
+                    "No node configuration found for nodeId {}, using defaults.",
+                    self.node_id()
+                ),
+            });
+            self.node.hostname = "localhost.localdomain".to_string();
         }
     }
 
@@ -70,8 +118,7 @@ impl Bootstrap {
         }
     }
 
-    pub async fn get_infallible<T: ObjectType>(&mut self, id: impl Into<u64>) -> Option<T> {
-        let id = id.into();
+    pub async fn get_infallible<T: ObjectType>(&mut self, id: Id) -> Option<T> {
         match self.registry.object::<T>(id).await {
             Ok(Some(setting)) => {
                 let mut errors = Vec::new();
@@ -162,7 +209,7 @@ impl Bootstrap {
     }
 
     pub fn node_id(&self) -> u64 {
-        self.node.node_id
+        self.registry.0.node_id
     }
 
     pub fn hostname(&self) -> &str {
@@ -176,7 +223,7 @@ impl Bootstrap {
                     trc::event!(
                         Registry(trc::RegistryEvent::ValidationError),
                         Source = object_id.object().as_str(),
-                        Id = object_id.id(),
+                        Id = object_id.id().id(),
                         Reason = errors
                             .iter()
                             .map(|err| trc::Value::from(err.to_string()))
@@ -187,7 +234,7 @@ impl Bootstrap {
                     trc::event!(
                         Registry(trc::RegistryEvent::BuildError),
                         Source = object_id.object().as_str(),
-                        Id = object_id.id(),
+                        Id = object_id.id().id(),
                         Reason = message.clone(),
                     );
                 }
@@ -195,7 +242,7 @@ impl Bootstrap {
                     trc::event!(
                         Registry(trc::RegistryEvent::ReadError),
                         Source = object_id.as_ref().map(|id| id.object().as_str()),
-                        Id = object_id.as_ref().map(|id| id.id()),
+                        Id = object_id.as_ref().map(|id| id.id().id()),
                         CausedBy = error.clone(),
                     );
                 }
@@ -203,7 +250,7 @@ impl Bootstrap {
                     trc::event!(
                         Registry(trc::RegistryEvent::BuildError),
                         Source = object_id.object().as_str(),
-                        Id = object_id.id(),
+                        Id = object_id.id().id(),
                         Reason = "Object not found",
                     );
                 }
@@ -216,7 +263,7 @@ impl Bootstrap {
             trc::event!(
                 Registry(trc::RegistryEvent::BuildWarning),
                 Source = warning.object_id.object().as_str(),
-                Id = warning.object_id.id(),
+                Id = warning.object_id.id().id(),
                 Key = warning.property.map(|key| key.as_str()),
                 Reason = warning.message.clone(),
             );

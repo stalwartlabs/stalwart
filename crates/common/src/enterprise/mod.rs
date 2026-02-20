@@ -172,15 +172,17 @@ impl Server {
             return Ok(None);
         };
 
-        let Some(domain_record) = self.registry().object::<Domain>(domain_id).await? else {
+        let Some(domain_record) = self.registry().object::<Domain>(domain_id.into()).await? else {
             return Ok(None);
         };
         let mut logo = domain_record.logo;
 
-        if logo.is_none() && tenant_id != u32::MAX {
+        if logo.is_none()
+            && let Some(tenant_id) = tenant_id
+        {
             logo = self
                 .registry()
-                .object::<Tenant>(tenant_id)
+                .object::<Tenant>(tenant_id.into())
                 .await?
                 .and_then(|t| t.logo);
         }

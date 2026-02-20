@@ -37,16 +37,16 @@ pub const FALLBACK_ADMIN_ID: u32 = u32::MAX;
 const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
 pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct EmailAddress {
-    local_part: Box<str>,
-    id_domain: u32,
+    pub local_part: Box<str>,
+    pub domain_id: u32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EmailAddressRef<'x> {
     local_part: &'x str,
-    id_domain: u32,
+    domain_id: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -60,8 +60,8 @@ pub struct DomainCache {
     pub names: Box<[ArcStr]>,
     pub id: u32,
     pub id_directory: Option<u32>,
-    pub id_tenant: u32,
-    pub catch_all: Option<ArcStr>,
+    pub id_tenant: Option<u32>,
+    pub catch_all: Option<Box<str>>,
     pub sub_addressing_custom: Option<Box<IfBlock>>,
     pub flags: u8,
 }
@@ -71,7 +71,9 @@ pub const DOMAIN_FLAG_SUB_ADDRESSING: u8 = 1 << 1;
 
 #[derive(Debug, Clone)]
 pub struct AccountCache {
-    pub addresses: Box<[ArcStr]>,
+    pub name: Box<str>,
+    pub id: u32,
+    pub addresses: Box<[EmailAddress]>,
     pub id_tenant: Option<u32>,
     pub id_member_of: TinyVec<[u32; 3]>,
     pub quota_disk: u64,
@@ -89,7 +91,7 @@ pub struct RoleCache {
 
 #[derive(Debug, Clone)]
 pub struct MailingListCache {
-    pub addresses: Box<[ArcStr]>,
+    //pub addresses: Box<[Box<str>]>,
     pub recipients: Arc<[ArcStr]>,
 }
 
@@ -146,7 +148,7 @@ pub(crate) struct AccessTo {
 pub struct AccountInfo {
     pub(crate) account_id: u32,
     pub(crate) account: Arc<AccountCache>,
-    pub(crate) member_of: Vec<Arc<AccountCache>>,
+    pub(crate) addresses: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -193,28 +195,32 @@ impl CacheItemWeight for DomainCache {
 
 impl Equivalent<EmailAddress> for EmailAddressRef<'_> {
     fn equivalent(&self, key: &EmailAddress) -> bool {
-        self.local_part == &*key.local_part && self.id_domain == key.id_domain
+        self.local_part == &*key.local_part && self.domain_id == key.domain_id
     }
 }
 
 impl Hash for EmailAddress {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.local_part.as_ref().hash(state);
-        self.id_domain.hash(state);
+        self.domain_id.hash(state);
     }
 }
 
 impl Hash for EmailAddressRef<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.local_part.hash(state);
-        self.id_domain.hash(state);
+        self.domain_id.hash(state);
     }
 }
 
 impl CacheItemWeight for AccountCache {
     fn weight(&self) -> u64 {
         std::mem::size_of::<AccountCache>() as u64
-            + self.addresses.iter().map(|s| s.len() as u64).sum::<u64>()
+            + self
+                .addresses
+                .iter()
+                .map(|s| s.local_part.len() as u64 + std::mem::size_of::<EmailAddress>() as u64)
+                .sum::<u64>()
             + self.description.as_ref().map_or(0, |s| s.len() as u64)
     }
 }
@@ -228,7 +234,7 @@ impl CacheItemWeight for RoleCache {
 impl CacheItemWeight for MailingListCache {
     fn weight(&self) -> u64 {
         std::mem::size_of::<MailingListCache>() as u64
-            + self.addresses.iter().map(|s| s.len() as u64).sum::<u64>()
+            //+ self.addresses.iter().map(|s| s.len() as u64).sum::<u64>()
             + self.recipients.iter().map(|s| s.len() as u64).sum::<u64>()
     }
 }
@@ -259,11 +265,20 @@ impl BuildAccessToken for Arc<AccessTokenInner> {
     }
 }
 
+impl EmailAddress {
+    pub fn new(local_part: impl Into<Box<str>>, domain_id: u32) -> Self {
+        Self {
+            local_part: local_part.into(),
+            domain_id,
+        }
+    }
+}
+
 impl<'x> EmailAddressRef<'x> {
-    pub fn new(local_part: &'x str, id_domain: u32) -> Self {
+    pub fn new(local_part: &'x str, domain_id: u32) -> Self {
         Self {
             local_part,
-            id_domain,
+            domain_id,
         }
     }
 }

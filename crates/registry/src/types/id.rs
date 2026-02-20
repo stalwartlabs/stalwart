@@ -16,49 +16,49 @@ use types::{blob::BlobId, id::Id};
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct ObjectId {
     object: Object,
-    id: u64,
+    id: Id,
 }
 
 impl ObjectId {
-    pub fn new(object: Object, id: impl Into<u64>) -> Self {
-        Self {
-            object,
-            id: id.into(),
-        }
+    pub fn new(object: Object, id: Id) -> Self {
+        Self { object, id }
     }
 
-    pub fn id(&self) -> u64 {
+    #[inline(always)]
+    pub fn id(&self) -> Id {
         self.id
     }
 
+    #[inline(always)]
     pub fn object(&self) -> Object {
         self.object
     }
 
+    #[inline(always)]
     pub fn is_valid(&self) -> bool {
-        self.id != u64::MAX
+        self.id.is_valid()
     }
 }
 
 impl Display for ObjectId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.object.as_str(), Id::new(self.id))
+        write!(f, "{}:{}", self.object.as_str(), self.id)
     }
 }
 
 impl Object {
-    pub fn id(&self, id: u64) -> ObjectId {
+    pub fn id(&self, id: Id) -> ObjectId {
         ObjectId::new(*self, id)
     }
 
     pub fn singleton(&self) -> ObjectId {
-        ObjectId::new(*self, 20080258862541u64)
+        ObjectId::new(*self, Id::singleton())
     }
 }
 
 impl Default for ObjectId {
     fn default() -> Self {
-        ObjectId::new(Object::Account, u64::MAX)
+        ObjectId::new(Object::Account, Id::default())
     }
 }
 

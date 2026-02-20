@@ -45,7 +45,7 @@ impl Server {
     pub async fn build_acme_provider(&self, id: u64) -> trc::Result<AcmeProvider> {
         if let Some(server) = self
             .registry()
-            .object::<structs::AcmeProvider>(id)
+            .object::<structs::AcmeProvider>(id.into())
             .await
             .caused_by(trc::location!())?
         {
@@ -63,7 +63,7 @@ impl Server {
     pub async fn build_dns_updater(&self, id: u64) -> trc::Result<DnsUpdater> {
         let Some(server) = self
             .registry()
-            .object::<DnsServer>(id)
+            .object::<DnsServer>(id.into())
             .await
             .caused_by(trc::location!())?
         else {

@@ -231,12 +231,12 @@ fn log_event(event: &BroadcastEvent) -> trc::Value {
             RegistryChange::Insert(id) => trc::Value::Array(vec![
                 "RegistryInsert".into(),
                 id.object().as_str().into(),
-                id.id().into(),
+                id.id().id().into(),
             ]),
             RegistryChange::Delete(id) => trc::Value::Array(vec![
                 "RegistryDelete".into(),
                 id.object().as_str().into(),
-                id.id().into(),
+                id.id().id().into(),
             ]),
             RegistryChange::Reload(object) => {
                 trc::Value::Array(vec!["RegistryReload".into(), object.as_str().into()])

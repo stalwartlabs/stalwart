@@ -78,7 +78,7 @@ impl Core {
             // SPDX-SnippetEnd
             sieve: Scripting::parse(bp).await,
             network: Network::parse(bp).await,
-            smtp: SmtpConfig::parse(bp).await,
+            smtp: Box::pin(SmtpConfig::parse(bp)).await,
             jmap: JmapConfig::parse(bp).await,
             imap: ImapConfig::parse(bp).await,
             oauth: OAuthConfig::parse(bp).await,

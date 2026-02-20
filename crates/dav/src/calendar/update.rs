@@ -116,7 +116,6 @@ impl CalendarUpdateRequestHandler for Server {
             .account_info(access_token.account_id())
             .await
             .caused_by(trc::location!())?;
-        let account_emails = account_info.addresses().collect::<Vec<_>>();
 
         if let Some(resource) = resources.by_path(resource_name.as_ref()) {
             if resource.is_container() {
@@ -223,7 +222,7 @@ impl CalendarUpdateRequestHandler for Server {
             // Scheduling
             let mut itip_messages = None;
             if self.core.groupware.itip_enabled
-                && !account_emails.is_empty()
+                && !account_info.addresses().is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
                 && new_event.data.event_range_end() > now
             {
@@ -231,10 +230,10 @@ impl CalendarUpdateRequestHandler for Server {
                     itip_update(
                         &mut new_event.data.event,
                         &old_ical,
-                        account_emails.as_slice(),
+                        account_info.addresses(),
                     )
                 } else {
-                    itip_create(&mut new_event.data.event, account_emails.as_slice())
+                    itip_create(&mut new_event.data.event, account_info.addresses())
                 };
 
                 match result {
@@ -385,11 +384,11 @@ impl CalendarUpdateRequestHandler for Server {
             // Scheduling
             let mut itip_messages = None;
             if self.core.groupware.itip_enabled
-                && !account_emails.is_empty()
+                && !account_info.addresses().is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
                 && event.data.event_range_end() > now() as i64
             {
-                match itip_create(&mut event.data.event, account_emails.as_slice()) {
+                match itip_create(&mut event.data.event, account_info.addresses()) {
                     Ok(messages) => {
                         if messages.iter().map(|r| r.to.len()).sum::<usize>()
                             < self.core.groupware.itip_outbound_max_recipients

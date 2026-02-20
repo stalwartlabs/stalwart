@@ -82,6 +82,10 @@ impl SqlDirectory {
             );
         }
 
+        if account.email.is_empty() {
+            account.email = sanitize_email(username).unwrap_or_else(|| username.to_lowercase());
+        }
+
         Ok(account)
     }
 

@@ -68,7 +68,11 @@ impl IdentitySet for Server {
 
             // Validate email address
             if !identity.email.is_empty() {
-                if !account_info.addresses().any(|e| e == identity.email) {
+                if !account_info
+                    .addresses()
+                    .iter()
+                    .any(|e| e == &identity.email)
+                {
                     response.not_created.append(
                         id,
                         SetError::invalid_properties()

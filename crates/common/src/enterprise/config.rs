@@ -20,7 +20,10 @@ use registry::schema::{
     structs::{self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SpamLlm},
 };
 use std::sync::Arc;
-use store::registry::bootstrap::Bootstrap;
+use store::{
+    registry::{HashedObject, RegistryQuery, bootstrap::Bootstrap, write::RegistryWrite},
+    roaring::RoaringBitmap,
+};
 use trc::MetricType;
 use types::id::Id;
 use utils::template::Template;
@@ -30,8 +33,10 @@ impl Enterprise {
         let server_hostname = bp.hostname().to_string();
         let mut update_license = None;
 
-        let mut enterprise = bp.setting_infallible::<structs::Enterprise>().await;
-        let license_result = match (&enterprise.license_key, &enterprise.api_key) {
+        let mut enterprise = bp
+            .setting_infallible::<HashedObject<structs::Enterprise>>()
+            .await;
+        let license_result = match (&enterprise.object.license_key, &enterprise.object.api_key) {
             (Some(license_key), maybe_api_key) => {
                 match (
                     LicenseKey::new(license_key, &server_hostname),
@@ -79,8 +84,16 @@ impl Enterprise {
 
         // Update the license if a new one was obtained
         if let Some(license) = update_license {
-            enterprise.license_key = Some(license);
-            if let Err(err) = bp.registry.update(Id::singleton(), &enterprise).await {
+            enterprise.object.license_key = Some(license);
+            if let Err(err) = bp
+                .registry
+                .write(RegistryWrite::update(
+                    Id::singleton(),
+                    &enterprise.object,
+                    &enterprise,
+                ))
+                .await
+            {
                 trc::error!(
                     err.caused_by(trc::location!())
                         .details("Failed to update license key")
@@ -88,13 +101,18 @@ impl Enterprise {
             }
         }
 
-        match bp.registry.count(Object::Account).await {
-            Ok(total) if total > license.accounts as u64 => {
+        match bp
+            .registry
+            .query::<RoaringBitmap>(RegistryQuery::new(Object::Account))
+            .await
+        {
+            Ok(total) if total.len() > license.accounts as u64 => {
                 bp.build_warning(
                     Object::Enterprise.singleton(),
                     format!(
                         "License key is valid but only allows {} accounts, found {}.",
-                        license.accounts, total
+                        license.accounts,
+                        total.len()
                     ),
                 );
                 return None;
@@ -137,14 +155,14 @@ impl Enterprise {
                 default_temperature: api.temperature,
             });
             ai_apis.insert(api.id.clone(), api.clone());
-            ai_apis_ids.insert(id.id(), api);
+            ai_apis_ids.insert(id.id().id(), api);
         }
 
         // Build the enterprise configuration
         let mut enterprise = Enterprise {
             license,
             undelete_retention: dr.hold_deleted_for.map(|retention| retention.into_inner()),
-            logo_url: enterprise.logo_url,
+            logo_url: enterprise.object.logo_url,
             metrics_alerts: Default::default(),
             spam_filter_llm: SpamFilterLlmConfig::parse(bp, &ai_apis_ids).await,
             ai_apis,

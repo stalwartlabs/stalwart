@@ -245,7 +245,10 @@ impl<T: SessionStream> Session<T> {
             {
                 let address_lcase = self.data.mail_from.as_ref().unwrap().address_lcase.as_str();
                 if authenticated_as != address_lcase
-                    && !self.authenticated_emails().any(|e| e == address_lcase)
+                    && !self
+                        .authenticated_emails()
+                        .iter()
+                        .any(|e| e == address_lcase)
                 {
                     trc::event!(
                         Smtp(SmtpEvent::MailFromUnauthorized),
@@ -255,6 +258,7 @@ impl<T: SessionStream> Session<T> {
                             .into_iter()
                             .chain(
                                 self.authenticated_emails()
+                                    .iter()
                                     .map(|e| trc::Value::String(e.into()))
                             )
                             .collect::<Vec<_>>()

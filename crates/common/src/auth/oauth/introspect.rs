@@ -61,9 +61,9 @@ impl Server {
                     .account(access_token.account_id())
                     .await
                     .caused_by(trc::location!())?
-                    .addresses
-                    .first()
-                    .map(|v| v.to_string()),
+                    .name()
+                    .to_string()
+                    .into(),
                 token_type: Some("bearer".into()),
                 exp: Some(token_info.expiry as i64),
                 iat: Some(token_info.issued_at as i64),

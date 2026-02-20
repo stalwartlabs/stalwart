@@ -137,7 +137,7 @@ impl ItipAutoExpunge for Server {
             .account(account_id)
             .await
             .caused_by(trc::location!())?
-            .account_tenant_ids(account_id);
+            .account_tenant_ids();
 
         for document_id in destroy_ids {
             // Fetch event
@@ -480,8 +480,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
 
-            let emails = account_info.addresses().collect::<Vec<_>>();
-            if let Ok(messages) = itip_cancel(&event.data.event, emails.as_slice(), true) {
+            if let Ok(messages) = itip_cancel(&event.data.event, account_info.addresses(), true) {
                 ItipMessages::new(vec![messages])
                     .queue(batch)
                     .caused_by(trc::location!())?;

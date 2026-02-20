@@ -48,7 +48,7 @@ pub struct Account {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Group {
     pub email: String,
     pub email_aliases: Vec<String>,

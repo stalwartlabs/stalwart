@@ -368,7 +368,7 @@ impl CalendarEventNotificationHandler for Server {
 
         for (email, attendee) in attendees {
             if let Some(account_id) = self
-                .account_id_from_email(&email, false)
+                .account_id_from_email(&email, true)
                 .await
                 .caused_by(trc::location!())?
             {

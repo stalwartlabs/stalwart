@@ -5,16 +5,15 @@
  */
 
 use crate::{
-    object::{AnyId, JmapObject, JmapObjectId, MaybeReference, parse_ref},
+    object::{AnyId, JmapObject, JmapObjectId},
     request::deserialize::DeserializeArguments,
 };
-use jmap_tools::{Element, Key};
 use registry::{
     jmap::RegistryValue,
     schema::prelude::{Object, Property},
 };
 use std::borrow::Cow;
-use types::{blob::BlobId, id::Id};
+use types::id::Id;
 
 #[derive(Debug)]
 pub struct Registry;

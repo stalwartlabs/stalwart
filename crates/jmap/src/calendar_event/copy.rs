@@ -111,7 +111,6 @@ impl JmapCalendarEventCopy for Server {
             .account_info(access_token.account_id())
             .await
             .caused_by(trc::location!())?;
-        let account_emails = account_info.addresses().collect::<Vec<_>>();
 
         // Prepare batch
         let mut batch = BatchBuilder::new();
@@ -170,7 +169,7 @@ impl JmapCalendarEventCopy for Server {
                     &mut batch,
                     access_token,
                     account_id,
-                    &account_emails,
+                    account_info.addresses(),
                     false,
                     &can_add_calendars,
                     calendar_event.data.event.into_jscalendar(),

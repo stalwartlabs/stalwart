@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccountInfo, sharing::notification::ShareNotification};
+use common::{Server, auth::AccountCache, sharing::notification::ShareNotification};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::{
@@ -19,7 +19,7 @@ use jmap_proto::{
     types::{date::UTCDate, state::State},
 };
 use jmap_tools::{Key, Map, Value};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use store::{
     Deserialize, IterateParams, LogKey, U64_LEN,
     ahash::{AHashMap, AHashSet},
@@ -63,7 +63,7 @@ impl ShareNotificationGet for Server {
         let mut min_id = u64::MAX;
         let mut max_id = 0u64;
 
-        let mut account_cache: AHashMap<u32, AccountInfo> = AHashMap::new();
+        let mut account_cache: AHashMap<u32, Arc<AccountCache>> = AHashMap::new();
 
         let mut ids = if let Some(ids) = request.ids.take() {
             let ids = ids.unwrap();
@@ -150,12 +150,11 @@ impl ShareNotificationGet for Server {
                 if let Some(account) = account_cache.get(&notification.changed_by) {
                     account.clone()
                 } else {
-                    let account =
-                        if let Ok(account) = self.account_info(notification.changed_by).await {
-                            account
-                        } else {
-                            continue;
-                        };
+                    let account = if let Ok(account) = self.account(notification.changed_by).await {
+                        account
+                    } else {
+                        continue;
+                    };
 
                     account_cache.insert(notification.changed_by, account.clone());
                     account
@@ -184,7 +183,7 @@ impl ShareNotificationGet for Server {
 fn build_share_notification(
     id: u64,
     mut notification: ShareNotification,
-    changed_by: &AccountInfo,
+    changed_by: &AccountCache,
     properties: &[ShareNotificationProperty],
 ) -> Value<'static, ShareNotificationProperty, ShareNotificationValue> {
     let mut result = Map::with_capacity(properties.len());

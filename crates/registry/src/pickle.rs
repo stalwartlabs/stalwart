@@ -39,6 +39,10 @@ impl<'x> PickledStream<'x> {
     pub fn eof(&self) -> bool {
         self.pos >= self.data.len()
     }
+
+    pub fn bytes(&self) -> &'x [u8] {
+        self.data
+    }
 }
 
 impl Pickle for u16 {

@@ -157,7 +157,7 @@ impl IdentityGet for Server {
         }
 
         // Obtain account info
-        let account = self
+        let account_info = self
             .account_info(account_id)
             .await
             .caused_by(trc::location!())?;
@@ -168,14 +168,17 @@ impl IdentityGet for Server {
             .with_collection(Collection::Identity);
 
         // Create identities
-        let name = account.description().unwrap_or(account.name());
-        let emails = account.addresses().collect::<Vec<_>>();
+        let name = account_info.description().unwrap_or(account_info.name());
         let mut next_document_id = self
             .store()
-            .assign_document_ids(account_id, Collection::Identity, emails.len() as u64)
+            .assign_document_ids(
+                account_id,
+                Collection::Identity,
+                account_info.addresses().len() as u64,
+            )
             .await
             .caused_by(trc::location!())?;
-        for email in &emails {
+        for email in account_info.addresses() {
             let email = sanitize_email(email).unwrap_or_default();
             if email.is_empty() || email.starts_with('@') {
                 continue;

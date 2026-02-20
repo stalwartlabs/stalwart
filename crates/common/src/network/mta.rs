@@ -54,7 +54,11 @@ impl Server {
             if let Some(sub_addressing) = &domain.sub_addressing_custom {
                 // Custom sub-addressing resolution
                 if let Some(result) = self
-                    .eval_if::<String, _>(sub_addressing, &Address(local_part.as_ref()), session_id)
+                    .eval_if::<String, _>(
+                        sub_addressing,
+                        &AddressResolver(local_part.as_ref()),
+                        session_id,
+                    )
                     .await
                 {
                     local_part = Cow::Owned(result);
@@ -66,28 +70,26 @@ impl Server {
 
         // Masked email resolution
         if let Cow::Borrowed(addr) = &local_part
-            && let Some(masked) = MaskedAddress::parse(addr)
+            && let Some(masked_id) = MaskedAddress::parse(addr)
         {
-            return if !masked.has_expired
-                && let Some(masked_entry) = self
-                    .registry()
-                    .object::<MaskedEmail>(
-                        Id::from_parts(masked.account_id, masked.account_id).id(),
-                    )
-                    .await
-                    .caused_by(trc::location!())?
+            return if let Some(masked_entry) = self
+                .registry()
+                .object::<MaskedEmail>(Id::new(masked_id))
+                .await
+                .caused_by(trc::location!())?
                 && masked_entry.enabled
                 && masked_entry
                     .expires_at
                     .is_none_or(|at| at.timestamp() > now() as i64)
                 && let Some(account) = self
-                    .try_account(masked.account_id)
+                    .try_account(masked_entry.account_id.document_id())
                     .await
                     .caused_by(trc::location!())?
-                && account.addresses.iter().any(|addr| {
-                    addr.strip_suffix(domain_part)
-                        .is_some_and(|a| a.ends_with('@'))
-                }) {
+                && account
+                    .addresses
+                    .iter()
+                    .any(|addr| addr.domain_id == domain.id)
+            {
                 Ok(RcptResolution::Rewrite(account.name().to_string()))
             } else {
                 Ok(RcptResolution::UnknownRecipient)
@@ -397,9 +399,9 @@ impl Server {
     }
 }
 
-struct Address<'x>(&'x str);
+pub struct AddressResolver<'x>(pub &'x str);
 
-impl ResolveVariable for Address<'_> {
+impl ResolveVariable for AddressResolver<'_> {
     fn resolve_variable(&'_ self, _: ExpressionVariable) -> crate::expr::Variable<'_> {
         Variable::from(self.0)
     }

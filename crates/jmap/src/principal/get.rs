@@ -81,7 +81,7 @@ impl PrincipalGet for Server {
                 continue;
             };
             let principal = self
-                .account_info(document_id)
+                .account(document_id)
                 .await
                 .caused_by(trc::location!())?;
 

@@ -20,10 +20,14 @@ use registry::{
 };
 use std::{fmt::Debug, net::IpAddr};
 use store::{
-    registry::{bootstrap::Bootstrap, write::RegistryWriteResult},
+    registry::{
+        bootstrap::Bootstrap,
+        write::{RegistryWrite, RegistryWriteResult},
+    },
     write::now,
 };
 use trc::AddContext;
+use types::id::Id;
 use utils::glob::{GlobPattern, MatchType};
 
 #[derive(Debug, Clone)]
@@ -41,6 +45,10 @@ pub struct Security {
     pub auth_fail_rate: Option<Rate>,
     pub rcpt_fail_rate: Option<Rate>,
     pub loiter_fail_rate: Option<Rate>,
+
+    pub default_role_ids_user: Vec<Id>,
+    pub default_role_ids_group: Vec<Id>,
+    pub default_role_ids_tenant: Vec<Id>,
 }
 
 #[derive(Default)]
@@ -74,7 +82,11 @@ impl Security {
 
         if !expired_allows.is_empty() {
             for (id, _) in &expired_allows {
-                if let Err(err) = bp.registry.delete::<AllowedIp>(id.id()).await {
+                if let Err(err) = bp
+                    .registry
+                    .write::<AllowedIp>(RegistryWrite::delete(id.id()))
+                    .await
+                {
                     trc::error!(
                         err.details("Failed to delete expired allowed IP from registry.")
                             .caused_by(trc::location!())
@@ -99,9 +111,11 @@ impl Security {
         }
 
         let security = bp.setting_infallible::<structs::Security>().await;
+        let local = bp.setting_infallible::<structs::LocalSettings>().await;
+        let auth = bp.setting_infallible::<structs::Authentication>().await;
         Security {
-            fallback_admin: bp.local.fallback_admin_user.as_ref().and_then(|user| {
-                bp.local
+            fallback_admin: local.fallback_admin_user.as_ref().and_then(|user| {
+                local
                     .fallback_admin_secret
                     .as_ref()
                     .map(|secret| (user.to_string(), secret.to_string()))
@@ -119,6 +133,9 @@ impl Security {
                 .map(|pattern| MatchType::Matches(GlobPattern::compile(pattern, true)))
                 .collect(),
             scanner_fail_rate: security.scan_ban_rate,
+            default_role_ids_user: auth.default_user_role_ids,
+            default_role_ids_group: auth.default_group_role_ids,
+            default_role_ids_tenant: auth.default_tenant_role_ids,
         }
     }
 }
@@ -240,7 +257,7 @@ impl Server {
         let now = now() as i64;
         let RegistryWriteResult::Success(id) = self
             .registry()
-            .insert(&BlockedIp {
+            .write(RegistryWrite::insert(&BlockedIp {
                 address: IpAddrOrMask::from_ip(ip),
                 created_at: UTCDateTime::from_timestamp(now),
                 expires_at: self
@@ -250,7 +267,7 @@ impl Server {
                     .blocked_ip_expiration
                     .map(|v| UTCDateTime::from_timestamp(now + v as i64)),
                 reason,
-            })
+            }))
             .await
             .caused_by(trc::location!())?
         else {
@@ -259,7 +276,7 @@ impl Server {
 
         // Increment version
         self.cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Insert(
-            Object::BlockedIp.id(id.id()),
+            Object::BlockedIp.id(id),
         )))
         .await;
 
@@ -317,7 +334,11 @@ impl BlockedIps {
 
         if !expired_blocks.is_empty() {
             for (id, _) in &expired_blocks {
-                if let Err(err) = bp.registry.delete::<BlockedIp>(id.id()).await {
+                if let Err(err) = bp
+                    .registry
+                    .write::<BlockedIp>(RegistryWrite::delete(id.id()))
+                    .await
+                {
                     trc::error!(
                         err.details("Failed to delete expired blocked IP from registry.")
                             .caused_by(trc::location!())
