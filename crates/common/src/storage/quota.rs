@@ -10,7 +10,7 @@ use crate::{
 };
 use registry::{
     schema::enums::{StorageQuota, TenantStorageQuota},
-    types::EnumType,
+    types::EnumImpl,
 };
 use store::{ValueKey, write::ValueClass};
 use trc::AddContext;

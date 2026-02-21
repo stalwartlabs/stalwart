@@ -10,7 +10,7 @@ use crate::{
 };
 use registry::{
     jmap::RegistryValue,
-    schema::prelude::{Object, Property},
+    schema::prelude::{ObjectType, Property},
 };
 use std::borrow::Cow;
 use types::id::Id;
@@ -20,7 +20,7 @@ pub struct Registry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegistryFilter {
-    Type(Object),
+    Type(ObjectType),
     Text(String),
     Id(Vec<Id>),
     Property(Property),

@@ -9,9 +9,9 @@ use directory::Directory;
 use registry::{
     schema::{
         enums::{StorageQuota, TenantStorageQuota},
-        prelude::Object,
+        prelude::ObjectType,
     },
-    types::EnumType,
+    types::EnumImpl,
 };
 use std::sync::Arc;
 use store::{
@@ -91,14 +91,14 @@ impl Server {
 
     pub async fn total_accounts(&self) -> trc::Result<u64> {
         self.registry()
-            .query::<RoaringBitmap>(RegistryQuery::new(Object::Account))
+            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Account))
             .await
             .map(|r| r.len())
     }
 
     pub async fn total_domains(&self) -> trc::Result<u64> {
         self.registry()
-            .query::<RoaringBitmap>(RegistryQuery::new(Object::Domain))
+            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Domain))
             .await
             .map(|r| r.len())
     }

@@ -13,10 +13,10 @@ use ahash::AHashMap;
 use registry::{
     schema::{
         enums::NodeShardType,
-        prelude::Object,
+        prelude::{Object, ObjectType},
         structs::{self, Asn, HttpForm, NodeRole, NodeShard, Rate},
     },
-    types::EnumType,
+    types::EnumImpl,
 };
 use std::{hash::Hasher, str::FromStr, time::Duration};
 use xxhash_rust::xxh3::Xxh3Builder;
@@ -117,7 +117,7 @@ impl ContactForm {
             return None;
         } else if form.deliver_to.is_empty() {
             bp.build_error(
-                Object::HttpForm.singleton(),
+                ObjectType::HttpForm.singleton(),
                 "Contact form is enabled but no recipient addresses are configured",
             );
             return None;
@@ -331,7 +331,7 @@ impl Http {
             .collect::<Result<Vec<_>, String>>()
             .map_err(|e| {
                 bp.build_error(
-                    Object::Http.singleton(),
+                    ObjectType::Http.singleton(),
                     format!("Failed to parse HTTP headers: {}", e),
                 )
             })
@@ -366,9 +366,9 @@ impl Http {
         }
 
         Http {
-            response_url: bp.compile_expr(Object::Http.singleton(), &http.ctx_base_url()),
+            response_url: bp.compile_expr(ObjectType::Http.singleton(), &http.ctx_base_url()),
             allowed_endpoint: bp
-                .compile_expr(Object::Http.singleton(), &http.ctx_allowed_endpoints()),
+                .compile_expr(ObjectType::Http.singleton(), &http.ctx_allowed_endpoints()),
             rate_authenticated: http.rate_limit_authenticated,
             rate_anonymous: http.rate_limit_anonymous,
             response_headers: http_headers,
@@ -389,7 +389,7 @@ impl AsnGeoLookupConfig {
                     .build_headers(asn.http_headers, None)
                     .map_err(|err| {
                         bp.build_error(
-                            Object::Asn.singleton(),
+                            ObjectType::Asn.singleton(),
                             format!("Unable to build HTTP headers: {}", err),
                         )
                     })

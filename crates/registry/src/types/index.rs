@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    schema::prelude::{Object, Property},
+    schema::prelude::{ObjectType, Property},
     types::{id::ObjectId, ipmask::IpAddrOrMask},
 };
 use ahash::AHashSet;
@@ -52,12 +52,12 @@ pub enum IndexValue<'x> {
 #[derive(Debug, Default)]
 
 pub struct IndexBuilder<'x> {
-    pub object: Option<Object>,
+    pub object: Option<ObjectType>,
     pub keys: AHashSet<IndexKey<'x>>,
 }
 
 impl<'x> IndexBuilder<'x> {
-    pub fn object(&mut self, object: Object) {
+    pub fn object(&mut self, object: ObjectType) {
         if self.object.is_none() {
             self.object = Some(object);
         }
@@ -127,7 +127,7 @@ impl<'x> IndexBuilder<'x> {
         });
     }
 
-    pub fn foreign_key(&mut self, object: Object, id: Option<Id>, type_filter: Option<u16>) {
+    pub fn foreign_key(&mut self, object: ObjectType, id: Option<Id>, type_filter: Option<u16>) {
         if let Some(id) = id {
             self.keys.insert(IndexKey::ForeignKey {
                 object_id: ObjectId::new(object, id),

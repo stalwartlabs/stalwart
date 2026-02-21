@@ -14,7 +14,7 @@ use directory::Credentials;
 use quick_cache::Equivalent;
 use registry::{
     schema::enums::{Locale, Permission},
-    types::EnumType,
+    types::EnumImpl,
 };
 use std::{
     hash::{Hash, Hasher},

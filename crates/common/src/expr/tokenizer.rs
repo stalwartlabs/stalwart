@@ -10,7 +10,7 @@ use super::{
 };
 use ahash::AHashSet;
 use regex::Regex;
-use registry::{schema::enums::ExpressionConstant, types::EnumType};
+use registry::{schema::enums::ExpressionConstant, types::EnumImpl};
 use std::{borrow::Cow, iter::Peekable, slice::Iter};
 use trc::MetricType;
 

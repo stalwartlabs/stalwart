@@ -27,7 +27,7 @@ use mail_builder::{
     mime::{BodyPart, MimePart},
 };
 use mail_parser::decoders::html::html_to_text;
-use registry::{schema::enums::Permission, types::EnumType};
+use registry::{schema::enums::Permission, types::EnumImpl};
 use smtp::core::{Session, SessionData};
 use smtp_proto::{MailFrom, RcptTo};
 use std::{str::FromStr, sync::Arc, time::Duration};

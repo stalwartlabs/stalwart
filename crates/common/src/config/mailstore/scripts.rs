@@ -15,12 +15,12 @@ use crate::{
 use ahash::AHashMap;
 use registry::{
     schema::{
-        prelude::Object,
+        prelude::ObjectType,
         structs::{
             SieveSystemInterpreter, SieveSystemScript, SieveUserInterpreter, SieveUserScript,
         },
     },
-    types::EnumType,
+    types::EnumImpl,
 };
 use sieve::{Compiler, Runtime, Sieve, compiler::grammar::Capability};
 use std::sync::Arc;
@@ -169,19 +169,19 @@ impl Scripting {
             untrusted_scripts,
             trusted_scripts,
             from_addr: bp.compile_expr(
-                Object::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemScript.singleton(),
                 &trusted.ctx_default_from_address(),
             ),
             from_name: bp.compile_expr(
-                Object::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemScript.singleton(),
                 &trusted.ctx_default_from_name(),
             ),
             return_path: bp.compile_expr(
-                Object::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemScript.singleton(),
                 &trusted.ctx_default_return_path(),
             ),
             sign: bp.compile_expr(
-                Object::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemScript.singleton(),
                 &trusted.ctx_dkim_sign_domain(),
             ),
         }

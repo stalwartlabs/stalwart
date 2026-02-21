@@ -17,7 +17,11 @@ use biscuit::{
     },
     jws::Secret,
 };
-use registry::schema::{enums::JwtSignatureAlgorithm, prelude::Object, structs::OidcProvider};
+use registry::schema::{
+    enums::JwtSignatureAlgorithm,
+    prelude::{Object, ObjectType},
+    structs::OidcProvider,
+};
 use ring::signature::{self, KeyPair};
 use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey, traits::PublicKeyParts};
 use store::{
@@ -88,7 +92,7 @@ impl OAuthConfig {
             | SignatureAlgorithm::PS384
             | SignatureAlgorithm::PS512 => parse_rsa_key(&auth)
                 .map_err(|err| {
-                    bp.build_error(Object::OidcProvider.singleton(), err);
+                    bp.build_error(ObjectType::OidcProvider.singleton(), err);
                 })
                 .unwrap_or_else(|_| {
                     (
@@ -102,7 +106,7 @@ impl OAuthConfig {
             SignatureAlgorithm::ES256 | SignatureAlgorithm::ES384 | SignatureAlgorithm::ES512 => {
                 parse_ecdsa_key(&auth, oidc_signature_algorithm)
                     .map_err(|err| {
-                        bp.build_error(Object::OidcProvider.singleton(), err);
+                        bp.build_error(ObjectType::OidcProvider.singleton(), err);
                     })
                     .unwrap_or_else(|_| {
                         (

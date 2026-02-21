@@ -13,7 +13,7 @@ use ahash::AHashSet;
 use registry::{
     schema::{
         enums::BlockReason,
-        prelude::Object,
+        prelude::{HashedObject, Object, ObjectType},
         structs::{self, AllowedIp, BlockedIp, Rate},
     },
     types::{datetime::UTCDateTime, ipmask::IpAddrOrMask},
@@ -65,26 +65,34 @@ impl Security {
         let mut expired_allows = Vec::new();
         let now = now() as i64;
 
-        for ip in bp.list_infallible::<AllowedIp>().await {
+        for ip in bp.list_infallible::<HashedObject<AllowedIp>>().await {
             let id = ip.id;
-            let ip = ip.object;
+            let revision = ip.object.revision;
+            let ip = ip.object.object;
 
-            if ip.expires_at.is_none_or(|ip| ip.timestamp() > now) {
+            if ip.expires_at.as_ref().is_none_or(|ip| ip.timestamp() > now) {
                 if let Some(ip) = ip.address.try_to_ip() {
                     allowed_ip_addresses.insert(ip);
                 } else {
                     allowed_ip_networks.push(ip.address);
                 }
             } else {
-                expired_allows.push((id, ip.address));
+                expired_allows.push((
+                    id,
+                    ip.address.clone(),
+                    Object {
+                        inner: ip.into(),
+                        revision,
+                    },
+                ));
             }
         }
 
         if !expired_allows.is_empty() {
-            for (id, _) in &expired_allows {
+            for (id, _, object) in &expired_allows {
                 if let Err(err) = bp
                     .registry
-                    .write::<AllowedIp>(RegistryWrite::delete(id.id()))
+                    .write(RegistryWrite::delete_object(*id, object))
                     .await
                 {
                     trc::error!(
@@ -98,7 +106,7 @@ impl Security {
                 Security(trc::SecurityEvent::IpAllowExpired),
                 Details = expired_allows
                     .into_iter()
-                    .map(|(_, ip)| trc::Value::from(ip.into_inner().0))
+                    .map(|(_, ip, _)| trc::Value::from(ip.into_inner().0))
                     .collect::<Vec<_>>()
             );
         }
@@ -257,17 +265,20 @@ impl Server {
         let now = now() as i64;
         let RegistryWriteResult::Success(id) = self
             .registry()
-            .write(RegistryWrite::insert(&BlockedIp {
-                address: IpAddrOrMask::from_ip(ip),
-                created_at: UTCDateTime::from_timestamp(now),
-                expires_at: self
-                    .core
-                    .network
-                    .security
-                    .blocked_ip_expiration
-                    .map(|v| UTCDateTime::from_timestamp(now + v as i64)),
-                reason,
-            }))
+            .write(RegistryWrite::insert(
+                &BlockedIp {
+                    address: IpAddrOrMask::from_ip(ip),
+                    created_at: UTCDateTime::from_timestamp(now),
+                    expires_at: self
+                        .core
+                        .network
+                        .security
+                        .blocked_ip_expiration
+                        .map(|v| UTCDateTime::from_timestamp(now + v as i64)),
+                    reason,
+                }
+                .into(),
+            ))
             .await
             .caused_by(trc::location!())?
         else {
@@ -276,7 +287,7 @@ impl Server {
 
         // Increment version
         self.cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Insert(
-            Object::BlockedIp.id(id),
+            ObjectType::BlockedIp.id(id),
         )))
         .await;
 
@@ -317,26 +328,34 @@ impl BlockedIps {
         let mut expired_blocks = Vec::new();
         let now = now() as i64;
 
-        for ip in bp.list_infallible::<BlockedIp>().await {
+        for ip in bp.list_infallible::<HashedObject<BlockedIp>>().await {
             let id = ip.id;
-            let ip = ip.object;
+            let revision = ip.object.revision;
+            let ip = ip.object.object;
 
-            if ip.expires_at.is_none_or(|ip| ip.timestamp() > now) {
+            if ip.expires_at.as_ref().is_none_or(|ip| ip.timestamp() > now) {
                 if let Some(ip) = ip.address.try_to_ip() {
                     ips.blocked_ip_addresses.insert(ip);
                 } else {
                     ips.blocked_ip_networks.push(ip.address);
                 }
             } else {
-                expired_blocks.push((id, ip.address));
+                expired_blocks.push((
+                    id,
+                    ip.address.clone(),
+                    Object {
+                        inner: ip.into(),
+                        revision,
+                    },
+                ));
             }
         }
 
         if !expired_blocks.is_empty() {
-            for (id, _) in &expired_blocks {
+            for (id, _, object) in &expired_blocks {
                 if let Err(err) = bp
                     .registry
-                    .write::<BlockedIp>(RegistryWrite::delete(id.id()))
+                    .write(RegistryWrite::delete_object(*id, object))
                     .await
                 {
                     trc::error!(
@@ -349,7 +368,7 @@ impl BlockedIps {
                 Security(trc::SecurityEvent::IpBlockExpired),
                 Details = expired_blocks
                     .into_iter()
-                    .map(|(_, ip)| trc::Value::from(ip.into_inner().0))
+                    .map(|(_, ip, _)| trc::Value::from(ip.into_inner().0))
                     .collect::<Vec<_>>()
             );
         }

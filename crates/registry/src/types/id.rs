@@ -7,20 +7,20 @@
 use crate::{
     jmap::{JsonPointerPatch, RegistryJsonPatch, RegistryValue},
     pickle::{Pickle, PickledStream},
-    schema::prelude::Object,
-    types::{EnumType, error::PatchError},
+    schema::prelude::ObjectType,
+    types::{EnumImpl, error::PatchError},
 };
 use std::{fmt::Display, str::FromStr};
 use types::{blob::BlobId, id::Id};
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct ObjectId {
-    object: Object,
+    object: ObjectType,
     id: Id,
 }
 
 impl ObjectId {
-    pub fn new(object: Object, id: Id) -> Self {
+    pub fn new(object: ObjectType, id: Id) -> Self {
         Self { object, id }
     }
 
@@ -30,7 +30,7 @@ impl ObjectId {
     }
 
     #[inline(always)]
-    pub fn object(&self) -> Object {
+    pub fn object(&self) -> ObjectType {
         self.object
     }
 
@@ -46,7 +46,7 @@ impl Display for ObjectId {
     }
 }
 
-impl Object {
+impl ObjectType {
     pub fn id(&self, id: Id) -> ObjectId {
         ObjectId::new(*self, id)
     }
@@ -58,19 +58,19 @@ impl Object {
 
 impl Default for ObjectId {
     fn default() -> Self {
-        ObjectId::new(Object::Account, Id::default())
+        ObjectId::new(ObjectType::Account, Id::default())
     }
 }
 
 impl Pickle for Id {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.id().to_le_bytes());
+        out.extend_from_slice(&self.id().to_be_bytes());
     }
 
     fn unpickle(data: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; std::mem::size_of::<u64>()];
         arr.copy_from_slice(data.read_bytes(8)?);
-        let id = u64::from_le_bytes(arr);
+        let id = u64::from_be_bytes(arr);
 
         Some(Id::new(id))
     }

@@ -6,7 +6,7 @@
 
 use utils::map::vec_map::VecMap;
 
-use crate::types::EnumType;
+use crate::types::EnumImpl;
 use std::collections::HashMap;
 
 pub trait Pickle: Sized {
@@ -47,61 +47,61 @@ impl<'x> PickledStream<'x> {
 
 impl Pickle for u16 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_le_bytes());
+        out.extend_from_slice(&self.to_be_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; std::mem::size_of::<u16>()];
         arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u16>())?);
-        Some(u16::from_le_bytes(arr))
+        Some(u16::from_be_bytes(arr))
     }
 }
 
 impl Pickle for u64 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_le_bytes());
+        out.extend_from_slice(&self.to_be_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; std::mem::size_of::<u64>()];
         arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u64>())?);
-        Some(u64::from_le_bytes(arr))
+        Some(u64::from_be_bytes(arr))
     }
 }
 
 impl Pickle for u32 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_le_bytes());
+        out.extend_from_slice(&self.to_be_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; std::mem::size_of::<u32>()];
         arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u32>())?);
-        Some(u32::from_le_bytes(arr))
+        Some(u32::from_be_bytes(arr))
     }
 }
 
 impl Pickle for i64 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_le_bytes());
+        out.extend_from_slice(&self.to_be_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; std::mem::size_of::<i64>()];
         arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<i64>())?);
-        Some(i64::from_le_bytes(arr))
+        Some(i64::from_be_bytes(arr))
     }
 }
 
 impl Pickle for f64 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_le_bytes());
+        out.extend_from_slice(&self.to_be_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; std::mem::size_of::<f64>()];
         arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<f64>())?);
-        Some(f64::from_le_bytes(arr))
+        Some(f64::from_be_bytes(arr))
     }
 }
 
@@ -121,27 +121,27 @@ impl Pickle for bool {
 
 impl Pickle for String {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
         out.extend_from_slice(self.as_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut len_arr = [0u8; std::mem::size_of::<u32>()];
         len_arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u32>())?);
-        let bytes = stream.read_bytes(u32::from_le_bytes(len_arr) as usize)?;
+        let bytes = stream.read_bytes(u32::from_be_bytes(len_arr) as usize)?;
         String::from_utf8(bytes.to_vec()).ok()
     }
 }
 
-impl<T: EnumType> Pickle for T {
+impl<T: EnumImpl> Pickle for T {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_id().to_le_bytes());
+        out.extend_from_slice(&self.to_id().to_be_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut id_arr = [0u8; std::mem::size_of::<u16>()];
         id_arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u16>())?);
-        Self::from_id(u16::from_le_bytes(id_arr))
+        Self::from_id(u16::from_be_bytes(id_arr))
     }
 }
 
@@ -175,7 +175,7 @@ where
     T: Pickle,
 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
         for item in self {
             item.pickle(out);
         }
@@ -184,7 +184,7 @@ where
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut len_arr = [0u8; 4];
         len_arr.copy_from_slice(stream.read_bytes(4)?);
-        let len = u32::from_le_bytes(len_arr) as usize;
+        let len = u32::from_be_bytes(len_arr) as usize;
         let mut vec = Vec::with_capacity(len);
         for _ in 0..len {
             vec.push(T::unpickle(stream)?);
@@ -200,7 +200,7 @@ where
     S: std::hash::BuildHasher + Default,
 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
         for (key, value) in self {
             key.pickle(out);
             value.pickle(out);
@@ -210,7 +210,7 @@ where
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut len_arr = [0u8; 4];
         len_arr.copy_from_slice(stream.read_bytes(4)?);
-        let len = u32::from_le_bytes(len_arr) as usize;
+        let len = u32::from_be_bytes(len_arr) as usize;
         let mut map = HashMap::with_capacity_and_hasher(len, S::default());
         for _ in 0..len {
             let key = K::unpickle(stream)?;
@@ -227,7 +227,7 @@ where
     V: Pickle,
 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
         for (key, value) in self {
             key.pickle(out);
             value.pickle(out);
@@ -237,7 +237,7 @@ where
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
         let mut len_arr = [0u8; 4];
         len_arr.copy_from_slice(stream.read_bytes(4)?);
-        let len = u32::from_le_bytes(len_arr) as usize;
+        let len = u32::from_be_bytes(len_arr) as usize;
         let mut map = VecMap::with_capacity(len);
         for _ in 0..len {
             let key = K::unpickle(stream)?;

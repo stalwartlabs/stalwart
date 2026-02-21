@@ -10,7 +10,7 @@ use jmap_proto::{
     object::{JmapRight, JmapSharedObject},
 };
 use jmap_tools::{JsonPointerIter, Key, Map, Property, Value};
-use registry::schema::prelude::Object;
+use registry::schema::prelude::ObjectType;
 use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use types::{
     acl::{Acl, AclGrant},
@@ -242,7 +242,7 @@ impl JmapAcl for Server {
 
         let principal_ids = self
             .registry()
-            .query::<RoaringBitmap>(RegistryQuery::new(Object::Account))
+            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Account))
             .await
             .unwrap_or_default();
 

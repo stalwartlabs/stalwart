@@ -11,25 +11,17 @@ pub mod query;
 pub mod write;
 
 use registry::{
-    pickle::{Pickle, PickledStream},
-    schema::prelude::{Object, Property},
-    types::{ObjectType, id::ObjectId},
+    schema::prelude::{ObjectType, Property},
+    types::{ObjectImpl, id::ObjectId},
 };
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-
-pub struct HashedObject<T> {
-    pub hash: u64,
-    pub object: T,
-}
-
-pub struct RegistryObject<T: ObjectType> {
+pub struct RegistryObject<T: ObjectImpl> {
     pub id: ObjectId,
     pub object: T,
 }
 
 pub struct RegistryQuery {
-    pub object_type: Object,
+    pub object_type: ObjectType,
     pub filters: Vec<RegistryFilter>,
     pub account_id: Option<u32>,
     pub tenant_id: Option<u32>,
@@ -56,31 +48,4 @@ pub enum RegistryFilterValue {
     U64(u64),
     U16(u16),
     Boolean(bool),
-}
-
-impl<T: ObjectType> Pickle for HashedObject<T> {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        self.object.pickle(out);
-    }
-
-    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let hash = xxhash_rust::xxh3::xxh3_64(stream.bytes());
-        T::unpickle(stream).map(|object| Self { hash, object })
-    }
-}
-
-impl<T: ObjectType> ObjectType for HashedObject<T> {
-    const FLAGS: u64 = T::FLAGS;
-
-    fn object() -> Object {
-        T::object()
-    }
-
-    fn validate(&self, errors: &mut Vec<registry::schema::prelude::ValidationError>) -> bool {
-        self.object.validate(errors)
-    }
-
-    fn index<'x>(&'x self, builder: &mut registry::schema::prelude::IndexBuilder<'x>) {
-        self.object.index(builder)
-    }
 }

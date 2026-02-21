@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
 use super::ErrorType;
 use crate::auth::authenticate::Authenticator;
 use common::{
@@ -19,11 +17,12 @@ use http_proto::{request::fetch_body, *};
 use registry::{
     schema::{
         enums::Permission,
-        prelude::{Object, Property},
+        prelude::{ObjectType, Property},
         structs::OAuthClient,
     },
     types::datetime::UTCDateTime,
 };
+use std::future::Future;
 use store::{
     ahash::AHashSet,
     rand::{Rng, distr::Alphanumeric, rng},
@@ -82,16 +81,19 @@ impl ClientRegistrationHandler for Server {
             .collect::<String>();
 
         self.registry()
-            .write(RegistryWrite::insert(&OAuthClient {
-                client_id: client_id.clone(),
-                created_at: UTCDateTime::now(),
-                description: request.client_name.clone(),
-                contacts: request.contacts.clone(),
-                member_tenant_id: tenant_id.map(|id| Id::new(id as u64)),
-                redirect_uris: request.redirect_uris.clone(),
-                logo: request.logo_uri.clone(),
-                ..Default::default()
-            }))
+            .write(RegistryWrite::insert(
+                &OAuthClient {
+                    client_id: client_id.clone(),
+                    created_at: UTCDateTime::now(),
+                    description: request.client_name.clone(),
+                    contacts: request.contacts.clone(),
+                    member_tenant_id: tenant_id.map(|id| Id::new(id as u64)),
+                    redirect_uris: request.redirect_uris.clone(),
+                    logo: request.logo_uri.clone(),
+                    ..Default::default()
+                }
+                .into(),
+            ))
             .await
             .caused_by(trc::location!())?;
 
@@ -124,7 +126,7 @@ impl ClientRegistrationHandler for Server {
         let found_registration = if let Some(client_id) = self
             .registry()
             .query::<AHashSet<u64>>(
-                RegistryQuery::new(Object::OAuthClient).equal(Property::ClientId, client_id),
+                RegistryQuery::new(ObjectType::OAuthClient).equal(Property::ClientId, client_id),
             )
             .await?
             .iter()

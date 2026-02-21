@@ -8,8 +8,8 @@ use common::ipc::{
     BroadcastEvent, CacheInvalidation, CalendarAlert, PushNotification, RegistryChange,
 };
 use registry::{
-    schema::prelude::Object,
-    types::{EnumType, id::ObjectId},
+    schema::prelude::ObjectType,
+    types::{EnumImpl, id::ObjectId},
 };
 use std::{borrow::Borrow, io::Write};
 use types::{id::Id, type_state::StateChange};
@@ -180,7 +180,7 @@ where
                     let id = self.messages.next_leb128::<u64>().ok_or(())?;
                     Ok(Some(BroadcastEvent::RegistryChange(
                         RegistryChange::Insert(ObjectId::new(
-                            Object::from_id(object_id).ok_or(())?,
+                            ObjectType::from_id(object_id).ok_or(())?,
                             Id::new(id),
                         )),
                     )))
@@ -190,7 +190,7 @@ where
                     let id = self.messages.next_leb128::<u64>().ok_or(())?;
                     Ok(Some(BroadcastEvent::RegistryChange(
                         RegistryChange::Delete(ObjectId::new(
-                            Object::from_id(object_id).ok_or(())?,
+                            ObjectType::from_id(object_id).ok_or(())?,
                             Id::new(id),
                         )),
                     )))
@@ -198,7 +198,7 @@ where
                 6 => {
                     let object_id = self.messages.next_leb128().ok_or(())?;
                     Ok(Some(BroadcastEvent::RegistryChange(
-                        RegistryChange::Reload(Object::from_id(object_id).ok_or(())?),
+                        RegistryChange::Reload(ObjectType::from_id(object_id).ok_or(())?),
                     )))
                 }
                 7 => {

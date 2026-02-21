@@ -9,7 +9,7 @@ use crate::{
     backend::{elastic::ElasticSearchStore, meili::MeiliSearchStore},
     registry::bootstrap::Bootstrap,
 };
-use registry::schema::{prelude::Object, structs};
+use registry::schema::{prelude::ObjectType, structs};
 
 #[allow(unreachable_patterns)]
 impl SearchStore {
@@ -48,7 +48,7 @@ impl SearchStore {
         match result {
             Ok(store) => Some(store),
             Err(err) => {
-                bp.build_error(Object::SearchStore.singleton(), err);
+                bp.build_error(ObjectType::SearchStore.singleton(), err);
                 None
             }
         }

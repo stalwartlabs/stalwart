@@ -14,7 +14,7 @@ use ahash::AHashSet;
 use hyper::HeaderMap;
 use registry::schema::{
     enums::{self, ExpressionConstant, MtaStage},
-    prelude::Object,
+    prelude::ObjectType,
     structs::{
         MtaExtensions, MtaHook, MtaInboundSession, MtaMilter, MtaStageAuth, MtaStageConnect,
         MtaStageData, MtaStageEhlo, MtaStageMail, MtaStageRcpt,
@@ -186,128 +186,156 @@ impl SessionConfig {
 
         SessionConfig {
             timeout: bp.compile_expr(
-                Object::MtaInboundSession.singleton(),
+                ObjectType::MtaInboundSession.singleton(),
                 &session.ctx_timeout(),
             ),
             duration: bp.compile_expr(
-                Object::MtaInboundSession.singleton(),
+                ObjectType::MtaInboundSession.singleton(),
                 &session.ctx_max_duration(),
             ),
             transfer_limit: bp.compile_expr(
-                Object::MtaInboundSession.singleton(),
+                ObjectType::MtaInboundSession.singleton(),
                 &session.ctx_transfer_limit(),
             ),
             connect: Connect {
-                hostname: bp
-                    .compile_expr(Object::MtaStageConnect.singleton(), &connect.ctx_hostname()),
-                script: bp.compile_expr(Object::MtaStageConnect.singleton(), &connect.ctx_script()),
+                hostname: bp.compile_expr(
+                    ObjectType::MtaStageConnect.singleton(),
+                    &connect.ctx_hostname(),
+                ),
+                script: bp.compile_expr(
+                    ObjectType::MtaStageConnect.singleton(),
+                    &connect.ctx_script(),
+                ),
                 greeting: bp.compile_expr(
-                    Object::MtaStageConnect.singleton(),
+                    ObjectType::MtaStageConnect.singleton(),
                     &connect.ctx_smtp_greeting(),
                 ),
             },
             ehlo: Ehlo {
-                script: bp.compile_expr(Object::MtaStageEhlo.singleton(), &ehlo.ctx_script()),
-                require: bp.compile_expr(Object::MtaStageEhlo.singleton(), &ehlo.ctx_require()),
+                script: bp.compile_expr(ObjectType::MtaStageEhlo.singleton(), &ehlo.ctx_script()),
+                require: bp.compile_expr(ObjectType::MtaStageEhlo.singleton(), &ehlo.ctx_require()),
                 reject_non_fqdn: bp.compile_expr(
-                    Object::MtaStageEhlo.singleton(),
+                    ObjectType::MtaStageEhlo.singleton(),
                     &ehlo.ctx_reject_non_fqdn(),
                 ),
             },
             auth: Auth {
                 mechanisms: bp.compile_expr(
-                    Object::MtaStageAuth.singleton(),
+                    ObjectType::MtaStageAuth.singleton(),
                     &auth.ctx_sasl_mechanisms(),
                 ),
-                require: bp.compile_expr(Object::MtaStageAuth.singleton(), &auth.ctx_require()),
+                require: bp.compile_expr(ObjectType::MtaStageAuth.singleton(), &auth.ctx_require()),
                 must_match_sender: bp.compile_expr(
-                    Object::MtaStageAuth.singleton(),
+                    ObjectType::MtaStageAuth.singleton(),
                     &auth.ctx_must_match_sender(),
                 ),
-                errors_max: bp
-                    .compile_expr(Object::MtaStageAuth.singleton(), &auth.ctx_max_failures()),
-                errors_wait: bp
-                    .compile_expr(Object::MtaStageAuth.singleton(), &auth.ctx_wait_on_fail()),
+                errors_max: bp.compile_expr(
+                    ObjectType::MtaStageAuth.singleton(),
+                    &auth.ctx_max_failures(),
+                ),
+                errors_wait: bp.compile_expr(
+                    ObjectType::MtaStageAuth.singleton(),
+                    &auth.ctx_wait_on_fail(),
+                ),
             },
             mail: Mail {
-                script: bp.compile_expr(Object::MtaStageMail.singleton(), &mail.ctx_script()),
-                rewrite: bp.compile_expr(Object::MtaStageMail.singleton(), &mail.ctx_rewrite()),
+                script: bp.compile_expr(ObjectType::MtaStageMail.singleton(), &mail.ctx_script()),
+                rewrite: bp.compile_expr(ObjectType::MtaStageMail.singleton(), &mail.ctx_rewrite()),
                 is_allowed: bp.compile_expr(
-                    Object::MtaStageMail.singleton(),
+                    ObjectType::MtaStageMail.singleton(),
                     &mail.ctx_is_sender_allowed(),
                 ),
             },
             rcpt: Rcpt {
-                script: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_script()),
-                relay: bp
-                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_allow_relaying()),
-                rewrite: bp.compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_rewrite()),
-                errors_max: bp
-                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_max_failures()),
-                errors_wait: bp
-                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_wait_on_fail()),
-                max_recipients: bp
-                    .compile_expr(Object::MtaStageRcpt.singleton(), &rcpt.ctx_max_recipients()),
+                script: bp.compile_expr(ObjectType::MtaStageRcpt.singleton(), &rcpt.ctx_script()),
+                relay: bp.compile_expr(
+                    ObjectType::MtaStageRcpt.singleton(),
+                    &rcpt.ctx_allow_relaying(),
+                ),
+                rewrite: bp.compile_expr(ObjectType::MtaStageRcpt.singleton(), &rcpt.ctx_rewrite()),
+                errors_max: bp.compile_expr(
+                    ObjectType::MtaStageRcpt.singleton(),
+                    &rcpt.ctx_max_failures(),
+                ),
+                errors_wait: bp.compile_expr(
+                    ObjectType::MtaStageRcpt.singleton(),
+                    &rcpt.ctx_wait_on_fail(),
+                ),
+                max_recipients: bp.compile_expr(
+                    ObjectType::MtaStageRcpt.singleton(),
+                    &rcpt.ctx_max_recipients(),
+                ),
             },
             data: Data {
-                script: bp.compile_expr(Object::MtaStageData.singleton(), &data.ctx_script()),
+                script: bp.compile_expr(ObjectType::MtaStageData.singleton(), &data.ctx_script()),
                 spam_filter: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_enable_spam_filter(),
                 ),
-                max_messages: bp
-                    .compile_expr(Object::MtaStageData.singleton(), &data.ctx_max_messages()),
+                max_messages: bp.compile_expr(
+                    ObjectType::MtaStageData.singleton(),
+                    &data.ctx_max_messages(),
+                ),
                 max_message_size: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_max_message_size(),
                 ),
                 max_received_headers: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_max_received_headers(),
                 ),
                 add_received: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_add_received_header(),
                 ),
                 add_received_spf: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_add_received_spf_header(),
                 ),
                 add_return_path: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_add_return_path_header(),
                 ),
                 add_auth_results: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_add_auth_results_header(),
                 ),
                 add_message_id: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_add_message_id_header(),
                 ),
                 add_date: bp.compile_expr(
-                    Object::MtaStageData.singleton(),
+                    ObjectType::MtaStageData.singleton(),
                     &data.ctx_add_date_header(),
                 ),
                 add_delivered_to: data.add_delivered_to_header,
             },
             extensions: Extensions {
                 pipelining: bp
-                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_pipelining()),
-                chunking: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_chunking()),
-                requiretls: bp
-                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_require_tls()),
-                dsn: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_dsn()),
-                vrfy: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_vrfy()),
-                expn: bp.compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_expn()),
-                no_soliciting: bp
-                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_no_soliciting()),
-                future_release: bp
-                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_future_release()),
+                    .compile_expr(ObjectType::MtaExtensions.singleton(), &ext.ctx_pipelining()),
+                chunking: bp
+                    .compile_expr(ObjectType::MtaExtensions.singleton(), &ext.ctx_chunking()),
+                requiretls: bp.compile_expr(
+                    ObjectType::MtaExtensions.singleton(),
+                    &ext.ctx_require_tls(),
+                ),
+                dsn: bp.compile_expr(ObjectType::MtaExtensions.singleton(), &ext.ctx_dsn()),
+                vrfy: bp.compile_expr(ObjectType::MtaExtensions.singleton(), &ext.ctx_vrfy()),
+                expn: bp.compile_expr(ObjectType::MtaExtensions.singleton(), &ext.ctx_expn()),
+                no_soliciting: bp.compile_expr(
+                    ObjectType::MtaExtensions.singleton(),
+                    &ext.ctx_no_soliciting(),
+                ),
+                future_release: bp.compile_expr(
+                    ObjectType::MtaExtensions.singleton(),
+                    &ext.ctx_future_release(),
+                ),
                 deliver_by: bp
-                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_deliver_by()),
-                mt_priority: bp
-                    .compile_expr(Object::MtaExtensions.singleton(), &ext.ctx_mt_priority()),
+                    .compile_expr(ObjectType::MtaExtensions.singleton(), &ext.ctx_deliver_by()),
+                mt_priority: bp.compile_expr(
+                    ObjectType::MtaExtensions.singleton(),
+                    &ext.ctx_mt_priority(),
+                ),
             },
             mta_sts_policy: Policy::try_parse(bp).await,
             milters: bp

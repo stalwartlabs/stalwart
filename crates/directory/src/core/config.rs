@@ -9,7 +9,7 @@ use crate::{
     backend::{ldap::LdapDirectory, oidc::OpenIdDirectory, sql::SqlDirectory},
 };
 use registry::schema::{
-    prelude::Object,
+    prelude::ObjectType,
     structs::{self, Authentication},
 };
 use std::{collections::HashMap, sync::Arc};
@@ -45,7 +45,7 @@ impl Directories {
                 Some(default_directory) => default_directory.clone().into(),
                 None => {
                     bp.build_error(
-                        Object::Authentication.singleton(),
+                        ObjectType::Authentication.singleton(),
                         format!("Default directory with ID {} not found", directory_id),
                     );
                     None

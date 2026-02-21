@@ -5,7 +5,7 @@
  */
 
 use crate::{BlobStore, backend::fs::FsStore, registry::bootstrap::Bootstrap};
-use registry::schema::{prelude::Object, structs};
+use registry::schema::{prelude::ObjectType, structs};
 
 #[allow(unreachable_patterns)]
 impl BlobStore {
@@ -52,7 +52,7 @@ impl BlobStore {
         match result {
             Ok(store) => Some(store),
             Err(err) => {
-                bp.build_error(Object::BlobStore.singleton(), err);
+                bp.build_error(ObjectType::BlobStore.singleton(), err);
                 None
             }
         }

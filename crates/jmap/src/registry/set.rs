@@ -9,10 +9,12 @@ use jmap_proto::{
     method::set::{SetRequest, SetResponse},
     object::registry::Registry,
 };
+use registry::schema::prelude::ObjectType;
 
 pub trait RegistrySet: Sync + Send {
     fn registry_set(
         &self,
+        object_type: ObjectType,
         request: SetRequest<'_, Registry>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<Registry>>> + Send;
@@ -21,6 +23,7 @@ pub trait RegistrySet: Sync + Send {
 impl RegistrySet for Server {
     async fn registry_set(
         &self,
+        object_type: ObjectType,
         mut request: SetRequest<'_, Registry>,
         access_token: &AccessToken,
     ) -> trc::Result<SetResponse<Registry>> {

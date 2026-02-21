@@ -13,7 +13,10 @@ pub mod search;
 pub mod write;
 
 use ::registry::{
-    schema::{enums::CompressionAlgo, prelude::Object},
+    schema::{
+        enums::CompressionAlgo,
+        prelude::{Object, ObjectType},
+    },
     types::id::ObjectId,
 };
 pub use ahash;
@@ -199,8 +202,8 @@ pub struct RegistryStore(pub(crate) Arc<RegistryStoreInner>);
 
 pub struct RegistryStoreInner {
     pub(crate) local_path: PathBuf,
-    pub(crate) local_registry: RwLock<AHashMap<ObjectId, serde_json::Value>>,
-    pub(crate) local_objects: AHashSet<Object>,
+    pub(crate) local_registry: RwLock<AHashMap<ObjectId, Object>>,
+    pub(crate) local_objects: AHashSet<ObjectType>,
     pub(crate) store: Store,
     pub(crate) node_id: u64,
     pub(crate) id_generator: SnowflakeIdGenerator,

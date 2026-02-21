@@ -5,12 +5,13 @@
  */
 
 use crate::{RegistryStore, RegistryStoreInner, Store};
+use ahash::AHashSet;
 use registry::{
     schema::{
-        prelude::Object,
+        prelude::ObjectType,
         structs::{DataStore, LocalSettings},
     },
-    types::id::ObjectId,
+    types::{EnumImpl, id::ObjectId},
 };
 use std::path::PathBuf;
 use types::id::Id;
@@ -25,30 +26,49 @@ impl RegistryStore {
         let Some(data_store) = inner
             .local_registry
             .read()
-            .get(&ObjectId::new(Object::DataStore, Id::singleton()))
+            .get(&ObjectId::new(ObjectType::DataStore, Id::singleton()))
             .cloned()
+            .map(DataStore::from)
         else {
             return Err(format!(
                 "{ERROR_MSG}: Missing \"DataStore\" object definition."
             ));
         };
-        let data_store = serde_json::from_value::<DataStore>(data_store)
-            .map_err(|err| format!("{ERROR_MSG}: Failed to parse \"DataStore\" object: {err}"))?;
+
         let Some(local_settings) = inner
             .local_registry
             .read()
-            .get(&ObjectId::new(Object::LocalSettings, Id::singleton()))
+            .get(&ObjectId::new(ObjectType::LocalSettings, Id::singleton()))
             .cloned()
+            .map(LocalSettings::from)
         else {
             return Err(format!(
                 "{ERROR_MSG}: Missing \"LocalSettings\" object definition."
             ));
         };
-        let local_settings =
-            serde_json::from_value::<LocalSettings>(local_settings).map_err(|err| {
-                format!("{ERROR_MSG}: Failed to parse \"LocalSettings\" object: {err}")
-            })?;
 
+        // Validate local objects
+        let mut local_objects =
+            AHashSet::from_iter([ObjectType::DataStore, ObjectType::LocalSettings]);
+        for object in local_settings.local_registry_object_types {
+            if let Some(object) = ObjectType::parse(&object) {
+                local_objects.insert(object);
+            } else {
+                return Err(format!(
+                    "{ERROR_MSG}: LocalSettings/localRegistryObjectImpls contains invalid object type: {object}"
+                ));
+            }
+        }
+        for object_id in inner.local_registry.read().keys() {
+            if !local_objects.contains(&object_id.object()) {
+                return Err(format!(
+                    "{ERROR_MSG}: Found object of type {:?} in local registry, but it is not listed in LocalSettings/localRegistryObjectImpls.",
+                    object_id.object().as_str()
+                ));
+            }
+        }
+
+        inner.local_objects = local_objects;
         inner.store = Store::build(data_store).await?;
         inner.node_id = local_settings.node_id;
         if inner.node_id == 0 {

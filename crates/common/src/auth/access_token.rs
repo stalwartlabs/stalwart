@@ -19,7 +19,7 @@ use registry::{
         enums::Permission,
         structs::{self, Account},
     },
-    types::EnumType,
+    types::EnumImpl,
 };
 use std::{
     hash::{Hash, Hasher},

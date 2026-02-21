@@ -20,7 +20,7 @@ use jmap_proto::{
 };
 use registry::{
     schema::structs::{Calendar, Email, SieveUserInterpreter},
-    types::EnumType,
+    types::EnumImpl,
 };
 use store::registry::bootstrap::Bootstrap;
 use types::type_state::DataType;

@@ -250,13 +250,13 @@ impl<'de> serde::Deserialize<'de> for UTCDateTime {
 
 impl Pickle for UTCDateTime {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.0.to_le_bytes());
+        out.extend_from_slice(&self.0.to_be_bytes());
     }
 
     fn unpickle(data: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; 8];
         arr.copy_from_slice(data.read_bytes(8)?);
-        Some(UTCDateTime(i64::from_le_bytes(arr)))
+        Some(UTCDateTime(i64::from_be_bytes(arr)))
     }
 }
 

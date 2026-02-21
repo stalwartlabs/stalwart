@@ -8,7 +8,7 @@ use crate::task_manager::{IndexAction, Task};
 use common::Server;
 use email::{cache::MessageCacheFetch, message::metadata::MessageMetadata};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent, contact::ContactCard};
-use registry::schema::prelude::{Object, Property};
+use registry::schema::prelude::{ObjectType, Property};
 use std::cmp::Ordering;
 use store::{
     IterateParams, SerializeInfallible, ValueKey,
@@ -280,7 +280,7 @@ impl ReindexIndexTask for Server {
         } else {
             self.registry()
                 .query(
-                    RegistryQuery::new(Object::Account)
+                    RegistryQuery::new(ObjectType::Account)
                         .equal_opt(Property::MemberTenantId, tenant_id),
                 )
                 .await

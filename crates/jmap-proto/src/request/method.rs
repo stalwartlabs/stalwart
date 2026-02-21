@@ -5,7 +5,7 @@
  */
 
 use std::{borrow::Cow, fmt::Display};
-use registry::{schema::prelude::Object, types::EnumType};
+use registry::{schema::prelude::ObjectType, types::EnumImpl};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MethodName {
@@ -36,7 +36,7 @@ pub enum MethodObject {
     FileNode,
     ParticipantIdentity,
     ShareNotification,
-    Registry(Object),
+    Registry(ObjectType),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,7 +300,7 @@ impl MethodName {
 
         ).or_else(|| {
             let (obj, fnc) = s.strip_prefix("x:")?.split_once('/')?;
-            let obj = Object::parse(obj)?;
+            let obj = ObjectType::parse(obj)?;
             let fnc = hashify::tiny_map!(fnc.as_bytes(), 
                 "get" => MethodFunction::Get,
                 "set" => MethodFunction::Set,
@@ -361,6 +361,15 @@ impl MethodFunction {
             MethodFunction::Echo => "echo",
             MethodFunction::GetAvailability => "getAvailability",
         }
+    }
+}
+
+impl MethodObject {
+    pub fn unwrap_registry(self) -> ObjectType {
+        match self {
+            MethodObject::Registry(obj) => obj,
+            _ => panic!("Not a registry method object"),
+         }
     }
 }
 

@@ -21,7 +21,7 @@ use arcstr::ArcStr;
 use registry::{
     schema::{
         enums::{Locale, StorageQuota, TenantStorageQuota},
-        prelude::{Object, Property},
+        prelude::{ObjectType, Property},
         structs::{
             Account, DkimSignature, Domain, MailingList, MaskedEmail, Permissions, PermissionsList,
             Role, SubAddressing, Tenant,
@@ -57,7 +57,7 @@ impl Server {
                 if let Some(domain_id) = self
                     .registry()
                     .query::<AHashSet<u64>>(
-                        RegistryQuery::new(Object::Domain).equal(Property::Name, domain),
+                        RegistryQuery::new(ObjectType::Domain).equal(Property::Name, domain),
                     )
                     .await?
                     .into_iter()
@@ -114,7 +114,7 @@ impl Server {
                         flags |= DOMAIN_FLAG_SUB_ADDRESSING;
                         let mut bp = Bootstrap::new(self.registry().clone());
                         let custom = bp.compile_expr(
-                            ObjectId::new(Object::Domain, domain_id.into()),
+                            ObjectId::new(ObjectType::Domain, domain_id.into()),
                             &custom.ctx_custom_rule(),
                         );
                         if bp.errors.is_empty() {
@@ -177,8 +177,8 @@ impl Server {
                 {
                     let item_id = object.id().document_id();
                     let result = match object.object() {
-                        Object::Account => EmailCache::Account(item_id),
-                        Object::MailingList => EmailCache::MailingList(item_id),
+                        ObjectType::Account => EmailCache::Account(item_id),
+                        ObjectType::MailingList => EmailCache::MailingList(item_id),
                         _ => {
                             return Err(trc::AuthEvent::Error
                                 .into_err()
@@ -595,7 +595,7 @@ impl Server {
                 let ids = self
                     .registry()
                     .query::<AHashSet<u64>>(
-                        RegistryQuery::new(Object::DkimSignature)
+                        RegistryQuery::new(ObjectType::DkimSignature)
                             .equal(Property::DomainId, domain.id),
                     )
                     .await?;

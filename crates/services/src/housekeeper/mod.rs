@@ -667,7 +667,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                             #[cfg(feature = "enterprise")]
                             ActionClass::RenewLicense => {
                                 use common::ipc::RegistryChange;
-                                use registry::schema::prelude::Object;
+                                use registry::schema::prelude::ObjectType;
 
                                 trc::event!(
                                     Housekeeper(trc::HousekeeperEvent::Run),
@@ -675,13 +675,11 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                 );
 
                                 match server
-                                    .reload_registry(RegistryChange::Reload(Object::Enterprise))
+                                    .reload_registry(RegistryChange::Reload(ObjectType::Enterprise))
                                     .await
                                 {
                                     Ok(result) => {
                                         if let Some(new_core) = result.new_core {
-                                            use registry::schema::prelude::Object;
-
                                             if let Some(enterprise) = &new_core.enterprise {
                                                 let renew_in =
                                                     if enterprise.license.is_near_expiration() {
@@ -709,7 +707,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
 
                                             server
                                                 .cluster_broadcast(BroadcastEvent::reload(
-                                                    Object::Enterprise,
+                                                    ObjectType::Enterprise,
                                                 ))
                                                 .await;
                                         }

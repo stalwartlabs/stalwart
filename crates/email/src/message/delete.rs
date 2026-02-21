@@ -7,7 +7,7 @@
 use super::metadata::MessageData;
 use common::{KV_LOCK_PURGE_ACCOUNT, Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
-use registry::schema::prelude::Object;
+use registry::schema::prelude::ObjectType;
 use std::future::Future;
 use store::ahash::AHashSet;
 use store::registry::RegistryQuery;
@@ -113,7 +113,7 @@ impl EmailDeletion for Server {
     async fn purge_accounts(&self, use_roles: bool) {
         match self
             .registry()
-            .query::<AHashSet<u64>>(RegistryQuery::new(Object::Account))
+            .query::<AHashSet<u64>>(RegistryQuery::new(ObjectType::Account))
             .await
         {
             Ok(account_ids) => {

@@ -11,81 +11,61 @@ use crate::{
 };
 use registry::{
     pickle::PickledStream,
-    types::{EnumType, ObjectType, id::ObjectId},
+    schema::prelude::Object,
+    types::{EnumImpl, ObjectImpl, id::ObjectId},
 };
 use trc::AddContext;
 use types::id::Id;
 use utils::codec::leb128::Leb128Reader;
 
 impl RegistryStore {
-    pub async fn object<T: ObjectType>(&self, id: Id) -> trc::Result<Option<T>> {
-        let item_id = id.id();
-        let object = T::object();
-
-        if self.0.local_objects.contains(&object) {
-            let Some(item) = self
-                .0
-                .local_registry
-                .read()
-                .get(&ObjectId::new(object, id))
-                .cloned()
-            else {
-                return Ok(None);
-            };
-            serde_json::from_value::<T>(item).map(Some).map_err(|err| {
-                trc::EventType::Registry(trc::RegistryEvent::LocalParseError)
-                    .into_err()
-                    .caused_by(trc::location!())
-                    .id(item_id)
-                    .details(object.as_str())
-                    .reason(err)
-            })
+    pub async fn get(&self, object_id: ObjectId) -> trc::Result<Option<Object>> {
+        if self.0.local_objects.contains(&object_id.object()) {
+            Ok(self.0.local_registry.read().get(&object_id).cloned())
         } else {
-            let Some(bytes) = self
-                .0
+            self.0
                 .store
-                .get_value::<PickledBytes>(ValueKey::from(ValueClass::Registry(
-                    RegistryClass::Item {
-                        object_id: object.to_id(),
-                        item_id,
-                    },
-                )))
-                .await?
-            else {
-                return Ok(None);
-            };
-            T::unpickle(&mut PickledStream::new(&bytes.0))
-                .ok_or_else(|| {
-                    trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                        .into_err()
-                        .caused_by(trc::location!())
-                        .id(item_id)
-                        .details(object.as_str())
-                        .ctx(trc::Key::Value, bytes.0)
+                .get_value::<Object>(ValueKey::from(ValueClass::Registry(RegistryClass::Item {
+                    object_id: object_id.object().to_id(),
+                    item_id: object_id.id().id(),
+                })))
+                .await
+                .and_then(|v| {
+                    if v.as_ref()
+                        .is_none_or(|v| v.object_type() == object_id.object())
+                    {
+                        Ok(v)
+                    } else {
+                        Err(
+                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                                .into_err()
+                                .caused_by(trc::location!())
+                                .id(object_id.id().id())
+                                .details(object_id.object().as_str())
+                                .reason("Object type mismatch"),
+                        )
+                    }
                 })
-                .map(Some)
         }
     }
 
-    pub async fn list<T: ObjectType>(&self) -> trc::Result<Vec<RegistryObject<T>>> {
-        let object = T::object();
+    pub async fn object<T: ObjectImpl + From<Object>>(&self, id: Id) -> trc::Result<Option<T>> {
+        self.get(ObjectId::new(T::OBJECT, id))
+            .await
+            .map(|v| v.map(T::from))
+    }
+
+    pub async fn list<T: ObjectImpl + From<Object>>(&self) -> trc::Result<Vec<RegistryObject<T>>> {
+        let object = T::OBJECT;
 
         if self.0.local_objects.contains(&object) {
             let mut results = Vec::new();
 
             for (id, item) in self.0.local_registry.read().iter() {
                 if id.object() == object {
-                    let item = serde_json::from_value::<T>(item.clone()).map_err(|err| {
-                        trc::EventType::Registry(trc::RegistryEvent::LocalParseError)
-                            .into_err()
-                            .caused_by(trc::location!())
-                            .id(id.id().id())
-                            .details(object.as_str())
-                            .reason(err)
-                    })?;
                     results.push(RegistryObject {
                         id: *id,
-                        object: item,
+                        object: T::from(item.clone()),
                     });
                 }
             }
@@ -125,15 +105,17 @@ impl RegistryStore {
                                     .details(object.as_str())
                                     .ctx(trc::Key::Key, key)
                             })?;
-                        let item =
-                            T::unpickle(&mut PickledStream::new(value)).ok_or_else(|| {
-                                trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                    .into_err()
-                                    .caused_by(trc::location!())
-                                    .id(id)
-                                    .details(object.as_str())
-                                    .ctx(trc::Key::Value, value)
-                            })?;
+                        let item = T::unpickle(&mut PickledStream::new(
+                            value.get(U16_LEN..).unwrap_or_default(),
+                        ))
+                        .ok_or_else(|| {
+                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                                .into_err()
+                                .caused_by(trc::location!())
+                                .id(id)
+                                .details(object.as_str())
+                                .ctx(trc::Key::Value, value)
+                        })?;
                         results.push(RegistryObject {
                             id: ObjectId::new(object, Id::new(id)),
                             object: item,
@@ -150,10 +132,13 @@ impl RegistryStore {
     }
 }
 
-struct PickledBytes(Vec<u8>);
-
-impl Deserialize for PickledBytes {
+impl Deserialize for Object {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
-        Ok(Self(bytes.to_vec()))
+        Object::unpickle(&mut PickledStream::new(bytes)).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
     }
 }

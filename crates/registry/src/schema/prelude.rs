@@ -11,8 +11,8 @@ pub use crate::pickle::Pickle;
 pub use crate::schema::enums::*;
 pub use crate::schema::properties::*;
 pub use crate::schema::structs::*;
-pub use crate::types::EnumType;
-pub use crate::types::ObjectType;
+pub use crate::types::EnumImpl;
+pub use crate::types::ObjectImpl;
 pub use crate::types::datetime::UTCDateTime;
 pub use crate::types::duration::Duration;
 pub use crate::types::error::*;
@@ -25,6 +25,18 @@ pub use serde::{Deserialize, Serialize};
 pub use std::str::FromStr;
 pub use types::id::Id;
 pub use utils::map::vec_map::VecMap;
+
+#[derive(Debug, Clone)]
+pub struct Object {
+    pub inner: ObjectInner,
+    pub revision: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HashedObject<T: ObjectImpl> {
+    pub object: T,
+    pub revision: u32,
+}
 
 #[derive(Debug)]
 pub struct ExpressionContext<'x> {

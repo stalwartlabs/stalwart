@@ -11,11 +11,11 @@ use crate::{
 use ahash::AHashSet;
 use registry::{
     schema::{
-        prelude::{Object, Property},
+        prelude::{Object, ObjectType, Property},
         structs::Node,
     },
     types::{
-        EnumType, ObjectType,
+        EnumImpl, ObjectImpl,
         error::{Error, ValidationError, Warning},
         id::ObjectId,
     },
@@ -56,7 +56,7 @@ impl Bootstrap {
         let ids = match self
             .registry
             .query::<AHashSet<u64>>(
-                RegistryQuery::new(Object::Node).equal(Property::NodeId, self.node_id()),
+                RegistryQuery::new(ObjectType::Node).equal(Property::NodeId, self.node_id()),
             )
             .await
         {
@@ -77,7 +77,10 @@ impl Bootstrap {
             self.node = node;
         } else {
             self.warnings.push(Warning {
-                object_id: ObjectId::new(Object::Node, id.map(Id::new).unwrap_or(Id::singleton())),
+                object_id: ObjectId::new(
+                    ObjectType::Node,
+                    id.map(Id::new).unwrap_or(Id::singleton()),
+                ),
                 property: Some(Property::NodeId),
                 message: format!(
                     "No node configuration found for nodeId {}, using defaults.",
@@ -88,8 +91,8 @@ impl Bootstrap {
         }
     }
 
-    pub async fn setting<T: ObjectType>(&mut self) -> trc::Result<T> {
-        let object_id = T::object().singleton();
+    pub async fn setting<T: ObjectImpl + From<Object>>(&mut self) -> trc::Result<T> {
+        let object_id = T::OBJECT.singleton();
 
         if let Some(setting) = self.registry.object::<T>(object_id.id()).await? {
             let mut errors = Vec::new();
@@ -102,13 +105,13 @@ impl Bootstrap {
         Ok(T::default())
     }
 
-    pub async fn setting_infallible<T: ObjectType>(&mut self) -> T {
+    pub async fn setting_infallible<T: ObjectImpl + From<Object>>(&mut self) -> T {
         match self.setting::<T>().await {
             Ok(setting) => setting,
             Err(err) => {
                 if !self.has_fatal_errors {
                     self.errors.push(Error::Internal {
-                        object_id: Some(T::object().singleton()),
+                        object_id: Some(T::OBJECT.singleton()),
                         error: err,
                     });
                     self.has_fatal_errors = true;
@@ -118,7 +121,7 @@ impl Bootstrap {
         }
     }
 
-    pub async fn get_infallible<T: ObjectType>(&mut self, id: Id) -> Option<T> {
+    pub async fn get_infallible<T: ObjectImpl + From<Object>>(&mut self, id: Id) -> Option<T> {
         match self.registry.object::<T>(id).await {
             Ok(Some(setting)) => {
                 let mut errors = Vec::new();
@@ -126,7 +129,7 @@ impl Bootstrap {
                     Some(setting)
                 } else {
                     self.errors.push(Error::Validation {
-                        object_id: ObjectId::new(T::object(), id),
+                        object_id: ObjectId::new(T::OBJECT, id),
                         errors,
                     });
                     None
@@ -134,14 +137,14 @@ impl Bootstrap {
             }
             Ok(None) => {
                 self.errors.push(Error::NotFound {
-                    object_id: ObjectId::new(T::object(), id),
+                    object_id: ObjectId::new(T::OBJECT, id),
                 });
                 None
             }
             Err(err) => {
                 if !self.has_fatal_errors {
                     self.errors.push(Error::Internal {
-                        object_id: Some(ObjectId::new(T::object(), id)),
+                        object_id: Some(ObjectId::new(T::OBJECT, id)),
                         error: err,
                     });
                     self.has_fatal_errors = true;
@@ -151,7 +154,9 @@ impl Bootstrap {
         }
     }
 
-    pub async fn list_infallible<T: ObjectType>(&mut self) -> Vec<RegistryObject<T>> {
+    pub async fn list_infallible<T: ObjectImpl + From<Object>>(
+        &mut self,
+    ) -> Vec<RegistryObject<T>> {
         match self.registry.list::<T>().await {
             Ok(objects) => objects
                 .into_iter()
@@ -195,7 +200,7 @@ impl Bootstrap {
         });
     }
 
-    pub fn validate(&mut self, id: ObjectId, object: &impl ObjectType) -> bool {
+    pub fn validate(&mut self, id: ObjectId, object: &impl ObjectImpl) -> bool {
         let mut errors = Vec::new();
         if object.validate(&mut errors) {
             true

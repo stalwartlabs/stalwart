@@ -37,26 +37,26 @@ impl Core {
         let enterprise = {
             let enterprise = crate::enterprise::Enterprise::parse(bp).await;
             if enterprise.is_none() {
-                use registry::schema::prelude::Object;
+                use registry::schema::prelude::ObjectType;
                 use store::Store;
 
                 if storage.data.is_enterprise() {
                     bp.build_error(
-                        Object::DataStore.singleton(),
+                        ObjectType::DataStore.singleton(),
                         "Disabling enterprise-only data store.",
                     );
                     storage.data = storage.data.downgrade_store();
                 }
                 if storage.blob.is_enterprise() {
                     bp.build_error(
-                        Object::BlobStore.singleton(),
+                        ObjectType::BlobStore.singleton(),
                         "Disabling enterprise-only blob store.",
                     );
                     storage.blob = storage.blob.downgrade_store();
                 }
                 if storage.memory.is_enterprise() {
                     bp.build_error(
-                        Object::InMemoryStore.singleton(),
+                        ObjectType::InMemoryStore.singleton(),
                         "Disabling enterprise-only in-memory store.",
                     );
                     storage.memory = storage.memory.downgrade_store();

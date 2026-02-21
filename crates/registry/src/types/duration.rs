@@ -125,14 +125,14 @@ impl FromStr for Duration {
 
 impl Pickle for Duration {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.0.as_millis() as u64).to_le_bytes());
+        out.extend_from_slice(&(self.0.as_millis() as u64).to_be_bytes());
     }
 
     fn unpickle(data: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; 8];
         arr.copy_from_slice(data.read_bytes(8)?);
         Some(Duration(std::time::Duration::from_millis(
-            u64::from_le_bytes(arr),
+            u64::from_be_bytes(arr),
         )))
     }
 }

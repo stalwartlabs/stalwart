@@ -210,12 +210,12 @@ impl Pickle for IpAddrOrMask {
             IpAddrOrMask::V4 { addr, mask } => {
                 out.push(4);
                 out.extend_from_slice(&addr.octets());
-                out.extend_from_slice(&mask.to_le_bytes());
+                out.extend_from_slice(&mask.to_be_bytes());
             }
             IpAddrOrMask::V6 { addr, mask } => {
                 out.push(6);
                 out.extend_from_slice(&addr.octets());
-                out.extend_from_slice(&mask.to_le_bytes());
+                out.extend_from_slice(&mask.to_be_bytes());
             }
         }
     }
@@ -229,7 +229,7 @@ impl Pickle for IpAddrOrMask {
                 mask_arr.copy_from_slice(data.read_bytes(4)?);
                 Some(IpAddrOrMask::V4 {
                     addr: Ipv4Addr::from(addr_arr),
-                    mask: u32::from_le_bytes(mask_arr),
+                    mask: u32::from_be_bytes(mask_arr),
                 })
             }
             6 => {
@@ -239,7 +239,7 @@ impl Pickle for IpAddrOrMask {
                 mask_arr.copy_from_slice(data.read_bytes(16)?);
                 Some(IpAddrOrMask::V6 {
                     addr: Ipv6Addr::from(addr_arr),
-                    mask: u128::from_le_bytes(mask_arr),
+                    mask: u128::from_be_bytes(mask_arr),
                 })
             }
             _ => None,

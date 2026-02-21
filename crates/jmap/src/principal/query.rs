@@ -14,9 +14,9 @@ use jmap_proto::{
 use registry::{
     schema::{
         enums::AccountType,
-        prelude::{Object, Permission, Property},
+        prelude::{ObjectType, Permission, Property},
     },
-    types::EnumType,
+    types::EnumImpl,
 };
 use std::future::Future;
 use store::{
@@ -52,7 +52,7 @@ impl PrincipalQuery for Server {
         let principal_ids = self
             .registry()
             .query::<RoaringBitmap>(
-                RegistryQuery::new(Object::Account).with_tenant(access_token.tenant_id()),
+                RegistryQuery::new(ObjectType::Account).with_tenant(access_token.tenant_id()),
             )
             .await
             .caused_by(trc::location!())?;
@@ -86,7 +86,7 @@ impl PrincipalQuery for Server {
                         filters.push(SearchFilter::is_in_set(
                             self.registry()
                                 .query::<RoaringBitmap>(
-                                    RegistryQuery::new(Object::Account)
+                                    RegistryQuery::new(ObjectType::Account)
                                         .with_tenant(access_token.tenant_id())
                                         .text(text),
                                 )
@@ -107,7 +107,7 @@ impl PrincipalQuery for Server {
                         filters.push(SearchFilter::is_in_set(
                             self.registry()
                                 .query::<RoaringBitmap>(
-                                    RegistryQuery::new(Object::Account)
+                                    RegistryQuery::new(ObjectType::Account)
                                         .equal(Property::Type, typ.to_id())
                                         .with_tenant(access_token.tenant_id()),
                                 )

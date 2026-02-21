@@ -15,7 +15,7 @@ use mail_auth::{
     mta_sts::TlsRpt,
     report::{Record, tlsrpt::FailureDetails},
 };
-use registry::{schema::prelude::Object, types::id::ObjectId};
+use registry::{schema::prelude::ObjectType, types::id::ObjectId};
 use std::{
     sync::{
         Arc,
@@ -106,7 +106,7 @@ pub enum BroadcastEvent {
 pub enum RegistryChange {
     Insert(ObjectId),
     Delete(ObjectId),
-    Reload(Object),
+    Reload(ObjectType),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -209,7 +209,7 @@ impl TrainTaskController {
 }
 
 impl BroadcastEvent {
-    pub fn reload(object: Object) -> Self {
+    pub fn reload(object: ObjectType) -> Self {
         BroadcastEvent::RegistryChange(RegistryChange::Reload(object))
     }
 }

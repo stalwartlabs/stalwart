@@ -15,7 +15,7 @@ use compact_str::{CompactString, ToCompactString, format_compact};
 use hyper::StatusCode;
 use registry::{
     schema::prelude::Property,
-    types::{EnumType, id::ObjectId},
+    types::{EnumImpl, id::ObjectId},
 };
 use std::{cmp::Ordering, fmt::Display};
 use trc::{Collector, EvalEvent};

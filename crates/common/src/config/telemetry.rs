@@ -20,7 +20,7 @@ use opentelemetry_sdk::{
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use registry::schema::{
     enums::{EventPolicy, LogRotateFrequency},
-    prelude::Object,
+    prelude::{Object, ObjectType},
     structs::{self, EventTracingLevel, MetricsPrometheus, Tracer, WebHook},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -564,7 +564,7 @@ impl Metrics {
                             .collect::<HashMap<String, String>>(),
                         Err(err) => {
                             bp.build_error(
-                                Object::Metrics.singleton(),
+                                ObjectType::Metrics.singleton(),
                                 format!("Failed to build OpenTelemetry HTTP headers: {err}"),
                             );
                             Default::default()
@@ -589,7 +589,7 @@ impl Metrics {
                         })),
                         Err(err) => {
                             bp.build_error(
-                                Object::Metrics.singleton(),
+                                ObjectType::Metrics.singleton(),
                                 format!("Failed to build OpenTelemetry metrics exporter: {err}"),
                             );
                             None
@@ -615,7 +615,7 @@ impl Metrics {
                         })),
                         Err(err) => {
                             bp.build_error(
-                                Object::Metrics.singleton(),
+                                ObjectType::Metrics.singleton(),
                                 format!("Failed to build OpenTelemetry metrics exporter: {err}"),
                             );
                             None

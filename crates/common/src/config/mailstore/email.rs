@@ -12,13 +12,13 @@ use registry::{
             CompressionAlgo, SearchCalendarField, SearchContactField, SearchEmailField,
             StorageQuota,
         },
-        prelude::Object,
+        prelude::ObjectType,
         structs::{
             AddressBook, Authentication, Calendar, DataRetention, Domain, Email, Jmap, Search,
             SieveUserInterpreter,
         },
     },
-    types::EnumType,
+    types::EnumImpl,
 };
 use std::time::Duration;
 use store::{
@@ -94,7 +94,7 @@ impl EmailConfig {
             default_domain.name
         } else {
             bp.build_error(
-                Object::Authentication.singleton(),
+                ObjectType::Authentication.singleton(),
                 format!(
                     "Default domain with ID {} not found",
                     auth.default_domain_id

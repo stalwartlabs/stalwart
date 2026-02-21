@@ -11,7 +11,7 @@ use crate::expr::{
 };
 use registry::schema::{
     enums::ExpressionConstant,
-    prelude::Object,
+    prelude::ObjectType,
     structs::{
         DataRetention, DkimReportSettings, DmarcReportSettings, ReportSettings, SpfReportSettings,
         TlsReportSettings,
@@ -85,7 +85,7 @@ impl ReportConfig {
 
         ReportConfig {
             submitter: bp.compile_expr(
-                Object::ReportSettings.singleton(),
+                ObjectType::ReportSettings.singleton(),
                 &report.ctx_outbound_report_submitter(),
             ),
             analysis: ReportAnalysis {
@@ -99,114 +99,114 @@ impl ReportConfig {
             },
             dkim: Report {
                 name: bp.compile_expr(
-                    Object::DkimReportSettings.singleton(),
+                    ObjectType::DkimReportSettings.singleton(),
                     &dkim.ctx_from_name(),
                 ),
                 address: bp.compile_expr(
-                    Object::DkimReportSettings.singleton(),
+                    ObjectType::DkimReportSettings.singleton(),
                     &dkim.ctx_from_address(),
                 ),
                 subject: bp
-                    .compile_expr(Object::DkimReportSettings.singleton(), &dkim.ctx_subject()),
+                    .compile_expr(ObjectType::DkimReportSettings.singleton(), &dkim.ctx_subject()),
                 sign: bp.compile_expr(
-                    Object::DkimReportSettings.singleton(),
+                    ObjectType::DkimReportSettings.singleton(),
                     &dkim.ctx_dkim_sign_domain(),
                 ),
                 send: bp.compile_expr(
-                    Object::DkimReportSettings.singleton(),
+                    ObjectType::DkimReportSettings.singleton(),
                     &dkim.ctx_send_frequency(),
                 ),
             },
             spf: Report {
-                name: bp.compile_expr(Object::SpfReportSettings.singleton(), &spf.ctx_from_name()),
+                name: bp.compile_expr(ObjectType::SpfReportSettings.singleton(), &spf.ctx_from_name()),
                 address: bp.compile_expr(
-                    Object::SpfReportSettings.singleton(),
+                    ObjectType::SpfReportSettings.singleton(),
                     &spf.ctx_from_address(),
                 ),
-                subject: bp.compile_expr(Object::SpfReportSettings.singleton(), &spf.ctx_subject()),
+                subject: bp.compile_expr(ObjectType::SpfReportSettings.singleton(), &spf.ctx_subject()),
                 sign: bp.compile_expr(
-                    Object::SpfReportSettings.singleton(),
+                    ObjectType::SpfReportSettings.singleton(),
                     &spf.ctx_dkim_sign_domain(),
                 ),
                 send: bp.compile_expr(
-                    Object::SpfReportSettings.singleton(),
+                    ObjectType::SpfReportSettings.singleton(),
                     &spf.ctx_send_frequency(),
                 ),
             },
             dmarc: Report {
                 name: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_failure_from_name(),
                 ),
                 address: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_failure_from_address(),
                 ),
                 subject: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_failure_subject(),
                 ),
                 sign: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_failure_dkim_sign_domain(),
                 ),
                 send: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_failure_send_frequency(),
                 ),
             },
             dmarc_aggregate: AggregateReport {
                 name: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_aggregate_from_name(),
                 ),
                 address: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_aggregate_from_address(),
                 ),
                 org_name: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_aggregate_org_name(),
                 ),
                 contact_info: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_aggregate_contact_info(),
                 ),
                 send: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_aggregate_send_frequency(),
                 ),
                 sign: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_aggregate_dkim_sign_domain(),
                 ),
                 max_size: bp.compile_expr(
-                    Object::DmarcReportSettings.singleton(),
+                    ObjectType::DmarcReportSettings.singleton(),
                     &dmarc.ctx_aggregate_max_report_size(),
                 ),
             },
             tls: AggregateReport {
-                name: bp.compile_expr(Object::TlsReportSettings.singleton(), &tls.ctx_from_name()),
+                name: bp.compile_expr(ObjectType::TlsReportSettings.singleton(), &tls.ctx_from_name()),
                 address: bp.compile_expr(
-                    Object::TlsReportSettings.singleton(),
+                    ObjectType::TlsReportSettings.singleton(),
                     &tls.ctx_from_address(),
                 ),
                 org_name: bp
-                    .compile_expr(Object::TlsReportSettings.singleton(), &tls.ctx_org_name()),
+                    .compile_expr(ObjectType::TlsReportSettings.singleton(), &tls.ctx_org_name()),
                 contact_info: bp.compile_expr(
-                    Object::TlsReportSettings.singleton(),
+                    ObjectType::TlsReportSettings.singleton(),
                     &tls.ctx_contact_info(),
                 ),
                 send: bp.compile_expr(
-                    Object::TlsReportSettings.singleton(),
+                    ObjectType::TlsReportSettings.singleton(),
                     &tls.ctx_send_frequency(),
                 ),
                 sign: bp.compile_expr(
-                    Object::TlsReportSettings.singleton(),
+                    ObjectType::TlsReportSettings.singleton(),
                     &tls.ctx_dkim_sign_domain(),
                 ),
                 max_size: bp.compile_expr(
-                    Object::TlsReportSettings.singleton(),
+                    ObjectType::TlsReportSettings.singleton(),
                     &tls.ctx_max_report_size(),
                 ),
             },

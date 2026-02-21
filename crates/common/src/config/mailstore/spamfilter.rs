@@ -14,7 +14,7 @@ use mail_auth::common::resolver::ToReverseName;
 use nlp::classifier::model::{CcfhClassifier, FhClassifier};
 use registry::schema::{
     enums::{ExpressionVariable, ModelSize},
-    prelude::Object,
+    prelude::ObjectType,
     structs::{
         self, SpamDnsblServer, SpamDnsblSettings, SpamFileExtension, SpamPyzor, SpamRule,
         SpamSettings, SpamTag,
@@ -421,14 +421,14 @@ impl PyzorConfig {
             Ok(Some(address)) => address,
             Ok(None) => {
                 bp.build_error(
-                    Object::SpamPyzor.singleton(),
+                    ObjectType::SpamPyzor.singleton(),
                     "Invalid address: No addresses found.",
                 );
                 return None;
             }
             Err(err) => {
                 bp.build_error(
-                    Object::SpamPyzor.singleton(),
+                    ObjectType::SpamPyzor.singleton(),
                     format!("Invalid address: {}", err),
                 );
                 return None;

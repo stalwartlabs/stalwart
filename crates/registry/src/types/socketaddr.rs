@@ -75,14 +75,14 @@ impl AsRef<std::net::SocketAddr> for SocketAddr {
 impl Pickle for SocketAddr {
     fn pickle(&self, out: &mut Vec<u8>) {
         self.0.ip().pickle(out);
-        out.extend_from_slice(&self.0.port().to_le_bytes());
+        out.extend_from_slice(&self.0.port().to_be_bytes());
     }
 
     fn unpickle(data: &mut PickledStream<'_>) -> Option<Self> {
         let ip = std::net::IpAddr::unpickle(data)?;
         let mut port_bytes = [0u8; 2];
         port_bytes.copy_from_slice(data.read_bytes(2)?);
-        let port = u16::from_le_bytes(port_bytes);
+        let port = u16::from_be_bytes(port_bytes);
         Some(SocketAddr(std::net::SocketAddr::new(ip, port)))
     }
 }

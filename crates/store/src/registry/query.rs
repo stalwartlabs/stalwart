@@ -14,8 +14,8 @@ use crate::{
 };
 use ahash::AHashSet;
 use registry::{
-    schema::prelude::{OBJ_FILTER_ACCOUNT, OBJ_FILTER_TENANT, OBJ_SINGLETON, Object, Property},
-    types::EnumType,
+    schema::prelude::{OBJ_FILTER_ACCOUNT, OBJ_FILTER_TENANT, OBJ_SINGLETON, ObjectType, Property},
+    types::EnumImpl,
 };
 use roaring::RoaringBitmap;
 use std::{borrow::Cow, ops::BitAndAssign};
@@ -197,7 +197,7 @@ impl RegistryQueryResults for RoaringBitmap {
 }
 
 impl RegistryQuery {
-    pub fn new(object_type: Object) -> Self {
+    pub fn new(object_type: ObjectType) -> Self {
         Self {
             object_type,
             filters: Vec::new(),
@@ -364,7 +364,7 @@ impl From<u16> for RegistryFilterValue {
     }
 }
 
-async fn all_ids<T: RegistryQueryResults>(store: &Store, object: Object) -> trc::Result<T> {
+async fn all_ids<T: RegistryQueryResults>(store: &Store, object: ObjectType) -> trc::Result<T> {
     let mut bm = T::default();
     let object_id = object.to_id();
     store
@@ -394,7 +394,7 @@ async fn all_ids<T: RegistryQueryResults>(store: &Store, object: Object) -> trc:
 
 async fn range_to_set<T: RegistryQueryResults>(
     store: &Store,
-    object: Object,
+    object: ObjectType,
     index_id: u16,
     match_value: &[u8],
     op: RegistryFilterOp,

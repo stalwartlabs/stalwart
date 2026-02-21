@@ -17,7 +17,7 @@ use mail_auth::IpLookupStrategy;
 use mail_send::Credentials;
 use registry::schema::{
     enums::{self, ExpressionConstant, ExpressionVariable, MtaRequiredOrOptional},
-    prelude::Object,
+    prelude::ObjectType,
     structs::{
         DsnReportSettings, MtaConnectionStrategy, MtaDeliveryExpiration, MtaDeliverySchedule,
         MtaInboundThrottle, MtaOutboundStrategy, MtaOutboundThrottle, MtaQueueQuota, MtaRoute,
@@ -201,21 +201,27 @@ impl QueueConfig {
         let dsn = bp.setting_infallible::<DsnReportSettings>().await;
 
         let mut queue = QueueConfig {
-            route: bp.compile_expr(Object::MtaOutboundStrategy.singleton(), &st.ctx_route()),
-            queue: bp.compile_expr(Object::MtaOutboundStrategy.singleton(), &st.ctx_schedule()),
+            route: bp.compile_expr(ObjectType::MtaOutboundStrategy.singleton(), &st.ctx_route()),
+            queue: bp.compile_expr(
+                ObjectType::MtaOutboundStrategy.singleton(),
+                &st.ctx_schedule(),
+            ),
             connection: bp.compile_expr(
-                Object::MtaOutboundStrategy.singleton(),
+                ObjectType::MtaOutboundStrategy.singleton(),
                 &st.ctx_connection(),
             ),
-            tls: bp.compile_expr(Object::MtaOutboundStrategy.singleton(), &st.ctx_tls()),
+            tls: bp.compile_expr(ObjectType::MtaOutboundStrategy.singleton(), &st.ctx_tls()),
             dsn: Dsn {
-                name: bp.compile_expr(Object::DsnReportSettings.singleton(), &dsn.ctx_from_name()),
+                name: bp.compile_expr(
+                    ObjectType::DsnReportSettings.singleton(),
+                    &dsn.ctx_from_name(),
+                ),
                 address: bp.compile_expr(
-                    Object::DsnReportSettings.singleton(),
+                    ObjectType::DsnReportSettings.singleton(),
                     &dsn.ctx_from_address(),
                 ),
                 sign: bp.compile_expr(
-                    Object::DsnReportSettings.singleton(),
+                    ObjectType::DsnReportSettings.singleton(),
                     &dsn.ctx_dkim_sign_domain(),
                 ),
             },

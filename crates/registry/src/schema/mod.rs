@@ -5,11 +5,15 @@
  */
 
 use crate::{
+    pickle::Pickle,
     schema::{
         enums::{TracingLevel, TracingLevelOpt},
-        prelude::{Account, Duration, GroupAccount, HttpAuth, NodeRange, Property, UserAccount},
+        prelude::{
+            Account, Duration, GroupAccount, HashedObject, HttpAuth, NodeRange, Object,
+            ObjectInner, ObjectType, Property, UserAccount,
+        },
     },
-    types::EnumType,
+    types::{EnumImpl, ObjectImpl},
 };
 use std::{cmp::Ordering, fmt::Display};
 use trc::TOTAL_EVENT_COUNT;
@@ -174,7 +178,7 @@ impl From<TracingLevel> for trc::Level {
     }
 }
 
-impl EnumType for trc::EventType {
+impl EnumImpl for trc::EventType {
     const COUNT: usize = TOTAL_EVENT_COUNT;
 
     fn parse(s: &str) -> Option<Self> {
@@ -194,7 +198,7 @@ impl EnumType for trc::EventType {
     }
 }
 
-impl EnumType for trc::MetricType {
+impl EnumImpl for trc::MetricType {
     const COUNT: usize = TOTAL_EVENT_COUNT;
 
     fn parse(s: &str) -> Option<Self> {
@@ -223,5 +227,64 @@ impl PartialOrd for Property {
 impl Ord for Property {
     fn cmp(&self, other: &Self) -> Ordering {
         self.to_id().cmp(&other.to_id())
+    }
+}
+
+impl<T: Into<ObjectInner>> From<T> for Object {
+    fn from(value: T) -> Self {
+        Object {
+            inner: value.into(),
+            revision: 0,
+        }
+    }
+}
+
+impl<T: ObjectImpl + From<Object>> From<Object> for HashedObject<T> {
+    fn from(value: Object) -> Self {
+        HashedObject {
+            revision: value.revision,
+            object: T::from(value),
+        }
+    }
+}
+
+impl<T: ObjectImpl> ObjectImpl for HashedObject<T> {
+    const FLAGS: u64 = T::FLAGS;
+    const OBJECT: ObjectType = T::OBJECT;
+
+    fn validate(&self, errors: &mut Vec<prelude::ValidationError>) -> bool {
+        self.object.validate(errors)
+    }
+
+    fn index<'x>(&'x self, builder: &mut prelude::IndexBuilder<'x>) {
+        self.object.index(builder)
+    }
+}
+
+impl<T: ObjectImpl> Pickle for HashedObject<T> {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        T::OBJECT.pickle(out);
+        self.object.pickle(out);
+        (xxhash_rust::xxh3::xxh3_64(out) as u32).pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let _ = u16::unpickle(stream)?;
+        Some(Self {
+            object: T::unpickle(stream)?,
+            revision: u32::unpickle(stream)?,
+        })
+    }
+}
+
+impl<'de, T: ObjectImpl> serde::Deserialize<'de> for HashedObject<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(|object| Self {
+            object,
+            revision: 0,
+        })
     }
 }

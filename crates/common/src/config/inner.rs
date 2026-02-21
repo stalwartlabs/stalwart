@@ -24,7 +24,10 @@ use arc_swap::ArcSwap;
 use mail_auth::{MX, Parameters, Txt};
 use mail_send::smtp::tls::build_tls_connector;
 use parking_lot::RwLock;
-use registry::schema::{prelude::Object, structs};
+use registry::schema::{
+    prelude::{Object, ObjectType},
+    structs,
+};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
@@ -68,7 +71,7 @@ impl Data {
             )
             .or_else(|err| {
                 bp.build_error(
-                    Object::Certificate.singleton(),
+                    ObjectType::Certificate.singleton(),
                     format!("Failed to build self-signed TLS certificate: {err}"),
                 );
                 build_self_signed_cert(vec!["localhost".to_string()])

@@ -39,7 +39,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
                 if token.has_permission(Permission::AiModelInteract) {
                     true
                 } else {
-                    use registry::types::EnumType;
+                    use registry::types::EnumImpl;
 
                     trc::event!(
                         Security(SecurityEvent::Unauthorized),

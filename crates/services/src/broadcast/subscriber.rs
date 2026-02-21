@@ -9,7 +9,7 @@ use common::{
     BuildServer, Inner,
     ipc::{BroadcastEvent, HousekeeperEvent, PushEvent, PushNotification, RegistryChange},
 };
-use registry::types::EnumType;
+use registry::types::EnumImpl;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 use trc::{ClusterEvent, ServerEvent};

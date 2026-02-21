@@ -5,7 +5,7 @@
  */
 
 use crate::Coordinator;
-use registry::schema::{prelude::Object, structs};
+use registry::schema::{prelude::ObjectType, structs};
 use store::{InMemoryStore, registry::bootstrap::Bootstrap};
 
 #[allow(unreachable_patterns)]
@@ -54,7 +54,7 @@ impl Coordinator {
         match result {
             Ok(store) => Some(store),
             Err(err) => {
-                bp.build_error(Object::Coordinator.singleton(), err);
+                bp.build_error(ObjectType::Coordinator.singleton(), err);
                 None
             }
         }

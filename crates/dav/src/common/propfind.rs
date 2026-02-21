@@ -56,7 +56,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use registry::schema::{enums::Permission, prelude::Object};
+use registry::schema::{enums::Permission, prelude::ObjectType};
 use std::sync::Arc;
 use store::{
     ValueKey,
@@ -260,7 +260,7 @@ impl PropFindRequestHandler for Server {
                     // Return all principals
                     self.registry()
                         .query::<RoaringBitmap>(
-                            RegistryQuery::new(Object::Account)
+                            RegistryQuery::new(ObjectType::Account)
                                 .with_tenant(access_token.tenant_id()),
                         )
                         .await

@@ -351,7 +351,9 @@ impl RequestHandler for Server {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
-                    self.registry_get(req, access_token).await?.into()
+                    self.registry_get(method_name.obj.unwrap_registry(), req, access_token)
+                        .await?
+                        .into()
                 }
             },
             RequestMethod::Query(req) => match req {
@@ -424,7 +426,9 @@ impl RequestHandler for Server {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
-                    self.registry_query(req, access_token).await?.into()
+                    self.registry_query(method_name.obj.unwrap_registry(), req, access_token)
+                        .await?
+                        .into()
                 }
             },
             RequestMethod::Set(req) => match req {
@@ -532,7 +536,9 @@ impl RequestHandler for Server {
                     set_account_id_if_missing(&mut req.account_id, access_token);
                     access_token.assert_is_member(req.account_id)?;
 
-                    self.registry_set(req, access_token).await?.into()
+                    self.registry_set(method_name.obj.unwrap_registry(), req, access_token)
+                        .await?
+                        .into()
                 }
             },
             RequestMethod::Changes(mut req) => {

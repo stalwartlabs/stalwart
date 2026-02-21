@@ -16,16 +16,15 @@ use crate::{enterprise::llm::ApiType, expr::if_block::BootstrapExprExt};
 use ahash::AHashMap;
 use registry::schema::{
     enums::AiModelType,
-    prelude::{Object, Property},
+    prelude::{ObjectType, Property},
     structs::{self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SpamLlm},
 };
 use std::sync::Arc;
 use store::{
-    registry::{HashedObject, RegistryQuery, bootstrap::Bootstrap, write::RegistryWrite},
+    registry::{RegistryQuery, bootstrap::Bootstrap, write::RegistryWrite},
     roaring::RoaringBitmap,
 };
 use trc::MetricType;
-use types::id::Id;
 use utils::template::Template;
 
 impl Enterprise {
@@ -33,10 +32,8 @@ impl Enterprise {
         let server_hostname = bp.hostname().to_string();
         let mut update_license = None;
 
-        let mut enterprise = bp
-            .setting_infallible::<HashedObject<structs::Enterprise>>()
-            .await;
-        let license_result = match (&enterprise.object.license_key, &enterprise.object.api_key) {
+        let mut enterprise = bp.setting_infallible::<structs::Enterprise>().await;
+        let license_result = match (&enterprise.license_key, &enterprise.api_key) {
             (Some(license_key), maybe_api_key) => {
                 match (
                     LicenseKey::new(license_key, &server_hostname),
@@ -77,21 +74,18 @@ impl Enterprise {
         let license = match license_result {
             Ok(license) => license,
             Err(err) => {
-                bp.build_warning(Object::Enterprise.singleton(), err.to_string());
+                bp.build_warning(ObjectType::Enterprise.singleton(), err.to_string());
                 return None;
             }
         };
 
         // Update the license if a new one was obtained
+        let logo_url = enterprise.logo_url.clone();
         if let Some(license) = update_license {
-            enterprise.object.license_key = Some(license);
+            enterprise.license_key = Some(license);
             if let Err(err) = bp
                 .registry
-                .write(RegistryWrite::update(
-                    Id::singleton(),
-                    &enterprise.object,
-                    &enterprise,
-                ))
+                .write(RegistryWrite::insert(&enterprise.into()))
                 .await
             {
                 trc::error!(
@@ -103,12 +97,12 @@ impl Enterprise {
 
         match bp
             .registry
-            .query::<RoaringBitmap>(RegistryQuery::new(Object::Account))
+            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Account))
             .await
         {
             Ok(total) if total.len() > license.accounts as u64 => {
                 bp.build_warning(
-                    Object::Enterprise.singleton(),
+                    ObjectType::Enterprise.singleton(),
                     format!(
                         "License key is valid but only allows {} accounts, found {}.",
                         license.accounts,
@@ -162,7 +156,7 @@ impl Enterprise {
         let mut enterprise = Enterprise {
             license,
             undelete_retention: dr.hold_deleted_for.map(|retention| retention.into_inner()),
-            logo_url: enterprise.object.logo_url,
+            logo_url,
             metrics_alerts: Default::default(),
             spam_filter_llm: SpamFilterLlmConfig::parse(bp, &ai_apis_ids).await,
             ai_apis,
@@ -214,19 +208,19 @@ impl Enterprise {
             (
                 alarm.template,
                 &mut enterprise.template_calendar_alarm,
-                Object::CalendarAlarm.singleton(),
+                ObjectType::CalendarAlarm.singleton(),
                 Property::Template,
             ),
             (
                 sched.email_template,
                 &mut enterprise.template_scheduling_email,
-                Object::CalendarScheduling.singleton(),
+                ObjectType::CalendarScheduling.singleton(),
                 Property::EmailTemplate,
             ),
             (
                 sched.http_rsvp_template,
                 &mut enterprise.template_scheduling_web,
-                Object::CalendarScheduling.singleton(),
+                ObjectType::CalendarScheduling.singleton(),
                 Property::HttpRsvpTemplate,
             ),
         ] {
@@ -253,7 +247,7 @@ impl SpamFilterLlmConfig {
             SpamLlm::Enable(llm) => {
                 let Some(model) = models.get(&llm.model_id.id()).cloned() else {
                     bp.build_error(
-                        Object::SpamLlm.singleton(),
+                        ObjectType::SpamLlm.singleton(),
                         format!("Model {:?} not found in AI API configuration", llm.model_id),
                     );
                     return None;

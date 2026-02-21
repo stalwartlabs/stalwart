@@ -6,7 +6,7 @@
 
 use crate::{
     pickle::Pickle,
-    schema::prelude::Object,
+    schema::prelude::ObjectType,
     types::{error::ValidationError, index::IndexBuilder},
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -22,7 +22,7 @@ pub mod ipmask;
 pub mod socketaddr;
 pub mod string;
 
-pub trait EnumType: Sized + Debug + PartialEq + Eq {
+pub trait EnumImpl: Sized + Debug + PartialEq + Eq {
     const COUNT: usize;
 
     fn parse(s: &str) -> Option<Self>;
@@ -31,12 +31,12 @@ pub trait EnumType: Sized + Debug + PartialEq + Eq {
     fn to_id(&self) -> u16;
 }
 
-pub trait ObjectType:
+pub trait ObjectImpl:
     Pickle + Serialize + DeserializeOwned + Default + Clone + Send + Sync
 {
     const FLAGS: u64;
+    const OBJECT: ObjectType;
 
-    fn object() -> Object;
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool;
     fn index<'x>(&'x self, builder: &mut IndexBuilder<'x>);
 }

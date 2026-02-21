@@ -7,7 +7,6 @@
 use crate::{
     IterateParams, RegistryStore, SUBSPACE_REGISTRY, SerializeInfallible, U16_LEN, U64_LEN,
     ValueKey,
-    registry::HashedObject,
     write::{
         AnyClass, BatchBuilder, RegistryClass, ValueClass,
         assert::AssertValue,
@@ -16,16 +15,17 @@ use crate::{
 };
 use registry::{
     schema::prelude::{
-        OBJ_FILTER_ACCOUNT, OBJ_FILTER_TENANT, OBJ_SEQ_ID, OBJ_SINGLETON, Object, Property,
+        OBJ_FILTER_ACCOUNT, OBJ_FILTER_TENANT, OBJ_SEQ_ID, OBJ_SINGLETON, Object, ObjectType,
+        Property,
     },
     types::{
-        EnumType, ObjectType,
+        EnumImpl,
         error::ValidationError,
         id::ObjectId,
         index::{IndexBuilder, IndexKey, IndexValue},
     },
 };
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 use trc::AddContext;
 use types::id::Id;
 use utils::codec::leb128::Leb128Reader;
@@ -56,42 +56,41 @@ pub enum RegistryWriteResult {
     NotSupported,
 }
 
-pub struct RegistryWrite<'x, T: ObjectType> {
-    op: RegistryWriteOp<'x, T>,
+pub struct RegistryWrite<'x> {
+    op: RegistryWriteOp<'x>,
     current_tenant_id: Option<u32>,
     current_account_id: Option<u32>,
 }
 
-pub enum RegistryWriteOp<'x, T: ObjectType> {
+pub enum RegistryWriteOp<'x> {
     Insert {
-        object: &'x T,
+        object: &'x Object,
         id: Option<Id>,
     },
     Update {
-        object: &'x T,
+        object: &'x Object,
         id: Id,
-        old_object: &'x HashedObject<T>,
+        old_object: &'x Object,
     },
     Delete {
-        id: Id,
+        object_id: ObjectId,
+        object: Option<&'x Object>,
     },
 }
 
 impl RegistryStore {
-    pub async fn write<T: ObjectType>(
-        &self,
-        write: RegistryWrite<'_, T>,
-    ) -> trc::Result<RegistryWriteResult> {
-        let object_type = T::object();
-        let object_flags = T::FLAGS;
-        let object_id = object_type.to_id();
+    pub async fn write(&self, write: RegistryWrite<'_>) -> trc::Result<RegistryWriteResult> {
         let mut set_index = IndexBuilder::default();
         let mut clear_index = IndexBuilder::default();
 
-        let mut batch = BatchBuilder::new();
-        let mut item_id;
         let object;
+        let object_type;
+        let object_flags;
+        let object_id;
         let object_tenant_id;
+        let mut item_id;
+
+        let mut batch = BatchBuilder::new();
         let mut write_id = true;
         let mut generate_id = false;
 
@@ -101,6 +100,9 @@ impl RegistryStore {
                 id,
             } => {
                 object = insert_object;
+                object_flags = object.flags();
+                object_type = object.object_type();
+                object_id = object_type.to_id();
                 object.index(&mut set_index);
                 object_tenant_id = set_index.tenant_id();
 
@@ -122,12 +124,15 @@ impl RegistryStore {
                 old_object,
             } => {
                 object = update_object;
+                object_flags = object.flags();
+                object_type = object.object_type();
+                object_id = object_type.to_id();
                 object.index(&mut set_index);
                 object_tenant_id = set_index.tenant_id();
 
                 // Obtain changes
                 let mut old_index = IndexBuilder::default();
-                old_object.object.index(&mut old_index);
+                old_object.index(&mut old_index);
                 for key in &old_index.keys {
                     set_index.keys.remove(key);
                 }
@@ -142,12 +147,12 @@ impl RegistryStore {
                 item_id = id.id();
                 batch.assert_value(
                     ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
-                    AssertValue::Hash(old_object.hash),
+                    AssertValue::U32(old_object.revision),
                 );
             }
-            RegistryWriteOp::Delete { id } => {
-                return if object_flags & OBJ_SINGLETON == 0 {
-                    self.delete(write, id).await
+            RegistryWriteOp::Delete { object_id, object } => {
+                return if object_id.object().flags() & OBJ_SINGLETON == 0 {
+                    self.delete(write, object_id, object).await
                 } else {
                     Ok(RegistryWriteResult::CannotDeleteSingleton)
                 };
@@ -180,17 +185,10 @@ impl RegistryStore {
                 return Ok(RegistryWriteResult::NotSupported);
             }
             let id = Id::new(item_id);
-            self.0.local_registry.write().insert(
-                ObjectId::new(object_type, id),
-                serde_json::to_value(object.clone()).map_err(|err| {
-                    trc::EventType::Registry(trc::RegistryEvent::LocalWriteError)
-                        .into_err()
-                        .caused_by(trc::location!())
-                        .id(item_id)
-                        .details(object_type.as_str())
-                        .reason(err)
-                })?,
-            );
+            self.0
+                .local_registry
+                .write()
+                .insert(ObjectId::new(object_type, id), object.clone());
             return self
                 .write_local_registry()
                 .await
@@ -338,13 +336,15 @@ impl RegistryStore {
         Ok(RegistryWriteResult::Success(Id::new(item_id)))
     }
 
-    async fn delete<T: ObjectType>(
+    async fn delete(
         &self,
-        write: RegistryWrite<'_, T>,
-        id: Id,
+        write: RegistryWrite<'_>,
+        object_id: ObjectId,
+        object: Option<&Object>,
     ) -> trc::Result<RegistryWriteResult> {
-        let object_type = T::object();
-        let object_id = object_type.to_id();
+        let object_type = object_id.object();
+        let object_type_id = object_type.to_id();
+        let id = object_id.id();
         let item_id = id.id();
 
         if self.0.local_objects.contains(&object_type) {
@@ -359,7 +359,11 @@ impl RegistryStore {
         }
 
         // Fetch object
-        let Some(object) = self.object::<HashedObject<T>>(id).await? else {
+        let object = if let Some(object) = object {
+            Cow::Borrowed(object)
+        } else if let Some(object) = self.get(object_id).await? {
+            Cow::Owned(object)
+        } else {
             return Ok(RegistryWriteResult::NotFound {
                 object_id: ObjectId::new(object_type, id),
             });
@@ -367,7 +371,7 @@ impl RegistryStore {
 
         // Validate tenant and account changes
         let mut clear_index = IndexBuilder::default();
-        object.object.index(&mut clear_index);
+        object.index(&mut clear_index);
         if let Some(err) = write.validate_owner(&clear_index) {
             return Ok(err);
         }
@@ -376,7 +380,7 @@ impl RegistryStore {
         let mut linked = Vec::new();
         let key = KeySerializer::new(U64_LEN + U16_LEN + 1)
             .write(1u8)
-            .write(object_id)
+            .write(object_type_id)
             .write(item_id)
             .finalize();
         let prefix_len = key.len();
@@ -386,7 +390,7 @@ impl RegistryStore {
         }));
         let key = KeySerializer::new((U64_LEN * 2) + U16_LEN + 1)
             .write(1u8)
-            .write(object_id)
+            .write(object_type_id)
             .write(item_id)
             .write(u64::MAX)
             .finalize();
@@ -399,8 +403,8 @@ impl RegistryStore {
             .iterate(
                 IterateParams::new(from_key, to_key).no_values().ascending(),
                 |key, _| {
-                    let object =
-                        Object::from_id(key.deserialize_be_u16(prefix_len)?).ok_or_else(|| {
+                    let object = ObjectType::from_id(key.deserialize_be_u16(prefix_len)?)
+                        .ok_or_else(|| {
                             trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
                                 .into_err()
                                 .caused_by(trc::location!())
@@ -436,18 +440,21 @@ impl RegistryStore {
         let mut batch = BatchBuilder::new();
         batch
             .assert_value(
-                ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
-                AssertValue::Hash(object.hash),
+                ValueClass::Registry(RegistryClass::Item {
+                    object_id: object_type_id,
+                    item_id,
+                }),
+                AssertValue::U32(object.revision),
             )
             .clear(ValueClass::Registry(RegistryClass::Item {
-                object_id,
+                object_id: object_type_id,
                 item_id,
             }))
             .clear(ValueClass::Registry(RegistryClass::Id {
-                object_id,
+                object_id: object_type_id,
                 item_id,
             }))
-            .registry_index(object_id, item_id, clear_index.keys.iter(), false);
+            .registry_index(object_type_id, item_id, clear_index.keys.iter(), false);
 
         self.0
             .store
@@ -461,7 +468,7 @@ impl RegistryStore {
         &self,
         from_key: RegistryClass,
         to_key: RegistryClass,
-        object: Option<Object>,
+        object: Option<ObjectType>,
     ) -> trc::Result<Option<ObjectId>> {
         let from_key = ValueKey::from(from_key);
         let to_key = ValueKey::from(to_key);
@@ -480,7 +487,7 @@ impl RegistryStore {
                         } else {
                             let object_id =
                                 key.deserialize_be_u16(key.len() - U64_LEN - U16_LEN)?;
-                            Object::from_id(object_id).ok_or_else(|| {
+                            ObjectType::from_id(object_id).ok_or_else(|| {
                                 trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
                                     .into_err()
                                     .caused_by(trc::location!())
@@ -587,8 +594,8 @@ impl SerializeInfallible for IndexValue<'_> {
     }
 }
 
-impl<'x, T: ObjectType> RegistryWrite<'x, T> {
-    pub fn insert(object: &'x T) -> Self {
+impl<'x> RegistryWrite<'x> {
+    pub fn insert(object: &'x Object) -> Self {
         Self {
             op: RegistryWriteOp::Insert { object, id: None },
             current_tenant_id: None,
@@ -596,7 +603,7 @@ impl<'x, T: ObjectType> RegistryWrite<'x, T> {
         }
     }
 
-    pub fn insert_with_id(id: Id, object: &'x T) -> Self {
+    pub fn insert_with_id(id: Id, object: &'x Object) -> Self {
         Self {
             op: RegistryWriteOp::Insert {
                 object,
@@ -607,7 +614,7 @@ impl<'x, T: ObjectType> RegistryWrite<'x, T> {
         }
     }
 
-    pub fn update(id: Id, object: &'x T, old_object: &'x HashedObject<T>) -> Self {
+    pub fn update(id: Id, object: &'x Object, old_object: &'x Object) -> Self {
         Self {
             op: RegistryWriteOp::Update {
                 object,
@@ -619,9 +626,23 @@ impl<'x, T: ObjectType> RegistryWrite<'x, T> {
         }
     }
 
-    pub fn delete(id: Id) -> Self {
+    pub fn delete(object_id: ObjectId) -> Self {
         Self {
-            op: RegistryWriteOp::Delete { id },
+            op: RegistryWriteOp::Delete {
+                object_id,
+                object: None,
+            },
+            current_tenant_id: None,
+            current_account_id: None,
+        }
+    }
+
+    pub fn delete_object(object_id: ObjectId, object: &'x Object) -> Self {
+        Self {
+            op: RegistryWriteOp::Delete {
+                object_id,
+                object: Some(object),
+            },
             current_tenant_id: None,
             current_account_id: None,
         }

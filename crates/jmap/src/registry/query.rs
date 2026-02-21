@@ -9,10 +9,12 @@ use jmap_proto::{
     method::query::{QueryRequest, QueryResponse},
     object::registry::Registry,
 };
+use registry::schema::prelude::ObjectType;
 
 pub trait RegistryQuery: Sync + Send {
     fn registry_query(
         &self,
+        object_type: ObjectType,
         request: QueryRequest<Registry>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
@@ -21,6 +23,7 @@ pub trait RegistryQuery: Sync + Send {
 impl RegistryQuery for Server {
     async fn registry_query(
         &self,
+        object_type: ObjectType,
         mut request: QueryRequest<Registry>,
         access_token: &AccessToken,
     ) -> trc::Result<QueryResponse> {

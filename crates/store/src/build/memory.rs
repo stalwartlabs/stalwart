@@ -5,7 +5,7 @@
  */
 
 use crate::{InMemoryStore, registry::bootstrap::Bootstrap};
-use registry::schema::{prelude::Object, structs};
+use registry::schema::{prelude::ObjectType, structs};
 
 #[allow(unreachable_patterns)]
 impl InMemoryStore {
@@ -36,7 +36,7 @@ impl InMemoryStore {
         match result {
             Ok(store) => Some(store),
             Err(err) => {
-                bp.build_error(Object::InMemoryStore.singleton(), err);
+                bp.build_error(ObjectType::InMemoryStore.singleton(), err);
                 None
             }
         }

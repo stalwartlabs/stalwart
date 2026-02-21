@@ -16,7 +16,7 @@ use mail_auth::{
 };
 use registry::schema::{
     enums::{DnsResolverProtocol, PolicyEnforcement},
-    prelude::Object,
+    prelude::ObjectType,
     structs::{DnsResolver, MtaSts},
 };
 use serde::{Deserialize, Serialize};
@@ -122,7 +122,7 @@ impl Resolvers {
                 }
                 Err(err) => {
                     bp.build_error(
-                        Object::DnsResolver.singleton(),
+                        ObjectType::DnsResolver.singleton(),
                         format!("Failed to read system DNS config: {err}"),
                     );
                     resolver_config = ResolverConfig::cloudflare();

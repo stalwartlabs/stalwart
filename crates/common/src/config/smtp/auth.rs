@@ -16,10 +16,10 @@ use mail_parser::decoders::base64::base64_decode;
 use registry::{
     schema::{
         enums::{self, ExpressionConstant},
-        prelude::Object,
+        prelude::ObjectType,
         structs::{Dkim1Signature, DkimSignature, SenderAuth},
     },
-    types::ObjectType,
+    types::ObjectImpl,
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 use store::registry::bootstrap::Bootstrap;
@@ -87,26 +87,35 @@ impl MailAuthConfig {
 
         MailAuthConfig {
             dkim: DkimAuthConfig {
-                verify: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_dkim_verify()),
-                sign: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_dkim_sign_domain()),
+                verify: bp
+                    .compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_dkim_verify()),
+                sign: bp.compile_expr(
+                    ObjectType::SenderAuth.singleton(),
+                    &auth.ctx_dkim_sign_domain(),
+                ),
                 strict: auth.dkim_strict,
             },
             arc: ArcAuthConfig {
-                verify: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_arc_verify()),
-                //seal: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_arc_seal_domain()),
+                verify: bp.compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_arc_verify()),
+                //seal: bp.compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_arc_seal_domain()),
             },
             spf: SpfAuthConfig {
-                verify_ehlo: bp
-                    .compile_expr(Object::SenderAuth.singleton(), &auth.ctx_spf_ehlo_verify()),
-                verify_mail_from: bp
-                    .compile_expr(Object::SenderAuth.singleton(), &auth.ctx_spf_from_verify()),
+                verify_ehlo: bp.compile_expr(
+                    ObjectType::SenderAuth.singleton(),
+                    &auth.ctx_spf_ehlo_verify(),
+                ),
+                verify_mail_from: bp.compile_expr(
+                    ObjectType::SenderAuth.singleton(),
+                    &auth.ctx_spf_from_verify(),
+                ),
             },
             dmarc: DmarcAuthConfig {
-                verify: bp.compile_expr(Object::SenderAuth.singleton(), &auth.ctx_dmarc_verify()),
+                verify: bp
+                    .compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_dmarc_verify()),
             },
             iprev: IpRevAuthConfig {
                 verify: bp.compile_expr(
-                    Object::SenderAuth.singleton(),
+                    ObjectType::SenderAuth.singleton(),
                     &auth.ctx_reverse_ip_verify(),
                 ),
             },
@@ -116,20 +125,20 @@ impl MailAuthConfig {
 
 impl DkimSigner {
     pub fn new(domain: String, signature: DkimSignature) -> trc::Result<Self> {
+        let mut errors = vec![];
+        if !signature.validate(&mut errors) {
+            return Err(trc::DkimEvent::BuildError
+                .reason("DKIM signature validation failed")
+                .details(
+                    errors
+                        .into_iter()
+                        .map(|v| trc::Value::from(v.to_string()))
+                        .collect::<Vec<_>>(),
+                ));
+        }
+
         match signature {
             DkimSignature::Dkim1Ed25519Sha256(signature) => {
-                let mut errors = vec![];
-                if !signature.validate(&mut errors) {
-                    return Err(trc::DkimEvent::BuildError
-                        .reason("DKIM signature validation failed")
-                        .details(
-                            errors
-                                .into_iter()
-                                .map(|v| trc::Value::from(v.to_string()))
-                                .collect::<Vec<_>>(),
-                        ));
-                }
-
                 let private_key = simple_pem_parse(&signature.private_key).ok_or_else(|| {
                     trc::DkimEvent::BuildError
                         .reason("Failed to parse ED25519 private key PEM")
@@ -147,18 +156,6 @@ impl DkimSigner {
                 )))
             }
             DkimSignature::Dkim1RsaSha256(signature) => {
-                let mut errors = vec![];
-                if !signature.validate(&mut errors) {
-                    return Err(trc::DkimEvent::BuildError
-                        .reason("DKIM signature validation failed")
-                        .details(
-                            errors
-                                .into_iter()
-                                .map(|v| trc::Value::from(v.to_string()))
-                                .collect::<Vec<_>>(),
-                        ));
-                }
-
                 let key = PrivatePkcs1KeyDer::from_pem_slice(signature.private_key.as_bytes())
                     .map(PrivateKeyDer::Pkcs1)
                     .or_else(|_| {
@@ -188,20 +185,20 @@ impl DkimSigner {
 
 impl ArcSealer {
     pub fn new(selector: String, domain: String, signature: DkimSignature) -> trc::Result<Self> {
+        let mut errors = vec![];
+        if !signature.validate(&mut errors) {
+            return Err(trc::DkimEvent::BuildError
+                .reason("DKIM signature validation failed")
+                .details(
+                    errors
+                        .into_iter()
+                        .map(|v| trc::Value::from(v.to_string()))
+                        .collect::<Vec<_>>(),
+                ));
+        }
+
         match signature {
             DkimSignature::Dkim1Ed25519Sha256(signature) => {
-                let mut errors = vec![];
-                if !signature.validate(&mut errors) {
-                    return Err(trc::DkimEvent::BuildError
-                        .reason("DKIM signature validation failed")
-                        .details(
-                            errors
-                                .into_iter()
-                                .map(|v| trc::Value::from(v.to_string()))
-                                .collect::<Vec<_>>(),
-                        ));
-                }
-
                 let private_key = simple_pem_parse(&signature.private_key).ok_or_else(|| {
                     trc::DkimEvent::BuildError
                         .reason("Failed to parse ED25519 private key PEM")
@@ -219,18 +216,6 @@ impl ArcSealer {
                 )))
             }
             DkimSignature::Dkim1RsaSha256(signature) => {
-                let mut errors = vec![];
-                if !signature.validate(&mut errors) {
-                    return Err(trc::DkimEvent::BuildError
-                        .reason("DKIM signature validation failed")
-                        .details(
-                            errors
-                                .into_iter()
-                                .map(|v| trc::Value::from(v.to_string()))
-                                .collect::<Vec<_>>(),
-                        ));
-                }
-
                 let key = PrivatePkcs1KeyDer::from_pem_slice(signature.private_key.as_bytes())
                     .map(PrivateKeyDer::Pkcs1)
                     .or_else(|_| {

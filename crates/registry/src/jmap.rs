@@ -7,7 +7,7 @@
 use crate::{
     schema::prelude::Property,
     types::{
-        EnumType,
+        EnumImpl,
         error::PatchError,
         string::{StringValidator, StringValidatorResult},
     },
@@ -322,7 +322,7 @@ impl RegistryJsonPatch for f64 {
     }
 }
 
-impl<T: EnumType> RegistryJsonEnumPatch for T {
+impl<T: EnumImpl> RegistryJsonEnumPatch for T {
     fn patch(
         &mut self,
         pointer: JsonPointerPatch<'_>,
@@ -534,7 +534,7 @@ impl MapItem for u32 {
     }
 }
 
-impl<T: EnumType> MapItem for T {
+impl<T: EnumImpl> MapItem for T {
     fn try_from_string(value: &str) -> Option<Self> {
         Self::parse(value)
     }
@@ -544,7 +544,7 @@ impl<T: EnumType> MapItem for T {
     }
 }
 
-pub fn object_type<T: EnumType>(
+pub fn object_type<T: EnumImpl>(
     pointer: &JsonPointerPatch<'_>,
     value: &Value<'_, Property, RegistryValue>,
 ) -> Result<T, PatchError> {

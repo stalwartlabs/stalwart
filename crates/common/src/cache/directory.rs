@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use crate::{Server, auth::DomainCache};
 use registry::{
-    schema::structs::{Account, EmailAlias, GroupAccount, UserAccount},
-    types::datetime::UTCDateTime,
+    schema::{
+        prelude::{Object, ObjectType},
+        structs::{Account, EmailAlias, GroupAccount, UserAccount},
+    },
+    types::{datetime::UTCDateTime, id::ObjectId},
 };
-use store::registry::{
-    HashedObject,
-    write::{RegistryWrite, RegistryWriteResult},
-};
+use store::registry::write::{RegistryWrite, RegistryWriteResult};
 use trc::AddContext;
 use types::id::Id;
 
@@ -37,7 +37,7 @@ impl Server {
             Some(account_id) => {
                 let current_account = self
                     .registry()
-                    .object::<HashedObject<Account>>(Id::from(account_id))
+                    .get(ObjectId::new(ObjectType::Account, account_id.into()))
                     .await
                     .caused_by(trc::location!())?
                     .ok_or_else(|| {
@@ -47,8 +47,9 @@ impl Server {
                             .ctx(trc::Key::AccountName, account.email.clone())
                             .ctx(trc::Key::AccountId, account_id)
                     })?;
-                let mut updated_account =
-                    current_account.object.clone().into_user().ok_or_else(|| {
+                let mut updated_account = Account::from(current_account.clone())
+                    .into_user()
+                    .ok_or_else(|| {
                         trc::AuthEvent::Error
                             .into_err()
                             .details(
@@ -111,7 +112,7 @@ impl Server {
                 }
 
                 if has_changes {
-                    let updated_account = Account::User(updated_account);
+                    let updated_account = Object::from(Account::User(updated_account));
                     match self
                         .registry()
                         .write(RegistryWrite::update(
@@ -124,7 +125,7 @@ impl Server {
                     {
                         RegistryWriteResult::Success(id) => Ok(AccountWithId {
                             id: id.document_id(),
-                            account: updated_account,
+                            account: updated_account.into(),
                         }),
                         failure => Err(trc::AuthEvent::Error
                             .into_err()
@@ -135,7 +136,7 @@ impl Server {
                 } else {
                     Ok(AccountWithId {
                         id: account_id,
-                        account: current_account.object,
+                        account: Account::User(updated_account),
                     })
                 }
             }
@@ -169,7 +170,7 @@ impl Server {
                         .into(),
                     );
                 }
-                let account = Account::User(UserAccount {
+                let account = Object::from(Account::User(UserAccount {
                     name: local.to_string(),
                     domain_id: Id::from(domain.id),
                     aliases,
@@ -180,7 +181,7 @@ impl Server {
                     role_ids: self.core.network.security.default_role_ids_user.clone(),
                     secret: account.secret.unwrap_or_default(),
                     ..Default::default()
-                });
+                }));
 
                 match self
                     .registry()
@@ -190,7 +191,7 @@ impl Server {
                 {
                     RegistryWriteResult::Success(id) => Ok(AccountWithId {
                         id: id.document_id(),
-                        account,
+                        account: account.into(),
                     }),
                     failure => Err(trc::AuthEvent::Error
                         .into_err()
@@ -213,7 +214,7 @@ impl Server {
             Some(account_id) => {
                 let current_account = self
                     .registry()
-                    .object::<HashedObject<Account>>(Id::from(account_id))
+                    .get(ObjectId::new(ObjectType::Account, account_id.into()))
                     .await
                     .caused_by(trc::location!())?
                     .ok_or_else(|| {
@@ -223,8 +224,9 @@ impl Server {
                             .ctx(trc::Key::AccountName, group.email.clone())
                             .ctx(trc::Key::AccountId, account_id)
                     })?;
-                let mut updated_account =
-                    current_account.object.clone().into_group().ok_or_else(|| {
+                let mut updated_account = Account::from(current_account.clone())
+                    .into_group()
+                    .ok_or_else(|| {
                         trc::AuthEvent::Error
                             .into_err()
                             .details(
@@ -257,12 +259,11 @@ impl Server {
                 }
 
                 if has_changes {
-                    let updated_account = Account::Group(updated_account);
                     match self
                         .registry()
                         .write(RegistryWrite::update(
                             Id::from(account_id),
-                            &updated_account,
+                            &Object::from(Account::Group(updated_account)),
                             &current_account,
                         ))
                         .await
@@ -298,7 +299,7 @@ impl Server {
                     }
                 }
 
-                let account = Account::Group(GroupAccount {
+                let account = Object::from(Account::Group(GroupAccount {
                     name: local.to_string(),
                     domain_id: Id::from(domain.id),
                     aliases,
@@ -307,7 +308,7 @@ impl Server {
                     member_tenant_id: domain.id_tenant.map(Id::from),
                     role_ids: self.core.network.security.default_role_ids_group.clone(),
                     ..Default::default()
-                });
+                }));
 
                 match self
                     .registry()

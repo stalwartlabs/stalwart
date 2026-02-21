@@ -15,7 +15,7 @@ use crate::{
 };
 use ahash::AHashMap;
 use directory::Directories;
-use registry::schema::{prelude::Object, structs::BlockedIp};
+use registry::schema::{prelude::ObjectType, structs::BlockedIp};
 use std::sync::Arc;
 use store::{InMemoryStore, LookupStores, registry::bootstrap::Bootstrap, write::now};
 
@@ -27,11 +27,11 @@ pub struct ReloadResult {
 
 impl Server {
     pub async fn reload_registry(&self, change: RegistryChange) -> trc::Result<ReloadResult> {
-        // TODO: check the different events triggering this, spam filter reload, etc.
+        let todo = "check the different events triggering this, spam filter reload, etc. make sure all are used";
         let mut bootstrap = Bootstrap::init(self.registry().clone()).await;
         let object = match change {
             RegistryChange::Insert(id) => {
-                if matches!(id.object(), Object::BlockedIp) {
+                if matches!(id.object(), ObjectType::BlockedIp) {
                     if let Some(ip) = bootstrap.get_infallible::<BlockedIp>(id.id()).await
                         && ip.expires_at.is_none_or(|ip| ip.timestamp() > now() as i64)
                     {
@@ -62,7 +62,7 @@ impl Server {
         };
 
         match object {
-            Object::Certificate => {
+            ObjectType::Certificate => {
                 let mut certificates = AHashMap::new();
                 parse_certificates(
                     &mut result.bootstrap,
@@ -75,7 +75,7 @@ impl Server {
                     .tls_certificates
                     .store(Arc::new(certificates));
             }
-            Object::MemoryLookupKey | Object::MemoryLookupKeyValue => {
+            ObjectType::MemoryLookupKey | ObjectType::MemoryLookupKeyValue => {
                 let mut lookup = LookupStores {
                     stores: self.inner.data.lookup_stores.load().as_ref().clone(),
                 };
@@ -84,7 +84,7 @@ impl Server {
                     .retain(|_, store| !matches!(store, InMemoryStore::Static(_)));
                 lookup.parse_static(&mut result.bootstrap).await;
             }
-            Object::HttpLookup => {
+            ObjectType::HttpLookup => {
                 let mut lookup = LookupStores {
                     stores: self.inner.data.lookup_stores.load().as_ref().clone(),
                 };
@@ -93,7 +93,7 @@ impl Server {
                     .retain(|_, store| !matches!(store, InMemoryStore::Http(_)));
                 lookup.parse_http(&mut result.bootstrap).await;
             }
-            Object::LookupStore => {
+            ObjectType::StoreLookup => {
                 let mut lookup = LookupStores {
                     stores: self.inner.data.lookup_stores.load().as_ref().clone(),
                 };

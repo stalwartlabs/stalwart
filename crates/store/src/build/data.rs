@@ -6,7 +6,7 @@
 
 use crate::{Store, registry::bootstrap::Bootstrap};
 use registry::schema::{
-    prelude::Object,
+    prelude::ObjectType,
     structs::{DataStore, MetricsStore, TracingStore},
 };
 
@@ -56,7 +56,7 @@ impl Store {
         match result {
             Ok(store) => store,
             Err(err) => {
-                bp.build_warning(Object::TracingStore.singleton(), err);
+                bp.build_warning(ObjectType::TracingStore.singleton(), err);
                 None
             }
         }
@@ -86,7 +86,7 @@ impl Store {
         match result {
             Ok(store) => store,
             Err(err) => {
-                bp.build_warning(Object::MetricsStore.singleton(), err);
+                bp.build_warning(ObjectType::MetricsStore.singleton(), err);
                 None
             }
         }

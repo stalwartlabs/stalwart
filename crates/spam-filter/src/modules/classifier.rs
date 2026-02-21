@@ -25,7 +25,7 @@ use nlp::classifier::reservoir::SampleReservoir;
 use nlp::classifier::train::{CcfhTrainer, FhTrainer};
 use nlp::tokenizers::types::TypesTokenizer;
 use nlp::tokenizers::{stream::WordStemTokenizer, types::TokenType};
-use registry::schema::prelude::Object;
+use registry::schema::prelude::ObjectType;
 use std::time::Instant;
 use std::{
     borrow::Cow,
@@ -510,7 +510,7 @@ impl SpamClassifier for Server {
             .data
             .spam_classifier
             .store(Arc::new(classifier.inner));
-        self.cluster_broadcast(BroadcastEvent::reload(Object::SpamClassifier))
+        self.cluster_broadcast(BroadcastEvent::reload(ObjectType::SpamClassifier))
             .await;
 
         trc::event!(
