@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{JsonPointerPatch, RegistryJsonPatch},
+    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch},
     pickle::{Pickle, PickledStream},
     types::error::PatchError,
 };
@@ -141,7 +141,7 @@ impl RegistryJsonPatch for Duration {
     fn patch(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+        value: JmapValue<'_>,
     ) -> Result<(), PatchError> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Number(value), None) => {
@@ -154,5 +154,11 @@ impl RegistryJsonPatch for Duration {
             }
             _ => Err(PatchError::new(pointer, "Invalid path for Duration")),
         }
+    }
+}
+
+impl IntoValue for Duration {
+    fn into_value(self) -> JmapValue<'static> {
+        JmapValue::Number((self.0.as_millis() as u64).into())
     }
 }

@@ -211,6 +211,11 @@ impl RegistryQuery {
         self
     }
 
+    pub fn with_account_opt(mut self, account_id: Option<u32>) -> Self {
+        self.account_id = account_id;
+        self
+    }
+
     pub fn with_tenant(mut self, tenant_id: Option<u32>) -> Self {
         self.tenant_id = tenant_id;
         self

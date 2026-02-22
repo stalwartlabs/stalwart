@@ -18,6 +18,7 @@ use registry::{
 pub struct RegistryObject<T: ObjectImpl> {
     pub id: ObjectId,
     pub object: T,
+    pub revision: u32,
 }
 
 pub struct RegistryQuery {

@@ -7,7 +7,7 @@
 use std::{fmt::Display, str::FromStr};
 
 use crate::{
-    jmap::{JsonPointerPatch, RegistryJsonPatch},
+    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch},
     pickle::{Pickle, PickledStream},
     types::error::PatchError,
 };
@@ -91,7 +91,7 @@ impl RegistryJsonPatch for SocketAddr {
     fn patch(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+        value: JmapValue<'_>,
     ) -> Result<(), PatchError> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Str(value), None) => {
@@ -110,5 +110,11 @@ impl RegistryJsonPatch for SocketAddr {
                 "Invalid path for SocketAddr, expected a string value",
             )),
         }
+    }
+}
+
+impl IntoValue for SocketAddr {
+    fn into_value(self) -> JmapValue<'static> {
+        JmapValue::Str(self.to_string().into())
     }
 }

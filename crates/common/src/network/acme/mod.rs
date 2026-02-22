@@ -17,7 +17,6 @@ use dns_update::DnsUpdater;
 use registry::schema::structs;
 use rustls::sign::CertifiedKey;
 use std::{fmt::Debug, sync::Arc, time::Duration};
-use store::registry::RegistryObject;
 
 pub struct AcmeProvider {
     pub id: String,

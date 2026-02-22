@@ -13,7 +13,7 @@ use ahash::AHashSet;
 use registry::{
     schema::{
         enums::BlockReason,
-        prelude::{HashedObject, Object, ObjectType},
+        prelude::{Object, ObjectType},
         structs::{self, AllowedIp, BlockedIp, Rate},
     },
     types::{datetime::UTCDateTime, ipmask::IpAddrOrMask},
@@ -65,10 +65,10 @@ impl Security {
         let mut expired_allows = Vec::new();
         let now = now() as i64;
 
-        for ip in bp.list_infallible::<HashedObject<AllowedIp>>().await {
+        for ip in bp.list_infallible::<AllowedIp>().await {
             let id = ip.id;
-            let revision = ip.object.revision;
-            let ip = ip.object.object;
+            let revision = ip.revision;
+            let ip = ip.object;
 
             if ip.expires_at.as_ref().is_none_or(|ip| ip.timestamp() > now) {
                 if let Some(ip) = ip.address.try_to_ip() {
@@ -328,10 +328,10 @@ impl BlockedIps {
         let mut expired_blocks = Vec::new();
         let now = now() as i64;
 
-        for ip in bp.list_infallible::<HashedObject<BlockedIp>>().await {
+        for ip in bp.list_infallible::<BlockedIp>().await {
             let id = ip.id;
-            let revision = ip.object.revision;
-            let ip = ip.object.object;
+            let revision = ip.revision;
+            let ip = ip.object;
 
             if ip.expires_at.as_ref().is_none_or(|ip| ip.timestamp() > now) {
                 if let Some(ip) = ip.address.try_to_ip() {

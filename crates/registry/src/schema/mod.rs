@@ -5,15 +5,14 @@
  */
 
 use crate::{
-    pickle::Pickle,
     schema::{
         enums::{TracingLevel, TracingLevelOpt},
         prelude::{
-            Account, Duration, GroupAccount, HashedObject, HttpAuth, NodeRange, Object,
-            ObjectInner, ObjectType, Property, UserAccount,
+            Account, Duration, GroupAccount, HttpAuth, NodeRange, Object, ObjectInner, Property,
+            UserAccount,
         },
     },
-    types::{EnumImpl, ObjectImpl},
+    types::EnumImpl,
 };
 use std::{cmp::Ordering, fmt::Display};
 use trc::TOTAL_EVENT_COUNT;
@@ -239,52 +238,8 @@ impl<T: Into<ObjectInner>> From<T> for Object {
     }
 }
 
-impl<T: ObjectImpl + From<Object>> From<Object> for HashedObject<T> {
-    fn from(value: Object) -> Self {
-        HashedObject {
-            revision: value.revision,
-            object: T::from(value),
-        }
-    }
-}
-
-impl<T: ObjectImpl> ObjectImpl for HashedObject<T> {
-    const FLAGS: u64 = T::FLAGS;
-    const OBJECT: ObjectType = T::OBJECT;
-
-    fn validate(&self, errors: &mut Vec<prelude::ValidationError>) -> bool {
-        self.object.validate(errors)
-    }
-
-    fn index<'x>(&'x self, builder: &mut prelude::IndexBuilder<'x>) {
-        self.object.index(builder)
-    }
-}
-
-impl<T: ObjectImpl> Pickle for HashedObject<T> {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        T::OBJECT.pickle(out);
-        self.object.pickle(out);
-        (xxhash_rust::xxh3::xxh3_64(out) as u32).pickle(out);
-    }
-
-    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
-        let _ = u16::unpickle(stream)?;
-        Some(Self {
-            object: T::unpickle(stream)?,
-            revision: u32::unpickle(stream)?,
-        })
-    }
-}
-
-impl<'de, T: ObjectImpl> serde::Deserialize<'de> for HashedObject<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        T::deserialize(deserializer).map(|object| Self {
-            object,
-            revision: 0,
-        })
+impl Object {
+    pub fn new(inner: ObjectInner) -> Self {
+        Object { inner, revision: 0 }
     }
 }

@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{JsonPointerPatch, RegistryJsonPatch},
+    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch},
     pickle::{Pickle, PickledStream},
     types::error::PatchError,
 };
@@ -251,7 +251,7 @@ impl RegistryJsonPatch for IpAddrOrMask {
     fn patch(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+        value: JmapValue<'_>,
     ) -> Result<(), PatchError> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Str(value), None) => {
@@ -270,6 +270,12 @@ impl RegistryJsonPatch for IpAddrOrMask {
                 "Invalid path for IpAddrOrMask, expected a string value",
             )),
         }
+    }
+}
+
+impl IntoValue for IpAddrOrMask {
+    fn into_value(self) -> JmapValue<'static> {
+        JmapValue::Str(self.to_string().into())
     }
 }
 

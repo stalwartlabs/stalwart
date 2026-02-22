@@ -52,6 +52,7 @@ impl Listeners {
 
     fn parse_server(&mut self, bp: &mut Bootstrap, listener: RegistryObject<NetworkListener>) {
         let id = listener.id;
+        let revision = listener.revision;
         let listener = listener.object;
 
         // Parse protocol
@@ -139,6 +140,7 @@ impl Listeners {
         self.parsed_listeners.push(RegistryObject {
             id,
             object: listener,
+            revision,
         });
     }
 

@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::{JsonPointerPatch, RegistryJsonPatch, RegistryValue},
+    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch, RegistryValue},
     pickle::{Pickle, PickledStream},
     schema::prelude::ObjectType,
     types::{EnumImpl, error::PatchError},
@@ -80,7 +80,7 @@ impl RegistryJsonPatch for Id {
     fn patch(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+        value: JmapValue<'_>,
     ) -> Result<(), PatchError> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Element(RegistryValue::Id(value)), None) => {
@@ -107,7 +107,7 @@ impl RegistryJsonPatch for BlobId {
     fn patch(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: jmap_tools::Value<'_, crate::schema::prelude::Property, crate::jmap::RegistryValue>,
+        value: JmapValue<'_>,
     ) -> Result<(), PatchError> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Element(RegistryValue::BlobId(value)), None) => {
@@ -130,5 +130,17 @@ impl RegistryJsonPatch for BlobId {
                 "Invalid path for BlobId, expected a string value",
             )),
         }
+    }
+}
+
+impl IntoValue for Id {
+    fn into_value(self) -> JmapValue<'static> {
+        JmapValue::Element(RegistryValue::Id(self))
+    }
+}
+
+impl IntoValue for BlobId {
+    fn into_value(self) -> JmapValue<'static> {
+        JmapValue::Element(RegistryValue::BlobId(self))
     }
 }

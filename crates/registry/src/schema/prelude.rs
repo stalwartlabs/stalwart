@@ -3,9 +3,11 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+pub use crate::jmap::IntoValue;
+pub use crate::jmap::JmapValue;
 pub use crate::jmap::{
     JsonPointerPatch, RegistryJsonEnumPatch, RegistryJsonPatch, RegistryJsonPropertyPatch,
-    object_type,
+    patch::object_type,
 };
 pub use crate::pickle::Pickle;
 pub use crate::schema::enums::*;
@@ -29,12 +31,6 @@ pub use utils::map::vec_map::VecMap;
 #[derive(Debug, Clone)]
 pub struct Object {
     pub inner: ObjectInner,
-    pub revision: u32,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct HashedObject<T: ObjectImpl> {
-    pub object: T,
     pub revision: u32,
 }
 

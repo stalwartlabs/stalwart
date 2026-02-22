@@ -10,7 +10,7 @@ use crate::{
     write::{AnyClass, RegistryClass, ValueClass, key::KeySerializer},
 };
 use registry::{
-    pickle::PickledStream,
+    pickle::{Pickle, PickledStream},
     schema::prelude::Object,
     types::{EnumImpl, ObjectImpl, id::ObjectId},
 };
@@ -56,16 +56,17 @@ impl RegistryStore {
     }
 
     pub async fn list<T: ObjectImpl + From<Object>>(&self) -> trc::Result<Vec<RegistryObject<T>>> {
-        let object = T::OBJECT;
+        let object_type = T::OBJECT;
 
-        if self.0.local_objects.contains(&object) {
+        if self.0.local_objects.contains(&object_type) {
             let mut results = Vec::new();
 
             for (id, item) in self.0.local_registry.read().iter() {
-                if id.object() == object {
+                if id.object() == object_type {
                     results.push(RegistryObject {
                         id: *id,
                         object: T::from(item.clone()),
+                        revision: 0,
                     });
                 }
             }
@@ -81,14 +82,14 @@ impl RegistryStore {
                             subspace: SUBSPACE_REGISTRY,
                             key: KeySerializer::new(U16_LEN + 1)
                                 .write(0u8)
-                                .write(object.to_id())
+                                .write(object_type.to_id())
                                 .finalize(),
                         })),
                         ValueKey::from(ValueClass::Any(AnyClass {
                             subspace: SUBSPACE_REGISTRY,
                             key: KeySerializer::new(U16_LEN + U64_LEN + 1)
                                 .write(0u8)
-                                .write(object.to_id())
+                                .write(object_type.to_id())
                                 .write(u64::MAX)
                                 .finalize(),
                         })),
@@ -102,23 +103,26 @@ impl RegistryStore {
                                 trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
                                     .into_err()
                                     .caused_by(trc::location!())
-                                    .details(object.as_str())
+                                    .details(object_type.as_str())
                                     .ctx(trc::Key::Key, key)
                             })?;
-                        let item = T::unpickle(&mut PickledStream::new(
-                            value.get(U16_LEN..).unwrap_or_default(),
-                        ))
-                        .ok_or_else(|| {
-                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                .into_err()
-                                .caused_by(trc::location!())
-                                .id(id)
-                                .details(object.as_str())
-                                .ctx(trc::Key::Value, value)
-                        })?;
+                        let mut stream = PickledStream::new(value);
+                        let _ = u16::unpickle(&mut stream);
+                        let (object, revision) = T::unpickle(&mut stream)
+                            .and_then(|item| u32::unpickle(&mut stream).map(|rev| (item, rev)))
+                            .ok_or_else(|| {
+                                trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                                    .into_err()
+                                    .caused_by(trc::location!())
+                                    .id(id)
+                                    .details(object_type.as_str())
+                                    .ctx(trc::Key::Value, value)
+                            })?;
+
                         results.push(RegistryObject {
-                            id: ObjectId::new(object, Id::new(id)),
-                            object: item,
+                            id: ObjectId::new(object_type, Id::new(id)),
+                            object,
+                            revision,
                         });
 
                         Ok(true)
