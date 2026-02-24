@@ -8,7 +8,7 @@ use crate::{
     SearchStore,
     backend::meili::{MeiliSearchStore, Task, TaskStatus, TaskUid},
     search::{
-        CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
+        CalendarSearchField, ContactSearchField, EmailSearchField, SearchField, SearchableField,
         TracingSearchField,
     },
 };
@@ -96,6 +96,9 @@ impl MeiliSearchStore {
 
         for key in T::primary_keys() {
             filterable.push(Value::String(key.field_name().to_string()));
+            if matches!(key, SearchField::Id) {
+                sortable.push(Value::String(key.field_name().to_string()));
+            }
         }
 
         #[cfg(feature = "test_mode")]
