@@ -172,11 +172,11 @@ impl EmailQuery for Server {
                                 if item
                                     .mailboxes
                                     .iter()
-                                    .any(|mb| mailboxes.contains(&mb.mailbox_id))
+                                    .any(|mb| !mailboxes.contains(&mb.mailbox_id))
                                 {
-                                    None
-                                } else {
                                     Some(item.document_id)
+                                } else {
+                                    None
                                 }
                             }),
                         )));
