@@ -30,7 +30,7 @@ impl Listeners {
     pub async fn parse(bp: &mut Bootstrap) -> Self {
         // Parse ACME managers
         let mut servers = Listeners {
-            span_id_gen: Arc::new(SnowflakeIdGenerator::with_node_id(bp.node_id())),
+            span_id_gen: Arc::new(SnowflakeIdGenerator::new()),
             ..Default::default()
         };
 

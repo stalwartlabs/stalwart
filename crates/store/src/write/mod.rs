@@ -222,29 +222,9 @@ pub enum SearchIndexId {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum TaskQueueClass {
-    UpdateIndex {
-        due: TaskEpoch,
-        index: SearchIndex,
-        is_insert: bool,
-    },
-    SendAlarm {
-        due: TaskEpoch,
-        event_id: u16,
-        alarm_id: u16,
-        is_email_alert: bool,
-    },
-    SendImip {
-        due: TaskEpoch,
-        is_payload: bool,
-    },
-    MergeThreads {
-        due: TaskEpoch,
-    },
+    Task { id: u64 },
+    Due { id: u64, due: u64 },
 }
-
-#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
-#[repr(transparent)]
-pub struct TaskEpoch(pub(crate) u64);
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub enum SearchIndex {
@@ -396,9 +376,6 @@ pub struct SetOperation {
 pub enum BlobOp {
     Commit { hash: BlobHash },
     Link { hash: BlobHash, to: BlobLink },
-    Quota { hash: BlobHash, until: u64 },
-    Undelete { hash: BlobHash, until: u64 },
-    SpamSample { hash: BlobHash, until: u64 },
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -741,58 +718,5 @@ impl Default for Params {
 impl AsRef<[Param]> for Params {
     fn as_ref(&self) -> &[Param] {
         &self.0
-    }
-}
-
-impl TaskEpoch {
-    /*
-      Structure of the 64-bit epoch:
-       4 bytes: seconds since custom epoch (1632280000)
-       2 bytes: attempt number
-       2 bytes: sequence id
-    */
-
-    const EPOCH_OFFSET: u64 = 1632280000;
-
-    pub fn now() -> Self {
-        Self::new(now())
-    }
-
-    pub fn new(timestamp: u64) -> Self {
-        Self(timestamp.saturating_sub(Self::EPOCH_OFFSET) << 32)
-    }
-
-    pub fn with_attempt(mut self, attempt: u16) -> Self {
-        self.0 |= (attempt as u64) << 16;
-        self
-    }
-
-    pub fn with_sequence_id(mut self, sequence_id: u16) -> Self {
-        self.0 |= sequence_id as u64;
-        self
-    }
-
-    pub fn with_random_sequence_id(self) -> Self {
-        self.with_sequence_id(rand::random())
-    }
-
-    pub fn due(&self) -> u64 {
-        (self.0 >> 32) + Self::EPOCH_OFFSET
-    }
-
-    pub fn attempt(&self) -> u16 {
-        (self.0 >> 16) as u16
-    }
-
-    pub fn sequence_id(&self) -> u16 {
-        self.0 as u16
-    }
-
-    pub fn inner(&self) -> u64 {
-        self.0
-    }
-
-    pub fn from_inner(inner: u64) -> Self {
-        Self(inner)
     }
 }

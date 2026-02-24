@@ -113,6 +113,7 @@ impl RegistrySet for Server {
             ObjectType::SpamTag => {}
             ObjectType::SpfReportSettings => {}
             ObjectType::StoreLookup => {}
+            ObjectType::TaskManager => {}
             ObjectType::TlsReportSettings => {}
             ObjectType::Tracer => {}
             ObjectType::TracingStore => {}

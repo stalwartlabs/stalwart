@@ -4,13 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
 use super::{BlobOp, Operation, ValueClass, ValueOp, key::DeserializeBigEndian, now};
 use crate::{
-    BlobStore, IterateParams, Store, U32_LEN, U64_LEN, ValueKey,
-    write::{BatchBuilder, BlobLink},
+    BlobStore, Deserialize, IterateParams, SerializeInfallible, Store, U16_LEN, U32_LEN, U64_LEN,
+    ValueKey,
+    write::{BatchBuilder, BlobLink, RegistryClass},
 };
+use registry::{
+    schema::prelude::Property,
+    types::{EnumImpl, id::ObjectId},
+};
+use std::time::Instant;
 use trc::{AddContext, PurgeEvent};
 use types::{
     blob::BlobClass,
@@ -36,49 +40,6 @@ impl Store {
         .await
         .map(|v| v.is_some())
         .caused_by(trc::location!())
-    }
-
-    pub async fn blob_quota(&self, account_id: u32) -> trc::Result<BlobQuota> {
-        let from_key = ValueKey {
-            account_id,
-            collection: 0,
-            document_id: 0,
-            class: ValueClass::Blob(BlobOp::Quota {
-                hash: BlobHash::default(),
-                until: 0,
-            }),
-        };
-        let to_key = ValueKey {
-            account_id: account_id + 1,
-            collection: 0,
-            document_id: 0,
-            class: ValueClass::Blob(BlobOp::Quota {
-                hash: BlobHash::default(),
-                until: u64::MAX,
-            }),
-        };
-
-        let now = now();
-        let mut quota = BlobQuota { bytes: 0, count: 0 };
-
-        self.iterate(
-            IterateParams::new(from_key, to_key).ascending(),
-            |key, value| {
-                let until = key.deserialize_be_u64(key.len() - U64_LEN)?;
-                if until > now {
-                    let bytes = value.deserialize_be_u32(0)?;
-                    if bytes > 0 {
-                        quota.bytes += bytes as usize;
-                        quota.count += 1;
-                    }
-                }
-                Ok(true)
-            },
-        )
-        .await
-        .caused_by(trc::location!())?;
-
-        Ok(quota)
     }
 
     pub async fn blob_has_access(
@@ -195,6 +156,31 @@ impl Store {
                     op: ValueOp::Clear,
                 });
             }
+            for (account_id, object_id) in state.delete_registry {
+                if batch.is_large_batch() {
+                    self.write(batch.build_all())
+                        .await
+                        .caused_by(trc::location!())?;
+                    batch = BatchBuilder::new();
+                }
+
+                let item_id = object_id.id().id();
+                let object_id = object_id.object().to_id();
+
+                if let Some(account_id) = account_id {
+                    batch.clear(ValueClass::Registry(RegistryClass::Index {
+                        index_id: Property::AccountId.to_id(),
+                        object_id,
+                        item_id,
+                        key: account_id.serialize(),
+                    }));
+                }
+
+                batch.clear(ValueClass::Registry(RegistryClass::Id {
+                    object_id,
+                    item_id,
+                }));
+            }
             if !batch.is_empty() {
                 self.write(batch.build_all())
                     .await
@@ -220,7 +206,7 @@ struct BlobPurgeState {
     last_hash: BlobHash,
     last_hash_is_linked: bool,
     delete_keys: Vec<(Option<u32>, BlobOp)>,
-    spam_train_samples: Vec<(u32, u64)>,
+    delete_registry: Vec<(Option<u32>, ObjectId)>,
     now: u64,
     total_deleted: u64,
     total_active: u64,
@@ -232,7 +218,7 @@ impl BlobPurgeState {
             last_hash: BlobHash::default(),
             last_hash_is_linked: true, // Avoid deleting non-existing last_hash on first iteration
             delete_keys: Vec::new(),
-            spam_train_samples: Vec::new(),
+            delete_registry: Vec::new(),
             now: now(),
             total_deleted: 0,
             total_active: 0,
@@ -257,42 +243,6 @@ impl BlobPurgeState {
             ));
         } else {
             self.total_active += 1;
-            if !self.spam_train_samples.is_empty() {
-                if self.spam_train_samples.len() > 1 {
-                    // Sort by account_id ascending, then until descending
-                    self.spam_train_samples
-                        .sort_unstable_by(|(a_id, a_until), (b_id, b_until)| {
-                            a_id.cmp(b_id).then_with(|| b_until.cmp(a_until))
-                        });
-                    let mut samples = self.spam_train_samples.iter().peekable();
-                    while let Some((account_id, _)) = samples.next() {
-                        // Keep only the latest sample per account
-                        while let Some((next_account_id, next_until)) = samples.peek() {
-                            if next_account_id == account_id {
-                                self.delete_keys.push((
-                                    Some(*account_id),
-                                    BlobOp::SpamSample {
-                                        hash: self.last_hash.clone(),
-                                        until: *next_until,
-                                    },
-                                ));
-                                self.delete_keys.push((
-                                    Some(*account_id),
-                                    BlobOp::Link {
-                                        hash: self.last_hash.clone(),
-                                        to: BlobLink::Temporary { until: *next_until },
-                                    },
-                                ));
-                                samples.next();
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                self.spam_train_samples.clear();
-            }
             self.last_hash = new_hash;
         }
     }
@@ -319,44 +269,12 @@ impl BlobPurgeState {
                             to: BlobLink::Temporary { until },
                         },
                     ));
-                    match value.first().copied() {
-                        Some(BlobLink::QUOTA_LINK) => {
-                            self.delete_keys.push((
-                                Some(account_id),
-                                BlobOp::Quota {
-                                    hash: self.last_hash.clone(),
-                                    until,
-                                },
-                            ));
-                        }
-                        Some(BlobLink::UNDELETE_LINK) => {
-                            self.delete_keys.push((
-                                Some(account_id),
-                                BlobOp::Undelete {
-                                    hash: self.last_hash.clone(),
-                                    until,
-                                },
-                            ));
-                        }
-                        Some(BlobLink::SPAM_SAMPLE_LINK) => {
-                            self.delete_keys.push((
-                                Some(account_id),
-                                BlobOp::SpamSample {
-                                    hash: self.last_hash.clone(),
-                                    until,
-                                },
-                            ));
-                        }
-                        _ => {}
+                    if value.len() == U16_LEN + U64_LEN {
+                        self.delete_registry.push((
+                            (account_id != u32::MAX).then_some(account_id),
+                            ObjectId::deserialize(value)?,
+                        ));
                     }
-                } else {
-                    // Delete attempts to train the same message multiple times
-                    if matches!(value.first(), Some(&BlobLink::SPAM_SAMPLE_LINK)) {
-                        let account_id = key.deserialize_be_u32(BLOB_HASH_LEN)?;
-                        self.spam_train_samples.push((account_id, until));
-                    }
-
-                    self.last_hash_is_linked = true;
                 }
                 Ok(())
             }

@@ -76,7 +76,7 @@ impl RegistryStore {
                 "{ERROR_MSG}: \"LocalSettings\" object has invalid nodeId of 0."
             ));
         }
-        inner.id_generator = SnowflakeIdGenerator::with_node_id(inner.node_id);
+        inner.id_generator = SnowflakeIdGenerator::new();
         Ok(Self(inner.into()))
     }
 }

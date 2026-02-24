@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    Deserialize, IterateParams, RegistryStore, SUBSPACE_REGISTRY, U16_LEN, U64_LEN, ValueKey,
+    IterateParams, RegistryStore, SUBSPACE_REGISTRY, U16_LEN, U64_LEN, ValueKey,
     registry::RegistryObject,
     write::{AnyClass, RegistryClass, ValueClass, key::KeySerializer},
 };
@@ -133,16 +133,5 @@ impl RegistryStore {
 
             Ok(results)
         }
-    }
-}
-
-impl Deserialize for Object {
-    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
-        Object::unpickle(&mut PickledStream::new(bytes)).ok_or_else(|| {
-            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                .into_err()
-                .caused_by(trc::location!())
-                .ctx(trc::Key::Value, bytes)
-        })
     }
 }

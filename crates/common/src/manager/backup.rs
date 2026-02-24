@@ -312,7 +312,7 @@ impl Family {
                 SUBSPACE_COUNTER,
                 SUBSPACE_PROPERTY,
             ],
-            Family::Blob => &[SUBSPACE_BLOBS, SUBSPACE_BLOB_EXTRA, SUBSPACE_BLOB_LINK],
+            Family::Blob => &[SUBSPACE_BLOBS, SUBSPACE_BLOB_LINK],
             Family::Registry => &[SUBSPACE_REGISTRY],
             Family::Changelog => &[SUBSPACE_LOGS],
             Family::Queue => &[SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUEUE_EVENT],

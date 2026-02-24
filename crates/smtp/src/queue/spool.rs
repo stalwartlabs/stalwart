@@ -16,6 +16,12 @@ use crate::queue::{
 use common::config::smtp::queue::QueueName;
 use common::ipc::QueueEvent;
 use common::{KV_LOCK_QUEUE_MESSAGE, Server};
+use registry::pickle::Pickle;
+use registry::schema::prelude::ObjectType;
+use registry::schema::structs::SpamTrainingSample;
+use registry::types::EnumImpl;
+use registry::types::datetime::UTCDateTime;
+use registry::types::id::ObjectId;
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
 use std::future::Future;
@@ -25,12 +31,16 @@ use store::write::key::DeserializeBigEndian;
 use store::write::serialize::rkyv_deserialize;
 use store::write::{
     AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, MergeResult, Params,
-    QueueClass, ValueClass, now,
+    QueueClass, RegistryClass, ValueClass, now,
 };
-use store::{Deserialize, IterateParams, Serialize, U64_LEN, ValueKey};
+use store::{
+    Deserialize, IterateParams, Serialize, SerializeInfallible, U64_LEN, ValueKey, xxhash_rust,
+};
 use trc::{AddContext, ServerEvent, SpamEvent};
+use types::blob::BlobId;
 use types::blob_hash::BlobHash;
 use utils::DomainPart;
+use utils::snowflake::SnowflakeIdGenerator;
 
 pub const LOCK_EXPIRY: u64 = 10 * 60; // 10 minutes
 pub const QUEUE_REFRESH: u64 = 5 * 60; // 5 minutes
@@ -443,25 +453,37 @@ impl MessageWrapper {
             );
         }
 
-        if let Some(is_spam) = train_spam
+        if let Some((is_spam, subject)) = train_spam
             && let Some(config) = &server.core.spam.classifier
         {
             let hold_period = now + config.hold_samples_for;
+            let sample = SpamTrainingSample {
+                account_id: None,
+                blob_id: BlobId::new(self.message.blob_hash.clone(), Default::default()),
+                delete_after_use: false,
+                expires_at: UTCDateTime::from_timestamp(hold_period as i64),
+                from: self.message.return_path.to_string(),
+                is_spam,
+                subject,
+            }
+            .to_pickled_vec();
 
+            let object_id = ObjectType::SpamTrainingSample.to_id();
+            let item_id = SnowflakeIdGenerator::from_sequence_id(xxhash_rust::xxh3::xxh3_64(
+                sample.as_slice(),
+            ))
+            .unwrap_or_default();
             batch
                 .set(
                     BlobOp::Link {
                         hash: self.message.blob_hash.clone(),
                         to: BlobLink::Temporary { until: hold_period },
                     },
-                    vec![BlobLink::SPAM_SAMPLE_LINK],
+                    ObjectId::new(ObjectType::SpamTrainingSample, item_id.into()).serialize(),
                 )
                 .set(
-                    BlobOp::SpamSample {
-                        hash: self.message.blob_hash.clone(),
-                        until: hold_period,
-                    },
-                    vec![u8::from(is_spam), 1],
+                    ValueClass::Registry(RegistryClass::Id { object_id, item_id }),
+                    sample,
                 );
 
             trc::event!(

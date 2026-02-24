@@ -120,6 +120,7 @@ pub const KV_RATE_LIMIT_CONTACT: u8 = 7;
 pub const KV_RATE_LIMIT_HTTP_AUTHENTICATED: u8 = 8;
 pub const KV_RATE_LIMIT_HTTP_ANONYMOUS: u8 = 9;
 pub const KV_RATE_LIMIT_IMAP: u8 = 10;
+pub const KV_QUOTA_BLOB: u8 = 11;
 pub const KV_GREYLIST: u8 = 16;
 pub const KV_LOCK_PURGE_ACCOUNT: u8 = 20;
 pub const KV_LOCK_QUEUE_MESSAGE: u8 = 21;

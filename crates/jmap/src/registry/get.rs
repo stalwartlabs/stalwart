@@ -147,6 +147,7 @@ impl RegistryGet for Server {
             | ObjectType::SpamTag
             | ObjectType::SpfReportSettings
             | ObjectType::StoreLookup
+            | ObjectType::TaskManager
             | ObjectType::TlsReportSettings
             | ObjectType::Tracer
             | ObjectType::TracingStore
@@ -222,6 +223,9 @@ impl RegistryGet for Server {
                         _ => {}
                     }
 
+                    let todo = "compact pickle";
+                    let todo = "app passwords, apis and user change pass/OTP";
+
                     let mut object = object.into_value();
                     let object_map = object.as_object_mut().unwrap();
                     if is_tenant_filtered && let Some(tenant_id) = access_token.tenant_id() {
@@ -262,8 +266,6 @@ impl RegistryGet for Server {
             }
             ObjectType::Log => {}
             ObjectType::QueuedMessage => {}
-
-            // Move to registry
             ObjectType::Task => {}
             ObjectType::ArfFeedbackReport => {}
             ObjectType::DmarcReport => {}

@@ -41,12 +41,12 @@ pub struct QueuedMessage {
     pub queue_name: QueueName,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum MessageSource {
     Authenticated,
     Unauthenticated {
         dmarc_pass: bool,
-        train_spam: Option<bool>,
+        train_spam: Option<(bool, String)>,
     },
     Dsn,
     Report,

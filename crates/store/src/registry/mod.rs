@@ -10,10 +10,19 @@ pub mod local;
 pub mod query;
 pub mod write;
 
-use registry::{
-    schema::prelude::{ObjectType, Property},
-    types::{ObjectImpl, id::ObjectId},
+use crate::{
+    Deserialize, SerializeInfallible, U16_LEN, U64_LEN,
+    write::key::{DeserializeBigEndian, KeySerializer},
 };
+use registry::{
+    pickle::{Pickle, PickledStream},
+    schema::{
+        prelude::{Object, ObjectType, Property},
+        structs::{DeletedItem, SpamTrainingSample, Task},
+    },
+    types::{EnumImpl, ObjectImpl, id::ObjectId},
+};
+use types::id::Id;
 
 pub struct RegistryObject<T: ObjectImpl> {
     pub id: ObjectId,
@@ -49,4 +58,77 @@ pub enum RegistryFilterValue {
     U64(u64),
     U16(u16),
     Boolean(bool),
+}
+
+impl Deserialize for Object {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let mut stream = PickledStream::new(bytes);
+        Object::unpickle(&mut stream).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
+    }
+}
+
+impl Deserialize for Task {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let mut stream = PickledStream::new(bytes);
+        Task::unpickle(&mut stream).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
+    }
+}
+
+impl Deserialize for SpamTrainingSample {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let mut stream = PickledStream::new(bytes);
+        SpamTrainingSample::unpickle(&mut stream).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
+    }
+}
+
+impl Deserialize for DeletedItem {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let mut stream = PickledStream::new(bytes);
+        DeletedItem::unpickle(&mut stream).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
+    }
+}
+
+impl SerializeInfallible for ObjectId {
+    fn serialize(&self) -> Vec<u8> {
+        KeySerializer::new(U16_LEN + U64_LEN)
+            .write(self.object().to_id())
+            .write(self.id().id())
+            .finalize()
+    }
+}
+
+impl Deserialize for ObjectId {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let object_id = bytes.deserialize_be_u16(0)?;
+        let item_id = bytes.deserialize_be_u64(U16_LEN)?;
+        Ok(ObjectId::new(
+            ObjectType::from_id(object_id).ok_or_else(|| {
+                trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                    .into_err()
+                    .caused_by(trc::location!())
+                    .ctx(trc::Key::Value, bytes)
+            })?,
+            Id::new(item_id),
+        ))
+    }
 }

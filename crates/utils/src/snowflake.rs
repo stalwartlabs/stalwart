@@ -12,7 +12,6 @@ use std::{
 #[derive(Debug)]
 pub struct SnowflakeIdGenerator {
     epoch: SystemTime,
-    node_id: u64,
     sequence: AtomicU64,
 }
 
@@ -23,7 +22,8 @@ const SEQUENCE_MASK: u64 = (1 << SEQUENCE_LEN) - 1;
 const NODE_ID_MASK: u64 = (1 << NODE_ID_LEN) - 1;
 
 const DEFAULT_EPOCH: u64 = 1632280000; // 52 years after UNIX_EPOCH
-//const DEFAULT_EPOCH_MS: u128 = (DEFAULT_EPOCH as u128) * 1000; // 52 years after UNIX_EPOCH in milliseconds
+
+static mut NODE_ID: u64 = 1;
 
 /*
 
@@ -35,9 +35,27 @@ ID characteristics:
 
 */
 
+#[inline(always)]
+fn node_id() -> u64 {
+    unsafe { std::ptr::read_volatile(&raw const NODE_ID) }
+}
+
 impl SnowflakeIdGenerator {
     pub fn new() -> Self {
-        Self::with_node_id(rand::random::<u64>())
+        Self {
+            epoch: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_EPOCH), // 52 years after UNIX_EPOCH
+            sequence: 0.into(),
+        }
+    }
+
+    pub fn set_node_id(set_node_id: u64) {
+        let set_node_id = set_node_id & NODE_ID_MASK;
+
+        if set_node_id != node_id() {
+            unsafe {
+                NODE_ID = set_node_id;
+            }
+        }
     }
 
     pub fn from_duration(period: Duration) -> Option<u64> {
@@ -56,8 +74,7 @@ impl SnowflakeIdGenerator {
             .and_then(|diff| Self::from_duration(Duration::from_secs(diff)))
     }
 
-    pub fn from_sequence_and_node_id(sequence: u64, node_id: Option<u64>) -> Option<u64> {
-        let node_id = node_id.unwrap_or_else(rand::random::<u64>);
+    pub fn from_sequence_id(sequence: u64) -> Option<u64> {
         let sequence = sequence & SEQUENCE_MASK;
 
         (SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_EPOCH))
@@ -66,20 +83,12 @@ impl SnowflakeIdGenerator {
             .map(|elapsed| {
                 ((elapsed.as_millis() as u64) << (SEQUENCE_LEN + NODE_ID_LEN))
                     | (sequence << NODE_ID_LEN)
-                    | (node_id & NODE_ID_MASK)
+                    | node_id()
             })
     }
 
     pub fn to_timestamp(id: u64) -> u64 {
         (id >> (SEQUENCE_LEN + NODE_ID_LEN)) / 1000 + DEFAULT_EPOCH
-    }
-
-    pub fn with_node_id(node_id: u64) -> Self {
-        Self {
-            epoch: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_EPOCH), // 52 years after UNIX_EPOCH
-            node_id,
-            sequence: 0.into(),
-        }
     }
 
     #[inline(always)]
@@ -104,9 +113,7 @@ impl SnowflakeIdGenerator {
             .unwrap_or_default() as u64;
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed) & SEQUENCE_MASK;
 
-        (elapsed << (SEQUENCE_LEN + NODE_ID_LEN))
-            | (sequence << NODE_ID_LEN)
-            | (self.node_id & NODE_ID_MASK)
+        (elapsed << (SEQUENCE_LEN + NODE_ID_LEN)) | (sequence << NODE_ID_LEN) | node_id()
     }
 }
 
@@ -120,7 +127,6 @@ impl Clone for SnowflakeIdGenerator {
     fn clone(&self) -> Self {
         Self {
             epoch: self.epoch,
-            node_id: self.node_id,
             sequence: 0.into(),
         }
     }

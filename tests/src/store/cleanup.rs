@@ -19,7 +19,8 @@ pub async fn store_destroy(store: &Store) {
         SUBSPACE_ACL,
         SUBSPACE_TASK_QUEUE,
         SUBSPACE_INDEXES,
-        SUBSPACE_BLOB_EXTRA,
+        SUBSPACE_DELETED_ITEMS,
+        SUBSPACE_SPAM_SAMPLES,
         SUBSPACE_BLOB_LINK,
         SUBSPACE_LOGS,
         SUBSPACE_IN_MEMORY_COUNTER,
@@ -141,28 +142,6 @@ pub async fn store_blob_expire_all(store: &Store) {
                         .deserialize_be_u64(BLOB_HASH_LEN + U32_LEN)
                         .caused_by(trc::location!())?;
 
-                    match value.first().copied() {
-                        Some(BlobLink::QUOTA_LINK) => {
-                            batch.clear(ValueClass::Blob(BlobOp::Quota {
-                                hash: hash.clone(),
-                                until,
-                            }));
-                        }
-                        Some(BlobLink::UNDELETE_LINK) => {
-                            batch.clear(ValueClass::Blob(BlobOp::Undelete {
-                                hash: hash.clone(),
-                                until,
-                            }));
-                        }
-                        Some(BlobLink::SPAM_SAMPLE_LINK) => {
-                            batch.clear(ValueClass::Blob(BlobOp::SpamSample {
-                                hash: hash.clone(),
-                                until,
-                            }));
-                        }
-                        _ => {}
-                    }
-
                     batch.clear(ValueClass::Blob(BlobOp::Link {
                         hash,
                         to: BlobLink::Temporary { until },
@@ -258,7 +237,8 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
         (SUBSPACE_QUEUE_EVENT, true),
         (SUBSPACE_REPORT_OUT, true),
         (SUBSPACE_REPORT_IN, true),
-        (SUBSPACE_BLOB_EXTRA, true),
+        (SUBSPACE_DELETED_ITEMS, true),
+        (SUBSPACE_SPAM_SAMPLES, true),
         (SUBSPACE_BLOB_LINK, true),
         (SUBSPACE_BLOBS, true),
         (SUBSPACE_COUNTER, false),

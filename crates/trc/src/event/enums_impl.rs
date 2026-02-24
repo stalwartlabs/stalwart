@@ -400,7 +400,6 @@ impl EventType {
             b"registry.not-supported" => EventType::Registry(RegistryEvent::NotSupported),
             b"registry.validation-error" => EventType::Registry(RegistryEvent::ValidationError),
             b"registry.reserved03" => EventType::Registry(RegistryEvent::Reserved03),
-            b"registry.reserved04" => EventType::Registry(RegistryEvent::Reserved04),
             b"resource.not-found" => EventType::Resource(ResourceEvent::NotFound),
             b"resource.bad-parameters" => EventType::Resource(ResourceEvent::BadParameters),
             b"resource.error" => EventType::Resource(ResourceEvent::Error),
@@ -573,6 +572,7 @@ impl EventType {
             b"task-queue.task-locked" => EventType::TaskQueue(TaskQueueEvent::TaskLocked),
             b"task-queue.task-ignored" => EventType::TaskQueue(TaskQueueEvent::TaskIgnored),
             b"task-queue.task-failed" => EventType::TaskQueue(TaskQueueEvent::TaskFailed),
+            b"task-queue.task-retry" => EventType::TaskQueue(TaskQueueEvent::TaskRetry),
             b"task-queue.blob-not-found" => EventType::TaskQueue(TaskQueueEvent::BlobNotFound),
             b"task-queue.metadata-not-found" => EventType::TaskQueue(TaskQueueEvent::MetadataNotFound),
             b"telemetry.alert" => EventType::Telemetry(TelemetryEvent::Alert),
@@ -1106,7 +1106,6 @@ impl EventType {
             EventType::Registry(RegistryEvent::NotSupported) => "registry.not-supported",
             EventType::Registry(RegistryEvent::ValidationError) => "registry.validation-error",
             EventType::Registry(RegistryEvent::Reserved03) => "registry.reserved03",
-            EventType::Registry(RegistryEvent::Reserved04) => "registry.reserved04",
             EventType::Resource(ResourceEvent::NotFound) => "resource.not-found",
             EventType::Resource(ResourceEvent::BadParameters) => "resource.bad-parameters",
             EventType::Resource(ResourceEvent::Error) => "resource.error",
@@ -1283,6 +1282,7 @@ impl EventType {
             EventType::TaskQueue(TaskQueueEvent::TaskLocked) => "task-queue.task-locked",
             EventType::TaskQueue(TaskQueueEvent::TaskIgnored) => "task-queue.task-ignored",
             EventType::TaskQueue(TaskQueueEvent::TaskFailed) => "task-queue.task-failed",
+            EventType::TaskQueue(TaskQueueEvent::TaskRetry) => "task-queue.task-retry",
             EventType::TaskQueue(TaskQueueEvent::BlobNotFound) => "task-queue.blob-not-found",
             EventType::TaskQueue(TaskQueueEvent::MetadataNotFound) => {
                 "task-queue.metadata-not-found"
@@ -1721,7 +1721,6 @@ impl EventType {
             EventType::Registry(RegistryEvent::NotSupported) => 64,
             EventType::Registry(RegistryEvent::ValidationError) => 63,
             EventType::Registry(RegistryEvent::Reserved03) => 59,
-            EventType::Registry(RegistryEvent::Reserved04) => 53,
             EventType::Resource(ResourceEvent::NotFound) => 389,
             EventType::Resource(ResourceEvent::BadParameters) => 386,
             EventType::Resource(ResourceEvent::Error) => 388,
@@ -1894,6 +1893,7 @@ impl EventType {
             EventType::TaskQueue(TaskQueueEvent::TaskLocked) => 144,
             EventType::TaskQueue(TaskQueueEvent::TaskIgnored) => 586,
             EventType::TaskQueue(TaskQueueEvent::TaskFailed) => 587,
+            EventType::TaskQueue(TaskQueueEvent::TaskRetry) => 53,
             EventType::TaskQueue(TaskQueueEvent::BlobNotFound) => 141,
             EventType::TaskQueue(TaskQueueEvent::MetadataNotFound) => 145,
             EventType::Telemetry(TelemetryEvent::Alert) => 548,
@@ -2358,7 +2358,6 @@ impl EventType {
             64 => Some(EventType::Registry(RegistryEvent::NotSupported)),
             63 => Some(EventType::Registry(RegistryEvent::ValidationError)),
             59 => Some(EventType::Registry(RegistryEvent::Reserved03)),
-            53 => Some(EventType::Registry(RegistryEvent::Reserved04)),
             389 => Some(EventType::Resource(ResourceEvent::NotFound)),
             386 => Some(EventType::Resource(ResourceEvent::BadParameters)),
             388 => Some(EventType::Resource(ResourceEvent::Error)),
@@ -2531,6 +2530,7 @@ impl EventType {
             144 => Some(EventType::TaskQueue(TaskQueueEvent::TaskLocked)),
             586 => Some(EventType::TaskQueue(TaskQueueEvent::TaskIgnored)),
             587 => Some(EventType::TaskQueue(TaskQueueEvent::TaskFailed)),
+            53 => Some(EventType::TaskQueue(TaskQueueEvent::TaskRetry)),
             141 => Some(EventType::TaskQueue(TaskQueueEvent::BlobNotFound)),
             145 => Some(EventType::TaskQueue(TaskQueueEvent::MetadataNotFound)),
             548 => Some(EventType::Telemetry(TelemetryEvent::Alert)),
@@ -3412,7 +3412,6 @@ impl EventType {
             }
             EventType::Registry(RegistryEvent::ValidationError) => "Object validation error",
             EventType::Registry(RegistryEvent::Reserved03) => "Importing external configuration",
-            EventType::Registry(RegistryEvent::Reserved04) => "Configuration already up to date",
             EventType::Resource(ResourceEvent::NotFound) => "Resource not found",
             EventType::Resource(ResourceEvent::BadParameters) => "Bad resource parameters",
             EventType::Resource(ResourceEvent::Error) => "Resource error",
@@ -3595,6 +3594,7 @@ impl EventType {
                 "Task ignored based on current server roles"
             }
             EventType::TaskQueue(TaskQueueEvent::TaskFailed) => "Task failed during processing",
+            EventType::TaskQueue(TaskQueueEvent::TaskRetry) => "Task will be retried",
             EventType::TaskQueue(TaskQueueEvent::BlobNotFound) => "Blob not found for task",
             EventType::TaskQueue(TaskQueueEvent::MetadataNotFound) => "Metadata not found for task",
             EventType::Telemetry(TelemetryEvent::Alert) => "Alert triggered",
@@ -4351,9 +4351,6 @@ impl EventType {
             EventType::Registry(RegistryEvent::Reserved03) => {
                 "An external configuration is being imported"
             }
-            EventType::Registry(RegistryEvent::Reserved04) => {
-                "The configuration is already up to date"
-            }
             EventType::Resource(ResourceEvent::NotFound) => "The resource was not found",
             EventType::Resource(ResourceEvent::BadParameters) => "The resource parameters are bad",
             EventType::Resource(ResourceEvent::Error) => "An error occurred with the resource",
@@ -4668,6 +4665,9 @@ impl EventType {
                 "The task was ignored based on the current server roles"
             }
             EventType::TaskQueue(TaskQueueEvent::TaskFailed) => "The task failed during processing",
+            EventType::TaskQueue(TaskQueueEvent::TaskRetry) => {
+                "The task will be retried after a failure"
+            }
             EventType::TaskQueue(TaskQueueEvent::BlobNotFound) => {
                 "The requested blob was not found for task"
             }
@@ -5404,7 +5404,6 @@ impl EventType {
             EventType::Registry(RegistryEvent::NotSupported),
             EventType::Registry(RegistryEvent::ValidationError),
             EventType::Registry(RegistryEvent::Reserved03),
-            EventType::Registry(RegistryEvent::Reserved04),
             EventType::Resource(ResourceEvent::NotFound),
             EventType::Resource(ResourceEvent::BadParameters),
             EventType::Resource(ResourceEvent::Error),
@@ -5577,6 +5576,7 @@ impl EventType {
             EventType::TaskQueue(TaskQueueEvent::TaskLocked),
             EventType::TaskQueue(TaskQueueEvent::TaskIgnored),
             EventType::TaskQueue(TaskQueueEvent::TaskFailed),
+            EventType::TaskQueue(TaskQueueEvent::TaskRetry),
             EventType::TaskQueue(TaskQueueEvent::BlobNotFound),
             EventType::TaskQueue(TaskQueueEvent::MetadataNotFound),
             EventType::Telemetry(TelemetryEvent::Alert),

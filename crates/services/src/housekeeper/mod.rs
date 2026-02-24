@@ -396,6 +396,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                     Type = "purge_data_store"
                                 );
                                 let todo = "make sure all store types are purged, in memory, metrics, tracing, etc";
+                                let todo = "make sure spam samples with their indexes and undelete items are purged as well";
 
                                 queue.schedule(
                                     Instant::now()

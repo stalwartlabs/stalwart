@@ -21,20 +21,24 @@ use common::{
     auth::{AccountInfo, AccountTenantIds},
     storage::index::ObjectIndexBuilder,
 };
+use registry::{
+    pickle::Pickle,
+    schema::structs::{Task, TaskCalendarAlarmEmail, TaskCalendarAlarmNotification, TaskStatus},
+    types::{EnumImpl, datetime::UTCDateTime},
+};
 use store::{
-    IterateParams, U16_LEN, U32_LEN, U64_LEN, ValueKey,
+    IterateParams, SerializeInfallible, U32_LEN, ValueKey,
     roaring::RoaringBitmap,
     write::{
-        AlignedBytes, Archive, BatchBuilder, IndexPropertyClass, TaskEpoch, TaskQueueClass,
-        ValueClass,
-        key::{DeserializeBigEndian, KeySerializer},
-        now,
+        AlignedBytes, Archive, BatchBuilder, IndexPropertyClass, Operation, TaskQueueClass,
+        ValueClass, ValueOp, key::DeserializeBigEndian, now,
     },
 };
 use trc::AddContext;
 use types::{
     collection::{Collection, VanishedCollection},
     field::CalendarNotificationField,
+    id::Id,
 };
 
 pub trait ItipAutoExpunge: Sync + Send {
@@ -526,52 +530,70 @@ impl DestroyArchive<Archive<&ArchivedCalendarEventNotification>> {
 }
 
 impl CalendarAlarm {
-    pub fn write_task(&self, batch: &mut BatchBuilder) {
-        match &self.typ {
+    pub fn build_write_ops(&self, account_id: u32, document_id: u32) -> [Operation; 2] {
+        let task = match &self.typ {
             CalendarAlarmType::Email {
                 event_start,
                 event_start_tz,
                 event_end,
                 event_end_tz,
-            } => {
-                batch.set(
-                    ValueClass::TaskQueue(TaskQueueClass::SendAlarm {
-                        due: TaskEpoch::new(self.alarm_time as u64),
-                        event_id: self.event_id,
-                        alarm_id: self.alarm_id,
-                        is_email_alert: true,
-                    }),
-                    KeySerializer::new((U64_LEN * 2) + (U16_LEN * 2))
-                        .write(*event_start as u64)
-                        .write(*event_end as u64)
-                        .write(*event_start_tz)
-                        .write(*event_end_tz)
-                        .finalize(),
-                );
-            }
+            } => Task::CalendarAlarmEmail(TaskCalendarAlarmEmail {
+                account_id: account_id.into(),
+                document_id: document_id.into(),
+                alarm_id: self.alarm_id.into(),
+                event_id: self.event_id.into(),
+                event_end: UTCDateTime::from_timestamp(*event_end),
+                event_end_tz: (*event_end_tz).into(),
+                event_start: UTCDateTime::from_timestamp(*event_start),
+                event_start_tz: (*event_start_tz).into(),
+                status: TaskStatus::at(self.alarm_time),
+            }),
             CalendarAlarmType::Display { recurrence_id } => {
-                batch.set(
-                    ValueClass::TaskQueue(TaskQueueClass::SendAlarm {
-                        due: TaskEpoch::new(self.alarm_time as u64),
-                        event_id: self.event_id,
-                        alarm_id: self.alarm_id,
-                        is_email_alert: false,
-                    }),
-                    KeySerializer::new(U64_LEN)
-                        .write(recurrence_id.unwrap_or_default() as u64)
-                        .finalize(),
-                );
+                Task::CalendarAlarmNotification(TaskCalendarAlarmNotification {
+                    account_id: account_id.into(),
+                    document_id: document_id.into(),
+                    alarm_id: self.alarm_id.into(),
+                    event_id: self.event_id.into(),
+                    recurrence_id: *recurrence_id,
+                    status: TaskStatus::at(self.alarm_time),
+                })
             }
+        };
+        let id = Id::from_parts(account_id, document_id).id();
+        [
+            Operation::Value {
+                class: ValueClass::TaskQueue(TaskQueueClass::Due {
+                    id,
+                    due: self.alarm_time as u64,
+                }),
+                op: ValueOp::Set(task.object_type().to_id().serialize()),
+            },
+            Operation::Value {
+                class: ValueClass::TaskQueue(TaskQueueClass::Task { id }),
+                op: ValueOp::Set(task.to_pickled_vec()),
+            },
+        ]
+    }
+
+    pub fn write_task(&self, batch: &mut BatchBuilder) {
+        let account_id = batch.last_account_id().unwrap();
+        let document_id = batch.last_document_id().unwrap();
+
+        for op in self.build_write_ops(account_id, document_id) {
+            batch.any_op(op);
         }
     }
 
     pub fn delete_task(&self, batch: &mut BatchBuilder) {
-        batch.clear(ValueClass::TaskQueue(TaskQueueClass::SendAlarm {
-            due: TaskEpoch::new(self.alarm_time as u64),
-            event_id: self.event_id,
-            alarm_id: self.alarm_id,
-            is_email_alert: matches!(self.typ, CalendarAlarmType::Email { .. }),
-        }));
+        let account_id = batch.last_account_id().unwrap();
+        let document_id = batch.last_document_id().unwrap();
+        let id = Id::from_parts(account_id, document_id).id();
+        batch
+            .clear(ValueClass::TaskQueue(TaskQueueClass::Task { id }))
+            .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
+                id,
+                due: self.alarm_time as u64,
+            }));
     }
 }
 

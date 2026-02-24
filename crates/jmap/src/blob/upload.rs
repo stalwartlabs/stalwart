@@ -164,19 +164,11 @@ impl BlobUpload for Server {
             }
 
             // Enforce quota
-            let used = self
-                .core
-                .storage
-                .data
-                .blob_quota(account_id)
-                .await
-                .caused_by(trc::location!())?;
-
-            if ((self.core.jmap.upload_tmp_quota_size > 0
-                && used.bytes + data.len() > self.core.jmap.upload_tmp_quota_size)
-                || (self.core.jmap.upload_tmp_quota_amount > 0
-                    && used.count + 1 > self.core.jmap.upload_tmp_quota_amount))
-                && !access_token.has_permission(Permission::UnlimitedUploads)
+            if !access_token.has_permission(Permission::UnlimitedUploads)
+                && !self
+                    .blob_has_quota(account_id, data.len())
+                    .await
+                    .caused_by(trc::location!())?
             {
                 response.not_created.append(
                     create_id,
@@ -224,19 +216,11 @@ impl BlobUpload for Server {
         }
 
         // Enforce quota
-        let used = self
-            .core
-            .storage
-            .data
-            .blob_quota(account_id.document_id())
-            .await
-            .caused_by(trc::location!())?;
-
-        if ((self.core.jmap.upload_tmp_quota_size > 0
-            && used.bytes + data.len() > self.core.jmap.upload_tmp_quota_size)
-            || (self.core.jmap.upload_tmp_quota_amount > 0
-                && used.count + 1 > self.core.jmap.upload_tmp_quota_amount))
-            && !access_token.has_permission(Permission::UnlimitedUploads)
+        if !access_token.has_permission(Permission::UnlimitedUploads)
+            && !self
+                .blob_has_quota(account_id.document_id(), data.len())
+                .await
+                .caused_by(trc::location!())?
         {
             let err = Err(trc::LimitEvent::BlobQuota
                 .into_err()

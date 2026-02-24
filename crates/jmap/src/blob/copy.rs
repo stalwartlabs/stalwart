@@ -6,12 +6,12 @@
 
 use super::download::BlobDownload;
 use common::{Server, auth::AccessToken};
-use registry::schema::enums::Permission;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::copy::{CopyBlobRequest, CopyBlobResponse},
     request::IntoValid,
 };
+use registry::schema::enums::Permission;
 use std::future::Future;
 use store::write::{BatchBuilder, BlobLink, BlobOp, now};
 use trc::AddContext;
@@ -43,19 +43,11 @@ impl BlobCopy for Server {
         for blob_id in request.blob_ids.into_valid() {
             if self.has_access_blob(&blob_id, access_token).await? {
                 // Enforce quota
-                let used = self
-                    .core
-                    .storage
-                    .data
-                    .blob_quota(account_id)
-                    .await
-                    .caused_by(trc::location!())?;
-
-                if ((self.core.jmap.upload_tmp_quota_size > 0
-                    && used.bytes >= self.core.jmap.upload_tmp_quota_size)
-                    || (self.core.jmap.upload_tmp_quota_amount > 0
-                        && used.count + 1 > self.core.jmap.upload_tmp_quota_amount))
-                    && !access_token.has_permission(Permission::UnlimitedUploads)
+                if !access_token.has_permission(Permission::UnlimitedUploads)
+                    && !self
+                        .blob_has_quota(account_id, 1)
+                        .await
+                        .caused_by(trc::location!())?
                 {
                     response.not_copied.append(
                         blob_id,

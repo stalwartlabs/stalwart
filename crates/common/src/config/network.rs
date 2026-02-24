@@ -13,8 +13,8 @@ use ahash::AHashMap;
 use registry::{
     schema::{
         enums::NodeShardType,
-        prelude::{Object, ObjectType},
-        structs::{self, Asn, HttpForm, NodeRole, NodeShard, Rate},
+        prelude::ObjectType,
+        structs::{self, Asn, HttpForm, NodeRole, NodeShard, Rate, TaskManager},
     },
     types::EnumImpl,
 };
@@ -30,6 +30,7 @@ pub struct Network {
     pub http: Http,
     pub contact_form: Option<ContactForm>,
     pub asn_geo_lookup: AsnGeoLookupConfig,
+    pub task_manager: TaskManager,
 }
 
 #[derive(Clone)]
@@ -155,6 +156,7 @@ impl Network {
             asn_geo_lookup: AsnGeoLookupConfig::parse(bp).await.unwrap_or_default(),
             roles: ClusterRoles::default(),
             http: Http::parse(bp).await,
+            task_manager: bp.setting_infallible::<TaskManager>().await,
         };
 
         // Process ranges

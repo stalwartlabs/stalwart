@@ -608,7 +608,6 @@ pub enum RegistryEvent {
     NotSupported = 64,
     ValidationError = 63,
     Reserved03 = 59,
-    Reserved04 = 53,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -826,6 +825,7 @@ pub enum TaskQueueEvent {
     TaskLocked = 144,
     TaskIgnored = 586,
     TaskFailed = 587,
+    TaskRetry = 53,
     BlobNotFound = 141,
     MetadataNotFound = 145,
 }

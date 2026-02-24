@@ -23,17 +23,28 @@ use mail_parser::{
     DateTime, Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
     parsers::fields::thread::thread_name,
 };
-use registry::schema::prelude::Permission;
-use std::{borrow::Cow, cmp::Ordering, fmt::Write, time::Instant};
-use std::{future::Future, hash::Hasher};
-use store::write::{AlignedBytes, Archive};
-use store::{
-    IndexKeyPrefix, IterateParams, U32_LEN, ValueKey,
-    ahash::{AHashMap, AHashSet},
-    write::{
-        AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, SearchIndex,
-        TaskEpoch, TaskQueueClass, ValueClass, key::DeserializeBigEndian, now,
+use registry::{
+    pickle::Pickle,
+    schema::{
+        enums::IndexDocumentType,
+        prelude::{ObjectType, Permission, Property},
+        structs::{SpamTrainingSample, Task, TaskIndexDocument, TaskMergeThreads, TaskStatus},
     },
+    types::{EnumImpl, datetime::UTCDateTime, id::ObjectId},
+};
+use std::future::Future;
+use std::{borrow::Cow, cmp::Ordering, fmt::Write, time::Instant};
+use store::{
+    IndexKeyPrefix, IterateParams, SerializeInfallible, U32_LEN, ValueKey,
+    ahash::AHashMap,
+    write::{
+        AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, ValueClass,
+        key::DeserializeBigEndian, now,
+    },
+};
+use store::{
+    write::{AlignedBytes, Archive, RegistryClass},
+    xxhash_rust,
 };
 use trc::{AddContext, MessageIngestEvent, SpamEvent};
 use types::{
@@ -41,10 +52,11 @@ use types::{
     blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
     field::{ContactField, EmailField, MailboxField, PrincipalField},
+    id::Id,
     keyword::Keyword,
     special_use::SpecialUse,
 };
-use utils::{cheeky_hash::CheekyHash, sanitize_email};
+use utils::{cheeky_hash::CheekyHash, sanitize_email, snowflake::SnowflakeIdGenerator};
 
 #[derive(Default)]
 pub struct IngestedEmail {
@@ -109,10 +121,15 @@ pub trait EmailIngest: Sync + Send {
         is_spam: bool,
         span_id: u64,
     ) -> impl Future<Output = trc::Result<()>> + Send;
+
+    #[allow(clippy::too_many_arguments)]
     fn add_spam_sample(
         &self,
+        account_id: u32,
         batch: &mut BatchBuilder,
         hash: BlobHash,
+        from: String,
+        subject: String,
         is_spam: bool,
         hold_sample: bool,
         span_id: u64,
@@ -603,6 +620,25 @@ impl EmailIngest for Server {
             size: (message.raw_message.len() + extra_headers.len()) as u32,
         };
 
+        // Request spam training
+        if let Some(learn_spam) = train_spam {
+            self.add_spam_sample(
+                account_id,
+                &mut batch,
+                params.blob_hash.unwrap_or(&blob_hash).clone(),
+                message
+                    .from()
+                    .and_then(|s| s.first())
+                    .and_then(|s| s.address())
+                    .unwrap_or_default()
+                    .to_string(),
+                thread_name(message.subject().unwrap_or_default()).to_string(),
+                learn_spam,
+                !is_encrypted,
+                params.session_id,
+            );
+        }
+
         batch
             .with_collection(Collection::Email)
             .with_document(document_id)
@@ -623,38 +659,30 @@ impl EmailIngest for Server {
                 }),
                 ThreadInfo::serialize(thread_id, &message_ids),
             )
-            .set(
-                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                    index: SearchIndex::Email,
-                    due: TaskEpoch::now(),
-                    is_insert: true,
-                }),
-                vec![],
-            );
+            .schedule_task(Task::IndexDocument(TaskIndexDocument {
+                account_id: account_id.into(),
+                document_id: document_id.into(),
+                document_type: IndexDocumentType::Email,
+                status: TaskStatus::now(),
+            }));
 
         if let Some(blob_hold) = blob_hold {
             batch.clear(blob_hold);
         }
 
         // Merge threads if necessary
-        if let Some(merge_threads) = MergeThreadIds::new(thread_result).serialize() {
-            batch.set(
-                ValueClass::TaskQueue(TaskQueueClass::MergeThreads {
-                    due: TaskEpoch::now(),
-                }),
-                merge_threads,
-            );
-        }
-
-        // Request spam training
-        if let Some(learn_spam) = train_spam {
-            self.add_spam_sample(
-                &mut batch,
-                params.blob_hash.unwrap_or(&blob_hash).clone(),
-                learn_spam,
-                !is_encrypted,
-                params.session_id,
-            );
+        if !thread_result.merge_ids.is_empty() {
+            batch.schedule_task(Task::MergeThreads(TaskMergeThreads {
+                account_id: account_id.into(),
+                document_id: document_id.into(),
+                status: TaskStatus::now(),
+                thread_ids: thread_result
+                    .merge_ids
+                    .into_iter()
+                    .map(|id| id.into())
+                    .collect(),
+                thread_hash: thread_result.thread_hash.to_string(),
+            }));
         }
 
         // Add iTIP responses to batch
@@ -876,9 +904,14 @@ impl EmailIngest for Server {
             let metadata = archive
                 .to_unarchived::<MessageMetadata>()
                 .caused_by(trc::location!())?;
+            let part = metadata.inner.root_part();
+
             self.add_spam_sample(
+                account_id,
                 batch,
                 (&metadata.inner.blob_hash).into(),
+                part.from().unwrap_or_default().to_string(),
+                thread_name(part.subject().unwrap_or_default()).to_string(),
                 is_spam,
                 true,
                 span_id,
@@ -890,8 +923,11 @@ impl EmailIngest for Server {
 
     fn add_spam_sample(
         &self,
+        account_id: u32,
         batch: &mut BatchBuilder,
         hash: BlobHash,
+        from: String,
+        subject: String,
         is_spam: bool,
         hold_sample: bool,
         span_id: u64,
@@ -903,17 +939,42 @@ impl EmailIngest for Server {
             dt.second = 0;
             let until = dt.to_timestamp() as u64 + config.hold_samples_for;
 
+            let sample = SpamTrainingSample {
+                account_id: Some(Id::from(account_id)),
+                blob_id: BlobId::new(hash.clone(), BlobClass::default()),
+                delete_after_use: !hold_sample,
+                expires_at: UTCDateTime::from_timestamp(until as i64),
+                from,
+                is_spam,
+                subject,
+            }
+            .to_pickled_vec();
+
+            let object_id = ObjectType::SpamTrainingSample.to_id();
+            let item_id = SnowflakeIdGenerator::from_sequence_id(xxhash_rust::xxh3::xxh3_64(
+                sample.as_slice(),
+            ))
+            .unwrap_or_default();
             batch
                 .set(
                     BlobOp::Link {
-                        hash: hash.clone(),
+                        hash,
                         to: BlobLink::Temporary { until },
                     },
-                    vec![BlobLink::SPAM_SAMPLE_LINK],
+                    ObjectId::new(ObjectType::SpamTrainingSample, item_id.into()).serialize(),
                 )
                 .set(
-                    BlobOp::SpamSample { hash, until },
-                    vec![u8::from(is_spam), u8::from(hold_sample)],
+                    ValueClass::Registry(RegistryClass::Id { object_id, item_id }),
+                    sample,
+                )
+                .set(
+                    ValueClass::Registry(RegistryClass::Index {
+                        index_id: Property::AccountId.to_id(),
+                        object_id,
+                        item_id,
+                        key: account_id.serialize(),
+                    }),
+                    vec![],
                 );
 
             trc::event!(
@@ -952,65 +1013,6 @@ fn has_message_id(a: &[CheekyHash], b: &[u8]) -> bool {
 impl IngestSource<'_> {
     pub fn is_smtp(&self) -> bool {
         matches!(self, Self::Smtp { .. })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MergeThreadIds<T> {
-    pub thread_hash: CheekyHash,
-    pub merge_ids: T,
-}
-
-impl MergeThreadIds<Vec<u32>> {
-    pub(crate) fn new(thread_result: ThreadResult) -> Self {
-        Self {
-            thread_hash: thread_result.thread_hash,
-            merge_ids: thread_result.merge_ids,
-        }
-    }
-
-    pub(crate) fn serialize(&self) -> Option<Vec<u8>> {
-        if !self.merge_ids.is_empty() {
-            let mut buf =
-                Vec::with_capacity(self.thread_hash.len() + self.merge_ids.len() * U32_LEN);
-            buf.extend_from_slice(self.thread_hash.as_bytes());
-            for id in &self.merge_ids {
-                buf.extend_from_slice(&id.to_be_bytes());
-            }
-            Some(buf)
-        } else {
-            None
-        }
-    }
-}
-
-impl MergeThreadIds<AHashSet<u32>> {
-    pub fn deserialize(bytes: &[u8]) -> Option<Self> {
-        if !bytes.is_empty() {
-            let thread_hash = CheekyHash::deserialize(bytes)?;
-            let mut merge_ids =
-                AHashSet::with_capacity(((bytes.len() - thread_hash.len()) / U32_LEN) + 1);
-            let mut start_offset = thread_hash.len();
-
-            while let Some(id_bytes) = bytes.get(start_offset..start_offset + U32_LEN) {
-                merge_ids.insert(u32::from_be_bytes(id_bytes.try_into().ok()?));
-                start_offset += U32_LEN;
-            }
-
-            Some(Self {
-                thread_hash,
-                merge_ids,
-            })
-        } else {
-            None
-        }
-    }
-}
-
-impl std::hash::Hash for MergeThreadIds<AHashSet<u32>> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.thread_hash.hash(state);
-        self.merge_ids.len().hash(state);
     }
 }
 

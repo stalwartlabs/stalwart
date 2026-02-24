@@ -222,6 +222,10 @@ impl BlobId {
             0
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.hash.is_empty()
+    }
 }
 
 impl serde::Serialize for BlobId {
@@ -230,6 +234,16 @@ impl serde::Serialize for BlobId {
         S: serde::Serializer,
     {
         serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for BlobId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        BlobId::from_str(<&str>::deserialize(deserializer)?)
+            .map_err(|_| serde::de::Error::custom("invalid BlobId"))
     }
 }
 

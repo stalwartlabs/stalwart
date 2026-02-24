@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::task_manager::TaskResult;
 use common::{Server, storage::index::ObjectIndexBuilder};
-use email::message::{
-    ingest::{MergeThreadIds, ThreadMerge},
-    metadata::MessageData,
-};
-use std::time::Duration;
+use email::message::{ingest::ThreadMerge, metadata::MessageData};
+use registry::schema::structs::TaskMergeThreads;
+use std::{str::FromStr, time::Duration};
 use store::{
     IndexKeyPrefix, IterateParams, U32_LEN, ValueKey,
     ahash::{AHashMap, AHashSet},
@@ -24,31 +23,25 @@ use types::{
     collection::{Collection, SyncCollection},
     field::EmailField,
 };
+use utils::cheeky_hash::CheekyHash;
 
 const MAX_RETRIES: usize = 5;
 
-pub trait MergeThreadsTask: Sync + Send {
-    fn merge_threads(
-        &self,
-        account_id: u32,
-        threads: &MergeThreadIds<AHashSet<u32>>,
-    ) -> impl Future<Output = bool> + Send;
+pub(crate) trait MergeThreadsTask: Sync + Send {
+    fn merge_threads(&self, threads: &TaskMergeThreads) -> impl Future<Output = TaskResult> + Send;
 }
 
 impl MergeThreadsTask for Server {
-    async fn merge_threads(
-        &self,
-        account_id: u32,
-        threads: &MergeThreadIds<AHashSet<u32>>,
-    ) -> bool {
-        match merge_threads(self, account_id, threads).await {
-            Ok(_) => true,
+    async fn merge_threads(&self, threads: &TaskMergeThreads) -> TaskResult {
+        match merge_threads(self, threads).await {
+            Ok(result) => result,
             Err(err) => {
+                let result = TaskResult::temporary(err.to_string());
                 trc::error!(
-                    err.account_id(account_id)
+                    err.account_id(threads.account_id.document_id())
                         .details("Failed to merge threads")
                 );
-                false
+                result
             }
         }
     }
@@ -56,11 +49,19 @@ impl MergeThreadsTask for Server {
 
 async fn merge_threads(
     server: &Server,
-    account_id: u32,
-    merge_threads: &MergeThreadIds<AHashSet<u32>>,
-) -> trc::Result<()> {
-    let key_len = IndexKeyPrefix::len() + merge_threads.thread_hash.len() + U32_LEN;
+    task_merge_threads: &TaskMergeThreads,
+) -> trc::Result<TaskResult> {
+    let Ok(thread_hash) = CheekyHash::from_str(&task_merge_threads.thread_hash) else {
+        return Ok(TaskResult::permanent("Invalid thread hash"));
+    };
+    let account_id = task_merge_threads.account_id.document_id();
+    let key_len = IndexKeyPrefix::len() + thread_hash.len() + U32_LEN;
     let document_id_pos = key_len - U32_LEN;
+    let merge_thread_ids = task_merge_threads
+        .thread_ids
+        .iter()
+        .map(|id| id.document_id())
+        .collect::<AHashSet<_>>();
     let mut thread_merge = ThreadMerge::new();
     let mut thread_index = AHashMap::new();
     let mut try_count = 0;
@@ -77,7 +78,7 @@ async fn merge_threads(
                         document_id: 0,
                         class: ValueClass::IndexProperty(IndexPropertyClass::Hash {
                             property: EmailField::Threading.into(),
-                            hash: merge_threads.thread_hash,
+                            hash: thread_hash,
                         }),
                     },
                     ValueKey {
@@ -86,7 +87,7 @@ async fn merge_threads(
                         document_id: u32::MAX,
                         class: ValueClass::IndexProperty(IndexPropertyClass::Hash {
                             property: EmailField::Threading.into(),
-                            hash: merge_threads.thread_hash,
+                            hash: thread_hash,
                         }),
                     },
                 )
@@ -94,7 +95,7 @@ async fn merge_threads(
                 |key, value| {
                     if key.len() == key_len {
                         let thread_id = value.deserialize_be_u32(0)?;
-                        if merge_threads.merge_ids.contains(&thread_id) {
+                        if merge_thread_ids.contains(&thread_id) {
                             let document_id = key.deserialize_be_u32(document_id_pos)?;
 
                             thread_merge.add(thread_id, document_id);
@@ -110,7 +111,7 @@ async fn merge_threads(
 
         if thread_merge.num_thread_ids() < 2 {
             // Another process merged the threads already?
-            return Ok(());
+            return Ok(TaskResult::Success);
         }
         let thread_id = thread_merge.merge_thread_id();
 
@@ -172,7 +173,7 @@ async fn merge_threads(
                         batch.set(
                             ValueClass::IndexProperty(IndexPropertyClass::Hash {
                                 property: EmailField::Threading.into(),
-                                hash: merge_threads.thread_hash,
+                                hash: thread_hash,
                             }),
                             thread_index,
                         );
@@ -182,7 +183,7 @@ async fn merge_threads(
         }
 
         match server.commit_batch(batch).await {
-            Ok(_) => return Ok(()),
+            Ok(_) => return Ok(TaskResult::Success),
             Err(err) if err.is_assertion_failure() && try_count < MAX_RETRIES => {
                 let backoff = store::rand::rng().random_range(50..=300);
                 tokio::time::sleep(Duration::from_millis(backoff)).await;

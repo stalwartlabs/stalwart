@@ -7,13 +7,15 @@
 use super::metadata::MessageData;
 use common::{KV_LOCK_PURGE_ACCOUNT, Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
+use registry::schema::enums::IndexDocumentType;
 use registry::schema::prelude::ObjectType;
+use registry::schema::structs::{Task, TaskIndexDocument, TaskStatus};
 use std::future::Future;
 use store::ahash::AHashSet;
 use store::registry::RegistryQuery;
 use store::write::key::DeserializeBigEndian;
-use store::write::{IndexPropertyClass, SearchIndex, TaskEpoch, TaskQueueClass, now};
-use store::{IterateParams, SerializeInfallible, U32_LEN, U64_LEN, ValueKey};
+use store::write::{IndexPropertyClass, now};
+use store::{IterateParams, U32_LEN, U64_LEN, ValueKey};
 use store::{
     roaring::RoaringBitmap,
     write::{BatchBuilder, ValueClass},
@@ -83,14 +85,12 @@ impl EmailDeletion for Server {
                             .with_current(metadata),
                     )
                     .caused_by(trc::location!())?
-                    .set(
-                        ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                            index: SearchIndex::Email,
-                            due: TaskEpoch::now(),
-                            is_insert: false,
-                        }),
-                        0u64.serialize(),
-                    )
+                    .schedule_task(Task::UnindexDocument(TaskIndexDocument {
+                        account_id: account_id.into(),
+                        document_id: document_id.into(),
+                        document_type: IndexDocumentType::Email,
+                        status: TaskStatus::now(),
+                    }))
                     .commit_point();
 
                 deleted_ids.insert(document_id);

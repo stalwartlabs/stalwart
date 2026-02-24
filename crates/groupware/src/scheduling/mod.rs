@@ -14,6 +14,7 @@ use calcard::{
         ICalendarStatus, ICalendarUserTypes, ICalendarValue, Uri,
     },
 };
+use registry::schema::structs::TaskCalendarItipContents;
 use std::{fmt::Display, hash::Hash};
 
 pub mod attendee;
@@ -144,7 +145,7 @@ pub enum ItipError {
     AutoAddDisabled,
 }
 
-#[derive(Debug, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Debug)]
 pub struct ItipMessage<T> {
     pub from: String,
     pub from_organizer: bool,
@@ -153,7 +154,7 @@ pub struct ItipMessage<T> {
     pub message: T,
 }
 
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ItipSummary {
     Invite(Vec<ItipField>),
     Update {
@@ -168,13 +169,14 @@ pub enum ItipSummary {
     },
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ItipField {
     pub name: ICalendarProperty,
     pub value: ItipValue,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum ItipValue {
     Text(String),
     Time(ItipTime),
@@ -182,22 +184,21 @@ pub enum ItipValue {
     Participants(Vec<ItipParticipant>),
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ItipTime {
     pub start: i64,
     pub tz_id: u16,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ItipParticipant {
     pub email: String,
     pub name: Option<String>,
     pub is_organizer: bool,
 }
 
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub struct ItipMessages {
-    pub messages: Vec<ItipMessage<String>>,
+    pub messages: Vec<TaskCalendarItipContents>,
 }
 
 impl Attendee<'_> {

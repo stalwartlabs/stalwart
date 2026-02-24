@@ -12,6 +12,11 @@ use std::collections::HashMap;
 pub trait Pickle: Sized {
     fn pickle(&self, out: &mut Vec<u8>);
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self>;
+    fn to_pickled_vec(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(256);
+        self.pickle(&mut out);
+        out
+    }
 }
 
 pub struct PickledStream<'x> {

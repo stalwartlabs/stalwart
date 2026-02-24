@@ -46,7 +46,7 @@ impl RocksDbStore {
             SUBSPACE_INDEXES,
             SUBSPACE_ACL,
             SUBSPACE_TASK_QUEUE,
-            SUBSPACE_BLOB_EXTRA,
+            SUBSPACE_DELETED_ITEMS,
             SUBSPACE_BLOB_LINK,
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,
@@ -60,11 +60,11 @@ impl RocksDbStore {
             SUBSPACE_TELEMETRY_SPAN,
             SUBSPACE_TELEMETRY_METRIC,
             SUBSPACE_SEARCH_INDEX,
+            SUBSPACE_SPAM_SAMPLES,
             LEGACY_SUBSPACE_BITMAP_ID,
             LEGACY_SUBSPACE_BITMAP_TAG,
             LEGACY_SUBSPACE_BITMAP_TEXT,
             LEGACY_SUBSPACE_FTS_INDEX,
-            LEGACY_SUBSPACE_TELEMETRY_INDEX,
         ] {
             let cf_opts = Options::default();
             cfs.push(ColumnFamilyDescriptor::new(

@@ -12,7 +12,7 @@ use crate::{
     mailbox::UidMailbox,
     message::{
         index::extractors::VisitTextArchived,
-        ingest::{MergeThreadIds, ThreadInfo},
+        ingest::ThreadInfo,
         metadata::{
             MESSAGE_HAS_ATTACHMENT, MESSAGE_RECEIVED_MASK, MetadataHeaderName, MetadataHeaderValue,
         },
@@ -20,9 +20,11 @@ use crate::{
 };
 use common::{Server, storage::index::ObjectIndexBuilder};
 use mail_parser::parsers::fields::thread::thread_name;
-use store::write::{
-    BatchBuilder, IndexPropertyClass, SearchIndex, TaskEpoch, TaskQueueClass, ValueClass,
+use registry::schema::{
+    enums::IndexDocumentType,
+    structs::{Task, TaskIndexDocument, TaskMergeThreads, TaskStatus},
 };
+use store::write::{BatchBuilder, IndexPropertyClass, ValueClass};
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive},
@@ -203,23 +205,26 @@ impl EmailCopy for Server {
                 }),
                 ThreadInfo::serialize(thread_id, &message_ids),
             )
-            .set(
-                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                    index: SearchIndex::Email,
-                    due: TaskEpoch::now(),
-                    is_insert: true,
-                }),
-                vec![],
-            );
+            .schedule_task(Task::IndexDocument(TaskIndexDocument {
+                account_id: to_account_id.into(),
+                document_id: document_id.into(),
+                document_type: IndexDocumentType::Email,
+                status: TaskStatus::now(),
+            }));
 
         // Merge threads if necessary
-        if let Some(merge_threads) = MergeThreadIds::new(thread_result).serialize() {
-            batch.set(
-                ValueClass::TaskQueue(TaskQueueClass::MergeThreads {
-                    due: TaskEpoch::now(),
-                }),
-                merge_threads,
-            );
+        if !thread_result.merge_ids.is_empty() {
+            batch.schedule_task(Task::MergeThreads(TaskMergeThreads {
+                account_id: to_account_id.into(),
+                document_id: document_id.into(),
+                status: TaskStatus::now(),
+                thread_ids: thread_result
+                    .merge_ids
+                    .into_iter()
+                    .map(|id| id.into())
+                    .collect(),
+                thread_hash: thread_result.thread_hash.to_string(),
+            }));
         }
 
         metadata

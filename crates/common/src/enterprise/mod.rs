@@ -12,7 +12,6 @@ pub mod alerts;
 pub mod config;
 pub mod license;
 pub mod llm;
-pub mod undelete;
 
 use crate::{
     Core, Server, config::groupware::CalendarTemplateVariable, expr::Expression,

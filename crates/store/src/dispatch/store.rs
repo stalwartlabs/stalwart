@@ -6,7 +6,7 @@
 
 use super::DocumentSet;
 use crate::{
-    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_BLOB_EXTRA, SUBSPACE_COUNTER,
+    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_COUNTER, SUBSPACE_DELETED_ITEMS,
     SUBSPACE_INDEXES, SUBSPACE_LOGS, Store, U32_LEN, Value, ValueKey,
     write::{
         AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, Operation, ReportClass, ValueClass,
@@ -344,12 +344,7 @@ impl Store {
     }
 
     pub async fn danger_destroy_account(&self, account_id: u32) -> trc::Result<()> {
-        for subspace in [
-            SUBSPACE_LOGS,
-            SUBSPACE_INDEXES,
-            SUBSPACE_COUNTER,
-            SUBSPACE_BLOB_EXTRA,
-        ] {
+        for subspace in [SUBSPACE_LOGS, SUBSPACE_INDEXES, SUBSPACE_COUNTER] {
             self.delete_range(
                 AnyKey {
                     subspace,

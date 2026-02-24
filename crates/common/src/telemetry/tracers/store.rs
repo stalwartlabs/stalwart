@@ -10,11 +10,12 @@
 
 use crate::config::telemetry::StoreTracer;
 use ahash::{AHashMap, AHashSet};
+use registry::schema::structs::{Task, TaskIndexTrace, TaskStatus};
 use std::{collections::HashSet, future::Future, time::Duration};
 use store::{
     Deserialize, SearchStore, Store, ValueKey,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery, TracingSearchField},
-    write::{BatchBuilder, SearchIndex, TaskEpoch, TaskQueueClass, TelemetryClass, ValueClass},
+    write::{BatchBuilder, SearchIndex, TelemetryClass, ValueClass},
 };
 use trc::{
     AddContext, AuthEvent, Event, EventDetails, EventType, Key, MessageIngestEvent,
@@ -61,16 +62,10 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
                                     events.len() + 2,
                                 ),
                             )
-                            .with_account_id((span_id >> 32) as u32) // TODO: This is hacky, improve
-                            .with_document(span_id as u32)
-                            .set(
-                                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                                    due: TaskEpoch::now(),
-                                    index: SearchIndex::Tracing,
-                                    is_insert: true,
-                                }),
-                                vec![],
-                            );
+                            .schedule_task(Task::IndexTrace(TaskIndexTrace {
+                                status: TaskStatus::now(),
+                                trace_id: span_id.into(),
+                            }));
                     }
                 }
             }

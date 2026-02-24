@@ -11,7 +11,7 @@ use crate::{
 };
 use std::{fmt::Display, str::FromStr, time::SystemTime};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct UTCDateTime(i64);
 

@@ -25,6 +25,7 @@ pub use crate::types::socketaddr::SocketAddr;
 pub use crate::types::string::StringValidator;
 pub use serde::{Deserialize, Serialize};
 pub use std::str::FromStr;
+pub use types::blob::BlobId;
 pub use types::id::Id;
 pub use utils::map::vec_map::VecMap;
 

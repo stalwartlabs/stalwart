@@ -11,7 +11,11 @@ use crate::{
     types::{EnumImpl, error::PatchError},
 };
 use std::{fmt::Display, str::FromStr};
-use types::{blob::BlobId, id::Id};
+use types::{
+    blob::{BlobClass, BlobId},
+    blob_hash::{BLOB_HASH_LEN, BlobHash},
+    id::Id,
+};
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct ObjectId {
@@ -69,10 +73,28 @@ impl Pickle for Id {
 
     fn unpickle(data: &mut PickledStream<'_>) -> Option<Self> {
         let mut arr = [0u8; std::mem::size_of::<u64>()];
-        arr.copy_from_slice(data.read_bytes(8)?);
+        arr.copy_from_slice(data.read_bytes(std::mem::size_of::<u64>())?);
         let id = u64::from_be_bytes(arr);
 
         Some(Id::new(id))
+    }
+}
+
+impl Pickle for BlobId {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(self.hash.as_slice());
+    }
+
+    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
+        stream.read_bytes(BLOB_HASH_LEN).map(|bytes| {
+            BlobId::new(
+                BlobHash::try_from_hash_slice(bytes).unwrap(),
+                BlobClass::Reserved {
+                    account_id: 0,
+                    expires: 0,
+                },
+            )
+        })
     }
 }
 

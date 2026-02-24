@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::Server;
+use crate::{KV_QUOTA_BLOB, Server};
 use mail_parser::{
     Encoding,
     decoders::{base64::base64_decode, quoted_printable::quoted_printable_decode},
 };
 use store::{
-    SerializeInfallible,
+    U32_LEN, U64_LEN,
+    dispatch::lookup::KeyValue,
     write::{BatchBuilder, BlobLink, BlobOp, now},
 };
 use trc::AddContext;
@@ -19,7 +20,46 @@ use types::{
     blob_hash::BlobHash,
 };
 
+const COUNT_BYTES: u32 = 20;
+const COUNT_SHIFT: u32 = 64 - COUNT_BYTES;
+const SIZE_MASK: u64 = (1u64 << COUNT_SHIFT) - 1;
+
 impl Server {
+    pub async fn blob_has_quota(&self, account_id: u32, bytes: usize) -> trc::Result<bool> {
+        if self.core.jmap.upload_tmp_quota_size > 0 || self.core.jmap.upload_tmp_quota_amount > 0 {
+            let now = now();
+            let range_start = now / self.core.jmap.upload_tmp_ttl;
+            let range_end =
+                (range_start * self.core.jmap.upload_tmp_ttl) + self.core.jmap.upload_tmp_ttl;
+            let expires_in = range_end - now;
+
+            let mut bucket = Vec::with_capacity(U32_LEN + U64_LEN + 1);
+            bucket.push(KV_QUOTA_BLOB);
+            bucket.extend_from_slice(account_id.to_be_bytes().as_slice());
+            bucket.extend_from_slice(range_start.to_be_bytes().as_slice());
+
+            self.in_memory_store()
+                .counter_incr(
+                    KeyValue::new(bucket, 1i64 << COUNT_SHIFT | bytes as i64).expires(expires_in),
+                    true,
+                )
+                .await
+                .caused_by(trc::location!())
+                .map(|v| {
+                    let v = v as u64;
+                    let count = v >> COUNT_SHIFT;
+                    let size = v & SIZE_MASK;
+
+                    (self.core.jmap.upload_tmp_quota_amount == 0
+                        || count <= self.core.jmap.upload_tmp_quota_amount as u64)
+                        && (self.core.jmap.upload_tmp_quota_size == 0
+                            || size <= self.core.jmap.upload_tmp_quota_size as u64)
+                })
+        } else {
+            Ok(true)
+        }
+    }
+
     #[allow(clippy::blocks_in_conditions)]
     pub async fn put_jmap_blob(&self, account_id: u32, data: &[u8]) -> trc::Result<BlobId> {
         // First reserve the hash
@@ -27,22 +67,13 @@ impl Server {
         let mut batch = BatchBuilder::new();
         let until = now() + self.core.jmap.upload_tmp_ttl;
 
-        batch
-            .with_account_id(account_id)
-            .set(
-                BlobOp::Link {
-                    hash: hash.clone(),
-                    to: BlobLink::Temporary { until },
-                },
-                vec![BlobLink::QUOTA_LINK],
-            )
-            .set(
-                BlobOp::Quota {
-                    hash: hash.clone(),
-                    until,
-                },
-                (data.len() as u32).serialize(),
-            );
+        batch.with_account_id(account_id).set(
+            BlobOp::Link {
+                hash: hash.clone(),
+                to: BlobLink::Temporary { until },
+            },
+            vec![],
+        );
 
         self.core
             .storage

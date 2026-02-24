@@ -630,6 +630,12 @@ impl ArchivedMessageMetadataPart {
         })
     }
 
+    pub fn from(&self) -> Option<&str> {
+        self.header_value(&MetadataHeaderName::From)
+            .and_then(|header| header.as_single_address())
+            .and_then(|addr| addr.address.as_deref())
+    }
+
     pub fn subject(&self) -> Option<&str> {
         self.header_value(&MetadataHeaderName::Subject)
             .and_then(|header| header.as_text())

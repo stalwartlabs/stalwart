@@ -97,7 +97,6 @@ pub const U16_LEN: usize = std::mem::size_of::<u16>();
 pub const SUBSPACE_ACL: u8 = b'a';
 pub const SUBSPACE_TASK_QUEUE: u8 = b'f';
 pub const SUBSPACE_INDEXES: u8 = b'i';
-pub const SUBSPACE_BLOB_EXTRA: u8 = b'j';
 pub const SUBSPACE_BLOB_LINK: u8 = b'k';
 pub const SUBSPACE_BLOBS: u8 = b't';
 pub const SUBSPACE_LOGS: u8 = b'l';
@@ -106,6 +105,7 @@ pub const SUBSPACE_IN_MEMORY_VALUE: u8 = b'm';
 pub const SUBSPACE_IN_MEMORY_COUNTER: u8 = b'y';
 pub const SUBSPACE_PROPERTY: u8 = b'p';
 pub const SUBSPACE_REGISTRY: u8 = b's';
+pub const SUBSPACE_REGISTRY_DIRECTORY: u8 = b'd';
 pub const SUBSPACE_QUEUE_MESSAGE: u8 = b'e';
 pub const SUBSPACE_QUEUE_EVENT: u8 = b'q';
 pub const SUBSPACE_QUOTA: u8 = b'u';
@@ -114,14 +114,14 @@ pub const SUBSPACE_REPORT_IN: u8 = b'r';
 pub const SUBSPACE_TELEMETRY_SPAN: u8 = b'o';
 pub const SUBSPACE_TELEMETRY_METRIC: u8 = b'x';
 pub const SUBSPACE_SEARCH_INDEX: u8 = b'z';
+pub const SUBSPACE_DELETED_ITEMS: u8 = b'j';
+pub const SUBSPACE_SPAM_SAMPLES: u8 = b'w';
 
 // TODO: Remove in v1.0
 pub const LEGACY_SUBSPACE_BITMAP_ID: u8 = b'b';
 pub const LEGACY_SUBSPACE_BITMAP_TAG: u8 = b'c';
 pub const LEGACY_SUBSPACE_BITMAP_TEXT: u8 = b'v';
 pub const LEGACY_SUBSPACE_FTS_INDEX: u8 = b'g';
-pub const LEGACY_SUBSPACE_TELEMETRY_INDEX: u8 = b'w';
-pub const LEGACY_SUBSPACE_DIRECTORY: u8 = b'd';
 
 #[derive(Clone)]
 pub struct IterateParams<T: Key> {

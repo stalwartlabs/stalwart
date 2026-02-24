@@ -4,21 +4,29 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::task_manager::{IndexAction, Task};
+use crate::task_manager::{Task, TaskDetails, TaskResult};
 use common::Server;
 use email::{cache::MessageCacheFetch, message::metadata::MessageMetadata};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent, contact::ContactCard};
-use registry::schema::prelude::{ObjectType, Property};
+use registry::{
+    schema::{
+        enums::IndexDocumentType,
+        prelude::{ObjectType, Property},
+        structs::{TaskIndexDocument, TaskIndexTrace, TaskStatus},
+    },
+    types::EnumImpl,
+};
 use std::cmp::Ordering;
 use store::{
-    IterateParams, SerializeInfallible, ValueKey,
+    IterateParams, ValueKey,
     ahash::AHashMap,
+    rand::{self, Rng},
     registry::RegistryQuery,
     roaring::RoaringBitmap,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
-        AlignedBytes, Archive, BatchBuilder, SearchIndex, TaskEpoch, TaskQueueClass,
-        TelemetryClass, ValueClass, key::DeserializeBigEndian,
+        AlignedBytes, Archive, BatchBuilder, SearchIndex, TelemetryClass, ValueClass,
+        key::DeserializeBigEndian, now,
     },
 };
 use trc::{AddContext, TaskQueueEvent};
@@ -29,10 +37,7 @@ use types::{
 };
 
 pub(crate) trait SearchIndexTask: Sync + Send {
-    fn index(
-        &self,
-        tasks: &[Task<IndexAction>],
-    ) -> impl Future<Output = Vec<IndexTaskResult>> + Send;
+    fn index(&self, tasks: &[TaskDetails]) -> impl Future<Output = Vec<IndexTaskResult>> + Send;
 }
 
 pub trait ReindexIndexTask: Sync + Send {
@@ -52,22 +57,15 @@ enum TaskType {
     Delete,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TaskStatus {
-    Success,
-    Failed,
-    Ignored,
-}
-
 #[derive(Debug)]
 pub(crate) struct IndexTaskResult {
-    index: SearchIndex,
+    index: IndexDocumentType,
     task_type: TaskType,
-    status: TaskStatus,
+    pub result: TaskResult,
 }
 
 impl SearchIndexTask for Server {
-    async fn index(&self, tasks: &[Task<IndexAction>]) -> Vec<IndexTaskResult> {
+    async fn index(&self, tasks: &[TaskDetails]) -> Vec<IndexTaskResult> {
         let mut results: Vec<IndexTaskResult> = Vec::with_capacity(tasks.len());
         let mut batch = BatchBuilder::new();
         let mut document_insertions = Vec::new();
@@ -75,101 +73,135 @@ impl SearchIndexTask for Server {
             std::array::from_fn(|_| AHashMap::new());
 
         for task in tasks {
-            if task.action.is_insert {
-                let document = match task.action.index {
-                    SearchIndex::Email => {
-                        build_email_document(self, task.account_id, task.document_id).await
-                    }
-                    SearchIndex::Calendar => {
-                        build_calendar_document(self, task.account_id, task.document_id).await
-                    }
-                    SearchIndex::Contacts => {
-                        build_contact_document(self, task.account_id, task.document_id).await
-                    }
-                    SearchIndex::File => {
-                        // File indexing not implemented yet
-                        continue;
-                    }
-                    SearchIndex::Tracing => {
-                        build_tracing_span_document(self, task.account_id, task.document_id).await
-                    }
-                    SearchIndex::InMemory => unreachable!(),
-                };
+            match &task.task {
+                Task::IndexDocument(task) => {
+                    let account_id = task.account_id.document_id();
+                    let document_id = task.document_id.document_id();
 
-                let result = match document {
-                    Ok(Some(doc)) if !doc.is_empty() => {
-                        document_insertions.push(doc);
-                        TaskStatus::Success
-                    }
-                    Err(err) => {
-                        trc::error!(
-                            err.account_id(task.account_id)
-                                .document_id(task.document_id)
-                                .caused_by(trc::location!())
-                                .ctx(trc::Key::Collection, task.action.index.name())
-                                .details("Failed to build document for indexing")
-                        );
-                        TaskStatus::Failed
-                    }
-                    _ => {
-                        trc::event!(
-                            TaskQueue(TaskQueueEvent::TaskIgnored),
-                            Collection = task.action.index.name(),
-                            Reason = "Nothing to index",
-                            AccountId = task.account_id,
-                            DocumentId = task.document_id,
-                        );
-                        TaskStatus::Ignored
-                    }
-                };
-
-                results.push(IndexTaskResult {
-                    task_type: TaskType::Insert,
-                    index: task.action.index,
-                    status: result,
-                });
-            } else {
-                let idx = match task.action.index {
-                    SearchIndex::Email => {
-                        if let Err(err) = delete_email_metadata(
-                            self,
-                            &mut batch,
-                            task.account_id,
-                            task.document_id,
-                        )
-                        .await
-                        {
-                            trc::error!(
-                                err.account_id(task.account_id)
-                                    .document_id(task.document_id)
-                                    .caused_by(trc::location!())
-                                    .details("Failed to delete email metadata from index")
-                            );
-                            results.push(IndexTaskResult {
-                                task_type: TaskType::Delete,
-                                index: task.action.index,
-                                status: TaskStatus::Failed,
-                            });
+                    let document = match task.document_type {
+                        IndexDocumentType::Email => {
+                            build_email_document(self, account_id, document_id).await
+                        }
+                        IndexDocumentType::Calendar => {
+                            build_calendar_document(self, account_id, document_id).await
+                        }
+                        IndexDocumentType::Contacts => {
+                            build_contact_document(self, account_id, document_id).await
+                        }
+                        IndexDocumentType::File => {
+                            // File indexing not implemented yet
                             continue;
                         }
-                        0
-                    }
-                    SearchIndex::Calendar => 1,
-                    SearchIndex::Contacts => 2,
-                    SearchIndex::File => 3,
-                    SearchIndex::Tracing | SearchIndex::InMemory => unreachable!(),
-                };
+                    };
 
-                document_deletions[idx]
-                    .entry(task.account_id)
-                    .or_default()
-                    .push(task.document_id);
+                    let result = match document {
+                        Ok(Some(doc)) if !doc.is_empty() => {
+                            document_insertions.push(doc);
+                            TaskResult::Success
+                        }
+                        Err(err) => {
+                            let result = TaskResult::temporary(err.to_string());
+                            trc::error!(
+                                err.account_id(account_id)
+                                    .document_id(document_id)
+                                    .caused_by(trc::location!())
+                                    .ctx(trc::Key::Collection, task.document_type.as_str())
+                                    .details("Failed to build document for indexing")
+                            );
+                            result
+                        }
+                        _ => {
+                            trc::event!(
+                                TaskQueue(TaskQueueEvent::TaskIgnored),
+                                Collection = task.document_type.as_str(),
+                                Reason = "Nothing to index",
+                                AccountId = account_id,
+                                DocumentId = document_id,
+                            );
+                            TaskResult::Ignored
+                        }
+                    };
 
-                results.push(IndexTaskResult {
-                    task_type: TaskType::Delete,
-                    index: task.action.index,
-                    status: TaskStatus::Success,
-                });
+                    results.push(IndexTaskResult {
+                        task_type: TaskType::Insert,
+                        index: task.document_type,
+                        result,
+                    });
+                }
+                Task::IndexTrace(task) => {
+                    let result = match build_tracing_span_document(self, task.trace_id.id()).await {
+                        Ok(Some(doc)) if !doc.is_empty() => {
+                            document_insertions.push(doc);
+                            TaskResult::Success
+                        }
+                        Err(err) => {
+                            let result = TaskResult::temporary(err.to_string());
+                            trc::error!(
+                                err.id(task.trace_id.id())
+                                    .caused_by(trc::location!())
+                                    .details("Failed to build document for indexing")
+                            );
+                            result
+                        }
+                        _ => {
+                            trc::event!(
+                                TaskQueue(TaskQueueEvent::TaskIgnored),
+                                Reason = "Nothing to index",
+                                Id = task.trace_id.id(),
+                            );
+                            TaskResult::Ignored
+                        }
+                    };
+
+                    results.push(IndexTaskResult {
+                        task_type: TaskType::Insert,
+                        index: IndexDocumentType::File, // use File index for tracing spans to avoid creating a new index type
+                        result,
+                    });
+                }
+                Task::UnindexDocument(task) => {
+                    let account_id = task.account_id.document_id();
+                    let document_id = task.document_id.document_id();
+                    let idx = match task.document_type {
+                        IndexDocumentType::Email => {
+                            if let Err(err) =
+                                delete_email_metadata(self, &mut batch, account_id, document_id)
+                                    .await
+                            {
+                                trc::error!(
+                                    err.account_id(account_id)
+                                        .document_id(document_id)
+                                        .caused_by(trc::location!())
+                                        .details("Failed to delete email metadata from index")
+                                );
+                                results.push(IndexTaskResult {
+                                    task_type: TaskType::Delete,
+                                    index: task.document_type,
+                                    result: TaskResult::temporary(
+                                        "Failed to delete email metadata from index",
+                                    ),
+                                });
+                                continue;
+                            }
+                            0
+                        }
+                        IndexDocumentType::Calendar => 1,
+                        IndexDocumentType::Contacts => 2,
+                        IndexDocumentType::File => 3,
+                    };
+
+                    document_deletions[idx]
+                        .entry(account_id)
+                        .or_default()
+                        .push(document_id);
+
+                    results.push(IndexTaskResult {
+                        task_type: TaskType::Delete,
+                        index: task.document_type,
+                        result: TaskResult::Success,
+                    });
+                }
+                _ => unreachable!(),
             }
         }
 
@@ -183,10 +215,11 @@ impl SearchIndexTask for Server {
             );
             for r in results.iter_mut() {
                 if r.task_type == TaskType::Delete
-                    && r.status == TaskStatus::Success
-                    && r.index == SearchIndex::Email
+                    && r.result == TaskResult::Success
+                    && r.index == IndexDocumentType::Email
                 {
-                    r.status = TaskStatus::Failed;
+                    r.result =
+                        TaskResult::temporary("Failed to commit index deletions to data store");
                 }
             }
             return results;
@@ -201,8 +234,8 @@ impl SearchIndexTask for Server {
                     .details("Failed to index documents")
             );
             for r in results.iter_mut() {
-                if r.task_type == TaskType::Insert && r.status == TaskStatus::Success {
-                    r.status = TaskStatus::Failed;
+                if r.task_type == TaskType::Insert && r.result == TaskResult::Success {
+                    r.result = TaskResult::temporary("Failed to index documents");
                 }
             }
             return results;
@@ -256,8 +289,8 @@ impl SearchIndexTask for Server {
                         .ctx(trc::Key::Collection, index.name())
                 );
                 for r in results.iter_mut() {
-                    if r.task_type == TaskType::Delete && r.status == TaskStatus::Success {
-                        r.status = TaskStatus::Failed;
+                    if r.task_type == TaskType::Delete && r.result == TaskResult::Success {
+                        r.result = TaskResult::temporary("Failed to delete documents from index");
                     }
                 }
                 return results;
@@ -286,15 +319,12 @@ impl ReindexIndexTask for Server {
                 .await
                 .caused_by(trc::location!())?
         };
-        let due = TaskEpoch::now();
 
+        let now = now() as i64;
         match index {
             SearchIndex::Email => {
                 for account_id in accounts {
                     let mut batch = BatchBuilder::new();
-                    batch
-                        .with_account_id(account_id)
-                        .with_collection(Collection::Email);
 
                     for document_id in self
                         .get_cached_messages(account_id)
@@ -305,21 +335,16 @@ impl ReindexIndexTask for Server {
                         .iter()
                         .map(|v| v.document_id)
                     {
-                        batch.with_document(document_id).set(
-                            ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                                due,
-                                index: SearchIndex::Email,
-                                is_insert: true,
-                            }),
-                            0u64.serialize(),
-                        );
+                        batch.schedule_task(Task::IndexDocument(TaskIndexDocument {
+                            account_id: account_id.into(),
+                            document_id: document_id.into(),
+                            document_type: IndexDocumentType::Email,
+                            status: TaskStatus::at(now + rand::rng().random_range(0..=300)),
+                        }));
 
                         if batch.len() >= 2000 {
                             self.core.storage.data.write(batch.build_all()).await?;
                             batch = BatchBuilder::new();
-                            batch
-                                .with_account_id(account_id)
-                                .with_collection(Collection::Email);
                         }
                     }
 
@@ -343,22 +368,22 @@ impl ReindexIndexTask for Server {
                         .await
                         .caused_by(trc::location!())?;
                     let mut batch = BatchBuilder::new();
-                    batch.with_account_id(account_id);
 
                     for document_id in cache.document_ids(false) {
-                        batch.with_document(document_id).set(
-                            ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                                due,
-                                index,
-                                is_insert: true,
-                            }),
-                            0u64.serialize(),
-                        );
+                        batch.schedule_task(Task::IndexDocument(TaskIndexDocument {
+                            account_id: account_id.into(),
+                            document_id: document_id.into(),
+                            document_type: if index == SearchIndex::Calendar {
+                                IndexDocumentType::Calendar
+                            } else {
+                                IndexDocumentType::Contacts
+                            },
+                            status: TaskStatus::at(now + rand::rng().random_range(0..=300)),
+                        }));
 
                         if batch.len() >= 2000 {
                             self.core.storage.data.write(batch.build_all()).await?;
                             batch = BatchBuilder::new();
-                            batch.with_account_id(account_id);
                         }
                     }
 
@@ -390,17 +415,10 @@ impl ReindexIndexTask for Server {
 
                 let mut batch = BatchBuilder::new();
                 for span_id in spans {
-                    batch
-                        .with_account_id((span_id >> 32) as u32) // TODO: This is hacky, improve
-                        .with_document(span_id as u32)
-                        .set(
-                            ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                                due: TaskEpoch::now(),
-                                index: SearchIndex::Tracing,
-                                is_insert: true,
-                            }),
-                            vec![],
-                        );
+                    batch.schedule_task(Task::IndexTrace(TaskIndexTrace {
+                        trace_id: span_id.into(),
+                        status: TaskStatus::at(now + rand::rng().random_range(0..=300)),
+                    }));
                     if batch.len() >= 2000 {
                         self.core.storage.data.write(batch.build_all()).await?;
                         batch = BatchBuilder::new();
@@ -541,8 +559,7 @@ async fn build_contact_document(
 #[cfg(feature = "enterprise")]
 async fn build_tracing_span_document(
     server: &Server,
-    account_id: u32,
-    document_id: u32,
+    span_id: u64,
 ) -> trc::Result<Option<IndexDocument>> {
     use common::telemetry::tracers::store::{TracingStore, build_span_document};
 
@@ -550,7 +567,6 @@ async fn build_tracing_span_document(
         return Ok(None);
     };
 
-    let span_id = ((account_id as u64) << 32) | document_id as u64;
     let span = server.tracing_store().get_span(span_id).await?;
 
     if !span.is_empty() {
@@ -563,11 +579,7 @@ async fn build_tracing_span_document(
 // SPDX-SnippetEnd
 
 #[cfg(not(feature = "enterprise"))]
-async fn build_tracing_span_document(
-    _: &Server,
-    _: u32,
-    _: u32,
-) -> trc::Result<Option<IndexDocument>> {
+async fn build_tracing_span_document(_: &Server, _: u64) -> trc::Result<Option<IndexDocument>> {
     Ok(None)
 }
 
@@ -604,7 +616,6 @@ async fn delete_email_metadata(
             // Hold blob for undeletion
             #[cfg(feature = "enterprise")]
             {
-                use common::enterprise::undelete::DeletedItemType;
                 use email::message::metadata::ArchivedMetadataHeaderName;
 
                 if let Some(undelete_retention) = server
@@ -613,20 +624,27 @@ async fn delete_email_metadata(
                     .as_ref()
                     .and_then(|e| e.undelete_retention.as_ref())
                 {
-                    use common::enterprise::undelete::DeletedItem;
                     use email::message::metadata::MESSAGE_RECEIVED_MASK;
-                    use store::{
-                        Serialize,
-                        write::{Archiver, BlobLink, BlobOp, now},
+                    use registry::{
+                        pickle::Pickle,
+                        schema::structs::{DeletedEmail, DeletedItem},
+                        types::{datetime::UTCDateTime, id::ObjectId},
                     };
+                    use store::{
+                        SerializeInfallible,
+                        write::{BlobLink, BlobOp, RegistryClass, now},
+                        xxhash_rust,
+                    };
+                    use types::blob::BlobId;
+                    use utils::snowflake::SnowflakeIdGenerator;
 
                     let root_part = metadata.root_part();
-                    let from: Option<Box<str>> = root_part.headers.iter().find_map(|h| {
+                    let from: Option<String> = root_part.headers.iter().find_map(|h| {
                         if let ArchivedMetadataHeaderName::From = &h.name {
                             h.value.as_single_address().and_then(|addr| {
                                 match (addr.address.as_ref(), addr.name.as_ref()) {
                                     (Some(address), Some(name)) => {
-                                        Some(format!("{} <{}>", name, address).into_boxed_str())
+                                        Some(format!("{} <{}>", name, address))
                                     }
                                     (Some(address), None) => Some(address.as_ref().into()),
                                     (None, Some(name)) => Some(name.as_ref().into()),
@@ -637,7 +655,7 @@ async fn delete_email_metadata(
                             None
                         }
                     });
-                    let subject: Option<Box<str>> = root_part.headers.iter().rev().find_map(|h| {
+                    let subject: Option<String> = root_part.headers.iter().rev().find_map(|h| {
                         if let ArchivedMetadataHeaderName::Subject = &h.name {
                             h.value.as_text().map(Into::into)
                         } else {
@@ -647,31 +665,46 @@ async fn delete_email_metadata(
                     let now = now();
                     let until = now + undelete_retention.as_secs();
                     let blob_hash = BlobHash::from(&metadata.blob_hash);
+
+                    let item = DeletedItem::Email(DeletedEmail {
+                        account_id: account_id.into(),
+                        blob_id: BlobId::new(blob_hash.clone(), Default::default()),
+                        cleanup_at: UTCDateTime::from_timestamp(until as i64),
+                        deleted_at: UTCDateTime::now(),
+                        from: from.unwrap_or_default(),
+                        received_at: UTCDateTime::from_timestamp(
+                            (metadata.rcvd_attach.to_native() & MESSAGE_RECEIVED_MASK) as i64,
+                        ),
+                        subject: subject.unwrap_or_default(),
+                        size: root_part.offset_end.to_native() as u64,
+                    })
+                    .to_pickled_vec();
+                    let object_id = ObjectType::DeletedItem.to_id();
+                    let item_id = SnowflakeIdGenerator::from_sequence_id(
+                        xxhash_rust::xxh3::xxh3_64(item.as_slice()),
+                    )
+                    .unwrap_or_default();
+
                     batch
                         .set(
                             BlobOp::Link {
-                                hash: blob_hash.clone(),
+                                hash: blob_hash,
                                 to: BlobLink::Temporary { until },
                             },
-                            vec![BlobLink::UNDELETE_LINK],
+                            ObjectId::new(ObjectType::DeletedItem, item_id.into()).serialize(),
                         )
                         .set(
-                            BlobOp::Undelete {
-                                hash: blob_hash,
-                                until,
-                            },
-                            Archiver::new(DeletedItem {
-                                typ: DeletedItemType::Email {
-                                    from: from.unwrap_or_default(),
-                                    subject: subject.unwrap_or_default(),
-                                    received_at: metadata.rcvd_attach.to_native()
-                                        & MESSAGE_RECEIVED_MASK,
-                                },
-                                size: root_part.offset_end.to_native(),
-                                deleted_at: now,
-                            })
-                            .serialize()
-                            .caused_by(trc::location!())?,
+                            ValueClass::Registry(RegistryClass::Index {
+                                index_id: Property::AccountId.to_id(),
+                                object_id,
+                                item_id,
+                                key: account_id.serialize(),
+                            }),
+                            vec![],
+                        )
+                        .set(
+                            ValueClass::Registry(RegistryClass::Id { object_id, item_id }),
+                            item,
                         );
                 }
             }
@@ -689,10 +722,4 @@ async fn delete_email_metadata(
     }
 
     Ok(())
-}
-
-impl IndexTaskResult {
-    pub fn is_done(&self) -> bool {
-        self.status != TaskStatus::Failed
-    }
 }

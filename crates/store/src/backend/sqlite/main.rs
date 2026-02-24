@@ -64,7 +64,8 @@ impl SqliteStore {
         for table in [
             SUBSPACE_ACL,
             SUBSPACE_TASK_QUEUE,
-            SUBSPACE_BLOB_EXTRA,
+            SUBSPACE_DELETED_ITEMS,
+            SUBSPACE_SPAM_SAMPLES,
             SUBSPACE_BLOB_LINK,
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,

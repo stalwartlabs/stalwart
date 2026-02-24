@@ -34,7 +34,7 @@ use mail_auth::{
     dmarc::{self, verify::DmarcParameters},
 };
 use mail_builder::headers::{date::Date, message_id::generate_message_id_header};
-use mail_parser::MessageParser;
+use mail_parser::{MessageParser, parsers::fields::thread::thread_name};
 use registry::schema::structs::Rate;
 use sieve::runtime::Variable;
 use smtp_proto::{
@@ -423,7 +423,12 @@ impl<T: SessionStream> Session<T> {
                 SpamFilterAction::Allow(score) => {
                     // Add headers
                     headers.extend_from_slice(score.headers.as_bytes());
-                    train_spam = score.train_spam;
+                    train_spam = score.train_spam.map(|is_spam| {
+                        (
+                            is_spam,
+                            thread_name(parsed_message.subject().unwrap_or_default()).to_string(),
+                        )
+                    });
 
                     // Add scores for local recipients
                     for (is_spam, recipient) in
