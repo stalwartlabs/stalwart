@@ -14,12 +14,10 @@ use trc::AddContext;
 
 impl SqliteStore {
     pub(crate) async fn write(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
-        let mut conn = self
-            .conn_pool
-            .get()
-            .map_err(into_error)
-            .caused_by(trc::location!())?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let mut conn = manager.get().map_err(into_error)?;
+
             let mut account_id = u32::MAX;
             let mut collection = u8::MAX;
             let mut document_id = u32::MAX;
@@ -271,12 +269,9 @@ impl SqliteStore {
     }
 
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
-        let conn = self
-            .conn_pool
-            .get()
-            .map_err(into_error)
-            .caused_by(trc::location!())?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
                 conn.prepare_cached(&format!("DELETE FROM {} WHERE v = 0", char::from(subspace),))
                     .map_err(into_error)
@@ -292,12 +287,10 @@ impl SqliteStore {
     }
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
-        let conn = self
-            .conn_pool
-            .get()
-            .map_err(into_error)
-            .caused_by(trc::location!())?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
+
             conn.prepare_cached(&format!(
                 "DELETE FROM {} WHERE k >= ? AND k < ?",
                 char::from(from.subspace()),

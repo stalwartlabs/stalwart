@@ -13,8 +13,9 @@ impl SqliteStore {
     where
         U: Deserialize + 'static,
     {
-        let conn = self.conn_pool.get().map_err(into_error)?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             let mut result = conn
                 .prepare_cached(&format!(
                     "SELECT v FROM {} WHERE k = ?",
@@ -24,7 +25,7 @@ impl SqliteStore {
             let key = key.serialize(0);
             result
                 .query_row([&key], |row| {
-                    U::deserialize(row.get_ref(0)?.as_bytes()?)
+                    U::deserialize_with_key(&key, row.get_ref(0)?.as_bytes()?)
                         .map_err(|err| rusqlite::Error::ToSqlConversionFailure(err.into()))
                 })
                 .optional()
@@ -38,9 +39,9 @@ impl SqliteStore {
         params: IterateParams<T>,
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
-        let conn = self.conn_pool.get().map_err(into_error)?;
-
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             let table = char::from(params.begin.subspace());
             let begin = params.begin.serialize(0);
             let end = params.end.serialize(0);
@@ -113,8 +114,9 @@ impl SqliteStore {
         let key = key.into();
         let table = char::from(key.subspace());
         let key = key.serialize(0);
-        let conn = self.conn_pool.get().map_err(into_error)?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             match conn
                 .prepare_cached(&format!("SELECT v FROM {table} WHERE k = ?"))
                 .map_err(into_error)?

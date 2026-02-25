@@ -79,6 +79,7 @@ impl SqliteStore {
             SUBSPACE_TELEMETRY_SPAN,
             SUBSPACE_TELEMETRY_METRIC,
             SUBSPACE_SEARCH_INDEX,
+            SUBSPACE_DIRECTORY,
         ] {
             let table = char::from(table);
             conn.execute(
@@ -93,16 +94,22 @@ impl SqliteStore {
             .map_err(into_error)?;
         }
 
-        let table = char::from(SUBSPACE_INDEXES);
-        conn.execute(
-            &format!(
-                "CREATE TABLE IF NOT EXISTS {table} (
+        for table in [
+            SUBSPACE_INDEXES,
+            SUBSPACE_REGISTRY_IDX,
+            SUBSPACE_REGISTRY_IDX_GLOBAL,
+        ] {
+            let table = char::from(table);
+            conn.execute(
+                &format!(
+                    "CREATE TABLE IF NOT EXISTS {table} (
                         k BLOB PRIMARY KEY
                 )"
-            ),
-            [],
-        )
-        .map_err(into_error)?;
+                ),
+                [],
+            )
+            .map_err(into_error)?;
+        }
 
         for table in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
             conn.execute(
