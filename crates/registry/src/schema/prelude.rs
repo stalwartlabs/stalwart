@@ -32,7 +32,7 @@ pub use utils::map::vec_map::VecMap;
 #[derive(Debug, Clone)]
 pub struct Object {
     pub inner: ObjectInner,
-    pub revision: u32,
+    pub revision: u64,
 }
 
 #[derive(Debug)]

@@ -30,7 +30,7 @@ impl PostgresStore {
             .map_err(into_error)
             .and_then(|r| {
                 if let Some(r) = r {
-                    Ok(Some(U::deserialize(r.get(0))?))
+                    Ok(Some(U::deserialize_with_key(&key, r.get(0))?))
                 } else {
                     Ok(None)
                 }

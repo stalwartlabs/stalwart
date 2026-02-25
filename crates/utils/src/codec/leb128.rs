@@ -182,6 +182,7 @@ impl_unsigned_leb128!(u64, [0, 7, 14, 21, 28, 35, 42, 49, 56, 63]);
 impl_unsigned_leb128!(usize, [0, 7, 14, 21, 28, 35, 42, 49, 56, 63]);
 
 impl Leb128Writer for Vec<u8> {
+    #[inline(always)]
     fn write_leb128<T: Leb128_>(&mut self, value: T) -> std::io::Result<usize> {
         T::to_leb128_writer(value, self)
     }

@@ -124,7 +124,6 @@ pub const KV_QUOTA_BLOB: u8 = 11;
 pub const KV_GREYLIST: u8 = 16;
 pub const KV_LOCK_PURGE_ACCOUNT: u8 = 20;
 pub const KV_LOCK_QUEUE_MESSAGE: u8 = 21;
-pub const KV_LOCK_QUEUE_REPORT: u8 = 22;
 pub const KV_LOCK_TASK: u8 = 23;
 pub const KV_LOCK_HOUSEKEEPER: u8 = 24;
 pub const KV_LOCK_DAV: u8 = 25;

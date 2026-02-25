@@ -8,7 +8,7 @@ use crate::{RegistryStore, RegistryStoreInner, Store};
 use ahash::AHashMap;
 use parking_lot::RwLock;
 use registry::{
-    schema::prelude::{OBJ_SINGLETON, Object, ObjectType},
+    schema::prelude::{OBJ_SINGLETON, Object, ObjectInner, ObjectType},
     types::{EnumImpl, id::ObjectId},
 };
 use serde_json::{Map, Value, map::Entry};
@@ -48,9 +48,10 @@ impl RegistryStoreInner {
                         ));
                     }
                     if local_registry
-                        .insert(ObjectId::new(object_type, Id::new(id)), Object::deserialize(object_type, value).map_err(|err| {
+                        .insert(ObjectId::new(object_type, Id::new(id)), ObjectInner::deserialize(object_type, value).map_err(|err| {
                             format!("{error_msg}: Failed to parse object {key:?} with id {id}: {err}")
-                        }).and_then(|obj| {
+                        }).and_then(|inner| {
+                            let obj = Object { inner, revision: 0 };
                             let mut errors = Vec::new();
                             obj.validate(&mut errors);
                             if errors.is_empty() {
@@ -76,11 +77,12 @@ impl RegistryStoreInner {
             } else if local_registry
                 .insert(
                     ObjectId::new(object_type, Id::singleton()),
-                    Object::deserialize(object_type, object)
+                    ObjectInner::deserialize(object_type, object)
                         .map_err(|err| {
                             format!("{error_msg}: Failed to parse object {key:?}: {err}")
                         })
-                        .and_then(|obj| {
+                        .and_then(|inner| {
+                            let obj = Object { inner, revision: 0 };
                             let mut errors = Vec::new();
                             obj.validate(&mut errors);
                             if errors.is_empty() {

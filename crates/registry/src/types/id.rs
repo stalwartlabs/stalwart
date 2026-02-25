@@ -68,15 +68,11 @@ impl Default for ObjectId {
 
 impl Pickle for Id {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.id().to_be_bytes());
+        self.id().pickle(out);
     }
 
     fn unpickle(data: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; std::mem::size_of::<u64>()];
-        arr.copy_from_slice(data.read_bytes(std::mem::size_of::<u64>())?);
-        let id = u64::from_be_bytes(arr);
-
-        Some(Id::new(id))
+        u64::unpickle(data).map(Id::new)
     }
 }
 

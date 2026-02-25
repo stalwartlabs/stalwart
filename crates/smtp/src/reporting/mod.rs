@@ -21,7 +21,6 @@ use mail_auth::{
 };
 use mail_parser::DateTime;
 use std::{future::Future, io, time::SystemTime};
-use store::write::{ReportEvent, key::KeySerializer};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod analysis;
@@ -318,29 +317,5 @@ impl io::Write for SerializedSize {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
-    }
-}
-
-pub trait ReportLock {
-    fn tls_lock(&self) -> Vec<u8>;
-    fn dmarc_lock(&self) -> Vec<u8>;
-}
-
-impl ReportLock for ReportEvent {
-    fn tls_lock(&self) -> Vec<u8> {
-        KeySerializer::new(self.domain.len() + std::mem::size_of::<u64>() + 1)
-            .write(0u8)
-            .write(self.due)
-            .write(self.domain.as_bytes())
-            .finalize()
-    }
-
-    fn dmarc_lock(&self) -> Vec<u8> {
-        KeySerializer::new(self.domain.len() + (std::mem::size_of::<u64>() * 2) + 1)
-            .write(1u8)
-            .write(self.due)
-            .write(self.policy_hash)
-            .write(self.domain.as_bytes())
-            .finalize()
     }
 }

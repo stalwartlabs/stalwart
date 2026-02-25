@@ -4,24 +4,31 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::AHashMap;
-use common::Server;
+use ahash::{AHashMap, AHashSet};
+use common::{Server, psl};
 use mail_auth::{
     flate2::read::GzDecoder,
     report::{ActionDisposition, DmarcResult, Feedback, Report, tlsrpt::TlsReport},
     zip,
 };
 use mail_parser::{Message, MimeHeaders, PartType};
+use registry::{
+    pickle::Pickle,
+    schema::{
+        prelude::ObjectType,
+        structs::{ArfExternalReport, DmarcExternalReport, TlsExternalReport},
+    },
+    types::{EnumImpl, datetime::UTCDateTime, index::IndexBuilder},
+    utils::report::ReportIndex,
+};
 use std::{
     borrow::Cow,
     collections::hash_map::Entry,
     io::{Cursor, Read},
 };
-use store::{
-    Serialize,
-    write::{Archiver, BatchBuilder, ReportClass, ValueClass, now},
-};
+use store::write::{BatchBuilder, RegistryClass, ValueClass, now};
 use trc::IncomingReportEvent;
+use types::id::Id;
 
 enum Compression {
     None,
@@ -39,16 +46,6 @@ struct ReportData<'x> {
     compression: Compression,
     format: Format<(), (), ()>,
     data: &'x [u8],
-}
-
-#[derive(
-    rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, serde::Serialize, serde::Deserialize,
-)]
-pub struct IncomingReport<T> {
-    pub from: String,
-    pub to: Vec<String>,
-    pub subject: String,
-    pub report: T,
 }
 
 pub trait AnalyzeReport: Sync + Send {
@@ -274,50 +271,105 @@ impl AnalyzeReport for Server {
                 // Store report
                 if let Some(expires_in) = &core.core.smtp.report.analysis.store {
                     let expires = now() + expires_in.as_secs();
-                    let id = core.inner.data.queue_id_gen.generate();
-
+                    let item_id = core.inner.data.queue_id_gen.generate();
                     let mut batch = BatchBuilder::new();
+
                     match report {
                         Format::Dmarc(report) => {
-                            batch.set(
-                                ValueClass::Report(ReportClass::Dmarc { id, expires }),
-                                Archiver::new(IncomingReport {
-                                    from,
-                                    to,
-                                    subject,
-                                    report,
-                                })
-                                .serialize()
-                                .unwrap_or_default(),
-                            );
+                            let object_id = ObjectType::DmarcExternalReport.to_id();
+                            let mut report = DmarcExternalReport {
+                                from,
+                                to,
+                                subject,
+                                member_tenant_id: vec![],
+                                expires_at: UTCDateTime::from_timestamp(expires as i64),
+                                received_at: UTCDateTime::now(),
+                                report: report.into(),
+                            };
+                            report.member_tenant_id = tenant_ids(
+                                &core,
+                                report
+                                    .domains()
+                                    .filter_map(psl::domain_str)
+                                    .collect::<AHashSet<_>>(),
+                            )
+                            .await;
+                            let mut index_builder = IndexBuilder::default();
+                            report.build_search_index(&mut index_builder);
+                            batch
+                                .registry_index(object_id, item_id, index_builder.keys.iter(), true)
+                                .set(
+                                    ValueClass::Registry(RegistryClass::Item {
+                                        object_id,
+                                        item_id,
+                                    }),
+                                    report.to_pickled_vec(),
+                                );
                         }
                         Format::Tls(report) => {
-                            batch.set(
-                                ValueClass::Report(ReportClass::Tls { id, expires }),
-                                Archiver::new(IncomingReport {
-                                    from,
-                                    to,
-                                    subject,
-                                    report,
-                                })
-                                .serialize()
-                                .unwrap_or_default(),
-                            );
+                            let object_id = ObjectType::TlsExternalReport.to_id();
+                            let mut report = TlsExternalReport {
+                                from,
+                                to,
+                                subject,
+                                member_tenant_id: vec![],
+                                expires_at: UTCDateTime::from_timestamp(expires as i64),
+                                received_at: UTCDateTime::now(),
+                                report: report.into(),
+                            };
+                            report.member_tenant_id = tenant_ids(
+                                &core,
+                                report
+                                    .domains()
+                                    .filter_map(psl::domain_str)
+                                    .collect::<AHashSet<_>>(),
+                            )
+                            .await;
+                            let mut index_builder = IndexBuilder::default();
+                            report.build_search_index(&mut index_builder);
+                            batch
+                                .registry_index(object_id, item_id, index_builder.keys.iter(), true)
+                                .set(
+                                    ValueClass::Registry(RegistryClass::Item {
+                                        object_id,
+                                        item_id,
+                                    }),
+                                    report.to_pickled_vec(),
+                                );
                         }
                         Format::Arf(report) => {
-                            batch.set(
-                                ValueClass::Report(ReportClass::Arf { id, expires }),
-                                Archiver::new(IncomingReport {
-                                    from,
-                                    to,
-                                    subject,
-                                    report,
-                                })
-                                .serialize()
-                                .unwrap_or_default(),
-                            );
+                            let object_id = ObjectType::ArfExternalReport.to_id();
+                            let mut report = ArfExternalReport {
+                                from,
+                                to,
+                                subject,
+                                member_tenant_id: vec![],
+                                expires_at: UTCDateTime::from_timestamp(expires as i64),
+                                received_at: UTCDateTime::now(),
+                                report: report.into(),
+                            };
+                            report.member_tenant_id = tenant_ids(
+                                &core,
+                                report
+                                    .domains()
+                                    .filter_map(psl::domain_str)
+                                    .collect::<AHashSet<_>>(),
+                            )
+                            .await;
+                            let mut index_builder = IndexBuilder::default();
+                            report.build_search_index(&mut index_builder);
+                            batch
+                                .registry_index(object_id, item_id, index_builder.keys.iter(), true)
+                                .set(
+                                    ValueClass::Registry(RegistryClass::Item {
+                                        object_id,
+                                        item_id,
+                                    }),
+                                    report.to_pickled_vec(),
+                                );
                         }
                     }
+
                     if let Err(err) = core.core.storage.data.write(batch.build_all()).await {
                         trc::error!(
                             err.span_id(session_id)
@@ -330,6 +382,29 @@ impl AnalyzeReport for Server {
             }
         });
     }
+}
+
+async fn tenant_ids(server: &Server, domains: AHashSet<&str>) -> Vec<Id> {
+    let mut tenant_ids = Vec::with_capacity(domains.len());
+    for domain in domains {
+        if let Some(tenant_id) = server
+            .domain(domain)
+            .await
+            .map_err(|err| {
+                trc::error!(
+                    err.caused_by(trc::location!())
+                        .details("Failed to lookup domain")
+                );
+            })
+            .unwrap_or_default()
+            .and_then(|domain| domain.id_tenant)
+            .map(Id::from)
+            && !tenant_ids.contains(&tenant_id)
+        {
+            tenant_ids.push(tenant_id);
+        }
+    }
+    tenant_ids
 }
 
 trait LogReport {
@@ -491,14 +566,5 @@ impl LogReport for Feedback<'_> {
                 .map(|d| trc::Value::String(d.as_ref().into()))
                 .collect::<Vec<_>>(),
         );
-    }
-}
-
-impl<T> IncomingReport<T> {
-    pub fn has_domain(&self, domain: &[String]) -> bool {
-        self.to
-            .iter()
-            .any(|to| domain.iter().any(|d| to.ends_with(d.as_str())))
-            || domain.iter().any(|d| self.from.ends_with(d.as_str()))
     }
 }

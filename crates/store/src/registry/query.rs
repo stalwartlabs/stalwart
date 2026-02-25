@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    IterateParams, RegistryStore, SUBSPACE_REGISTRY, Store, U16_LEN, U64_LEN, ValueKey,
+    IterateParams, RegistryStore, SUBSPACE_REGISTRY_IDX, Store, U16_LEN, U64_LEN, ValueKey,
     registry::{RegistryFilter, RegistryFilterOp, RegistryFilterValue, RegistryQuery},
     write::{
         AnyClass, RegistryClass, ValueClass,
@@ -49,41 +49,15 @@ impl RegistryStore {
                 }
             }
             return Ok(results);
-        }
-        let mut results = if (flags & OBJ_FILTER_ACCOUNT != 0)
-            && let Some(account_id) = query.account_id
-        {
-            range_to_set::<T>(
-                &self.0.store,
-                query.object_type,
-                Property::AccountId.to_id(),
-                &account_id.to_be_bytes(),
-                RegistryFilterOp::Equal,
-            )
-            .await?
-        } else if (flags & OBJ_FILTER_TENANT != 0)
-            && let Some(tenant_id) = query.tenant_id
-        {
-            range_to_set::<T>(
-                &self.0.store,
-                query.object_type,
-                Property::MemberTenantId.to_id(),
-                &tenant_id.to_be_bytes(),
-                RegistryFilterOp::Equal,
-            )
-            .await?
-        } else {
-            all_ids::<T>(&self.0.store, query.object_type).await?
-        };
-
-        if !results.has_items() || query.filters.is_empty() {
-            return Ok(results);
+        } else if query.filters.is_empty() {
+            return all_ids::<T>(&self.0.store, query.object_type).await;
         }
 
         let mut u64_buffer;
         let mut u16_buffer;
         let mut bool_buffer = [0u8; 1];
 
+        let mut results = T::default();
         for filter in query.filters {
             if filter.op == RegistryFilterOp::TextMatch {
                 if let RegistryFilterValue::String(text) = filter.value {
@@ -120,7 +94,11 @@ impl RegistryStore {
                         }
                     }
 
-                    results.intersect(&matches);
+                    if !results.has_items() {
+                        results = matches;
+                    } else {
+                        results.intersect(&matches);
+                    }
                 } else {
                     return Err(trc::EventType::Registry(trc::RegistryEvent::NotSupported)
                         .into_err()
@@ -150,7 +128,11 @@ impl RegistryStore {
                 )
                 .await?;
 
-                results.intersect(&result);
+                if !results.has_items() {
+                    results = result;
+                } else {
+                    results.intersect(&result);
+                }
             }
 
             if !results.has_items() {
@@ -201,23 +183,40 @@ impl RegistryQuery {
         Self {
             object_type,
             filters: Vec::new(),
-            account_id: None,
-            tenant_id: None,
         }
     }
 
     pub fn with_account(mut self, account_id: u32) -> Self {
-        self.account_id = Some(account_id);
+        if self.object_type.flags() & OBJ_FILTER_ACCOUNT != 0 {
+            let filter = RegistryFilter::equal(Property::AccountId, account_id);
+            if self.filters.is_empty() {
+                self.filters.push(filter);
+            } else {
+                self.filters.insert(0, filter);
+            }
+        }
         self
     }
 
-    pub fn with_account_opt(mut self, account_id: Option<u32>) -> Self {
-        self.account_id = account_id;
-        self
+    pub fn with_account_opt(self, account_id: Option<u32>) -> Self {
+        if let Some(account_id) = account_id {
+            self.with_account(account_id)
+        } else {
+            self
+        }
     }
 
     pub fn with_tenant(mut self, tenant_id: Option<u32>) -> Self {
-        self.tenant_id = tenant_id;
+        if let Some(tenant_id) = tenant_id
+            && self.object_type.flags() & OBJ_FILTER_TENANT != 0
+        {
+            let filter = RegistryFilter::equal(Property::MemberTenantId, tenant_id);
+            if self.filters.is_empty() {
+                self.filters.push(filter);
+            } else {
+                self.filters.insert(0, filter);
+            }
+        }
         self
     }
 
@@ -387,7 +386,9 @@ async fn all_ids<T: RegistryQueryResults>(store: &Store, object: ObjectType) -> 
             .no_values()
             .ascending(),
             |key, _| {
-                bm.push(key.deserialize_be_u64(key.len() - U64_LEN)?);
+                if key.len() == U64_LEN + U16_LEN {
+                    bm.push(key.deserialize_be_u64(key.len() - U64_LEN)?);
+                }
 
                 Ok(true)
             },
@@ -426,9 +427,8 @@ async fn range_to_set<T: RegistryQueryResults>(
     };
 
     let begin = ValueKey::from(ValueClass::Any(AnyClass {
-        subspace: SUBSPACE_REGISTRY,
-        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + 1 + from_value.len())
-            .write(2u8)
+        subspace: SUBSPACE_REGISTRY_IDX,
+        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + from_value.len())
             .write(object_id)
             .write(from_index_id)
             .write(from_value)
@@ -436,9 +436,8 @@ async fn range_to_set<T: RegistryQueryResults>(
             .finalize(),
     }));
     let end = ValueKey::from(ValueClass::Any(AnyClass {
-        subspace: SUBSPACE_REGISTRY,
-        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + 1 + end_value.len())
-            .write(2u8)
+        subspace: SUBSPACE_REGISTRY_IDX,
+        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + end_value.len())
             .write(object_id)
             .write(end_index_id)
             .write(end_value)
@@ -447,8 +446,7 @@ async fn range_to_set<T: RegistryQueryResults>(
     }));
 
     let mut bm = T::default();
-    let prefix = KeySerializer::new((U16_LEN * 2) + 1)
-        .write(2u8)
+    let prefix = KeySerializer::new(U16_LEN * 2)
         .write(object_id)
         .write(index_id)
         .finalize();

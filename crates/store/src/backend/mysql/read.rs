@@ -28,7 +28,7 @@ impl MysqlStore {
             .map_err(into_error)
             .and_then(|r| {
                 if let Some(r) = r {
-                    Ok(Some(U::deserialize_owned(r)?))
+                    Ok(Some(U::deserialize_owned_with_key(&key, r)?))
                 } else {
                     Ok(None)
                 }

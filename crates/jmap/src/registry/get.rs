@@ -267,9 +267,9 @@ impl RegistryGet for Server {
             ObjectType::Log => {}
             ObjectType::QueuedMessage => {}
             ObjectType::Task => {}
-            ObjectType::ArfFeedbackReport => {}
-            ObjectType::DmarcReport => {}
-            ObjectType::TlsReport => {}
+            ObjectType::ArfExternalReport => {}
+            ObjectType::DmarcExternalReport => {}
+            ObjectType::TlsExternalReport => {}
             ObjectType::DeletedItem => {}
             ObjectType::Metric => {}
             ObjectType::Trace => {}

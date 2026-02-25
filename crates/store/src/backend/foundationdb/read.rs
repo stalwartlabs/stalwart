@@ -38,8 +38,10 @@ impl FdbStore {
         let trx = self.read_trx().await?;
 
         match read_chunked_value(&key, &trx, true).await? {
-            ChunkedValue::Single(bytes) => U::deserialize(&bytes).map(Some),
-            ChunkedValue::Chunked { bytes, .. } => U::deserialize_owned(bytes).map(Some),
+            ChunkedValue::Single(bytes) => U::deserialize_with_key(&key, &bytes).map(Some),
+            ChunkedValue::Chunked { bytes, .. } => {
+                U::deserialize_owned_with_key(&key, bytes).map(Some)
+            }
             ChunkedValue::None => Ok(None),
         }
     }

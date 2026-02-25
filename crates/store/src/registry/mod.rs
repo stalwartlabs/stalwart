@@ -17,8 +17,8 @@ use crate::{
 use registry::{
     pickle::{Pickle, PickledStream},
     schema::{
-        prelude::{Object, ObjectType, Property},
-        structs::{DeletedItem, SpamTrainingSample, Task},
+        prelude::{Object, ObjectInner, ObjectType, Property},
+        structs::{DeletedItem, DmarcInternalReport, SpamTrainingSample, Task, TlsInternalReport},
     },
     types::{EnumImpl, ObjectImpl, id::ObjectId},
 };
@@ -27,14 +27,12 @@ use types::id::Id;
 pub struct RegistryObject<T: ObjectImpl> {
     pub id: ObjectId,
     pub object: T,
-    pub revision: u32,
+    pub revision: u64,
 }
 
 pub struct RegistryQuery {
     pub object_type: ObjectType,
     pub filters: Vec<RegistryFilter>,
-    pub account_id: Option<u32>,
-    pub tenant_id: Option<u32>,
 }
 
 pub struct RegistryFilter {
@@ -61,14 +59,21 @@ pub enum RegistryFilterValue {
 }
 
 impl Deserialize for Object {
-    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
-        let mut stream = PickledStream::new(bytes);
-        Object::unpickle(&mut stream).ok_or_else(|| {
-            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                .into_err()
-                .caused_by(trc::location!())
-                .ctx(trc::Key::Value, bytes)
-        })
+    fn deserialize_with_key(key: &[u8], bytes: &[u8]) -> trc::Result<Self> {
+        let revision = xxhash_rust::xxh3::xxh3_64(bytes);
+        ObjectType::from_id(key.deserialize_be_u16(0)?)
+            .and_then(|object_id| ObjectInner::unpickle(object_id, &mut PickledStream::new(bytes)))
+            .map(|inner| Object { revision, inner })
+            .ok_or_else(|| {
+                trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                    .into_err()
+                    .caused_by(trc::location!())
+                    .ctx(trc::Key::Value, bytes)
+            })
+    }
+
+    fn deserialize(_: &[u8]) -> trc::Result<Self> {
+        unreachable!("Object deserialization requires the object type from the key")
     }
 }
 
@@ -100,6 +105,30 @@ impl Deserialize for DeletedItem {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
         let mut stream = PickledStream::new(bytes);
         DeletedItem::unpickle(&mut stream).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
+    }
+}
+
+impl Deserialize for TlsInternalReport {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let mut stream = PickledStream::new(bytes);
+        TlsInternalReport::unpickle(&mut stream).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
+    }
+}
+
+impl Deserialize for DmarcInternalReport {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let mut stream = PickledStream::new(bytes);
+        DmarcInternalReport::unpickle(&mut stream).ok_or_else(|| {
             trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
                 .into_err()
                 .caused_by(trc::location!())

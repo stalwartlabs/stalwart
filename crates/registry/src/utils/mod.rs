@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-pub mod jmap;
-pub mod pickle;
-pub mod schema;
-pub mod types;
-pub mod utils;
+pub mod account;
+pub mod cron;
+pub mod http;
+pub mod report;
+pub mod task;

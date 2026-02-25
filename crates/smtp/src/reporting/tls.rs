@@ -6,7 +6,7 @@
 
 use super::{AggregateTimestamp, SerializedSize};
 use crate::{queue::RecipientDomain, reporting::SmtpReporting};
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use common::{
     Server, USER_AGENT,
     config::smtp::{
@@ -23,12 +23,22 @@ use mail_auth::{
     },
 };
 use mail_parser::DateTime;
+use registry::{
+    pickle::Pickle,
+    schema::{
+        enums::TlsPolicyType,
+        prelude::{ObjectType, Property},
+        structs::{Task, TlsFailureDetails, TlsInternalReport, TlsReport, TlsReportPolicy},
+    },
+    types::{EnumImpl, datetime::UTCDateTime},
+};
 use reqwest::header::CONTENT_TYPE;
 use std::fmt::Write;
 use std::{collections::hash_map::Entry, future::Future, sync::Arc, time::Duration};
 use store::{
-    Deserialize, IterateParams, Serialize, ValueKey,
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder, QueueClass, ReportEvent, ValueClass},
+    Deserialize, IterateParams, ValueKey,
+    registry::RegistryQuery,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, QueueClass, RegistryClass, ValueClass},
 };
 use trc::{AddContext, OutgoingReportEvent};
 
@@ -61,7 +71,6 @@ pub trait TlsReporting: Sync + Send {
         span_id: u64,
     ) -> impl Future<Output = trc::Result<Option<TlsReport>>> + Send;
     fn schedule_tls(&self, event: Box<TlsEvent>) -> impl Future<Output = ()> + Send;
-    fn delete_tls_report(&self, events: Vec<ReportEvent>) -> impl Future<Output = ()> + Send;
 }
 
 impl TlsReporting for Server {
@@ -397,42 +406,112 @@ impl TlsReporting for Server {
     }
 
     async fn schedule_tls(&self, event: Box<TlsEvent>) {
-        let created = event.interval.to_timestamp();
-        let deliver_at = created + event.interval.as_secs();
-        let mut report_event = ReportEvent {
-            due: deliver_at,
-            policy_hash: event.policy.to_hash(),
-            seq_id: created,
-            domain: event.domain,
+        // Find the report by domain name
+        let mut batch = BatchBuilder::new();
+        let object_id = ObjectType::TlsInternalReport.to_id();
+        let item_id;
+        let report = match self
+            .registry()
+            .query::<AHashSet<u64>>(
+                RegistryQuery::new(ObjectType::TlsInternalReport)
+                    .equal(Property::Domain, event.domain.clone()),
+            )
+            .await
+            .map(|ids| ids.into_iter().next())
+        {
+            Ok(Some(item_id_)) => {
+                match self
+                    .store()
+                    .get_value::<TlsInternalReport>(ValueKey::from(ValueClass::Registry(
+                        RegistryClass::Item {
+                            object_id,
+                            item_id: item_id_,
+                        },
+                    )))
+                    .await
+                {
+                    Ok(Some(report)) => {
+                        item_id = item_id_;
+                        Some(report)
+                    }
+                    Ok(None) => {
+                        batch.clear(ValueClass::Registry(RegistryClass::Index {
+                            index_id: Property::Domain.to_id(),
+                            object_id,
+                            item_id: item_id_,
+                            key: event.domain.as_bytes().to_vec(),
+                        }));
+                        item_id = self.inner.data.queue_id_gen.generate();
+                        None
+                    }
+                    Err(err) => {
+                        trc::error!(
+                            err.caused_by(trc::location!())
+                                .details("Failed to query registry for TLS report")
+                        );
+                        return;
+                    }
+                }
+            }
+            Ok(None) => {
+                item_id = self.inner.data.queue_id_gen.generate();
+                None
+            }
+            Err(err) => {
+                trc::error!(
+                    err.caused_by(trc::location!())
+                        .details("Failed to query registry for TLS report")
+                );
+                return;
+            }
         };
 
-        // Write policy if missing
-        let mut builder = BatchBuilder::new();
-        if self
-            .core
-            .storage
-            .data
-            .get_value::<()>(ValueKey::from(ValueClass::Queue(
-                QueueClass::TlsReportHeader(report_event.clone()),
-            )))
-            .await
-            .unwrap_or_default()
-            .is_none()
+        // Generate policy if missing
+        let mut report = if let Some(report) = report {
+            report
+        } else {
+            batch.set(
+                ValueClass::Registry(RegistryClass::Index {
+                    index_id: Property::Domain.to_id(),
+                    object_id,
+                    item_id,
+                    key: event.domain.as_bytes().to_vec(),
+                }),
+                vec![],
+            );
+            let todo = "schedule task";
+
+            TlsInternalReport {
+                created_at: UTCDateTime::now(),
+                deliver_at: UTCDateTime::from_timestamp(
+                    (event.interval.to_timestamp() + event.interval.as_secs()) as i64,
+                ),
+                domain: event.domain,
+                ..Default::default()
+            }
+        };
+        let policy_hash = event.policy.to_hash();
+        let policy = if let Some(policy) = report
+            .policy_identifiers
+            .iter()
+            .position(|id| *id == policy_hash)
+            .and_then(|idx| report.report.policies.get_mut(idx))
         {
+            policy
+        } else {
             // Serialize report
-            let mut policy = PolicyDetails {
-                policy_type: PolicyType::NoPolicyFound,
-                policy_string: vec![],
-                policy_domain: report_event.domain.clone(),
-                mx_host: vec![],
+            let mut policy = TlsReportPolicy {
+                policy_type: TlsPolicyType::NoPolicyFound,
+                policy_domain: report.domain.clone(),
+                ..Default::default()
             };
 
             match event.policy {
                 common::ipc::PolicyType::Tlsa(tlsa) => {
-                    policy.policy_type = PolicyType::Tlsa;
+                    policy.policy_type = TlsPolicyType::Tlsa;
                     if let Some(tlsa) = tlsa {
                         for entry in &tlsa.entries {
-                            policy.policy_string.push(format!(
+                            policy.policy_strings.push(format!(
                                 "{} {} {} {}",
                                 if entry.is_end_entity { 3 } else { 2 },
                                 i32::from(entry.is_spki),
@@ -449,10 +528,10 @@ impl TlsReporting for Server {
                     }
                 }
                 common::ipc::PolicyType::Sts(sts) => {
-                    policy.policy_type = PolicyType::Sts;
+                    policy.policy_type = TlsPolicyType::Sts;
                     if let Some(sts) = sts {
-                        policy.policy_string.push("version: STSv1".to_string());
-                        policy.policy_string.push(format!(
+                        policy.policy_strings.push("version: STSv1".to_string());
+                        policy.policy_strings.push(format!(
                             "mode: {}",
                             match sts.mode {
                                 Mode::Enforce => "enforce",
@@ -461,112 +540,64 @@ impl TlsReporting for Server {
                             }
                         ));
                         policy
-                            .policy_string
+                            .policy_strings
                             .push(format!("max_age: {}", sts.max_age));
                         for mx in &sts.mx {
                             let mx = match mx {
                                 MxPattern::Equals(mx) => mx.to_string(),
                                 MxPattern::StartsWith(mx) => format!("*.{mx}"),
                             };
-                            policy.policy_string.push(format!("mx: {mx}"));
-                            policy.mx_host.push(mx);
+                            policy.policy_strings.push(format!("mx: {mx}"));
+                            policy.mx_hosts.push(mx);
                         }
                     }
                 }
                 _ => (),
             }
 
-            // Create report entry
-            let entry = TlsFormat {
-                rua: event.tls_record.rua.clone(),
-                policy,
-                records: vec![],
-            };
-
-            // Write report
-            builder.set(
-                ValueClass::Queue(QueueClass::TlsReportHeader(report_event.clone())),
-                match Archiver::new(entry).serialize() {
-                    Ok(data) => data.to_vec(),
-                    Err(err) => {
-                        trc::error!(
-                            err.caused_by(trc::location!())
-                                .details("Failed to serialize TLS report")
-                        );
-                        return;
+            for rua in &event.tls_record.rua {
+                match rua {
+                    ReportUri::Mail(mail) => {
+                        if !report.mail_rua.contains(mail) {
+                            report.mail_rua.push(mail.clone());
+                        }
                     }
-                },
-            );
+                    ReportUri::Http(uri) => {
+                        if !report.http_rua.contains(uri) {
+                            report.http_rua.push(uri.clone());
+                        }
+                    }
+                }
+            }
+
+            report.policy_identifiers.push(policy_hash);
+            report.report.policies.push(policy);
+            report.report.policies.last_mut().unwrap()
+        };
+
+        // Add failure details
+        if let Some(failure) = event.failure.map(TlsFailureDetails::from) {
+            if let Some(idx) = policy.failure_details.iter().position(|d| d == &failure) {
+                policy.failure_details[idx].failed_session_count += 1;
+            } else {
+                policy.failure_details.push(failure);
+            }
+
+            policy.total_failed_sessions += 1;
+        } else {
+            policy.total_successful_sessions += 1;
         }
 
         // Write entry
-        report_event.seq_id = self.inner.data.queue_id_gen.generate();
-        builder.set(
-            ValueClass::Queue(QueueClass::TlsReportEvent(report_event)),
-            match Archiver::new(event.failure).serialize() {
-                Ok(data) => data.to_vec(),
-                Err(err) => {
-                    trc::error!(
-                        err.caused_by(trc::location!())
-                            .details("Failed to serialize TLS report")
-                    );
-                    return;
-                }
-            },
+        batch.set(
+            ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
+            report.to_pickled_vec(),
         );
-
-        if let Err(err) = self.core.storage.data.write(builder.build_all()).await {
-            trc::error!(
-                err.caused_by(trc::location!())
-                    .details("Failed to write TLS report")
-            );
-        }
-    }
-
-    async fn delete_tls_report(&self, events: Vec<ReportEvent>) {
-        let mut batch = BatchBuilder::new();
-
-        for event in events {
-            let from_key = ReportEvent {
-                due: event.due,
-                policy_hash: event.policy_hash,
-                seq_id: 0,
-                domain: event.domain.clone(),
-            };
-            let to_key = ReportEvent {
-                due: event.due,
-                policy_hash: event.policy_hash,
-                seq_id: u64::MAX,
-                domain: event.domain.clone(),
-            };
-
-            // Remove report events
-            if let Err(err) = self
-                .core
-                .storage
-                .data
-                .delete_range(
-                    ValueKey::from(ValueClass::Queue(QueueClass::TlsReportEvent(from_key))),
-                    ValueKey::from(ValueClass::Queue(QueueClass::TlsReportEvent(to_key))),
-                )
-                .await
-            {
-                trc::error!(
-                    err.caused_by(trc::location!())
-                        .details("Failed to delete TLS reports")
-                );
-
-                return;
-            }
-
-            // Remove report header
-            batch.clear(ValueClass::Queue(QueueClass::TlsReportHeader(event)));
-        }
 
         if let Err(err) = self.core.storage.data.write(batch.build_all()).await {
             trc::error!(
                 err.caused_by(trc::location!())
-                    .details("Failed to delete TLS reports")
+                    .details("Failed to write TLS report")
             );
         }
     }

@@ -37,6 +37,9 @@ pub async fn store_destroy(store: &Store) {
         SUBSPACE_TELEMETRY_SPAN,
         SUBSPACE_TELEMETRY_METRIC,
         SUBSPACE_SEARCH_INDEX,
+        SUBSPACE_REGISTRY_IDX,
+        SUBSPACE_REGISTRY_IDX_GLOBAL,
+        SUBSPACE_DIRECTORY,
     ] {
         if subspace == SUBSPACE_SEARCH_INDEX && store.is_pg_or_mysql() {
             continue;
@@ -247,6 +250,9 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
         (SUBSPACE_TELEMETRY_SPAN, true),
         (SUBSPACE_TELEMETRY_METRIC, true),
         (SUBSPACE_SEARCH_INDEX, true),
+        (SUBSPACE_REGISTRY_IDX, false),
+        (SUBSPACE_REGISTRY_IDX_GLOBAL, false),
+        (SUBSPACE_DIRECTORY, true),
     ] {
         if (subspace == SUBSPACE_SEARCH_INDEX && store.is_pg_or_mysql())
         //|| (subspace == directory && !include_directory)

@@ -203,7 +203,7 @@ impl SpamClassifier for Server {
             .iterate(
                 IterateParams::new(from_key, to_key).descending(),
                 |key, value| {
-                    let id = key.deserialize_be_u64(U16_LEN + 1)?;
+                    let id = key.deserialize_be_u64(U16_LEN)?;
                     let sample = SpamTrainingSample::deserialize(value)?;
 
                     let until = sample.expires_at.timestamp() as u64;

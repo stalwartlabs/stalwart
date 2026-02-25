@@ -10,7 +10,7 @@ use crate::{
     write::{AnyClass, RegistryClass, ValueClass, key::KeySerializer},
 };
 use registry::{
-    pickle::{Pickle, PickledStream},
+    pickle::PickledStream,
     schema::prelude::Object,
     types::{EnumImpl, ObjectImpl, id::ObjectId},
 };
@@ -107,22 +107,19 @@ impl RegistryStore {
                                     .ctx(trc::Key::Key, key)
                             })?;
                         let mut stream = PickledStream::new(value);
-                        let _ = u16::unpickle(&mut stream);
-                        let (object, revision) = T::unpickle(&mut stream)
-                            .and_then(|item| u32::unpickle(&mut stream).map(|rev| (item, rev)))
-                            .ok_or_else(|| {
-                                trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                    .into_err()
-                                    .caused_by(trc::location!())
-                                    .id(id)
-                                    .details(object_type.as_str())
-                                    .ctx(trc::Key::Value, value)
-                            })?;
+                        let object = T::unpickle(&mut stream).ok_or_else(|| {
+                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                                .into_err()
+                                .caused_by(trc::location!())
+                                .id(id)
+                                .details(object_type.as_str())
+                                .ctx(trc::Key::Value, value)
+                        })?;
 
                         results.push(RegistryObject {
                             id: ObjectId::new(object_type, Id::new(id)),
                             object,
-                            revision,
+                            revision: xxhash_rust::xxh3::xxh3_64(value),
                         });
 
                         Ok(true)

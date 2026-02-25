@@ -25,7 +25,7 @@ use registry::schema::structs::Rate;
 use std::{collections::hash_map::Entry, future::Future};
 use store::{
     Deserialize, IterateParams, Serialize, ValueKey,
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder, QueueClass, ReportEvent, ValueClass},
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, QueueClass, ValueClass},
 };
 use trc::{AddContext, OutgoingReportEvent};
 use utils::DomainPart;
@@ -318,7 +318,6 @@ pub trait DmarcReporting: Sync + Send {
         serialized_size: Option<&mut serde_json::Serializer<SerializedSize>>,
         span_id: u64,
     ) -> impl Future<Output = trc::Result<Option<Report>>> + Send;
-    fn delete_dmarc_report(&self, event: ReportEvent) -> impl Future<Output = ()> + Send;
     fn schedule_dmarc(&self, event: Box<DmarcEvent>) -> impl Future<Output = ()> + Send;
 }
 
@@ -574,47 +573,6 @@ impl DmarcReporting for Server {
         }
 
         Ok(Some(report))
-    }
-
-    async fn delete_dmarc_report(&self, event: ReportEvent) {
-        let from_key = ReportEvent {
-            due: event.due,
-            policy_hash: event.policy_hash,
-            seq_id: 0,
-            domain: event.domain.clone(),
-        };
-        let to_key = ReportEvent {
-            due: event.due,
-            policy_hash: event.policy_hash,
-            seq_id: u64::MAX,
-            domain: event.domain.clone(),
-        };
-
-        if let Err(err) = self
-            .core
-            .storage
-            .data
-            .delete_range(
-                ValueKey::from(ValueClass::Queue(QueueClass::DmarcReportEvent(from_key))),
-                ValueKey::from(ValueClass::Queue(QueueClass::DmarcReportEvent(to_key))),
-            )
-            .await
-        {
-            trc::error!(
-                err.caused_by(trc::location!())
-                    .details("Failed to delete DMARC report")
-            );
-            return;
-        }
-
-        let mut batch = BatchBuilder::new();
-        batch.clear(ValueClass::Queue(QueueClass::DmarcReportHeader(event)));
-        if let Err(err) = self.core.storage.data.write(batch.build_all()).await {
-            trc::error!(
-                err.caused_by(trc::location!())
-                    .details("Failed to delete DMARC report")
-            );
-        }
     }
 
     async fn schedule_dmarc(&self, event: Box<DmarcEvent>) {

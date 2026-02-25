@@ -172,7 +172,6 @@ pub enum ValueClass {
     Blob(BlobOp),
     Registry(RegistryClass),
     Queue(QueueClass),
-    Report(ReportClass),
     Telemetry(TelemetryClass),
     SearchIndex(SearchIndexClass),
     Any(AnyClass),
@@ -285,19 +284,8 @@ pub enum RegistryClass {
 pub enum QueueClass {
     Message(u64),
     MessageEvent(QueueEvent),
-    DmarcReportHeader(ReportEvent),
-    DmarcReportEvent(ReportEvent),
-    TlsReportHeader(ReportEvent),
-    TlsReportEvent(ReportEvent),
     QuotaCount(Vec<u8>),
     QuotaSize(Vec<u8>),
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub enum ReportClass {
-    Tls { id: u64, expires: u64 },
-    Dmarc { id: u64, expires: u64 },
-    Arf { id: u64, expires: u64 },
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -317,14 +305,6 @@ pub struct QueueEvent {
     pub due: u64,
     pub queue_id: u64,
     pub queue_name: [u8; 8],
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub struct ReportEvent {
-    pub due: u64,
-    pub policy_hash: u64,
-    pub seq_id: u64,
-    pub domain: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Default)]
@@ -483,16 +463,6 @@ impl AssignedIds {
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Reason, "No counter ids were created")
             })
-    }
-}
-
-impl QueueClass {
-    pub fn due(&self) -> Option<u64> {
-        match self {
-            QueueClass::DmarcReportHeader(report_event) => report_event.due.into(),
-            QueueClass::TlsReportHeader(report_event) => report_event.due.into(),
-            _ => None,
-        }
     }
 }
 

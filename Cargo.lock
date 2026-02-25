@@ -6018,6 +6018,7 @@ dependencies = [
  "ahash",
  "hashify",
  "jmap-tools",
+ "mail-auth 0.8.0",
  "serde",
  "serde_json",
  "trc",

@@ -29,17 +29,28 @@ pub use roaring;
 use utils::snowflake::SnowflakeIdGenerator;
 pub use xxhash_rust;
 
+use crate::backend::{elastic::ElasticSearchStore, meili::MeiliSearchStore};
 use ahash::{AHashMap, AHashSet};
 use backend::{fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use write::ValueClass;
 
-use crate::backend::{elastic::ElasticSearchStore, meili::MeiliSearchStore};
-
 pub trait Deserialize: Sized + Sync + Send {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self>;
+
+    #[inline(always)]
     fn deserialize_owned(bytes: Vec<u8>) -> trc::Result<Self> {
         Self::deserialize(&bytes)
+    }
+
+    #[inline(always)]
+    fn deserialize_with_key(_: &[u8], bytes: &[u8]) -> trc::Result<Self> {
+        Self::deserialize(bytes)
+    }
+
+    #[inline(always)]
+    fn deserialize_owned_with_key(key: &[u8], bytes: Vec<u8>) -> trc::Result<Self> {
+        Self::deserialize_with_key(key, &bytes)
     }
 }
 
@@ -105,7 +116,9 @@ pub const SUBSPACE_IN_MEMORY_VALUE: u8 = b'm';
 pub const SUBSPACE_IN_MEMORY_COUNTER: u8 = b'y';
 pub const SUBSPACE_PROPERTY: u8 = b'p';
 pub const SUBSPACE_REGISTRY: u8 = b's';
-pub const SUBSPACE_REGISTRY_DIRECTORY: u8 = b'd';
+pub const SUBSPACE_REGISTRY_IDX: u8 = b'b';
+pub const SUBSPACE_REGISTRY_IDX_GLOBAL: u8 = b'c';
+pub const SUBSPACE_DIRECTORY: u8 = b'd';
 pub const SUBSPACE_QUEUE_MESSAGE: u8 = b'e';
 pub const SUBSPACE_QUEUE_EVENT: u8 = b'q';
 pub const SUBSPACE_QUOTA: u8 = b'u';
@@ -118,8 +131,6 @@ pub const SUBSPACE_DELETED_ITEMS: u8 = b'j';
 pub const SUBSPACE_SPAM_SAMPLES: u8 = b'w';
 
 // TODO: Remove in v1.0
-pub const LEGACY_SUBSPACE_BITMAP_ID: u8 = b'b';
-pub const LEGACY_SUBSPACE_BITMAP_TAG: u8 = b'c';
 pub const LEGACY_SUBSPACE_BITMAP_TEXT: u8 = b'v';
 pub const LEGACY_SUBSPACE_FTS_INDEX: u8 = b'g';
 

@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use utils::map::vec_map::VecMap;
+use utils::{
+    codec::leb128::{Leb128_, Leb128Reader, Leb128Writer},
+    map::vec_map::VecMap,
+};
 
 use crate::types::EnumImpl;
 use std::collections::HashMap;
@@ -30,15 +33,23 @@ impl<'x> PickledStream<'x> {
     }
 
     pub fn read(&mut self) -> Option<u8> {
-        let byte = *self.data.get(self.pos)?;
-        self.pos += 1;
-        Some(byte)
+        self.data.get(self.pos).copied().inspect(|_| self.pos += 1)
+    }
+
+    pub fn read_leb128<T: Leb128_>(&mut self) -> Option<T> {
+        self.data
+            .get(self.pos..)
+            .and_then(|bytes| bytes.read_leb128())
+            .map(|(value, read_bytes)| {
+                self.pos += read_bytes;
+                value
+            })
     }
 
     pub fn read_bytes(&mut self, len: usize) -> Option<&'x [u8]> {
-        let bytes = self.data.get(self.pos..self.pos + len)?;
-        self.pos += len;
-        Some(bytes)
+        self.data.get(self.pos..self.pos + len).inspect(|_| {
+            self.pos += len;
+        })
     }
 
     pub fn eof(&self) -> bool {
@@ -48,53 +59,49 @@ impl<'x> PickledStream<'x> {
     pub fn bytes(&self) -> &'x [u8] {
         self.data
     }
+
+    pub fn assert_version(&mut self, expected: u8) -> Option<u8> {
+        self.read().filter(|&version| version == expected)
+    }
 }
 
 impl Pickle for u16 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_be_bytes());
+        let _ = out.write_leb128(*self);
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; std::mem::size_of::<u16>()];
-        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u16>())?);
-        Some(u16::from_be_bytes(arr))
+        stream.read_leb128()
     }
 }
 
 impl Pickle for u64 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_be_bytes());
+        let _ = out.write_leb128(*self);
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; std::mem::size_of::<u64>()];
-        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u64>())?);
-        Some(u64::from_be_bytes(arr))
+        stream.read_leb128()
     }
 }
 
 impl Pickle for u32 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_be_bytes());
+        let _ = out.write_leb128(*self);
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; std::mem::size_of::<u32>()];
-        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u32>())?);
-        Some(u32::from_be_bytes(arr))
+        stream.read_leb128()
     }
 }
 
 impl Pickle for i64 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_be_bytes());
+        let _ = out.write_leb128(*self as u64);
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; std::mem::size_of::<i64>()];
-        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<i64>())?);
-        Some(i64::from_be_bytes(arr))
+        stream.read_leb128::<u64>().map(|v| v as i64)
     }
 }
 
@@ -126,27 +133,24 @@ impl Pickle for bool {
 
 impl Pickle for String {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
+        (self.len() as u32).pickle(out);
         out.extend_from_slice(self.as_bytes());
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut len_arr = [0u8; std::mem::size_of::<u32>()];
-        len_arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u32>())?);
-        let bytes = stream.read_bytes(u32::from_be_bytes(len_arr) as usize)?;
-        String::from_utf8(bytes.to_vec()).ok()
+        u32::unpickle(stream)
+            .and_then(|len| stream.read_bytes(len as usize))
+            .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
     }
 }
 
 impl<T: EnumImpl> Pickle for T {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_id().to_be_bytes());
+        self.to_id().pickle(out);
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut id_arr = [0u8; std::mem::size_of::<u16>()];
-        id_arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<u16>())?);
-        Self::from_id(u16::from_be_bytes(id_arr))
+        u16::unpickle(stream).and_then(Self::from_id)
     }
 }
 
@@ -180,16 +184,14 @@ where
     T: Pickle,
 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
+        (self.len() as u32).pickle(out);
         for item in self {
             item.pickle(out);
         }
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut len_arr = [0u8; 4];
-        len_arr.copy_from_slice(stream.read_bytes(4)?);
-        let len = u32::from_be_bytes(len_arr) as usize;
+        let len = u32::unpickle(stream)? as usize;
         let mut vec = Vec::with_capacity(len);
         for _ in 0..len {
             vec.push(T::unpickle(stream)?);
@@ -205,7 +207,7 @@ where
     S: std::hash::BuildHasher + Default,
 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
+        (self.len() as u32).pickle(out);
         for (key, value) in self {
             key.pickle(out);
             value.pickle(out);
@@ -213,9 +215,7 @@ where
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut len_arr = [0u8; 4];
-        len_arr.copy_from_slice(stream.read_bytes(4)?);
-        let len = u32::from_be_bytes(len_arr) as usize;
+        let len = u32::unpickle(stream)? as usize;
         let mut map = HashMap::with_capacity_and_hasher(len, S::default());
         for _ in 0..len {
             let key = K::unpickle(stream)?;
@@ -232,7 +232,7 @@ where
     V: Pickle,
 {
     fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.len() as u32).to_be_bytes());
+        (self.len() as u32).pickle(out);
         for (key, value) in self {
             key.pickle(out);
             value.pickle(out);
@@ -240,9 +240,7 @@ where
     }
 
     fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut len_arr = [0u8; 4];
-        len_arr.copy_from_slice(stream.read_bytes(4)?);
-        let len = u32::from_be_bytes(len_arr) as usize;
+        let len = u32::unpickle(stream)? as usize;
         let mut map = VecMap::with_capacity(len);
         for _ in 0..len {
             let key = K::unpickle(stream)?;

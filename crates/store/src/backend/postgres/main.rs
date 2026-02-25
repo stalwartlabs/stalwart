@@ -13,7 +13,7 @@ use crate::{
     },
     *,
 };
-use ::registry::schema::structs;
+use ::registry::schema::{enums::PostgreSqlRecyclingMethod, structs};
 use deadpool::managed::Object;
 use deadpool_postgres::{Config, Manager, ManagerConfig, PoolConfig, RecyclingMethod, Runtime};
 use tokio_postgres::NoTls;
@@ -30,7 +30,11 @@ impl PostgresStore {
         cfg.connect_timeout = config.timeout.map(|t| t.into_inner());
         cfg.options = config.options;
         cfg.manager = Some(ManagerConfig {
-            recycling_method: RecyclingMethod::Fast,
+            recycling_method: match config.pool_recycling_method {
+                PostgreSqlRecyclingMethod::Fast => RecyclingMethod::Fast,
+                PostgreSqlRecyclingMethod::Verified => RecyclingMethod::Verified,
+                PostgreSqlRecyclingMethod::Clean => RecyclingMethod::Clean,
+            },
         });
         if let Some(max_conn) = config.pool_max_connections {
             cfg.pool = PoolConfig::new(max_conn as usize).into();
@@ -101,6 +105,7 @@ impl PostgresStore {
             SUBSPACE_REPORT_IN,
             SUBSPACE_LOGS,
             SUBSPACE_BLOBS,
+            SUBSPACE_DIRECTORY,
             SUBSPACE_TELEMETRY_SPAN,
             SUBSPACE_TELEMETRY_METRIC,
         ] {
@@ -118,7 +123,11 @@ impl PostgresStore {
             .map_err(into_error)?;
         }
 
-        for table in [SUBSPACE_INDEXES] {
+        for table in [
+            SUBSPACE_INDEXES,
+            SUBSPACE_REGISTRY_IDX,
+            SUBSPACE_REGISTRY_IDX_GLOBAL,
+        ] {
             let table = char::from(table);
             conn.execute(
                 &format!(

@@ -14,7 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use store::{
-    BlobStore, SUBSPACE_BLOBS, SUBSPACE_COUNTER, SUBSPACE_INDEXES, SUBSPACE_QUOTA, Store, U32_LEN,
+    BlobStore, SUBSPACE_BLOBS, SUBSPACE_COUNTER, SUBSPACE_INDEXES, SUBSPACE_QUOTA,
+    SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_IDX_GLOBAL, Store, U32_LEN,
     write::{AnyClass, BatchBuilder, ValueClass, key::DeserializeBigEndian},
 };
 use types::{collection::Collection, field::Field};
@@ -84,7 +85,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                 }
             }
         }
-        SUBSPACE_INDEXES => {
+        SUBSPACE_INDEXES | SUBSPACE_REGISTRY_IDX | SUBSPACE_REGISTRY_IDX_GLOBAL => {
             while let Some((key, _)) = reader.next() {
                 let account_id = key
                     .as_slice()

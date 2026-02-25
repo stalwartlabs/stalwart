@@ -140,9 +140,9 @@ impl RegistrySet for Server {
             ObjectType::Task => {}
 
             // Move to registry?
-            ObjectType::ArfFeedbackReport => {}
-            ObjectType::DmarcReport => {}
-            ObjectType::TlsReport => {}
+            ObjectType::ArfExternalReport => {}
+            ObjectType::DmarcExternalReport => {}
+            ObjectType::TlsExternalReport => {}
             ObjectType::DeletedItem => {}
             ObjectType::Metric => {}
             ObjectType::Trace => {}

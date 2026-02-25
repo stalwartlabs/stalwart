@@ -5,17 +5,16 @@
  */
 
 use super::{
-    AnyKey, BlobOp, InMemoryClass, QueueClass, ReportClass, ReportEvent, TaskQueueClass,
-    TelemetryClass, ValueClass,
+    AnyKey, BlobOp, InMemoryClass, QueueClass, TaskQueueClass, TelemetryClass, ValueClass,
 };
 use crate::{
-    Deserialize, IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL, SUBSPACE_BLOB_LINK,
-    SUBSPACE_COUNTER, SUBSPACE_DELETED_ITEMS, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_IN_MEMORY_VALUE,
-    SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY, SUBSPACE_QUEUE_EVENT,
-    SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REGISTRY, SUBSPACE_REGISTRY_DIRECTORY,
-    SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT, SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES,
-    SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC, SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN,
-    U64_LEN, ValueKey, WITH_SUBSPACE,
+    IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL, SUBSPACE_BLOB_LINK, SUBSPACE_COUNTER,
+    SUBSPACE_DELETED_ITEMS, SUBSPACE_DIRECTORY, SUBSPACE_IN_MEMORY_COUNTER,
+    SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY,
+    SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REGISTRY,
+    SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_IDX_GLOBAL, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
+    SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
+    SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
     write::{
         BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexId, SearchIndexType,
     },
@@ -110,51 +109,33 @@ impl KeySerialize for u64 {
 impl DeserializeBigEndian for &[u8] {
     fn deserialize_be_u16(&self, index: usize) -> trc::Result<u16> {
         self.get(index..index + U16_LEN)
+            .and_then(|bytes| bytes.try_into().ok())
             .ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Value, *self)
-            })
-            .and_then(|bytes| {
-                bytes.try_into().map_err(|_| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Value, *self)
-                })
             })
             .map(u16::from_be_bytes)
     }
 
     fn deserialize_be_u32(&self, index: usize) -> trc::Result<u32> {
         self.get(index..index + U32_LEN)
+            .and_then(|bytes| bytes.try_into().ok())
             .ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Value, *self)
-            })
-            .and_then(|bytes| {
-                bytes.try_into().map_err(|_| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Value, *self)
-                })
             })
             .map(u32::from_be_bytes)
     }
 
     fn deserialize_be_u64(&self, index: usize) -> trc::Result<u64> {
         self.get(index..index + U64_LEN)
+            .and_then(|bytes| bytes.try_into().ok())
             .ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Value, *self)
-            })
-            .and_then(|bytes| {
-                bytes.try_into().map_err(|_| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Value, *self)
-                })
             })
             .map(u64::from_be_bytes)
     }
@@ -320,46 +301,44 @@ impl ValueClass {
                 InMemoryClass::Counter(key) => serializer.write(key.as_slice()),
             },
             ValueClass::Registry(registry) => match registry {
-                RegistryClass::Item { object_id, item_id } => serializer
-                    .write(0u8)
-                    .write(*object_id)
-                    .write_leb128(*item_id),
-                RegistryClass::Reference {
-                    to_object_id,
-                    to_item_id,
-                    from_object_id,
-                    from_item_id,
-                } => serializer
-                    .write(1u8)
-                    .write(*to_object_id)
-                    .write_leb128(*to_item_id)
-                    .write(*from_object_id)
-                    .write_leb128(*from_item_id),
+                RegistryClass::Item { object_id, item_id } => {
+                    serializer.write(*object_id).write_leb128(*item_id)
+                }
+                RegistryClass::Id { object_id, item_id } => {
+                    serializer.write(*object_id).write(*item_id)
+                }
                 RegistryClass::Index {
                     index_id,
                     object_id,
                     item_id,
                     key,
                 } => serializer
-                    .write(2u8)
                     .write(*object_id)
                     .write(*index_id)
                     .write(key.as_slice())
                     .write(*item_id),
+                RegistryClass::Reference {
+                    to_object_id,
+                    to_item_id,
+                    from_object_id,
+                    from_item_id,
+                } => serializer
+                    .write(0u8)
+                    .write(*to_object_id)
+                    .write(*to_item_id)
+                    .write(*from_object_id)
+                    .write_leb128(*from_item_id),
                 RegistryClass::IndexGlobal {
                     index_id,
                     object_id,
                     item_id,
                     key,
                 } => serializer
-                    .write(3u8)
+                    .write(1u8)
                     .write(*index_id)
                     .write(key.as_slice())
                     .write(*object_id)
                     .write(*item_id),
-                RegistryClass::Id { object_id, item_id } => {
-                    serializer.write(4u8).write(*object_id).write(*item_id)
-                }
                 RegistryClass::IdCounter { object_id } => serializer.write(*object_id),
             },
             ValueClass::Queue(queue) => match queue {
@@ -368,45 +347,8 @@ impl ValueClass {
                     .write(event.due)
                     .write(event.queue_id)
                     .write(event.queue_name.as_slice()),
-                QueueClass::DmarcReportHeader(event) => serializer
-                    .write(0u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id)
-                    .write(0u8),
-                QueueClass::TlsReportHeader(event) => serializer
-                    .write(0u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id)
-                    .write(1u8),
-                QueueClass::DmarcReportEvent(event) => serializer
-                    .write(1u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id),
-                QueueClass::TlsReportEvent(event) => serializer
-                    .write(2u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id),
                 QueueClass::QuotaCount(key) => serializer.write(0u8).write(key.as_slice()),
                 QueueClass::QuotaSize(key) => serializer.write(1u8).write(key.as_slice()),
-            },
-            ValueClass::Report(report) => match report {
-                ReportClass::Tls { id, expires } => {
-                    serializer.write(0u8).write(*expires).write(*id)
-                }
-                ReportClass::Dmarc { id, expires } => {
-                    serializer.write(1u8).write(*expires).write(*id)
-                }
-                ReportClass::Arf { id, expires } => {
-                    serializer.write(2u8).write(*expires).write(*id)
-                }
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span { span_id } => serializer.write(*span_id),
@@ -544,6 +486,13 @@ const REG_OAUTH_CLIENT: u16 = ObjectType::OAuthClient as u16;
 const REG_MAILING_LIST: u16 = ObjectType::MailingList as u16;
 const REG_MASKED_EMAIL: u16 = ObjectType::MaskedEmail as u16;
 const REG_PUBLIC_KEY: u16 = ObjectType::PublicKey as u16;
+const REG_TRACE: u16 = ObjectType::Trace as u16;
+const REG_METRIC: u16 = ObjectType::Metric as u16;
+const REPORT_EXTERNAL_ARF: u16 = ObjectType::ArfExternalReport as u16;
+const REPORT_EXTERNAL_DMARC: u16 = ObjectType::DmarcExternalReport as u16;
+const REPORT_EXTERNAL_TLS: u16 = ObjectType::TlsExternalReport as u16;
+const REPORT_INTERNAL_DMARC: u16 = ObjectType::DmarcInternalReport as u16;
+const REPORT_INTERNAL_TLS: u16 = ObjectType::TlsInternalReport as u16;
 
 impl ValueClass {
     pub fn serialized_size(&self) -> usize {
@@ -556,11 +505,10 @@ impl ValueClass {
             ValueClass::Acl(_) => U32_LEN * 3 + 2,
             ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v)) => v.len(),
             ValueClass::Registry(registry) => match registry {
-                RegistryClass::Item { .. } => U16_LEN + U64_LEN + 2,
+                RegistryClass::Item { .. } => U16_LEN + U64_LEN + 1,
                 RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 2,
-                RegistryClass::Index { key, .. } | RegistryClass::IndexGlobal { key, .. } => {
-                    (U16_LEN * 2) + U64_LEN + key.len() + 2
-                }
+                RegistryClass::Index { key, .. } => (U16_LEN * 2) + U64_LEN + key.len() + 1,
+                RegistryClass::IndexGlobal { key, .. } => (U16_LEN * 2) + U64_LEN + key.len() + 2,
                 RegistryClass::Id { .. } => U16_LEN + U64_LEN + 1,
                 RegistryClass::IdCounter { .. } => U16_LEN + 1,
             },
@@ -582,15 +530,8 @@ impl ValueClass {
             ValueClass::Queue(q) => match q {
                 QueueClass::Message(_) => U64_LEN,
                 QueueClass::MessageEvent(_) => U64_LEN * 3,
-                QueueClass::DmarcReportEvent(event) | QueueClass::TlsReportEvent(event) => {
-                    event.domain.len() + U64_LEN * 3
-                }
-                QueueClass::DmarcReportHeader(event) | QueueClass::TlsReportHeader(event) => {
-                    event.domain.len() + (U64_LEN * 3) + 1
-                }
                 QueueClass::QuotaCount(v) | QueueClass::QuotaSize(v) => v.len(),
             },
-            ValueClass::Report(_) => U64_LEN * 2 + 1,
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span { .. } => U64_LEN + 1,
                 TelemetryClass::Metric { .. } => U64_LEN * 2 + 1,
@@ -626,22 +567,23 @@ impl ValueClass {
                 BlobOp::Commit { .. } | BlobOp::Link { .. } => SUBSPACE_BLOB_LINK,
             },
             ValueClass::Registry(registry) => match registry {
-                RegistryClass::Item { object_id, .. }
-                | RegistryClass::Id { object_id, .. }
-                | RegistryClass::Index { object_id, .. }
-                | RegistryClass::Reference {
-                    to_object_id: object_id,
-                    ..
-                } => match *object_id {
+                RegistryClass::Item { object_id, .. } => match *object_id {
                     REG_ACCOUNT | REG_DOMAIN | REG_TENANT | REG_ROLE | REG_OAUTH_CLIENT
-                    | REG_MAILING_LIST | REG_MASKED_EMAIL | REG_PUBLIC_KEY => {
-                        SUBSPACE_REGISTRY_DIRECTORY
-                    }
+                    | REG_MAILING_LIST | REG_MASKED_EMAIL | REG_PUBLIC_KEY => SUBSPACE_DIRECTORY,
                     REG_DELETED_ITEM => SUBSPACE_DELETED_ITEMS,
                     REG_SPAM_SAMPLE => SUBSPACE_SPAM_SAMPLES,
+                    REG_TRACE => SUBSPACE_TELEMETRY_SPAN,
+                    REG_METRIC => SUBSPACE_TELEMETRY_METRIC,
+                    REPORT_EXTERNAL_ARF | REPORT_EXTERNAL_DMARC | REPORT_EXTERNAL_TLS => {
+                        SUBSPACE_REPORT_IN
+                    }
+                    REPORT_INTERNAL_DMARC | REPORT_INTERNAL_TLS => SUBSPACE_REPORT_OUT,
                     _ => SUBSPACE_REGISTRY,
                 },
-                RegistryClass::IndexGlobal { .. } => SUBSPACE_REGISTRY,
+                RegistryClass::Id { .. } | RegistryClass::Index { .. } => SUBSPACE_REGISTRY_IDX,
+                RegistryClass::Reference { .. } | RegistryClass::IndexGlobal { .. } => {
+                    SUBSPACE_REGISTRY_IDX_GLOBAL
+                }
                 RegistryClass::IdCounter { .. } => SUBSPACE_COUNTER,
             },
             ValueClass::InMemory(lookup) => match lookup {
@@ -651,13 +593,8 @@ impl ValueClass {
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(_) => SUBSPACE_QUEUE_MESSAGE,
                 QueueClass::MessageEvent(_) => SUBSPACE_QUEUE_EVENT,
-                QueueClass::DmarcReportHeader(_)
-                | QueueClass::TlsReportHeader(_)
-                | QueueClass::DmarcReportEvent(_)
-                | QueueClass::TlsReportEvent(_) => SUBSPACE_REPORT_OUT,
                 QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_) => SUBSPACE_QUOTA,
             },
-            ValueClass::Report(_) => SUBSPACE_REPORT_IN,
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span { .. } => SUBSPACE_TELEMETRY_SPAN,
                 TelemetryClass::Metric { .. } => SUBSPACE_TELEMETRY_METRIC,
@@ -704,25 +641,6 @@ impl From<RegistryClass> for ValueClass {
 impl From<BlobOp> for ValueClass {
     fn from(value: BlobOp) -> Self {
         ValueClass::Blob(value)
-    }
-}
-
-impl Deserialize for ReportEvent {
-    fn deserialize(key: &[u8]) -> trc::Result<Self> {
-        Ok(ReportEvent {
-            due: key.deserialize_be_u64(1)?,
-            policy_hash: key.deserialize_be_u64(key.len() - (U64_LEN * 2 + 1))?,
-            seq_id: key.deserialize_be_u64(key.len() - (U64_LEN + 1))?,
-            domain: key
-                .get(U64_LEN + 1..key.len() - (U64_LEN * 2 + 1))
-                .and_then(|domain| std::str::from_utf8(domain).ok())
-                .map(|s| s.to_string())
-                .ok_or_else(|| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Key, key)
-                })?,
-        })
     }
 }
 

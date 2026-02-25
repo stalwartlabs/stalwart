@@ -6,13 +6,11 @@
 
 use super::DocumentSet;
 use crate::{
-    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_COUNTER, SUBSPACE_DELETED_ITEMS,
-    SUBSPACE_INDEXES, SUBSPACE_LOGS, Store, U32_LEN, Value, ValueKey,
+    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_COUNTER, SUBSPACE_INDEXES,
+    SUBSPACE_LOGS, Store, U32_LEN, Value, ValueKey,
     write::{
-        AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, Operation, ReportClass, ValueClass,
-        ValueOp,
+        AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, Operation, ValueClass, ValueOp,
         key::{DeserializeBigEndian, KeySerializer},
-        now,
     },
 };
 use compact_str::ToCompactString;
@@ -189,36 +187,6 @@ impl Store {
     }
 
     pub async fn purge_store(&self) -> trc::Result<()> {
-        // Delete expired reports
-        let now = now();
-        self.delete_range(
-            ValueKey::from(ValueClass::Report(ReportClass::Dmarc { id: 0, expires: 0 })),
-            ValueKey::from(ValueClass::Report(ReportClass::Dmarc {
-                id: u64::MAX,
-                expires: now,
-            })),
-        )
-        .await
-        .caused_by(trc::location!())?;
-        self.delete_range(
-            ValueKey::from(ValueClass::Report(ReportClass::Tls { id: 0, expires: 0 })),
-            ValueKey::from(ValueClass::Report(ReportClass::Tls {
-                id: u64::MAX,
-                expires: now,
-            })),
-        )
-        .await
-        .caused_by(trc::location!())?;
-        self.delete_range(
-            ValueKey::from(ValueClass::Report(ReportClass::Arf { id: 0, expires: 0 })),
-            ValueKey::from(ValueClass::Report(ReportClass::Arf {
-                id: u64::MAX,
-                expires: now,
-            })),
-        )
-        .await
-        .caused_by(trc::location!())?;
-
         match self {
             #[cfg(feature = "sqlite")]
             Self::SQLite(store) => store.purge_store().await,

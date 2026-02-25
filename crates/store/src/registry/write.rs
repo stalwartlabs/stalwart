@@ -5,8 +5,8 @@
  */
 
 use crate::{
-    IterateParams, RegistryStore, SUBSPACE_REGISTRY, SerializeInfallible, U16_LEN, U64_LEN,
-    ValueKey,
+    IterateParams, RegistryStore, SUBSPACE_REGISTRY_IDX_GLOBAL, SerializeInfallible, U16_LEN,
+    U64_LEN, ValueKey,
     write::{
         AnyClass, BatchBuilder, RegistryClass, ValueClass,
         assert::AssertValue,
@@ -147,7 +147,7 @@ impl RegistryStore {
                 item_id = id.id();
                 batch.assert_value(
                     ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
-                    AssertValue::U32(old_object.revision),
+                    AssertValue::Hash(old_object.revision),
                 );
             }
             RegistryWriteOp::Delete { object_id, object } => {
@@ -317,7 +317,7 @@ impl RegistryStore {
 
         // It's pickle time!
         let mut out = Vec::with_capacity(256);
-        object.pickle(&mut out);
+        object.inner.pickle(&mut out);
 
         // Build batch
         if write_id {
@@ -379,23 +379,23 @@ impl RegistryStore {
         // Validate relationships
         let mut linked = Vec::new();
         let key = KeySerializer::new(U64_LEN + U16_LEN + 1)
-            .write(1u8)
+            .write(0u8)
             .write(object_type_id)
             .write(item_id)
             .finalize();
         let prefix_len = key.len();
         let from_key = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY,
+            subspace: SUBSPACE_REGISTRY_IDX_GLOBAL,
             key,
         }));
         let key = KeySerializer::new((U64_LEN * 2) + U16_LEN + 1)
-            .write(1u8)
+            .write(0u8)
             .write(object_type_id)
             .write(item_id)
             .write(u64::MAX)
             .finalize();
         let to_key = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY,
+            subspace: SUBSPACE_REGISTRY_IDX_GLOBAL,
             key,
         }));
         self.0
@@ -444,7 +444,7 @@ impl RegistryStore {
                     object_id: object_type_id,
                     item_id,
                 }),
-                AssertValue::U32(object.revision),
+                AssertValue::Hash(object.revision),
             )
             .clear(ValueClass::Registry(RegistryClass::Item {
                 object_id: object_type_id,
@@ -546,13 +546,13 @@ impl RegistryClass {
 }
 
 impl BatchBuilder {
-    fn registry_index<'x>(
+    pub fn registry_index<'x>(
         &mut self,
         object_id: u16,
         item_id: u64,
         index_keys: impl Iterator<Item = &'x IndexKey<'x>>,
         is_set: bool,
-    ) {
+    ) -> &mut Self {
         for key in index_keys {
             if is_set {
                 self.set(
@@ -565,6 +565,7 @@ impl BatchBuilder {
                 )));
             }
         }
+        self
     }
 }
 
