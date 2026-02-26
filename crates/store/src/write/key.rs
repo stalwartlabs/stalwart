@@ -12,7 +12,7 @@ use crate::{
     SUBSPACE_DELETED_ITEMS, SUBSPACE_DIRECTORY, SUBSPACE_IN_MEMORY_COUNTER,
     SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY,
     SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REGISTRY,
-    SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_IDX_GLOBAL, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
+    SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_PK, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
     SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
     SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
     write::{
@@ -323,22 +323,18 @@ impl ValueClass {
                     from_object_id,
                     from_item_id,
                 } => serializer
-                    .write(0u8)
                     .write(*to_object_id)
                     .write(*to_item_id)
                     .write(*from_object_id)
-                    .write_leb128(*from_item_id),
-                RegistryClass::IndexGlobal {
-                    index_id,
+                    .write(*from_item_id),
+                RegistryClass::PrimaryKey {
                     object_id,
-                    item_id,
+                    index_id,
                     key,
                 } => serializer
-                    .write(1u8)
+                    .write((*object_id).unwrap_or(u16::MAX))
                     .write(*index_id)
-                    .write(key.as_slice())
-                    .write(*object_id)
-                    .write(*item_id),
+                    .write(key.as_slice()),
                 RegistryClass::IdCounter { object_id } => serializer.write(*object_id),
             },
             ValueClass::Queue(queue) => match queue {
@@ -351,15 +347,8 @@ impl ValueClass {
                 QueueClass::QuotaSize(key) => serializer.write(1u8).write(key.as_slice()),
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
-                TelemetryClass::Span { span_id } => serializer.write(*span_id),
-                TelemetryClass::Metric {
-                    timestamp,
-                    metric_id,
-                    node_id,
-                } => serializer
-                    .write(*timestamp)
-                    .write_leb128(*metric_id)
-                    .write_leb128(*node_id),
+                TelemetryClass::Span(span_id) => serializer.write(*span_id),
+                TelemetryClass::Metric(metric_id) => serializer.write(*metric_id),
             },
             ValueClass::DocumentId => serializer.write(account_id).write(collection),
             ValueClass::ChangeId => serializer.write(account_id),
@@ -506,9 +495,9 @@ impl ValueClass {
             ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v)) => v.len(),
             ValueClass::Registry(registry) => match registry {
                 RegistryClass::Item { .. } => U16_LEN + U64_LEN + 1,
-                RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 2,
+                RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 1,
                 RegistryClass::Index { key, .. } => (U16_LEN * 2) + U64_LEN + key.len() + 1,
-                RegistryClass::IndexGlobal { key, .. } => (U16_LEN * 2) + U64_LEN + key.len() + 2,
+                RegistryClass::PrimaryKey { key, .. } => (U16_LEN * 2) + key.len() + 1,
                 RegistryClass::Id { .. } => U16_LEN + U64_LEN + 1,
                 RegistryClass::IdCounter { .. } => U16_LEN + 1,
             },
@@ -533,8 +522,7 @@ impl ValueClass {
                 QueueClass::QuotaCount(v) | QueueClass::QuotaSize(v) => v.len(),
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
-                TelemetryClass::Span { .. } => U64_LEN + 1,
-                TelemetryClass::Metric { .. } => U64_LEN * 2 + 1,
+                TelemetryClass::Span(_) | TelemetryClass::Metric(_) => U64_LEN + 1,
             },
             ValueClass::DocumentId | ValueClass::Quota | ValueClass::TenantQuota(_) => U32_LEN + 1,
             ValueClass::ChangeId => U32_LEN,
@@ -581,8 +569,8 @@ impl ValueClass {
                     _ => SUBSPACE_REGISTRY,
                 },
                 RegistryClass::Id { .. } | RegistryClass::Index { .. } => SUBSPACE_REGISTRY_IDX,
-                RegistryClass::Reference { .. } | RegistryClass::IndexGlobal { .. } => {
-                    SUBSPACE_REGISTRY_IDX_GLOBAL
+                RegistryClass::Reference { .. } | RegistryClass::PrimaryKey { .. } => {
+                    SUBSPACE_REGISTRY_PK
                 }
                 RegistryClass::IdCounter { .. } => SUBSPACE_COUNTER,
             },

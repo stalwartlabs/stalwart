@@ -397,12 +397,8 @@ impl ReindexIndexTask for Server {
                 self.store()
                     .iterate(
                         IterateParams::new(
-                            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span {
-                                span_id: 0,
-                            })),
-                            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span {
-                                span_id: u64::MAX,
-                            })),
+                            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(0))),
+                            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(u64::MAX))),
                         )
                         .no_values(),
                         |key, _| {
@@ -561,16 +557,17 @@ async fn build_tracing_span_document(
     server: &Server,
     span_id: u64,
 ) -> trc::Result<Option<IndexDocument>> {
-    use common::telemetry::tracers::store::{TracingStore, build_span_document};
+    use common::telemetry::tracers::store::build_span_document;
+    use registry::schema::structs::Trace;
 
-    let Some(index_fields) = server.core.email.index_fields.get(&SearchIndex::Tracing) else {
-        return Ok(None);
-    };
-
-    let span = server.tracing_store().get_span(span_id).await?;
-
-    if !span.is_empty() {
-        Ok(Some(build_span_document(span_id, span, index_fields)))
+    if let Some(index_fields) = server.core.email.index_fields.get(&SearchIndex::Tracing) {
+        server
+            .tracing_store()
+            .get_value::<Trace>(ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(
+                span_id,
+            ))))
+            .await
+            .map(|trace| trace.map(|trace| build_span_document(span_id, trace, index_fields)))
     } else {
         Ok(None)
     }

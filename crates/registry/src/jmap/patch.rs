@@ -208,6 +208,24 @@ impl RegistryJsonPatch for f64 {
     }
 }
 
+impl RegistryJsonPatch for trc::Key {
+    fn patch(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: super::JmapValue<'_>,
+    ) -> Result<(), PatchError> {
+        if let Some(new_value) = value.as_str().and_then(|v| trc::Key::try_parse(v.as_ref())) {
+            *self = new_value;
+            pointer.assert_eof()
+        } else {
+            Err(PatchError::new(
+                pointer,
+                format!("Invalid value {:?} for enum type {:?}.", value, self),
+            ))
+        }
+    }
+}
+
 impl<T: EnumImpl> RegistryJsonEnumPatch for T {
     fn patch(
         &mut self,

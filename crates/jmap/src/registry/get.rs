@@ -274,6 +274,8 @@ impl RegistryGet for Server {
             ObjectType::Metric => {}
             ObjectType::Trace => {}
             ObjectType::SpamTrainingSample => {}
+            ObjectType::DmarcInternalReport => todo!(),
+            ObjectType::TlsInternalReport => todo!(),
         }
 
         Ok(response)

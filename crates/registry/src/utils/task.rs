@@ -16,6 +16,8 @@ impl Task {
             Task::CalendarAlarmNotification(task) => task.status = status,
             Task::CalendarItipMessage(task) => task.status = status,
             Task::MergeThreads(task) => task.status = status,
+            Task::DmarcReport(task) => task.status = status,
+            Task::TlsReport(task) => task.status = status,
         }
     }
 
@@ -28,6 +30,8 @@ impl Task {
             Task::CalendarAlarmNotification(task) => &task.status,
             Task::CalendarItipMessage(task) => &task.status,
             Task::MergeThreads(task) => &task.status,
+            Task::DmarcReport(task) => &task.status,
+            Task::TlsReport(task) => &task.status,
         }
     }
 

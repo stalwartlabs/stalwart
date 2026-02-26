@@ -11,14 +11,16 @@ pub mod query;
 pub mod write;
 
 use crate::{
-    Deserialize, SerializeInfallible, U16_LEN, U64_LEN,
+    Deserialize, SerializeInfallible, U16_LEN, U32_LEN, U64_LEN,
     write::key::{DeserializeBigEndian, KeySerializer},
 };
 use registry::{
     pickle::{Pickle, PickledStream},
     schema::{
         prelude::{Object, ObjectInner, ObjectType, Property},
-        structs::{DeletedItem, DmarcInternalReport, SpamTrainingSample, Task, TlsInternalReport},
+        structs::{
+            DeletedItem, DmarcInternalReport, SpamTrainingSample, Task, TlsInternalReport, Trace,
+        },
     },
     types::{EnumImpl, ObjectImpl, id::ObjectId},
 };
@@ -39,6 +41,12 @@ pub struct RegistryFilter {
     pub property: Property,
     pub op: RegistryFilterOp,
     pub value: RegistryFilterValue,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+pub struct ObjectIdVersioned {
+    pub object_id: ObjectId,
+    pub version: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,5 +167,35 @@ impl Deserialize for ObjectId {
             })?,
             Id::new(item_id),
         ))
+    }
+}
+
+impl SerializeInfallible for ObjectIdVersioned {
+    fn serialize(&self) -> Vec<u8> {
+        KeySerializer::new(U16_LEN + U64_LEN + U32_LEN)
+            .write(self.object_id.object().to_id())
+            .write(self.object_id.id().id())
+            .write(self.version)
+            .finalize()
+    }
+}
+
+impl Deserialize for ObjectIdVersioned {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let object_id = ObjectId::deserialize(bytes)?;
+        let version = bytes.deserialize_be_u32(U16_LEN + U64_LEN)?;
+        Ok(Self { object_id, version })
+    }
+}
+
+impl Deserialize for Trace {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        let mut stream = PickledStream::new(bytes);
+        Trace::unpickle(&mut stream).ok_or_else(|| {
+            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                .into_err()
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Value, bytes)
+        })
     }
 }

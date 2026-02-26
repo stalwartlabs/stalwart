@@ -349,6 +349,7 @@ impl EventType {
             b"outgoing-report.submission-error" => EventType::OutgoingReport(OutgoingReportEvent::SubmissionError),
             b"outgoing-report.no-recipients-found" => EventType::OutgoingReport(OutgoingReportEvent::NoRecipientsFound),
             b"outgoing-report.locked" => EventType::OutgoingReport(OutgoingReportEvent::Locked),
+            b"outgoing-report.max-size-exceeded" => EventType::OutgoingReport(OutgoingReportEvent::MaxSizeExceeded),
             b"pop3.connection-start" => EventType::Pop3(Pop3Event::ConnectionStart),
             b"pop3.connection-end" => EventType::Pop3(Pop3Event::ConnectionEnd),
             b"pop3.delete" => EventType::Pop3(Pop3Event::Delete),
@@ -399,7 +400,6 @@ impl EventType {
             b"registry.build-warning" => EventType::Registry(RegistryEvent::BuildWarning),
             b"registry.not-supported" => EventType::Registry(RegistryEvent::NotSupported),
             b"registry.validation-error" => EventType::Registry(RegistryEvent::ValidationError),
-            b"registry.reserved03" => EventType::Registry(RegistryEvent::Reserved03),
             b"resource.not-found" => EventType::Resource(ResourceEvent::NotFound),
             b"resource.bad-parameters" => EventType::Resource(ResourceEvent::BadParameters),
             b"resource.error" => EventType::Resource(ResourceEvent::Error),
@@ -1045,6 +1045,9 @@ impl EventType {
                 "outgoing-report.no-recipients-found"
             }
             EventType::OutgoingReport(OutgoingReportEvent::Locked) => "outgoing-report.locked",
+            EventType::OutgoingReport(OutgoingReportEvent::MaxSizeExceeded) => {
+                "outgoing-report.max-size-exceeded"
+            }
             EventType::Pop3(Pop3Event::ConnectionStart) => "pop3.connection-start",
             EventType::Pop3(Pop3Event::ConnectionEnd) => "pop3.connection-end",
             EventType::Pop3(Pop3Event::Delete) => "pop3.delete",
@@ -1105,7 +1108,6 @@ impl EventType {
             EventType::Registry(RegistryEvent::BuildWarning) => "registry.build-warning",
             EventType::Registry(RegistryEvent::NotSupported) => "registry.not-supported",
             EventType::Registry(RegistryEvent::ValidationError) => "registry.validation-error",
-            EventType::Registry(RegistryEvent::Reserved03) => "registry.reserved03",
             EventType::Resource(ResourceEvent::NotFound) => "resource.not-found",
             EventType::Resource(ResourceEvent::BadParameters) => "resource.bad-parameters",
             EventType::Resource(ResourceEvent::Error) => "resource.error",
@@ -1670,6 +1672,7 @@ impl EventType {
             EventType::OutgoingReport(OutgoingReportEvent::SubmissionError) => 343,
             EventType::OutgoingReport(OutgoingReportEvent::NoRecipientsFound) => 338,
             EventType::OutgoingReport(OutgoingReportEvent::Locked) => 337,
+            EventType::OutgoingReport(OutgoingReportEvent::MaxSizeExceeded) => 59,
             EventType::Pop3(Pop3Event::ConnectionStart) => 348,
             EventType::Pop3(Pop3Event::ConnectionEnd) => 347,
             EventType::Pop3(Pop3Event::Delete) => 349,
@@ -1720,7 +1723,6 @@ impl EventType {
             EventType::Registry(RegistryEvent::BuildWarning) => 55,
             EventType::Registry(RegistryEvent::NotSupported) => 64,
             EventType::Registry(RegistryEvent::ValidationError) => 63,
-            EventType::Registry(RegistryEvent::Reserved03) => 59,
             EventType::Resource(ResourceEvent::NotFound) => 389,
             EventType::Resource(ResourceEvent::BadParameters) => 386,
             EventType::Resource(ResourceEvent::Error) => 388,
@@ -2307,6 +2309,9 @@ impl EventType {
                 OutgoingReportEvent::NoRecipientsFound,
             )),
             337 => Some(EventType::OutgoingReport(OutgoingReportEvent::Locked)),
+            59 => Some(EventType::OutgoingReport(
+                OutgoingReportEvent::MaxSizeExceeded,
+            )),
             348 => Some(EventType::Pop3(Pop3Event::ConnectionStart)),
             347 => Some(EventType::Pop3(Pop3Event::ConnectionEnd)),
             349 => Some(EventType::Pop3(Pop3Event::Delete)),
@@ -2357,7 +2362,6 @@ impl EventType {
             55 => Some(EventType::Registry(RegistryEvent::BuildWarning)),
             64 => Some(EventType::Registry(RegistryEvent::NotSupported)),
             63 => Some(EventType::Registry(RegistryEvent::ValidationError)),
-            59 => Some(EventType::Registry(RegistryEvent::Reserved03)),
             389 => Some(EventType::Resource(ResourceEvent::NotFound)),
             386 => Some(EventType::Resource(ResourceEvent::BadParameters)),
             388 => Some(EventType::Resource(ResourceEvent::Error)),
@@ -2755,7 +2759,6 @@ impl EventType {
             EventType::Queue(QueueEvent::RateLimitExceeded) => Level::Info,
             EventType::Queue(QueueEvent::ConcurrencyLimitExceeded) => Level::Info,
             EventType::Queue(QueueEvent::QuotaExceeded) => Level::Info,
-            EventType::Registry(RegistryEvent::Reserved03) => Level::Info,
             EventType::Resource(ResourceEvent::DownloadExternal) => Level::Info,
             EventType::Resource(ResourceEvent::WebadminUnpacked) => Level::Info,
             EventType::Security(SecurityEvent::AuthenticationBan) => Level::Info,
@@ -3349,6 +3352,9 @@ impl EventType {
             EventType::OutgoingReport(OutgoingReportEvent::Locked) => {
                 "Report is locked by another process"
             }
+            EventType::OutgoingReport(OutgoingReportEvent::MaxSizeExceeded) => {
+                "Report size exceeds maximum"
+            }
             EventType::Pop3(Pop3Event::ConnectionStart) => "POP3 connection started",
             EventType::Pop3(Pop3Event::ConnectionEnd) => "POP3 connection ended",
             EventType::Pop3(Pop3Event::Delete) => "POP3 DELETE command",
@@ -3411,7 +3417,6 @@ impl EventType {
                 "Operation not supported by local registry"
             }
             EventType::Registry(RegistryEvent::ValidationError) => "Object validation error",
-            EventType::Registry(RegistryEvent::Reserved03) => "Importing external configuration",
             EventType::Resource(ResourceEvent::NotFound) => "Resource not found",
             EventType::Resource(ResourceEvent::BadParameters) => "Bad resource parameters",
             EventType::Resource(ResourceEvent::Error) => "Resource error",
@@ -4260,6 +4265,9 @@ impl EventType {
             EventType::OutgoingReport(OutgoingReportEvent::Locked) => {
                 "The report is locked by another process"
             }
+            EventType::OutgoingReport(OutgoingReportEvent::MaxSizeExceeded) => {
+                "The report size exceeds the maximum allowed size"
+            }
             EventType::Pop3(Pop3Event::ConnectionStart) => "POP3 connection started",
             EventType::Pop3(Pop3Event::ConnectionEnd) => "POP3 connection ended",
             EventType::Pop3(Pop3Event::Delete) => "Client deleted a message",
@@ -4347,9 +4355,6 @@ impl EventType {
             }
             EventType::Registry(RegistryEvent::ValidationError) => {
                 "An error occurred while validating a registry object"
-            }
-            EventType::Registry(RegistryEvent::Reserved03) => {
-                "An external configuration is being imported"
             }
             EventType::Resource(ResourceEvent::NotFound) => "The resource was not found",
             EventType::Resource(ResourceEvent::BadParameters) => "The resource parameters are bad",
@@ -5353,6 +5358,7 @@ impl EventType {
             EventType::OutgoingReport(OutgoingReportEvent::SubmissionError),
             EventType::OutgoingReport(OutgoingReportEvent::NoRecipientsFound),
             EventType::OutgoingReport(OutgoingReportEvent::Locked),
+            EventType::OutgoingReport(OutgoingReportEvent::MaxSizeExceeded),
             EventType::Pop3(Pop3Event::ConnectionStart),
             EventType::Pop3(Pop3Event::ConnectionEnd),
             EventType::Pop3(Pop3Event::Delete),
@@ -5403,7 +5409,6 @@ impl EventType {
             EventType::Registry(RegistryEvent::BuildWarning),
             EventType::Registry(RegistryEvent::NotSupported),
             EventType::Registry(RegistryEvent::ValidationError),
-            EventType::Registry(RegistryEvent::Reserved03),
             EventType::Resource(ResourceEvent::NotFound),
             EventType::Resource(ResourceEvent::BadParameters),
             EventType::Resource(ResourceEvent::Error),
@@ -5716,6 +5721,7 @@ impl MetricType {
             b"eval.store-not-found" => MetricType::EvalStoreNotFound,
             b"http.request-time" => MetricType::HttpRequestTime,
             b"http.active-connections" => MetricType::HttpActiveConnections,
+            b"http.connection-start" => MetricType::HttpConnectionStart,
             b"http.error" => MetricType::HttpError,
             b"http.request-body" => MetricType::HttpRequestBody,
             b"http.response-body" => MetricType::HttpResponseBody,
@@ -6059,6 +6065,7 @@ impl MetricType {
             MetricType::EvalStoreNotFound => "eval.store-not-found",
             MetricType::HttpRequestTime => "http.request-time",
             MetricType::HttpActiveConnections => "http.active-connections",
+            MetricType::HttpConnectionStart => "http.connection-start",
             MetricType::HttpError => "http.error",
             MetricType::HttpRequestBody => "http.request-body",
             MetricType::HttpResponseBody => "http.response-body",
@@ -6413,6 +6420,7 @@ impl MetricType {
             MetricType::EvalStoreNotFound => 113,
             MetricType::HttpRequestTime => 12,
             MetricType::HttpActiveConnections => 17,
+            MetricType::HttpConnectionStart => 337,
             MetricType::HttpError => 114,
             MetricType::HttpRequestBody => 115,
             MetricType::HttpResponseBody => 116,
@@ -6755,6 +6763,7 @@ impl MetricType {
             113 => Some(MetricType::EvalStoreNotFound),
             12 => Some(MetricType::HttpRequestTime),
             17 => Some(MetricType::HttpActiveConnections),
+            337 => Some(MetricType::HttpConnectionStart),
             114 => Some(MetricType::HttpError),
             115 => Some(MetricType::HttpRequestBody),
             116 => Some(MetricType::HttpResponseBody),
@@ -7091,6 +7100,7 @@ impl MetricType {
             MetricType::EvalError => 138,
             MetricType::EvalDirectoryNotFound => 137,
             MetricType::EvalStoreNotFound => 140,
+            MetricType::HttpConnectionStart => 153,
             MetricType::HttpError => 154,
             MetricType::HttpRequestBody => 155,
             MetricType::HttpResponseBody => 157,
@@ -7416,6 +7426,7 @@ impl MetricType {
             MetricType::EvalStoreNotFound => "Store not found while evaluating expression",
             MetricType::HttpRequestTime => "HTTP request duration",
             MetricType::HttpActiveConnections => "Active HTTP connections",
+            MetricType::HttpConnectionStart => "HTTP connection started",
             MetricType::HttpError => "HTTP error occurred",
             MetricType::HttpRequestBody => "HTTP request body",
             MetricType::HttpResponseBody => "HTTP response body",
@@ -7771,6 +7782,7 @@ impl MetricType {
             | MetricType::EvalError
             | MetricType::EvalDirectoryNotFound
             | MetricType::EvalStoreNotFound
+            | MetricType::HttpConnectionStart
             | MetricType::HttpError
             | MetricType::HttpRequestBody
             | MetricType::HttpResponseBody
@@ -8110,6 +8122,7 @@ impl MetricType {
             MetricType::EvalStoreNotFound,
             MetricType::HttpRequestTime,
             MetricType::HttpActiveConnections,
+            MetricType::HttpConnectionStart,
             MetricType::HttpError,
             MetricType::HttpRequestBody,
             MetricType::HttpResponseBody,

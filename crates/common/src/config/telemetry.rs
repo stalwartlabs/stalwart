@@ -508,7 +508,7 @@ impl Tracers {
                     .copied()
                     .unwrap_or(event_type.level());
                 if Level::Info.is_contained(event_level) {
-                    global_interests.set(event_type);
+                    global_interests.set(event_type.to_id() as usize);
                 }
             }
 

@@ -154,6 +154,7 @@ pub struct DmarcEvent {
     pub report_record: Record,
     pub dmarc_record: Arc<Dmarc>,
     pub interval: AggregateFrequency,
+    pub span_id: u64,
 }
 
 #[derive(Debug)]
@@ -163,6 +164,7 @@ pub struct TlsEvent {
     pub failure: Option<FailureDetails>,
     pub tls_record: Arc<TlsRpt>,
     pub interval: AggregateFrequency,
+    pub span_id: u64,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]

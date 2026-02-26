@@ -74,6 +74,10 @@ impl SnowflakeIdGenerator {
             .and_then(|diff| Self::from_duration(Duration::from_secs(diff)))
     }
 
+    pub fn from_timestamp_and_sequence_id(timestamp: u64, sequence: u64) -> Option<u64> {
+        Self::from_timestamp(timestamp).map(|id| id | (sequence << NODE_ID_LEN) | node_id())
+    }
+
     pub fn from_sequence_id(sequence: u64) -> Option<u64> {
         let sequence = sequence & SEQUENCE_MASK;
 

@@ -16,16 +16,13 @@ use types::id::Id;
 pub enum IndexKey<'x> {
     Unique {
         property: Property,
-        value: IndexValue<'x>,
+        value_1: IndexValue<'x>,
+        value_2: IndexValue<'x>,
+        global: bool,
     },
     Search {
         property: Property,
         value: IndexValue<'x>,
-    },
-    Global {
-        property: Property,
-        value_1: IndexValue<'x>,
-        value_2: IndexValue<'x>,
     },
     ForeignKey {
         object_id: ObjectId,
@@ -52,17 +49,10 @@ pub enum IndexValue<'x> {
 #[derive(Debug, Default)]
 
 pub struct IndexBuilder<'x> {
-    pub object: Option<ObjectType>,
     pub keys: AHashSet<IndexKey<'x>>,
 }
 
 impl<'x> IndexBuilder<'x> {
-    pub fn object(&mut self, object: ObjectType) {
-        if self.object.is_none() {
-            self.object = Some(object);
-        }
-    }
-
     pub fn typ(&mut self, typ: u16) {
         self.keys.insert(IndexKey::Search {
             property: Property::Type,
@@ -73,7 +63,9 @@ impl<'x> IndexBuilder<'x> {
     pub fn unique(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
         self.keys.insert(IndexKey::Unique {
             property,
-            value: value.into(),
+            value_1: value.into(),
+            value_2: IndexValue::None,
+            global: false,
         });
     }
 
@@ -106,24 +98,26 @@ impl<'x> IndexBuilder<'x> {
         }
     }
 
-    pub fn global(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
-        self.keys.insert(IndexKey::Global {
+    pub fn unique_global(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
+        self.keys.insert(IndexKey::Unique {
             property,
             value_1: value.into(),
             value_2: IndexValue::None,
+            global: true,
         });
     }
 
-    pub fn composite(
+    pub fn unique_global_composite(
         &mut self,
         property: Property,
         value: impl Into<IndexValue<'x>>,
         composite: impl Into<IndexValue<'x>>,
     ) {
-        self.keys.insert(IndexKey::Global {
+        self.keys.insert(IndexKey::Unique {
             property,
             value_1: value.into(),
             value_2: composite.into(),
+            global: true,
         });
     }
 

@@ -10,18 +10,25 @@
 
 use crate::config::telemetry::StoreTracer;
 use ahash::{AHashMap, AHashSet};
-use registry::schema::structs::{Task, TaskIndexTrace, TaskStatus};
+use registry::{
+    pickle::Pickle,
+    schema::structs::{
+        Task, TaskIndexTrace, TaskStatus, Trace, TraceEvent, TraceKeyValue, TraceValue,
+        TraceValueBoolean, TraceValueDuration, TraceValueEvent, TraceValueFloat, TraceValueInteger,
+        TraceValueIpAddr, TraceValueList, TraceValueString, TraceValueUTCDateTime,
+        TraceValueUnsignedInt,
+    },
+    types::{datetime::UTCDateTime, ipaddr::IpAddr},
+};
 use std::{collections::HashSet, future::Future, time::Duration};
 use store::{
-    Deserialize, SearchStore, Store, ValueKey,
+    SearchStore, Store, ValueKey,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery, TracingSearchField},
     write::{BatchBuilder, SearchIndex, TelemetryClass, ValueClass},
 };
 use trc::{
     AddContext, AuthEvent, Event, EventDetails, EventType, Key, MessageIngestEvent,
-    OutgoingReportEvent, QueueEvent, Value,
-    ipc::subscriber::SubscriberBuilder,
-    serializers::binary::{deserialize_events, serialize_events},
+    OutgoingReportEvent, QueueEvent, Value, ipc::subscriber::SubscriberBuilder,
 };
 use utils::snowflake::SnowflakeIdGenerator;
 
@@ -53,14 +60,15 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
                         // Serialize events
                         batch
                             .set(
-                                ValueClass::Telemetry(TelemetryClass::Span { span_id }),
-                                serialize_events(
+                                ValueClass::Telemetry(TelemetryClass::Span(span_id)),
+                                map_events(
                                     [span.as_ref()]
                                         .into_iter()
                                         .chain(events.iter().map(|event| event.as_ref()))
                                         .chain([event.as_ref()].into_iter()),
                                     events.len() + 2,
-                                ),
+                                )
+                                .to_pickled_vec(),
                             )
                             .schedule_task(Task::IndexTrace(TaskIndexTrace {
                                 status: TaskStatus::now(),
@@ -80,15 +88,72 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
     });
 }
 
+fn map_events<'x>(
+    span_events: impl IntoIterator<Item = &'x Event<EventDetails>>,
+    num_events: usize,
+) -> Trace {
+    let mut events = Vec::with_capacity(num_events);
+
+    for event in span_events {
+        let mut key_values = Vec::with_capacity(event.keys.len());
+        for (key, value) in &event.keys {
+            key_values.push(TraceKeyValue {
+                key: *key,
+                value: map_value(value),
+            });
+        }
+
+        events.push(TraceEvent {
+            event: event.inner.typ,
+            timestamp: UTCDateTime::from_timestamp(event.inner.timestamp as i64),
+            key_values,
+        });
+    }
+
+    Trace { events }
+}
+
+fn map_value(value: &Value) -> TraceValue {
+    match value {
+        Value::String(value) => TraceValue::String(TraceValueString {
+            value: value.to_string(),
+        }),
+        Value::UInt(value) => TraceValue::UnsignedInt(TraceValueUnsignedInt { value: *value }),
+        Value::Int(value) => TraceValue::Integer(TraceValueInteger { value: *value }),
+        Value::Float(value) => TraceValue::Float(TraceValueFloat { value: *value }),
+        Value::Timestamp(value) => TraceValue::UTCDateTime(TraceValueUTCDateTime {
+            value: UTCDateTime::from_timestamp(*value as i64),
+        }),
+        Value::Duration(value) => TraceValue::Duration(TraceValueDuration { value: *value }),
+        Value::Bytes(items) => TraceValue::String(TraceValueString {
+            value: String::from_utf8_lossy(items).to_string(),
+        }),
+        Value::Bool(value) => TraceValue::Boolean(TraceValueBoolean { value: *value }),
+        Value::Ipv4(ipv4_addr) => TraceValue::IpAddr(TraceValueIpAddr {
+            value: IpAddr((*ipv4_addr).into()),
+        }),
+        Value::Ipv6(ipv6_addr) => TraceValue::IpAddr(TraceValueIpAddr {
+            value: IpAddr((*ipv6_addr).into()),
+        }),
+        Value::Event(event) => TraceValue::Event(TraceValueEvent {
+            value: event
+                .keys()
+                .iter()
+                .map(|(k, v)| TraceKeyValue {
+                    key: *k,
+                    value: map_value(v),
+                })
+                .collect(),
+            event: event.event_type(),
+        }),
+        Value::Array(values) => TraceValue::List(TraceValueList {
+            value: values.iter().map(map_value).collect::<Vec<_>>(),
+        }),
+        Value::None => TraceValue::Null,
+    }
+}
+
 pub trait TracingStore: Sync + Send {
-    fn get_span(
-        &self,
-        span_id: u64,
-    ) -> impl Future<Output = trc::Result<Vec<Event<EventDetails>>>> + Send;
-    fn get_raw_span(
-        &self,
-        span_id: u64,
-    ) -> impl Future<Output = trc::Result<Option<Vec<u8>>>> + Send;
     fn purge_spans(
         &self,
         period: Duration,
@@ -97,24 +162,6 @@ pub trait TracingStore: Sync + Send {
 }
 
 impl TracingStore for Store {
-    async fn get_span(&self, span_id: u64) -> trc::Result<Vec<Event<EventDetails>>> {
-        self.get_value::<Span>(ValueKey::from(ValueClass::Telemetry(
-            TelemetryClass::Span { span_id },
-        )))
-        .await
-        .caused_by(trc::location!())
-        .map(|span| span.map(|span| span.0).unwrap_or_default())
-    }
-
-    async fn get_raw_span(&self, span_id: u64) -> trc::Result<Option<Vec<u8>>> {
-        self.get_value::<RawSpan>(ValueKey::from(ValueClass::Telemetry(
-            TelemetryClass::Span { span_id },
-        )))
-        .await
-        .caused_by(trc::location!())
-        .map(|span| span.map(|span| span.0))
-    }
-
     async fn purge_spans(
         &self,
         period: Duration,
@@ -127,10 +174,8 @@ impl TracingStore for Store {
         })?;
 
         self.delete_range(
-            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span { span_id: 0 })),
-            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span {
-                span_id: until_span_id,
-            })),
+            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(0))),
+            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(until_span_id))),
         )
         .await
         .caused_by(trc::location!())?;
@@ -218,76 +263,57 @@ impl StoreTracer {
     }
 }
 
-struct RawSpan(Vec<u8>);
-struct Span(Vec<Event<EventDetails>>);
-
-impl Deserialize for Span {
-    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
-        deserialize_events(bytes).map(Self)
-    }
-}
-
-impl Deserialize for RawSpan {
-    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
-        Ok(Self(bytes.to_vec()))
-    }
-}
-
 pub fn build_span_document(
     span_id: u64,
-    events: Vec<Event<EventDetails>>,
+    trace: Trace,
     index_fields: &AHashSet<SearchField>,
 ) -> IndexDocument {
     let mut document = IndexDocument::new(SearchIndex::Tracing).with_id(span_id);
     let mut keywords = HashSet::new();
 
-    for (idx, event) in events.into_iter().enumerate() {
+    for (idx, event) in trace.events.into_iter().enumerate() {
         if idx == 0
             && (index_fields.is_empty()
                 || index_fields.contains(&TracingSearchField::EventType.into()))
         {
-            document.index_unsigned(TracingSearchField::EventType, event.inner.typ.to_id());
+            document.index_unsigned(TracingSearchField::EventType, event.event.to_id());
         }
 
-        for (key, value) in event.keys {
+        for TraceKeyValue { key, value } in event.key_values {
             match (key, value) {
-                (Key::QueueId, Value::UInt(queue_id)) => {
+                (Key::QueueId, TraceValue::UnsignedInt(TraceValueUnsignedInt { value })) => {
                     if index_fields.is_empty()
                         || index_fields.contains(&TracingSearchField::QueueId.into())
                     {
-                        document.index_unsigned(TracingSearchField::QueueId, queue_id);
+                        document.index_unsigned(TracingSearchField::QueueId, value);
                     }
                 }
-                (Key::From | Key::To | Key::Domain | Key::Hostname, Value::String(address)) => {
+                (
+                    Key::From | Key::To | Key::Domain | Key::Hostname,
+                    TraceValue::String(TraceValueString { value }),
+                ) => {
                     if index_fields.is_empty()
                         || index_fields.contains(&TracingSearchField::Keywords.into())
                     {
-                        keywords.insert(address.to_string());
+                        keywords.insert(value);
                     }
                 }
-                (Key::To, Value::Array(value)) => {
+                (Key::To, TraceValue::List(TraceValueList { value })) => {
                     if index_fields.is_empty()
                         || index_fields.contains(&TracingSearchField::Keywords.into())
                     {
                         for value in value {
-                            if let Value::String(address) = value {
-                                keywords.insert(address.to_string());
+                            if let TraceValue::String(TraceValueString { value }) = value {
+                                keywords.insert(value);
                             }
                         }
                     }
                 }
-                (Key::RemoteIp, Value::Ipv4(ip)) => {
+                (Key::RemoteIp, TraceValue::IpAddr(TraceValueIpAddr { value })) => {
                     if index_fields.is_empty()
                         || index_fields.contains(&TracingSearchField::Keywords.into())
                     {
-                        keywords.insert(ip.to_string());
-                    }
-                }
-                (Key::RemoteIp, Value::Ipv6(ip)) => {
-                    if index_fields.is_empty()
-                        || index_fields.contains(&TracingSearchField::Keywords.into())
-                    {
-                        keywords.insert(ip.to_string());
+                        keywords.insert(value.to_string());
                     }
                 }
 

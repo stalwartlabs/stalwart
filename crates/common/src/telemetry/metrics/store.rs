@@ -8,40 +8,32 @@
  *
  */
 
-use crate::Core;
 use ahash::AHashMap;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use registry::{
+    pickle::Pickle,
+    schema::structs::{Metric, MetricCount, MetricSum},
+};
 use std::{future::Future, sync::Arc, time::Duration};
 use store::{
-    IterateParams, Store, U32_LEN, U64_LEN, ValueKey,
-    write::{
-        BatchBuilder, TelemetryClass, ValueClass,
-        key::{DeserializeBigEndian, KeySerializer},
-        now,
-    },
+    Store, ValueKey,
+    write::{BatchBuilder, TelemetryClass, ValueClass},
 };
 use trc::*;
-use utils::codec::leb128::Leb128Reader;
+use utils::snowflake::SnowflakeIdGenerator;
 
 pub trait MetricsStore: Sync + Send {
     fn write_metrics(
         &self,
-        core: Arc<Core>,
-        timestamp: u64,
+        timestamp: Option<u64>,
         history: SharedMetricHistory,
     ) -> impl Future<Output = trc::Result<()>> + Send;
-    fn query_metrics(
-        &self,
-        from_timestamp: u64,
-        to_timestamp: u64,
-    ) -> impl Future<Output = trc::Result<Vec<Metric<MetricType, MetricType, u64>>>> + Send;
     fn purge_metrics(&self, period: Duration) -> impl Future<Output = trc::Result<()>> + Send;
 }
 
 #[derive(Default)]
 pub struct MetricsHistory {
-    events: AHashMap<EventType, u32>,
+    events: AHashMap<MetricType, u32>,
     histograms: AHashMap<MetricType, HistogramHistory>,
 }
 
@@ -51,81 +43,71 @@ struct HistogramHistory {
     count: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type")]
-#[serde(rename_all = "camelCase")]
-pub enum Metric<CI, MI, T> {
-    Counter {
-        id: CI,
-        timestamp: T,
-        value: u64,
-    },
-    Gauge {
-        id: MI,
-        timestamp: T,
-        value: u64,
-    },
-    Histogram {
-        id: MI,
-        timestamp: T,
-        count: u64,
-        sum: u64,
-    },
-}
-
 pub type SharedMetricHistory = Arc<Mutex<MetricsHistory>>;
-
-const TYPE_COUNTER: u64 = 0x00;
-const TYPE_HISTOGRAM: u64 = 0x01;
-const TYPE_GAUGE: u64 = 0x02;
 
 impl MetricsStore for Store {
     async fn write_metrics(
         &self,
-        core: Arc<Core>,
-        timestamp: u64,
+        _timestamp: Option<u64>,
         history_: SharedMetricHistory,
     ) -> trc::Result<()> {
         let mut batch = BatchBuilder::new();
         {
-            let node_id = core.network.node_id;
             let mut history = history_.lock();
             for event in [
-                EventType::Smtp(SmtpEvent::ConnectionStart),
-                EventType::Imap(ImapEvent::ConnectionStart),
-                EventType::Pop3(Pop3Event::ConnectionStart),
-                EventType::ManageSieve(ManageSieveEvent::ConnectionStart),
-                EventType::Http(HttpEvent::ConnectionStart),
-                EventType::Delivery(DeliveryEvent::AttemptStart),
-                EventType::Queue(QueueEvent::QueueMessage),
-                EventType::Queue(QueueEvent::QueueMessageAuthenticated),
-                EventType::Queue(QueueEvent::QueueDsn),
-                EventType::Queue(QueueEvent::QueueReport),
-                EventType::MessageIngest(MessageIngestEvent::Ham),
-                EventType::MessageIngest(MessageIngestEvent::Spam),
-                EventType::Auth(AuthEvent::Failed),
-                EventType::Security(SecurityEvent::AuthenticationBan),
-                EventType::Security(SecurityEvent::ScanBan),
-                EventType::Security(SecurityEvent::AbuseBan),
-                EventType::Security(SecurityEvent::LoiterBan),
-                EventType::Security(SecurityEvent::IpBlocked),
-                EventType::IncomingReport(IncomingReportEvent::DmarcReport),
-                EventType::IncomingReport(IncomingReportEvent::DmarcReportWithWarnings),
-                EventType::IncomingReport(IncomingReportEvent::TlsReport),
-                EventType::IncomingReport(IncomingReportEvent::TlsReportWithWarnings),
+                MetricType::SmtpConnectionStart,
+                MetricType::ImapConnectionStart,
+                MetricType::Pop3ConnectionStart,
+                MetricType::ManageSieveConnectionStart,
+                MetricType::HttpConnectionStart,
+                MetricType::DeliveryAttemptStart,
+                MetricType::QueueQueueMessage,
+                MetricType::QueueQueueMessageAuthenticated,
+                MetricType::QueueQueueDsn,
+                MetricType::QueueQueueReport,
+                MetricType::MessageIngestHam,
+                MetricType::MessageIngestSpam,
+                MetricType::AuthFailed,
+                MetricType::SecurityAuthenticationBan,
+                MetricType::SecurityScanBan,
+                MetricType::SecurityAbuseBan,
+                MetricType::SecurityLoiterBan,
+                MetricType::SecurityIpBlocked,
+                MetricType::IncomingReportDmarcReport,
+                MetricType::IncomingReportDmarcReportWithWarnings,
+                MetricType::IncomingReportTlsReport,
+                MetricType::IncomingReportTlsReportWithWarnings,
             ] {
-                let reading = Collector::read_metric_counter(event.to_id() as usize);
+                let reading = Collector::read_metric_counter(event.event_id());
                 if reading > 0 {
                     let history = history.events.entry(event).or_insert(0);
                     let diff = reading - *history;
+
+                    #[cfg(not(feature = "test_mode"))]
+                    let metric_id = SnowflakeIdGenerator::from_sequence_id(event.to_id() as u64)
+                        .unwrap_or_default();
+
+                    #[cfg(feature = "test_mode")]
+                    let metric_id = _timestamp
+                        .map(|timestamp| {
+                            SnowflakeIdGenerator::from_timestamp_and_sequence_id(
+                                timestamp,
+                                event.to_id() as u64,
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            SnowflakeIdGenerator::from_sequence_id(event.to_id() as u64)
+                        })
+                        .unwrap_or_default();
+
                     if diff > 0 {
                         batch.set(
-                            ValueClass::Telemetry(TelemetryClass::Metric {
-                                timestamp,
-                                metric_id: (event.to_id() << 2) as u64 | TYPE_COUNTER,
-                                node_id,
-                            }),
-                            KeySerializer::new(U32_LEN).write_leb128(diff).finalize(),
+                            ValueClass::Telemetry(TelemetryClass::Metric(metric_id)),
+                            Metric::Counter(MetricCount {
+                                count: diff as u64,
+                                metric: event,
+                            })
+                            .to_pickled_vec(),
                         );
                     }
                     *history = reading;
@@ -133,48 +115,77 @@ impl MetricsStore for Store {
             }
 
             for gauge in Collector::collect_gauges(true) {
-                let gauge_id = gauge.id();
-                if matches!(gauge_id, MetricType::QueueCount | MetricType::ServerMemory) {
+                let metric = gauge.id();
+                if matches!(metric, MetricType::QueueCount | MetricType::ServerMemory) {
                     let value = gauge.get();
                     if value > 0 {
+                        #[cfg(not(feature = "test_mode"))]
+                        let metric_id =
+                            SnowflakeIdGenerator::from_sequence_id(metric.to_id() as u64)
+                                .unwrap_or_default();
+
+                        #[cfg(feature = "test_mode")]
+                        let metric_id = _timestamp
+                            .map(|timestamp| {
+                                SnowflakeIdGenerator::from_timestamp_and_sequence_id(
+                                    timestamp,
+                                    metric.to_id() as u64,
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                SnowflakeIdGenerator::from_sequence_id(metric.to_id() as u64)
+                            })
+                            .unwrap_or_default();
+
                         batch.set(
-                            ValueClass::Telemetry(TelemetryClass::Metric {
-                                timestamp,
-                                metric_id: (gauge_id.to_id() << 2) as u64 | TYPE_GAUGE,
-                                node_id,
-                            }),
-                            KeySerializer::new(U32_LEN).write_leb128(value).finalize(),
+                            ValueClass::Telemetry(TelemetryClass::Metric(metric_id)),
+                            Metric::Gauge(MetricCount {
+                                count: value,
+                                metric,
+                            })
+                            .to_pickled_vec(),
                         );
                     }
                 }
             }
 
             for histogram in Collector::collect_histograms(true) {
-                let histogram_id = histogram.id();
+                let metric = histogram.id();
                 if matches!(
-                    histogram_id,
+                    metric,
                     MetricType::MessageIngestTime
                         | MetricType::MessageIngestIndexTime
                         | MetricType::DeliveryTotalTime
                         | MetricType::DeliveryAttemptTime
                         | MetricType::DnsLookupTime
                 ) {
-                    let history = history.histograms.entry(histogram_id).or_default();
+                    let history = history.histograms.entry(metric).or_default();
                     let sum = histogram.sum();
                     let count = histogram.count();
                     let diff_sum = sum - history.sum;
                     let diff_count = count - history.count;
                     if diff_sum > 0 || diff_count > 0 {
+                        #[cfg(not(feature = "test_mode"))]
+                        let metric_id =
+                            SnowflakeIdGenerator::from_sequence_id(metric.to_id() as u64)
+                                .unwrap_or_default();
+
+                        #[cfg(feature = "test_mode")]
+                        let metric_id = _timestamp
+                            .map(|timestamp| {
+                                SnowflakeIdGenerator::from_timestamp_and_sequence_id(
+                                    timestamp,
+                                    metric.to_id() as u64,
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                SnowflakeIdGenerator::from_sequence_id(metric.to_id() as u64)
+                            })
+                            .unwrap_or_default();
+
                         batch.set(
-                            ValueClass::Telemetry(TelemetryClass::Metric {
-                                timestamp,
-                                metric_id: (histogram_id.to_id() << 2) as u64 | TYPE_HISTOGRAM,
-                                node_id,
-                            }),
-                            KeySerializer::new(U32_LEN)
-                                .write_leb128(diff_count)
-                                .write_leb128(diff_sum)
-                                .finalize(),
+                            ValueClass::Telemetry(TelemetryClass::Metric(metric_id)),
+                            Metric::Histogram(MetricSum { count, metric, sum }).to_pickled_vec(),
                         );
                     }
                     history.sum = sum;
@@ -192,105 +203,16 @@ impl MetricsStore for Store {
         Ok(())
     }
 
-    async fn query_metrics(
-        &self,
-        from_timestamp: u64,
-        to_timestamp: u64,
-    ) -> trc::Result<Vec<Metric<MetricType, MetricType, u64>>> {
-        let mut metrics = Vec::new();
-        self.iterate(
-            IterateParams::new(
-                ValueKey::from(ValueClass::Telemetry(TelemetryClass::Metric {
-                    timestamp: from_timestamp,
-                    metric_id: 0,
-                    node_id: 0,
-                })),
-                ValueKey::from(ValueClass::Telemetry(TelemetryClass::Metric {
-                    timestamp: to_timestamp,
-                    metric_id: 0,
-                    node_id: 0,
-                })),
-            ),
-            |key, value| {
-                let timestamp = key.deserialize_be_u64(0).caused_by(trc::location!())?;
-                let (metric_type, _) = key
-                    .get(U64_LEN..)
-                    .and_then(|bytes| bytes.read_leb128::<u64>())
-                    .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))?;
-                match metric_type & 0x03 {
-                    TYPE_COUNTER => {
-                        let id =
-                            MetricType::from_id((metric_type >> 2) as u16).ok_or_else(|| {
-                                trc::Error::corrupted_key(key, None, trc::location!())
-                            })?;
-                        let (value, _) = value.read_leb128::<u64>().ok_or_else(|| {
-                            trc::Error::corrupted_key(key, value.into(), trc::location!())
-                        })?;
-                        metrics.push(Metric::Counter {
-                            id,
-                            timestamp,
-                            value,
-                        });
-                    }
-                    TYPE_HISTOGRAM => {
-                        let id =
-                            MetricType::from_id((metric_type >> 2) as u16).ok_or_else(|| {
-                                trc::Error::corrupted_key(key, None, trc::location!())
-                            })?;
-                        let (count, bytes_read) = value.read_leb128::<u64>().ok_or_else(|| {
-                            trc::Error::corrupted_key(key, value.into(), trc::location!())
-                        })?;
-                        let (sum, _) = value
-                            .get(bytes_read..)
-                            .and_then(|bytes| bytes.read_leb128::<u64>())
-                            .ok_or_else(|| {
-                                trc::Error::corrupted_key(key, value.into(), trc::location!())
-                            })?;
-                        metrics.push(Metric::Histogram {
-                            id,
-                            timestamp,
-                            count,
-                            sum,
-                        });
-                    }
-                    TYPE_GAUGE => {
-                        let id =
-                            MetricType::from_id((metric_type >> 2) as u16).ok_or_else(|| {
-                                trc::Error::corrupted_key(key, None, trc::location!())
-                            })?;
-                        let (value, _) = value.read_leb128::<u64>().ok_or_else(|| {
-                            trc::Error::corrupted_key(key, value.into(), trc::location!())
-                        })?;
-                        metrics.push(Metric::Gauge {
-                            id,
-                            timestamp,
-                            value,
-                        });
-                    }
-                    _ => return Err(trc::Error::corrupted_key(key, None, trc::location!())),
-                }
-
-                Ok(true)
-            },
-        )
-        .await
-        .caused_by(trc::location!())?;
-
-        Ok(metrics)
-    }
-
     async fn purge_metrics(&self, period: Duration) -> trc::Result<()> {
+        let until_span_id = SnowflakeIdGenerator::from_duration(period).ok_or_else(|| {
+            trc::StoreEvent::UnexpectedError
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Reason, "Failed to generate reference metric id.")
+        })?;
+
         self.delete_range(
-            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Metric {
-                timestamp: 0,
-                metric_id: 0,
-                node_id: 0,
-            })),
-            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Metric {
-                timestamp: now() - period.as_secs(),
-                metric_id: 0,
-                node_id: 0,
-            })),
+            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Metric(0))),
+            ValueKey::from(ValueClass::Telemetry(TelemetryClass::Metric(until_span_id))),
         )
         .await
         .caused_by(trc::location!())

@@ -483,6 +483,18 @@ impl BatchBuilder {
                 class.serialize(),
             )
     }
+
+    pub fn schedule_task_with_id(&mut self, id: u64, task: Task) -> &mut Self {
+        let due = task.due_timestamp();
+        let class = task.object_type().to_id();
+        let task = task.to_pickled_vec();
+
+        self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), task)
+            .set(
+                ValueClass::TaskQueue(TaskQueueClass::Due { id, due }),
+                class.serialize(),
+            )
+    }
 }
 
 pub struct CommitPointIterator {

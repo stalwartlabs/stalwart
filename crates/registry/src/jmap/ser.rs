@@ -100,3 +100,9 @@ impl<V: IntoValue> IntoValue for Vec<V> {
         JmapValue::Array(array)
     }
 }
+
+impl IntoValue for trc::Key {
+    fn into_value(self) -> JmapValue<'static> {
+        JmapValue::Str(self.name().into())
+    }
+}

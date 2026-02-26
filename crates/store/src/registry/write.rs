@@ -5,10 +5,9 @@
  */
 
 use crate::{
-    IterateParams, RegistryStore, SUBSPACE_REGISTRY_IDX_GLOBAL, SerializeInfallible, U16_LEN,
-    U64_LEN, ValueKey,
+    IterateParams, RegistryStore, SerializeInfallible, U16_LEN, U64_LEN, ValueKey,
     write::{
-        AnyClass, BatchBuilder, RegistryClass, ValueClass,
+        BatchBuilder, RegistryClass, ValueClass,
         assert::AssertValue,
         key::{DeserializeBigEndian, KeySerializer},
     },
@@ -28,7 +27,6 @@ use registry::{
 use std::{borrow::Cow, fmt::Display};
 use trc::AddContext;
 use types::id::Id;
-use utils::codec::leb128::Leb128Reader;
 
 pub enum RegistryWriteResult {
     Success(Id),
@@ -268,35 +266,32 @@ impl RegistryStore {
                         });
                     }
                 }
-                IndexKey::Search { .. } => {}
-                IndexKey::Unique { property, .. } => {
-                    let from_key = RegistryClass::from_index_key(key, object_id, 0);
-                    let to_key = RegistryClass::from_index_key(key, object_id, u64::MAX);
+                IndexKey::Unique {
+                    property,
+                    value_1,
+                    value_2,
+                    global,
+                } => {
+                    let key = ValueKey::from(ValueClass::Registry(RegistryClass::PrimaryKey {
+                        object_id: (!*global).then_some(object_id),
+                        index_id: property.to_id(),
+                        key: serialize_composite_key(value_1, value_2),
+                    }));
                     if let Some(existing_id) = self
-                        .validate_primary_key(from_key, to_key, Some(object_type))
-                        .await?
-                        && existing_id.id().id() != item_id
+                        .0
+                        .store
+                        .get_value::<ObjectId>(key)
+                        .await
+                        .caused_by(trc::location!())?
+                        && existing_id != ObjectId::new(object_type, Id::new(item_id))
                     {
                         return Ok(RegistryWriteResult::PrimaryKeyConflict {
-                            existing_id,
                             property: *property,
+                            existing_id,
                         });
                     }
                 }
-                IndexKey::Global { property, .. } => {
-                    let from_key = RegistryClass::from_index_key(key, 0, 0);
-                    let to_key = RegistryClass::from_index_key(key, u16::MAX, u64::MAX);
-
-                    if let Some(existing_id) =
-                        self.validate_primary_key(from_key, to_key, None).await?
-                        && existing_id.id().id() != item_id
-                    {
-                        return Ok(RegistryWriteResult::PrimaryKeyConflict {
-                            existing_id,
-                            property: *property,
-                        });
-                    }
-                }
+                IndexKey::Search { .. } => {}
             }
         }
 
@@ -326,12 +321,13 @@ impl RegistryStore {
                 vec![],
             );
         }
-        batch.registry_index(object_id, item_id, set_index.keys.iter(), true);
-        batch.registry_index(object_id, item_id, clear_index.keys.iter(), false);
-        batch.set(
-            ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
-            out,
-        );
+        batch
+            .registry_index(object_id, item_id, set_index.keys.iter(), true)
+            .registry_index(object_id, item_id, clear_index.keys.iter(), false)
+            .set(
+                ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
+                out,
+            );
 
         Ok(RegistryWriteResult::Success(Id::new(item_id)))
     }
@@ -378,50 +374,38 @@ impl RegistryStore {
 
         // Validate relationships
         let mut linked = Vec::new();
-        let key = KeySerializer::new(U64_LEN + U16_LEN + 1)
-            .write(0u8)
-            .write(object_type_id)
-            .write(item_id)
-            .finalize();
-        let prefix_len = key.len();
-        let from_key = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY_IDX_GLOBAL,
-            key,
+        let from_key = ValueKey::from(ValueClass::Registry(RegistryClass::Reference {
+            to_object_id: object_type_id,
+            to_item_id: item_id,
+            from_object_id: 0,
+            from_item_id: 0,
         }));
-        let key = KeySerializer::new((U64_LEN * 2) + U16_LEN + 1)
-            .write(0u8)
-            .write(object_type_id)
-            .write(item_id)
-            .write(u64::MAX)
-            .finalize();
-        let to_key = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY_IDX_GLOBAL,
-            key,
+        let to_key = ValueKey::from(ValueClass::Registry(RegistryClass::Reference {
+            to_object_id: object_type_id,
+            to_item_id: item_id,
+            from_object_id: u16::MAX,
+            from_item_id: u64::MAX,
         }));
+
         self.0
             .store
             .iterate(
                 IterateParams::new(from_key, to_key).no_values().ascending(),
                 |key, _| {
-                    let object = ObjectType::from_id(key.deserialize_be_u16(prefix_len)?)
-                        .ok_or_else(|| {
-                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                .into_err()
-                                .caused_by(trc::location!())
-                                .ctx(trc::Key::Key, key)
-                        })?;
-                    let id = key
-                        .get(prefix_len + U16_LEN..)
-                        .and_then(|key| key.read_leb128::<u64>())
-                        .map(|r| r.0)
-                        .ok_or_else(|| {
-                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                .into_err()
-                                .caused_by(trc::location!())
-                                .details(object.as_str())
-                                .ctx(trc::Key::Key, key)
-                        })?;
-                    linked.push(ObjectId::new(object, Id::new(id)));
+                    if key.len() == (U16_LEN * 2) + (U64_LEN * 2) {
+                        let object =
+                            ObjectType::from_id(key.deserialize_be_u16(U64_LEN + U16_LEN)?)
+                                .ok_or_else(|| {
+                                    trc::EventType::Registry(
+                                        trc::RegistryEvent::DeserializationError,
+                                    )
+                                    .into_err()
+                                    .caused_by(trc::location!())
+                                    .ctx(trc::Key::Key, key)
+                                })?;
+                        let id = key.deserialize_be_u64(U64_LEN + U16_LEN + U16_LEN)?;
+                        linked.push(ObjectId::new(object, Id::new(id)));
+                    }
 
                     Ok(true)
                 },
@@ -463,86 +447,6 @@ impl RegistryStore {
             .map(|_| RegistryWriteResult::Success(Id::from(item_id)))
             .caused_by(trc::location!())
     }
-
-    pub async fn validate_primary_key(
-        &self,
-        from_key: RegistryClass,
-        to_key: RegistryClass,
-        object: Option<ObjectType>,
-    ) -> trc::Result<Option<ObjectId>> {
-        let from_key = ValueKey::from(from_key);
-        let to_key = ValueKey::from(to_key);
-        let key_len = from_key.class.serialized_size() - 1;
-
-        let mut result = None;
-        self.0
-            .store
-            .iterate(
-                IterateParams::new(from_key, to_key).no_values().ascending(),
-                |key, _| {
-                    if key.len() == key_len {
-                        let item_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
-                        let object = if let Some(object) = object {
-                            object
-                        } else {
-                            let object_id =
-                                key.deserialize_be_u16(key.len() - U64_LEN - U16_LEN)?;
-                            ObjectType::from_id(object_id).ok_or_else(|| {
-                                trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                    .into_err()
-                                    .caused_by(trc::location!())
-                                    .ctx(trc::Key::Key, key)
-                            })?
-                        };
-
-                        result = Some(ObjectId::new(object, Id::new(item_id)));
-                    }
-
-                    Ok(false)
-                },
-            )
-            .await
-            .caused_by(trc::location!())
-            .map(|_| result)
-    }
-}
-
-impl RegistryClass {
-    pub fn from_index_key(key: &IndexKey<'_>, object_id: u16, item_id: u64) -> Self {
-        match key {
-            IndexKey::Unique { property, value } => RegistryClass::Index {
-                index_id: property.to_id(),
-                object_id,
-                item_id,
-                key: value.serialize(),
-            },
-            IndexKey::Search { property, value } => RegistryClass::Index {
-                index_id: property.to_id(),
-                object_id,
-                item_id,
-                key: value.serialize(),
-            },
-            IndexKey::Global {
-                property,
-                value_1,
-                value_2,
-            } => RegistryClass::IndexGlobal {
-                index_id: property.to_id(),
-                object_id,
-                item_id,
-                key: serialize_composite_key(value_1, value_2),
-            },
-            IndexKey::ForeignKey {
-                object_id: to_object_id,
-                ..
-            } => RegistryClass::Reference {
-                to_object_id: to_object_id.object().to_id(),
-                to_item_id: to_object_id.id().id(),
-                from_item_id: item_id,
-                from_object_id: object_id,
-            },
-        }
-    }
 }
 
 impl BatchBuilder {
@@ -554,15 +458,52 @@ impl BatchBuilder {
         is_set: bool,
     ) -> &mut Self {
         for key in index_keys {
-            if is_set {
-                self.set(
-                    ValueClass::Registry(RegistryClass::from_index_key(key, object_id, item_id)),
+            let (key, value) = match key {
+                IndexKey::Search { property, value } => (
+                    RegistryClass::Index {
+                        index_id: property.to_id(),
+                        object_id,
+                        item_id,
+                        key: value.serialize(),
+                    },
                     vec![],
-                );
+                ),
+                IndexKey::Unique {
+                    property,
+                    value_1,
+                    value_2,
+                    global,
+                } => (
+                    RegistryClass::PrimaryKey {
+                        object_id: (!*global).then_some(object_id),
+                        index_id: property.to_id(),
+                        key: serialize_composite_key(value_1, value_2),
+                    },
+                    KeySerializer::new(U16_LEN + U64_LEN)
+                        .write(object_id)
+                        .write(item_id)
+                        .finalize(),
+                ),
+                IndexKey::ForeignKey {
+                    object_id: to_object_id,
+                    ..
+                } => (
+                    RegistryClass::Reference {
+                        to_object_id: to_object_id.object().to_id(),
+                        to_item_id: to_object_id.id().id(),
+                        from_item_id: item_id,
+                        from_object_id: object_id,
+                    },
+                    vec![],
+                ),
+            };
+            if is_set {
+                if !value.is_empty() {
+                    self.assert_value(ValueClass::Registry(key.clone()), ());
+                }
+                self.set(ValueClass::Registry(key), value);
             } else {
-                self.clear(ValueClass::Registry(RegistryClass::from_index_key(
-                    key, object_id, item_id,
-                )));
+                self.clear(ValueClass::Registry(key));
             }
         }
         self

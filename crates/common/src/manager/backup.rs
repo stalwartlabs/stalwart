@@ -316,7 +316,7 @@ impl Family {
             Family::Registry => &[
                 SUBSPACE_REGISTRY,
                 SUBSPACE_REGISTRY_IDX,
-                SUBSPACE_REGISTRY_IDX_GLOBAL,
+                SUBSPACE_REGISTRY_PK,
                 SUBSPACE_DIRECTORY,
             ],
             Family::Changelog => &[SUBSPACE_LOGS],

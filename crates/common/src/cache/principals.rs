@@ -27,15 +27,13 @@ use registry::{
             Role, SubAddressing, Tenant,
         },
     },
-    types::{
-        id::ObjectId,
-        index::{IndexKey, IndexValue},
-    },
+    types::{EnumImpl, id::ObjectId},
 };
 use std::{borrow::Cow, sync::Arc};
 use store::{
+    U64_LEN, ValueKey,
     registry::{RegistryQuery, bootstrap::Bootstrap},
-    write::{RegistryClass, now},
+    write::{RegistryClass, ValueClass, key::KeySerializer, now},
 };
 use trc::AddContext;
 use types::id::Id;
@@ -161,19 +159,20 @@ impl Server {
                 .get(&EmailAddressRef::new(local_part, domain_id))
                 .is_none()
             {
-                let key = IndexKey::Global {
-                    property: Property::Email,
-                    value_1: IndexValue::Text(local_part.into()),
-                    value_2: IndexValue::U64(domain_id.into()),
-                };
+                let key = ValueKey::from(ValueClass::Registry(RegistryClass::PrimaryKey {
+                    object_id: None,
+                    index_id: Property::Email.to_id(),
+                    key: KeySerializer::new(local_part.len() + U64_LEN)
+                        .write(local_part.as_bytes())
+                        .write(domain_id as u64)
+                        .finalize(),
+                }));
+
                 if let Some(object) = self
-                    .registry()
-                    .validate_primary_key(
-                        RegistryClass::from_index_key(&key, 0, 0),
-                        RegistryClass::from_index_key(&key, u16::MAX, u64::MAX),
-                        None,
-                    )
-                    .await?
+                    .store()
+                    .get_value::<ObjectId>(key)
+                    .await
+                    .caused_by(trc::location!())?
                 {
                     let item_id = object.id().document_id();
                     let result = match object.object() {

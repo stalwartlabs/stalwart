@@ -8,6 +8,7 @@ use crate::task_manager::imip::SendImipTask;
 use crate::task_manager::index::SearchIndexTask;
 use crate::task_manager::lock::TaskLockManager;
 use crate::task_manager::merge_threads::MergeThreadsTask;
+use crate::task_manager::report::SubmitReportTask;
 use alarm::SendAlarmTask;
 use common::config::server::ServerProtocol;
 use common::network::limiter::ConcurrencyLimiter;
@@ -43,6 +44,7 @@ pub mod imip;
 pub mod index;
 pub mod lock;
 pub mod merge_threads;
+pub mod report;
 
 const QUEUE_REFRESH_INTERVAL: u64 = 60 * 5; // 5 minutes
 const DEFAULT_LOCK_EXPIRY: u64 = 60 * 5; // 5 minutes
@@ -207,6 +209,16 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
                                     server.send_imip(task, server_instance.clone()).await
                                 }
                                 Task::MergeThreads(task) => server.merge_threads(task).await,
+                                Task::DmarcReport(task) => {
+                                    server
+                                        .submit_report(report::ReportId::Dmarc(task.report_id.id()))
+                                        .await
+                                }
+                                Task::TlsReport(task) => {
+                                    server
+                                        .submit_report(report::ReportId::Tls(task.report_id.id()))
+                                        .await
+                                }
                                 Task::IndexDocument(_)
                                 | Task::UnindexDocument(_)
                                 | Task::IndexTrace(_) => unreachable!(),
@@ -385,6 +397,7 @@ impl TaskQueueManager for Server {
                 TaskType::MergeThreads => roles
                     .merge_threads
                     .is_enabled_for_integer(task_job.id as u32),
+                TaskType::DmarcReport | TaskType::TlsReport => true,
             };
 
             if enabled {
@@ -569,6 +582,8 @@ impl TaskInfo for Task {
             Task::CalendarAlarmNotification(_) => "CalendarAlarmNotification",
             Task::CalendarItipMessage(_) => "CalendarItipMessage",
             Task::MergeThreads(_) => "MergeThreads",
+            Task::DmarcReport(_) => "DmarcReport",
+            Task::TlsReport(_) => "TlsReport",
         }
     }
 }

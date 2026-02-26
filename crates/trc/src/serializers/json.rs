@@ -281,3 +281,22 @@ impl<'de> serde::Deserialize<'de> for MetricType {
         Self::parse(s).ok_or_else(|| serde::de::Error::unknown_variant(s, &[]))
     }
 }
+
+impl serde::Serialize for Key {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.name())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Key {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = <&str>::deserialize(deserializer)?;
+        Self::try_parse(s).ok_or_else(|| serde::de::Error::unknown_variant(s, &[]))
+    }
+}

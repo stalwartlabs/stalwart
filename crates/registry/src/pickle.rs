@@ -250,3 +250,13 @@ where
         Some(map)
     }
 }
+
+impl Pickle for trc::Key {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.code().pickle(out);
+    }
+
+    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
+        u64::unpickle(stream).and_then(Self::from_code)
+    }
+}

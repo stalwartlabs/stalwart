@@ -265,10 +265,9 @@ pub enum RegistryClass {
         item_id: u64,
         key: Vec<u8>,
     },
-    IndexGlobal {
+    PrimaryKey {
+        object_id: Option<u16>,
         index_id: u16,
-        object_id: u16,
-        item_id: u64,
         key: Vec<u8>,
     },
     Id {
@@ -290,14 +289,8 @@ pub enum QueueClass {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum TelemetryClass {
-    Span {
-        span_id: u64,
-    },
-    Metric {
-        timestamp: u64,
-        metric_id: u64,
-        node_id: u64,
-    },
+    Span(u64),
+    Metric(u64),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]

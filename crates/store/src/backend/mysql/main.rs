@@ -93,6 +93,7 @@ impl MysqlStore {
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,
             SUBSPACE_REGISTRY,
+            SUBSPACE_REGISTRY_PK,
             SUBSPACE_DIRECTORY,
             SUBSPACE_QUEUE_MESSAGE,
             SUBSPACE_QUEUE_EVENT,
@@ -125,11 +126,7 @@ impl MysqlStore {
         .await
         .map_err(into_error)?;
 
-        for table in [
-            SUBSPACE_INDEXES,
-            SUBSPACE_REGISTRY_IDX,
-            SUBSPACE_REGISTRY_IDX_GLOBAL,
-        ] {
+        for table in [SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX] {
             let table = char::from(table);
             conn.query_drop(format!(
                 "CREATE TABLE IF NOT EXISTS {table} (

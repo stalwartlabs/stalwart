@@ -119,27 +119,19 @@ impl RegistrySet for Server {
             ObjectType::TracingStore => {}
             ObjectType::WebDav => {}
             ObjectType::WebHook => {}
-
-            // Tenant filtered
             ObjectType::Account => {}
             ObjectType::DsnReportSettings => {}
             ObjectType::MailingList => {}
             ObjectType::OAuthClient => {}
             ObjectType::Role => {}
             ObjectType::Tenant => {}
-
-            // Account filtered
             ObjectType::MaskedEmail => {}
             ObjectType::PublicKey => {}
-
-            // Special
             ObjectType::DkimSignature => {}
             ObjectType::Domain => {}
             ObjectType::Log => {}
             ObjectType::QueuedMessage => {}
             ObjectType::Task => {}
-
-            // Move to registry?
             ObjectType::ArfExternalReport => {}
             ObjectType::DmarcExternalReport => {}
             ObjectType::TlsExternalReport => {}
@@ -147,6 +139,8 @@ impl RegistrySet for Server {
             ObjectType::Metric => {}
             ObjectType::Trace => {}
             ObjectType::SpamTrainingSample => {}
+            ObjectType::DmarcInternalReport => todo!(),
+            ObjectType::TlsInternalReport => todo!(),
         }
 
         let todo = "read only properties";

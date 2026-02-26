@@ -628,11 +628,9 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
 
                                     let metrics_store = server.core.storage.metrics.clone();
                                     let metrics_history = metrics_history.clone();
-                                    let core = server.core.clone();
                                     tokio::spawn(async move {
-                                        if let Err(err) = metrics_store
-                                            .write_metrics(core, now(), metrics_history)
-                                            .await
+                                        if let Err(err) =
+                                            metrics_store.write_metrics(None, metrics_history).await
                                         {
                                             trc::error!(err.details("Failed to write metrics"));
                                         }

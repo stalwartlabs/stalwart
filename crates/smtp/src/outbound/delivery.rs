@@ -411,6 +411,7 @@ impl QueuedMessage {
                                                 .into(),
                                             tls_record: tls_report.record.clone(),
                                             interval: tls_report.interval,
+                                            span_id: message.span_id,
                                         })
                                         .await;
                                     }
@@ -426,6 +427,7 @@ impl QueuedMessage {
                                                 .into(),
                                             tls_record: tls_report.record.clone(),
                                             interval: tls_report.interval,
+                                            span_id: message.span_id,
                                         })
                                         .await;
                                 }
@@ -584,6 +586,7 @@ impl QueuedMessage {
                                         .into(),
                                     tls_record: tls_report.record.clone(),
                                     interval: tls_report.interval,
+                                    span_id: message.span_id,
                                 })
                                 .await;
                         }
@@ -715,6 +718,7 @@ impl QueuedMessage {
                                                 .into(),
                                             tls_record: tls_report.record.clone(),
                                             interval: tls_report.interval,
+                                            span_id: message.span_id,
                                         })
                                         .await;
                                 }
@@ -756,6 +760,7 @@ impl QueuedMessage {
                                                 .into(),
                                             tls_record: tls_report.record.clone(),
                                             interval: tls_report.interval,
+                                            span_id: message.span_id,
                                         })
                                         .await;
                                 }
@@ -812,6 +817,7 @@ impl QueuedMessage {
                                                 .into(),
                                                 tls_record: tls_report.record.clone(),
                                                 interval: tls_report.interval,
+                                                span_id: message.span_id,
                                             })
                                             .await;
                                     }
@@ -1054,6 +1060,7 @@ impl QueuedMessage {
                                                     .into(),
                                                     tls_record: tls_report.record.clone(),
                                                     interval: tls_report.interval,
+                                                    span_id: message.span_id,
                                                 })
                                                 .await;
                                         }
@@ -1071,6 +1078,7 @@ impl QueuedMessage {
                                                 failure: None,
                                                 tls_record: tls_report.record.clone(),
                                                 interval: tls_report.interval,
+                                                span_id: message.span_id,
                                             })
                                             .await;
                                     }
@@ -1123,6 +1131,7 @@ impl QueuedMessage {
                                                 .into(),
                                                 tls_record: tls_report.record.clone(),
                                                 interval: tls_report.interval,
+                                                span_id: message.span_id,
                                             })
                                             .await;
                                     }
@@ -1171,6 +1180,7 @@ impl QueuedMessage {
                                                 .into(),
                                                 tls_record: tls_report.record.clone(),
                                                 interval: tls_report.interval,
+                                                span_id: message.span_id,
                                             })
                                             .await;
                                     }

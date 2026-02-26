@@ -7,6 +7,7 @@
 // This file is auto-generated. Do not edit directly.
 
 pub const TOTAL_EVENT_COUNT: usize = 596;
+pub const TOTAL_METRIC_COUNT: usize = 338;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
@@ -532,6 +533,7 @@ pub enum OutgoingReportEvent {
     SubmissionError = 343,
     NoRecipientsFound = 338,
     Locked = 337,
+    MaxSizeExceeded = 59,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -607,7 +609,6 @@ pub enum RegistryEvent {
     BuildWarning = 55,
     NotSupported = 64,
     ValidationError = 63,
-    Reserved03 = 59,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -981,6 +982,7 @@ pub enum MetricType {
     EvalStoreNotFound = 113,
     HttpRequestTime = 12,
     HttpActiveConnections = 17,
+    HttpConnectionStart = 337,
     HttpError = 114,
     HttpRequestBody = 115,
     HttpResponseBody = 116,

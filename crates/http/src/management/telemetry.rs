@@ -11,10 +11,6 @@
 use common::{
     Server,
     auth::{AccessToken, oauth::GrantType},
-    telemetry::{
-        metrics::store::{Metric, MetricsStore},
-        tracers::store::TracingStore,
-    },
 };
 use http_body_util::{StreamBody, combinators::BoxBody};
 use http_proto::*;
@@ -25,22 +21,18 @@ use hyper::{
 use mail_parser::DateTime;
 use registry::schema::enums::Permission;
 use serde_json::json;
+use std::future::Future;
 use std::{
     fmt::Write,
     time::{Duration, Instant},
 };
-use std::{future::Future, str::FromStr};
-use store::{
-    ahash::{AHashMap, AHashSet},
-    search::{SearchComparator, SearchField, SearchFilter, SearchQuery, TracingSearchField},
-    write::{SearchIndex, now},
-};
+use store::ahash::{AHashMap, AHashSet};
 use trc::{
-    Collector, DeliveryEvent, EventType, Key, MetricType, QueueEvent, Value,
+    Collector, EventType, Key, MetricType, Value,
     ipc::{bitset::Bitset, subscriber::SubscriberBuilder},
     serializers::json::JsonEventSerializer,
 };
-use utils::{snowflake::SnowflakeIdGenerator, url_params::UrlParams};
+use utils::url_params::UrlParams;
 
 pub trait TelemetryApi: Sync + Send {
     fn handle_telemetry_api_request(
@@ -60,165 +52,13 @@ impl TelemetryApi for Server {
     ) -> trc::Result<HttpResponse> {
         let params = UrlParams::new(req.uri().query());
         let account_id = access_token.account_id();
+        let todo = "use same format as in JMAP API";
 
         match (
             path.get(1).copied().unwrap_or_default(),
             path.get(2).copied(),
             req.method(),
         ) {
-            ("traces", None, &Method::GET) => {
-                // Validate the access token
-                access_token.enforce_permission(Permission::TracingList)?;
-
-                let page: usize = params.parse("page").unwrap_or(0);
-                let limit: usize = params.parse("limit").unwrap_or(0);
-                let mut tracing_query = Vec::new();
-                tracing_query.push(SearchFilter::And);
-                if let Some(typ) = params.parse::<EventType>("type") {
-                    tracing_query.push(SearchFilter::eq(
-                        TracingSearchField::EventType,
-                        typ.to_id() as u64,
-                    ));
-                }
-                if let Some(queue_id) = params.parse::<u64>("queue_id") {
-                    tracing_query.push(SearchFilter::eq(TracingSearchField::QueueId, queue_id));
-                }
-                if let Some(query) = params.get("filter") {
-                    let mut buf = String::with_capacity(query.len());
-                    let mut in_quote = false;
-                    for ch in query.chars() {
-                        if ch.is_ascii_whitespace() {
-                            if in_quote {
-                                buf.push(' ');
-                            } else if !buf.is_empty() {
-                                tracing_query.push(SearchFilter::has_keyword(
-                                    TracingSearchField::Keywords,
-                                    buf,
-                                ));
-                                buf = String::new();
-                            }
-                        } else if ch == '"' {
-                            buf.push(ch);
-                            if in_quote {
-                                if !buf.is_empty() {
-                                    tracing_query.push(SearchFilter::has_keyword(
-                                        TracingSearchField::Keywords,
-                                        buf,
-                                    ));
-                                    buf = String::new();
-                                }
-                                in_quote = false;
-                            } else {
-                                in_quote = true;
-                            }
-                        } else {
-                            buf.push(ch);
-                        }
-                    }
-                    if !buf.is_empty() {
-                        tracing_query
-                            .push(SearchFilter::has_keyword(TracingSearchField::Keywords, buf));
-                    }
-                }
-                let values = params.get("values").is_some();
-                if let Some(before) = params
-                    .parse::<Timestamp>("before")
-                    .map(|t| t.into_inner())
-                    .and_then(SnowflakeIdGenerator::from_timestamp)
-                {
-                    tracing_query.push(SearchFilter::lt(SearchField::Id, before));
-                }
-                if let Some(after) = params
-                    .parse::<Timestamp>("after")
-                    .map(|t| t.into_inner())
-                    .and_then(SnowflakeIdGenerator::from_timestamp)
-                {
-                    tracing_query.push(SearchFilter::gt(SearchField::Id, after));
-                }
-                if !tracing_query.iter().any(|f| {
-                    matches!(
-                        f,
-                        SearchFilter::Operator {
-                            field: SearchField::Tracing(
-                                TracingSearchField::Keywords | TracingSearchField::QueueId
-                            ) | SearchField::Id,
-                            ..
-                        }
-                    )
-                }) {
-                    tracing_query.push(SearchFilter::gt(
-                        SearchField::Id,
-                        SnowflakeIdGenerator::from_timestamp(now() - 86400).unwrap_or_default(),
-                    ));
-                }
-
-                tracing_query.push(SearchFilter::End);
-
-                let store = self.tracing_store();
-
-                if !store.is_active() {
-                    return Err(trc::ManageEvent::NotSupported
-                        .ctx(trc::Key::Details, "No tracing store has been configured"));
-                }
-
-                let span_ids = self
-                    .search_store()
-                    .query_global(
-                        SearchQuery::new(SearchIndex::Tracing)
-                            .with_filters(tracing_query)
-                            .with_comparator(SearchComparator::Field {
-                                field: SearchField::Id,
-                                ascending: false,
-                            }),
-                    )
-                    .await?;
-
-                let (total, span_ids) = if limit > 0 {
-                    let offset = page.saturating_sub(1) * limit;
-                    (
-                        span_ids.len(),
-                        span_ids.into_iter().skip(offset).take(limit).collect(),
-                    )
-                } else {
-                    (span_ids.len(), span_ids)
-                };
-
-                if values && !span_ids.is_empty() {
-                    let mut values = Vec::with_capacity(span_ids.len());
-
-                    for span_id in span_ids {
-                        for event in store.get_span(span_id).await? {
-                            if matches!(
-                                event.inner.typ,
-                                EventType::Delivery(DeliveryEvent::AttemptStart)
-                                    | EventType::Queue(
-                                        QueueEvent::QueueMessage
-                                            | QueueEvent::QueueMessageAuthenticated
-                                    )
-                            ) {
-                                values.push(event);
-                                break;
-                            }
-                        }
-                    }
-
-                    Ok(JsonResponse::new(json!({
-                            "data": {
-                                "items": JsonEventSerializer::new(values).with_spans(),
-                                "total": total,
-                            },
-                    }))
-                    .into_http_response())
-                } else {
-                    Ok(JsonResponse::new(json!({
-                            "data": {
-                                "items": span_ids,
-                                "total": total,
-                            },
-                    }))
-                    .into_http_response())
-                }
-            }
             ("traces", Some("live"), &Method::GET) => {
                 // Validate the access token
                 access_token.enforce_permission(Permission::TracingLive)?;
@@ -346,45 +186,6 @@ impl TelemetryApi for Server {
                     },
                 ))))
             }
-            ("trace", id, &Method::GET) => {
-                // Validate the access token
-                access_token.enforce_permission(Permission::TracingGet)?;
-
-                let store = self.tracing_store();
-                if !store.is_active() {
-                    return Err(trc::ManageEvent::NotSupported
-                        .ctx(trc::Key::Details, "No tracing store has been configured"));
-                }
-
-                let mut events = Vec::new();
-                for span_id in id
-                    .or_else(|| params.get("id"))
-                    .unwrap_or_default()
-                    .split(',')
-                {
-                    if let Ok(span_id) = span_id.parse::<u64>() {
-                        events.push(
-                            JsonEventSerializer::new(store.get_span(span_id).await?)
-                                .with_description()
-                                .with_explanation(),
-                        );
-                    } else {
-                        events.push(JsonEventSerializer::new(Vec::new()));
-                    }
-                }
-
-                if events.len() == 1 && id.is_some() {
-                    Ok(JsonResponse::new(json!({
-                            "data": events.into_iter().next().unwrap(),
-                    }))
-                    .into_http_response())
-                } else {
-                    Ok(JsonResponse::new(json!({
-                            "data": events,
-                    }))
-                    .into_http_response())
-                }
-            }
             ("live", Some("tracing-token"), &Method::GET) => {
                 // Validate the access token
                 access_token.enforce_permission(Permission::TracingLive)?;
@@ -404,74 +205,6 @@ impl TelemetryApi for Server {
                     "data": self.encode_access_token(GrantType::LiveMetrics, account_id, "web", 60).await?,
             }))
             .into_http_response())
-            }
-            ("metrics", None, &Method::GET) => {
-                let todo = "move to registry";
-                // Validate the access token
-                access_token.enforce_permission(Permission::MetricsList)?;
-
-                let before = params
-                    .parse::<Timestamp>("before")
-                    .map(|t| t.into_inner())
-                    .unwrap_or(u64::MAX);
-                let after = params
-                    .parse::<Timestamp>("after")
-                    .map(|t| t.into_inner())
-                    .unwrap_or(0);
-
-                if !self.metrics_store().is_active() {
-                    return Err(trc::ManageEvent::Error
-                        .ctx(trc::Key::Details, "No metrics store has been defined")
-                        .ctx(
-                            trc::Key::Reason,
-                            concat!(
-                                "You need to configure a metrics ",
-                                "store in order to use this feature."
-                            ),
-                        ));
-                }
-
-                let results = self.metrics_store().query_metrics(after, before).await?;
-                let mut metrics = Vec::with_capacity(results.len());
-
-                for metric in results {
-                    metrics.push(match metric {
-                        Metric::Counter {
-                            id,
-                            timestamp,
-                            value,
-                        } => Metric::Counter {
-                            id: id.as_str().to_string(),
-                            timestamp: DateTime::from_timestamp(timestamp as i64).to_rfc3339(),
-                            value,
-                        },
-                        Metric::Histogram {
-                            id,
-                            timestamp,
-                            count,
-                            sum,
-                        } => Metric::Histogram {
-                            id: id.as_str(),
-                            timestamp: DateTime::from_timestamp(timestamp as i64).to_rfc3339(),
-                            count,
-                            sum,
-                        },
-                        Metric::Gauge {
-                            id,
-                            timestamp,
-                            value,
-                        } => Metric::Gauge {
-                            id: id.as_str(),
-                            timestamp: DateTime::from_timestamp(timestamp as i64).to_rfc3339(),
-                            value,
-                        },
-                    });
-                }
-
-                Ok(JsonResponse::new(json!({
-                        "data": metrics,
-                }))
-                .into_http_response())
             }
             ("metrics", Some("live"), &Method::GET) => {
                 // Validate the access token
@@ -579,25 +312,5 @@ impl TelemetryApi for Server {
             }
             _ => Err(trc::ResourceEvent::NotFound.into_err()),
         }
-    }
-}
-
-pub(super) struct Timestamp(u64);
-
-impl FromStr for Timestamp {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(dt) = DateTime::parse_rfc3339(s) {
-            Ok(Timestamp(dt.to_timestamp() as u64))
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl Timestamp {
-    pub fn into_inner(self) -> u64 {
-        self.0
     }
 }
