@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::acl::Rights;
 use super::{ImapResponse, authenticate::Mechanism};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +26,7 @@ pub enum Capability {
     Binary,
     Unselect,
     ACL,
+    Rights(Vec<Rights>),
     UIDPlus,
     ESearch,
     SASLIR, //SASL-IR
@@ -99,6 +101,13 @@ impl Capability {
             Capability::Binary => b"BINARY",
             Capability::Unselect => b"UNSELECT",
             Capability::ACL => b"ACL",
+            Capability::Rights(rights) => {
+                buf.extend_from_slice(b"RIGHTS=");
+                for right in rights {
+                    buf.push(right.to_char());
+                }
+                return;
+            }
             Capability::UIDPlus => b"UIDPLUS",
             Capability::ESearch => b"ESEARCH",
             Capability::SASLIR => b"SASL-IR",
@@ -152,6 +161,12 @@ impl Capability {
                 Capability::Binary,
                 Capability::Unselect,
                 Capability::ACL,
+                Capability::Rights(vec![
+                    Rights::CreateMailbox,
+                    Rights::DeleteMailbox,
+                    Rights::DeleteMessages,
+                    Rights::Expunge,
+                ]),
                 Capability::UIDPlus,
                 Capability::ESearch,
                 Capability::Within,
@@ -206,6 +221,7 @@ impl ImapResponse for Response {
 mod tests {
     use crate::protocol::{
         ImapResponse,
+        acl::Rights,
         capability::{Capability, Response},
     };
 
@@ -216,11 +232,12 @@ mod tests {
                 capabilities: vec![
                     Capability::IMAP4rev2,
                     Capability::StartTLS,
-                    Capability::LoginDisabled
+                    Capability::LoginDisabled,
+                    Capability::Rights(vec![Rights::Read, Rights::Seen]),
                 ],
             }
             .serialize(),
-            "* CAPABILITY IMAP4rev2 STARTTLS LOGINDISABLED\r\n".as_bytes()
+            "* CAPABILITY IMAP4rev2 STARTTLS LOGINDISABLED RIGHTS=rs\r\n".as_bytes()
         );
     }
 }
