@@ -167,19 +167,17 @@ impl Store {
                 let item_id = object_id.id().id();
                 let object_id = object_id.object().to_id();
 
-                if let Some(account_id) = account_id {
-                    batch.clear(ValueClass::Registry(RegistryClass::Index {
+                batch
+                    .clear(ValueClass::Registry(RegistryClass::Index {
                         index_id: Property::AccountId.to_id(),
                         object_id,
                         item_id,
-                        key: account_id.serialize(),
+                        key: (account_id as u64).serialize(),
+                    }))
+                    .clear(ValueClass::Registry(RegistryClass::Item {
+                        object_id,
+                        item_id,
                     }));
-                }
-
-                batch.clear(ValueClass::Registry(RegistryClass::Id {
-                    object_id,
-                    item_id,
-                }));
             }
             if !batch.is_empty() {
                 self.write(batch.build_all())
@@ -206,7 +204,7 @@ struct BlobPurgeState {
     last_hash: BlobHash,
     last_hash_is_linked: bool,
     delete_keys: Vec<(Option<u32>, BlobOp)>,
-    delete_registry: Vec<(Option<u32>, ObjectId)>,
+    delete_registry: Vec<(u32, ObjectId)>,
     now: u64,
     total_deleted: u64,
     total_active: u64,
@@ -270,10 +268,8 @@ impl BlobPurgeState {
                         },
                     ));
                     if value.len() == U16_LEN + U64_LEN {
-                        self.delete_registry.push((
-                            (account_id != u32::MAX).then_some(account_id),
-                            ObjectId::deserialize(value)?,
-                        ));
+                        self.delete_registry
+                            .push((account_id, ObjectId::deserialize(value)?));
                     }
                 }
                 Ok(())

@@ -188,11 +188,11 @@ impl SpamClassifier for Server {
         let mut duplicate_samples = Vec::new();
         let mut remove_entries = false;
         let object_id = ObjectType::SpamTrainingSample.to_id();
-        let from_key = ValueKey::from(ValueClass::Registry(RegistryClass::Id {
+        let from_key = ValueKey::from(ValueClass::Registry(RegistryClass::Item {
             object_id,
             item_id: trainer.last_id + 1,
         }));
-        let to_key = ValueKey::from(ValueClass::Registry(RegistryClass::Id {
+        let to_key = ValueKey::from(ValueClass::Registry(RegistryClass::Item {
             object_id,
             item_id: u64::MAX,
         }));
@@ -551,18 +551,17 @@ impl SpamClassifier for Server {
                             hash: sample.sample.hash,
                             to: BlobLink::Temporary { until },
                         })
-                        .clear(ValueClass::Registry(RegistryClass::Id {
+                        .clear(ValueClass::Registry(RegistryClass::Item {
                             object_id,
                             item_id: sample.id,
-                        }));
-                    if sample.sample.account_id != u32::MAX {
-                        batch.clear(ValueClass::Registry(RegistryClass::Index {
+                        }))
+                        .clear(ValueClass::Registry(RegistryClass::Index {
                             index_id: Property::AccountId.to_id(),
                             object_id,
                             item_id: sample.id,
-                            key: sample.sample.account_id.serialize(),
+                            key: (sample.sample.account_id as u64).serialize(),
                         }));
-                    }
+
                     if batch.is_large_batch() {
                         self.store()
                             .write(batch.build_all())

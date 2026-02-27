@@ -165,6 +165,7 @@ impl Server {
                     .credentials
                     .into_iter()
                     .filter_map(|(credential_id, credential)| {
+                        let credential = credential.unwrap_properties();
                         let expires_at = credential
                             .expires_at
                             .map(|v| v.timestamp() as u64)
@@ -750,6 +751,7 @@ fn hash_account(account: &Account) -> u64 {
             account.role_ids.hash(&mut s);
             hash_permissions(&mut s, &account.permissions);
             for (credential_id, credential) in &account.credentials {
+                let credential = credential.as_properties();
                 credential_id.hash(&mut s);
                 credential.expires_at.hash(&mut s);
                 hash_permissions(&mut s, &credential.permissions);

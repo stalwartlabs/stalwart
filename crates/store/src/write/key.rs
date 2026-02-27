@@ -304,7 +304,7 @@ impl ValueClass {
                 RegistryClass::Item { object_id, item_id } => {
                     serializer.write(*object_id).write_leb128(*item_id)
                 }
-                RegistryClass::Id { object_id, item_id } => {
+                RegistryClass::IndexId { object_id, item_id } => {
                     serializer.write(*object_id).write(*item_id)
                 }
                 RegistryClass::Index {
@@ -498,7 +498,7 @@ impl ValueClass {
                 RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 1,
                 RegistryClass::Index { key, .. } => (U16_LEN * 2) + U64_LEN + key.len() + 1,
                 RegistryClass::PrimaryKey { key, .. } => (U16_LEN * 2) + key.len() + 1,
-                RegistryClass::Id { .. } => U16_LEN + U64_LEN + 1,
+                RegistryClass::IndexId { .. } => U16_LEN + U64_LEN + 1,
                 RegistryClass::IdCounter { .. } => U16_LEN + 1,
             },
             ValueClass::Blob(op) => match op {
@@ -568,7 +568,9 @@ impl ValueClass {
                     REPORT_INTERNAL_DMARC | REPORT_INTERNAL_TLS => SUBSPACE_REPORT_OUT,
                     _ => SUBSPACE_REGISTRY,
                 },
-                RegistryClass::Id { .. } | RegistryClass::Index { .. } => SUBSPACE_REGISTRY_IDX,
+                RegistryClass::IndexId { .. } | RegistryClass::Index { .. } => {
+                    SUBSPACE_REGISTRY_IDX
+                }
                 RegistryClass::Reference { .. } | RegistryClass::PrimaryKey { .. } => {
                     SUBSPACE_REGISTRY_PK
                 }

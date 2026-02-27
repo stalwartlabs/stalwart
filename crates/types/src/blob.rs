@@ -32,8 +32,8 @@ pub enum BlobClass {
 impl Default for BlobClass {
     fn default() -> Self {
         BlobClass::Reserved {
-            account_id: 0,
-            expires: 0,
+            account_id: u32::MAX,
+            expires: u64::MAX,
         }
     }
 }
@@ -63,6 +63,10 @@ impl BlobClass {
             }
             BlobClass::Linked { .. } => true,
         }
+    }
+
+    pub fn is_superuser(&self) -> bool {
+        matches!(self, BlobClass::Reserved { account_id, expires } if *account_id == u32::MAX && *expires == u64::MAX)
     }
 }
 

@@ -17,6 +17,7 @@ pub enum StringValidator {
     Lowercase,
     Uppercase,
     Trim,
+    SecretHash,
 }
 
 pub enum StringValidatorResult {
@@ -65,6 +66,13 @@ impl StringValidator {
                     }
                 } else {
                     StringValidatorResult::Valid
+                }
+            }
+            Self::SecretHash => {
+                if !value.is_empty() && value.len() <= 128 {
+                    StringValidatorResult::Valid
+                } else {
+                    StringValidatorResult::Invalid("Secret cannot be empty")
                 }
             }
         }

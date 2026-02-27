@@ -964,7 +964,7 @@ impl EmailIngest for Server {
                     ObjectId::new(ObjectType::SpamTrainingSample, item_id.into()).serialize(),
                 )
                 .set(
-                    ValueClass::Registry(RegistryClass::Id { object_id, item_id }),
+                    ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
                     sample,
                 )
                 .set(
@@ -972,7 +972,7 @@ impl EmailIngest for Server {
                         index_id: Property::AccountId.to_id(),
                         object_id,
                         item_id,
-                        key: account_id.serialize(),
+                        key: (account_id as u64).serialize(),
                     }),
                     vec![],
                 );

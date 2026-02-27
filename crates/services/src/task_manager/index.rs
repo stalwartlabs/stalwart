@@ -695,12 +695,12 @@ async fn delete_email_metadata(
                                 index_id: Property::AccountId.to_id(),
                                 object_id,
                                 item_id,
-                                key: account_id.serialize(),
+                                key: (account_id as u64).serialize(),
                             }),
                             vec![],
                         )
                         .set(
-                            ValueClass::Registry(RegistryClass::Id { object_id, item_id }),
+                            ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
                             item,
                         );
                 }

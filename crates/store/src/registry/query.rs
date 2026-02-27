@@ -374,11 +374,11 @@ async fn all_ids<T: RegistryQueryResults>(store: &Store, object: ObjectType) -> 
     store
         .iterate(
             IterateParams::new(
-                ValueKey::from(ValueClass::Registry(RegistryClass::Id {
+                ValueKey::from(ValueClass::Registry(RegistryClass::IndexId {
                     object_id,
                     item_id: 0u64,
                 })),
-                ValueKey::from(ValueClass::Registry(RegistryClass::Id {
+                ValueKey::from(ValueClass::Registry(RegistryClass::IndexId {
                     object_id,
                     item_id: u64::MAX,
                 })),

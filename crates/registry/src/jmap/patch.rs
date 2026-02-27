@@ -26,7 +26,22 @@ impl<'x> JsonPointerPatch<'x> {
             ptr,
             pos: 0,
             validators: &[],
+            is_create: false,
         }
+    }
+
+    pub fn cloned(&self) -> Self {
+        Self {
+            ptr: self.ptr,
+            pos: 0,
+            validators: &[],
+            is_create: false,
+        }
+    }
+
+    pub fn with_create(mut self, is_create: bool) -> Self {
+        self.is_create = is_create;
+        self
     }
 
     pub fn with_validators(mut self, validators: &'x [StringValidator]) -> Self {
@@ -63,12 +78,20 @@ impl<'x> JsonPointerPatch<'x> {
 
     pub fn assert_eof(&self) -> Result<(), PatchError> {
         if self.has_next() {
-            Err(PatchError::new(
-                JsonPointerPatch::new(self.ptr),
-                "Invalid JSON Pointer path",
-            ))
+            Err(PatchError::new(self.cloned(), "Invalid JSON Pointer path"))
         } else {
             Ok(())
+        }
+    }
+
+    pub fn assert_read_only(self) -> Result<Self, PatchError> {
+        if self.is_create {
+            Ok(self)
+        } else {
+            Err(PatchError::new(
+                self.cloned(),
+                "Cannot modify read-only property",
+            ))
         }
     }
 }

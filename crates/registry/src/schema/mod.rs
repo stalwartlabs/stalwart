@@ -7,7 +7,7 @@
 use crate::{
     schema::{
         enums::{TracingLevel, TracingLevelOpt},
-        prelude::{NodeRange, Object, ObjectInner, Property},
+        prelude::{Credential, CredentialProperties, NodeRange, Object, ObjectInner, Property},
     },
     types::EnumImpl,
 };
@@ -33,6 +33,23 @@ impl NodeRange {
         node_id >= self.from_node_id && node_id <= self.to_node_id
     }
 }
+
+impl Credential {
+    pub fn unwrap_properties(self) -> CredentialProperties {
+        match self {
+            Credential::AppPassword(credential_properties) => credential_properties,
+            Credential::ApiKey(credential_properties) => credential_properties,
+        }
+    }
+
+    pub fn as_properties(&self) -> &CredentialProperties {
+        match self {
+            Credential::AppPassword(credential_properties) => credential_properties,
+            Credential::ApiKey(credential_properties) => credential_properties,
+        }
+    }
+}
+
 impl Display for Property {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())

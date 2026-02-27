@@ -4,6 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::registry::mapping::{
+    RegistryGetResponse,
+    account::account_get,
+    deleted_item::deleted_item_get,
+    log::log_get,
+    queued_message::queued_message_get,
+    report::report_get,
+    spam_sample::spam_sample_get,
+    task::task_get,
+    telemetry::{metric_get, trace_get},
+};
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
@@ -41,25 +52,38 @@ impl RegistryGet for Server {
         mut request: GetRequest<Registry>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Registry>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let mut properties = request
-            .properties
-            .take()
-            .map(|p| p.unwrap())
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|prop| prop.try_unwrap())
-            .collect::<AHashSet<_>>();
-        if !properties.is_empty() {
-            properties.insert(Property::Id);
-        }
-
-        let mut response = GetResponse {
-            account_id: request.account_id.into(),
-            state: None,
-            list: vec![],
-            not_found: vec![],
+        let object_flags = object_type.flags();
+        let is_tenant_filtered =
+            (object_flags & OBJ_FILTER_TENANT) != 0 && access_token.tenant_id().is_some();
+        let is_account_filtered = (object_flags & OBJ_FILTER_ACCOUNT) != 0
+            && !access_token.has_permission(Permission::Impersonate);
+        let mut get = RegistryGetResponse {
+            access_token,
+            server: self,
+            account_id: request.account_id.document_id(),
+            object_type,
+            ids: request.unwrap_ids(self.core.jmap.get_max_objects)?,
+            properties: request
+                .properties
+                .take()
+                .map(|p| p.unwrap())
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|prop| prop.try_unwrap())
+                .collect::<AHashSet<_>>(),
+            response: GetResponse {
+                account_id: request.account_id.into(),
+                state: None,
+                list: vec![],
+                not_found: vec![],
+            },
+            object_flags,
+            is_tenant_filtered,
+            is_account_filtered,
         };
+        if !get.properties.is_empty() {
+            get.properties.insert(Property::Id);
+        }
 
         match object_type {
             ObjectType::AcmeProvider
@@ -163,34 +187,30 @@ impl RegistryGet for Server {
             | ObjectType::PublicKey
             | ObjectType::DkimSignature
             | ObjectType::Domain => {
-                let flags = object_type.flags();
-                let is_singleton = (flags & OBJ_SINGLETON) != 0;
-                let is_tenant_filtered =
-                    (flags & OBJ_FILTER_TENANT) != 0 && access_token.tenant_id().is_some();
-                let is_account_filtered = (flags & OBJ_FILTER_ACCOUNT) != 0
-                    && !access_token.has_permission(Permission::Impersonate);
+                let is_singleton = (get.object_flags & OBJ_SINGLETON) != 0;
 
-                let ids = if let Some(ids) = ids {
+                let ids = if let Some(ids) = get.ids.take() {
                     ids
                 } else {
-                    self.registry()
+                    let mut ids = self
+                        .registry()
                         .query::<AHashSet<u64>>(
                             RegistryQuery::new(object_type)
                                 .with_tenant(access_token.tenant_id())
-                                .with_account_opt(
-                                    is_account_filtered.then_some(request.account_id.into()),
-                                ),
+                                .with_account_opt(is_account_filtered.then_some(get.account_id)),
                         )
                         .await
                         .caused_by(trc::location!())?
                         .into_iter()
                         .take(self.core.jmap.get_max_objects)
                         .map(Id::new)
-                        .collect()
+                        .collect::<Vec<_>>();
+                    ids.sort_unstable();
+                    ids
                 };
-                response.list.reserve(ids.len());
+                get.response.list.reserve(ids.len());
 
-                'outer: for id in ids {
+                for id in ids {
                     let object = if let Some(object) = self
                         .registry()
                         .get(ObjectId::new(object_type, id))
@@ -199,23 +219,23 @@ impl RegistryGet for Server {
                     {
                         object
                     } else if id.is_singleton() && is_singleton {
-                        Object::new(ObjectInner::from(object_type))
+                        Object::from(object_type)
                     } else {
-                        response.not_found.push(id);
+                        get.not_found(id);
                         continue;
                     };
 
                     match &object.inner {
                         ObjectInner::DkimSignature(obj)
-                            if properties.is_empty()
-                                || properties.contains(&Property::PublicKey) =>
+                            if get.properties.is_empty()
+                                || get.properties.contains(&Property::PublicKey) =>
                         {
                             let todo = "dkim public key";
                             todo!()
                         }
                         ObjectInner::Domain(obj)
-                            if properties.is_empty()
-                                || properties.contains(&Property::DnsZoneFile) =>
+                            if get.properties.is_empty()
+                                || get.properties.contains(&Property::DnsZoneFile) =>
                         {
                             let todo = "domain dns zone file";
                             todo!()
@@ -223,61 +243,87 @@ impl RegistryGet for Server {
                         _ => {}
                     }
 
-                    let todo = "compact pickle";
-                    let todo = "app passwords, apis and user change pass/OTP";
+                    get.insert(id, object.into_value());
+                }
 
-                    let mut object = object.into_value();
-                    let object_map = object.as_object_mut().unwrap();
-                    if is_tenant_filtered && let Some(tenant_id) = access_token.tenant_id() {
-                        let expected_value =
-                            JmapValue::Element(RegistryValue::Id(Id::from(tenant_id)));
-                        for (key, value) in object_map.iter() {
-                            if matches!(key, Key::Property(Property::MemberTenantId))
-                                && value != &expected_value
-                            {
-                                response.not_found.push(id);
-                                continue 'outer;
-                            }
-                        }
-                        object_map.remove(&Key::Property(Property::MemberTenantId));
-                    } else if is_account_filtered {
-                        let expected_value =
-                            JmapValue::Element(RegistryValue::Id(request.account_id));
-                        for (key, value) in object_map.iter() {
-                            if matches!(key, Key::Property(Property::AccountId))
-                                && value != &expected_value
-                            {
-                                response.not_found.push(id);
-                                continue 'outer;
-                            }
-                        }
-                        object_map.remove(&Key::Property(Property::AccountId));
-                    }
+                Ok(get.into_response())
+            }
+            ObjectType::QueuedMessage => {
+                queued_message_get(get).await.map(|get| get.into_response())
+            }
+            ObjectType::Task => task_get(get).await.map(|get| get.into_response()),
 
-                    object_map.insert_unchecked(Property::Id, RegistryValue::Id(id));
-                    if !properties.is_empty() {
-                        object_map.as_mut_vec().retain_mut(|(prop, _)| {
-                            prop.as_property()
-                                .is_some_and(|prop| properties.contains(prop))
-                        });
-                    }
-                    response.list.push(object);
+            ObjectType::ArfExternalReport
+            | ObjectType::DmarcExternalReport
+            | ObjectType::TlsExternalReport
+            | ObjectType::DmarcInternalReport
+            | ObjectType::TlsInternalReport => report_get(get).await.map(|get| get.into_response()),
+
+            ObjectType::DeletedItem => deleted_item_get(get).await.map(|get| get.into_response()),
+            ObjectType::SpamTrainingSample => {
+                spam_sample_get(get).await.map(|get| get.into_response())
+            }
+            ObjectType::Metric => metric_get(get).await.map(|get| get.into_response()),
+            ObjectType::Trace => trace_get(get).await.map(|get| get.into_response()),
+            ObjectType::Log => log_get(get).await.map(|get| get.into_response()),
+            ObjectType::AccountSettings | ObjectType::Credential => {
+                account_get(get).await.map(|get| get.into_response())
+            }
+        }
+    }
+}
+
+impl RegistryGetResponse<'_> {
+    pub fn insert(&mut self, id: Id, mut object: JmapValue<'static>) {
+        let object_map = object.as_object_mut().unwrap();
+
+        if self.is_tenant_filtered
+            && let Some(tenant_id) = self.access_token.tenant_id()
+        {
+            let expected_value = JmapValue::Element(RegistryValue::Id(Id::from(tenant_id)));
+            for (key, value) in object_map.iter() {
+                if matches!(key, Key::Property(Property::MemberTenantId))
+                    && (value != &expected_value
+                        || value
+                            .as_array()
+                            .is_none_or(|arr| !arr.contains(&expected_value)))
+                {
+                    self.not_found(id);
+                    return;
                 }
             }
-            ObjectType::Log => {}
-            ObjectType::QueuedMessage => {}
-            ObjectType::Task => {}
-            ObjectType::ArfExternalReport => {}
-            ObjectType::DmarcExternalReport => {}
-            ObjectType::TlsExternalReport => {}
-            ObjectType::DeletedItem => {}
-            ObjectType::Metric => {}
-            ObjectType::Trace => {}
-            ObjectType::SpamTrainingSample => {}
-            ObjectType::DmarcInternalReport => todo!(),
-            ObjectType::TlsInternalReport => todo!(),
+            object_map.remove(&Key::Property(Property::MemberTenantId));
+        } else if self.is_account_filtered {
+            let expected_value = JmapValue::Element(RegistryValue::Id(self.account_id.into()));
+            for (key, value) in object_map.iter() {
+                if matches!(key, Key::Property(Property::AccountId)) && value != &expected_value {
+                    self.not_found(id);
+                    return;
+                }
+            }
+            object_map.remove(&Key::Property(Property::AccountId));
         }
 
-        Ok(response)
+        object_map.insert_unchecked(Property::Id, RegistryValue::Id(id));
+        if !self.properties.is_empty() {
+            object_map.as_mut_vec().retain_mut(|(prop, _)| {
+                prop.as_property()
+                    .is_some_and(|prop| self.properties.contains(prop))
+            });
+        }
+        self.response.list.push(object);
+    }
+
+    pub fn not_found(&mut self, id: Id) {
+        self.response.not_found.push(id);
+    }
+
+    pub fn not_found_any(mut self) -> Self {
+        self.response.not_found = self.ids.take().unwrap_or_default();
+        self
+    }
+
+    pub fn into_response(self) -> GetResponse<Registry> {
+        self.response
     }
 }

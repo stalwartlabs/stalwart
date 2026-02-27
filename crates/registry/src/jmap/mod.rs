@@ -25,11 +25,12 @@ pub enum RegistryValue {
     IdReference(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct JsonPointerPatch<'x> {
     ptr: &'x JsonPointer<Property>,
     pos: usize,
     validators: &'x [StringValidator],
+    is_create: bool,
 }
 
 pub trait RegistryJsonPatch: Debug + Default {

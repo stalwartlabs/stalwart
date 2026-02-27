@@ -105,7 +105,7 @@ impl EmailSet for Server {
 
             #[cfg(not(feature = "test_mode"))]
             {
-                self.get_access_token(account_id)
+                self.access_token(account_id)
                     .await
                     .caused_by(trc::location!())?
                     .into()

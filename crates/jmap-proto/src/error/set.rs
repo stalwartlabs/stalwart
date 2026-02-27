@@ -195,6 +195,11 @@ impl<T: Property> SetError<T> {
         Self::new(SetErrorType::WillDestroy).with_description("ID will be destroyed.")
     }
 
+    pub fn singleton() -> Self {
+        Self::new(SetErrorType::Singleton)
+            .with_description("Singletons cannot be created or destroyed.")
+    }
+
     pub fn address_book_has_contents() -> Self {
         Self::new(SetErrorType::AddressBookHasContents)
             .with_description("Address book is not empty.")

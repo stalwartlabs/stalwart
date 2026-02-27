@@ -17,7 +17,7 @@ use common::config::smtp::queue::QueueName;
 use common::ipc::QueueEvent;
 use common::{KV_LOCK_QUEUE_MESSAGE, Server};
 use registry::pickle::Pickle;
-use registry::schema::prelude::ObjectType;
+use registry::schema::prelude::{ObjectType, Property};
 use registry::schema::structs::SpamTrainingSample;
 use registry::types::EnumImpl;
 use registry::types::datetime::UTCDateTime;
@@ -482,8 +482,17 @@ impl MessageWrapper {
                     ObjectId::new(ObjectType::SpamTrainingSample, item_id.into()).serialize(),
                 )
                 .set(
-                    ValueClass::Registry(RegistryClass::Id { object_id, item_id }),
+                    ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
                     sample,
+                )
+                .set(
+                    ValueClass::Registry(RegistryClass::Index {
+                        index_id: Property::AccountId.to_id(),
+                        object_id,
+                        item_id,
+                        key: (u32::MAX as u64).serialize(),
+                    }),
+                    vec![],
                 );
 
             trc::event!(

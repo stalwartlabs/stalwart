@@ -265,14 +265,14 @@ pub enum RegistryClass {
         item_id: u64,
         key: Vec<u8>,
     },
+    IndexId {
+        object_id: u16,
+        item_id: u64,
+    },
     PrimaryKey {
         object_id: Option<u16>,
         index_id: u16,
         key: Vec<u8>,
-    },
-    Id {
-        object_id: u16,
-        item_id: u64,
     },
     IdCounter {
         object_id: u16,

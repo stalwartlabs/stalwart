@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::registry::mapping::RegistryGetResponse;
 use common::{Server, config::smtp::queue::ArchivedQueueExpiry};
 use registry::{
+    jmap::IntoValue,
     schema::{
         enums::{DeliveryErrorType, MessageFlag, RecipientFlag},
         structs::{
@@ -16,16 +18,52 @@ use registry::{
     types::{datetime::UTCDateTime, ipaddr::IpAddr},
 };
 use smtp::queue::{spool::SmtpSpool, *};
-use types::{blob::BlobId, blob_hash::BlobHash};
+use store::{
+    IterateParams, U64_LEN, ValueKey,
+    ahash::AHashSet,
+    write::{QueueClass, ValueClass, key::DeserializeBigEndian},
+};
+use trc::AddContext;
+use types::{blob::BlobId, blob_hash::BlobHash, id::Id};
+use utils::DomainPart;
 
-pub(crate) async fn queued_message_fetch(
-    server: &Server,
-    queue_id: u64,
-) -> trc::Result<Option<QueuedMessage>> {
-    let Some(message_archive) = server.read_message_archive(queue_id).await? else {
-        return Ok(None);
+pub(crate) async fn queued_message_get(
+    mut get: RegistryGetResponse<'_>,
+) -> trc::Result<RegistryGetResponse<'_>> {
+    let ids = if let Some(ids) = get.ids.take() {
+        ids
+    } else {
+        queued_ids(get.server, get.server.core.jmap.get_max_objects)
+            .await?
+            .into_iter()
+            .map(Id::from)
+            .collect()
     };
-    let message_in = message_archive.unarchive::<Message>()?;
+
+    for id in ids {
+        let Some(message_archive) = get.server.read_message_archive(id.id()).await? else {
+            get.not_found(id);
+            continue;
+        };
+        let message_in = message_archive.unarchive::<Message>()?;
+        if get.access_token.tenant_id().is_some() {
+            if let Some(domain) = message_in.return_path.try_domain_part()
+                && let Some(domain) = get.server.domain(domain).await?
+                && domain.id_tenant == get.access_token.tenant_id()
+            {
+                get.insert(id, map_message(message_in).into_value());
+            } else {
+                get.not_found(id);
+            }
+        } else {
+            get.insert(id, map_message(message_in).into_value());
+        }
+    }
+
+    Ok(get)
+}
+
+fn map_message(message_in: &ArchivedMessage) -> QueuedMessage {
     let mut message_out = QueuedMessage {
         blob_id: BlobId::new(BlobHash::from(&message_in.blob_hash), Default::default()),
         created_at: UTCDateTime::from_timestamp(message_in.created.to_native() as i64),
@@ -109,7 +147,7 @@ pub(crate) async fn queued_message_fetch(
         message_out.recipients.push(rcpt_out);
     }
 
-    Ok(Some(message_out))
+    message_out
 }
 
 fn map_error_details(err_in: &ArchivedErrorDetails) -> DeliveryError {
@@ -163,4 +201,37 @@ fn map_error_details(err_in: &ArchivedErrorDetails) -> DeliveryError {
 
 fn build_enhanced_code(esc: &[u8; 3]) -> String {
     format!("{}.{}.{}", esc[0], esc[1], esc[2])
+}
+
+async fn queued_ids(server: &Server, max_results: usize) -> trc::Result<AHashSet<u64>> {
+    let mut events = AHashSet::with_capacity(8);
+
+    let from_key = ValueKey::from(ValueClass::Queue(QueueClass::MessageEvent(
+        store::write::QueueEvent {
+            due: 0,
+            queue_id: 0,
+            queue_name: [0; 8],
+        },
+    )));
+    let to_key = ValueKey::from(ValueClass::Queue(QueueClass::MessageEvent(
+        store::write::QueueEvent {
+            due: u64::MAX,
+            queue_id: u64::MAX,
+            queue_name: [u8::MAX; 8],
+        },
+    )));
+
+    server
+        .store()
+        .iterate(
+            IterateParams::new(from_key, to_key).ascending().no_values(),
+            |key, _| {
+                events.insert(key.deserialize_be_u64(U64_LEN)?);
+
+                Ok(events.len() < max_results)
+            },
+        )
+        .await
+        .caused_by(trc::location!())
+        .map(|_| events)
 }

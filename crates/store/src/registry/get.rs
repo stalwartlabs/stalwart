@@ -30,22 +30,6 @@ impl RegistryStore {
                     item_id: object_id.id().id(),
                 })))
                 .await
-                .and_then(|v| {
-                    if v.as_ref()
-                        .is_none_or(|v| v.object_type() == object_id.object())
-                    {
-                        Ok(v)
-                    } else {
-                        Err(
-                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                .into_err()
-                                .caused_by(trc::location!())
-                                .id(object_id.id().id())
-                                .details(object_id.object().as_str())
-                                .reason("Object type mismatch"),
-                        )
-                    }
-                })
         }
     }
 

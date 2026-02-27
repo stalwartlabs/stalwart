@@ -9,6 +9,7 @@ use email::cache::MessageCacheFetch;
 use email::cache::email::MessageCacheAccess;
 use email::message::metadata::MessageMetadata;
 use groupware::cache::GroupwareCache;
+use registry::schema::enums::Permission;
 use std::future::Future;
 use store::ValueKey;
 use store::write::{AlignedBytes, Archive};
@@ -100,44 +101,49 @@ impl BlobDownload for Server {
         blob_id: &BlobId,
         access_token: &AccessToken,
     ) -> trc::Result<bool> {
-        Ok(self
-            .store()
-            .blob_has_access(&blob_id.hash, &blob_id.class)
-            .await
-            .caused_by(trc::location!())?
-            && match &blob_id.class {
-                BlobClass::Linked {
-                    account_id,
-                    collection,
-                    document_id,
-                } => {
-                    if access_token.is_member(*account_id) {
-                        true
-                    } else {
-                        match Collection::from(*collection) {
-                            Collection::Email => self
-                                .get_cached_messages(*account_id)
-                                .await
-                                .caused_by(trc::location!())?
-                                .shared_messages(access_token, Acl::ReadItems)
-                                .contains(*document_id),
-                            collection @ (Collection::FileNode
-                            | Collection::ContactCard
-                            | Collection::CalendarEvent) => self
-                                .fetch_dav_resources(
-                                    access_token.account_id(),
-                                    *account_id,
-                                    SyncCollection::from(collection),
-                                )
-                                .await
-                                .caused_by(trc::location!())?
-                                .shared_items(access_token, [Acl::ReadItems], true)
-                                .contains(*document_id),
-                            _ => false,
+        Ok(
+            (blob_id.class.is_superuser() && access_token.has_permission(Permission::BlobFetch))
+                || (self
+                    .store()
+                    .blob_has_access(&blob_id.hash, &blob_id.class)
+                    .await
+                    .caused_by(trc::location!())?
+                    && match &blob_id.class {
+                        BlobClass::Linked {
+                            account_id,
+                            collection,
+                            document_id,
+                        } => {
+                            if access_token.is_member(*account_id) {
+                                true
+                            } else {
+                                match Collection::from(*collection) {
+                                    Collection::Email => self
+                                        .get_cached_messages(*account_id)
+                                        .await
+                                        .caused_by(trc::location!())?
+                                        .shared_messages(access_token, Acl::ReadItems)
+                                        .contains(*document_id),
+                                    collection @ (Collection::FileNode
+                                    | Collection::ContactCard
+                                    | Collection::CalendarEvent) => self
+                                        .fetch_dav_resources(
+                                            access_token.account_id(),
+                                            *account_id,
+                                            SyncCollection::from(collection),
+                                        )
+                                        .await
+                                        .caused_by(trc::location!())?
+                                        .shared_items(access_token, [Acl::ReadItems], true)
+                                        .contains(*document_id),
+                                    _ => false,
+                                }
+                            }
                         }
-                    }
-                }
-                BlobClass::Reserved { account_id, .. } => access_token.is_member(*account_id),
-            })
+                        BlobClass::Reserved { account_id, .. } => {
+                            access_token.is_member(*account_id)
+                        }
+                    }),
+        )
     }
 }

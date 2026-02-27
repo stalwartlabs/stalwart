@@ -211,7 +211,7 @@ impl RegistryStore {
                             key: type_filter.serialize(),
                         }
                     } else {
-                        RegistryClass::Id { object_id, item_id }
+                        RegistryClass::IndexId { object_id, item_id }
                     };
                     if self
                         .0
@@ -317,7 +317,7 @@ impl RegistryStore {
         // Build batch
         if write_id {
             batch.set(
-                ValueClass::Registry(RegistryClass::Id { object_id, item_id }),
+                ValueClass::Registry(RegistryClass::IndexId { object_id, item_id }),
                 vec![],
             );
         }
@@ -434,7 +434,7 @@ impl RegistryStore {
                 object_id: object_type_id,
                 item_id,
             }))
-            .clear(ValueClass::Registry(RegistryClass::Id {
+            .clear(ValueClass::Registry(RegistryClass::IndexId {
                 object_id: object_type_id,
                 item_id,
             }))

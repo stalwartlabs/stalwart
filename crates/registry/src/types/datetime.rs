@@ -225,7 +225,7 @@ impl Display for UTCDateTime {
 
 impl Default for UTCDateTime {
     fn default() -> Self {
-        UTCDateTime(i64::MAX)
+        UTCDateTime::now()
     }
 }
 

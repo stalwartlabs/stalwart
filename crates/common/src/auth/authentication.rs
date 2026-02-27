@@ -17,8 +17,8 @@ use directory::{
     core::secret::{verify_mfa_secret_hash, verify_secret_hash},
 };
 use registry::schema::{
-    enums::{CredentialType, Permission},
-    structs,
+    enums::Permission,
+    structs::{self, Credential},
 };
 use std::{net::IpAddr, sync::Arc};
 use store::write::now;
@@ -305,7 +305,9 @@ impl Server {
             .and_then(|account| account.into_user())
         {
             // Find credential by credential_id
-            for (id, credential) in &account.credentials {
+            for (id, credential_) in &account.credentials {
+                let credential = credential_.as_properties();
+
                 if *id == credential_id {
                     if !verify_secret_hash(&credential.secret, secret).await? {
                         return Err(trc::AuthEvent::Failed
@@ -337,9 +339,9 @@ impl Server {
                         AccountId = account_id,
                         Id = credential_id,
                         SpanId = span_id,
-                        Details = match credential.credential_type {
-                            CredentialType::AppPassword => "Authenticated with app password",
-                            CredentialType::ApiKey => "Authenticated with API key",
+                        Details = match credential_ {
+                            Credential::AppPassword(_) => "Authenticated with app password",
+                            Credential::ApiKey(_) => "Authenticated with API key",
                         }
                     );
 

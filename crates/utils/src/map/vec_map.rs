@@ -215,6 +215,16 @@ impl<K: Eq + PartialEq, V> VecMap<K, V> {
             cmp => cmp,
         });
     }
+
+    pub fn extend(&mut self, iter: impl IntoIterator<Item = (K, V)>) {
+        for (k, v) in iter {
+            self.append(k, v);
+        }
+    }
+
+    pub fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
+        self.inner.drain(..).map(|kv| (kv.key, kv.value))
+    }
 }
 
 impl<K: Eq + PartialEq, V: Default> VecMap<K, V> {
