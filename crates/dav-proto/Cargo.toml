@@ -7,7 +7,7 @@ edition = "2024"
 trc = { path = "../trc" }
 types = { path = "../types" }
 hashify = "0.2.6"
-quick-xml = { version = "0.38" }
+quick-xml = { version = "0.39" }
 calcard = { version = "0.3", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
 hyper = "1.6.0"
