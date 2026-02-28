@@ -88,8 +88,51 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
             MAX_THREADS
         );
 
-        // Wait for indexing to complete
+        // Regression test: Email/query filter {hasAttachment:true} should match emails with binary
+        // attachments (not just those with attachment text indexed).
+        let sent_at = now();
+        let binary_anchor = "stalwart-hasattachment-binary";
+        let binary_message = MessageBuilder::new()
+            .from(("Sender", "sender@domain.com"))
+            .to(("Recipient", "rcpt@domain.com"))
+            .subject("Binary attachment regression")
+            .date(Date::new(sent_at as i64 + 10_000))
+            .message_id(binary_anchor)
+            .text_body("binary attachment")
+            .attachment("application/octet-stream", "file.bin", &[0u8; 8][..])
+            .write_to_vec()
+            .unwrap();
+
+        client
+            .email_import(
+                binary_message,
+                [Id::new(2000u64).to_string()],
+                Vec::<String>::new().into(),
+                Some(sent_at as i64 + 10_000),
+            )
+            .await
+            .unwrap();
+
+        // Wait for indexing to complete (covers both the bulk import and the regression message).
         wait_for_index(&server).await;
+
+        let binary_email_id = get_anchor(client, binary_anchor)
+            .await
+            .expect("binary regression email should be findable by Message-Id");
+
+        let ids = client
+            .email_query(
+                email::query::Filter::has_attachment(true).into(),
+                None::<Vec<_>>,
+            )
+            .await
+            .unwrap()
+            .take_ids();
+
+        assert!(
+            ids.iter().any(|id| id.to_string() == binary_email_id),
+            "expected hasAttachment query to include imported binary attachment message"
+        );
     }
 
     let can_stem = !params.server.search_store().is_mysql();
