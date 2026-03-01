@@ -4,15 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Display, str::FromStr};
-
 use crate::{
-    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch},
+    jmap::{
+        IntoValue, JmapValue, JsonPointerPatch, MaybeUnpatched, PatchResult, RegistryJsonPatch,
+    },
     pickle::{Pickle, PickledStream},
     types::error::PatchError,
 };
+use std::{fmt::Display, str::FromStr};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SocketAddr(pub std::net::SocketAddr);
 
 impl SocketAddr {
@@ -86,16 +87,16 @@ impl Pickle for SocketAddr {
 }
 
 impl RegistryJsonPatch for SocketAddr {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Str(value), None) => {
                 if let Ok(new_value) = SocketAddr::from_str(value.as_ref()) {
                     *self = new_value;
-                    Ok(())
+                    Ok(MaybeUnpatched::Patched)
                 } else {
                     Err(PatchError::new(
                         pointer,

@@ -105,6 +105,8 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                             CacheInvalidation::Tenant(id) => (5u8, *id),
                             CacheInvalidation::Role(id) => (6u8, *id),
                             CacheInvalidation::List(id) => (7u8, *id),
+                            CacheInvalidation::DomainLogo(id) => (8u8, *id),
+                            CacheInvalidation::TenantLogo(id) => (9u8, *id),
                         };
 
                         serialized.push(marker);
@@ -216,6 +218,8 @@ where
                             5 => CacheInvalidation::Tenant(id),
                             6 => CacheInvalidation::Role(id),
                             7 => CacheInvalidation::List(id),
+                            8 => CacheInvalidation::DomainLogo(id),
+                            9 => CacheInvalidation::TenantLogo(id),
                             _ => return Err(()),
                         });
                     }

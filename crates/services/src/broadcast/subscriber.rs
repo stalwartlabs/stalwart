@@ -137,7 +137,7 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                 }
                                             }
                                             BroadcastEvent::CacheInvalidation(changes) => {
-                                                inner.build_server().invalidate_caches(changes, false).await;
+                                                inner.build_server().invalidate_local_caches(&changes).await;
 
                                             }
                                             BroadcastEvent::RegistryChange(change) => {

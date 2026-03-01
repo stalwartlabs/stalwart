@@ -22,11 +22,11 @@ impl Directories {
         for directory in bp.list_infallible::<structs::Directory>().await {
             let id = directory.id;
             let result = match directory.object {
-                structs::Directory::Ldap(directory) => LdapDirectory::open(directory),
+                structs::Directory::Ldap(directory) => LdapDirectory::open(directory).await,
                 structs::Directory::Sql(directory) => {
                     SqlDirectory::open(directory, &bp.data_store).await
                 }
-                structs::Directory::Oidc(directory) => OpenIdDirectory::open(directory),
+                structs::Directory::Oidc(directory) => OpenIdDirectory::open(directory).await,
             };
 
             match result {

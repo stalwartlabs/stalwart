@@ -19,12 +19,15 @@ use std::{sync::Arc, time::Duration};
 
 impl MeiliSearchStore {
     pub async fn open(config: structs::MeilisearchStore) -> Result<SearchStore, String> {
-        let client = config.http_auth.build_http_client(
-            config.http_headers,
-            "application/json".into(),
-            config.timeout,
-            config.allow_invalid_certs,
-        )?;
+        let client = config
+            .http_auth
+            .build_http_client(
+                config.http_headers,
+                "application/json".into(),
+                config.timeout,
+                config.allow_invalid_certs,
+            )
+            .await?;
 
         Url::parse(&config.url).map_err(|e| format!("Invalid URL: {e}",))?;
 

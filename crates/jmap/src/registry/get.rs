@@ -217,6 +217,15 @@ impl RegistryGet for Server {
                         .await
                         .caused_by(trc::location!())?
                     {
+                        if (is_tenant_filtered
+                            && access_token.tenant_id().map(Id::from)
+                                != object.inner.member_tenant_id())
+                            || (is_account_filtered
+                                && object.inner.account_id() != Some(Id::from(get.account_id)))
+                        {
+                            get.not_found(id);
+                            continue;
+                        }
                         object
                     } else if id.is_singleton() && is_singleton {
                         Object::from(object_type)

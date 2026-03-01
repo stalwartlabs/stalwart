@@ -5,7 +5,10 @@
  */
 
 use crate::{
-    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch, RegistryValue},
+    jmap::{
+        IntoValue, JmapValue, JsonPointerPatch, MaybeUnpatched, PatchResult, RegistryJsonPatch,
+        RegistryValue,
+    },
     pickle::{Pickle, PickledStream},
     schema::prelude::ObjectType,
     types::{EnumImpl, error::PatchError},
@@ -17,7 +20,7 @@ use types::{
     id::Id,
 };
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash, serde::Serialize)]
 pub struct ObjectId {
     object: ObjectType,
     id: Id,
@@ -95,20 +98,20 @@ impl Pickle for BlobId {
 }
 
 impl RegistryJsonPatch for Id {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Element(RegistryValue::Id(value)), None) => {
                 *self = value;
-                Ok(())
+                Ok(MaybeUnpatched::Patched)
             }
             (jmap_tools::Value::Str(value), None) => {
                 if let Ok(new_value) = Id::from_str(value.as_ref()) {
                     *self = new_value;
-                    Ok(())
+                    Ok(MaybeUnpatched::Patched)
                 } else {
                     Err(PatchError::new(pointer, "Failed to parse Id from string"))
                 }
@@ -122,20 +125,20 @@ impl RegistryJsonPatch for Id {
 }
 
 impl RegistryJsonPatch for BlobId {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Element(RegistryValue::BlobId(value)), None) => {
                 *self = value;
-                Ok(())
+                Ok(MaybeUnpatched::Patched)
             }
             (jmap_tools::Value::Str(value), None) => {
                 if let Ok(new_value) = BlobId::from_str(value.as_ref()) {
                     *self = new_value;
-                    Ok(())
+                    Ok(MaybeUnpatched::Patched)
                 } else {
                     Err(PatchError::new(
                         pointer,

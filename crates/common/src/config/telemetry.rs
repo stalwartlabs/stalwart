@@ -20,7 +20,7 @@ use opentelemetry_sdk::{
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use registry::schema::{
     enums::{EventPolicy, LogRotateFrequency},
-    prelude::{Object, ObjectType},
+    prelude::ObjectType,
     structs::{self, EventTracingLevel, MetricsPrometheus, Tracer, WebHook},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -261,7 +261,11 @@ impl Tracers {
                     events = tracer.events;
                     events_policy = tracer.events_policy;
 
-                    let headers = match tracer.http_auth.build_headers(tracer.http_headers, None) {
+                    let headers = match tracer
+                        .http_auth
+                        .build_headers(tracer.http_headers, None)
+                        .await
+                    {
                         Ok(headers) => headers
                             .into_iter()
                             .filter_map(|(k, v)| {
@@ -460,6 +464,7 @@ impl Tracers {
             let headers = match hook
                 .http_auth
                 .build_headers(hook.http_headers, "application/json".into())
+                .await
             {
                 Ok(headers) => headers,
                 Err(err) => {
@@ -478,7 +483,19 @@ impl Tracers {
                     timeout: hook.timeout.into_inner(),
                     tls_allow_invalid_certs: hook.allow_invalid_certs,
                     headers,
-                    key: hook.signature_key.unwrap_or_default(),
+                    key: hook
+                        .signature_key
+                        .secret()
+                        .await
+                        .map_err(|err| {
+                            bp.build_error(
+                                id,
+                                format!("Unable to retrieve signature key: {}", err),
+                            );
+                        })
+                        .unwrap_or_default()
+                        .unwrap_or_default()
+                        .into_owned(),
                     throttle: hook.throttle.into_inner(),
                     discard_after: hook.discard_after.into_inner(),
                 }),
@@ -545,17 +562,30 @@ impl Metrics {
 
         Metrics {
             prometheus: match metrics.prometheus {
-                MetricsPrometheus::Enabled(prom) => Some(PrometheusMetrics {
-                    auth: prom.auth_username.and_then(|user| {
-                        prom.auth_secret
-                            .map(|secret| STANDARD.encode(format!("{user}:{secret}")))
-                    }),
-                }),
+                MetricsPrometheus::Enabled(prom) => {
+                    let secret = prom
+                        .auth_secret
+                        .secret()
+                        .await
+                        .map_err(|err| {
+                            bp.build_error(
+                                ObjectType::Metrics.singleton(),
+                                format!("Unable to retrieve Prometheus auth secret: {err}"),
+                            );
+                        })
+                        .unwrap_or_default();
+                    Some(PrometheusMetrics {
+                        auth: prom.auth_username.and_then(|user| {
+                            secret.map(|secret| STANDARD.encode(format!("{user}:{secret}")))
+                        }),
+                    })
+                }
                 MetricsPrometheus::Disabled => None,
             },
             otel: match metrics.open_telemetry {
                 structs::MetricsOtel::Http(otel) => {
-                    let headers = match otel.http_auth.build_headers(otel.http_headers, None) {
+                    let headers = match otel.http_auth.build_headers(otel.http_headers, None).await
+                    {
                         Ok(headers) => headers
                             .into_iter()
                             .filter_map(|(k, v)| {

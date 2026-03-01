@@ -5,11 +5,15 @@
  */
 
 use argon2::Argon2;
+use argon2::PasswordHasher;
 use mail_builder::encoders::base64::base64_encode;
 use mail_parser::decoders::base64::base64_decode;
 use password_hash::PasswordHash;
+use password_hash::SaltString;
+use password_hash::rand_core::OsRng;
 use pbkdf2::Pbkdf2;
 use pwhash::{bcrypt, bsdi_crypt, md5_crypt, sha1_crypt, sha256_crypt, sha512_crypt, unix_crypt};
+use registry::schema::enums::PasswordHashAlgorithm;
 use scrypt::Scrypt;
 use sha1::Digest;
 use sha1::Sha1;
@@ -217,5 +221,52 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
         Ok(hashed_secret.as_bytes() == secret)
     } else {
         Ok(false)
+    }
+}
+
+pub async fn hash_secret(algorithm: PasswordHashAlgorithm, secret: String) -> trc::Result<String> {
+    let (tx, rx) = oneshot::channel();
+
+    tokio::task::spawn_blocking(move || {
+        let salt = SaltString::generate(&mut OsRng);
+
+        let result = match algorithm {
+            PasswordHashAlgorithm::Argon2id => {
+                let hasher = Argon2::default();
+                hasher
+                    .hash_password(secret.as_bytes(), &salt)
+                    .map(|h| h.to_string())
+            }
+            PasswordHashAlgorithm::Bcrypt => {
+                return tx
+                    .send(bcrypt::hash(secret.as_bytes()).map_err(|err| {
+                        trc::AuthEvent::Error
+                            .reason(err)
+                            .details("Bcrypt hash failed")
+                    }))
+                    .ok()
+                    .unwrap_or(());
+            }
+            PasswordHashAlgorithm::Scrypt => Scrypt
+                .hash_password(secret.as_bytes(), &salt)
+                .map(|h| h.to_string()),
+            PasswordHashAlgorithm::Pbkdf2 => Pbkdf2
+                .hash_password(secret.as_bytes(), &salt)
+                .map(|h| h.to_string()),
+        };
+
+        tx.send(result.map_err(|err| {
+            trc::AuthEvent::Error
+                .reason(err)
+                .details("Password hash failed")
+        }))
+        .ok();
+    });
+
+    match rx.await {
+        Ok(result) => result,
+        Err(err) => Err(trc::EventType::Server(trc::ServerEvent::ThreadError)
+            .caused_by(trc::location!())
+            .reason(err)),
     }
 }

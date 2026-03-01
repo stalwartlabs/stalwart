@@ -23,7 +23,7 @@ impl MysqlStore {
         let mut opts = OptsBuilder::default()
             .ip_or_hostname(config.host)
             .user(config.auth_username)
-            .pass(config.auth_secret)
+            .pass(config.auth_secret.secret().await?.map(|v| v.into_owned()))
             .db_name(Some(config.database))
             .max_allowed_packet(config.max_allowed_packet.map(|v| v as usize))
             .wait_timeout(config.timeout.map(|t| t.as_secs() as usize))
@@ -58,7 +58,7 @@ impl MysqlStore {
                     opts.clone()
                         .ip_or_hostname(replica.host)
                         .user(replica.auth_username)
-                        .pass(replica.auth_secret)
+                        .pass(replica.auth_secret.secret().await?.map(|v| v.into_owned()))
                         .db_name(Some(replica.database))
                         .tcp_port(replica.port as u16),
                 ),

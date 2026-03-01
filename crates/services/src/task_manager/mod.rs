@@ -547,7 +547,7 @@ pub fn next_retry_time(
         TaskRetryStrategy::FixedDelay(fixed) => fixed.delay.as_secs(),
         TaskRetryStrategy::ExponentialBackoff(backoff) => {
             let delay = (backoff.initial_delay.as_secs() as f64
-                * backoff.factor.powi(attempt as i32))
+                * backoff.factor.into_inner().powi(attempt as i32))
             .min(backoff.max_delay.as_secs() as f64) as u64;
 
             if backoff.jitter {

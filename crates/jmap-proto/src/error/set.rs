@@ -5,24 +5,46 @@
  */
 
 use jmap_tools::{Key, Property};
+use registry::types::{
+    error::{PatchError, ValidationError},
+    id::ObjectId,
+};
 use std::borrow::Cow;
 use types::id::Id;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(bound(serialize = "InvalidProperty<P>: serde::Serialize"))]
-pub struct SetError<P: Property> {
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct SetError<P: Property>(Box<SetErrorInner<P>>);
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(bound(serialize = "InvalidProperty<P>: serde::Serialize"))]
+struct SetErrorInner<P: Property> {
     #[serde(rename = "type")]
-    pub type_: SetErrorType,
+    type_: SetErrorType,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<Cow<'static, str>>,
+    description: Option<Cow<'static, str>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<Vec<InvalidProperty<P>>>,
+    properties: Option<Vec<InvalidProperty<P>>>,
 
     #[serde(rename = "existingId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     existing_id: Option<Id>,
+
+    #[serde(rename = "objectId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    object_id: Option<ObjectId>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "linkedObjects")]
+    linked_objects: Vec<ObjectId>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "validationErrors")]
+    validation_errors: Vec<ValidationError>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +111,15 @@ pub enum SetErrorType {
     NodeHasChildren,
     #[serde(rename = "calendarHasEvent")]
     CalendarHasEvent,
+    // Stalwart registry errors
+    #[serde(rename = "objectIsLinked")]
+    ObjectIsLinked,
+    #[serde(rename = "invalidForeignKey")]
+    InvalidForeignKey,
+    #[serde(rename = "primaryKeyViolation")]
+    PrimaryKeyViolation,
+    #[serde(rename = "validationFailed")]
+    ValidationFailed,
 }
 
 impl SetErrorType {
@@ -122,27 +153,34 @@ impl SetErrorType {
             SetErrorType::AddressBookHasContents => "addressBookHasContents",
             SetErrorType::NodeHasChildren => "nodeHasChildren",
             SetErrorType::CalendarHasEvent => "calendarHasEvent",
+            SetErrorType::ObjectIsLinked => "objectIsLinked",
+            SetErrorType::InvalidForeignKey => "invalidForeignKey",
+            SetErrorType::PrimaryKeyViolation => "primaryKeyViolation",
+            SetErrorType::ValidationFailed => "validationFailed",
         }
     }
 }
 
 impl<T: Property> SetError<T> {
     pub fn new(type_: SetErrorType) -> Self {
-        SetError {
+        SetError(Box::new(SetErrorInner {
             type_,
             description: None,
             properties: None,
             existing_id: None,
-        }
+            object_id: None,
+            linked_objects: Vec::new(),
+            validation_errors: Vec::new(),
+        }))
     }
 
     pub fn with_description(mut self, description: impl Into<Cow<'static, str>>) -> Self {
-        self.description = description.into().into();
+        self.0.description = description.into().into();
         self
     }
 
     pub fn with_property(mut self, property: impl Into<InvalidProperty<T>>) -> Self {
-        self.properties = vec![property.into()].into();
+        self.0.properties = vec![property.into()].into();
         self
     }
 
@@ -150,7 +188,7 @@ impl<T: Property> SetError<T> {
         mut self,
         properties: impl IntoIterator<Item = impl Into<InvalidProperty<T>>>,
     ) -> Self {
-        self.properties = properties
+        self.0.properties = properties
             .into_iter()
             .map(Into::into)
             .collect::<Vec<_>>()
@@ -158,8 +196,23 @@ impl<T: Property> SetError<T> {
         self
     }
 
+    pub fn with_object_id(mut self, object_id: ObjectId) -> Self {
+        self.0.object_id = object_id.into();
+        self
+    }
+
+    pub fn with_linked_objects(mut self, linked_objects: Vec<ObjectId>) -> Self {
+        self.0.linked_objects = linked_objects;
+        self
+    }
+
+    pub fn with_validation_errors(mut self, validation_errors: Vec<ValidationError>) -> Self {
+        self.0.validation_errors = validation_errors;
+        self
+    }
+
     pub fn with_existing_id(mut self, id: Id) -> Self {
-        self.existing_id = id.into();
+        self.0.existing_id = id.into();
         self
     }
 
@@ -251,5 +304,19 @@ impl<T: Property> serde::Serialize for InvalidProperty<T> {
                 path.serialize(serializer)
             }
         }
+    }
+}
+
+impl From<PatchError> for SetError<registry::schema::properties::Property> {
+    fn from(err: PatchError) -> Self {
+        SetError(Box::new(SetErrorInner {
+            type_: SetErrorType::InvalidPatch,
+            description: err.message.into(),
+            properties: Some(vec![InvalidProperty::Property(Key::Owned(err.path))]),
+            existing_id: None,
+            object_id: None,
+            linked_objects: Vec::new(),
+            validation_errors: Vec::new(),
+        }))
     }
 }

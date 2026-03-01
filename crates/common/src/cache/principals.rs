@@ -551,8 +551,16 @@ impl Server {
 
                 let cache = Arc::new(TenantCache {
                     id_roles: tenant
-                        .role_ids
-                        .into_iter()
+                        .roles
+                        .role_ids()
+                        .unwrap_or(
+                            self.core
+                                .network
+                                .security
+                                .default_role_ids_tenant
+                                .as_slice(),
+                        )
+                        .iter()
                         .map(|id| id.document_id())
                         .collect(),
                     quota_disk,

@@ -55,6 +55,12 @@ impl<const N: usize> Bitset<N> {
         }
     }
 
+    pub fn clear_many(&mut self, other: &Self) {
+        for i in 0..N {
+            self.0[i] &= !other.0[i];
+        }
+    }
+
     pub fn clear_all(&mut self) {
         for i in 0..N {
             self.0[i] = 0;

@@ -142,6 +142,10 @@ impl RegistryStore {
 
         Ok(results)
     }
+
+    pub async fn count(&self, query: RegistryQuery) -> trc::Result<usize> {
+        self.query::<AHashSet<u64>>(query).await.map(|r| r.len())
+    }
 }
 
 pub trait RegistryQueryResults: Default + Sized + Sync + Send {

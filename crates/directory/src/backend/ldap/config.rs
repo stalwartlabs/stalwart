@@ -11,13 +11,18 @@ use ldap3::LdapConnSettings;
 use registry::schema::structs;
 
 impl LdapDirectory {
-    pub fn open(config: structs::LdapDirectory) -> Result<Directory, String> {
+    pub async fn open(config: structs::LdapDirectory) -> Result<Directory, String> {
         let bind_dn = if let Some(dn) = config.bind_dn {
             Bind::new(
                 dn,
-                config.bind_secret.ok_or_else(|| {
-                    "LDAP bind password is required when bind DN is set".to_string()
-                })?,
+                config
+                    .bind_secret
+                    .secret()
+                    .await?
+                    .map(|v| v.into_owned())
+                    .ok_or_else(|| {
+                        "LDAP bind password is required when bind DN is set".to_string()
+                    })?,
             )
             .into()
         } else {

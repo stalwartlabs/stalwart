@@ -49,18 +49,10 @@ pub enum RegistryWriteResult {
     ValidationError {
         errors: Vec<ValidationError>,
     },
-    InvalidTenantId,
-    InvalidAccountId,
     NotSupported,
 }
 
-pub struct RegistryWrite<'x> {
-    op: RegistryWriteOp<'x>,
-    current_tenant_id: Option<u32>,
-    current_account_id: Option<u32>,
-}
-
-pub enum RegistryWriteOp<'x> {
+pub enum RegistryWrite<'x> {
     Insert {
         object: &'x Object,
         id: Option<Id>,
@@ -85,15 +77,14 @@ impl RegistryStore {
         let object_type;
         let object_flags;
         let object_id;
-        let object_tenant_id;
         let mut item_id;
 
         let mut batch = BatchBuilder::new();
         let mut write_id = true;
         let mut generate_id = false;
 
-        match write.op {
-            RegistryWriteOp::Insert {
+        match write {
+            RegistryWrite::Insert {
                 object: insert_object,
                 id,
             } => {
@@ -102,7 +93,6 @@ impl RegistryStore {
                 object_type = object.object_type();
                 object_id = object_type.to_id();
                 object.index(&mut set_index);
-                object_tenant_id = set_index.tenant_id();
 
                 item_id = if let Some(id) = id {
                     id.id()
@@ -116,7 +106,7 @@ impl RegistryStore {
                     self.0.id_generator.generate()
                 };
             }
-            RegistryWriteOp::Update {
+            RegistryWrite::Update {
                 object: update_object,
                 id,
                 old_object,
@@ -126,7 +116,6 @@ impl RegistryStore {
                 object_type = object.object_type();
                 object_id = object_type.to_id();
                 object.index(&mut set_index);
-                object_tenant_id = set_index.tenant_id();
 
                 // Obtain changes
                 let mut old_index = IndexBuilder::default();
@@ -148,9 +137,9 @@ impl RegistryStore {
                     AssertValue::Hash(old_object.revision),
                 );
             }
-            RegistryWriteOp::Delete { object_id, object } => {
+            RegistryWrite::Delete { object_id, object } => {
                 return if object_id.object().flags() & OBJ_SINGLETON == 0 {
-                    self.delete(write, object_id, object).await
+                    self.delete(object_id, object).await
                 } else {
                     Ok(RegistryWriteResult::CannotDeleteSingleton)
                 };
@@ -162,19 +151,6 @@ impl RegistryStore {
         object.validate(&mut errors);
         if !errors.is_empty() {
             return Ok(RegistryWriteResult::ValidationError { errors });
-        }
-
-        // Validate tenant ownership
-        if write.current_tenant_id.is_some()
-            && (object_flags & OBJ_FILTER_TENANT) != 0
-            && write.current_tenant_id != object_tenant_id
-        {
-            return Ok(RegistryWriteResult::InvalidTenantId);
-        }
-
-        // Validate tenant and account changes
-        if let Some(err) = write.validate_owner(&set_index) {
-            return Ok(err);
         }
 
         // Write to local registry
@@ -194,6 +170,8 @@ impl RegistryStore {
         }
 
         // Validate foreign keys
+        let tenant_id = object.inner.member_tenant_id().map(|id| id.id());
+        let account_id = object.inner.account_id().map(|id| id.id());
         for key in &set_index.keys {
             match key {
                 IndexKey::ForeignKey {
@@ -224,7 +202,7 @@ impl RegistryStore {
                         return Ok(RegistryWriteResult::InvalidForeignKey {
                             object_id: *foreign_id,
                         });
-                    } else if let Some(tenant_id) = object_tenant_id
+                    } else if let Some(tenant_id) = tenant_id
                         && (object_flags & OBJ_FILTER_TENANT) != 0
                         && self
                             .0
@@ -234,7 +212,7 @@ impl RegistryStore {
                                     index_id: Property::MemberTenantId.to_id(),
                                     object_id,
                                     item_id,
-                                    key: IndexValue::U64(tenant_id as u64).serialize(),
+                                    key: IndexValue::U64(tenant_id).serialize(),
                                 },
                             )))
                             .await
@@ -244,7 +222,7 @@ impl RegistryStore {
                         return Ok(RegistryWriteResult::InvalidForeignKey {
                             object_id: *foreign_id,
                         });
-                    } else if let Some(account_id) = write.current_account_id
+                    } else if let Some(account_id) = account_id
                         && (object_flags & OBJ_FILTER_ACCOUNT) != 0
                         && self
                             .0
@@ -254,7 +232,7 @@ impl RegistryStore {
                                     index_id: Property::AccountId.to_id(),
                                     object_id,
                                     item_id,
-                                    key: IndexValue::U64(account_id as u64).serialize(),
+                                    key: IndexValue::U64(account_id).serialize(),
                                 },
                             )))
                             .await
@@ -334,7 +312,6 @@ impl RegistryStore {
 
     async fn delete(
         &self,
-        write: RegistryWrite<'_>,
         object_id: ObjectId,
         object: Option<&Object>,
     ) -> trc::Result<RegistryWriteResult> {
@@ -368,11 +345,47 @@ impl RegistryStore {
         // Validate tenant and account changes
         let mut clear_index = IndexBuilder::default();
         object.index(&mut clear_index);
-        if let Some(err) = write.validate_owner(&clear_index) {
-            return Ok(err);
-        }
 
         // Validate relationships
+        let linked = self.linked_objects(object_id).await?;
+        if !linked.is_empty() {
+            return Ok(RegistryWriteResult::CannotDeleteLinked {
+                object_id: ObjectId::new(object_type, id),
+                linked_objects: linked,
+            });
+        }
+
+        // Build deletion batch
+        let mut batch = BatchBuilder::new();
+        batch
+            .assert_value(
+                ValueClass::Registry(RegistryClass::Item {
+                    object_id: object_type_id,
+                    item_id,
+                }),
+                AssertValue::Hash(object.revision),
+            )
+            .clear(ValueClass::Registry(RegistryClass::Item {
+                object_id: object_type_id,
+                item_id,
+            }))
+            .clear(ValueClass::Registry(RegistryClass::IndexId {
+                object_id: object_type_id,
+                item_id,
+            }))
+            .registry_index(object_type_id, item_id, clear_index.keys.iter(), false);
+
+        self.0
+            .store
+            .write(batch.build_all())
+            .await
+            .map(|_| RegistryWriteResult::Success(Id::from(item_id)))
+            .caused_by(trc::location!())
+    }
+
+    pub async fn linked_objects(&self, object_id: ObjectId) -> trc::Result<Vec<ObjectId>> {
+        let object_type_id = object_id.object().to_id();
+        let item_id = object_id.id().id();
         let mut linked = Vec::new();
         let from_key = ValueKey::from(ValueClass::Registry(RegistryClass::Reference {
             to_object_id: object_type_id,
@@ -411,41 +424,13 @@ impl RegistryStore {
                 },
             )
             .await
-            .caused_by(trc::location!())?;
-
-        if !linked.is_empty() {
-            return Ok(RegistryWriteResult::CannotDeleteLinked {
-                object_id: ObjectId::new(object_type, id),
-                linked_objects: linked,
-            });
-        }
-
-        // Build deletion batch
-        let mut batch = BatchBuilder::new();
-        batch
-            .assert_value(
-                ValueClass::Registry(RegistryClass::Item {
-                    object_id: object_type_id,
-                    item_id,
-                }),
-                AssertValue::Hash(object.revision),
-            )
-            .clear(ValueClass::Registry(RegistryClass::Item {
-                object_id: object_type_id,
-                item_id,
-            }))
-            .clear(ValueClass::Registry(RegistryClass::IndexId {
-                object_id: object_type_id,
-                item_id,
-            }))
-            .registry_index(object_type_id, item_id, clear_index.keys.iter(), false);
-
-        self.0
-            .store
-            .write(batch.build_all())
-            .await
-            .map(|_| RegistryWriteResult::Success(Id::from(item_id)))
             .caused_by(trc::location!())
+            .map(|_| linked)
+    }
+
+    #[inline(always)]
+    pub fn assign_id(&self) -> u64 {
+        self.0.id_generator.generate()
     }
 }
 
@@ -538,116 +523,36 @@ impl SerializeInfallible for IndexValue<'_> {
 
 impl<'x> RegistryWrite<'x> {
     pub fn insert(object: &'x Object) -> Self {
-        Self {
-            op: RegistryWriteOp::Insert { object, id: None },
-            current_tenant_id: None,
-            current_account_id: None,
-        }
+        RegistryWrite::Insert { object, id: None }
     }
 
     pub fn insert_with_id(id: Id, object: &'x Object) -> Self {
-        Self {
-            op: RegistryWriteOp::Insert {
-                object,
-                id: Some(id),
-            },
-            current_tenant_id: None,
-            current_account_id: None,
+        RegistryWrite::Insert {
+            object,
+            id: Some(id),
         }
     }
 
     pub fn update(id: Id, object: &'x Object, old_object: &'x Object) -> Self {
-        Self {
-            op: RegistryWriteOp::Update {
-                object,
-                id,
-                old_object,
-            },
-            current_tenant_id: None,
-            current_account_id: None,
+        RegistryWrite::Update {
+            object,
+            id,
+            old_object,
         }
     }
 
     pub fn delete(object_id: ObjectId) -> Self {
-        Self {
-            op: RegistryWriteOp::Delete {
-                object_id,
-                object: None,
-            },
-            current_tenant_id: None,
-            current_account_id: None,
+        RegistryWrite::Delete {
+            object_id,
+            object: None,
         }
     }
 
     pub fn delete_object(object_id: ObjectId, object: &'x Object) -> Self {
-        Self {
-            op: RegistryWriteOp::Delete {
-                object_id,
-                object: Some(object),
-            },
-            current_tenant_id: None,
-            current_account_id: None,
+        RegistryWrite::Delete {
+            object_id,
+            object: Some(object),
         }
-    }
-
-    pub fn with_current_tenant_id(mut self, tenant_id: u32) -> Self {
-        self.current_tenant_id = Some(tenant_id);
-        self
-    }
-
-    pub fn with_current_account_id(mut self, account_id: u32) -> Self {
-        self.current_account_id = Some(account_id);
-        self
-    }
-
-    fn validate_owner(&self, builder: &IndexBuilder<'_>) -> Option<RegistryWriteResult> {
-        // Validate tenant and account changes
-        if let Some(tenant_id) = self.current_tenant_id {
-            for key in &builder.keys {
-                if let IndexKey::Search {
-                    property: Property::MemberTenantId,
-                    value,
-                } = key
-                    && value != &IndexValue::U64(tenant_id as u64)
-                {
-                    return Some(RegistryWriteResult::InvalidTenantId);
-                }
-            }
-        }
-        if let Some(account_id) = self.current_account_id {
-            for key in &builder.keys {
-                if let IndexKey::Search {
-                    property: Property::AccountId,
-                    value,
-                } = key
-                    && value != &IndexValue::U64(account_id as u64)
-                {
-                    return Some(RegistryWriteResult::InvalidTenantId);
-                }
-            }
-        }
-
-        None
-    }
-}
-
-trait FindTenantId {
-    fn tenant_id(&self) -> Option<u32>;
-}
-
-impl FindTenantId for IndexBuilder<'_> {
-    fn tenant_id(&self) -> Option<u32> {
-        self.keys.iter().find_map(|key| {
-            if let IndexKey::Search {
-                property: Property::MemberTenantId,
-                value: IndexValue::U64(tenant_id),
-            } = key
-            {
-                Some(*tenant_id as u32)
-            } else {
-                None
-            }
-        })
     }
 }
 
@@ -689,8 +594,6 @@ impl Display for RegistryWriteResult {
                 }
                 Ok(())
             }
-            RegistryWriteResult::InvalidTenantId => write!(f, "Invalid tenant id"),
-            RegistryWriteResult::InvalidAccountId => write!(f, "Invalid account id"),
             RegistryWriteResult::NotSupported => write!(f, "Operation not supported"),
         }
     }

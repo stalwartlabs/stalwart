@@ -184,6 +184,37 @@ impl SessionConfig {
         let data = bp.setting_infallible::<MtaStageData>().await;
         let ext = bp.setting_infallible::<MtaExtensions>().await;
 
+        let mut hooks = Vec::new();
+
+        for hook in bp.list_infallible::<MtaHook>().await {
+            let id = hook.id;
+            let hook = hook.object;
+            let enable = bp.compile_expr(id, &hook.ctx_enable());
+            let headers = match hook
+                .http_auth
+                .build_headers(hook.http_headers, "application/json".into())
+                .await
+            {
+                Ok(headers) => headers,
+                Err(err) => {
+                    bp.build_error(id, format!("Unable to build HTTP headers: {}", err));
+                    continue;
+                }
+            };
+
+            hooks.push(MTAHook {
+                enable,
+                id,
+                url: hook.url,
+                timeout: hook.timeout.into_inner(),
+                headers,
+                tls_allow_invalid_certs: hook.allow_invalid_certs,
+                tempfail_on_error: hook.temp_fail_on_error,
+                run_on_stage: hook.stages.into_iter().map(Stage::from).collect(),
+                max_response_size: hook.max_response_size as usize,
+            });
+        }
+
         SessionConfig {
             timeout: bp.compile_expr(
                 ObjectType::MtaInboundSession.singleton(),
@@ -381,33 +412,7 @@ impl SessionConfig {
                     })
                 })
                 .collect(),
-            hooks: bp
-                .list_infallible::<MtaHook>()
-                .await
-                .into_iter()
-                .filter_map(|hook| {
-                    let id = hook.id;
-                    let hook = hook.object;
-
-                    Some(MTAHook {
-                        enable: bp.compile_expr(id, &hook.ctx_enable()),
-                        id,
-                        url: hook.url,
-                        timeout: hook.timeout.into_inner(),
-                        headers: hook
-                            .http_auth
-                            .build_headers(hook.http_headers, "application/json".into())
-                            .map_err(|err| {
-                                bp.build_error(id, format!("Unable to build HTTP headers: {}", err))
-                            })
-                            .ok()?,
-                        tls_allow_invalid_certs: hook.allow_invalid_certs,
-                        tempfail_on_error: hook.temp_fail_on_error,
-                        run_on_stage: hook.stages.into_iter().map(Stage::from).collect(),
-                        max_response_size: hook.max_response_size as usize,
-                    })
-                })
-                .collect(),
+            hooks,
         }
     }
 }

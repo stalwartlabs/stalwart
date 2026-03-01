@@ -374,7 +374,7 @@ impl<T: SessionStream> Session<T> {
 
             // Invalidate ACLs
             data.server
-                .invalidate_caches(vec![CacheInvalidation::AccessToken(acl_account_id)], true)
+                .invalidate_caches(CacheInvalidation::AccessToken(acl_account_id).into())
                 .await;
 
             trc::event!(

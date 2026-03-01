@@ -69,9 +69,9 @@ impl S3Store {
         };
         let credentials = Credentials::new(
             config.access_key.as_deref(),
-            config.secret_key.as_deref(),
-            config.security_token.as_deref(),
-            config.session_token.as_deref(),
+            config.secret_key.secret().await?.as_deref(),
+            config.security_token.secret().await?.as_deref(),
+            config.session_token.secret().await?.as_deref(),
             config.profile.as_deref(),
         )
         .map_err(|err| format!("Failed to create credentials: {err:?}"))?;

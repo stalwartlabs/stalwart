@@ -14,7 +14,7 @@ pub mod license;
 pub mod llm;
 
 use crate::{
-    Core, Server, config::groupware::CalendarTemplateVariable, expr::Expression,
+    Core, LogoCache, Server, config::groupware::CalendarTemplateVariable, expr::Expression,
     manager::application::Resource,
 };
 use ahash::{AHashMap, AHashSet};
@@ -136,7 +136,7 @@ impl Server {
         if let Some(enterprise) = &self.core.enterprise {
             let total_accounts = self.total_accounts().await.caused_by(trc::location!())?;
 
-            if total_accounts + 1 > enterprise.license.accounts as u64 {
+            if total_accounts + 1 > enterprise.license.accounts as usize {
                 trc::event!(
                     Server(trc::ServerEvent::Licensing),
                     Details = "Account creation not possible: license key account limit reached",
@@ -162,12 +162,11 @@ impl Server {
         let domain = psl::domain_str(domain).unwrap_or(domain);
         let logo = { self.inner.data.logos.lock().get(domain).cloned() };
         if let Some(logo) = logo {
-            return Ok(logo);
+            return Ok(logo.data);
         }
 
         let Some((domain_id, tenant_id)) = self.domain(domain).await?.map(|d| (d.id, d.id_tenant))
         else {
-            self.inner.data.logos.lock().insert(domain.into(), None);
             return Ok(None);
         };
 
@@ -222,11 +221,14 @@ impl Server {
             logo = Resource::new(content_type, contents).into();
         }
 
-        self.inner
-            .data
-            .logos
-            .lock()
-            .insert(domain.into(), logo.clone());
+        self.inner.data.logos.lock().insert(
+            domain.into(),
+            LogoCache {
+                domain_id,
+                tenant_id,
+                data: logo.clone(),
+            },
+        );
 
         Ok(logo)
     }

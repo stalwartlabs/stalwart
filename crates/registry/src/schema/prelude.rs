@@ -5,6 +5,8 @@
  */
 pub use crate::jmap::IntoValue;
 pub use crate::jmap::JmapValue;
+pub use crate::jmap::MaybeUnpatched;
+pub use crate::jmap::PatchResult;
 pub use crate::jmap::{
     JsonPointerPatch, RegistryJsonEnumPatch, RegistryJsonPatch, RegistryJsonPropertyPatch,
     patch::object_type,
@@ -18,6 +20,7 @@ pub use crate::types::ObjectImpl;
 pub use crate::types::datetime::UTCDateTime;
 pub use crate::types::duration::Duration;
 pub use crate::types::error::*;
+pub use crate::types::float::Float;
 pub use crate::types::index::IndexBuilder;
 pub use crate::types::ipaddr::IpAddr;
 pub use crate::types::ipmask::IpAddrOrMask;
@@ -48,3 +51,5 @@ pub const OBJ_SINGLETON: u64 = 1;
 pub const OBJ_SEQ_ID: u64 = 1 << 1;
 pub const OBJ_FILTER_ACCOUNT: u64 = 1 << 2;
 pub const OBJ_FILTER_TENANT: u64 = 1 << 3;
+
+pub const MASKED_PASSWORD: &str = "****";

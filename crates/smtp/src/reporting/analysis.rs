@@ -281,7 +281,7 @@ impl AnalyzeReport for Server {
                                 from,
                                 to,
                                 subject,
-                                member_tenant_id: vec![],
+                                member_tenant_id: None,
                                 expires_at: UTCDateTime::from_timestamp(expires as i64),
                                 received_at: UTCDateTime::now(),
                                 report: report.into(),
@@ -312,7 +312,7 @@ impl AnalyzeReport for Server {
                                 from,
                                 to,
                                 subject,
-                                member_tenant_id: vec![],
+                                member_tenant_id: None,
                                 expires_at: UTCDateTime::from_timestamp(expires as i64),
                                 received_at: UTCDateTime::now(),
                                 report: report.into(),
@@ -343,7 +343,7 @@ impl AnalyzeReport for Server {
                                 from,
                                 to,
                                 subject,
-                                member_tenant_id: vec![],
+                                member_tenant_id: None,
                                 expires_at: UTCDateTime::from_timestamp(expires as i64),
                                 received_at: UTCDateTime::now(),
                                 report: report.into(),
@@ -384,7 +384,7 @@ impl AnalyzeReport for Server {
     }
 }
 
-async fn tenant_ids(server: &Server, domains: AHashSet<&str>) -> Vec<Id> {
+async fn tenant_ids(server: &Server, domains: AHashSet<&str>) -> Option<Id> {
     let mut tenant_ids = Vec::with_capacity(domains.len());
     for domain in domains {
         if let Some(tenant_id) = server
@@ -404,7 +404,12 @@ async fn tenant_ids(server: &Server, domains: AHashSet<&str>) -> Vec<Id> {
             tenant_ids.push(tenant_id);
         }
     }
-    tenant_ids
+
+    if tenant_ids.len() == 1 {
+        tenant_ids.into_iter().next()
+    } else {
+        None
+    }
 }
 
 trait LogReport {

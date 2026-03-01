@@ -196,9 +196,9 @@ impl SpamFilterConfig {
             pyzor: PyzorConfig::parse(bp).await,
             classifier: ClassifierConfig::parse(bp).await,
             scores: SpamFilterScoreConfig {
-                reject_threshold: spam.score_reject as f32,
-                discard_threshold: spam.score_discard as f32,
-                spam_threshold: spam.score_spam as f32,
+                reject_threshold: spam.score_reject.into_inner() as f32,
+                discard_threshold: spam.score_discard.into_inner() as f32,
+                spam_threshold: spam.score_spam.into_inner() as f32,
             },
             grey_list_expiry: spam.greylist_for.map(|d| d.into_inner().as_secs()),
         }
@@ -375,9 +375,10 @@ impl SpamFilterLists {
 
         for tag in bp.list_infallible::<SpamTag>().await {
             match tag.object {
-                SpamTag::Score(tag) => lists
-                    .scores
-                    .insert_pattern(&tag.tag, SpamFilterAction::Allow(tag.score as f32)),
+                SpamTag::Score(tag) => lists.scores.insert_pattern(
+                    &tag.tag,
+                    SpamFilterAction::Allow(tag.score.into_inner() as f32),
+                ),
                 SpamTag::Discard(tag) => lists
                     .scores
                     .insert_pattern(&tag.tag, SpamFilterAction::Discard),
@@ -440,7 +441,7 @@ impl PyzorConfig {
             timeout: pyzor.timeout.into_inner(),
             min_count: pyzor.block_count,
             min_wl_count: pyzor.allow_count,
-            ratio: pyzor.ratio,
+            ratio: pyzor.ratio.into_inner(),
         }
         .into()
     }
@@ -508,10 +509,10 @@ impl FtrlParameters {
         };
         FtrlParameters {
             feature_hash_size: 1 << hash_size,
-            alpha: params.alpha,
-            beta: params.beta,
-            l1_ratio: params.l1_ratio,
-            l2_ratio: params.l2_ratio,
+            alpha: params.alpha.into_inner(),
+            beta: params.beta.into_inner(),
+            l1_ratio: params.l1_ratio.into_inner(),
+            l2_ratio: params.l2_ratio.into_inner(),
         }
     }
 }

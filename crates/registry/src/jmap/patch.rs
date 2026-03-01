@@ -6,8 +6,8 @@
 
 use crate::{
     jmap::{
-        JsonPointerPatch, RegistryJsonEnumPatch, RegistryJsonPatch, RegistryJsonPropertyPatch,
-        RegistryValue,
+        JmapValue, JsonPointerPatch, MaybeUnpatched, PatchResult, RegistryJsonEnumPatch,
+        RegistryJsonPatch, RegistryJsonPropertyPatch, RegistryValue,
     },
     schema::prelude::Property,
     types::{
@@ -76,11 +76,11 @@ impl<'x> JsonPointerPatch<'x> {
         self.ptr.as_slice().len() > self.pos
     }
 
-    pub fn assert_eof(&self) -> Result<(), PatchError> {
+    pub fn assert_eof(&self) -> PatchResult<'static> {
         if self.has_next() {
             Err(PatchError::new(self.cloned(), "Invalid JSON Pointer path"))
         } else {
-            Ok(())
+            Ok(MaybeUnpatched::Patched)
         }
     }
 
@@ -97,11 +97,11 @@ impl<'x> JsonPointerPatch<'x> {
 }
 
 impl<T: RegistryJsonPatch> RegistryJsonPatch for Option<T> {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Value::Null = value {
             *self = None;
             pointer.assert_eof()
@@ -115,11 +115,11 @@ impl<T: RegistryJsonPatch> RegistryJsonPatch for Option<T> {
 }
 
 impl<T: RegistryJsonEnumPatch + Default> RegistryJsonEnumPatch for Option<T> {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Value::Null = value {
             *self = None;
             pointer.assert_eof()
@@ -133,11 +133,11 @@ impl<T: RegistryJsonEnumPatch + Default> RegistryJsonEnumPatch for Option<T> {
 }
 
 impl RegistryJsonPatch for String {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Some(value) = value.into_string().filter(|v| !v.is_empty()) {
             let mut value = value.into_owned();
 
@@ -160,11 +160,11 @@ impl RegistryJsonPatch for String {
 }
 
 impl RegistryJsonPatch for bool {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Some(new_value) = value.as_bool() {
             *self = new_value;
             pointer.assert_eof()
@@ -178,11 +178,11 @@ impl RegistryJsonPatch for bool {
 }
 
 impl RegistryJsonPatch for u64 {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Some(new_value) = value.as_u64() {
             *self = new_value;
             pointer.assert_eof()
@@ -196,11 +196,11 @@ impl RegistryJsonPatch for u64 {
 }
 
 impl RegistryJsonPatch for i64 {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Some(new_value) = value.as_i64() {
             *self = new_value;
             pointer.assert_eof()
@@ -213,30 +213,12 @@ impl RegistryJsonPatch for i64 {
     }
 }
 
-impl RegistryJsonPatch for f64 {
-    fn patch(
-        &mut self,
-        pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
-        if let Some(new_value) = value.as_f64().filter(|v| v.is_finite()) {
-            *self = new_value;
-            pointer.assert_eof()
-        } else {
-            Err(PatchError::new(
-                pointer,
-                "Invalid value for float property (expected finite number)",
-            ))
-        }
-    }
-}
-
 impl RegistryJsonPatch for trc::Key {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: super::JmapValue<'_>,
-    ) -> Result<(), PatchError> {
+        value: super::JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Some(new_value) = value.as_str().and_then(|v| trc::Key::try_parse(v.as_ref())) {
             *self = new_value;
             pointer.assert_eof()
@@ -250,11 +232,11 @@ impl RegistryJsonPatch for trc::Key {
 }
 
 impl<T: EnumImpl> RegistryJsonEnumPatch for T {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if let Some(new_value) = value.as_str().and_then(|v| T::parse(v.as_ref())) {
             *self = new_value;
             pointer.assert_eof()
@@ -268,16 +250,16 @@ impl<T: EnumImpl> RegistryJsonEnumPatch for T {
 }
 
 impl<T: RegistryJsonPatch> RegistryJsonPatch for Vec<T> {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (pointer.next(), value) {
             (Some(JsonPointerItem::Number(idx)), Value::Null) => {
                 if *idx < self.len() as u64 {
                     self.remove(*idx as usize);
-                    return Ok(());
+                    return Ok(MaybeUnpatched::Patched);
                 }
             }
             (Some(JsonPointerItem::Number(idx)), value) => {
@@ -295,7 +277,7 @@ impl<T: RegistryJsonPatch> RegistryJsonPatch for Vec<T> {
                     inner.patch(pointer.clone(), item)?;
                     self.push(inner);
                 }
-                return Ok(());
+                return Ok(MaybeUnpatched::Patched);
             }
             _ => {}
         }
@@ -305,16 +287,16 @@ impl<T: RegistryJsonPatch> RegistryJsonPatch for Vec<T> {
 }
 
 impl<T: RegistryJsonEnumPatch + Default> RegistryJsonEnumPatch for Vec<T> {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (pointer.next(), value) {
             (Some(JsonPointerItem::Number(idx)), Value::Null) => {
                 if *idx < self.len() as u64 {
                     self.remove(*idx as usize);
-                    return Ok(());
+                    return Ok(MaybeUnpatched::Patched);
                 }
             }
             (Some(JsonPointerItem::Number(idx)), value) => {
@@ -332,7 +314,7 @@ impl<T: RegistryJsonEnumPatch + Default> RegistryJsonEnumPatch for Vec<T> {
                     inner.patch(pointer.clone(), item)?;
                     self.push(inner);
                 }
-                return Ok(());
+                return Ok(MaybeUnpatched::Patched);
             }
             _ => {}
         }
@@ -342,22 +324,22 @@ impl<T: RegistryJsonEnumPatch + Default> RegistryJsonEnumPatch for Vec<T> {
 }
 
 impl<K: MapItem, V: RegistryJsonPatch> RegistryJsonPatch for VecMap<K, V> {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: Value<'_, Property, RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (pointer.next(), value) {
             (Some(JsonPointerItem::Number(idx)), Value::Null) => {
                 if let Some(key) = K::try_from_integer(*idx) {
                     self.remove(&key);
-                    return Ok(());
+                    return Ok(MaybeUnpatched::Patched);
                 }
             }
             (Some(JsonPointerItem::Key(key)), Value::Null) => {
                 if let Some(key) = K::try_from_string(key.to_string().as_ref()) {
                     self.remove(&key);
-                    return Ok(());
+                    return Ok(MaybeUnpatched::Patched);
                 }
             }
             (Some(JsonPointerItem::Key(key)), value) => {
@@ -384,7 +366,7 @@ impl<K: MapItem, V: RegistryJsonPatch> RegistryJsonPatch for VecMap<K, V> {
                         ));
                     }
                 }
-                return Ok(());
+                return Ok(MaybeUnpatched::Patched);
             }
             _ => {}
         }
@@ -397,20 +379,27 @@ impl<K: MapItem, V: RegistryJsonPatch> RegistryJsonPatch for VecMap<K, V> {
 }
 
 impl<T: RegistryJsonPropertyPatch> RegistryJsonPatch for T {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: jmap_tools::Value<'_, Property, crate::jmap::RegistryValue>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         if pointer.has_next() {
             self.patch_property(pointer, value)
         } else if let Some(object) = value.into_object() {
             let mut ptr = JsonPointer::new(vec![JsonPointerItem::Root]);
+            let mut unpatched = VecMap::new();
             for (key, value) in object.into_vec() {
                 if let Some(property) = key.as_property() {
                     ptr.as_mut_slice()[0] = JsonPointerItem::Key(Key::Property(*property));
                     match self.patch_property(JsonPointerPatch::new(&ptr), value) {
-                        Ok(()) => {}
+                        Ok(MaybeUnpatched::Patched) => {}
+                        Ok(MaybeUnpatched::Unpatched { property, value }) => {
+                            unpatched.append(property, value);
+                        }
+                        Ok(MaybeUnpatched::UnpatchedMany { properties }) => {
+                            unpatched.extend(properties.into_iter());
+                        }
                         Err(mut e) => {
                             if !e.path.is_empty() {
                                 e.path = format!("{}/{}", e.path, property.as_str());
@@ -424,7 +413,13 @@ impl<T: RegistryJsonPropertyPatch> RegistryJsonPatch for T {
                     return Err(PatchError::new(pointer.clone(), "Invalid key for object"));
                 }
             }
-            Ok(())
+            if unpatched.is_empty() {
+                Ok(MaybeUnpatched::Patched)
+            } else {
+                Ok(MaybeUnpatched::UnpatchedMany {
+                    properties: unpatched,
+                })
+            }
         } else {
             Err(PatchError::new(pointer, "Invalid value type for object"))
         }

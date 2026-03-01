@@ -7,7 +7,8 @@
 use crate::{jmap::JsonPointerPatch, schema::prelude::Property, types::id::ObjectId};
 use std::{borrow::Cow, fmt::Display};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "type")]
 pub enum ValidationError {
     Invalid { property: Property, value: String },
     Required { property: Property },

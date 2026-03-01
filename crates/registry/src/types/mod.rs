@@ -15,6 +15,7 @@ use std::fmt::Debug;
 pub mod datetime;
 pub mod duration;
 pub mod error;
+pub mod float;
 pub mod id;
 pub mod index;
 pub mod ipaddr;

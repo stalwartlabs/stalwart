@@ -160,9 +160,16 @@ pub struct Data {
     pub queue_status: AtomicBool,
 
     pub applications: WebApplicationManager,
-    pub logos: Mutex<AHashMap<Box<str>, Option<Resource<Vec<u8>>>>>,
+    pub logos: Mutex<AHashMap<Box<str>, LogoCache>>,
 
     pub smtp_connectors: TlsConnectors,
+}
+
+#[derive(Clone)]
+pub struct LogoCache {
+    domain_id: u32,
+    tenant_id: Option<u32>,
+    data: Option<Resource<Vec<u8>>>,
 }
 
 pub struct Caches {

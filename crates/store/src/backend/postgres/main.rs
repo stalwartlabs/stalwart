@@ -25,7 +25,7 @@ impl PostgresStore {
         cfg.dbname = config.database.into();
         cfg.host = config.host.into();
         cfg.user = config.auth_username;
-        cfg.password = config.auth_secret;
+        cfg.password = config.auth_secret.secret().await?.map(|v| v.into_owned());
         cfg.port = (config.port as u16).into();
         cfg.connect_timeout = config.timeout.map(|t| t.into_inner());
         cfg.options = config.options;
@@ -47,7 +47,7 @@ impl PostgresStore {
             cfg.dbname = replica.database.into();
             cfg.host = replica.host.into();
             cfg.user = replica.auth_username;
-            cfg.password = replica.auth_secret;
+            cfg.password = replica.auth_secret.secret().await?.map(|v| v.into_owned());
             cfg.port = (replica.port as u16).into();
             cfg.options = replica.options;
             replicas.push(Store::PostgreSQL(Arc::new(PostgresStore {

@@ -12,7 +12,7 @@ use crate::{
 use ahash::AHashSet;
 use registry::{
     schema::{
-        enums::BlockReason,
+        enums::{BlockReason, PasswordHashAlgorithm},
         prelude::{Object, ObjectType},
         structs::{self, AllowedIp, BlockedIp, Rate},
     },
@@ -49,6 +49,8 @@ pub struct Security {
     pub default_role_ids_user: Vec<Id>,
     pub default_role_ids_group: Vec<Id>,
     pub default_role_ids_tenant: Vec<Id>,
+
+    pub password_hash_algorithm: PasswordHashAlgorithm,
 }
 
 #[derive(Default)]
@@ -144,6 +146,7 @@ impl Security {
             default_role_ids_user: auth.default_user_role_ids,
             default_role_ids_group: auth.default_group_role_ids,
             default_role_ids_tenant: auth.default_tenant_role_ids,
+            password_hash_algorithm: auth.password_hash_algorithm,
         }
     }
 }

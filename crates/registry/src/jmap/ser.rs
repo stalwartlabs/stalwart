@@ -46,12 +46,6 @@ impl IntoValue for i64 {
     }
 }
 
-impl IntoValue for f64 {
-    fn into_value(self) -> JmapValue<'static> {
-        JmapValue::Number(self.into())
-    }
-}
-
 impl<T: EnumImpl> IntoValue for T {
     fn into_value(self) -> JmapValue<'static> {
         JmapValue::Str(self.as_str().into())

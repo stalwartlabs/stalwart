@@ -340,6 +340,14 @@ impl QueueConfig {
                     );
                 }
                 MtaRoute::Relay(route) => {
+                    let secret = route
+                        .auth_secret
+                        .secret()
+                        .await
+                        .map_err(|err| {
+                            bp.build_error(obj.id, err);
+                        })
+                        .unwrap_or_default();
                     queue.routing_strategy.insert(
                         route.name,
                         RoutingStrategy::Relay(RelayConfig {
@@ -351,8 +359,8 @@ impl QueueConfig {
                             },
                             auth: route
                                 .auth_username
-                                .and_then(|user| route.auth_secret.map(|secret| (user, secret)))
-                                .map(|(user, secret)| Credentials::new(user, secret)),
+                                .and_then(|user| secret.map(|secret| (user, secret)))
+                                .map(|(user, secret)| Credentials::new(user, secret.into_owned())),
                             tls_implicit: route.implicit_tls,
                             tls_allow_invalid_certs: route.allow_invalid_certs,
                         }),

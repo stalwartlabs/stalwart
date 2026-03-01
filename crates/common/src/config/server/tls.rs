@@ -88,7 +88,18 @@ impl Server {
                     )),
                 },
                 server.key_name,
-                server.key,
+                server
+                    .key
+                    .secret()
+                    .await
+                    .map_err(|err| {
+                        trc::DnsEvent::BuildError
+                            .reason(err)
+                            .details("Failed to obtain TSIG key secret")
+                            .id(id.to_string())
+                    })?
+                    .into_owned()
+                    .into_bytes(),
                 match server.tsig_algorithm {
                     enums::TsigAlgorithm::HmacMd5 => TsigAlgorithm::HmacMd5,
                     enums::TsigAlgorithm::Gss => TsigAlgorithm::Gss,
@@ -118,7 +129,17 @@ impl Server {
                     enums::Sig0Algorithm::EcdsaP256Sha256 => KeyPair::ECDSA(
                         EcdsaKeyPair::from_pkcs8(
                             &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-                            server.key.as_bytes(),
+                            server
+                                .key
+                                .secret()
+                                .await
+                                .map_err(|err| {
+                                    trc::DnsEvent::BuildError
+                                        .reason(err)
+                                        .details("Failed to obtain key secret")
+                                        .id(id.to_string())
+                                })?
+                                .as_bytes(),
                             &ring::rand::SystemRandom::new(),
                         )
                         .map_err(|err| {
@@ -131,7 +152,17 @@ impl Server {
                     enums::Sig0Algorithm::EcdsaP384Sha384 => KeyPair::ECDSA(
                         EcdsaKeyPair::from_pkcs8(
                             &ring::signature::ECDSA_P384_SHA384_ASN1_SIGNING,
-                            server.key.as_bytes(),
+                            server
+                                .key
+                                .secret()
+                                .await
+                                .map_err(|err| {
+                                    trc::DnsEvent::BuildError
+                                        .reason(err)
+                                        .details("Failed to obtain key secret")
+                                        .id(id.to_string())
+                                })?
+                                .as_bytes(),
                             &ring::rand::SystemRandom::new(),
                         )
                         .map_err(|err| {
@@ -142,7 +173,20 @@ impl Server {
                         })?,
                     ),
                     enums::Sig0Algorithm::Ed25519 => KeyPair::ED25519(
-                        Ed25519KeyPair::from_pkcs8(server.key.as_bytes()).map_err(|err| {
+                        Ed25519KeyPair::from_pkcs8(
+                            server
+                                .key
+                                .secret()
+                                .await
+                                .map_err(|err| {
+                                    trc::DnsEvent::BuildError
+                                        .reason(err)
+                                        .details("Failed to obtain key secret")
+                                        .id(id.to_string())
+                                })?
+                                .as_bytes(),
+                        )
+                        .map_err(|err| {
                             trc::DnsEvent::BuildError
                                 .reason(err)
                                 .details("Failed to build Ed25519 key pair")
@@ -158,20 +202,47 @@ impl Server {
                 },
             ),
             DnsServer::Cloudflare(server) => DnsUpdater::new_cloudflare(
-                server.secret,
+                server.secret.secret().await.map_err(|err| {
+                    trc::DnsEvent::BuildError
+                        .reason(err)
+                        .details("Failed to obtain key secret")
+                        .id(id.to_string())
+                })?,
                 server.email,
                 server.timeout.into_inner().into(),
             ),
-            DnsServer::DigitalOcean(server) => {
-                DnsUpdater::new_digitalocean(server.secret, server.timeout.into_inner().into())
-            }
-            DnsServer::DeSEC(server) => {
-                DnsUpdater::new_desec(server.secret, server.timeout.into_inner().into())
-            }
+            DnsServer::DigitalOcean(server) => DnsUpdater::new_digitalocean(
+                server.secret.secret().await.map_err(|err| {
+                    trc::DnsEvent::BuildError
+                        .reason(err)
+                        .details("Failed to obtain key secret")
+                        .id(id.to_string())
+                })?,
+                server.timeout.into_inner().into(),
+            ),
+            DnsServer::DeSEC(server) => DnsUpdater::new_desec(
+                server.secret.secret().await.map_err(|err| {
+                    trc::DnsEvent::BuildError
+                        .reason(err)
+                        .details("Failed to obtain key secret")
+                        .id(id.to_string())
+                })?,
+                server.timeout.into_inner().into(),
+            ),
             DnsServer::Ovh(server) => DnsUpdater::new_ovh(
                 server.application_key,
-                server.application_secret,
-                server.consumer_key,
+                server.application_secret.secret().await.map_err(|err| {
+                    trc::DnsEvent::BuildError
+                        .reason(err)
+                        .details("Failed to obtain application secret")
+                        .id(id.to_string())
+                })?,
+                server.consumer_key.secret().await.map_err(|err| {
+                    trc::DnsEvent::BuildError
+                        .reason(err)
+                        .details("Failed to obtain consumer key")
+                        .id(id.to_string())
+                })?,
                 match server.ovh_endpoint {
                     enums::OvhEndpoint::OvhEu => OvhEndpoint::OvhEu,
                     enums::OvhEndpoint::OvhCa => OvhEndpoint::OvhCa,
@@ -199,10 +270,18 @@ pub(crate) async fn parse_certificates(
 ) {
     // Parse certificates
     for cert_obj in bp.list_infallible::<Certificate>().await {
-        match build_certified_key(
-            cert_obj.object.certificate.into_bytes(),
-            cert_obj.object.private_key.into_bytes(),
-        ) {
+        let secret = match cert_obj.object.private_key.secret().await {
+            Ok(secret) => secret.into_owned().into_bytes(),
+            Err(err) => {
+                bp.build_error(
+                    cert_obj.id,
+                    format!("Failed to obtain private key secret: {err}"),
+                );
+                continue;
+            }
+        };
+
+        match build_certified_key(cert_obj.object.certificate.into_bytes(), secret) {
             Ok(cert) => {
                 match cert
                     .end_entity_cert()

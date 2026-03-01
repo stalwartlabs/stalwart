@@ -5,7 +5,9 @@
  */
 
 use crate::{
-    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch},
+    jmap::{
+        IntoValue, JmapValue, JsonPointerPatch, MaybeUnpatched, PatchResult, RegistryJsonPatch,
+    },
     pickle::{Pickle, PickledStream},
     types::error::PatchError,
 };
@@ -134,16 +136,16 @@ impl Pickle for Duration {
 }
 
 impl RegistryJsonPatch for Duration {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Number(value), None) => {
                 if let Some(new_value) = value.as_u64().filter(|v| *v > 0) {
                     *self = Duration::from_millis(new_value);
-                    Ok(())
+                    Ok(MaybeUnpatched::Patched)
                 } else {
                     Err(PatchError::new(pointer, "Invalid duration value"))
                 }

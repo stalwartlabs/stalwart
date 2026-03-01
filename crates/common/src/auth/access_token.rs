@@ -9,7 +9,7 @@ use crate::{
     Server,
     auth::{
         AccessScope, AccessTo, AccessTokenInner, AccountTenantIds, FALLBACK_ADMIN_ID, Permissions,
-        PermissionsGroup,
+        PermissionsGroup, permissions::build_permissions_list,
     },
     network::limiter::{ConcurrencyLimiter, LimiterResult},
 };
@@ -17,7 +17,7 @@ use ahash::AHasher;
 use registry::{
     schema::{
         enums::Permission,
-        structs::{self, Account},
+        structs::{self, Account, Roles},
     },
     types::EnumImpl,
 };
@@ -41,68 +41,17 @@ impl Server {
     ) -> trc::Result<AccessTokenInner> {
         match account {
             Account::User(account) => {
-                // Calculate effective permissions
-                let (mut permissions, roles) = match account.permissions {
-                    structs::Permissions::Inherit => {
-                        (PermissionsGroup::default(), account.role_ids.as_slice())
-                    }
-                    structs::Permissions::Merge(permissions) => (
-                        PermissionsGroup::from(permissions),
-                        account.role_ids.as_slice(),
-                    ),
-                    structs::Permissions::Replace(permissions) => {
-                        (PermissionsGroup::from(permissions), &[][..])
-                    }
-                };
-                if !roles.is_empty() {
-                    permissions = self
-                        .add_role_permissions(permissions, roles.iter().map(|v| v.id() as u32))
-                        .await
-                        .caused_by(trc::location!())?
-                }
-
                 let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
-
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-
-                #[cfg(feature = "enterprise")]
-                {
-                    if let Some(tenant_id) = tenant_id {
-                        if self.is_enterprise_edition() {
-                            // Limit tenant permissions
-                            let tenant =
-                                self.tenant(tenant_id).await.caused_by(trc::location!())?;
-                            let (mut tenant_permissions, tenant_roles) =
-                                if let Some(permissions) = &tenant.permissions {
-                                    if permissions.merge {
-                                        ((**permissions).clone(), tenant.id_roles.as_slice())
-                                    } else {
-                                        ((**permissions).clone(), &[][..])
-                                    }
-                                } else {
-                                    (PermissionsGroup::default(), tenant.id_roles.as_slice())
-                                };
-                            if !tenant_roles.is_empty() {
-                                tenant_permissions = self
-                                    .add_role_permissions(
-                                        tenant_permissions,
-                                        tenant_roles.iter().copied(),
-                                    )
-                                    .await
-                                    .caused_by(trc::location!())?
-                            }
-
-                            permissions.restrict(&tenant_permissions);
-                        } else {
-                            // Enterprise edition downgrade, remove any tenant administrator permissions
-                            permissions.restrict(&PermissionsGroup::user());
-                        }
-                    }
-                }
-
-                // SPDX-SnippetEnd
+                let permissions = self
+                    .effective_permissions(
+                        &account.permissions,
+                        account
+                            .roles
+                            .role_ids()
+                            .unwrap_or(self.core.network.security.default_role_ids_user.as_slice()),
+                        tenant_id,
+                    )
+                    .await?;
 
                 let can_impersonate = permissions.enabled.get(Permission::Impersonate as usize)
                     && !permissions.disabled.get(Permission::Impersonate as usize);
@@ -161,6 +110,7 @@ impl Server {
                 }
 
                 let now = now();
+                let permissions = permissions.finalize();
                 let credential_scopes = account
                     .credentials
                     .into_iter()
@@ -172,14 +122,17 @@ impl Server {
                             .unwrap_or(u64::MAX);
                         if expires_at > now {
                             let permissions = match credential.permissions {
-                                structs::Permissions::Inherit => permissions.clone().finalize(),
+                                structs::Permissions::Inherit => permissions.clone(),
                                 structs::Permissions::Merge(merge) => {
                                     let mut permissions = permissions.clone();
-                                    permissions.union(&PermissionsGroup::from(merge));
-                                    permissions.finalize()
+                                    permissions.clear_many(&PermissionsGroup::from(merge).disabled);
+                                    permissions
                                 }
                                 structs::Permissions::Replace(replace) => {
-                                    PermissionsGroup::from(replace).finalize()
+                                    let mut replace_permissions =
+                                        PermissionsGroup::from(replace).finalize();
+                                    replace_permissions.intersection(&permissions);
+                                    replace_permissions
                                 }
                             };
                             Some(AccessScope {
@@ -216,7 +169,7 @@ impl Server {
                     tenant_id,
                     member_of,
                     access_to: access_to.into_boxed_slice(),
-                    scopes: [AccessScope::new(permissions.finalize(), u32::MAX)]
+                    scopes: [AccessScope::new(permissions, u32::MAX)]
                         .into_iter()
                         .chain(credential_scopes)
                         .collect::<Box<[AccessScope]>>(),
@@ -224,68 +177,16 @@ impl Server {
                 .update_size())
             }
             Account::Group(account) => {
-                // Calculate effective permissions
-                let (mut permissions, roles) = match account.permissions {
-                    structs::Permissions::Inherit => {
-                        (PermissionsGroup::default(), account.role_ids.as_slice())
-                    }
-                    structs::Permissions::Merge(permissions) => (
-                        PermissionsGroup::from(permissions),
-                        account.role_ids.as_slice(),
-                    ),
-                    structs::Permissions::Replace(permissions) => {
-                        (PermissionsGroup::from(permissions), &[][..])
-                    }
-                };
-                if !roles.is_empty() {
-                    permissions = self
-                        .add_role_permissions(permissions, roles.iter().map(|v| v.id() as u32))
-                        .await
-                        .caused_by(trc::location!())?
-                }
-
                 let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
-
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-
-                #[cfg(feature = "enterprise")]
-                {
-                    if let Some(tenant_id) = tenant_id {
-                        if self.is_enterprise_edition() {
-                            // Limit tenant permissions
-                            let tenant =
-                                self.tenant(tenant_id).await.caused_by(trc::location!())?;
-                            let (mut tenant_permissions, tenant_roles) =
-                                if let Some(permissions) = &tenant.permissions {
-                                    if permissions.merge {
-                                        ((**permissions).clone(), tenant.id_roles.as_slice())
-                                    } else {
-                                        ((**permissions).clone(), &[][..])
-                                    }
-                                } else {
-                                    (PermissionsGroup::default(), tenant.id_roles.as_slice())
-                                };
-                            if !tenant_roles.is_empty() {
-                                tenant_permissions = self
-                                    .add_role_permissions(
-                                        tenant_permissions,
-                                        tenant_roles.iter().copied(),
-                                    )
-                                    .await
-                                    .caused_by(trc::location!())?
-                            }
-
-                            permissions.restrict(&tenant_permissions);
-                        } else {
-                            // Enterprise edition downgrade, remove any tenant administrator permissions
-                            permissions.restrict(&PermissionsGroup::user());
-                        }
-                    }
-                }
-
-                // SPDX-SnippetEnd
+                let permissions = self
+                    .effective_permissions(
+                        &account.permissions,
+                        account.roles.role_ids().unwrap_or(
+                            self.core.network.security.default_role_ids_group.as_slice(),
+                        ),
+                        tenant_id,
+                    )
+                    .await?;
 
                 Ok(AccessTokenInner {
                     concurrent_imap_requests: self
@@ -566,28 +467,20 @@ impl AccessToken {
     }
 
     pub fn permissions(&self) -> Vec<Permission> {
-        const USIZE_BITS: usize = std::mem::size_of::<usize>() * 8;
-        const USIZE_MASK: u32 = USIZE_BITS as u32 - 1;
-        let mut permissions = Vec::new();
-
-        let Some(scope) = self.inner.scopes.get(self.scope_idx) else {
-            return permissions;
-        };
-
-        for (block_num, bytes) in scope.permissions.inner().iter().enumerate() {
-            let mut bytes = *bytes;
-
-            while bytes != 0 {
-                let item = USIZE_MASK - bytes.leading_zeros();
-                bytes ^= 1 << item;
-                if let Some(permission) =
-                    Permission::from_id(((block_num * USIZE_BITS) + item as usize) as u16)
-                {
-                    permissions.push(permission);
-                }
-            }
+        if let Some(scope) = self.inner.scopes.get(self.scope_idx) {
+            build_permissions_list(&scope.permissions)
+        } else {
+            vec![]
         }
-        permissions
+    }
+
+    pub(crate) fn permissions_bits(&self) -> &Permissions {
+        &self
+            .inner
+            .scopes
+            .get(self.scope_idx)
+            .unwrap_or(&self.inner.scopes[0])
+            .permissions
     }
 
     pub fn is_shared(&self, account_id: u32) -> bool {
@@ -748,7 +641,12 @@ fn hash_account(account: &Account) -> u64 {
     match account {
         Account::User(account) => {
             account.member_tenant_id.hash(&mut s);
-            account.role_ids.hash(&mut s);
+            match &account.roles {
+                Roles::Default => {}
+                Roles::Custom(custom_roles) => {
+                    custom_roles.role_ids.hash(&mut s);
+                }
+            }
             hash_permissions(&mut s, &account.permissions);
             for (credential_id, credential) in &account.credentials {
                 let credential = credential.as_properties();
@@ -759,7 +657,12 @@ fn hash_account(account: &Account) -> u64 {
         }
         Account::Group(account) => {
             account.member_tenant_id.hash(&mut s);
-            account.role_ids.hash(&mut s);
+            match &account.roles {
+                Roles::Default => {}
+                Roles::Custom(custom_roles) => {
+                    custom_roles.role_ids.hash(&mut s);
+                }
+            }
             hash_permissions(&mut s, &account.permissions);
         }
     }

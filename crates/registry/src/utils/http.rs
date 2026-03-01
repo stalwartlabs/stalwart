@@ -12,7 +12,7 @@ use utils::{
 };
 
 impl HttpAuth {
-    pub fn build_headers(
+    pub async fn build_headers(
         &self,
         extra_headers: VecMap<String, String>,
         content_type: Option<&str>,
@@ -24,7 +24,7 @@ impl HttpAuth {
             HttpAuth::Basic(auth) => build_http_headers(
                 extra_headers,
                 auth.username.as_str().into(),
-                auth.secret.as_str().into(),
+                auth.secret.secret().await?.as_ref().into(),
                 None,
                 content_type,
             ),
@@ -32,13 +32,13 @@ impl HttpAuth {
                 extra_headers,
                 None,
                 None,
-                auth.bearer_token.as_str().into(),
+                auth.bearer_token.secret().await?.as_ref().into(),
                 content_type,
             ),
         }
     }
 
-    pub fn build_http_client(
+    pub async fn build_http_client(
         &self,
         extra_headers: VecMap<String, String>,
         content_type: Option<&str>,
@@ -58,7 +58,7 @@ impl HttpAuth {
             HttpAuth::Basic(auth) => build_http_client(
                 extra_headers,
                 auth.username.as_str().into(),
-                auth.secret.as_str().into(),
+                auth.secret.secret().await?.as_ref().into(),
                 None,
                 content_type,
                 timeout.into_inner(),
@@ -68,7 +68,7 @@ impl HttpAuth {
                 extra_headers,
                 None,
                 None,
-                auth.bearer_token.as_str().into(),
+                auth.bearer_token.secret().await?.as_ref().into(),
                 content_type,
                 timeout.into_inner(),
                 allow_invalid_certs,

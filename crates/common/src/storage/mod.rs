@@ -89,18 +89,16 @@ impl Server {
         }
     }
 
-    pub async fn total_accounts(&self) -> trc::Result<u64> {
+    pub async fn total_accounts(&self) -> trc::Result<usize> {
         self.registry()
-            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Account))
+            .count(RegistryQuery::new(ObjectType::Account))
             .await
-            .map(|r| r.len())
     }
 
-    pub async fn total_domains(&self) -> trc::Result<u64> {
+    pub async fn total_domains(&self) -> trc::Result<usize> {
         self.registry()
-            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Domain))
+            .count(RegistryQuery::new(ObjectType::Domain))
             .await
-            .map(|r| r.len())
     }
 
     #[cfg(not(feature = "enterprise"))]

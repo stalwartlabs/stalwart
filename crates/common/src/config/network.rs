@@ -389,6 +389,7 @@ impl AsnGeoLookupConfig {
                 headers: asn
                     .http_auth
                     .build_headers(asn.http_headers, None)
+                    .await
                     .map_err(|err| {
                         bp.build_error(
                             ObjectType::Asn.singleton(),

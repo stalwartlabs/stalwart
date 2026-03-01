@@ -514,7 +514,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                                 Ok(total) => {
                                                     Collector::update_gauge(
                                                         MetricType::UserCount,
-                                                        total,
+                                                        total as u64,
                                                     );
                                                 }
                                                 Err(err) => {
@@ -530,7 +530,7 @@ pub fn spawn_housekeeper(inner: Arc<Inner>, mut rx: mpsc::Receiver<HousekeeperEv
                                                 Ok(total) => {
                                                     Collector::update_gauge(
                                                         MetricType::DomainCount,
-                                                        total,
+                                                        total as u64,
                                                     );
                                                 }
                                                 Err(err) => {

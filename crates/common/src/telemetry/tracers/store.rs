@@ -120,7 +120,9 @@ fn map_value(value: &Value) -> TraceValue {
         }),
         Value::UInt(value) => TraceValue::UnsignedInt(TraceValueUnsignedInt { value: *value }),
         Value::Int(value) => TraceValue::Integer(TraceValueInteger { value: *value }),
-        Value::Float(value) => TraceValue::Float(TraceValueFloat { value: *value }),
+        Value::Float(value) => TraceValue::Float(TraceValueFloat {
+            value: (*value).into(),
+        }),
         Value::Timestamp(value) => TraceValue::UTCDateTime(TraceValueUTCDateTime {
             value: UTCDateTime::from_timestamp(*value as i64),
         }),

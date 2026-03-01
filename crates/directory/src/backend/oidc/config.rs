@@ -9,7 +9,7 @@ use crate::Directory;
 use registry::schema::structs;
 
 impl OpenIdDirectory {
-    pub fn open(config: structs::OidcDirectory) -> Result<Directory, String> {
+    pub async fn open(config: structs::OidcDirectory) -> Result<Directory, String> {
         Ok(Directory::OpenId(match config {
             structs::OidcDirectory::UserInfo(config) => OpenIdDirectory::UserInfo {
                 endpoint: config.endpoint,
@@ -19,12 +19,15 @@ impl OpenIdDirectory {
                 claim_name: config.claim_name,
             },
             structs::OidcDirectory::Introspect(config) => {
-                let client = config.http_auth.build_http_client(
-                    config.http_headers,
-                    None,
-                    config.timeout,
-                    config.allow_invalid_certs,
-                )?;
+                let client = config
+                    .http_auth
+                    .build_http_client(
+                        config.http_headers,
+                        None,
+                        config.timeout,
+                        config.allow_invalid_certs,
+                    )
+                    .await?;
                 OpenIdDirectory::Introspect {
                     client,
                     endpoint: config.endpoint,

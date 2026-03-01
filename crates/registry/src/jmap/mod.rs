@@ -11,6 +11,7 @@ use crate::{
 use jmap_tools::{JsonPointer, Value};
 use std::fmt::Debug;
 use types::{blob::BlobId, id::Id};
+use utils::map::vec_map::VecMap;
 
 pub mod patch;
 pub mod properties;
@@ -25,6 +26,19 @@ pub enum RegistryValue {
     IdReference(String),
 }
 
+pub type PatchResult<'x> = Result<MaybeUnpatched<'x>, PatchError>;
+
+pub enum MaybeUnpatched<'x> {
+    Unpatched {
+        property: Property,
+        value: JmapValue<'x>,
+    },
+    UnpatchedMany {
+        properties: VecMap<Property, JmapValue<'x>>,
+    },
+    Patched,
+}
+
 #[derive(Clone)]
 pub struct JsonPointerPatch<'x> {
     ptr: &'x JsonPointer<Property>,
@@ -34,26 +48,20 @@ pub struct JsonPointerPatch<'x> {
 }
 
 pub trait RegistryJsonPatch: Debug + Default {
-    fn patch(
-        &mut self,
-        pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError>;
+    fn patch<'x>(&mut self, pointer: JsonPointerPatch<'_>, value: JmapValue<'x>)
+    -> PatchResult<'x>;
 }
 pub trait RegistryJsonPropertyPatch: Debug + Default {
-    fn patch_property(
+    fn patch_property<'x>(
         &mut self,
         pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError>;
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x>;
 }
 
 pub trait RegistryJsonEnumPatch: Debug {
-    fn patch(
-        &mut self,
-        pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError>;
+    fn patch<'x>(&mut self, pointer: JsonPointerPatch<'_>, value: JmapValue<'x>)
+    -> PatchResult<'x>;
 }
 
 pub trait IntoValue {

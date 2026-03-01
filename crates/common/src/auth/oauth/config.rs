@@ -17,11 +17,7 @@ use biscuit::{
     },
     jws::Secret,
 };
-use registry::schema::{
-    enums::JwtSignatureAlgorithm,
-    prelude::{Object, ObjectType},
-    structs::OidcProvider,
-};
+use registry::schema::{enums::JwtSignatureAlgorithm, prelude::ObjectType, structs::OidcProvider};
 use ring::signature::{self, KeyPair};
 use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey, traits::PublicKeyParts};
 use store::{
@@ -74,15 +70,24 @@ impl OAuthConfig {
             .collect::<String>()
             .into_bytes();
 
+        let signature_key = auth
+            .signature_key
+            .secret()
+            .await
+            .map_err(|err| {
+                bp.build_error(ObjectType::OidcProvider.singleton(), err);
+            })
+            .unwrap_or_default();
+
         let (oidc_signing_secret, algorithm) = match oidc_signature_algorithm {
             SignatureAlgorithm::None
             | SignatureAlgorithm::HS256
             | SignatureAlgorithm::HS384
             | SignatureAlgorithm::HS512 => (
-                Secret::Bytes(auth.signature_key.as_bytes().to_vec()),
+                Secret::Bytes(signature_key.as_bytes().to_vec()),
                 AlgorithmParameters::OctetKey(OctetKeyParameters {
                     key_type: OctetKeyType::Octet,
-                    value: auth.signature_key.as_bytes().to_vec(),
+                    value: signature_key.as_bytes().to_vec(),
                 }),
             ),
             SignatureAlgorithm::RS256
@@ -91,6 +96,7 @@ impl OAuthConfig {
             | SignatureAlgorithm::PS256
             | SignatureAlgorithm::PS384
             | SignatureAlgorithm::PS512 => parse_rsa_key(&auth)
+                .await
                 .map_err(|err| {
                     bp.build_error(ObjectType::OidcProvider.singleton(), err);
                 })
@@ -105,6 +111,7 @@ impl OAuthConfig {
                 }),
             SignatureAlgorithm::ES256 | SignatureAlgorithm::ES384 | SignatureAlgorithm::ES512 => {
                 parse_ecdsa_key(&auth, oidc_signature_algorithm)
+                    .await
                     .map_err(|err| {
                         bp.build_error(ObjectType::OidcProvider.singleton(), err);
                     })
@@ -139,7 +146,13 @@ impl OAuthConfig {
         };
 
         OAuthConfig {
-            oauth_key: auth.encryption_key,
+            oauth_key: auth
+                .encryption_key
+                .secret()
+                .await
+                .map_err(|err| bp.build_error(ObjectType::OidcProvider.singleton(), err))
+                .unwrap_or_default()
+                .into_owned(),
             oauth_expiry_user_code: auth.user_code_expiry.as_secs(),
             oauth_expiry_auth_code: auth.auth_code_expiry.as_secs(),
             oauth_expiry_token: auth.access_token_expiry.as_secs(),
@@ -181,8 +194,8 @@ impl Default for OAuthConfig {
     }
 }
 
-fn parse_rsa_key(auth: &OidcProvider) -> Result<(Secret, AlgorithmParameters), String> {
-    let rsa_key_pair = build_rsa_keypair(&auth.signature_key)?;
+async fn parse_rsa_key(auth: &OidcProvider) -> Result<(Secret, AlgorithmParameters), String> {
+    let rsa_key_pair = build_rsa_keypair(auth.signature_key.secret().await?.as_ref())?;
 
     let rsa_public_key = match RsaPublicKey::from_pkcs1_der(rsa_key_pair.public_key().as_ref()) {
         Ok(key) => key,
@@ -204,7 +217,7 @@ fn parse_rsa_key(auth: &OidcProvider) -> Result<(Secret, AlgorithmParameters), S
     ))
 }
 
-fn parse_ecdsa_key(
+async fn parse_ecdsa_key(
     auth: &OidcProvider,
     oidc_signature_algorithm: SignatureAlgorithm,
 ) -> Result<(Secret, AlgorithmParameters), String> {
@@ -220,7 +233,7 @@ fn parse_ecdsa_key(
         _ => unreachable!(),
     };
 
-    let ecdsa_key_pair = build_ecdsa_pem(alg, &auth.signature_key)?;
+    let ecdsa_key_pair = build_ecdsa_pem(alg, auth.signature_key.secret().await?.as_ref())?;
     let ecdsa_public_key = ecdsa_key_pair.public_key().as_ref();
 
     let (x, y) = match oidc_signature_algorithm {

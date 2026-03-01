@@ -37,9 +37,13 @@ impl NatsPubSub {
             opts = opts.no_echo();
         }
 
-        if let (Some(user), Some(pass)) = (config.auth_username, config.auth_secret) {
+        if let (Some(user), Some(pass)) = (
+            config.auth_username,
+            config.auth_secret.secret().await?.map(|v| v.into_owned()),
+        ) {
             opts = opts.user_and_password(user.to_string(), pass.to_string());
-        } else if let Some(credentials) = config.credentials {
+        } else if let Some(credentials) = config.credentials.secret().await?.map(|v| v.into_owned())
+        {
             opts = opts
                 .credentials(&credentials)
                 .map_err(|err| format!("Failed to parse Nats credentials: {}", err))?;

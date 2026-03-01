@@ -5,7 +5,9 @@
  */
 
 use crate::{
-    jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch},
+    jmap::{
+        IntoValue, JmapValue, JsonPointerPatch, MaybeUnpatched, PatchResult, RegistryJsonPatch,
+    },
     pickle::{Pickle, PickledStream},
     types::error::PatchError,
 };
@@ -248,16 +250,16 @@ impl Pickle for IpAddrOrMask {
 }
 
 impl RegistryJsonPatch for IpAddrOrMask {
-    fn patch(
+    fn patch<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'_>,
-    ) -> Result<(), PatchError> {
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
         match (value, pointer.next()) {
             (jmap_tools::Value::Str(value), None) => {
                 if let Ok(new_value) = IpAddrOrMask::from_str(value.as_ref()) {
                     *self = new_value;
-                    Ok(())
+                    Ok(MaybeUnpatched::Patched)
                 } else {
                     Err(PatchError::new(
                         pointer,

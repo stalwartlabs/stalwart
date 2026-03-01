@@ -109,7 +109,7 @@ pub enum RegistryChange {
     Reload(ObjectType),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum CacheInvalidation {
     AccessToken(u32),
     DavResources(u32),
@@ -119,6 +119,8 @@ pub enum CacheInvalidation {
     Tenant(u32),
     Role(u32),
     List(u32),
+    DomainLogo(u32),
+    TenantLogo(u32),
 }
 
 #[derive(Debug)]

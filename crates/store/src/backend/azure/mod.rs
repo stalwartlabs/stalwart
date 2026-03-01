@@ -23,7 +23,10 @@ pub struct AzureStore {
 
 impl AzureStore {
     pub async fn open(config: structs::AzureStore) -> Result<BlobStore, String> {
-        let credentials = match (config.access_key, config.sas_token) {
+        let credentials = match (
+            config.access_key.secret().await?.map(|v| v.into_owned()),
+            config.sas_token.secret().await?.map(|v| v.into_owned()),
+        ) {
             (Some(access_key), None) => {
                 StorageCredentials::access_key(config.storage_account.clone(), access_key)
             }

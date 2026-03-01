@@ -7,10 +7,7 @@
 use crate::registry::mapping::RegistryGetResponse;
 use registry::{
     jmap::IntoValue,
-    schema::{
-        enums::Permission,
-        prelude::{Object, ObjectInner, Property},
-    },
+    schema::prelude::{Object, ObjectInner, Property},
     types::EnumImpl,
 };
 use store::{
@@ -28,7 +25,7 @@ pub(crate) async fn spam_sample_get(
     let ids = if let Some(ids) = get.ids.take() {
         ids
     } else {
-        let query = if get.access_token.has_permission(Permission::Impersonate) {
+        let query = if !get.is_account_filtered {
             RegistryQuery::new(get.object_type).greater_than_or_equal(Property::AccountId, 0u64)
         } else {
             RegistryQuery::new(get.object_type).with_account(get.account_id)
@@ -57,6 +54,13 @@ pub(crate) async fn spam_sample_get(
             if get.is_account_filtered
                 && let ObjectInner::SpamTrainingSample(item) = &mut item.inner
             {
+                if item
+                    .account_id
+                    .is_none_or(|id| id.document_id() != get.account_id)
+                {
+                    get.not_found(id);
+                    continue;
+                }
                 item.blob_id.class = BlobClass::Reserved {
                     account_id: get.account_id,
                     expires: item.expires_at.timestamp() as u64,

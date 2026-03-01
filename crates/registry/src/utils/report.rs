@@ -19,7 +19,7 @@ use types::id::Id;
 pub trait ReportIndex {
     fn text(&self) -> impl Iterator<Item = &str>;
 
-    fn tenant_ids(&self) -> &[Id];
+    fn tenant_id(&self) -> Option<Id>;
 
     fn expires_at(&self) -> u64;
 
@@ -30,7 +30,7 @@ pub trait ReportIndex {
             index.text(Property::Domain, text);
         }
 
-        for tenant_id in self.tenant_ids() {
+        if let Some(tenant_id) = self.tenant_id() {
             index.search(Property::MemberTenantId, tenant_id.id());
         }
 
@@ -47,16 +47,11 @@ impl ReportIndex for structs::ArfExternalReport {
             .iter()
             .filter_map(|s| non_empty(s))
             .chain(
-                [
-                    report.dkim_domain.as_deref(),
-                    report.original_mail_from.as_deref(),
-                ]
-                .into_iter()
-                .flatten()
-                .filter_map(non_empty),
+                [report.dkim_domain.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(non_empty),
             )
-            .chain(self.to.iter().filter_map(|s| non_empty(s)))
-            .map(|domain| domain.rsplit_once('@').map(|(_, d)| d).unwrap_or(domain))
     }
 
     fn text(&self) -> impl Iterator<Item = &str> {
@@ -80,8 +75,8 @@ impl ReportIndex for structs::ArfExternalReport {
             .chain(non_empty(&self.from))
     }
 
-    fn tenant_ids(&self) -> &[Id] {
-        &self.member_tenant_id
+    fn tenant_id(&self) -> Option<Id> {
+        self.member_tenant_id
     }
 
     fn expires_at(&self) -> u64 {
@@ -96,16 +91,6 @@ impl ReportIndex for structs::DmarcExternalReport {
         non_empty(&report.policy_domain)
             .into_iter()
             .filter_map(non_empty)
-            .chain(report.records.iter().flat_map(|r| {
-                non_empty(&r.envelope_from)
-                    .into_iter()
-                    .filter_map(non_empty)
-                    .chain(non_empty(&r.header_from))
-                    .chain(r.dkim_results.iter().filter_map(|d| non_empty(&d.domain)))
-                    .chain(r.spf_results.iter().filter_map(|s| non_empty(&s.domain)))
-            }))
-            .chain(self.to.iter().filter_map(|s| non_empty(s)))
-            .map(|domain| domain.rsplit_once('@').map(|(_, d)| d).unwrap_or(domain))
     }
 
     fn text(&self) -> impl Iterator<Item = &str> {
@@ -128,8 +113,8 @@ impl ReportIndex for structs::DmarcExternalReport {
             .chain(non_empty(&self.from))
     }
 
-    fn tenant_ids(&self) -> &[Id] {
-        &self.member_tenant_id
+    fn tenant_id(&self) -> Option<Id> {
+        self.member_tenant_id
     }
 
     fn expires_at(&self) -> u64 {
@@ -144,13 +129,7 @@ impl ReportIndex for structs::TlsExternalReport {
         report
             .policies
             .iter()
-            .flat_map(|p| {
-                non_empty(&p.policy_domain)
-                    .into_iter()
-                    .chain(p.mx_hosts.iter().filter_map(|s| non_empty(s)))
-            })
-            .chain(self.to.iter().filter_map(|s| non_empty(s)))
-            .map(|domain| domain.rsplit_once('@').map(|(_, d)| d).unwrap_or(domain))
+            .flat_map(|p| non_empty(&p.policy_domain).into_iter())
     }
 
     fn text(&self) -> impl Iterator<Item = &str> {
@@ -172,8 +151,8 @@ impl ReportIndex for structs::TlsExternalReport {
             .chain(non_empty(&self.from))
     }
 
-    fn tenant_ids(&self) -> &[Id] {
-        &self.member_tenant_id
+    fn tenant_id(&self) -> Option<Id> {
+        self.member_tenant_id
     }
 
     fn expires_at(&self) -> u64 {
@@ -513,7 +492,7 @@ impl From<Record> for structs::DmarcReportRecord {
 impl From<structs::DmarcReport> for Report {
     fn from(value: structs::DmarcReport) -> Self {
         Report {
-            version: value.version as f32,
+            version: value.version.into_inner() as f32,
             report_metadata: ReportMetadata {
                 org_name: value.org_name,
                 email: value.email,
@@ -544,7 +523,7 @@ impl From<structs::DmarcReport> for Report {
 impl From<Report> for structs::DmarcReport {
     fn from(value: Report) -> Self {
         structs::DmarcReport {
-            version: value.version as f64,
+            version: (value.version as f64).into(),
             date_range_begin: UTCDateTime::from_timestamp(
                 value.report_metadata.date_range.begin as i64,
             ),

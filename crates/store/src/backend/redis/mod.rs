@@ -64,7 +64,7 @@ impl RedisStore {
         if let Some(value) = config.auth_username {
             builder = builder.username(value);
         }
-        if let Some(value) = config.auth_secret {
+        if let Some(value) = config.auth_secret.secret().await?.map(|v| v.into_owned()) {
             builder = builder.password(value);
         }
         if let Some(value) = config.max_retries {

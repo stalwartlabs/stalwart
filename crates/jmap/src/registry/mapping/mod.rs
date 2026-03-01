@@ -6,11 +6,13 @@
 
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
+    error::set::SetError,
     method::{get::GetResponse, set::SetResponse},
     object::registry::Registry,
 };
+use jmap_tools::Map;
 use registry::{
-    jmap::JmapValue,
+    jmap::{JmapValue, RegistryValue},
     schema::prelude::{ObjectType, Property},
 };
 use store::ahash::AHashSet;
@@ -20,6 +22,9 @@ use utils::map::vec_map::VecMap;
 pub mod account;
 pub mod deleted_item;
 pub mod log;
+pub mod masked_email;
+pub mod principal;
+pub mod public_key;
 pub mod queued_message;
 pub mod report;
 pub mod spam_sample;
@@ -51,4 +56,29 @@ pub(crate) struct RegistrySetResponse<'x> {
     pub object_flags: u64,
     pub is_tenant_filtered: bool,
     pub is_account_filtered: bool,
+}
+
+pub type ValidationResult = trc::Result<Result<ObjectResponse, SetError<Property>>>;
+
+pub struct ObjectResponse {
+    pub id: Option<Id>,
+    pub object: Map<'static, Property, RegistryValue>,
+}
+
+impl ObjectResponse {
+    pub fn new(id: Id, object: Map<'static, Property, RegistryValue>) -> Self {
+        Self {
+            id: Some(id),
+            object,
+        }
+    }
+}
+
+impl Default for ObjectResponse {
+    fn default() -> Self {
+        Self {
+            id: None,
+            object: Map::with_capacity(1),
+        }
+    }
 }

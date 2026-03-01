@@ -50,6 +50,7 @@ pub(crate) async fn report_get(
         internal_report_ids(get.server, object_id, get.server.core.jmap.get_max_objects).await?
     };
 
+    let tenant_id = get.access_token.tenant_id().map(Id::from);
     for id in ids {
         if let Some(report) = get
             .server
@@ -60,7 +61,11 @@ pub(crate) async fn report_get(
             })))
             .await?
         {
-            get.insert(id, report.into_value());
+            if !get.is_tenant_filtered || report.inner.member_tenant_id() == tenant_id {
+                get.insert(id, report.into_value());
+            } else {
+                get.not_found(id);
+            }
         } else {
             get.not_found(id);
         }

@@ -105,18 +105,6 @@ impl Pickle for i64 {
     }
 }
 
-impl Pickle for f64 {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_be_bytes());
-    }
-
-    fn unpickle(stream: &mut PickledStream<'_>) -> Option<Self> {
-        let mut arr = [0u8; std::mem::size_of::<f64>()];
-        arr.copy_from_slice(stream.read_bytes(std::mem::size_of::<f64>())?);
-        Some(f64::from_be_bytes(arr))
-    }
-}
-
 impl Pickle for bool {
     fn pickle(&self, out: &mut Vec<u8>) {
         out.push(if *self { 1 } else { 0 });

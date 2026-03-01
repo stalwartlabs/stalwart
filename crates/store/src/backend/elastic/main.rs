@@ -23,12 +23,15 @@ impl ElasticSearchStore {
         Url::parse(&config.url).map_err(|e| format!("Invalid URL: {e}",))?;
 
         Ok(SearchStore::ElasticSearch(Arc::new(Self {
-            client: config.http_auth.build_http_client(
-                config.http_headers,
-                "application/json".into(),
-                config.timeout,
-                config.allow_invalid_certs,
-            )?,
+            client: config
+                .http_auth
+                .build_http_client(
+                    config.http_headers,
+                    "application/json".into(),
+                    config.timeout,
+                    config.allow_invalid_certs,
+                )
+                .await?,
             url: config.url,
             num_replicas: config.num_replicas as usize,
             num_shards: config.num_shards as usize,

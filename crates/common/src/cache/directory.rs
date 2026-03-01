@@ -10,7 +10,7 @@ use crate::{Server, auth::DomainCache};
 use registry::{
     schema::{
         prelude::{Object, ObjectType},
-        structs::{Account, EmailAlias, GroupAccount, UserAccount},
+        structs::{Account, EmailAlias, GroupAccount, Roles, UserAccount},
     },
     types::{datetime::UTCDateTime, id::ObjectId},
 };
@@ -178,10 +178,21 @@ impl Server {
                     description: account.description,
                     member_group_ids,
                     member_tenant_id: domain.id_tenant.map(Id::from),
-                    role_ids: self.core.network.security.default_role_ids_user.clone(),
+                    roles: Roles::Default,
                     secret: account.secret.unwrap_or_default(),
                     ..Default::default()
                 }));
+
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+                #[cfg(feature = "enterprise")]
+                if self.core.is_enterprise_edition() && !self.can_create_account().await? {
+                    return Err(trc::AuthEvent::Error.into_err().details(
+                        "Account creation not possible: license key account limit reached",
+                    ));
+                }
+                // SPDX-SnippetEnd
 
                 match self
                     .registry()
@@ -306,9 +317,20 @@ impl Server {
                     created_at: UTCDateTime::now(),
                     description: group.description,
                     member_tenant_id: domain.id_tenant.map(Id::from),
-                    role_ids: self.core.network.security.default_role_ids_group.clone(),
+                    roles: Roles::Default,
                     ..Default::default()
                 }));
+
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+                #[cfg(feature = "enterprise")]
+                if self.core.is_enterprise_edition() && !self.can_create_account().await? {
+                    return Err(trc::AuthEvent::Error.into_err().details(
+                        "Account creation not possible: license key account limit reached",
+                    ));
+                }
+                // SPDX-SnippetEnd
 
                 match self
                     .registry()

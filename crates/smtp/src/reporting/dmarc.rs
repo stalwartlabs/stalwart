@@ -600,7 +600,7 @@ impl DmarcReporting for Server {
                             policy_subdomain_disposition: policy.sp.into(),
                             policy_testing_mode: policy.testing,
                             policy_version: None,
-                            version: 1.0,
+                            version: 1.0.into(),
                             ..Default::default()
                         },
                         policy_identifier: policy_hash,

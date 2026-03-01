@@ -17,7 +17,10 @@ use ahash::AHashMap;
 use registry::schema::{
     enums::AiModelType,
     prelude::{ObjectType, Property},
-    structs::{self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SpamLlm},
+    structs::{
+        self, AiModel, Alert, CalendarAlarm, CalendarScheduling, DataRetention, SecretKeyOptional,
+        SecretKeyValue, SpamLlm,
+    },
 };
 use std::sync::Arc;
 use store::{
@@ -33,14 +36,17 @@ impl Enterprise {
         let mut update_license = None;
 
         let mut enterprise = bp.setting_infallible::<structs::Enterprise>().await;
-        let license_result = match (&enterprise.license_key, &enterprise.api_key) {
-            (Some(license_key), maybe_api_key) => {
+        let license_result = match (
+            enterprise.license_key.secret().await,
+            enterprise.api_key.secret().await,
+        ) {
+            (Ok(Some(license_key)), Ok(maybe_api_key)) => {
                 match (
                     LicenseKey::new(license_key, &server_hostname),
                     maybe_api_key,
                 ) {
                     (Ok(license), Some(api_key)) if license.is_near_expiration() => Ok(license
-                        .try_renew(api_key)
+                        .try_renew(api_key.as_ref())
                         .await
                         .map(|result| {
                             update_license = Some(result.encoded_key);
@@ -49,7 +55,7 @@ impl Enterprise {
                         .unwrap_or(license)),
                     (Ok(license), None) => Ok(license),
                     (Err(_), Some(api_key)) => LicenseKey::invalid(&server_hostname)
-                        .try_renew(api_key)
+                        .try_renew(api_key.as_ref())
                         .await
                         .map(|result| {
                             update_license = Some(result.encoded_key);
@@ -58,14 +64,22 @@ impl Enterprise {
                     (maybe_license, _) => maybe_license,
                 }
             }
-            (None, Some(api_key)) => LicenseKey::invalid(&server_hostname)
-                .try_renew(api_key)
+            (Ok(None), Ok(Some(api_key))) => LicenseKey::invalid(&server_hostname)
+                .try_renew(api_key.as_ref())
                 .await
                 .map(|result| {
                     update_license = Some(result.encoded_key);
                     result.key
                 }),
-            (None, None) => {
+            (Ok(None), Ok(None)) => {
+                return None;
+            }
+            (Err(err), _) => {
+                bp.build_error(ObjectType::Enterprise.singleton(), err);
+                return None;
+            }
+            (_, Err(err)) => {
+                bp.build_error(ObjectType::Enterprise.singleton(), err);
                 return None;
             }
         };
@@ -82,7 +96,7 @@ impl Enterprise {
         // Update the license if a new one was obtained
         let logo_url = enterprise.logo_url.clone();
         if let Some(license) = update_license {
-            enterprise.license_key = Some(license);
+            enterprise.license_key = SecretKeyOptional::Value(SecretKeyValue { secret: license });
             if let Err(err) = bp
                 .registry
                 .write(RegistryWrite::insert(&enterprise.into()))
@@ -139,6 +153,7 @@ impl Enterprise {
                 headers: api
                     .http_auth
                     .build_headers(api.http_headers, "application/json".into())
+                    .await
                     .map_err(|err| {
                         bp.build_error(id, format!("Unable to build HTTP headers: {}", err))
                     })
@@ -146,7 +161,7 @@ impl Enterprise {
                 model: api.model,
                 timeout: api.timeout.into_inner(),
                 tls_allow_invalid_certs: api.allow_invalid_certs,
-                default_temperature: api.temperature,
+                default_temperature: api.temperature.into_inner(),
             });
             ai_apis.insert(api.id.clone(), api.clone());
             ai_apis_ids.insert(id.id().id(), api);
@@ -254,7 +269,7 @@ impl SpamFilterLlmConfig {
                 };
                 Some(SpamFilterLlmConfig {
                     model,
-                    temperature: llm.temperature,
+                    temperature: llm.temperature.into_inner(),
                     prompt: llm.prompt,
                     separator: llm.separator.chars().next().unwrap_or(','),
                     index_category: llm.response_pos_category as usize,
