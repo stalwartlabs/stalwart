@@ -13,6 +13,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 ## Fixed
 - Live tracing in community and OSS versions.
 - Timezone changes from the `AccountSettings` object return `invalidProperties`.
+- `mail-parser` panic with certain messages containing corrupted attachments.
 
 ## [0.16.3] - 2026-04-30
 
