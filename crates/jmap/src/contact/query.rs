@@ -347,7 +347,7 @@ impl ContactCardQuery for Server {
             .fetch_dav_resources(
                 access_token.account_id(),
                 account_id,
-                SyncCollection::Calendar,
+                SyncCollection::AddressBook,
             )
             .await?;
 
