@@ -16,16 +16,17 @@ impl Server {
     ) -> trc::Result<Resource<Vec<u8>>> {
         // Obtain parameters
         let params = UrlParams::new(uri);
-        let emailaddress = params
+        let emailaddress_param = params
             .get("emailaddress")
             .unwrap_or_default()
             .to_lowercase();
-        let Some((_, domain)) = emailaddress.rsplit_once('@') else {
-            return Err(trc::ResourceEvent::BadParameters
-                .into_err()
-                .details("Missing domain in email address"));
-        };
         let default_host = &self.core.network.server_name;
+        let (emailaddress, domain) =
+            if let Some((_, domain)) = emailaddress_param.rsplit_once('@') {
+                (emailaddress_param.as_str(), domain)
+            } else {
+                ("%EMAILADDRESS%", default_host.as_str())
+            };
 
         // Build XML response
         let mut config = String::with_capacity(1024);
