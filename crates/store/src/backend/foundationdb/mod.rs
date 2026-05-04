@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use foundationdb::{Database, FdbError, api::NetworkAutoStop};
+use foundationdb::{Database, FdbError};
 use std::time::{Duration, Instant};
 
 pub mod blob;
@@ -15,10 +15,8 @@ pub mod write;
 const MAX_VALUE_SIZE: usize = 100000;
 pub const TRANSACTION_EXPIRY: Duration = Duration::from_secs(1);
 
-#[allow(dead_code)]
 pub struct FdbStore {
     db: Database,
-    guard: NetworkAutoStop,
     version: parking_lot::Mutex<ReadVersion>,
 }
 

@@ -18,6 +18,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 - Spam filter: Use original instead of rewritten `RCPT` on checks.
 - JMAP references in nested objects not resolved.
 - Import tool fails to restore registry entries.
+- FDB: Allow multiple FoundationDB instances in the same process.
 
 ## [0.16.3] - 2026-04-30
 

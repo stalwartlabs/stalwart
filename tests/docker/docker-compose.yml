@@ -60,11 +60,18 @@ services:
     tmpfs:
       - /var/fdb/data
       - /var/fdb/logs
+    healthcheck:
+      test: [ "CMD-SHELL", "fdbcli --exec 'status' --timeout 3 >/dev/null 2>&1" ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
 
   fdb-init:
     image: foundationdb/foundationdb:7.4.6
     depends_on:
-      - foundationdb
+      foundationdb:
+        condition: service_healthy
     volumes:
       - fdb-config:/var/fdb
       - ./scripts/init-fdb.sh:/init-fdb.sh:ro

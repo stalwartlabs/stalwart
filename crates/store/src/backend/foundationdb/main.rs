@@ -6,19 +6,28 @@
 
 use super::FdbStore;
 use crate::Store;
-use foundationdb::{Database, api, options::DatabaseOption};
+use foundationdb::{Database, api, api::NetworkAutoStop, options::DatabaseOption};
+use parking_lot::Mutex;
 use registry::schema::structs;
 use std::sync::Arc;
 
+static FDB_NETWORK: Mutex<Option<NetworkAutoStop>> = Mutex::new(None);
+
 impl FdbStore {
     pub async fn open(config: structs::FoundationDbStore) -> Result<Store, String> {
-        let guard = unsafe {
-            api::FdbApiBuilder::default()
-                .build()
-                .map_err(|err| format!("Failed to boot FoundationDB: {err:?}"))?
-                .boot()
-                .map_err(|err| format!("Failed to boot FoundationDB: {err:?}"))?
-        };
+        {
+            let mut guard = FDB_NETWORK.lock();
+            if guard.is_none() {
+                let network = unsafe {
+                    api::FdbApiBuilder::default()
+                        .build()
+                        .map_err(|err| format!("Failed to boot FoundationDB: {err:?}"))?
+                        .boot()
+                        .map_err(|err| format!("Failed to boot FoundationDB: {err:?}"))?
+                };
+                *guard = Some(network);
+            }
+        }
 
         let db = Database::new(config.cluster_file.as_deref())
             .map_err(|err| format!("Failed to create FoundationDB database: {err:?}"))?;
@@ -49,7 +58,6 @@ impl FdbStore {
         }
 
         Ok(Store::FoundationDb(Arc::new(Self {
-            guard,
             db,
             version: Default::default(),
         })))

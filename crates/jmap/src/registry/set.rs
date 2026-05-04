@@ -29,7 +29,7 @@ use crate::registry::{
 };
 use common::{
     Server, auth::AccessToken, cache::invalidate::CacheInvalidationBuilder,
-    expr::if_block::BootstrapExprExt,
+    expr::if_block::BootstrapExprExt, ipc::CacheInvalidation,
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -649,8 +649,18 @@ impl RegistrySet for Server {
                             .await?
                         {
                             RegistryWriteResult::Success(_) => {
-                                // Schedule account deletion
                                 if let ObjectInner::Account(account) = &object.inner {
+                                    for sharee_id in self
+                                        .store()
+                                        .acl_revoke_all(id.document_id())
+                                        .await
+                                        .caused_by(trc::location!())?
+                                    {
+                                        cache_invalidator.invalidate(
+                                            CacheInvalidation::AccessToken(sharee_id),
+                                        );
+                                    }
+
                                     schedule_account_destruction(set.server, id, account).await?;
                                 }
 

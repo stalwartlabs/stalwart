@@ -1,13 +1,18 @@
+# syntax=docker/dockerfile:1
+
 FROM debian:trixie-slim AS chef
+ARG TARGETARCH
+ARG FDB_VERSION_RANGE="7.4"
 RUN apt-get update && \
     export DEBIAN_FRONTEND=noninteractive && \
-    apt-get install -yq \
+    apt-get install -yq --no-install-recommends \
     build-essential \
+    ca-certificates \
     cmake \
     clang \
     curl \
-    protobuf-compiler \
-    adduser
+    jq \
+    protobuf-compiler
 ENV RUSTUP_HOME=/opt/rust/rustup \
     PATH=/home/root/.cargo/bin:/opt/rust/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 RUN curl https://sh.rustup.rs -sSf | \
@@ -15,8 +20,19 @@ RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path && \
     env CARGO_HOME=/opt/rust/cargo \
     rustup component add rustfmt
-RUN curl -LO https://github.com/apple/foundationdb/releases/download/7.3.69/foundationdb-clients_7.3.69-1_amd64.deb && \
-    dpkg -i foundationdb-clients_7.3.69-1_amd64.deb
+RUN \
+    ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    case "$ARCH" in \
+        amd64) FDB_ARCH=amd64 ;; \
+        arm64) FDB_ARCH=aarch64 ;; \
+        *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; \
+    esac && \
+    curl --retry 5 -fLso fdb-client.deb "$(curl --retry 5 -fLs 'https://api.github.com/repos/apple/foundationdb/releases?per_page=100' | jq --arg FDB_ARCH "$FDB_ARCH" --arg RANGE "${FDB_VERSION_RANGE}" -r '[.[] | select(.tag_name | startswith($RANGE + "."))] | sort_by(.tag_name | split(".") | map(tonumber)) | reverse | .[0].assets[] | select(.name | test("foundationdb-clients.*" + $FDB_ARCH + ".deb$")) | .browser_download_url')" && \
+    mkdir -p /fdb && \
+    dpkg -x fdb-client.deb /fdb && \
+    mv /fdb/usr/include/foundationdb /usr/include && \
+    mv /fdb/usr/lib/libfdb_c.so /usr/lib && \
+    rm -rf fdb-client.deb /fdb
 RUN env CARGO_HOME=/opt/rust/cargo cargo install cargo-chef && \
     rm -rf /opt/rust/cargo/registry/
 WORKDIR /app
@@ -42,12 +58,10 @@ RUN cargo build -p stalwart --no-default-features --features "foundationdb s3 re
 FROM debian:trixie-slim AS runtime
 
 COPY --from=builder --chmod=0755 /app/target/release/stalwart /usr/local/bin/stalwart
+COPY --from=builder /usr/lib/libfdb_c.so /usr/lib/libfdb_c.so
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
     apt-get install -yq --no-install-recommends ca-certificates curl libcap2-bin && \
-    curl -LO https://github.com/apple/foundationdb/releases/download/7.3.69/foundationdb-clients_7.3.69-1_amd64.deb && \
-    dpkg -i foundationdb-clients_7.3.69-1_amd64.deb && \
-    rm -f foundationdb-clients_7.3.69-1_amd64.deb && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd -r -g 2000 stalwart && \
     useradd -r -u 2000 -g 2000 -s /usr/sbin/nologin -M stalwart && \
