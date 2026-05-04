@@ -22,6 +22,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 - Import tool fails to restore registry entries.
 - FDB: Allow multiple FoundationDB instances in the same process.
 - Autoconfig: Return `%EMAILADDRESS%` when no email address is provided.
+- Quota: Include Sieve scripts in quota recalculations.
 
 ## [0.16.3] - 2026-04-30
 

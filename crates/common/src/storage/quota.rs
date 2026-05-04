@@ -55,7 +55,7 @@ impl Server {
         item_size: u64,
     ) -> trc::Result<()> {
         if account.quota_disk != 0 {
-            let used_quota = self.get_used_quota_account(account.id).await? as u64;
+            let used_quota = self.get_used_quota_account(account.id).await?.max(0) as u64;
 
             if used_quota + item_size > account.quota_disk {
                 return Err(trc::LimitEvent::Quota
@@ -76,7 +76,7 @@ impl Server {
             let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
 
             if tenant.quota_disk != 0 {
-                let used_quota = self.get_used_quota_tenant(tenant_id).await? as u64;
+                let used_quota = self.get_used_quota_tenant(tenant_id).await?.max(0) as u64;
 
                 if used_quota + item_size > tenant.quota_disk {
                     return Err(trc::LimitEvent::TenantQuota

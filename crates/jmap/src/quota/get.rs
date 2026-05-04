@@ -81,7 +81,7 @@ impl QuotaGet for Server {
                     QuotaProperty::Id => Value::Element(id.into()),
                     QuotaProperty::ResourceType => "octets".to_string().into(),
                     QuotaProperty::Used => {
-                        (self.get_used_quota_account(account_id).await? as u64).into()
+                        (self.get_used_quota_account(account_id).await?.max(0) as u64).into()
                     }
                     QuotaProperty::HardLimit => account.as_ref().disk_quota().into(),
                     QuotaProperty::Scope => "account".to_string().into(),

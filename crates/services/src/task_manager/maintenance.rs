@@ -20,6 +20,7 @@ use common::{
 use email::{
     cache::MessageCacheFetch,
     message::{delete::EmailDeletion, ingest::EmailIngest, metadata::MessageData},
+    sieve::SieveScript,
 };
 use groupware::{
     calendar::{Calendar, CalendarEvent, CalendarEventNotification},
@@ -450,6 +451,7 @@ async fn recalculate_quota(server: &Server, account_id: u32) -> trc::Result<()> 
         Collection::AddressBook,
         Collection::ContactCard,
         Collection::FileNode,
+        Collection::SieveScript,
     ] {
         server
             .archives(account_id, collection, &(), |_, archive| {
@@ -474,6 +476,9 @@ async fn recalculate_quota(server: &Server, account_id: u32) -> trc::Result<()> 
                     }
                     Collection::FileNode => {
                         quota += archive.unarchive::<FileNode>()?.size() as i64;
+                    }
+                    Collection::SieveScript => {
+                        quota += u32::from(archive.unarchive::<SieveScript>()?.size) as i64;
                     }
                     _ => {}
                 }
