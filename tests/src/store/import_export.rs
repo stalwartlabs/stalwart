@@ -146,6 +146,24 @@ pub async fn test(test: &TestServer) {
             }),
             random_bytes(idx + 10),
         );
+        batch.set(
+            ValueClass::Registry(RegistryClass::IndexId {
+                object_id: idx as u16,
+                item_id: idx as u64 * 100,
+            }),
+            vec![],
+        );
+        for index_id in 0u16..3 {
+            batch.set(
+                ValueClass::Registry(RegistryClass::Index {
+                    object_id: idx as u16,
+                    index_id,
+                    key: random_bytes(idx + index_id as usize),
+                    item_id: idx as u64 * 100,
+                }),
+                vec![],
+            );
+        }
     }
     db.write(batch.build_all()).await.unwrap();
 
