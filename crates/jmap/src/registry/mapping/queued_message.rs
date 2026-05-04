@@ -472,9 +472,18 @@ pub(crate) async fn queued_message_query(
 
         let mut total = 0;
         if let Some(anchor) = req.request.anchor {
-            let anchor = anchor.id();
-            if anchor > due_from {
-                due_from = anchor;
+            let anchor_id = anchor.id();
+            if let Some(archive) = req.server.read_message_archive(anchor_id).await?
+                && let Ok(archived) = archive.unarchive::<Message>()
+                && let Some(anchor_due) = archived.next_delivery_event(queue_name)
+                && anchor_due >= due_from
+                && anchor_due <= due_to
+            {
+                if params.sort_ascending {
+                    due_from = anchor_due;
+                } else {
+                    due_to = anchor_due;
+                }
             }
         }
 

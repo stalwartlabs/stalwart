@@ -64,6 +64,7 @@ pub async fn insert_test_data(server: &Server) {
         let object_id = ObjectType::TlsInternalReport.to_id();
         let item_id = server.inner.data.queue_id_gen.generate();
         let mut batch = BatchBuilder::new();
+        batch.clear(report.primary_key());
         report.write_ops(&mut batch, item_id, true);
         let report_bytes = report.to_pickled_vec();
         batch.set(
@@ -77,6 +78,7 @@ pub async fn insert_test_data(server: &Server) {
         let object_id = ObjectType::DmarcInternalReport.to_id();
         let item_id = server.inner.data.queue_id_gen.generate();
         let mut batch = BatchBuilder::new();
+        batch.clear(report.primary_key());
         report.write_ops(&mut batch, item_id, true);
         let report_bytes = report.to_pickled_vec();
         batch.set(

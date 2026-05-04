@@ -411,15 +411,19 @@ pub(crate) async fn metric_query(
     if ts_from != 0 {
         ts_from = SnowflakeIdGenerator::from_timestamp(ts_from).unwrap_or(0);
     }
-    if let Some(anchor) = req.request.anchor {
-        let anchor = anchor.id();
-        if anchor > ts_from {
-            ts_from = anchor;
-        }
-    }
-
     if ts_to != u64::MAX {
         ts_to = SnowflakeIdGenerator::from_timestamp(ts_to).unwrap_or(u64::MAX);
+    }
+
+    if let Some(anchor) = req.request.anchor {
+        let anchor = anchor.id();
+        if params.sort_ascending {
+            if anchor > ts_from {
+                ts_from = anchor;
+            }
+        } else if anchor < ts_to {
+            ts_to = anchor;
+        }
     }
 
     let from_key = ValueKey::from(ValueClass::Telemetry(TelemetryClass::Metric(ts_from)));

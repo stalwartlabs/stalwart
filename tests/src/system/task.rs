@@ -137,7 +137,143 @@ pub async fn test(test: &mut TestServer) {
         .await
         .assert_destroyed(&[task.id]);
 
+    pagination_test(test).await;
+
     test.cleanup().await;
+}
+
+async fn pagination_test(test: &mut TestServer) {
+    println!("Running Task pagination tests...");
+    let admin = test.account("admin@example.org");
+
+    admin.assert_no_tasks().await;
+
+    let mut created = Vec::with_capacity(12);
+    for i in 0..12u64 {
+        created.push(admin.schedule_test_task(TASK_SUCCESS, 3600 + i).await);
+    }
+
+    let asc_order: Vec<Id> = admin
+        .registry_query_paginated(ObjectType::Task, "due", true, None, None, None, None, false)
+        .await
+        .object_ids()
+        .collect();
+    assert_eq!(asc_order.len(), 12, "expected 12 tasks, got {}", asc_order.len());
+
+    let desc_order: Vec<Id> = asc_order.iter().rev().copied().collect();
+
+    for chunk_start in [0usize, 5, 10] {
+        let chunk_size = std::cmp::min(5, 12 - chunk_start);
+
+        let asc = admin
+            .registry_query_paginated(
+                ObjectType::Task,
+                "due",
+                true,
+                Some(chunk_start as i32),
+                Some(5),
+                None,
+                None,
+                false,
+            )
+            .await
+            .object_ids()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            asc,
+            asc_order[chunk_start..chunk_start + chunk_size],
+            "ascending position={chunk_start} limit=5",
+        );
+
+        let desc = admin
+            .registry_query_paginated(
+                ObjectType::Task,
+                "due",
+                false,
+                Some(chunk_start as i32),
+                Some(5),
+                None,
+                None,
+                false,
+            )
+            .await
+            .object_ids()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            desc,
+            desc_order[chunk_start..chunk_start + chunk_size],
+            "descending position={chunk_start} limit=5",
+        );
+    }
+
+    for anchor_idx in [4usize, 9] {
+        let chunk_size = std::cmp::min(5, 12 - anchor_idx - 1);
+
+        let asc = admin
+            .registry_query_paginated(
+                ObjectType::Task,
+                "due",
+                true,
+                None,
+                Some(5),
+                Some(asc_order[anchor_idx]),
+                Some(1),
+                false,
+            )
+            .await
+            .object_ids()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            asc,
+            asc_order[anchor_idx + 1..anchor_idx + 1 + chunk_size],
+            "ascending anchor={} offset=1 limit=5",
+            asc_order[anchor_idx],
+        );
+
+        let desc = admin
+            .registry_query_paginated(
+                ObjectType::Task,
+                "due",
+                false,
+                None,
+                Some(5),
+                Some(desc_order[anchor_idx]),
+                Some(1),
+                false,
+            )
+            .await
+            .object_ids()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            desc,
+            desc_order[anchor_idx + 1..anchor_idx + 1 + chunk_size],
+            "descending anchor={} offset=1 limit=5",
+            desc_order[anchor_idx],
+        );
+    }
+
+    let response = admin
+        .registry_query_paginated(
+            ObjectType::Task,
+            "due",
+            true,
+            Some(0),
+            Some(5),
+            None,
+            None,
+            true,
+        )
+        .await;
+    let total = response
+        .pointer("/methodResponses/0/1/total")
+        .and_then(|v| v.as_u64());
+    assert_eq!(total, Some(12), "expected calculateTotal=12");
+
+    admin
+        .registry_destroy(ObjectType::Task, created.clone())
+        .await
+        .assert_destroyed(&created);
+    admin.assert_no_tasks().await;
 }
 
 impl Account {

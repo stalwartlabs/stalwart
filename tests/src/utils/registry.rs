@@ -144,6 +144,49 @@ impl Account {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn registry_query_paginated(
+        &self,
+        object: ObjectType,
+        sort_property: &str,
+        sort_ascending: bool,
+        position: Option<i32>,
+        limit: Option<usize>,
+        anchor: Option<Id>,
+        anchor_offset: Option<i32>,
+        calculate_total: bool,
+    ) -> JmapResponse {
+        let name = object.as_str();
+        let mut args = serde_json::Map::new();
+        args.insert("filter".into(), json!({}));
+        args.insert(
+            "sort".into(),
+            json!([{ "property": sort_property, "isAscending": sort_ascending }]),
+        );
+        if let Some(p) = position {
+            args.insert("position".into(), json!(p));
+        }
+        if let Some(l) = limit {
+            args.insert("limit".into(), json!(l));
+        }
+        if let Some(a) = anchor {
+            args.insert("anchor".into(), json!(a.to_string()));
+        }
+        if let Some(ao) = anchor_offset {
+            args.insert("anchorOffset".into(), json!(ao));
+        }
+        if calculate_total {
+            args.insert("calculateTotal".into(), json!(true));
+        }
+
+        self.jmap_method_calls(json!([[
+            format!("x:{name}/query"),
+            Value::Object(args),
+            "0"
+        ]]))
+        .await
+    }
+
     pub async fn registry_destroy(
         &self,
         object: ObjectType,
