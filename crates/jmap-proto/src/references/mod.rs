@@ -98,6 +98,8 @@ mod tests {
         },
         response::{ChangesResponseMethod, GetResponseMethod, Response, ResponseMethod},
     };
+    use crate::references::Graph;
+    use crate::references::eval::EvalObjectReferences;
     use jmap_tools::{Key, Map, Value};
     use std::collections::HashMap;
     use types::id::Id;
@@ -720,5 +722,231 @@ mod tests {
         } else {
             panic!("Expected Mailbox Set Request");
         }
+    }
+
+    #[test]
+    fn eval_nested_element_ref() {
+        let mut created_ids = HashMap::new();
+        created_ids.insert("server-1".to_string(), Id::new(42).into());
+        let response = Response::new(0, created_ids, 0);
+
+        let mut value: Value<'_, MailboxProperty, MailboxValue> = Value::Object(Map::from(vec![
+            (
+                Key::Property(MailboxProperty::Name),
+                Value::Str("inbox".into()),
+            ),
+            (
+                Key::Property(MailboxProperty::ParentId),
+                Value::Object(Map::from(vec![(
+                    Key::Property(MailboxProperty::ParentId),
+                    Value::Element(MailboxValue::IdReference("server-1".into())),
+                )])),
+            ),
+        ]));
+
+        value
+            .eval_object_references(&response, &mut Graph::None, 0, 5, true)
+            .unwrap();
+
+        let nested = value
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap();
+        assert_eq!(nested, &Value::Element(MailboxValue::Id(Id::new(42))));
+    }
+
+    #[test]
+    fn eval_array_element_ref() {
+        let mut created_ids = HashMap::new();
+        created_ids.insert("a".to_string(), Id::new(1).into());
+        created_ids.insert("b".to_string(), Id::new(2).into());
+        let response = Response::new(0, created_ids, 0);
+
+        let mut value: Value<'_, MailboxProperty, MailboxValue> =
+            Value::Object(Map::from(vec![(
+                Key::Property(MailboxProperty::ParentId),
+                Value::Array(vec![
+                    Value::Element(MailboxValue::IdReference("a".into())),
+                    Value::Element(MailboxValue::IdReference("b".into())),
+                ]),
+            )]));
+
+        value
+            .eval_object_references(&response, &mut Graph::None, 0, 5, true)
+            .unwrap();
+
+        let arr = value
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], Value::Element(MailboxValue::Id(Id::new(1))));
+        assert_eq!(arr[1], Value::Element(MailboxValue::Id(Id::new(2))));
+    }
+
+    #[test]
+    fn eval_nested_array_of_objects_with_element_ref() {
+        let mut created_ids = HashMap::new();
+        created_ids.insert("a".to_string(), Id::new(7).into());
+        let response = Response::new(0, created_ids, 0);
+
+        let mut value: Value<'_, MailboxProperty, MailboxValue> =
+            Value::Object(Map::from(vec![(
+                Key::Property(MailboxProperty::ParentId),
+                Value::Array(vec![Value::Object(Map::from(vec![(
+                    Key::Property(MailboxProperty::ParentId),
+                    Value::Element(MailboxValue::IdReference("a".into())),
+                )]))]),
+            )]));
+
+        value
+            .eval_object_references(&response, &mut Graph::None, 0, 5, true)
+            .unwrap();
+
+        let resolved = value
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap()
+            .as_array()
+            .unwrap()[0]
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap();
+        assert_eq!(resolved, &Value::Element(MailboxValue::Id(Id::new(7))));
+    }
+
+    #[test]
+    fn eval_graph_collects_nested_ref() {
+        let response = Response::new(0, HashMap::new(), 0);
+        let mut graph_map: HashMap<String, Vec<String>> = HashMap::new();
+        let child_id = "outer".to_string();
+
+        let mut value: Value<'_, MailboxProperty, MailboxValue> =
+            Value::Object(Map::from(vec![(
+                Key::Property(MailboxProperty::ParentId),
+                Value::Object(Map::from(vec![(
+                    Key::Property(MailboxProperty::ParentId),
+                    Value::Element(MailboxValue::IdReference("inner".into())),
+                )])),
+            )]));
+
+        {
+            let mut graph = Graph::Some {
+                child_id: &child_id,
+                graph: &mut graph_map,
+            };
+            value
+                .eval_object_references(&response, &mut graph, 0, 5, true)
+                .unwrap();
+        }
+
+        assert_eq!(graph_map.get("outer"), Some(&vec!["inner".to_string()]));
+    }
+
+    #[test]
+    fn eval_unresolved_nested_ref_errors_without_graph() {
+        let response = Response::new(0, HashMap::new(), 0);
+
+        let mut value: Value<'_, MailboxProperty, MailboxValue> =
+            Value::Object(Map::from(vec![(
+                Key::Property(MailboxProperty::ParentId),
+                Value::Object(Map::from(vec![(
+                    Key::Property(MailboxProperty::ParentId),
+                    Value::Element(MailboxValue::IdReference("missing".into())),
+                )])),
+            )]));
+
+        let err = value
+            .eval_object_references(&response, &mut Graph::None, 0, 5, true)
+            .unwrap_err();
+        assert!(
+            err.matches(trc::EventType::Jmap(
+                trc::JmapEvent::InvalidResultReference
+            )),
+            "{:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn eval_depth_limit_blocks_walk_into_inner_object() {
+        let mut created_ids = HashMap::new();
+        created_ids.insert("inner".to_string(), Id::new(99).into());
+        let response = Response::new(0, created_ids, 0);
+
+        let mut value: Value<'_, MailboxProperty, MailboxValue> =
+            Value::Object(Map::from(vec![(
+                Key::Property(MailboxProperty::ParentId),
+                Value::Object(Map::from(vec![(
+                    Key::Property(MailboxProperty::ParentId),
+                    Value::Object(Map::from(vec![(
+                        Key::Property(MailboxProperty::ParentId),
+                        Value::Element(MailboxValue::IdReference("inner".into())),
+                    )])),
+                )])),
+            )]));
+
+        value
+            .eval_object_references(&response, &mut Graph::None, 0, 2, true)
+            .unwrap();
+
+        let deepest = value
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap();
+        assert_eq!(
+            deepest,
+            &Value::Element(MailboxValue::IdReference("inner".into()))
+        );
+    }
+
+    #[test]
+    fn eval_depth_limit_substitutes_element_at_max_depth() {
+        let mut created_ids = HashMap::new();
+        created_ids.insert("inner".to_string(), Id::new(99).into());
+        let response = Response::new(0, created_ids, 0);
+
+        let mut value: Value<'_, MailboxProperty, MailboxValue> =
+            Value::Object(Map::from(vec![(
+                Key::Property(MailboxProperty::ParentId),
+                Value::Object(Map::from(vec![(
+                    Key::Property(MailboxProperty::ParentId),
+                    Value::Element(MailboxValue::IdReference("inner".into())),
+                )])),
+            )]));
+
+        value
+            .eval_object_references(&response, &mut Graph::None, 0, 2, true)
+            .unwrap();
+
+        let resolved = value
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get(&Key::Property(MailboxProperty::ParentId))
+            .unwrap();
+        assert_eq!(resolved, &Value::Element(MailboxValue::Id(Id::new(99))));
     }
 }

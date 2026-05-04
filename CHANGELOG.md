@@ -16,6 +16,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 - `mail-parser` panic with certain messages containing corrupted attachments.
 - Pagination by anchor for queued messages, tasks and metrics.
 - Spam filter: Use original instead of rewritten `RCPT` on checks.
+- JMAP references in nested objects not resolved.
 
 ## [0.16.3] - 2026-04-30
 
