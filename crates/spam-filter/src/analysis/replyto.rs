@@ -79,11 +79,11 @@ impl SpamFilterAnalyzeReplyTo for Server {
                             .any(|r| r.email == ctx.output.from.email)
                         || ctx
                             .output
-                            .env_to_addr
+                            .env_to_orig_addr
                             .iter()
                             .any(|r| r.domain_part.sld == ctx.output.from.email.domain_part.sld)
-                        || ctx.output.env_to_addr.len() == 1
-                            && ctx.output.env_to_addr.contains(&ctx.output.from.email))
+                        || ctx.output.env_to_orig_addr.len() == 1
+                            && ctx.output.env_to_orig_addr.contains(&ctx.output.from.email))
                     {
                         ctx.result.add_tag("SPOOF_REPLYTO");
                     }

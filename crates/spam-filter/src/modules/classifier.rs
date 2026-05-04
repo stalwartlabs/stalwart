@@ -579,7 +579,8 @@ impl SpamClassifier for Server {
         let started = Instant::now();
         match classifier.as_ref() {
             spamfilter::SpamClassifier::FhClassifier { classifier, .. } => {
-                let mut classifier_confidence = Vec::with_capacity(ctx.input.env_rcpt_to.len());
+                let mut classifier_confidence =
+                    Vec::with_capacity(ctx.input.env_rcpt_rewritten_to.len());
                 let mut has_prediction = false;
                 let mut tokens = self.spam_build_tokens(ctx).await.0;
                 let feature_builder = classifier.feature_builder();
@@ -587,7 +588,7 @@ impl SpamClassifier for Server {
                     feature_builder.scale(&mut tokens);
                 }
 
-                for rcpt in &ctx.input.env_rcpt_to {
+                for rcpt in &ctx.input.env_rcpt_rewritten_to {
                     let prediction = if let Some(account_id) = self
                         .account_id_from_email(rcpt, true)
                         .await
@@ -617,11 +618,12 @@ impl SpamClassifier for Server {
                         config.l2_normalize,
                     ));
                     ctx.result.classifier_confidence =
-                        vec![prediction.into(); ctx.input.env_rcpt_to.len()];
+                        vec![prediction.into(); ctx.input.env_rcpt_rewritten_to.len()];
                 }
             }
             spamfilter::SpamClassifier::CcfhClassifier { classifier, .. } => {
-                let mut classifier_confidence = Vec::with_capacity(ctx.input.env_rcpt_to.len());
+                let mut classifier_confidence =
+                    Vec::with_capacity(ctx.input.env_rcpt_rewritten_to.len());
                 let mut has_prediction = false;
                 let mut tokens = self.spam_build_tokens(ctx).await.0;
                 let feature_builder = classifier.feature_builder();
@@ -629,7 +631,7 @@ impl SpamClassifier for Server {
                     feature_builder.scale(&mut tokens);
                 }
 
-                for rcpt in &ctx.input.env_rcpt_to {
+                for rcpt in &ctx.input.env_rcpt_rewritten_to {
                     let prediction = if let Some(account_id) = self
                         .account_id_from_email(rcpt, true)
                         .await
@@ -659,7 +661,7 @@ impl SpamClassifier for Server {
                         config.l2_normalize,
                     ));
                     ctx.result.classifier_confidence =
-                        vec![prediction.into(); ctx.input.env_rcpt_to.len()];
+                        vec![prediction.into(); ctx.input.env_rcpt_rewritten_to.len()];
                 }
             }
             spamfilter::SpamClassifier::Disabled => {
@@ -673,7 +675,7 @@ impl SpamClassifier for Server {
                 .result
                 .classifier_confidence
                 .iter()
-                .zip(ctx.input.env_rcpt_to.iter())
+                .zip(ctx.input.env_rcpt_rewritten_to.iter())
                 .map(|(v, rcpt)| trc::Value::Array(vec![
                     trc::Value::from(rcpt.to_string()),
                     trc::Value::from(*v)

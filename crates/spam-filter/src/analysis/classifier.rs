@@ -32,7 +32,7 @@ impl SpamFilterAnalyzeClassify for Server {
 
     async fn spam_filter_analyze_spam_trap(&self, ctx: &mut SpamFilterContext<'_>) -> bool {
         if let Some(store) = self.get_lookup_store("spam-traps") {
-            for addr in &ctx.output.env_to_addr {
+            for addr in &ctx.output.env_to_orig_addr {
                 match store.key_exists(addr.address.as_str()).await {
                     Ok(true) => {
                         ctx.result.add_tag("SPAM_TRAP");

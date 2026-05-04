@@ -294,12 +294,6 @@ impl SessionData {
     }
 }
 
-/*impl Default for SessionData {
-    fn default() -> Self {
-        Self::local(AccessToken::from_id(0), None, vec![], vec![], 0)
-    }
-}*/
-
 impl SessionAddress {
     pub fn new(address: String) -> Self {
         let address_lcase = address.to_lowercase();

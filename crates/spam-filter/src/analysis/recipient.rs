@@ -161,7 +161,7 @@ impl SpamFilterAnalyzeRecipient for Server {
             }
 
             // Recipient is present in envelope
-            if ctx.output.env_to_addr.contains(&rcpt.email) {
+            if ctx.output.env_to_orig_addr.contains(&rcpt.email) {
                 to_match_envrcpt += 1;
             }
 
@@ -202,7 +202,7 @@ impl SpamFilterAnalyzeRecipient for Server {
             }
 
             if !has_list_id && !has_list_unsubscribe {
-                for env_rcpt in &ctx.output.env_to_addr {
+                for env_rcpt in &ctx.output.env_to_orig_addr {
                     if !unique_recipients.iter().any(|rcpt| rcpt.email == *env_rcpt)
                         && env_rcpt != &ctx.output.env_from_addr
                     {

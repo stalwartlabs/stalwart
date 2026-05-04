@@ -64,7 +64,7 @@ impl<T: ResolveVariable> ResolveVariable for SpamFilterResolver<'_, T> {
             ExpressionVariable::EnvTo => self
                 .ctx
                 .output
-                .env_to_addr
+                .env_to_orig_addr
                 .iter()
                 .map(|e| Variable::from(e.address.as_str()))
                 .collect::<Vec<_>>()

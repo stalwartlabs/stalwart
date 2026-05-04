@@ -47,7 +47,8 @@ pub struct SpamFilterInput<'x> {
     // Envelope
     pub env_from: &'x str,
     pub env_from_flags: u64,
-    pub env_rcpt_to: Vec<&'x str>,
+    pub env_rcpt_orig_to: Vec<&'x str>,
+    pub env_rcpt_rewritten_to: Vec<&'x str>,
 
     pub is_train: bool,
     pub is_test: bool,
@@ -59,7 +60,8 @@ pub struct SpamFilterOutput<'x> {
 
     pub env_from_addr: Email,
     pub env_from_postmaster: bool,
-    pub env_to_addr: HashSet<Email>,
+    pub env_to_orig_addr: HashSet<Email>,
+    pub env_to_rewritten_addr: HashSet<Email>,
     pub from: Recipient,
     pub recipients_to: Vec<Recipient>,
     pub recipients_cc: Vec<Recipient>,
@@ -156,7 +158,8 @@ impl<'x> SpamFilterInput<'x> {
             is_tls: true,
             env_from: "",
             env_from_flags: 0,
-            env_rcpt_to: vec![],
+            env_rcpt_rewritten_to: vec![],
+            env_rcpt_orig_to: vec![],
             is_test: false,
             is_train: false,
         }

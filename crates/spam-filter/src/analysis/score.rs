@@ -88,7 +88,7 @@ impl SpamFilterAnalyzeScore for Server {
         let mut total_results = 0;
         let mut user_results = vec![
             ctx.result.score >= self.core.spam.scores.spam_threshold;
-            ctx.input.env_rcpt_to.len()
+            ctx.input.env_rcpt_rewritten_to.len()
         ];
         if !ctx.result.classifier_confidence.is_empty() {
             for (idx, &confidence) in ctx.result.classifier_confidence.iter().enumerate() {

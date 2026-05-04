@@ -128,7 +128,7 @@ impl SpamFilterAnalyzeSubject for Server {
                 }
                 TokenType::Email(email) => {
                     // Subject contains recipient
-                    if ctx.output.env_to_addr.contains(email)
+                    if ctx.output.env_to_orig_addr.contains(email)
                         || ctx
                             .output
                             .all_recipients()

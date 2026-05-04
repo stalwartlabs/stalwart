@@ -372,7 +372,8 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
             Some(SpamClassifyParameters::SmtpUtf8) => MAIL_SMTPUTF8,
             None => 0,
         },
-        env_rcpt_to: request.env_rcpt_to.iter().map(String::as_str).collect(),
+        env_rcpt_orig_to: request.env_rcpt_to.iter().map(String::as_str).collect(),
+        env_rcpt_rewritten_to: request.env_rcpt_to.iter().map(String::as_str).collect(),
         is_test: true,
         is_train: false,
     };
