@@ -8,8 +8,11 @@ use mail_auth::{
     MessageAuthenticator,
     hickory_resolver::{
         TokioResolver,
-        config::{NameServerConfig, ProtocolConfig, ResolverConfig, ResolverOpts},
-        name_server::TokioConnectionProvider,
+        config::{
+            CLOUDFLARE, ConnectionConfig, GOOGLE, NameServerConfig, ProtocolConfig, QUAD9,
+            ResolverConfig, ResolverOpts,
+        },
+        net::runtime::TokioRuntimeProvider,
         system_conf::read_system_conf,
     },
 };
@@ -22,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
-    net::SocketAddr,
     str::FromStr,
     sync::Arc,
 };
@@ -124,23 +126,25 @@ impl Resolvers {
                         ObjectType::DnsResolver.singleton(),
                         format!("Failed to read system DNS config: {err}"),
                     );
-                    resolver_config = ResolverConfig::cloudflare();
+                    resolver_config = ResolverConfig::udp_and_tcp(&CLOUDFLARE);
                 }
             },
             DnsResolver::Custom(resolver) => {
                 resolver_config = ResolverConfig::default();
 
                 for server in resolver.servers {
-                    resolver_config.add_name_server(NameServerConfig::new(
-                        SocketAddr::new(server.address.into_inner(), server.port as u16),
-                        match server.protocol {
-                            DnsResolverProtocol::Udp => ProtocolConfig::Udp,
-                            DnsResolverProtocol::Tcp => ProtocolConfig::Tcp,
-                            DnsResolverProtocol::Tls => ProtocolConfig::Tls {
-                                server_name: Arc::from(server.address.to_string()),
-                            },
+                    let ip = server.address.into_inner();
+                    let port = server.port as u16;
+                    let protocol = match server.protocol {
+                        DnsResolverProtocol::Udp => ProtocolConfig::Udp,
+                        DnsResolverProtocol::Tcp => ProtocolConfig::Tcp,
+                        DnsResolverProtocol::Tls => ProtocolConfig::Tls {
+                            server_name: Arc::from(server.address.to_string()),
                         },
-                    ));
+                    };
+                    let mut connection = ConnectionConfig::new(protocol);
+                    connection.port = port;
+                    resolver_config.add_name_server(NameServerConfig::new(ip, true, vec![connection]));
                 }
 
                 opts.num_concurrent_reqs = resolver.concurrency as usize;
@@ -152,9 +156,9 @@ impl Resolvers {
             }
             DnsResolver::Cloudflare(resolver) => {
                 resolver_config = if resolver.use_tls {
-                    ResolverConfig::cloudflare_tls()
+                    ResolverConfig::tls(&CLOUDFLARE)
                 } else {
-                    ResolverConfig::cloudflare()
+                    ResolverConfig::udp_and_tcp(&CLOUDFLARE)
                 };
 
                 opts.num_concurrent_reqs = resolver.concurrency as usize;
@@ -166,9 +170,9 @@ impl Resolvers {
             }
             DnsResolver::Quad9(resolver) => {
                 resolver_config = if resolver.use_tls {
-                    ResolverConfig::quad9_tls()
+                    ResolverConfig::tls(&QUAD9)
                 } else {
-                    ResolverConfig::quad9()
+                    ResolverConfig::udp_and_tcp(&QUAD9)
                 };
                 opts.num_concurrent_reqs = resolver.concurrency as usize;
                 opts.timeout = resolver.timeout.into_inner();
@@ -178,7 +182,7 @@ impl Resolvers {
                 opts.edns0 = resolver.enable_edns;
             }
             DnsResolver::Google(resolver) => {
-                resolver_config = ResolverConfig::google();
+                resolver_config = ResolverConfig::udp_and_tcp(&GOOGLE);
                 opts.num_concurrent_reqs = resolver.concurrency as usize;
                 opts.timeout = resolver.timeout.into_inner();
                 opts.preserve_intermediates = resolver.preserve_intermediates;
@@ -201,10 +205,11 @@ impl Resolvers {
             dnssec: DnssecResolver {
                 resolver: TokioResolver::builder_with_config(
                     config_dnssec,
-                    TokioConnectionProvider::default(),
+                    TokioRuntimeProvider::default(),
                 )
                 .with_options(opts_dnssec)
-                .build(),
+                .build()
+                .expect("Failed to build DNSSEC resolver"),
             },
         }
     }
@@ -282,7 +287,10 @@ impl Default for Resolvers {
     fn default() -> Self {
         let (config, opts) = match read_system_conf() {
             Ok(conf) => conf,
-            Err(_) => (ResolverConfig::cloudflare(), ResolverOpts::default()),
+            Err(_) => (
+                ResolverConfig::udp_and_tcp(&CLOUDFLARE),
+                ResolverOpts::default(),
+            ),
         };
 
         let config_dnssec = config.clone();
@@ -294,10 +302,11 @@ impl Default for Resolvers {
             dnssec: DnssecResolver {
                 resolver: TokioResolver::builder_with_config(
                     config_dnssec,
-                    TokioConnectionProvider::default(),
+                    TokioRuntimeProvider::default(),
                 )
                 .with_options(opts_dnssec)
-                .build(),
+                .build()
+                .expect("Failed to build DNSSEC resolver"),
             },
         }
     }

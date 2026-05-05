@@ -1075,7 +1075,7 @@ dependencies = [
  "dns-update",
  "futures",
  "hashify",
- "hickory-proto 0.25.2",
+ "hickory-proto 0.26.1",
  "hostname",
  "hyper",
  "idna",
@@ -1265,6 +1265,16 @@ dependencies = [
  "trc",
  "utils",
  "zenoh",
+]
+
+[[package]]
+name = "core-foundation"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
 ]
 
 [[package]]
@@ -2805,6 +2815,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "hickory-net"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2295ed2f9c31e471e1428a8f88a3f0e1f4b27c15049592138d1eebe9c35b183"
+dependencies = [
+ "async-trait",
+ "aws-lc-rs",
+ "bitflags",
+ "bytes",
+ "cfg-if",
+ "data-encoding",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "hickory-proto 0.26.1",
+ "idna",
+ "ipnet",
+ "jni 0.22.4",
+ "lru-cache",
+ "parking_lot",
+ "rand 0.10.1",
+ "rustls 0.23.40",
+ "rustls-pki-types",
+ "thiserror 2.0.18",
+ "time",
+ "tinyvec",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "hickory-proto"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2840,53 +2883,50 @@ dependencies = [
 
 [[package]]
 name = "hickory-proto"
-version = "0.26.0-alpha.1"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a62d7684f766b0f96344be88c023f9b6650039aea09d526b4974cce302eb61b1"
+checksum = "0bab31817bfb44672a252e97fe81cd0c18d1b2cf892108922f6818820df8c643"
 dependencies = [
- "async-trait",
  "aws-lc-rs",
  "bitflags",
- "bytes",
- "cfg-if",
  "data-encoding",
- "enum-as-inner",
- "futures-channel",
- "futures-io",
- "futures-util",
  "idna",
  "ipnet",
+ "jni 0.22.4",
  "once_cell",
- "rand 0.9.4",
+ "prefix-trie",
+ "rand 0.10.1",
  "ring",
- "rustls 0.23.40",
  "rustls-pki-types",
  "thiserror 2.0.18",
  "time",
  "tinyvec",
- "tokio",
- "tokio-rustls",
  "tracing",
  "url",
 ]
 
 [[package]]
 name = "hickory-resolver"
-version = "0.26.0-alpha.1"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbab5e26a7f82341145ba1fbd1f1858d0490624fcc46270db2d3c4a101f763f4"
+checksum = "f0d58d28879ceecde6607729660c2667a081ccdc082e082675042793960f178c"
 dependencies = [
  "cfg-if",
  "futures-util",
- "hickory-proto 0.26.0-alpha.1",
+ "hickory-net",
+ "hickory-proto 0.26.1",
  "ipconfig",
+ "ipnet",
+ "jni 0.22.4",
  "moka",
+ "ndk-context",
  "once_cell",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.10.1",
  "resolv-conf",
  "rustls 0.23.40",
  "smallvec",
+ "system-configuration",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
@@ -3489,6 +3529,9 @@ name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "ipnetwork"
@@ -4132,9 +4175,9 @@ dependencies = [
 
 [[package]]
 name = "mail-auth"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f026538d37471da028cd5c6a907777c3de2d84e2c71b2b47ae301a10977c5e6"
+checksum = "c99f0db3f1292f72149bd50fcca0354d243defda0d26532ef7281ca716c77592"
 dependencies = [
  "aws-lc-rs",
  "flate2",
@@ -4478,6 +4521,12 @@ checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
  "getrandom 0.2.17",
 ]
+
+[[package]]
+name = "ndk-context"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "new_debug_unreachable"
@@ -5350,6 +5399,17 @@ name = "precomputed-hash"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
+
+[[package]]
+name = "prefix-trie"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90f561214012d3fc240a1f9c817cc4d57f5310910d066069c1b093f766bb5966"
+dependencies = [
+ "either",
+ "ipnet",
+ "num-traits",
+]
 
 [[package]]
 name = "prettyplease"
@@ -6489,7 +6549,7 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d99feebc72bae7ab76ba994bb5e121b8d83d910ca40b36e0921f53becc41784"
 dependencies = [
- "core-foundation",
+ "core-foundation 0.10.1",
  "core-foundation-sys",
  "jni 0.21.1",
  "log",
@@ -6510,7 +6570,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0"
 dependencies = [
- "core-foundation",
+ "core-foundation 0.10.1",
  "core-foundation-sys",
  "jni 0.22.4",
  "log",
@@ -6719,7 +6779,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
 dependencies = [
  "bitflags",
- "core-foundation",
+ "core-foundation 0.10.1",
  "core-foundation-sys",
  "libc",
  "security-framework-sys",
@@ -7613,6 +7673,27 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-io-kit",
  "windows",
+]
+
+[[package]]
+name = "system-configuration"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b"
+dependencies = [
+ "bitflags",
+ "core-foundation 0.9.4",
+ "system-configuration-sys",
+]
+
+[[package]]
+name = "system-configuration-sys"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
 ]
 
 [[package]]

@@ -10,9 +10,9 @@ use common::{
 };
 use mail_auth::{
     common::resolver::ToFqdn,
-    hickory_resolver::{
-        Name,
-        proto::rr::rdata::tlsa::{CertUsage, Matching, Selector},
+    hickory_resolver::proto::rr::{
+        Name, RData,
+        rdata::tlsa::{CertUsage, Matching, Selector},
     },
 };
 use std::{future::Future, sync::Arc};
@@ -53,10 +53,10 @@ impl TlsaLookup for Server {
         let mut has_intermediates = false;
         let mut found_insecure = false;
 
-        for record in tlsa_lookup.as_lookup().record_iter() {
-            if let Some(tlsa) = record.data().as_tlsa() {
-                if record.proof().is_secure() {
-                    let is_end_entity = match tlsa.cert_usage() {
+        for record in tlsa_lookup.answers() {
+            if let RData::TLSA(tlsa) = &record.data {
+                if record.proof.is_secure() {
+                    let is_end_entity = match tlsa.cert_usage {
                         CertUsage::DaneEe => true,
                         CertUsage::DaneTa => false,
                         _ => continue,
@@ -68,17 +68,17 @@ impl TlsaLookup for Server {
                     }
                     entries.push(TlsaEntry {
                         is_end_entity,
-                        is_sha256: match tlsa.matching() {
+                        is_sha256: match tlsa.matching {
                             Matching::Sha256 => true,
                             Matching::Sha512 => false,
                             _ => continue,
                         },
-                        is_spki: match tlsa.selector() {
+                        is_spki: match tlsa.selector {
                             Selector::Spki => true,
                             Selector::Full => false,
                             _ => continue,
                         },
-                        data: tlsa.cert_data().to_vec(),
+                        data: tlsa.cert_data.clone(),
                     });
                 } else {
                     found_insecure = true;

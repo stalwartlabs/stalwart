@@ -9,6 +9,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 ## Added
 
 ## Changed
+- Bump `mail-auth` to 0.9 (which bumps `hickory-resolver` to 0.26).
 
 ## Fixed
 - JMAP: 

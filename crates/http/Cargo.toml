@@ -23,7 +23,7 @@ registry = { path =  "../registry" }
 smtp-proto = { version = "0.2" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = { version = "0.4" }
-mail-auth = { version = "0.8", features = ["generate"] }
+mail-auth = { version = "0.9", features = ["generate"] }
 tokio = { version = "1.47", features = ["rt"] }
 hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.1", features = ["tokio"] }

@@ -12,7 +12,7 @@ rustls-platform-verifier = "0.7"
 tokio = { version = "1.47", features = ["net", "macros", "signal"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
 serde = { version = "1.0", features = ["derive"]}
-mail-auth = { version = "0.8" }
+mail-auth = { version = "0.9" }
 smtp-proto = { version = "0.2" }
 ahash = { version = "0.8", features = ["serde"] }
 chrono = "0.4"

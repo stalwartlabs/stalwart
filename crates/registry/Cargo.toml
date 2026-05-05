@@ -13,7 +13,7 @@ hashify = "0.2.7"
 ahash = { version = "0.8" }
 jmap-tools = { version = "0.1" }
 xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
-mail-auth = { version = "0.8" }
+mail-auth = { version = "0.9" }
 tokio = { version = "1.47", features = ["fs"] }
 lz4_flex = { version = "0.13", default-features = false }
 
