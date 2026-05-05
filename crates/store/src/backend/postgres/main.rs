@@ -39,7 +39,6 @@ impl PostgresStore {
         if let Some(max_conn) = config.pool_max_connections {
             cfg.pool = PoolConfig::new(max_conn as usize).into();
         }
-        let todo = "implement disabled languages properly";
 
         let mut replicas = vec![];
         for replica in config.read_replicas {

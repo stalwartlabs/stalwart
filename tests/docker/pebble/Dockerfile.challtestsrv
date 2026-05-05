@@ -1,0 +1,5 @@
+FROM ghcr.io/letsencrypt/pebble-challtestsrv:latest AS upstream
+
+FROM alpine:latest
+COPY --from=upstream /app /app
+ENTRYPOINT ["/bin/sh", "-c", "HOSTIP=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1}' | head -n1); exec /app -defaultIPv6 \"\" -defaultIPv4 \"${HOSTIP:-127.0.0.1}\""]

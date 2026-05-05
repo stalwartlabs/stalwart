@@ -198,30 +198,15 @@ services:
   # certificates from Pebble.
   # ---------------------------------------------------------------------------
   pebble-challtestsrv:
-    image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
+    build:
+      context: ./pebble
+      dockerfile: Dockerfile.challtestsrv
+    image: stalwart-pebble-challtestsrv:local
     ports:
       - "127.0.0.1:8055:8055"
-    command: [ "-defaultIPv6", "", "-defaultIPv4", "0.0.0.0" ]
-
-  # Long-running sidecar: keeps pebble-challtestsrv's default-IPv4 set to the
-  # host gateway. Re-applies on every restart of pebble-challtestsrv (the
-  # default in-memory IPv4 reverts to 0.0.0.0 each time the server starts).
-  # Uses the bridge network (not service:pebble-challtestsrv) so it survives
-  # restarts of the target container.
-  pebble-challtestsrv-init:
-    image: alpine:latest
-    depends_on:
-      - pebble-challtestsrv
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
-    healthcheck:
-      test: [ "CMD-SHELL", "test -f /tmp/ready" ]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 3s
-    entrypoint: [ "/bin/sh", "-c", "rm -f /tmp/ready; while true; do HOSTIP=$$(getent hosts host.docker.internal | awk '{print $$1}'); if [ -n \"$$HOSTIP\" ] && wget -qO- --post-data='{\"ip\":\"'$$HOSTIP'\"}' http://pebble-challtestsrv:8055/set-default-ipv4 >/dev/null 2>&1; then touch /tmp/ready; else rm -f /tmp/ready; fi; sleep 10; done" ]
 
   # ---------------------------------------------------------------------------
   # Pebble (ACME server)  –  ports 14000 (directory) + 15000 (management)
@@ -229,8 +214,7 @@ services:
   pebble:
     image: ghcr.io/letsencrypt/pebble:latest
     depends_on:
-      pebble-challtestsrv-init:
-        condition: service_healthy
+      - pebble-challtestsrv
     environment:
       PEBBLE_VA_NOSLEEP: "1"
       PEBBLE_WFE_NONCEREJECT: "0"
