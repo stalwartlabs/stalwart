@@ -11,7 +11,9 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 ## Changed
 
 ## Fixed
-- JMAP: Parsing ids containing digits in JSON Pointers.
+- JMAP: 
+  - Patching ids containing digits in JSON Pointers failes.
+  - Patching nested objects with `null` values fails.
 
 ## [0.16.4] - 2026-05-05
 

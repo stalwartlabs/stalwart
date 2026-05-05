@@ -80,6 +80,12 @@ impl JmapRights {
             .document_id();
 
         if let Some(right) = path.next() {
+            if path.next().is_some() {
+                return Err(SetError::invalid_properties()
+                    .with_property(T::SHARE_WITH_PROPERTY)
+                    .with_description("Invalid path for ACL patch."));
+            }
+
             let is_set = match value {
                 Value::Bool(is_set) => is_set,
                 Value::Null => false,
@@ -110,7 +116,7 @@ impl JmapRights {
                 if is_set {
                     acl_item.grants.insert_many(acl);
                 } else {
-                    acl_item.grants.insert_many(acl);
+                    acl_item.grants.remove_many(acl);
                     if acl_item.grants.is_empty() {
                         grants.retain(|item| item.account_id != account_id);
                     }

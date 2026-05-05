@@ -95,33 +95,30 @@ impl<T: RegistryJsonPatch + Default + Debug> RegistryJsonPatch for List<T> {
         value: JmapValue<'x>,
     ) -> PatchResult<'x> {
         match (pointer.next(), value) {
-            (Some(JsonPointerItem::Number(key)), Value::Null)
-                if self.0.remove(&(*key as u32)).is_some() =>
-            {
-                return Ok(MaybeUnpatched::Patched);
-            }
-            (Some(JsonPointerItem::Key(key)), Value::Null) => {
-                if let Ok(key) = key.to_string().parse::<u32>()
-                    && self.0.remove(&key).is_some()
-                {
-                    return Ok(MaybeUnpatched::Patched);
+            (Some(JsonPointerItem::Number(key)), value) => {
+                let key = *key as u32;
+                if matches!(value, Value::Null) && !pointer.has_next() {
+                    if self.0.remove(&key).is_some() {
+                        return Ok(MaybeUnpatched::Patched);
+                    }
+                } else {
+                    let result = self.0.get_mut_or_insert(key).patch(pointer, value);
+                    self.0.sort_unstable_by_key();
+                    return result;
                 }
             }
             (Some(JsonPointerItem::Key(key)), value) => {
                 if let Ok(key) = key.to_string().parse::<u32>() {
-                    let result = self.0.get_mut_or_insert(key).patch(pointer, value);
-
-                    self.0.sort_unstable_by_key();
-
-                    return result;
+                    if matches!(value, Value::Null) && !pointer.has_next() {
+                        if self.0.remove(&key).is_some() {
+                            return Ok(MaybeUnpatched::Patched);
+                        }
+                    } else {
+                        let result = self.0.get_mut_or_insert(key).patch(pointer, value);
+                        self.0.sort_unstable_by_key();
+                        return result;
+                    }
                 }
-            }
-            (Some(JsonPointerItem::Number(key)), value) => {
-                let result = self.0.get_mut_or_insert(*key as u32).patch(pointer, value);
-
-                self.0.sort_unstable_by_key();
-
-                return result;
             }
             (None, Value::Object(items)) => {
                 self.0.clear();

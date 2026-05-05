@@ -310,26 +310,24 @@ impl<K: MapItem, V: RegistryJsonPatch> RegistryJsonPatch for VecMap<K, V> {
         value: JmapValue<'x>,
     ) -> PatchResult<'x> {
         match (pointer.next(), value) {
-            (Some(JsonPointerItem::Number(idx)), Value::Null) => {
+            (Some(JsonPointerItem::Number(idx)), value) => {
                 if let Some(key) = K::try_from_integer(*idx) {
-                    self.remove(&key);
-                    return Ok(MaybeUnpatched::Patched);
-                }
-            }
-            (Some(JsonPointerItem::Key(key)), Value::Null) => {
-                if let Some(key) = K::try_from_string(key.to_string().as_ref()) {
-                    self.remove(&key);
-                    return Ok(MaybeUnpatched::Patched);
+                    return if matches!(value, Value::Null) && !pointer.has_next() {
+                        self.remove(&key);
+                        Ok(MaybeUnpatched::Patched)
+                    } else {
+                        self.get_mut_or_insert(key).patch(pointer, value)
+                    };
                 }
             }
             (Some(JsonPointerItem::Key(key)), value) => {
                 if let Some(key) = K::try_from_string(key.to_string().as_ref()) {
-                    return self.get_mut_or_insert(key).patch(pointer, value);
-                }
-            }
-            (Some(JsonPointerItem::Number(idx)), value) => {
-                if let Some(key) = K::try_from_integer(*idx) {
-                    return self.get_mut_or_insert(key).patch(pointer, value);
+                    return if matches!(value, Value::Null) && !pointer.has_next() {
+                        self.remove(&key);
+                        Ok(MaybeUnpatched::Patched)
+                    } else {
+                        self.get_mut_or_insert(key).patch(pointer, value)
+                    };
                 }
             }
             (None, Value::Object(items)) => {

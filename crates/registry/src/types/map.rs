@@ -140,19 +140,31 @@ impl<T: MapItem + Default> RegistryJsonPatch for Map<T> {
     ) -> PatchResult<'x> {
         match (pointer.next(), value) {
             (Some(JsonPointerItem::Number(idx)), Value::Null | Value::Bool(false)) => {
-                if let Some(key) = T::try_from_integer(*idx) {
+                let key = T::try_from_integer(*idx);
+
+                if !pointer.has_next()
+                    && let Some(key) = key
+                {
                     self.0.retain(|item| item != &key);
                     return Ok(MaybeUnpatched::Patched);
                 }
             }
             (Some(JsonPointerItem::Key(key)), Value::Null | Value::Bool(false)) => {
-                if let Some(key) = T::try_from_string(key.to_string().as_ref()) {
+                let key = T::try_from_string(key.to_string().as_ref());
+
+                if !pointer.has_next()
+                    && let Some(key) = key
+                {
                     self.0.retain(|item| item != &key);
                     return Ok(MaybeUnpatched::Patched);
                 }
             }
             (Some(JsonPointerItem::Key(key)), Value::Bool(true)) => {
-                if let Some(key) = T::try_from_string(key.to_string().as_ref()) {
+                let key = T::try_from_string(key.to_string().as_ref());
+
+                if !pointer.has_next()
+                    && let Some(key) = key
+                {
                     if !self.0.contains(&key) {
                         self.0.push(key);
                     }
@@ -161,7 +173,10 @@ impl<T: MapItem + Default> RegistryJsonPatch for Map<T> {
                 }
             }
             (Some(JsonPointerItem::Number(idx)), Value::Bool(true)) => {
-                if let Some(key) = T::try_from_integer(*idx) {
+                let key = T::try_from_integer(*idx);
+                if !pointer.has_next()
+                    && let Some(key) = key
+                {
                     if !self.0.contains(&key) {
                         self.0.push(key);
                     }

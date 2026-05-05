@@ -41,6 +41,8 @@ pub async fn test(test: &TestServer) {
 
     println!("Registry tests...");
 
+    test_patch_regressions();
+
     // Pickle-unpickle test
     let mut account = Account::User(UserAccount {
         aliases: List::from_iter([
@@ -537,6 +539,200 @@ impl TestServer {
             location
         );
     }
+}
+
+fn test_patch_regressions() {
+    fn fresh_account() -> Account {
+        Account::User(UserAccount {
+            credentials: List::from_iter([
+                Credential::Password(PasswordCredential {
+                    allowed_ips: Map::new(vec![
+                        IpAddrOrMask::from_str("192.168.1.1").unwrap(),
+                        IpAddrOrMask::from_str("192.168.1.2").unwrap(),
+                    ]),
+                    credential_id: 3u64.into(),
+                    expires_at: None,
+                    otp_auth: None,
+                    secret: "secret".into(),
+                }),
+                Credential::Password(PasswordCredential {
+                    allowed_ips: Map::new(vec![IpAddrOrMask::from_str("10.0.0.1").unwrap()]),
+                    credential_id: 4u64.into(),
+                    expires_at: None,
+                    otp_auth: None,
+                    secret: "another".into(),
+                }),
+            ]),
+            domain_id: 1u64.into(),
+            name: "patch-target".into(),
+            ..Default::default()
+        })
+    }
+
+    fn user(account: &Account) -> &UserAccount {
+        match account {
+            Account::User(u) => u,
+            _ => panic!("expected user account"),
+        }
+    }
+
+    fn user_mut(account: &mut Account) -> &mut UserAccount {
+        match account {
+            Account::User(u) => u,
+            _ => panic!("expected user account"),
+        }
+    }
+
+    fn password_at(account: &Account, idx: u32) -> &PasswordCredential {
+        let cred = user(account)
+            .credentials
+            .0
+            .get(&idx)
+            .expect("credential at index");
+        match cred {
+            Credential::Password(p) => p,
+            _ => panic!("expected password credential at idx {idx}"),
+        }
+    }
+
+    // Leaf-null patch into a List<T> entry removes only the leaf not the whole entry.
+    let mut account = fresh_account();
+    account.assert_patch(
+        "credentials/0/allowedIps/192.168.1.1",
+        JmapValue::Null,
+        trc::location!(),
+    );
+    {
+        let cred = password_at(&account, 0);
+        assert_eq!(cred.allowed_ips.len(), 1, "one ip should remain");
+        assert!(
+            cred.allowed_ips
+                .contains(&IpAddrOrMask::from_str("192.168.1.2").unwrap()),
+            "remaining ip survived"
+        );
+        assert!(
+            !cred
+                .allowed_ips
+                .contains(&IpAddrOrMask::from_str("192.168.1.1").unwrap()),
+            "targeted ip removed"
+        );
+    }
+    // The sibling credential is untouched.
+    {
+        let cred = password_at(&account, 1);
+        assert_eq!(cred.allowed_ips.len(), 1);
+        assert!(
+            cred.allowed_ips
+                .contains(&IpAddrOrMask::from_str("10.0.0.1").unwrap())
+        );
+    }
+
+    // Removing every leaf still leaves the entry in place with an empty map.
+    let mut account = fresh_account();
+    account.assert_patch(
+        "credentials/0/allowedIps/192.168.1.1",
+        JmapValue::Null,
+        trc::location!(),
+    );
+    account.assert_patch(
+        "credentials/0/allowedIps/192.168.1.2",
+        JmapValue::Null,
+        trc::location!(),
+    );
+    {
+        assert_eq!(
+            user(&account).credentials.len(),
+            2,
+            "credential entry retained"
+        );
+        let cred = password_at(&account, 0);
+        assert!(cred.allowed_ips.is_empty(), "leaf map drained");
+    }
+
+    // Direct removal of a list entry with no remaining segments still works.
+    let mut account = fresh_account();
+    account.assert_patch("credentials/0", JmapValue::Null, trc::location!());
+    {
+        assert_eq!(user(&account).credentials.len(), 1, "credential 0 removed");
+        let cred = password_at(&account, 1);
+        assert_eq!(cred.allowed_ips.len(), 1);
+    }
+
+    // Leaf-null patch into a scalar property of a list entry clears only that property.
+    let mut account = fresh_account();
+    {
+        let cred = user_mut(&mut account)
+            .credentials
+            .inner_mut()
+            .get_mut(&0)
+            .expect("credential at 0");
+        if let Credential::Password(p) = cred {
+            p.expires_at = Some(UTCDateTime::from_timestamp(now() as i64));
+        }
+    }
+    account.assert_patch("credentials/0/expiresAt", JmapValue::Null, trc::location!());
+    {
+        let cred = password_at(&account, 0);
+        assert!(cred.expires_at.is_none(), "expiresAt cleared");
+        assert_eq!(cred.allowed_ips.len(), 2, "siblings untouched");
+    }
+
+    // Map<T> set-style patches
+    fn account_with_groups() -> Account {
+        let mut account = match fresh_account() {
+            Account::User(u) => u,
+            _ => unreachable!(),
+        };
+        account.member_group_ids = Map::new(vec![Id::new(2000), Id::new(2001)]);
+        Account::User(account)
+    }
+
+    let mut account = account_with_groups();
+    account.assert_patch(
+        &format!("memberGroupIds/{}", Id::new(2000)),
+        JmapValue::Null,
+        trc::location!(),
+    );
+    assert_eq!(
+        user(&account).member_group_ids.len(),
+        1,
+        "one member removed"
+    );
+    assert!(
+        user(&account).member_group_ids.contains(&Id::new(2001)),
+        "sibling preserved"
+    );
+
+    let mut account = account_with_groups();
+    let extra_path = format!("memberGroupIds/{}/extra", Id::new(2000));
+    let ptr = JsonPointer::parse(&extra_path);
+    let outcome = account.patch(JsonPointerPatch::new(&ptr), JmapValue::Null);
+    assert!(outcome.is_err(), "extra segments must error on remove");
+    assert_eq!(
+        user(&account).member_group_ids.len(),
+        2,
+        "membership unchanged after rejected patch"
+    );
+
+    let mut account = account_with_groups();
+    let ptr = JsonPointer::parse(&format!("memberGroupIds/{}/extra", Id::new(2002)));
+    let outcome = account.patch(JsonPointerPatch::new(&ptr), JmapValue::Bool(true));
+    assert!(outcome.is_err(), "extra segments must error on add");
+    assert_eq!(
+        user(&account).member_group_ids.len(),
+        2,
+        "membership unchanged after rejected add"
+    );
+
+    // Direct adds and removes still work.
+    let mut account = account_with_groups();
+    account.assert_patch(
+        &format!("memberGroupIds/{}", Id::new(2002)),
+        true,
+        trc::location!(),
+    );
+    assert_eq!(user(&account).member_group_ids.len(), 3, "member added");
+    assert!(user(&account).member_group_ids.contains(&Id::new(2002)));
 }
 
 trait AssertPatch {
