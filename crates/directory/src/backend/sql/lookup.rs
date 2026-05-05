@@ -29,7 +29,7 @@ impl SqlDirectory {
                 .await
                 .caused_by(trc::location!())?,
         ) else {
-            return Err(trc::AuthEvent::Error
+            return Err(trc::AuthEvent::Failed
                 .into_err()
                 .details("SQL login query did not return an account")
                 .ctx(trc::Key::AccountName, username.to_string()));

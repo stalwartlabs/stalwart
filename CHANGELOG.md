@@ -14,6 +14,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 - JMAP: 
   - Patching ids containing digits in JSON Pointers failes.
   - Patching nested objects with `null` values fails.
+- SQL directory: Return `Failed` instead of `Error` when the query returns no results.
 
 ## [0.16.4] - 2026-05-05
 
