@@ -38,6 +38,7 @@ tokio-rustls = { version = "0.26", optional = true, default-features = false, fe
 rustls = { version = "0.23.5", optional = true, default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 rustls-pki-types = { version = "1", optional = true }
 aws-lc-rs = { version = "1", optional = true }
+x509-parser = { version = "0.18", optional = true }
 bytes = { version = "1.10", optional = true }
 mysql_async = { version = "0.36", default-features = false, features = ["default-rustls", "minimal"], optional = true }
 serde_json = { version = "1.0.64" }
@@ -61,7 +62,7 @@ tokio = { version = "1.47", features = ["full"] }
 # Data Stores
 rocks = ["rocksdb", "rayon", "num_cpus"]
 sqlite = ["rusqlite", "rayon", "r2d2", "num_cpus", "lru-cache"]
-postgres = ["tokio-postgres", "deadpool", "deadpool-postgres", "tokio-rustls", "rustls", "aws-lc-rs", "rustls-pki-types", "futures", "bytes"]
+postgres = ["tokio-postgres", "deadpool", "deadpool-postgres", "tokio-rustls", "rustls", "aws-lc-rs", "rustls-pki-types", "x509-parser", "futures", "bytes"]
 mysql = ["mysql_async", "futures"]
 foundation = ["foundationdb", "futures"]
 fdb-chunked-bm = []
