@@ -391,6 +391,59 @@ jobs:
           name: artifact-${{matrix.target}}
           path: artifacts
 
+  freebsd:
+    name: Build / ${{matrix.target}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-freebsd
+            arch: x86_64
+          - target: aarch64-unknown-freebsd
+            arch: aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Build in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.1"
+          arch: ${{matrix.arch}}
+          usesh: true
+          mem: 14336
+          cpu: 4
+          sync: rsync
+          copyback: true
+          # gmake: required by jemalloc-sys on BSD hosts
+          # llvm: provides libclang for bindgen (librocksdb-sys)
+          # rust: libsqlite3-sys 0.38 uses cfg_select!, stabilized in Rust
+          # 1.95. The default 'quarterly' pkg repo still ships rust 1.94, so
+          # switch to the 'latest' repo (currently 1.96.1). rustup is not an
+          # option here: aarch64-unknown-freebsd has no rustup toolchains yet.
+          prepare: |
+            set -e
+            mkdir -p /usr/local/etc/pkg/repos
+            echo 'FreeBSD: { url: "pkg+https://pkg.freebsd.org/${ABI}/latest", mirror_type: "srv" }' > /usr/local/etc/pkg/repos/FreeBSD.conf
+            pkg update -f
+            pkg install -y rust gmake llvm rocksdb
+            rustc --version
+          run: |
+            set -e
+            export CARGO_TARGET_DIR=/tmp/target
+            export CARGO_TERM_COLOR=always
+            cargo build --release -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise"
+            mkdir -p artifacts
+            cp /tmp/target/release/stalwart artifacts/stalwart
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifact-${{matrix.target}}
+          path: artifacts
+
   release:
     name: Release
     permissions:
@@ -398,7 +451,7 @@ jobs:
       contents: write
       attestations: write
     if: github.event_name == 'push' || inputs.Release
-    needs: [linux, windows, macos]
+    needs: [linux, windows, macos, freebsd]
     runs-on: ubuntu-latest
     steps:
       # Must run before artifacts are downloaded — checkout cleans the workspace.
@@ -484,7 +537,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [linux, windows, macos, multiarch, release]
+    needs: [linux, windows, macos, freebsd, multiarch, release]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -497,7 +550,7 @@ jobs:
 
   cleanup:
     name: Cleanup failed release
-    needs: [linux, windows, macos, multiarch, release]
+    needs: [linux, windows, macos, freebsd, multiarch, release]
     if: failure() && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
