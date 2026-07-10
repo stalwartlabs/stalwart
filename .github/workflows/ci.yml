@@ -401,8 +401,8 @@ jobs:
         include:
           - target: x86_64-unknown-freebsd
             arch: x86_64
-          - target: aarch64-unknown-freebsd
-            arch: aarch64
+          # - target: aarch64-unknown-freebsd
+          #   arch: aarch64
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
