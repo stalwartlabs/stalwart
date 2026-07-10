@@ -34,11 +34,11 @@ main() {
     # Detect OS
     local _os _uname _account
     _uname="$(uname)"
-    _account="stalwart"
     case "$_uname" in
-        Linux)  _os="linux" ;;
-        Darwin) _os="macos"; _account="_stalwart" ;;
-        *)      err "❌ Install failed: Unsupported OS: $_uname" ;;
+        Linux)   _os="linux"; _account="stalwart" ;;
+        Darwin)  _os="macos"; _account="_stalwart" ;;
+        FreeBSD) _os="freebsd"; _account="stalwart" ;;
+        *)       err "❌ Install failed: Unsupported OS: $_uname" ;;
     esac
 
     # Parse arguments
@@ -70,9 +70,16 @@ main() {
     local _bin_dir _bin_file _conf_dir _log_dir _data_dir _env_file _config_file
     if [ -z "$_prefix" ]; then
         _bin_dir="/usr/local/bin"
-        _conf_dir="/etc/stalwart"
         _log_dir="/var/log/stalwart"
-        _data_dir="/var/lib/stalwart"
+        if [ "$_os" = "freebsd" ]; then
+            # hier(7): third-party config lives under /usr/local/etc,
+            # variable data under /var/db
+            _conf_dir="/usr/local/etc/stalwart"
+            _data_dir="/var/db/stalwart"
+        else
+            _conf_dir="/etc/stalwart"
+            _data_dir="/var/lib/stalwart"
+        fi
     else
         _bin_dir="${_prefix}/bin"
         _conf_dir="${_prefix}/etc"
@@ -139,6 +146,10 @@ main() {
             create_service_macos "$_bin_file" "$_config_file" "$_env_file" "$_account"
             _service_type="launchd"
             ;;
+        freebsd)
+            create_service_freebsd "$_bin_file" "$_config_file" "$_env_file" "$_account" "$_log_dir"
+            _service_type="rcd"
+            ;;
     esac
 
     # Completion message
@@ -161,6 +172,9 @@ main() {
             ;;
         launchd)
             say "     sudo log show --predicate 'process == \"stalwart\"' --last 5m"
+            ;;
+        rcd)
+            say "     grep -A8 'bootstrap mode' ${_log_dir}/stalwart.log"
             ;;
     esac
     say ""
@@ -189,6 +203,11 @@ With no PREFIX, Stalwart is installed under standard FHS paths:
   env      /etc/stalwart/stalwart.env
   logs     /var/log/stalwart/
   data     /var/lib/stalwart/
+
+On FreeBSD, config and data follow hier(7) instead:
+  config   /usr/local/etc/stalwart/config.json
+  env      /usr/local/etc/stalwart/stalwart.env
+  data     /var/db/stalwart/
 
 When PREFIX is provided, a self-contained layout is used instead:
   binary   $PREFIX/bin/stalwart
@@ -265,6 +284,8 @@ create_account() {
 
         ensure dscl /Local/Default -delete /Users/_stalwart AuthenticationAuthority
         ensure dscl /Local/Default -delete /Users/_stalwart PasswordPolicyOptions
+    elif [ "$_os" = "freebsd" ]; then
+        ensure pw useradd -n "$_account" -c "Stalwart service" -d /nonexistent -s /usr/sbin/nologin -w no
     else
         ensure useradd "$_account" -s /usr/sbin/nologin -M -r -U
     fi
@@ -449,6 +470,60 @@ EOF
     launchctl bootout system "$_plist" 2>/dev/null || true
     launchctl bootstrap system "$_plist"
     launchctl enable system/stalwart
+}
+
+create_service_freebsd() {
+    local _bin="$1" _config="$2" _env="$3" _user="$4" _log_dir="$5"
+    ensure mkdir -p /usr/local/etc/rc.d
+    cat > /usr/local/etc/rc.d/stalwart <<EOF
+#!/bin/sh
+
+# PROVIDE: stalwart
+# REQUIRE: NETWORKING LOGIN
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="stalwart"
+rcvar="stalwart_enable"
+desc="Stalwart Server"
+
+load_rc_config \$name
+
+: \${stalwart_enable:="NO"}
+: \${stalwart_user:="${_user}"}
+: \${stalwart_config:="${_config}"}
+: \${stalwart_envfile:="${_env}"}
+: \${stalwart_logfile:="${_log_dir}/stalwart.log"}
+: \${stalwart_fdlimit:="65536"}
+
+pidfile="/var/run/stalwart.pid"
+procname="${_bin}"
+command="/usr/sbin/daemon"
+command_args="-f -o \${stalwart_logfile} -p \${pidfile} -u \${stalwart_user} ${_bin} --config=\${stalwart_config}"
+sig_stop="INT"
+start_precmd="stalwart_precmd"
+
+stalwart_precmd()
+{
+    # daemon(8) passes its environment through to the service
+    if [ -r "\${stalwart_envfile}" ]; then
+        set -a
+        . "\${stalwart_envfile}"
+        set +a
+    fi
+    ulimit -n "\${stalwart_fdlimit}"
+
+    # Binding privileged ports (25/443/465/993/...) as a non-root user
+    # requires: sysctl net.inet.ip.portrange.reservedhigh=0
+}
+
+run_rc_command "\$1"
+EOF
+    chmod +x /usr/local/etc/rc.d/stalwart
+    sysrc stalwart_enable=YES
+    service stalwart stop > /dev/null 2>&1 || true
+    service stalwart start
 }
 
 

@@ -651,6 +651,14 @@ fn map_dns_server(dns_server: &DnsServerBootstrap) -> Option<registry::schema::s
     }
 }
 
+// FreeBSD keeps variable application data under /var/db (hier(7))
+// rather than FHS /var/lib.
+const DEFAULT_DATA_PATH: &str = if cfg!(target_os = "freebsd") {
+    "/var/db/stalwart/"
+} else {
+    "/var/lib/stalwart/"
+};
+
 fn build_default_bootstrap(server: &Server) -> Bootstrap {
     let server_hostname = server.registry().local_hostname().to_string();
     let default_domain = psl::domain_str(&server_hostname)
@@ -659,7 +667,7 @@ fn build_default_bootstrap(server: &Server) -> Bootstrap {
 
     Bootstrap {
         data_store: DataStore::RocksDb(RocksDbStore {
-            path: "/var/lib/stalwart/".to_string(),
+            path: DEFAULT_DATA_PATH.to_string(),
             ..Default::default()
         }),
         blob_store: BlobStore::Default,

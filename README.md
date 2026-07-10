@@ -134,7 +134,7 @@ Key features:
 
 Install Stalwart on your server by following the instructions for your platform:
 
-- [Linux / MacOS](https://stalw.art/docs/install/platform/linux)
+- [Linux / MacOS / FreeBSD](https://stalw.art/docs/install/platform/linux)
 - [Windows](https://stalw.art/docs/install/platform/windows)
 - [Docker](https://stalw.art/docs/install/platform/docker)
 
