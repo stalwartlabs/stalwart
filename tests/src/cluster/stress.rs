@@ -7,7 +7,7 @@
 use crate::utils::server::{DestroyAllMailboxes, TestServer, TestServerBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::metadata::MessageData,
+    message::messagedata::MessageData,
 };
 use futures::future::join_all;
 use jmap_client::{
@@ -21,7 +21,6 @@ use store::{
     ValueKey,
     rand::{self, Rng},
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive},
 };
 use types::{collection::Collection, id::Id};
 
@@ -240,7 +239,7 @@ async fn email_tests(test: &TestServer) {
             for email_id in &email_ids_in_mailbox {
                 if let Some(mailbox_tags) = server
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<MessageData>(ValueKey::archive(
                         TEST_USER_ID,
                         Collection::Email,
                         email_id,
@@ -248,7 +247,7 @@ async fn email_tests(test: &TestServer) {
                     .await
                     .unwrap()
                 {
-                    let mailbox_tags = mailbox_tags.deserialize::<MessageData>().unwrap().mailboxes;
+                    let mailbox_tags = mailbox_tags.mailboxes;
                     if mailbox_tags.len() != 1 {
                         panic!(
                             "Email ORM has more than one mailbox {:?}! Id {} in mailbox {} with messages {:?}",

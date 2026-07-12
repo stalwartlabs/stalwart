@@ -62,26 +62,26 @@ pub const FIELDS: [&str; 20] = [
 */
 
 const FIELD_MAPPINGS: [EmailSearchField; 20] = [
-    EmailSearchField::HasAttachment, // "id",
-    EmailSearchField::To,            // "accession_number",
-    EmailSearchField::Headers,       // "artist",
-    EmailSearchField::Cc,            // "artistRole",
-    EmailSearchField::HasAttachment, // "artistId",
-    EmailSearchField::Subject,       // "title",
-    EmailSearchField::HasAttachment, // "dateText",
-    EmailSearchField::From,          // "medium",
-    EmailSearchField::Body,          // "creditLine",
-    EmailSearchField::ReceivedAt,    // "year",
-    EmailSearchField::Bcc,           // "acquisitionYear",
-    EmailSearchField::HasAttachment, // "dimensions",
-    EmailSearchField::Size,          // "width",
-    EmailSearchField::SentAt,        // "height",
-    EmailSearchField::HasAttachment, // "depth",
-    EmailSearchField::HasAttachment, // "units",
-    EmailSearchField::HasAttachment, // "inscription",
-    EmailSearchField::HasAttachment, // "thumbnailCopyright",
-    EmailSearchField::HasAttachment, // "thumbnailUrl",
-    EmailSearchField::HasAttachment, // "url",
+    EmailSearchField::_HasAttachment, // "id",
+    EmailSearchField::To,             // "accession_number",
+    EmailSearchField::Headers,        // "artist",
+    EmailSearchField::Cc,             // "artistRole",
+    EmailSearchField::_HasAttachment, // "artistId",
+    EmailSearchField::Subject,        // "title",
+    EmailSearchField::_HasAttachment, // "dateText",
+    EmailSearchField::From,           // "medium",
+    EmailSearchField::Body,           // "creditLine",
+    EmailSearchField::_ReceivedAt,    // "year",
+    EmailSearchField::Bcc,            // "acquisitionYear",
+    EmailSearchField::_HasAttachment, // "dimensions",
+    EmailSearchField::_Size,          // "width",
+    EmailSearchField::_SentAt,        // "height",
+    EmailSearchField::_HasAttachment, // "depth",
+    EmailSearchField::_HasAttachment, // "units",
+    EmailSearchField::_HasAttachment, // "inscription",
+    EmailSearchField::_HasAttachment, // "thumbnailCopyright",
+    EmailSearchField::_HasAttachment, // "thumbnailUrl",
+    EmailSearchField::_HasAttachment, // "url",
 ];
 
 const ALL_IDS: &[&str] = &[
@@ -150,9 +150,9 @@ pub async fn test(test: &TestServer) {
         document.index_text(field, &large_text, Language::English);
     }
     for field in [
-        EmailSearchField::ReceivedAt,
-        EmailSearchField::SentAt,
-        EmailSearchField::Size,
+        EmailSearchField::_ReceivedAt,
+        EmailSearchField::_SentAt,
+        EmailSearchField::_Size,
     ] {
         document.index_unsigned(field, rand::rng().random_range(100u64..1_000_000u64));
     }
@@ -234,9 +234,9 @@ pub async fn test(test: &TestServer) {
                                 field.to_lowercase(),
                             );
                         }
-                        EmailSearchField::ReceivedAt
-                        | EmailSearchField::SentAt
-                        | EmailSearchField::Size => {
+                        EmailSearchField::_ReceivedAt
+                        | EmailSearchField::_SentAt
+                        | EmailSearchField::_Size => {
                             document.index_unsigned(
                                 FIELD_MAPPINGS[pos].clone(),
                                 field.parse::<u64>().unwrap_or(0),
@@ -333,7 +333,7 @@ pub async fn test(test: &TestServer) {
             .query_account(
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(vec![SearchFilter::eq(SearchField::AccountId, 0u32)])
-                    .with_comparator(SearchComparator::ascending(EmailSearchField::ReceivedAt))
+                    .with_comparator(SearchComparator::ascending(EmailSearchField::_ReceivedAt))
                     .with_mask(mask.clone()),
             )
             .await
@@ -381,7 +381,7 @@ async fn test_filter(store: SearchStore, fields: &AHashMap<u32, String>, mask: &
             vec![
                 SearchFilter::eq(SearchField::AccountId, 0u32),
                 SearchFilter::has_english_text(EmailSearchField::Subject, "water"),
-                SearchFilter::eq(EmailSearchField::ReceivedAt, 1979u32),
+                SearchFilter::eq(EmailSearchField::_ReceivedAt, 1979u32),
             ],
             vec!["p11293"],
         ),
@@ -389,9 +389,9 @@ async fn test_filter(store: SearchStore, fields: &AHashMap<u32, String>, mask: &
             vec![
                 SearchFilter::eq(SearchField::AccountId, 0u32),
                 SearchFilter::has_keyword(EmailSearchField::From, "gelatin"),
-                SearchFilter::gt(EmailSearchField::ReceivedAt, 2000u32),
-                SearchFilter::lt(EmailSearchField::Size, 180u32),
-                SearchFilter::gt(EmailSearchField::Size, 0u32),
+                SearchFilter::gt(EmailSearchField::_ReceivedAt, 2000u32),
+                SearchFilter::lt(EmailSearchField::_Size, 180u32),
+                SearchFilter::gt(EmailSearchField::_Size, 0u32),
             ],
             vec!["p79426", "p79427", "p79428", "p79429", "p79430"],
         ),
@@ -426,8 +426,8 @@ async fn test_filter(store: SearchStore, fields: &AHashMap<u32, String>, mask: &
                 ),
                 SearchFilter::has_keyword(EmailSearchField::Cc, "artist"),
                 SearchFilter::Or,
-                SearchFilter::eq(EmailSearchField::ReceivedAt, 1969u32),
-                SearchFilter::eq(EmailSearchField::ReceivedAt, 1971u32),
+                SearchFilter::eq(EmailSearchField::_ReceivedAt, 1969u32),
+                SearchFilter::eq(EmailSearchField::_ReceivedAt, 1971u32),
                 SearchFilter::End,
             ],
             vec!["p01764", "t05843"],
@@ -444,12 +444,12 @@ async fn test_filter(store: SearchStore, fields: &AHashMap<u32, String>, mask: &
                 ),
                 SearchFilter::Or,
                 SearchFilter::And,
-                SearchFilter::ge(EmailSearchField::ReceivedAt, 1900u32),
-                SearchFilter::lt(EmailSearchField::ReceivedAt, 1910u32),
+                SearchFilter::ge(EmailSearchField::_ReceivedAt, 1900u32),
+                SearchFilter::lt(EmailSearchField::_ReceivedAt, 1910u32),
                 SearchFilter::End,
                 SearchFilter::And,
-                SearchFilter::ge(EmailSearchField::ReceivedAt, 2000u32),
-                SearchFilter::lt(EmailSearchField::ReceivedAt, 2010u32),
+                SearchFilter::ge(EmailSearchField::_ReceivedAt, 2000u32),
+                SearchFilter::lt(EmailSearchField::_ReceivedAt, 2010u32),
                 SearchFilter::End,
                 SearchFilter::End,
             ],
@@ -476,10 +476,10 @@ async fn test_filter(store: SearchStore, fields: &AHashMap<u32, String>, mask: &
                 SearchFilter::End,
                 SearchFilter::Not,
                 SearchFilter::Or,
-                SearchFilter::gt(EmailSearchField::ReceivedAt, 1980u32),
+                SearchFilter::gt(EmailSearchField::_ReceivedAt, 1980u32),
                 SearchFilter::And,
-                SearchFilter::gt(EmailSearchField::Size, 500u32),
-                SearchFilter::gt(EmailSearchField::SentAt, 500u32),
+                SearchFilter::gt(EmailSearchField::_Size, 500u32),
+                SearchFilter::gt(EmailSearchField::_SentAt, 500u32),
                 SearchFilter::End,
                 SearchFilter::End,
                 SearchFilter::End,
@@ -503,7 +503,7 @@ async fn test_filter(store: SearchStore, fields: &AHashMap<u32, String>, mask: &
                     SearchFilter::has_english_text(EmailSearchField::Subject, "'girl'"),
                     SearchFilter::End,
                     SearchFilter::End,
-                    SearchFilter::gt(EmailSearchField::ReceivedAt, 1900u32),
+                    SearchFilter::gt(EmailSearchField::_ReceivedAt, 1900u32),
                     SearchFilter::gt(EmailSearchField::Bcc, "2008".to_string()),
                 ]
             } else {
@@ -523,7 +523,7 @@ async fn test_filter(store: SearchStore, fields: &AHashMap<u32, String>, mask: &
                     SearchFilter::has_english_text(EmailSearchField::Subject, "'girl'"),
                     SearchFilter::End,
                     SearchFilter::End,
-                    SearchFilter::gt(EmailSearchField::ReceivedAt, 1900u32),
+                    SearchFilter::gt(EmailSearchField::_ReceivedAt, 1900u32),
                     SearchFilter::gt(EmailSearchField::Bcc, "2008".to_string()),
                 ]
             },
@@ -558,14 +558,14 @@ async fn test_sort(store: SearchStore, fields: &AHashMap<u32, String>, mask: &Ro
         (
             vec![
                 SearchFilter::eq(SearchField::AccountId, 0u32),
-                SearchFilter::gt(EmailSearchField::ReceivedAt, 0u32),
+                SearchFilter::gt(EmailSearchField::_ReceivedAt, 0u32),
                 SearchFilter::gt(EmailSearchField::Bcc, "0000".to_string()),
-                SearchFilter::gt(EmailSearchField::Size, 0u32),
+                SearchFilter::gt(EmailSearchField::_Size, 0u32),
             ],
             vec![
-                SearchComparator::descending(EmailSearchField::ReceivedAt),
+                SearchComparator::descending(EmailSearchField::_ReceivedAt),
                 SearchComparator::ascending(EmailSearchField::Bcc),
-                SearchComparator::ascending(EmailSearchField::Size),
+                SearchComparator::ascending(EmailSearchField::_Size),
                 SearchComparator::descending(EmailSearchField::To),
             ],
             vec![
@@ -581,12 +581,12 @@ async fn test_sort(store: SearchStore, fields: &AHashMap<u32, String>, mask: &Ro
         (
             vec![
                 SearchFilter::eq(SearchField::AccountId, 0u32),
-                SearchFilter::gt(EmailSearchField::Size, 0u32),
-                SearchFilter::gt(EmailSearchField::SentAt, 0u32),
+                SearchFilter::gt(EmailSearchField::_Size, 0u32),
+                SearchFilter::gt(EmailSearchField::_SentAt, 0u32),
             ],
             vec![
-                SearchComparator::descending(EmailSearchField::Size),
-                SearchComparator::ascending(EmailSearchField::SentAt),
+                SearchComparator::descending(EmailSearchField::_Size),
+                SearchComparator::ascending(EmailSearchField::_SentAt),
             ],
             vec![
                 "t03681", "t12601", "ar00166", "t12625", "t12915", "p04182", "t06483", "ar00703",
@@ -644,9 +644,9 @@ async fn test_unindex(store: SearchStore, fields: &AHashMap<u32, String>) {
                 .with_mask(RoaringBitmap::from_iter(fields.keys().copied()))
                 .with_filters(vec![
                     SearchFilter::has_keyword(EmailSearchField::From, "gelatin"),
-                    SearchFilter::gt(EmailSearchField::ReceivedAt, 2000u32),
-                    SearchFilter::lt(EmailSearchField::Size, 180u32),
-                    SearchFilter::gt(EmailSearchField::Size, 0u32),
+                    SearchFilter::gt(EmailSearchField::_ReceivedAt, 2000u32),
+                    SearchFilter::lt(EmailSearchField::_Size, 180u32),
+                    SearchFilter::gt(EmailSearchField::_Size, 0u32),
                 ])
                 .with_account_id(0),
         )
@@ -676,9 +676,9 @@ async fn test_unindex(store: SearchStore, fields: &AHashMap<u32, String>) {
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(vec![
                         SearchFilter::has_keyword(EmailSearchField::From, "gelatin"),
-                        SearchFilter::gt(EmailSearchField::ReceivedAt, 2000u32),
-                        SearchFilter::lt(EmailSearchField::Size, 180u32),
-                        SearchFilter::gt(EmailSearchField::Size, 0u32),
+                        SearchFilter::gt(EmailSearchField::_ReceivedAt, 2000u32),
+                        SearchFilter::lt(EmailSearchField::_Size, 180u32),
+                        SearchFilter::gt(EmailSearchField::_Size, 0u32),
                     ])
                     .with_account_id(0)
                     .with_mask(RoaringBitmap::from_iter(fields.keys().copied())),

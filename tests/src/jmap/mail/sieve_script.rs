@@ -198,11 +198,11 @@ pub async fn test(test: &TestServer) {
         .unwrap();
     assert_eq!(
         email.keywords().len(),
-        2,
-        "Expected 2 keywords, found {:?}.",
+        3,
+        "Expected 3 keywords, found {:?}.",
         email.keywords()
     );
-    for keyword in ["$important", "$seen"] {
+    for keyword in ["$important", "$seen", "$hasnoattachment"] {
         if !email.keywords().contains(&keyword) {
             panic!("Keyword {} not found in {:?}.", keyword, email.keywords());
         }

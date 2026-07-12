@@ -253,20 +253,82 @@ pub trait IndexableAndSerializableObject:
 }
 
 #[derive(Debug)]
-pub struct ObjectIndexBuilder<C: IndexableObject, N: IndexableAndSerializableObject> {
+pub struct ObjectIndexBuilder<C, N> {
     changed_by: u32,
     tenant_id: Option<u32>,
-    current: Option<Archive<C>>,
+    current: Option<C>,
     changes: Option<N>,
 }
 
-impl<C: IndexableObject, N: IndexableAndSerializableObject> Default for ObjectIndexBuilder<C, N> {
+impl<C, N> Default for ObjectIndexBuilder<C, N> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C, N> {
+pub trait CurrentObject: Send + Sync {
+    fn assert(&self, batch: &mut BatchBuilder);
+    fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>>;
+    fn clear(&self, batch: &mut BatchBuilder);
+}
+
+impl<T: IndexableObject> CurrentObject for Archive<T> {
+    #[inline(always)]
+    fn assert(&self, batch: &mut BatchBuilder) {
+        batch.assert_value(Field::ARCHIVE, self);
+    }
+
+    #[inline(always)]
+    fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
+        self.inner.index_values()
+    }
+
+    #[inline(always)]
+    fn clear(&self, batch: &mut BatchBuilder) {
+        batch.clear(Field::ARCHIVE);
+    }
+}
+
+impl CurrentObject for () {
+    fn assert(&self, _: &mut BatchBuilder) {}
+    fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
+        std::iter::empty()
+    }
+    fn clear(&self, _: &mut BatchBuilder) {}
+}
+
+pub trait SerializableObject: IndexableObject {
+    fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()>;
+}
+
+impl<T: IndexableAndSerializableObject> SerializableObject for T {
+    fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()> {
+        if T::is_versioned() {
+            let (offset, bytes) = Archiver::new(self).serialize_versioned()?;
+            batch.set_fnc(
+                Field::ARCHIVE,
+                Params::with_capacity(2).with_bytes(bytes).with_u64(offset),
+                |params, ids| {
+                    let change_id = ids.current_change_id()?;
+                    let archive = params.bytes(0);
+                    let offset = params.u64(1);
+
+                    let mut bytes = Vec::with_capacity(archive.len());
+                    bytes.extend_from_slice(&archive[..offset as usize]);
+                    bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
+                    bytes.push(archive.last().copied().unwrap()); // Marker
+                    Ok(bytes)
+                },
+            );
+        } else {
+            batch.set(Field::ARCHIVE, Archiver::new(self).serialize()?);
+        }
+
+        Ok(())
+    }
+}
+
+impl<C, N> ObjectIndexBuilder<C, N> {
     pub fn new() -> Self {
         Self {
             current: None,
@@ -276,7 +338,7 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
         }
     }
 
-    pub fn with_current(mut self, current: Archive<C>) -> Self {
+    pub fn with_current(mut self, current: C) -> Self {
         self.current = Some(current);
         self
     }
@@ -286,7 +348,7 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
         self
     }
 
-    pub fn with_current_opt(mut self, current: Option<Archive<C>>) -> Self {
+    pub fn with_current_opt(mut self, current: Option<C>) -> Self {
         self.current = current;
         self
     }
@@ -299,7 +361,7 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
         self.changes.as_mut()
     }
 
-    pub fn current(&self) -> Option<&Archive<C>> {
+    pub fn current(&self) -> Option<&C> {
         self.current.as_ref()
     }
 
@@ -315,9 +377,7 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
     }
 }
 
-impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
-    for ObjectIndexBuilder<C, N>
-{
+impl<C: CurrentObject, N: SerializableObject> IntoOperations for ObjectIndexBuilder<C, N> {
     fn build(self, batch: &mut BatchBuilder) -> trc::Result<()> {
         match (self.current, self.changes) {
             (None, Some(changes)) => {
@@ -325,31 +385,12 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
                 for item in changes.index_values() {
                     build_index(batch, item, self.changed_by, self.tenant_id, true);
                 }
-                if N::is_versioned() {
-                    let (offset, bytes) = Archiver::new(changes).serialize_versioned()?;
-                    batch.set_fnc(
-                        Field::ARCHIVE,
-                        Params::with_capacity(2).with_bytes(bytes).with_u64(offset),
-                        |params, ids| {
-                            let change_id = ids.current_change_id()?;
-                            let archive = params.bytes(0);
-                            let offset = params.u64(1);
-
-                            let mut bytes = Vec::with_capacity(archive.len());
-                            bytes.extend_from_slice(&archive[..offset as usize]);
-                            bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
-                            bytes.push(archive.last().copied().unwrap()); // Marker
-                            Ok(bytes)
-                        },
-                    );
-                } else {
-                    batch.set(Field::ARCHIVE, Archiver::new(changes).serialize()?);
-                }
+                changes.serialize_into(batch)?;
             }
             (Some(current), Some(changes)) => {
                 // Update
-                batch.assert_value(Field::ARCHIVE, &current);
-                for (current, change) in current.inner.index_values().zip(changes.index_values()) {
+                current.assert(batch);
+                for (current, change) in current.index_values().zip(changes.index_values()) {
                     if current != change {
                         merge_index(batch, current, change, self.changed_by, self.tenant_id)?;
                     } else {
@@ -367,35 +408,15 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> IntoOperations
                         }
                     }
                 }
-                if N::is_versioned() {
-                    let (offset, bytes) = Archiver::new(changes).serialize_versioned()?;
-                    batch.set_fnc(
-                        Field::ARCHIVE,
-                        Params::with_capacity(2).with_bytes(bytes).with_u64(offset),
-                        |params, ids| {
-                            let change_id = ids.current_change_id()?;
-                            let archive = params.bytes(0);
-                            let offset = params.u64(1);
-
-                            let mut bytes = Vec::with_capacity(archive.len());
-                            bytes.extend_from_slice(&archive[..offset as usize]);
-                            bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
-                            bytes.push(archive.last().copied().unwrap()); // Marker
-                            Ok(bytes)
-                        },
-                    );
-                } else {
-                    batch.set(Field::ARCHIVE, Archiver::new(changes).serialize()?);
-                }
+                changes.serialize_into(batch)?;
             }
             (Some(current), None) => {
                 // Deletion
-                batch.assert_value(Field::ARCHIVE, &current);
-                for item in current.inner.index_values() {
+                current.assert(batch);
+                for item in current.index_values() {
                     build_index(batch, item, self.changed_by, self.tenant_id, false);
                 }
-
-                batch.clear(Field::ARCHIVE);
+                current.clear(batch);
             }
             (None, None) => unreachable!(),
         }

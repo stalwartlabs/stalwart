@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::metadata::MessageData;
 use crate::cache::{MessageCacheFetch, email::MessageCacheAccess};
+use crate::message::messagedata::EmailMessageData;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
 use registry::schema::enums::IndexDocumentType;
@@ -67,43 +67,35 @@ impl EmailDeletion for Server {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email);
-        self.archives(
-            account_id,
-            Collection::Email,
-            &document_ids,
-            |document_id, data_| {
-                // Add changes to batch
-                let metadata = data_
-                    .to_unarchived::<MessageData>()
-                    .caused_by(trc::location!())?;
-                for mailbox in metadata.inner.mailboxes.iter() {
-                    batch.log_vanished_item(
-                        VanishedCollection::Email,
-                        (mailbox.mailbox_id.to_native(), mailbox.uid.to_native()),
-                    );
-                }
-                thread_ids.insert(metadata.inner.thread_id.to_native());
-                batch
-                    .with_document(document_id)
-                    .custom(
-                        ObjectIndexBuilder::<_, ()>::new()
-                            .with_tenant_id(tenant_id)
-                            .with_current(metadata),
-                    )
-                    .caused_by(trc::location!())?
-                    .schedule_task(Task::UnindexDocument(TaskIndexDocument {
-                        account_id: account_id.into(),
-                        document_id: document_id.into(),
-                        document_type: IndexDocumentType::Email,
-                        status: TaskStatus::now(),
-                    }))
-                    .commit_point();
+        self.message_datas(account_id, &document_ids, |document_id, metadata| {
+            // Add changes to batch
+            for mailbox in metadata.mailboxes.iter() {
+                batch.log_vanished_item(
+                    VanishedCollection::Email,
+                    (mailbox.mailbox_id, mailbox.uid),
+                );
+            }
+            thread_ids.insert(metadata.thread_id);
+            batch
+                .with_document(document_id)
+                .custom(
+                    ObjectIndexBuilder::<_, ()>::new()
+                        .with_tenant_id(tenant_id)
+                        .with_current(metadata),
+                )
+                .caused_by(trc::location!())?
+                .schedule_task(Task::UnindexDocument(TaskIndexDocument {
+                    account_id: account_id.into(),
+                    document_id: document_id.into(),
+                    document_type: IndexDocumentType::Email,
+                    status: TaskStatus::now(),
+                }))
+                .commit_point();
 
-                deleted_ids.insert(document_id);
+            deleted_ids.insert(document_id);
 
-                Ok(true)
-            },
-        )
+            Ok(true)
+        })
         .await?;
 
         self.log_emptied_threads(account_id, batch, thread_ids, &deleted_ids)

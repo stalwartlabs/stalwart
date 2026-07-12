@@ -13,8 +13,7 @@ use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::metadata::{
-        ArchivedMetadataPartType, MESSAGE_HAS_ATTACHMENT, MESSAGE_RECEIVED_MASK, MessageMetadata,
-        MetadataHeaderName, PART_ENCODING_PROBLEM,
+        ArchivedMetadataPartType, MessageMetadata, MetadataHeaderName, PART_ENCODING_PROBLEM,
     },
 };
 use jmap_proto::{
@@ -38,6 +37,7 @@ use types::{
     collection::Collection,
     field::EmailField,
     id::Id,
+    keyword::HASATTACHMENT,
 };
 use utils::chained_bytes::ChainedBytes;
 
@@ -269,9 +269,7 @@ impl EmailGet for Server {
                     EmailProperty::ReceivedAt => {
                         email.insert_unchecked(
                             EmailProperty::ReceivedAt,
-                            EmailValue::Date(UTCDate::from_timestamp(
-                                (metadata.rcvd_attach.to_native() & MESSAGE_RECEIVED_MASK) as i64,
-                            )),
+                            EmailValue::Date(UTCDate::from_timestamp(data.received_at as i64)),
                         );
                     }
                     EmailProperty::Preview => {
@@ -285,7 +283,7 @@ impl EmailGet for Server {
                     EmailProperty::HasAttachment => {
                         email.insert_unchecked(
                             EmailProperty::HasAttachment,
-                            (metadata.rcvd_attach.to_native() & MESSAGE_HAS_ATTACHMENT) != 0,
+                            (data.keywords & 1 << HASATTACHMENT) != 0,
                         );
                     }
                     EmailProperty::Subject => {

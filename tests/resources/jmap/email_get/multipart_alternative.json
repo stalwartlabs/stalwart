@@ -3,6 +3,7 @@
     "a": true
   },
   "keywords": {
+    "$hasnoattachment": true,
     "tag": true
   },
   "size": 616,

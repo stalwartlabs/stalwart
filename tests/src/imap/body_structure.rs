@@ -45,7 +45,6 @@ pub fn test() {
             blob_hash: Default::default(),
             blob_body_offset: message_.root_part().offset_body as u32,
             contents: build_metadata_contents(message_),
-            rcvd_attach: 0,
         };
         let metadata_ =
             Archive::deserialize_owned(Archiver::new(metadata).serialize().unwrap()).unwrap();

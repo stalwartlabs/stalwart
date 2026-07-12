@@ -10,4 +10,5 @@ pub mod delete;
 pub mod delivery;
 pub mod index;
 pub mod ingest;
+pub mod messagedata;
 pub mod metadata;

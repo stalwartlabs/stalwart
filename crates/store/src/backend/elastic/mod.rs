@@ -53,18 +53,18 @@ impl SearchField {
         match self {
             SearchField::AccountId
             | SearchField::DocumentId
-            | SearchField::Email(EmailSearchField::Size) => json!({
+            | SearchField::Email(EmailSearchField::_Size) => json!({
               "type": "integer"
             }),
             SearchField::Id
-            | SearchField::Email(EmailSearchField::SentAt | EmailSearchField::ReceivedAt)
+            | SearchField::Email(EmailSearchField::_SentAt | EmailSearchField::_ReceivedAt)
             | SearchField::Calendar(CalendarSearchField::Start)
             | SearchField::Tracing(TracingSearchField::QueueId | TracingSearchField::EventType) => {
                 json!({
                   "type": "long"
                 })
             }
-            SearchField::Email(EmailSearchField::HasAttachment) => json!({
+            SearchField::Email(EmailSearchField::_HasAttachment) => json!({
               "type": "boolean"
             }),
             SearchField::Calendar(CalendarSearchField::Uid)

@@ -266,7 +266,11 @@ impl<T: SessionStream> SessionData<T> {
                     )));
                 }
                 Filter::Before(date) => {
-                    filters.push(SearchFilter::lt(EmailSearchField::ReceivedAt, date));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .received(date, SearchOperator::LowerThan)
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::Deleted => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
@@ -291,13 +295,23 @@ impl<T: SessionStream> SessionData<T> {
                     )));
                 }
                 Filter::Larger(size) => {
-                    filters.push(SearchFilter::gt(EmailSearchField::Size, size));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .size(size, SearchOperator::GreaterThan)
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::On(date) => {
-                    filters.push(SearchFilter::And);
-                    filters.push(SearchFilter::ge(EmailSearchField::ReceivedAt, date));
-                    filters.push(SearchFilter::lt(EmailSearchField::ReceivedAt, date + 86400));
-                    filters.push(SearchFilter::End);
+                    let date_from = date as u64;
+                    let date_to = date_from + 86400;
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .emails
+                            .items
+                            .iter()
+                            .filter(|m| m.received_at >= date_from && m.received_at < date_to)
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::Seen => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
@@ -305,22 +319,47 @@ impl<T: SessionStream> SessionData<T> {
                     )));
                 }
                 Filter::SentBefore(date) => {
-                    filters.push(SearchFilter::lt(EmailSearchField::SentAt, date));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .sent(date, SearchOperator::LowerThan)
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::SentOn(date) => {
-                    filters.push(SearchFilter::And);
-                    filters.push(SearchFilter::ge(EmailSearchField::SentAt, date));
-                    filters.push(SearchFilter::lt(EmailSearchField::SentAt, date + 86400));
-                    filters.push(SearchFilter::End);
+                    let date_from = date;
+                    let date_to = date_from + 86400;
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .emails
+                            .items
+                            .iter()
+                            .filter(|m| {
+                                let sent_at = m.received_at as i64 + m.sent_at as i64;
+                                sent_at >= date_from && sent_at < date_to
+                            })
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::SentSince(date) => {
-                    filters.push(SearchFilter::ge(EmailSearchField::SentAt, date));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .sent(date, SearchOperator::GreaterEqualThan)
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::Since(date) => {
-                    filters.push(SearchFilter::ge(EmailSearchField::ReceivedAt, date));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .received(date, SearchOperator::GreaterEqualThan)
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::Smaller(size) => {
-                    filters.push(SearchFilter::lt(EmailSearchField::Size, size));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .size(size, SearchOperator::LowerThan)
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::Unanswered => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
@@ -382,16 +421,24 @@ impl<T: SessionStream> SessionData<T> {
                     filters.push(SearchFilter::End);*/
                 }
                 Filter::Older(secs) => {
-                    filters.push(SearchFilter::le(
-                        EmailSearchField::ReceivedAt,
-                        now().saturating_sub(secs as u64),
-                    ));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .received(
+                                now().saturating_sub(secs as u64) as i64,
+                                SearchOperator::LowerThan,
+                            )
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::Younger(secs) => {
-                    filters.push(SearchFilter::ge(
-                        EmailSearchField::ReceivedAt,
-                        now().saturating_sub(secs as u64),
-                    ));
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .received(
+                                now().saturating_sub(secs as u64) as i64,
+                                SearchOperator::GreaterEqualThan,
+                            )
+                            .map(|m| m.document_id),
+                    )));
                 }
                 Filter::ModSeq((modseq, _)) => {
                     let mut set = RoaringBitmap::new();
@@ -593,23 +640,55 @@ impl<T: SessionStream> SessionData<T> {
         let mut comparators = Vec::with_capacity(imap_comparator.len());
         for comparator in imap_comparator {
             comparators.push(match comparator.sort {
-                search::Sort::Arrival => {
-                    SearchComparator::field(EmailSearchField::ReceivedAt, comparator.ascending)
-                }
+                search::Sort::Arrival => SearchComparator::sorted_set(
+                    cache
+                        .emails
+                        .items
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| (m.document_id, i as u32))
+                        .collect(),
+                    comparator.ascending,
+                ),
                 search::Sort::Cc => {
                     return Err(trc::ImapEvent::Error
                         .into_err()
                         .details("Sorting by CC is not supported."));
                 }
                 search::Sort::Date => {
-                    SearchComparator::field(EmailSearchField::SentAt, comparator.ascending)
+                    let mut sorted = cache
+                        .emails
+                        .items
+                        .iter()
+                        .map(|m| (m.received_at as i64 + m.sent_at as i64, m.document_id))
+                        .collect::<Vec<_>>();
+                    sorted.sort_unstable_by_key(|(ts, _)| *ts);
+
+                    let mut set = store::ahash::AHashMap::with_capacity(sorted.len());
+                    let mut rank = 0u32;
+                    let mut prev_ts = None;
+                    for (ts, document_id) in sorted {
+                        if prev_ts.is_some_and(|prev| prev != ts) {
+                            rank += 1;
+                        }
+                        set.insert(document_id, rank);
+                        prev_ts = Some(ts);
+                    }
+
+                    SearchComparator::sorted_set(set, comparator.ascending)
                 }
                 search::Sort::From | search::Sort::DisplayFrom => {
                     SearchComparator::field(EmailSearchField::From, comparator.ascending)
                 }
-                search::Sort::Size => {
-                    SearchComparator::field(EmailSearchField::Size, comparator.ascending)
-                }
+                search::Sort::Size => SearchComparator::sorted_set(
+                    cache
+                        .emails
+                        .items
+                        .iter()
+                        .map(|m| (m.document_id, m.size))
+                        .collect(),
+                    comparator.ascending,
+                ),
                 search::Sort::Subject => {
                     SearchComparator::field(EmailSearchField::Subject, comparator.ascending)
                 }

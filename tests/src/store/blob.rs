@@ -206,7 +206,6 @@ pub async fn blob_tests() {
                     ValueClass::Property(EmailField::Metadata.into()),
                     Archiver::new(MessageMetadata {
                         contents: Default::default(),
-                        rcvd_attach: Default::default(),
                         blob_hash: hash.clone(),
                         blob_body_offset: Default::default(),
                         preview: Default::default(),

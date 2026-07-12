@@ -8,7 +8,7 @@ use crate::{
     jmap::mail::changes::{LogAction, ParseState},
     utils::server::TestServer,
 };
-use ::email::message::metadata::MessageData;
+use ::email::message::messagedata::MessageData;
 use common::storage::index::ObjectIndexBuilder;
 use jmap_client::{
     core::query::{Comparator, Filter},
@@ -20,7 +20,7 @@ use std::str::FromStr;
 use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::BatchBuilder,
 };
 use types::{
     collection::{Collection, SyncCollection},
@@ -139,9 +139,9 @@ pub async fn test(test: &TestServer) {
 
                 //let new_thread_id = store::rand::random::<u32>();
 
-                let old_message_ = server
+                let old_message = server
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<MessageData>(ValueKey::archive(
                         account.id().document_id(),
                         Collection::Email,
                         id.document_id(),
@@ -149,8 +149,7 @@ pub async fn test(test: &TestServer) {
                     .await
                     .unwrap()
                     .unwrap();
-                let old_message = old_message_.to_unarchived::<MessageData>().unwrap();
-                let mut new_message = old_message.deserialize::<MessageData>().unwrap();
+                let mut new_message = old_message.clone();
                 new_message.thread_id = thread_id;
 
                 server

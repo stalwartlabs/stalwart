@@ -211,10 +211,10 @@ impl EmailConfig {
                             SearchEmailField::Subject => EmailSearchField::Subject,
                             SearchEmailField::Body => EmailSearchField::Body,
                             SearchEmailField::Attachment => EmailSearchField::Attachment,
-                            SearchEmailField::ReceivedAt => EmailSearchField::ReceivedAt,
-                            SearchEmailField::SentAt => EmailSearchField::SentAt,
-                            SearchEmailField::Size => EmailSearchField::Size,
-                            SearchEmailField::HasAttachment => EmailSearchField::HasAttachment,
+                            SearchEmailField::ReceivedAt => EmailSearchField::_ReceivedAt,
+                            SearchEmailField::SentAt => EmailSearchField::_SentAt,
+                            SearchEmailField::Size => EmailSearchField::_Size,
+                            SearchEmailField::HasAttachment => EmailSearchField::_HasAttachment,
                             SearchEmailField::Headers => EmailSearchField::Headers,
                         })
                     })

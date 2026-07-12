@@ -8,11 +8,10 @@ use crate::message::{
     index::{MAX_MESSAGE_PARTS, extractors::VisitTextArchived},
     metadata::{
         ArchivedMessageMetadata, ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue,
-        ArchivedMetadataPartType, DecodedPartContent, MESSAGE_HAS_ATTACHMENT,
-        MESSAGE_RECEIVED_MASK, MetadataHeaderName,
+        ArchivedMetadataPartType, DecodedPartContent, MetadataHeaderName,
     },
 };
-use mail_parser::{DateTime, decoders::html::html_to_text, parsers::fields::thread::thread_name};
+use mail_parser::{decoders::html::html_to_text, parsers::fields::thread::thread_name};
 use nlp::{
     language::{
         Language,
@@ -49,23 +48,6 @@ impl ArchivedMessageMetadata {
                 .get(self.blob_body_offset.to_native() as usize..)
                 .unwrap_or_default(),
         );
-
-        if index_fields.is_empty()
-            || index_fields.contains(&SearchField::Email(EmailSearchField::ReceivedAt))
-        {
-            document.index_unsigned(
-                SearchField::Email(EmailSearchField::ReceivedAt),
-                self.rcvd_attach.to_native() & MESSAGE_RECEIVED_MASK,
-            );
-        }
-        if index_fields.is_empty()
-            || index_fields.contains(&SearchField::Email(EmailSearchField::Size))
-        {
-            document.index_unsigned(
-                SearchField::Email(EmailSearchField::Size),
-                raw_message.len() as u32,
-            );
-        }
 
         for (part_id, part) in message_contents
             .parts
@@ -148,18 +130,6 @@ impl ArchivedMessageMetadata {
                                     SearchField::Email(EmailSearchField::Subject),
                                     subject,
                                     part_language,
-                                );
-                            }
-                        }
-                        ArchivedMetadataHeaderName::Date => {
-                            if (index_fields.is_empty()
-                                || index_fields
-                                    .contains(&SearchField::Email(EmailSearchField::SentAt)))
-                                && let Some(date) = header.value.as_datetime()
-                            {
-                                document.index_integer(
-                                    SearchField::Email(EmailSearchField::SentAt),
-                                    DateTime::from(date).to_timestamp(),
                                 );
                             }
                         }
@@ -334,11 +304,6 @@ impl ArchivedMessageMetadata {
 
         #[cfg(feature = "test_mode")]
         document.set_unknown_language(default_language);
-
-        document.index_bool(
-            EmailSearchField::HasAttachment,
-            self.rcvd_attach.to_native() & MESSAGE_HAS_ATTACHMENT != 0,
-        );
         document
     }
 }

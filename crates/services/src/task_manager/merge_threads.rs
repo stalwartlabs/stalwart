@@ -8,7 +8,7 @@ use crate::task_manager::TaskResult;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use email::message::{
     ingest::{ThreadMerge, has_message_id},
-    metadata::MessageData,
+    messagedata::MessageData,
 };
 use registry::schema::structs::TaskMergeThreads;
 use std::{str::FromStr, time::Duration};
@@ -17,7 +17,7 @@ use store::{
     ahash::AHashMap,
     rand::Rng,
     write::{
-        AlignedBytes, Archive, BatchBuilder, IndexPropertyClass, MergeResult, Params, ValueClass,
+        BatchBuilder, IndexPropertyClass, MergeResult, Params, ValueClass,
         key::DeserializeBigEndian,
     },
 };
@@ -164,9 +164,9 @@ async fn merge_threads(
         for (&group_thread_id, document_ids) in thread_merge.thread_groups() {
             if thread_id != group_thread_id {
                 for &document_id in document_ids {
-                    if let Some(data_) = server
+                    if let Some(data) = server
                         .store()
-                        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        .get_value::<MessageData>(ValueKey::archive(
                             account_id,
                             Collection::Email,
                             document_id,
@@ -174,18 +174,13 @@ async fn merge_threads(
                         .await
                         .caused_by(trc::location!())?
                     {
-                        let data = data_
-                            .to_unarchived::<MessageData>()
-                            .caused_by(trc::location!())?;
-                        if data.inner.thread_id != group_thread_id {
+                        if data.thread_id != group_thread_id {
                             try_count += 1;
                             continue 'retry;
                         }
 
                         // Update thread id
-                        let mut new_data = data
-                            .deserialize::<MessageData>()
-                            .caused_by(trc::location!())?;
+                        let mut new_data = data.clone();
                         new_data.thread_id = thread_id;
                         batch
                             .with_document(document_id)

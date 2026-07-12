@@ -27,6 +27,7 @@ use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
 use auth::oauth::config::OAuthConfig;
 use calcard::common::timezone::Tz;
+use compact_str::CompactString;
 use config::{
     groupware::GroupwareConfig,
     mailstore::jmap::JmapConfig,
@@ -229,22 +230,30 @@ pub struct MessagesCache {
     pub change_id: u64,
     pub items: Box<[MessageCache]>,
     pub index: AHashMap<u32, u32>,
-    pub keywords: Box<[Box<str>]>,
+    pub keywords: Box<[CustomKeywords]>,
     pub size: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CustomKeywords {
+    pub names: Box<[CompactString]>,
+    pub document_id: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct MessageCache {
     pub document_id: u32,
-    pub mailboxes: TinyVec<[MessageUidCache; 2]>,
-    pub keywords: u128,
+    pub mailboxes: TinyVec<[MessageUid; 2]>,
+    pub keywords: u32,
     pub thread_id: u32,
     pub change_id: u64,
     pub size: u32,
+    pub received_at: u64,
+    pub sent_at: i32,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct MessageUidCache {
+pub struct MessageUid {
     pub mailbox_id: u32,
     pub uid: u32,
 }
@@ -428,6 +437,24 @@ pub struct ThrottleKeyHasher {
 
 #[derive(Clone, Default)]
 pub struct ThrottleKeyHasherBuilder {}
+
+impl PartialEq for MessageUid {
+    fn eq(&self, other: &Self) -> bool {
+        self.mailbox_id == other.mailbox_id
+    }
+}
+
+impl Eq for MessageUid {}
+
+impl MessageUid {
+    pub fn new(mailbox_id: u32, uid: u32) -> Self {
+        MessageUid { mailbox_id, uid }
+    }
+
+    pub fn new_unassigned(mailbox_id: u32) -> Self {
+        MessageUid { mailbox_id, uid: 0 }
+    }
+}
 
 pub const DEFAULT_LOGO_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAMgAAAAnCAMAAAB9lPf7AAABOFBMVEUAAAAAADoAAEkPDkIPDkIQ

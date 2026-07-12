@@ -181,19 +181,33 @@ impl EmailQuery for Server {
                             }),
                         )));
                     }
-                    EmailFilter::Before(date) => filters.push(SearchFilter::lt(
-                        EmailSearchField::ReceivedAt,
-                        date.timestamp(),
-                    )),
-                    EmailFilter::After(date) => filters.push(SearchFilter::gt(
-                        EmailSearchField::ReceivedAt,
-                        date.timestamp(),
-                    )),
+                    EmailFilter::Before(date) => {
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cached_messages
+                                .received(date.timestamp(), SearchOperator::LowerThan)
+                                .map(|m| m.document_id),
+                        )));
+                    }
+                    EmailFilter::After(date) => {
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cached_messages
+                                .received(date.timestamp(), SearchOperator::GreaterThan)
+                                .map(|m| m.document_id),
+                        )));
+                    }
                     EmailFilter::MinSize(size) => {
-                        filters.push(SearchFilter::ge(EmailSearchField::Size, size))
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cached_messages
+                                .size(size, SearchOperator::GreaterEqualThan)
+                                .map(|m| m.document_id),
+                        )));
                     }
                     EmailFilter::MaxSize(size) => {
-                        filters.push(SearchFilter::lt(EmailSearchField::Size, size))
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cached_messages
+                                .size(size, SearchOperator::LowerThan)
+                                .map(|m| m.document_id),
+                        )));
                     }
                     EmailFilter::AllInThreadHaveKeyword(keyword) => filters.push(
                         SearchFilter::is_in_set(thread_keywords(&cached_messages, keyword, true)),
@@ -225,10 +239,17 @@ impl EmailQuery for Server {
                         )));
                     }
                     EmailFilter::HasAttachment(has_attach) => {
-                        filters.push(SearchFilter::eq(
-                            EmailSearchField::HasAttachment,
-                            has_attach,
-                        ));
+                        let keyword = if has_attach {
+                            Keyword::HasAttachment
+                        } else {
+                            Keyword::HasNoAttachment
+                        };
+
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cached_messages
+                                .with_keyword(&keyword)
+                                .map(|item| item.document_id),
+                        )));
                     }
 
                     // Non-standard
@@ -240,10 +261,18 @@ impl EmailQuery for Server {
                         filters.push(SearchFilter::is_in_set(set));
                     }
                     EmailFilter::SentBefore(date) => {
-                        filters.push(SearchFilter::lt(EmailSearchField::SentAt, date.timestamp()))
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cached_messages
+                                .sent(date.timestamp(), SearchOperator::LowerThan)
+                                .map(|m| m.document_id),
+                        )));
                     }
                     EmailFilter::SentAfter(date) => {
-                        filters.push(SearchFilter::gt(EmailSearchField::SentAt, date.timestamp()))
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cached_messages
+                                .sent(date.timestamp(), SearchOperator::GreaterThan)
+                                .map(|m| m.document_id),
+                        )));
                     }
                     EmailFilter::InThread(id) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
@@ -282,12 +311,25 @@ impl EmailQuery for Server {
             .unwrap_or_default()
         {
             comparators.push(match comparator.property {
-                EmailComparator::ReceivedAt => {
-                    SearchComparator::field(EmailSearchField::ReceivedAt, comparator.is_ascending)
-                }
-                EmailComparator::Size => {
-                    SearchComparator::field(EmailSearchField::Size, comparator.is_ascending)
-                }
+                EmailComparator::ReceivedAt => SearchComparator::sorted_set(
+                    cached_messages
+                        .emails
+                        .items
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| (m.document_id, i as u32))
+                        .collect(),
+                    comparator.is_ascending,
+                ),
+                EmailComparator::Size => SearchComparator::sorted_set(
+                    cached_messages
+                        .emails
+                        .items
+                        .iter()
+                        .map(|m| (m.document_id, m.size))
+                        .collect(),
+                    comparator.is_ascending,
+                ),
                 EmailComparator::From => {
                     SearchComparator::field(EmailSearchField::From, comparator.is_ascending)
                 }
@@ -298,7 +340,26 @@ impl EmailQuery for Server {
                     SearchComparator::field(EmailSearchField::Subject, comparator.is_ascending)
                 }
                 EmailComparator::SentAt => {
-                    SearchComparator::field(EmailSearchField::SentAt, comparator.is_ascending)
+                    let mut sorted = cached_messages
+                        .emails
+                        .items
+                        .iter()
+                        .map(|m| (m.received_at as i64 + m.sent_at as i64, m.document_id))
+                        .collect::<Vec<_>>();
+                    sorted.sort_unstable_by_key(|(ts, _)| *ts);
+
+                    let mut set = store::ahash::AHashMap::with_capacity(sorted.len());
+                    let mut rank = 0u32;
+                    let mut prev_ts = None;
+                    for (ts, document_id) in sorted {
+                        if prev_ts.is_some_and(|prev| prev != ts) {
+                            rank += 1;
+                        }
+                        set.insert(document_id, rank);
+                        prev_ts = Some(ts);
+                    }
+
+                    SearchComparator::sorted_set(set, comparator.is_ascending)
                 }
                 EmailComparator::HasKeyword(keyword) => SearchComparator::set(
                     RoaringBitmap::from_iter(

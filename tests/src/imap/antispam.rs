@@ -96,14 +96,14 @@ pub async fn test(test: &TestServer) {
     imap.send("FETCH 11 (FLAGS RFC822.TEXT)").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_not_contains("FLAGS ($Junk")
+        .assert_not_contains("$Junk")
         .assert_contains("Subject: can someone explain")
         .assert_contains("X-Spam-Status: No")
         .assert_contains("PROB_HAM_HIGH");
     imap.send("FETCH 12 (FLAGS RFC822.TEXT)").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_not_contains("FLAGS ($Junk")
+        .assert_not_contains("$Junk")
         .assert_contains("Subject: classifier test")
         .assert_contains("X-Spam-Status: No")
         .assert_contains_any(&["PROB_SPAM_UNCERTAIN", "PROB_HAM_LOW"]);
@@ -111,7 +111,7 @@ pub async fn test(test: &TestServer) {
     imap.send("FETCH 10 (FLAGS RFC822.TEXT)").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains("FLAGS ($Junk")
+        .assert_contains("$Junk")
         .assert_contains("Subject: save up to")
         .assert_contains("X-Spam-Status: Yes")
         .assert_contains("PROB_SPAM_HIGH");

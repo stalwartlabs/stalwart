@@ -7,7 +7,10 @@
 use super::*;
 use crate::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::{delete::EmailDeletion, metadata::MessageData},
+    message::{
+        delete::EmailDeletion,
+        messagedata::{EmailMessageData, MessageData},
+    },
 };
 use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
@@ -90,86 +93,75 @@ impl MailboxDestroy for Server {
 
                 let mut deleted_ids = RoaringBitmap::new();
                 let mut thread_ids = RoaringBitmap::new();
-                self.archives(
-                    account_id,
-                    Collection::Email,
-                    &message_ids,
-                    |message_id, message_data_| {
-                        // Remove mailbox from list
-                        let prev_message_data = message_data_
-                            .to_unarchived::<MessageData>()
-                            .caused_by(trc::location!())?;
-                        if !prev_message_data
-                            .inner
-                            .mailboxes
-                            .iter()
-                            .any(|id| id.mailbox_id == document_id)
-                        {
-                            return Ok(true);
+                self.message_datas(account_id, &message_ids, |message_id, prev_message_data| {
+                    // Remove mailbox from list
+                    if !prev_message_data
+                        .mailboxes
+                        .iter()
+                        .any(|id| id.mailbox_id == document_id)
+                    {
+                        return Ok(true);
+                    }
+
+                    if prev_message_data.mailboxes.len() == 1 {
+                        // Delete message
+                        for mailbox in prev_message_data.mailboxes.iter() {
+                            batch.log_vanished_item(
+                                VanishedCollection::Email,
+                                (mailbox.mailbox_id, mailbox.uid),
+                            );
                         }
+                        deleted_ids.insert(message_id);
+                        thread_ids.insert(prev_message_data.thread_id);
+                        batch
+                            .with_collection(Collection::Email)
+                            .with_document(message_id)
+                            .custom(
+                                ObjectIndexBuilder::<_, ()>::new()
+                                    .with_changed_by(access_token.account_tenant_ids())
+                                    .with_current(prev_message_data),
+                            )
+                            .caused_by(trc::location!())?
+                            .schedule_task(Task::UnindexDocument(TaskIndexDocument {
+                                account_id: account_id.into(),
+                                document_id: message_id.into(),
+                                document_type: IndexDocumentType::Email,
+                                status: TaskStatus::now(),
+                            }))
+                            .commit_point();
+                    } else {
+                        let new_message_data = MessageData {
+                            mailboxes: prev_message_data
+                                .mailboxes
+                                .iter()
+                                .filter(|m| m.mailbox_id != document_id)
+                                .copied()
+                                .collect(),
+                            keywords: prev_message_data.keywords,
+                            thread_id: prev_message_data.thread_id,
+                            size: prev_message_data.size,
+                            keywords_extra: prev_message_data.keywords_extra.to_vec(),
+                            received_at: prev_message_data.received_at,
+                            sent_at: prev_message_data.sent_at,
+                            change_id: prev_message_data.change_id,
+                        };
 
-                        if prev_message_data.inner.mailboxes.len() == 1 {
-                            // Delete message
-                            for mailbox in prev_message_data.inner.mailboxes.iter() {
-                                batch.log_vanished_item(
-                                    VanishedCollection::Email,
-                                    (mailbox.mailbox_id.to_native(), mailbox.uid.to_native()),
-                                );
-                            }
-                            deleted_ids.insert(message_id);
-                            thread_ids.insert(prev_message_data.inner.thread_id.to_native());
-                            batch
-                                .with_collection(Collection::Email)
-                                .with_document(message_id)
-                                .custom(
-                                    ObjectIndexBuilder::<_, ()>::new()
-                                        .with_changed_by(access_token.account_tenant_ids())
-                                        .with_current(prev_message_data),
-                                )
-                                .caused_by(trc::location!())?
-                                .schedule_task(Task::UnindexDocument(TaskIndexDocument {
-                                    account_id: account_id.into(),
-                                    document_id: message_id.into(),
-                                    document_type: IndexDocumentType::Email,
-                                    status: TaskStatus::now(),
-                                }))
-                                .commit_point();
-                        } else {
-                            let new_message_data = MessageData {
-                                mailboxes: prev_message_data
-                                    .inner
-                                    .mailboxes
-                                    .iter()
-                                    .filter(|m| m.mailbox_id != document_id)
-                                    .map(|m| m.to_native())
-                                    .collect(),
-                                keywords: prev_message_data
-                                    .inner
-                                    .keywords
-                                    .iter()
-                                    .map(|k| k.to_native())
-                                    .collect(),
-                                thread_id: prev_message_data.inner.thread_id.to_native(),
-                                size: prev_message_data.inner.size.to_native(),
-                            };
+                        // Untag message from mailbox
+                        batch
+                            .with_collection(Collection::Email)
+                            .with_document(message_id)
+                            .custom(
+                                ObjectIndexBuilder::new()
+                                    .with_changed_by(access_token.account_tenant_ids())
+                                    .with_changes(new_message_data)
+                                    .with_current(prev_message_data),
+                            )
+                            .caused_by(trc::location!())?
+                            .commit_point();
+                    }
 
-                            // Untag message from mailbox
-                            batch
-                                .with_collection(Collection::Email)
-                                .with_document(message_id)
-                                .custom(
-                                    ObjectIndexBuilder::new()
-                                        .with_changed_by(access_token.account_tenant_ids())
-                                        .with_changes(new_message_data)
-                                        .with_current(prev_message_data),
-                                )
-                                .caused_by(trc::location!())?
-                                .commit_point();
-                        }
-
-                        Ok(true)
-                    },
-                )
+                    Ok(true)
+                })
                 .await
                 .caused_by(trc::location!())?;
 

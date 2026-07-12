@@ -583,7 +583,7 @@ impl SieveScriptSet for Server {
 }
 
 pub struct SetItemResponse<'x> {
-    builder: ObjectIndexBuilder<&'x ArchivedSieveScript, SieveScript>,
+    builder: ObjectIndexBuilder<Archive<&'x ArchivedSieveScript>, SieveScript>,
     blob_update: Option<Vec<u8>>,
     set_item: Option<bool>,
 }

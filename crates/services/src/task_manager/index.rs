@@ -576,7 +576,6 @@ async fn delete_email_metadata(
                     .as_ref()
                     .and_then(|e| e.deleted_items_retention.as_ref())
                 {
-                    use email::message::metadata::MESSAGE_RECEIVED_MASK;
                     use registry::{
                         schema::structs::{ArchivedEmail, ArchivedItem},
                         types::{ObjectImpl, datetime::UTCDateTime, id::ObjectId},
@@ -588,29 +587,38 @@ async fn delete_email_metadata(
                     use types::blob::BlobId;
 
                     let root_part = metadata.root_part();
-                    let from: Option<String> = root_part.headers.iter().find_map(|h| {
-                        if let ArchivedMetadataHeaderName::From = &h.name {
-                            h.value.as_single_address().and_then(|addr| {
-                                match (addr.address.as_ref(), addr.name.as_ref()) {
-                                    (Some(address), Some(name)) => {
-                                        Some(format!("{} <{}>", name, address))
+                    let mut from = None;
+                    let mut subject = None;
+                    let mut date = None;
+
+                    for header in root_part.headers.iter().rev() {
+                        match header.name {
+                            ArchivedMetadataHeaderName::From if from.is_none() => {
+                                from = header.value.as_single_address().and_then(|addr| {
+                                    match (addr.address.as_ref(), addr.name.as_ref()) {
+                                        (Some(address), Some(name)) => {
+                                            Some(format!("{} <{}>", name, address))
+                                        }
+                                        (Some(address), None) => Some(address.as_ref().into()),
+                                        (None, Some(name)) => Some(name.as_ref().into()),
+                                        (None, None) => None,
                                     }
-                                    (Some(address), None) => Some(address.as_ref().into()),
-                                    (None, Some(name)) => Some(name.as_ref().into()),
-                                    (None, None) => None,
+                                });
+                            }
+                            ArchivedMetadataHeaderName::Subject if subject.is_none() => {
+                                subject = header.value.as_text().map(Into::into)
+                            }
+                            ArchivedMetadataHeaderName::Date => {
+                                if let Some(dt) = header.value.as_datetime() {
+                                    use mail_parser::DateTime;
+
+                                    date = Some(DateTime::from(dt).to_timestamp());
                                 }
-                            })
-                        } else {
-                            None
+                            }
+                            _ => {}
                         }
-                    });
-                    let subject: Option<String> = root_part.headers.iter().rev().find_map(|h| {
-                        if let ArchivedMetadataHeaderName::Subject = &h.name {
-                            h.value.as_text().map(Into::into)
-                        } else {
-                            None
-                        }
-                    });
+                    }
+
                     let now = now();
                     let until = now + undelete_retention.as_secs();
                     let blob_hash = BlobHash::from(&metadata.blob_hash);
@@ -621,9 +629,9 @@ async fn delete_email_metadata(
                         archived_until: UTCDateTime::from_timestamp(until as i64),
                         archived_at: UTCDateTime::now(),
                         from: from.unwrap_or_default(),
-                        received_at: UTCDateTime::from_timestamp(
-                            (metadata.rcvd_attach.to_native() & MESSAGE_RECEIVED_MASK) as i64,
-                        ),
+                        received_at: date
+                            .map(UTCDateTime::from_timestamp)
+                            .unwrap_or_else(UTCDateTime::now),
                         subject: subject.unwrap_or_default(),
                         size: root_part.offset_end.to_native() as u64,
                     })

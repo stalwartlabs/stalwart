@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use std::{cmp::Ordering, fmt::Display};
 use types::id::Id;
-use types::keyword::{ArchivedKeyword, Keyword};
+use types::keyword::Keyword;
 use utils::chained_bytes::SliceRange;
 
 pub mod acl;
@@ -303,7 +303,7 @@ pub enum Flag {
     New,
     Notify,
     Unsubscribed,
-    Keyword(Box<str>),
+    Keyword(CompactString),
 }
 
 impl Flag {
@@ -380,43 +380,6 @@ impl From<Keyword> for Flag {
     }
 }
 
-impl From<&ArchivedKeyword> for Flag {
-    fn from(value: &ArchivedKeyword) -> Self {
-        match value {
-            ArchivedKeyword::Seen => Flag::Seen,
-            ArchivedKeyword::Draft => Flag::Draft,
-            ArchivedKeyword::Flagged => Flag::Flagged,
-            ArchivedKeyword::Answered => Flag::Answered,
-            ArchivedKeyword::Recent => Flag::Recent,
-            ArchivedKeyword::Important => Flag::Important,
-            ArchivedKeyword::Phishing => Flag::Phishing,
-            ArchivedKeyword::Junk => Flag::Junk,
-            ArchivedKeyword::NotJunk => Flag::NotJunk,
-            ArchivedKeyword::Deleted => Flag::Deleted,
-            ArchivedKeyword::Forwarded => Flag::Forwarded,
-            ArchivedKeyword::MdnSent => Flag::MDNSent,
-            ArchivedKeyword::Autosent => Flag::Autosent,
-            ArchivedKeyword::CanUnsubscribe => Flag::CanUnsubscribe,
-            ArchivedKeyword::Followed => Flag::Followed,
-            ArchivedKeyword::HasAttachment => Flag::HasAttachment,
-            ArchivedKeyword::HasMemo => Flag::HasMemo,
-            ArchivedKeyword::HasNoAttachment => Flag::HasNoAttachment,
-            ArchivedKeyword::Imported => Flag::Imported,
-            ArchivedKeyword::IsTrusted => Flag::IsTrusted,
-            ArchivedKeyword::MailFlagBit0 => Flag::MailFlagBit0,
-            ArchivedKeyword::MailFlagBit1 => Flag::MailFlagBit1,
-            ArchivedKeyword::MailFlagBit2 => Flag::MailFlagBit2,
-            ArchivedKeyword::MaskedEmail => Flag::MaskedEmail,
-            ArchivedKeyword::Memo => Flag::Memo,
-            ArchivedKeyword::Muted => Flag::Muted,
-            ArchivedKeyword::New => Flag::New,
-            ArchivedKeyword::Notify => Flag::Notify,
-            ArchivedKeyword::Unsubscribed => Flag::Unsubscribed,
-            ArchivedKeyword::Other(value) => Flag::Keyword(value.as_ref().into()),
-        }
-    }
-}
-
 impl From<Flag> for Keyword {
     fn from(value: Flag) -> Self {
         match value {
@@ -449,7 +412,7 @@ impl From<Flag> for Keyword {
             Flag::New => Keyword::New,
             Flag::Notify => Keyword::Notify,
             Flag::Unsubscribed => Keyword::Unsubscribed,
-            Flag::Keyword(value) => Keyword::from_boxed_other(value),
+            Flag::Keyword(value) => Keyword::from_compact_string(value),
         }
     }
 }

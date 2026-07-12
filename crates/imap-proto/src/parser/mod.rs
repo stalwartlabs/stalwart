@@ -25,15 +25,13 @@ pub mod store;
 pub mod subscribe;
 pub mod thread;
 
-use std::{borrow::Cow, str::FromStr};
-
-use chrono::{DateTime, NaiveDate};
-
 use crate::{
     Command,
     protocol::{Flag, Sequence},
     receiver::CommandParser,
 };
+use chrono::{DateTime, NaiveDate};
+use std::{borrow::Cow, str::FromStr};
 
 pub type Result<T> = std::result::Result<T, Cow<'static, str>>;
 
@@ -131,7 +129,7 @@ impl Flag {
             } else {
                 String::from_utf8(value)
                     .map_err(|_| Cow::from("Invalid UTF-8."))
-                    .map(|v| Flag::Keyword(v.into_boxed_str()))
+                    .map(|v| Flag::Keyword(v.into()))
             }
         } else {
             Err(Cow::from("Null flags are not allowed."))
@@ -171,7 +169,7 @@ impl Flag {
                 "$notify" => Flag::Notify,
                 "$unsubscribed" => Flag::Unsubscribed,
             )
-            .unwrap_or_else(|| Flag::Keyword(value.into_boxed_str()))
+            .unwrap_or_else(|| Flag::Keyword(value.into()))
         } else {
             let mut keyword = String::with_capacity(value.len());
             for c in value.chars() {
@@ -181,7 +179,7 @@ impl Flag {
                     keyword.push('_');
                 }
             }
-            Flag::Keyword(keyword.into_boxed_str())
+            Flag::Keyword(keyword.into())
         }
     }
 }

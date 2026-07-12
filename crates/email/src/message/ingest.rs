@@ -7,14 +7,15 @@
 use super::crypto::{EncryptMessage, EncryptMessageError};
 use crate::{
     cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
-    mailbox::{INBOX_ID, JUNK_ID, SENT_ID, TRASH_ID, UidMailbox},
+    mailbox::{INBOX_ID, JUNK_ID, SENT_ID, TRASH_ID},
     message::{
         crypto::EncryptionFlags,
         index::{IndexMessage, extractors::VisitText},
-        metadata::{MessageData, MessageMetadata},
+        messagedata::MessageData,
+        metadata::MessageMetadata,
     },
 };
-use common::{Server, auth::AccessToken};
+use common::{MessageUid, Server, auth::AccessToken};
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
@@ -42,6 +43,7 @@ use store::{
         key::DeserializeBigEndian, now,
     },
 };
+use tinyvec::TinyVec;
 use trc::{AddContext, MessageIngestEvent, SpamEvent};
 use types::{
     blob::{BlobClass, BlobId},
@@ -162,6 +164,7 @@ impl EmailIngest for Server {
 
         // Obtain message references and thread name
         let mut message_id = None;
+        let mut sent_at = None;
         let mut message_ids = Vec::new();
         let thread_result = {
             let mut subject = "";
@@ -192,6 +195,9 @@ impl EmailIngest for Server {
                             }
                             _ => "",
                         });
+                    }
+                    HeaderName::Date => {
+                        sent_at = header.value.as_datetime().map(|dt| dt.to_timestamp());
                     }
                     _ => (),
                 }
@@ -570,7 +576,8 @@ impl EmailIngest for Server {
         };
 
         // Assign IMAP UIDs
-        let mut mailbox_ids = Vec::with_capacity(params.mailbox_ids.len());
+        let mut mailbox_ids: TinyVec<[MessageUid; 2]> =
+            TinyVec::with_capacity(params.mailbox_ids.len());
         let mut imap_uids = Vec::with_capacity(params.mailbox_ids.len());
         let mut ids = self
             .assign_email_ids(account_id, params.mailbox_ids.iter().copied(), true)
@@ -578,7 +585,7 @@ impl EmailIngest for Server {
             .caused_by(trc::location!())?;
         let document_id = ids.next().unwrap();
         for (uid, mailbox_id) in ids.zip(params.mailbox_ids.iter().copied()) {
-            mailbox_ids.push(UidMailbox::new(mailbox_id, uid));
+            mailbox_ids.push(MessageUid::new(mailbox_id, uid));
             imap_uids.push(uid);
         }
 
@@ -601,11 +608,26 @@ impl EmailIngest for Server {
             document_id
         };
 
+        let mut keywords = 0;
+        let mut keywords_extra = Vec::new();
+        let received_at = params.received_at.unwrap_or_else(now);
+        for keyword in params.keywords {
+            match keyword.into_id() {
+                Ok(id) => keywords |= 1 << id,
+                Err(name) => keywords_extra.push(name),
+            }
+        }
         let data = MessageData {
-            mailboxes: mailbox_ids.into_boxed_slice(),
-            keywords: params.keywords.into_boxed_slice(),
+            mailboxes: mailbox_ids,
+            keywords,
+            keywords_extra,
             thread_id,
             size: (message.raw_message.len() + extra_headers.len()) as u32,
+            received_at,
+            sent_at: sent_at
+                .map(|sent_at| (sent_at - received_at as i64) as i32)
+                .unwrap_or_default(),
+            change_id: 0,
         };
 
         // Request spam training
@@ -637,7 +659,6 @@ impl EmailIngest for Server {
                 extra_headers_parsed,
                 blob_hash.clone(),
                 data,
-                params.received_at.unwrap_or_else(now),
             )
             .caused_by(trc::location!())?
             .set(

@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::{delete::EmailDeletion, metadata::MessageData},
+    message::{delete::EmailDeletion, messagedata::EmailMessageData},
 };
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
@@ -178,62 +178,50 @@ impl<T: SessionStream> SessionData<T> {
         let mut fully_deleted = RoaringBitmap::new();
         let mut thread_ids = RoaringBitmap::new();
         self.server
-            .archives(
-                account_id,
-                Collection::Email,
-                deleted_ids,
-                |document_id, data_| {
-                    let metadata = data_
-                        .to_unarchived::<MessageData>()
-                        .caused_by(trc::location!())?;
+            .message_datas(account_id, deleted_ids, |document_id, metadata| {
+                if let Some(message_uid) = metadata.message_uid(mailbox_id) {
+                    // Add vanished items
+                    batch.with_document(document_id);
+                    batch.log_vanished_item(VanishedCollection::Email, (mailbox_id, message_uid));
 
-                    if let Some(message_uid) = metadata.inner.message_uid(mailbox_id) {
-                        // Add vanished items
-                        batch.with_document(document_id);
-                        batch.log_vanished_item(
-                            VanishedCollection::Email,
-                            (mailbox_id, message_uid),
-                        );
+                    if metadata.mailboxes.len() == 1 {
+                        // Delete message
+                        fully_deleted.insert(document_id);
+                        thread_ids.insert(metadata.thread_id);
+                        batch
+                            .custom(
+                                ObjectIndexBuilder::<_, ()>::new()
+                                    .with_changed_by(self.access_token.account_tenant_ids())
+                                    .with_current(metadata),
+                            )
+                            .caused_by(trc::location!())?
+                            .schedule_task(Task::UnindexDocument(TaskIndexDocument {
+                                account_id: account_id.into(),
+                                document_id: document_id.into(),
+                                document_type: IndexDocumentType::Email,
+                                status: TaskStatus::now(),
+                            }))
+                            .commit_point();
+                    } else {
+                        // Untag message from this mailbox and remove Deleted flag
+                        let mut new_metadata = metadata.clone();
+                        new_metadata.remove_mailbox(mailbox_id);
+                        new_metadata.remove_keyword(&Keyword::Deleted);
 
-                        if metadata.inner.mailboxes.len() == 1 {
-                            // Delete message
-                            fully_deleted.insert(document_id);
-                            thread_ids.insert(metadata.inner.thread_id.to_native());
-                            batch
-                                .custom(
-                                    ObjectIndexBuilder::<_, ()>::new()
-                                        .with_changed_by(self.access_token.account_tenant_ids())
-                                        .with_current(metadata),
-                                )
-                                .caused_by(trc::location!())?
-                                .schedule_task(Task::UnindexDocument(TaskIndexDocument {
-                                    account_id: account_id.into(),
-                                    document_id: document_id.into(),
-                                    document_type: IndexDocumentType::Email,
-                                    status: TaskStatus::now(),
-                                }))
-                                .commit_point();
-                        } else {
-                            // Untag message from this mailbox and remove Deleted flag
-                            let mut new_metadata = metadata.inner.to_builder();
-                            new_metadata.remove_mailbox(mailbox_id);
-                            new_metadata.remove_keyword(&Keyword::Deleted);
-
-                            // Write changes
-                            batch
-                                .custom(
-                                    ObjectIndexBuilder::new()
-                                        .with_current(metadata)
-                                        .with_changes(new_metadata.seal()),
-                                )
-                                .caused_by(trc::location!())?
-                                .commit_point();
-                        }
+                        // Write changes
+                        batch
+                            .custom(
+                                ObjectIndexBuilder::new()
+                                    .with_current(metadata)
+                                    .with_changes(new_metadata),
+                            )
+                            .caused_by(trc::location!())?
+                            .commit_point();
                     }
+                }
 
-                    Ok(true)
-                },
-            )
+                Ok(true)
+            })
             .await
             .caused_by(trc::location!())?;
 

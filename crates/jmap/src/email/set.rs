@@ -11,15 +11,16 @@ use crate::{
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
 use common::{
-    Server, auth::AccessToken, ipc::PushNotification, storage::index::ObjectIndexBuilder,
+    MessageUid, Server, auth::AccessToken, ipc::PushNotification,
+    storage::index::ObjectIndexBuilder,
 };
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
-    mailbox::{JUNK_ID, TRASH_ID, UidMailbox},
+    mailbox::{JUNK_ID, TRASH_ID},
     message::{
         delete::EmailDeletion,
         ingest::{EmailIngest, IngestEmail, IngestSource},
-        metadata::MessageData,
+        messagedata::MessageData,
     },
 };
 use http_proto::HttpSessionData;
@@ -43,18 +44,13 @@ use mail_builder::{
 use mail_parser::MessageParser;
 use std::future::Future;
 use std::{borrow::Cow, collections::HashMap};
-use store::{
-    ValueKey,
-    ahash::AHashMap,
-    roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder},
-};
+use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
     id::Id,
-    keyword::{ArchivedKeyword, Keyword},
+    keyword::Keyword,
     type_state::{DataType, StateChange},
 };
 
@@ -808,9 +804,9 @@ impl EmailSet for Server {
 
             // Obtain message data
             let document_id = id.document_id();
-            let data_ = match self
+            let data = match self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<MessageData>(ValueKey::archive(
                     account_id,
                     Collection::Email,
                     document_id,
@@ -823,10 +819,7 @@ impl EmailSet for Server {
                     continue 'update;
                 }
             };
-            let data = data_
-                .to_unarchived::<MessageData>()
-                .caused_by(trc::location!())?;
-            let mut new_data = data.inner.to_builder();
+            let mut new_data = data.clone();
 
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
@@ -839,7 +832,7 @@ impl EmailSet for Server {
                         new_data.set_mailboxes(
                             ids.into_expanded_boolean_set()
                                 .filter_map(|id| {
-                                    UidMailbox::new_unassigned(
+                                    MessageUid::new_unassigned(
                                         id.try_into_property()?.try_into_id()?.document_id(),
                                     )
                                     .into()
@@ -866,7 +859,7 @@ impl EmailSet for Server {
                                 new_data.remove_keyword(keyword);
                             }
                             PatchResult::AddMailbox(id) => {
-                                new_data.add_mailbox(UidMailbox::new_unassigned(id));
+                                new_data.add_mailbox(MessageUid::new_unassigned(id));
                             }
                             PatchResult::RemoveMailbox(id) => {
                                 new_data.remove_mailbox(id);
@@ -895,8 +888,8 @@ impl EmailSet for Server {
                 }
             }
 
-            let has_keyword_changes = new_data.has_keyword_changes(data.inner);
-            let has_mailbox_changes = new_data.has_mailbox_changes(data.inner);
+            let has_keyword_changes = new_data.has_keyword_changes(&data);
+            let has_mailbox_changes = new_data.has_mailbox_changes(&data);
             if !has_keyword_changes && !has_mailbox_changes {
                 response.updated.append(id, None);
                 continue 'update;
@@ -922,7 +915,7 @@ impl EmailSet for Server {
 
                 // Process keyword changes
                 let mut changed_seen = false;
-                for keyword in new_data.added_keywords(data.inner) {
+                for keyword in new_data.added_keywords(&data) {
                     match keyword {
                         Keyword::Seen => {
                             changed_seen = true;
@@ -936,12 +929,12 @@ impl EmailSet for Server {
                         _ => {}
                     }
                 }
-                for keyword in new_data.removed_keywords(data.inner) {
+                for keyword in new_data.removed_keywords(&data) {
                     match keyword {
-                        ArchivedKeyword::Seen => {
+                        Keyword::Seen => {
                             changed_seen = true;
                         }
-                        ArchivedKeyword::Junk if train_spam.is_none() => {
+                        Keyword::Junk if train_spam.is_none() => {
                             train_spam = Some(false);
                         }
                         _ => {}
@@ -970,7 +963,7 @@ impl EmailSet for Server {
                 }
 
                 // Make sure all new mailboxIds are valid
-                for mailbox_id in new_data.added_mailboxes(data.inner) {
+                for mailbox_id in new_data.added_mailboxes(&data) {
                     if cache.has_mailbox_id(&mailbox_id.mailbox_id) {
                         // Verify permissions on shared accounts
                         if can_add_mailbox_ids
@@ -1007,11 +1000,11 @@ impl EmailSet for Server {
                 }
 
                 // Add all removed mailboxes to change list
-                for mailbox_id in new_data.removed_mailboxes(data.inner) {
+                for mailbox_id in new_data.removed_mailboxes(&data) {
                     // Verify permissions on shared accounts
                     if can_delete_mailbox_ids
                         .as_ref()
-                        .is_none_or(|ids| ids.contains(u32::from(mailbox_id.mailbox_id)))
+                        .is_none_or(|ids| ids.contains(mailbox_id.mailbox_id))
                     {
                         if mailbox_id.mailbox_id == JUNK_ID
                             && !new_data
@@ -1023,9 +1016,9 @@ impl EmailSet for Server {
                         }
 
                         changed_mailboxes
-                            .entry(mailbox_id.mailbox_id.to_native())
+                            .entry(mailbox_id.mailbox_id)
                             .or_default()
-                            .push(mailbox_id.uid.to_native());
+                            .push(mailbox_id.uid);
                     } else {
                         response.not_updated.append(
                             id,
@@ -1069,7 +1062,7 @@ impl EmailSet for Server {
                 .custom(
                     ObjectIndexBuilder::new()
                         .with_current(data)
-                        .with_changes(new_data.seal()),
+                        .with_changes(new_data),
                 )
                 .caused_by(trc::location!())?;
 

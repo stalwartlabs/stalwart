@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::mailbox::{ArchivedUidMailbox, UidMailbox};
-use common::storage::index::IndexableAndSerializableObject;
 use mail_parser::{
     Addr, Address, Attribute, ContentType, DateTime, Encoding, Group, HeaderName, HeaderValue,
     PartType,
@@ -16,38 +14,27 @@ use mail_parser::{
 };
 use rkyv::{boxed::ArchivedBox, rend::u16_le};
 use std::{borrow::Cow, collections::VecDeque, ops::Range};
-use types::{
-    blob_hash::BlobHash,
-    keyword::{ArchivedKeyword, Keyword},
-};
+use types::blob_hash::BlobHash;
 use utils::chained_bytes::ChainedBytes;
-
-#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug)]
-pub struct MessageData {
-    pub mailboxes: Box<[UidMailbox]>,
-    pub keywords: Box<[Keyword]>,
-    pub thread_id: u32,
-    pub size: u32,
-}
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug)]
 pub struct MessageMetadata {
     pub contents: Box<[MessageMetadataContents]>,
-    pub rcvd_attach: u64,
+    //pub rcvd_attach: u64,
     pub blob_hash: BlobHash,
     pub blob_body_offset: u32,
     pub preview: Box<str>,
     pub raw_headers: Box<[u8]>,
 }
 
-pub const MESSAGE_HAS_ATTACHMENT: u64 = 1 << 63;
+/*pub const MESSAGE_HAS_ATTACHMENT: u64 = 1 << 63;
 pub const MESSAGE_RECEIVED_MASK: u64 = !MESSAGE_HAS_ATTACHMENT;
 
 impl IndexableAndSerializableObject for MessageData {
     fn is_versioned() -> bool {
         true
     }
-}
+}*/
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug)]
 pub struct MessageMetadataContents {
@@ -898,153 +885,25 @@ impl From<&ArchivedMetadataDateTime> for DateTime {
     }
 }
 
+impl From<&MetadataDateTime> for DateTime {
+    fn from(dt: &MetadataDateTime) -> Self {
+        DateTime {
+            year: dt.year,
+            month: dt.month,
+            day: dt.day,
+            hour: dt.hour,
+            minute: dt.minute,
+            second: dt.second,
+            tz_before_gmt: dt.tz_hour < 0,
+            tz_hour: dt.tz_hour.unsigned_abs(),
+            tz_minute: dt.tz_minute,
+        }
+    }
+}
+
 impl ArchivedMessageMetadataContents {
     pub fn root_part(&self) -> &ArchivedMessageMetadataPart {
         &self.parts[0]
-    }
-}
-
-#[derive(Default)]
-pub struct MessageDataBuilder {
-    pub mailboxes: Vec<UidMailbox>,
-    pub keywords: Vec<Keyword>,
-    pub thread_id: u32,
-    pub size: u32,
-}
-
-impl MessageDataBuilder {
-    pub fn set_keywords(&mut self, keywords: Vec<Keyword>) {
-        self.keywords = keywords;
-    }
-
-    pub fn add_keyword(&mut self, keyword: Keyword) -> bool {
-        if !self.keywords.contains(&keyword) {
-            self.keywords.push(keyword);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn remove_keyword(&mut self, keyword: &Keyword) -> bool {
-        let prev_len = self.keywords.len();
-        self.keywords.retain(|k| k != keyword);
-        self.keywords.len() != prev_len
-    }
-
-    pub fn set_mailboxes(&mut self, mailboxes: Vec<UidMailbox>) {
-        self.mailboxes = mailboxes;
-    }
-
-    pub fn add_mailbox(&mut self, mailbox: UidMailbox) {
-        if !self.mailboxes.contains(&mailbox) {
-            self.mailboxes.push(mailbox);
-        }
-    }
-
-    pub fn remove_mailbox(&mut self, mailbox: u32) {
-        self.mailboxes.retain(|m| m.mailbox_id != mailbox);
-    }
-
-    pub fn has_keyword(&self, keyword: &Keyword) -> bool {
-        self.keywords.iter().any(|k| k == keyword)
-    }
-
-    pub fn has_keyword_changes(&self, prev_data: &ArchivedMessageData) -> bool {
-        self.keywords.len() != prev_data.keywords.len()
-            || !self
-                .keywords
-                .iter()
-                .all(|k| prev_data.keywords.iter().any(|pk| pk == k))
-    }
-
-    pub fn added_keywords(
-        &self,
-        prev_data: &ArchivedMessageData,
-    ) -> impl Iterator<Item = &Keyword> {
-        self.keywords
-            .iter()
-            .filter(|k| prev_data.keywords.iter().all(|pk| pk != *k))
-    }
-
-    pub fn removed_keywords<'x>(
-        &'x self,
-        prev_data: &'x ArchivedMessageData,
-    ) -> impl Iterator<Item = &'x ArchivedKeyword> {
-        prev_data
-            .keywords
-            .iter()
-            .filter(|k| self.keywords.iter().all(|pk| pk != *k))
-    }
-
-    pub fn added_mailboxes(
-        &self,
-        prev_data: &ArchivedMessageData,
-    ) -> impl Iterator<Item = &UidMailbox> {
-        self.mailboxes.iter().filter(|m| {
-            prev_data
-                .mailboxes
-                .iter()
-                .all(|pm| pm.mailbox_id != m.mailbox_id)
-        })
-    }
-
-    pub fn removed_mailboxes<'x>(
-        &'x self,
-        prev_data: &'x ArchivedMessageData,
-    ) -> impl Iterator<Item = &'x ArchivedUidMailbox> {
-        prev_data.mailboxes.iter().filter(|m| {
-            self.mailboxes
-                .iter()
-                .all(|pm| pm.mailbox_id != m.mailbox_id)
-        })
-    }
-
-    pub fn has_mailbox_changes(&self, prev_data: &ArchivedMessageData) -> bool {
-        self.mailboxes.len() != prev_data.mailboxes.len()
-            || !self.mailboxes.iter().all(|m| {
-                prev_data
-                    .mailboxes
-                    .iter()
-                    .any(|pm| pm.mailbox_id == m.mailbox_id)
-            })
-    }
-
-    pub fn seal(self) -> MessageData {
-        MessageData {
-            mailboxes: self.mailboxes.into_boxed_slice(),
-            keywords: self.keywords.into_boxed_slice(),
-            thread_id: self.thread_id,
-            size: self.size,
-        }
-    }
-}
-
-impl MessageData {
-    pub fn has_mailbox_id(&self, mailbox_id: u32) -> bool {
-        self.mailboxes.iter().any(|m| m.mailbox_id == mailbox_id)
-    }
-}
-
-impl ArchivedMessageData {
-    pub fn has_mailbox_id(&self, mailbox_id: u32) -> bool {
-        self.mailboxes.iter().any(|m| m.mailbox_id == mailbox_id)
-    }
-
-    pub fn message_uid(&self, mailbox_id: u32) -> Option<u32> {
-        self.mailboxes
-            .iter()
-            .find(|m| m.mailbox_id == mailbox_id)
-            .map(|m| m.uid.to_native())
-    }
-
-    pub fn to_builder(&self) -> MessageDataBuilder {
-        MessageDataBuilder {
-            mailboxes: self.mailboxes.iter().map(|m| m.to_native()).collect(),
-            keywords: self.keywords.iter().map(|k| k.to_native()).collect(),
-            thread_id: self.thread_id.to_native(),
-            size: self.size.to_native(),
-        }
     }
 }
 
@@ -1120,15 +979,6 @@ impl ArchivedMetadataHeaderValue {
                 groups.first().and_then(|g| g.addresses.first())
             }
             _ => None,
-        }
-    }
-}
-
-impl ArchivedUidMailbox {
-    pub fn to_native(&self) -> UidMailbox {
-        UidMailbox {
-            mailbox_id: self.mailbox_id.to_native(),
-            uid: self.uid.to_native(),
         }
     }
 }

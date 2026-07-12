@@ -6,10 +6,10 @@
 
 use crate::message::{
     index::{IndexMessage, MAX_MESSAGE_PARTS, PREVIEW_LENGTH},
+    messagedata::MessageData,
     metadata::{
         ArchivedMessageMetadata, ArchivedMessageMetadataPart, ArchivedMetadataHeaderName,
-        MESSAGE_HAS_ATTACHMENT, MESSAGE_RECEIVED_MASK, MessageData, MessageMetadata,
-        MessageMetadataPart, build_metadata_contents,
+        MessageMetadata, MessageMetadataPart, build_metadata_contents,
     },
 };
 use common::storage::index::ObjectIndexBuilder;
@@ -23,7 +23,11 @@ use store::{
     write::{Archiver, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, ValueClass},
 };
 use trc::AddContext;
-use types::{blob_hash::BlobHash, field::EmailField};
+use types::{
+    blob_hash::BlobHash,
+    field::EmailField,
+    keyword::{HASATTACHMENT, HASNOATTACHMENT},
+};
 use utils::cheeky_hash::CheekyHash;
 
 impl MessageMetadata {
@@ -105,8 +109,7 @@ impl IndexMessage for BatchBuilder {
         extra_headers: Vec<u8>,
         mut extra_headers_parsed: Vec<mail_parser::Header<'x>>,
         blob_hash: BlobHash,
-        data: MessageData,
-        received_at: u64,
+        mut data: MessageData,
     ) -> trc::Result<&mut Self> {
         let mut has_attachments = false;
         let mut preview = None;
@@ -219,12 +222,12 @@ impl IndexMessage for BatchBuilder {
             contents: build_metadata_contents(message),
             blob_hash,
             blob_body_offset,
-            rcvd_attach: (if has_attachments {
-                MESSAGE_HAS_ATTACHMENT
-            } else {
-                0
-            }) | (received_at & MESSAGE_RECEIVED_MASK),
         };
+        if has_attachments {
+            data.keywords |= 1 << HASATTACHMENT;
+        } else {
+            data.keywords |= 1 << HASNOATTACHMENT;
+        }
 
         self.set(
             BlobOp::Link {

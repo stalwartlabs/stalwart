@@ -4,27 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::message::metadata::{ArchivedMessageData, MessageData};
+use crate::message::messagedata::{EmailMessageData, KeywordsIter, MessageData};
 use common::{
-    MessageCache, MessageStoreCache, MessageUidCache, MessagesCache, Server, auth::AccessToken,
-    sharing::EffectiveAcl,
+    CustomKeywords, MessageCache, MessageStoreCache, MessageUid, MessagesCache, Server,
+    auth::AccessToken, sharing::EffectiveAcl,
 };
-use store::write::{AlignedBytes, Archive};
-use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap};
+use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap, search::SearchOperator};
 use trc::AddContext;
-use types::{
-    acl::Acl,
-    collection::Collection,
-    keyword::{Keyword, OTHER},
-};
+use types::{acl::Acl, collection::Collection, keyword::Keyword};
 use utils::map::bitmap::Bitmap;
+
+pub(crate) const HAS_CUSTOM_KEYWORDS: u32 = 1 << 31;
 
 struct MessagesCacheBuilder {
     pub change_id: u64,
     pub items: Vec<MessageCache>,
     pub index: AHashMap<u32, u32>,
-    pub keywords: Vec<Box<str>>,
-    pub size: u64,
+    pub keywords: Vec<CustomKeywords>,
 }
 
 pub(crate) async fn update_email_cache(
@@ -34,36 +30,61 @@ pub(crate) async fn update_email_cache(
     store_cache: &MessageStoreCache,
 ) -> trc::Result<MessagesCache> {
     let mut new_cache = MessagesCacheBuilder {
-        index: AHashMap::with_capacity(store_cache.emails.items.len()),
+        index: AHashMap::new(),
         items: Vec::with_capacity(store_cache.emails.items.len()),
-        size: 0,
         change_id: 0,
-        keywords: store_cache.emails.keywords.to_vec(),
+        keywords: Vec::with_capacity(store_cache.emails.keywords.len()),
     };
 
-    for (document_id, is_update) in changed_ids {
+    for (&document_id, is_update) in changed_ids {
         if *is_update
-            && let Some(archive) = server
+            && let Some(mut data) = server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<MessageData>(ValueKey::archive(
                     account_id,
                     Collection::Email,
-                    *document_id,
+                    document_id,
                 ))
                 .await
                 .caused_by(trc::location!())?
         {
-            insert_item(
-                &mut new_cache,
-                *document_id,
-                archive.to_unarchived::<MessageData>()?,
-            );
+            if !data.keywords_extra.is_empty() {
+                new_cache.keywords.push(CustomKeywords {
+                    names: data.keywords_extra.into_boxed_slice(),
+                    document_id,
+                });
+                data.keywords |= HAS_CUSTOM_KEYWORDS;
+            }
+
+            new_cache.items.push(MessageCache {
+                mailboxes: data.mailboxes,
+                keywords: data.keywords,
+                thread_id: data.thread_id,
+                change_id: data.change_id,
+                document_id,
+                size: data.size,
+                received_at: data.received_at,
+                sent_at: data.sent_at,
+            });
         }
     }
 
     for item in &store_cache.emails.items {
         if !changed_ids.contains_key(&item.document_id) {
-            email_insert(&mut new_cache, item.clone());
+            if item.keywords & HAS_CUSTOM_KEYWORDS != 0
+                && let Some(custom_keywords) = store_cache
+                    .emails
+                    .keywords
+                    .iter()
+                    .find(|k| k.document_id == item.document_id)
+            {
+                new_cache.keywords.push(CustomKeywords {
+                    names: custom_keywords.names.clone(),
+                    document_id: item.document_id,
+                });
+            }
+
+            new_cache.items.push(item.clone());
         }
     }
 
@@ -77,81 +98,66 @@ pub(crate) async fn full_email_cache_build(
     // Build cache
     let mut cache = MessagesCacheBuilder {
         items: Vec::with_capacity(16),
-        index: AHashMap::with_capacity(16),
-        keywords: Vec::new(),
-        size: 0,
+        index: AHashMap::default(),
+        keywords: Default::default(),
         change_id: 0,
     };
 
     server
-        .archives(
-            account_id,
-            Collection::Email,
-            &(),
-            |document_id, archive| {
-                insert_item(
-                    &mut cache,
+        .message_datas(account_id, &(), |document_id, mut data| {
+            if !data.keywords_extra.is_empty() {
+                cache.keywords.push(CustomKeywords {
+                    names: data.keywords_extra.into_boxed_slice(),
                     document_id,
-                    archive.to_unarchived::<MessageData>()?,
-                );
-                Ok(true)
-            },
-        )
+                });
+                data.keywords |= HAS_CUSTOM_KEYWORDS;
+            }
+
+            cache.items.push(MessageCache {
+                mailboxes: data.mailboxes,
+                keywords: data.keywords,
+                thread_id: data.thread_id,
+                change_id: data.change_id,
+                document_id,
+                size: data.size,
+                received_at: data.received_at,
+                sent_at: data.sent_at,
+            });
+            Ok(true)
+        })
         .await
         .caused_by(trc::location!())?;
 
     Ok(cache.build())
 }
 
-fn insert_item(
-    cache: &mut MessagesCacheBuilder,
-    document_id: u32,
-    archive: Archive<&ArchivedMessageData>,
-) {
-    let message = archive.inner;
-    let mut item = MessageCache {
-        mailboxes: message
-            .mailboxes
-            .iter()
-            .map(|m| MessageUidCache {
-                mailbox_id: m.mailbox_id.to_native(),
-                uid: m.uid.to_native(),
-            })
-            .collect(),
-        keywords: 0,
-        thread_id: message.thread_id.to_native(),
-        change_id: archive.version.change_id().unwrap_or_default(),
-        document_id,
-        size: message.size.to_native(),
-    };
-    for keyword in message.keywords.iter() {
-        match keyword.id() {
-            Ok(id) => {
-                item.keywords |= 1 << id;
-            }
-            Err(custom) => {
-                if let Some(idx) = cache.keywords.iter().position(|k| **k == *custom) {
-                    item.keywords |= 1 << (OTHER + idx);
-                } else if cache.keywords.len() < (128 - OTHER) {
-                    cache.keywords.push(custom.into());
-                    item.keywords |= 1 << (OTHER + cache.keywords.len() - 1);
-                }
-            }
-        }
-    }
-
-    email_insert(cache, item);
-}
-
 impl MessagesCacheBuilder {
     pub fn build(mut self) -> MessagesCache {
-        self.index.shrink_to_fit();
+        self.items.sort_unstable_by_key(|m| m.received_at);
+        self.index = AHashMap::with_capacity(self.items.len());
+
+        let mut size = self
+            .keywords
+            .iter()
+            .map(|k| {
+                std::mem::size_of::<CustomKeywords>()
+                    + (k.names.len() * std::mem::size_of::<String>())
+            })
+            .sum::<usize>() as u64;
+        for (i, item) in self.items.iter().enumerate() {
+            self.index.insert(item.document_id, i as u32);
+            size += (std::mem::size_of::<MessageCache>()
+                + (std::mem::size_of::<u32>() * 2)
+                + (item.mailboxes.len() * std::mem::size_of::<MessageUid>()))
+                as u64;
+        }
+
         MessagesCache {
             change_id: self.change_id,
             items: self.items.into_boxed_slice(),
             index: self.index,
             keywords: self.keywords.into_boxed_slice(),
-            size: self.size,
+            size,
         }
     }
 }
@@ -194,6 +200,12 @@ pub trait MessageCacheAccess {
     fn expand_keywords(&self, message: &MessageCache) -> impl Iterator<Item = Keyword>;
 
     fn has_keyword(&self, message: &MessageCache, keyword: &Keyword) -> bool;
+
+    fn received(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = &MessageCache>;
+
+    fn sent(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = &MessageCache>;
+
+    fn size(&self, size: u32, comp: SearchOperator) -> impl Iterator<Item = &MessageCache>;
 }
 
 impl MessageCacheAccess for MessageStoreCache {
@@ -220,19 +232,53 @@ impl MessageCacheAccess for MessageStoreCache {
     }
 
     fn with_keyword(&self, keyword: &Keyword) -> impl Iterator<Item = &MessageCache> {
-        let keyword_id = keyword_to_id(self, keyword);
         self.emails
             .items
             .iter()
-            .filter(move |m| keyword_id.is_some_and(|id| m.keywords & (1 << id) != 0))
+            .filter(move |m| self.has_keyword(m, keyword))
     }
 
     fn without_keyword(&self, keyword: &Keyword) -> impl Iterator<Item = &MessageCache> {
-        let keyword_id = keyword_to_id(self, keyword);
         self.emails
             .items
             .iter()
-            .filter(move |m| keyword_id.is_none_or(|id| m.keywords & (1 << id) == 0))
+            .filter(move |m| !self.has_keyword(m, keyword))
+    }
+
+    fn received(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = &MessageCache> {
+        self.emails.items.iter().filter(move |m| match comp {
+            SearchOperator::LowerThan => (m.received_at as i64) < date,
+            SearchOperator::LowerEqualThan => (m.received_at as i64) <= date,
+            SearchOperator::GreaterThan => (m.received_at as i64) > date,
+            SearchOperator::GreaterEqualThan => (m.received_at as i64) >= date,
+            SearchOperator::Equal => (m.received_at as i64) == date,
+            SearchOperator::Contains => unreachable!(),
+        })
+    }
+
+    fn sent(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = &MessageCache> {
+        self.emails.items.iter().filter(move |m| {
+            let sent_at = m.received_at as i64 + m.sent_at as i64;
+            match comp {
+                SearchOperator::LowerThan => sent_at < date,
+                SearchOperator::LowerEqualThan => sent_at <= date,
+                SearchOperator::GreaterThan => sent_at > date,
+                SearchOperator::GreaterEqualThan => sent_at >= date,
+                SearchOperator::Equal => sent_at == date,
+                SearchOperator::Contains => unreachable!(),
+            }
+        })
+    }
+
+    fn size(&self, size: u32, comp: SearchOperator) -> impl Iterator<Item = &MessageCache> {
+        self.emails.items.iter().filter(move |m| match comp {
+            SearchOperator::LowerThan => m.size < size,
+            SearchOperator::LowerEqualThan => m.size <= size,
+            SearchOperator::GreaterThan => m.size > size,
+            SearchOperator::GreaterEqualThan => m.size >= size,
+            SearchOperator::Equal => m.size == size,
+            SearchOperator::Contains => unreachable!(),
+        })
     }
 
     fn in_mailbox_with_keyword(
@@ -240,10 +286,9 @@ impl MessageCacheAccess for MessageStoreCache {
         mailbox_id: u32,
         keyword: &Keyword,
     ) -> impl Iterator<Item = &MessageCache> {
-        let keyword_id = keyword_to_id(self, keyword);
         self.emails.items.iter().filter(move |m| {
-            m.mailboxes.iter().any(|m| m.mailbox_id == mailbox_id)
-                && keyword_id.is_some_and(|id| m.keywords & (1 << id) != 0)
+            m.mailboxes.iter().any(|uid| uid.mailbox_id == mailbox_id)
+                && self.has_keyword(m, keyword)
         })
     }
 
@@ -252,10 +297,9 @@ impl MessageCacheAccess for MessageStoreCache {
         mailbox_id: u32,
         keyword: &Keyword,
     ) -> impl Iterator<Item = &MessageCache> {
-        let keyword_id = keyword_to_id(self, keyword);
         self.emails.items.iter().filter(move |m| {
-            m.mailboxes.iter().any(|m| m.mailbox_id == mailbox_id)
-                && keyword_id.is_none_or(|id| m.keywords & (1 << id) == 0)
+            m.mailboxes.iter().any(|uid| uid.mailbox_id == mailbox_id)
+                && !self.has_keyword(m, keyword)
         })
     }
 
@@ -298,59 +342,30 @@ impl MessageCacheAccess for MessageStoreCache {
     }
 
     fn expand_keywords(&self, message: &MessageCache) -> impl Iterator<Item = Keyword> {
-        KeywordsIter(message.keywords).map(move |id| match Keyword::try_from_id(id) {
-            Ok(keyword) => keyword,
-            Err(id) => Keyword::Other(self.emails.keywords[id - OTHER].clone()),
-        })
+        KeywordsIter(message.keywords & !HAS_CUSTOM_KEYWORDS).chain(
+            (message.keywords & HAS_CUSTOM_KEYWORDS != 0)
+                .then(|| {
+                    self.emails
+                        .keywords
+                        .iter()
+                        .filter(|k| k.document_id == message.document_id)
+                        .flat_map(|k| k.names.iter().map(|n| Keyword::Other(n.clone())))
+                })
+                .into_iter()
+                .flatten(),
+        )
     }
 
     fn has_keyword(&self, message: &MessageCache, keyword: &Keyword) -> bool {
-        keyword_to_id(self, keyword).is_some_and(|id| message.keywords & (1 << id) != 0)
-    }
-}
-
-fn email_insert(cache: &mut MessagesCacheBuilder, item: MessageCache) {
-    let id = item.document_id;
-    if let Some(idx) = cache.index.get(&id) {
-        cache.items[*idx as usize] = item;
-    } else {
-        cache.size += (std::mem::size_of::<MessageCache>()
-            + (std::mem::size_of::<u32>() * 2)
-            + (item.mailboxes.len() * std::mem::size_of::<MessageUidCache>()))
-            as u64;
-
-        let idx = cache.items.len() as u32;
-        cache.items.push(item);
-        cache.index.insert(id, idx);
-    }
-}
-
-#[inline]
-fn keyword_to_id(cache: &MessageStoreCache, keyword: &Keyword) -> Option<u32> {
-    match keyword.id() {
-        Ok(id) => Some(id),
-        Err(name) => cache
-            .emails
-            .keywords
-            .iter()
-            .position(|k| **k == *name)
-            .map(|idx| (OTHER + idx) as u32),
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct KeywordsIter(u128);
-
-impl Iterator for KeywordsIter {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.0 != 0 {
-            let item = 127 - self.0.leading_zeros();
-            self.0 ^= 1 << item;
-            Some(item as usize)
-        } else {
-            None
+        match keyword.id() {
+            Ok(id) => (message.keywords & (1 << id)) != 0,
+            Err(name) => {
+                message.keywords & HAS_CUSTOM_KEYWORDS != 0
+                    && self.emails.keywords.iter().any(|k| {
+                        k.document_id == message.document_id
+                            && k.names.iter().any(|n| n.as_str() == name)
+                    })
+            }
         }
     }
 }

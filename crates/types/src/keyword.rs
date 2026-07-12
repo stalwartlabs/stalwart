@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use compact_str::CompactString;
 use jmap_tools::{Element, Property, Value};
 use std::{fmt::Display, str::FromStr};
 
@@ -38,24 +39,11 @@ pub const NOTIFY: usize = 27;
 pub const UNSUBSCRIBED: usize = 28;
 pub const OTHER: usize = 29;
 
-#[derive(
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    rkyv::Archive,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    Default,
-    PartialOrd,
-    Ord,
-    serde::Serialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord, serde::Serialize)]
 #[serde(untagged)]
-#[rkyv(derive(PartialEq), compare(PartialEq))]
+#[repr(u8)]
 pub enum Keyword {
-    Other(Box<str>),
+    Other(CompactString),
     #[serde(rename(serialize = "$seen"))]
     Seen,
     #[serde(rename(serialize = "$draft"))]
@@ -125,15 +113,24 @@ impl Keyword {
             .unwrap_or_else(|| Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect()))
     }
 
-    pub fn from_other(value: String) -> Self {
+    pub fn from_string(value: String) -> Self {
         if value.len() <= Keyword::MAX_LENGTH {
-            Keyword::Other(value.into_boxed_str())
+            Keyword::Other(value.into())
         } else {
             Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect())
         }
     }
 
-    pub fn from_boxed_other(value: Box<str>) -> Self {
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Self {
+        if value.len() <= Keyword::MAX_LENGTH {
+            Keyword::Other(value.into())
+        } else {
+            Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect())
+        }
+    }
+
+    pub fn from_compact_string(value: CompactString) -> Self {
         if value.len() <= Keyword::MAX_LENGTH {
             Keyword::Other(value)
         } else {
@@ -215,7 +212,7 @@ impl Keyword {
         }
     }
 
-    pub fn into_id(self) -> Result<u32, Box<str>> {
+    pub fn into_id(self) -> Result<u32, CompactString> {
         match self {
             Keyword::Seen => Ok(SEEN as u32),
             Keyword::Draft => Ok(DRAFT as u32),
@@ -288,7 +285,7 @@ impl Keyword {
 
 impl From<String> for Keyword {
     fn from(value: String) -> Self {
-        Keyword::try_parse(&value).unwrap_or_else(|| Keyword::from_other(value))
+        Keyword::try_parse(&value).unwrap_or_else(|| Keyword::from_string(value))
     }
 }
 
@@ -325,43 +322,6 @@ impl Display for Keyword {
             Keyword::Notify => write!(f, "$notify"),
             Keyword::Unsubscribed => write!(f, "$unsubscribed"),
             Keyword::Other(s) => write!(f, "{}", s),
-        }
-    }
-}
-
-impl Display for ArchivedKeyword {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ArchivedKeyword::Seen => write!(f, "$seen"),
-            ArchivedKeyword::Draft => write!(f, "$draft"),
-            ArchivedKeyword::Flagged => write!(f, "$flagged"),
-            ArchivedKeyword::Answered => write!(f, "$answered"),
-            ArchivedKeyword::Recent => write!(f, "$recent"),
-            ArchivedKeyword::Important => write!(f, "$important"),
-            ArchivedKeyword::Phishing => write!(f, "$phishing"),
-            ArchivedKeyword::Junk => write!(f, "$junk"),
-            ArchivedKeyword::NotJunk => write!(f, "$notjunk"),
-            ArchivedKeyword::Deleted => write!(f, "$deleted"),
-            ArchivedKeyword::Forwarded => write!(f, "$forwarded"),
-            ArchivedKeyword::MdnSent => write!(f, "$mdnsent"),
-            ArchivedKeyword::Autosent => write!(f, "$autosent"),
-            ArchivedKeyword::CanUnsubscribe => write!(f, "$canunsubscribe"),
-            ArchivedKeyword::Followed => write!(f, "$followed"),
-            ArchivedKeyword::HasAttachment => write!(f, "$hasattachment"),
-            ArchivedKeyword::HasMemo => write!(f, "$hasmemo"),
-            ArchivedKeyword::HasNoAttachment => write!(f, "$hasnoattachment"),
-            ArchivedKeyword::Imported => write!(f, "$imported"),
-            ArchivedKeyword::IsTrusted => write!(f, "$istrusted"),
-            ArchivedKeyword::MailFlagBit0 => write!(f, "$MailFlagBit0"),
-            ArchivedKeyword::MailFlagBit1 => write!(f, "$MailFlagBit1"),
-            ArchivedKeyword::MailFlagBit2 => write!(f, "$MailFlagBit2"),
-            ArchivedKeyword::MaskedEmail => write!(f, "$maskedemail"),
-            ArchivedKeyword::Memo => write!(f, "$memo"),
-            ArchivedKeyword::Muted => write!(f, "$muted"),
-            ArchivedKeyword::New => write!(f, "$new"),
-            ArchivedKeyword::Notify => write!(f, "$notify"),
-            ArchivedKeyword::Unsubscribed => write!(f, "$unsubscribed"),
-            ArchivedKeyword::Other(s) => write!(f, "{}", s),
         }
     }
 }
@@ -408,115 +368,6 @@ impl FromStr for Keyword {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Keyword::parse(s))
-    }
-}
-
-impl ArchivedKeyword {
-    pub fn id(&self) -> Result<u32, &str> {
-        match self {
-            ArchivedKeyword::Seen => Ok(SEEN as u32),
-            ArchivedKeyword::Draft => Ok(DRAFT as u32),
-            ArchivedKeyword::Flagged => Ok(FLAGGED as u32),
-            ArchivedKeyword::Answered => Ok(ANSWERED as u32),
-            ArchivedKeyword::Recent => Ok(RECENT as u32),
-            ArchivedKeyword::Important => Ok(IMPORTANT as u32),
-            ArchivedKeyword::Phishing => Ok(PHISHING as u32),
-            ArchivedKeyword::Junk => Ok(JUNK as u32),
-            ArchivedKeyword::NotJunk => Ok(NOTJUNK as u32),
-            ArchivedKeyword::Deleted => Ok(DELETED as u32),
-            ArchivedKeyword::Forwarded => Ok(FORWARDED as u32),
-            ArchivedKeyword::MdnSent => Ok(MDN_SENT as u32),
-            ArchivedKeyword::Autosent => Ok(AUTOSENT as u32),
-            ArchivedKeyword::CanUnsubscribe => Ok(CANUNSUBSCRIBE as u32),
-            ArchivedKeyword::Followed => Ok(FOLLOWED as u32),
-            ArchivedKeyword::HasAttachment => Ok(HASATTACHMENT as u32),
-            ArchivedKeyword::HasMemo => Ok(HASMEMO as u32),
-            ArchivedKeyword::HasNoAttachment => Ok(HASNOATTACHMENT as u32),
-            ArchivedKeyword::Imported => Ok(IMPORTED as u32),
-            ArchivedKeyword::IsTrusted => Ok(ISTRUSTED as u32),
-            ArchivedKeyword::MailFlagBit0 => Ok(MAILFLAGBIT0 as u32),
-            ArchivedKeyword::MailFlagBit1 => Ok(MAILFLAGBIT1 as u32),
-            ArchivedKeyword::MailFlagBit2 => Ok(MAILFLAGBIT2 as u32),
-            ArchivedKeyword::MaskedEmail => Ok(MASKEDEMAIL as u32),
-            ArchivedKeyword::Memo => Ok(MEMO as u32),
-            ArchivedKeyword::Muted => Ok(MUTED as u32),
-            ArchivedKeyword::New => Ok(NEW as u32),
-            ArchivedKeyword::Notify => Ok(NOTIFY as u32),
-            ArchivedKeyword::Unsubscribed => Ok(UNSUBSCRIBED as u32),
-            ArchivedKeyword::Other(string) => Err(string.as_ref()),
-        }
-    }
-
-    pub fn to_native(&self) -> Keyword {
-        match self {
-            ArchivedKeyword::Seen => Keyword::Seen,
-            ArchivedKeyword::Draft => Keyword::Draft,
-            ArchivedKeyword::Flagged => Keyword::Flagged,
-            ArchivedKeyword::Answered => Keyword::Answered,
-            ArchivedKeyword::Recent => Keyword::Recent,
-            ArchivedKeyword::Important => Keyword::Important,
-            ArchivedKeyword::Phishing => Keyword::Phishing,
-            ArchivedKeyword::Junk => Keyword::Junk,
-            ArchivedKeyword::NotJunk => Keyword::NotJunk,
-            ArchivedKeyword::Deleted => Keyword::Deleted,
-            ArchivedKeyword::Forwarded => Keyword::Forwarded,
-            ArchivedKeyword::MdnSent => Keyword::MdnSent,
-            ArchivedKeyword::Autosent => Keyword::Autosent,
-            ArchivedKeyword::CanUnsubscribe => Keyword::CanUnsubscribe,
-            ArchivedKeyword::Followed => Keyword::Followed,
-            ArchivedKeyword::HasAttachment => Keyword::HasAttachment,
-            ArchivedKeyword::HasMemo => Keyword::HasMemo,
-            ArchivedKeyword::HasNoAttachment => Keyword::HasNoAttachment,
-            ArchivedKeyword::Imported => Keyword::Imported,
-            ArchivedKeyword::IsTrusted => Keyword::IsTrusted,
-            ArchivedKeyword::MailFlagBit0 => Keyword::MailFlagBit0,
-            ArchivedKeyword::MailFlagBit1 => Keyword::MailFlagBit1,
-            ArchivedKeyword::MailFlagBit2 => Keyword::MailFlagBit2,
-            ArchivedKeyword::MaskedEmail => Keyword::MaskedEmail,
-            ArchivedKeyword::Memo => Keyword::Memo,
-            ArchivedKeyword::Muted => Keyword::Muted,
-            ArchivedKeyword::New => Keyword::New,
-            ArchivedKeyword::Notify => Keyword::Notify,
-            ArchivedKeyword::Unsubscribed => Keyword::Unsubscribed,
-            ArchivedKeyword::Other(other) => Keyword::Other(other.as_ref().into()),
-        }
-    }
-}
-
-impl From<&ArchivedKeyword> for Keyword {
-    fn from(value: &ArchivedKeyword) -> Self {
-        match value {
-            ArchivedKeyword::Seen => Keyword::Seen,
-            ArchivedKeyword::Draft => Keyword::Draft,
-            ArchivedKeyword::Flagged => Keyword::Flagged,
-            ArchivedKeyword::Answered => Keyword::Answered,
-            ArchivedKeyword::Recent => Keyword::Recent,
-            ArchivedKeyword::Important => Keyword::Important,
-            ArchivedKeyword::Phishing => Keyword::Phishing,
-            ArchivedKeyword::Junk => Keyword::Junk,
-            ArchivedKeyword::NotJunk => Keyword::NotJunk,
-            ArchivedKeyword::Deleted => Keyword::Deleted,
-            ArchivedKeyword::Forwarded => Keyword::Forwarded,
-            ArchivedKeyword::MdnSent => Keyword::MdnSent,
-            ArchivedKeyword::Autosent => Keyword::Autosent,
-            ArchivedKeyword::CanUnsubscribe => Keyword::CanUnsubscribe,
-            ArchivedKeyword::Followed => Keyword::Followed,
-            ArchivedKeyword::HasAttachment => Keyword::HasAttachment,
-            ArchivedKeyword::HasMemo => Keyword::HasMemo,
-            ArchivedKeyword::HasNoAttachment => Keyword::HasNoAttachment,
-            ArchivedKeyword::Imported => Keyword::Imported,
-            ArchivedKeyword::IsTrusted => Keyword::IsTrusted,
-            ArchivedKeyword::MailFlagBit0 => Keyword::MailFlagBit0,
-            ArchivedKeyword::MailFlagBit1 => Keyword::MailFlagBit1,
-            ArchivedKeyword::MailFlagBit2 => Keyword::MailFlagBit2,
-            ArchivedKeyword::MaskedEmail => Keyword::MaskedEmail,
-            ArchivedKeyword::Memo => Keyword::Memo,
-            ArchivedKeyword::Muted => Keyword::Muted,
-            ArchivedKeyword::New => Keyword::New,
-            ArchivedKeyword::Notify => Keyword::Notify,
-            ArchivedKeyword::Unsubscribed => Keyword::Unsubscribed,
-            ArchivedKeyword::Other(string) => Keyword::Other(string.as_ref().into()),
-        }
     }
 }
 

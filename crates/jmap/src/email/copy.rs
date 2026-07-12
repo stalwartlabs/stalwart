@@ -29,6 +29,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Value};
 use std::future::Future;
+use store::write::now;
 use trc::AddContext;
 use types::acl::Acl;
 use utils::map::vec_map::VecMap;
@@ -215,7 +216,14 @@ impl JmapEmailCopy for Server {
                     account_id,
                     mailboxes,
                     keywords,
-                    received_at.map(|dt| dt.timestamp() as u64),
+                    received_at
+                        .map(|dt| dt.timestamp() as u64)
+                        .unwrap_or_else(|| {
+                            from_cache
+                                .email_by_id(&from_message_id)
+                                .map(|v| v.received_at)
+                                .unwrap_or_else(now)
+                        }),
                     session.session_id,
                 )
                 .await?

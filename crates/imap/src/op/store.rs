@@ -13,7 +13,7 @@ use ahash::AHashSet;
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     mailbox::TRASH_ID,
-    message::{ingest::EmailIngest, metadata::MessageData},
+    message::{ingest::EmailIngest, messagedata::MessageData},
 };
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
@@ -29,7 +29,7 @@ use std::{sync::Arc, time::Instant};
 use store::{
     ValueKey,
     query::log::{Change, Query},
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::BatchBuilder,
 };
 use trc::AddContext;
 use types::{
@@ -197,14 +197,10 @@ impl<T: SessionStream> SessionData<T> {
 
         for (id, imap_id) in &ids {
             // Obtain message data
-            let data_ = if let Some(data) = self
+            let data = if let Some(data) = self
                 .server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::Email,
-                    *id,
-                ))
+                .get_value::<MessageData>(ValueKey::archive(account_id, Collection::Email, *id))
                 .await
                 .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?
             {
@@ -213,11 +209,7 @@ impl<T: SessionStream> SessionData<T> {
                 continue;
             };
 
-            // Deserialize
-            let data = data_
-                .to_unarchived::<MessageData>()
-                .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
-            let mut new_data = data.inner.to_builder();
+            let mut new_data = data.clone();
 
             // Apply changes
             let mut seen_changed = false;
@@ -243,26 +235,26 @@ impl<T: SessionStream> SessionData<T> {
                 }
             }
 
-            if !new_data.has_keyword_changes(data.inner) {
+            if !new_data.has_keyword_changes(&data) {
                 continue;
             }
 
             // Train spam filter
             let mut train_spam = None;
-            for keyword in new_data.added_keywords(data.inner) {
-                if keyword == &Keyword::Junk {
+            for keyword in new_data.added_keywords(&data) {
+                if keyword == Keyword::Junk {
                     train_spam = Some(true);
                     break;
-                } else if keyword == &Keyword::NotJunk && !data.inner.has_mailbox_id(TRASH_ID) {
+                } else if keyword == Keyword::NotJunk && !data.has_mailbox_id(TRASH_ID) {
                     // Only train as ham if not in Trash (Apple likes to add NotJunk to trashed items, which would be spammy)
                     train_spam = Some(false);
                     break;
                 }
             }
             if train_spam.is_none() {
-                for keyword in new_data.removed_keywords(data.inner) {
-                    if keyword == &Keyword::Junk {
-                        if !data.inner.has_mailbox_id(TRASH_ID) {
+                for keyword in new_data.removed_keywords(&data) {
+                    if keyword == Keyword::Junk {
+                        if !data.has_mailbox_id(TRASH_ID) {
                             train_spam = Some(false);
                         }
                         break;
@@ -272,12 +264,7 @@ impl<T: SessionStream> SessionData<T> {
 
             // Convert keywords to flags
             let flags = if !arguments.is_silent {
-                new_data
-                    .keywords
-                    .iter()
-                    .cloned()
-                    .map(Flag::from)
-                    .collect::<Vec<_>>()
+                new_data.keywords().map(Flag::from).collect::<Vec<_>>()
             } else {
                 vec![]
             };
@@ -297,7 +284,7 @@ impl<T: SessionStream> SessionData<T> {
                 .custom(
                     ObjectIndexBuilder::new()
                         .with_current(data)
-                        .with_changes(new_data.seal()),
+                        .with_changes(new_data),
                 )
                 .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
 

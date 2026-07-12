@@ -12,7 +12,7 @@ use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
 };
 #[allow(unused_imports)]
-use email::mailbox::{INBOX_ID, JUNK_ID, TRASH_ID, UidMailbox};
+use email::mailbox::{INBOX_ID, JUNK_ID, TRASH_ID};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::{
@@ -57,6 +57,7 @@ pub trait MailboxSet: Sync + Send {
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<mailbox::Mailbox>>> + Send;
 
+    #[allow(clippy::type_complexity)]
     fn mailbox_set_item(
         &self,
         changes_: Map<'_, MailboxProperty, MailboxValue>,
@@ -64,7 +65,7 @@ pub trait MailboxSet: Sync + Send {
         ctx: &SetContext,
     ) -> impl Future<
         Output = trc::Result<
-            Result<ObjectIndexBuilder<Mailbox, Mailbox>, SetError<MailboxProperty>>,
+            Result<ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, SetError<MailboxProperty>>,
         >,
     > + Send;
 }
@@ -343,7 +344,8 @@ impl MailboxSet for Server {
         changes_: Map<'_, MailboxProperty, MailboxValue>,
         update: Option<(u32, Archive<Mailbox>)>,
         ctx: &SetContext<'_>,
-    ) -> trc::Result<Result<ObjectIndexBuilder<Mailbox, Mailbox>, SetError<MailboxProperty>>> {
+    ) -> trc::Result<Result<ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, SetError<MailboxProperty>>>
+    {
         // Parse properties
         let mut changes = update
             .as_ref()

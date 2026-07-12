@@ -6,7 +6,7 @@
 
 use super::download::BlobDownload;
 use common::{Server, auth::AccessToken};
-use email::message::metadata::MessageData;
+use email::message::messagedata::MessageData;
 use jmap_proto::{
     method::{
         get::{GetRequest, GetResponse},
@@ -20,11 +20,7 @@ use mail_builder::encoders::base64::base64_encode;
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
 use std::future::Future;
-use store::{
-    ValueKey,
-    write::{AlignedBytes, Archive},
-};
-use trc::AddContext;
+use store::ValueKey;
 use types::{blob::BlobClass, collection::Collection, id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
 
@@ -205,29 +201,24 @@ impl BlobOperations for Server {
                 } if *account_id == req_account_id => {
                     let collection = Collection::from(*collection);
                     if collection == Collection::Email {
-                        if let Some(data_) = self
+                        if let Some(data) = self
                             .store()
-                            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                            .get_value::<MessageData>(ValueKey::archive(
                                 req_account_id,
                                 Collection::Email,
                                 *document_id,
                             ))
                             .await?
                         {
-                            let data = data_
-                                .unarchive::<MessageData>()
-                                .caused_by(trc::location!())?;
                             if include_email {
                                 matched_ids.append(
                                     DataType::Email,
-                                    vec![Id::from_parts(u32::from(data.thread_id), *document_id)],
+                                    vec![Id::from_parts(data.thread_id, *document_id)],
                                 );
                             }
                             if include_thread {
-                                matched_ids.append(
-                                    DataType::Thread,
-                                    vec![Id::from(u32::from(data.thread_id))],
-                                );
+                                matched_ids
+                                    .append(DataType::Thread, vec![Id::from(data.thread_id)]);
                             }
                             if include_mailbox {
                                 matched_ids.append(
@@ -236,7 +227,7 @@ impl BlobOperations for Server {
                                         .iter()
                                         .map(|m| {
                                             debug_assert!(m.uid != 0);
-                                            Id::from(u32::from(m.mailbox_id))
+                                            Id::from(m.mailbox_id)
                                         })
                                         .collect::<Vec<_>>(),
                                 );

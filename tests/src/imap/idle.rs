@@ -124,7 +124,7 @@ pub async fn test(
     imap_check
         .assert_read(Type::Status, ResponseType::Ok)
         .await
-        .assert_contains("* 1 FETCH (FLAGS () UID 1)");
+        .assert_contains("* 1 FETCH (FLAGS ($hasnoattachment) UID 1)");
 
     // Delete message and expect an update
     imap.send("SELECT Parmeggiano").await;
@@ -138,7 +138,7 @@ pub async fn test(
     imap_check
         .assert_read(Type::Status, ResponseType::Ok)
         .await
-        .assert_contains("* 1 FETCH (FLAGS (\\Deleted) UID 1)");
+        .assert_contains("* 1 FETCH (FLAGS ($hasnoattachment \\Deleted) UID 1)");
 
     imap.send("UID EXPUNGE").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)

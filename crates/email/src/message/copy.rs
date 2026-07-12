@@ -6,20 +6,16 @@
 
 use super::{
     ingest::{EmailIngest, IngestedEmail},
-    metadata::{MessageData, MessageMetadata},
+    metadata::MessageMetadata,
 };
-use crate::{
-    mailbox::UidMailbox,
-    message::{
-        index::extractors::VisitTextArchived,
-        ingest::ThreadInfo,
-        metadata::{
-            MESSAGE_HAS_ATTACHMENT, MESSAGE_RECEIVED_MASK, MetadataHeaderName, MetadataHeaderValue,
-        },
-    },
+use crate::message::{
+    index::extractors::VisitTextArchived,
+    ingest::ThreadInfo,
+    messagedata::MessageData,
+    metadata::{MetadataHeaderName, MetadataHeaderValue},
 };
-use common::{Server, storage::index::ObjectIndexBuilder};
-use mail_parser::parsers::fields::thread::thread_name;
+use common::{MessageUid, Server, storage::index::ObjectIndexBuilder};
+use mail_parser::{DateTime, parsers::fields::thread::thread_name};
 use registry::{
     schema::{
         enums::IndexDocumentType,
@@ -32,6 +28,7 @@ use store::{
     ValueKey,
     write::{AlignedBytes, Archive},
 };
+use tinyvec::TinyVec;
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId},
@@ -55,7 +52,7 @@ pub trait EmailCopy: Sync + Send {
         to_account_id: u32,
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
-        received_at: Option<u64>,
+        received_at: u64,
         session_id: u64,
     ) -> impl Future<Output = trc::Result<Result<IngestedEmail, CopyMessageError>>> + Send;
 }
@@ -69,11 +66,11 @@ impl EmailCopy for Server {
         to_account_id: u32,
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
-        received_at: Option<u64>,
+        received_at: u64,
         session_id: u64,
     ) -> trc::Result<Result<IngestedEmail, CopyMessageError>> {
         // Obtain metadata
-        let mut metadata = if let Some(metadata) = self
+        let metadata = if let Some(metadata) = self
             .store()
             .get_value::<Archive<AlignedBytes>>(ValueKey::property(
                 from_account_id,
@@ -107,15 +104,10 @@ impl EmailCopy for Server {
             }
         }
 
-        // Set receivedAt
-        if let Some(received_at) = received_at {
-            metadata.rcvd_attach = (metadata.rcvd_attach & MESSAGE_HAS_ATTACHMENT)
-                | (received_at & MESSAGE_RECEIVED_MASK);
-        }
-
         // Obtain threadId
         let mut message_ids = Vec::new();
         let mut subject = "";
+        let mut sent_at = None;
         for header in &metadata.contents[0].parts[0].headers {
             match &header.name {
                 MetadataHeaderName::MessageId => {
@@ -143,6 +135,11 @@ impl EmailCopy for Server {
                         _ => "",
                     });
                 }
+                MetadataHeaderName::Date => {
+                    if let MetadataHeaderValue::DateTime(date) = &header.value {
+                        sent_at = Some(DateTime::from(date).to_timestamp());
+                    }
+                }
                 _ => (),
             }
         }
@@ -161,7 +158,7 @@ impl EmailCopy for Server {
         let blob_hash = metadata.blob_hash.clone();
 
         // Assign IMAP UIDs
-        let mut mailbox_ids = Vec::with_capacity(mailboxes.len());
+        let mut mailbox_ids: TinyVec<[MessageUid; 2]> = TinyVec::with_capacity(mailboxes.len());
         email.imap_uids = Vec::with_capacity(mailboxes.len());
         let mut ids = self
             .assign_email_ids(to_account_id, mailboxes.iter().copied(), true)
@@ -169,8 +166,17 @@ impl EmailCopy for Server {
             .caused_by(trc::location!())?;
         let document_id = ids.next().unwrap();
         for (uid, mailbox_id) in ids.zip(mailboxes.iter().copied()) {
-            mailbox_ids.push(UidMailbox::new(mailbox_id, uid));
+            mailbox_ids.push(MessageUid::new(mailbox_id, uid));
             email.imap_uids.push(uid);
+        }
+
+        let mut keywords_flags = 0;
+        let mut keywords_extra = Vec::new();
+        for keyword in keywords {
+            match keyword.into_id() {
+                Ok(id) => keywords_flags |= 1 << id,
+                Err(name) => keywords_extra.push(name),
+            }
         }
 
         // Prepare batch
@@ -195,10 +201,16 @@ impl EmailCopy for Server {
                 ObjectIndexBuilder::<(), _>::new()
                     .with_tenant_id(tenant_id)
                     .with_changes(MessageData {
-                        mailboxes: mailbox_ids.into_boxed_slice(),
-                        keywords: keywords.into_boxed_slice(),
+                        mailboxes: mailbox_ids,
+                        keywords: keywords_flags,
                         thread_id,
                         size,
+                        keywords_extra,
+                        received_at,
+                        sent_at: sent_at
+                            .map(|sent_at| (sent_at - received_at as i64) as i32)
+                            .unwrap_or_default(),
+                        change_id: 0,
                     }),
             )
             .caused_by(trc::location!())?

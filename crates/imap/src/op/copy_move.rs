@@ -9,14 +9,16 @@ use crate::{
     core::{MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::{ipc::PushNotification, network::SessionStream, storage::index::ObjectIndexBuilder};
+use common::{
+    MessageUid, ipc::PushNotification, network::SessionStream, storage::index::ObjectIndexBuilder,
+};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    mailbox::{JUNK_ID, TRASH_ID, UidMailbox},
+    mailbox::{JUNK_ID, TRASH_ID},
     message::{
         copy::{CopyMessageError, EmailCopy},
         ingest::EmailIngest,
-        metadata::MessageData,
+        messagedata::MessageData,
     },
 };
 use imap_proto::{
@@ -28,7 +30,7 @@ use std::{sync::Arc, time::Instant};
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::{BatchBuilder, now},
 };
 use trc::AddContext;
 use types::{
@@ -199,12 +201,12 @@ impl<T: SessionStream> SessionData<T> {
         if src_mailbox.id.account_id == dest_mailbox.account_id {
             // Mailboxes are in the same account
             let account_id = src_mailbox.id.account_id;
-            let dest_mailbox_id = UidMailbox::new_unassigned(dest_mailbox_id);
+            let dest_mailbox_id = MessageUid::new_unassigned(dest_mailbox_id);
             let mut batch = BatchBuilder::new();
 
             for (id, imap_id) in ids {
                 // Obtain mailbox tags
-                let data_ = if let Some(result) = self
+                let data = if let Some(result) = self
                     .get_message_data(account_id, id)
                     .await
                     .imap_ctx(&arguments.tag, trc::location!())?
@@ -214,14 +216,8 @@ impl<T: SessionStream> SessionData<T> {
                     continue;
                 };
 
-                // Deserialize
-                let data = data_
-                    .to_unarchived::<MessageData>()
-                    .imap_ctx(&arguments.tag, trc::location!())?;
-
                 // Make sure the message still belongs to this mailbox
                 if !data
-                    .inner
                     .mailboxes
                     .iter()
                     .any(|mailbox| mailbox.mailbox_id == src_mailbox.id.mailbox_id)
@@ -231,15 +227,14 @@ impl<T: SessionStream> SessionData<T> {
 
                 // If the message is already in the destination mailbox, skip it.
                 if let Some(mailbox) = data
-                    .inner
                     .mailboxes
                     .iter()
                     .find(|mailbox| mailbox.mailbox_id == dest_mailbox_id.mailbox_id)
                 {
-                    copied_ids.push((imap_id.uid, mailbox.uid.to_native()));
+                    copied_ids.push((imap_id.uid, mailbox.uid));
 
                     if is_move {
-                        let mut new_data = data.inner.to_builder();
+                        let mut new_data = data.clone();
                         new_data.remove_mailbox(src_mailbox.id.mailbox_id);
                         batch
                             .with_account_id(account_id)
@@ -248,7 +243,7 @@ impl<T: SessionStream> SessionData<T> {
                             .custom(
                                 ObjectIndexBuilder::new()
                                     .with_current(data)
-                                    .with_changes(new_data.seal()),
+                                    .with_changes(new_data),
                             )
                             .imap_ctx(&arguments.tag, trc::location!())?
                             .log_vanished_item(
@@ -263,7 +258,7 @@ impl<T: SessionStream> SessionData<T> {
                 }
 
                 // Prepare changes
-                let mut new_data = data.inner.to_builder();
+                let mut new_data = data.clone();
 
                 // Add destination folder
                 new_data.add_mailbox(dest_mailbox_id);
@@ -304,7 +299,7 @@ impl<T: SessionStream> SessionData<T> {
                     .custom(
                         ObjectIndexBuilder::new()
                             .with_current(data)
-                            .with_changes(new_data.seal()),
+                            .with_changes(new_data),
                     )
                     .imap_ctx(&arguments.tag, trc::location!())?;
                 if is_move {
@@ -354,6 +349,7 @@ impl<T: SessionStream> SessionData<T> {
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?;
             for (id, imap_id) in ids {
+                let email = cache.email_by_id(&id);
                 match self
                     .server
                     .copy_message(
@@ -361,11 +357,10 @@ impl<T: SessionStream> SessionData<T> {
                         id,
                         dest_account_id,
                         vec![dest_mailbox_id],
-                        cache
-                            .email_by_id(&id)
+                        email
                             .map(|e| cache.expand_keywords(e).collect())
                             .unwrap_or_default(),
-                        None,
+                        email.map(|email| email.received_at).unwrap_or_else(now),
                         self.session_id,
                     )
                     .await
@@ -541,15 +536,11 @@ impl<T: SessionStream> SessionData<T> {
         &self,
         account_id: u32,
         id: u32,
-    ) -> trc::Result<Option<Archive<AlignedBytes>>> {
+    ) -> trc::Result<Option<MessageData>> {
         if let Some(data) = self
             .server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
-                account_id,
-                Collection::Email,
-                id,
-            ))
+            .get_value::<MessageData>(ValueKey::archive(account_id, Collection::Email, id))
             .await?
         {
             Ok(Some(data))

@@ -4,6 +4,7 @@
   },
   "keywords": {
     "$draft": true,
+    "$hasattachment": true,
     "$seen": true
   },
   "receivedAt": "2018-07-10T01:03:11Z",

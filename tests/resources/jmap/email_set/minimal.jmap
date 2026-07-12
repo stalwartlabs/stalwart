@@ -2,7 +2,9 @@
   "mailboxIds": {
     "a": true
   },
-  "keywords": {},
+  "keywords": {
+    "$hasnoattachment": true
+  },
   "receivedAt": "2018-07-10T01:03:11Z",
   "messageId": [
     "my-message-id"

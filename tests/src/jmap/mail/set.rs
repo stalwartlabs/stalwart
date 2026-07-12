@@ -322,6 +322,11 @@ pub async fn assert_email_properties(
 
     assert_eq!(
         keywords.iter().copied().collect::<AHashSet<_>>(),
-        result.keywords().iter().copied().collect::<AHashSet<_>>()
+        result
+            .keywords()
+            .iter()
+            .copied()
+            .filter(|k| *k != "$hasattachment" && *k != "$hasnoattachment")
+            .collect::<AHashSet<_>>()
     );
 }

@@ -29,13 +29,6 @@ pub struct Mailbox {
     pub acls: Vec<AclGrant>,
 }
 
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, Copy)]
-#[rkyv(derive(Debug, Clone, Copy))]
-pub struct UidMailbox {
-    pub mailbox_id: u32,
-    pub uid: u32,
-}
-
 impl Mailbox {
     pub fn new(name: impl Into<String>) -> Self {
         Mailbox {
@@ -90,23 +83,5 @@ impl Mailbox {
 impl ArchivedMailbox {
     pub fn is_subscribed(&self, subscriber: u32) -> bool {
         self.subscribers.iter().any(|x| u32::from(x) == subscriber)
-    }
-}
-
-impl PartialEq for UidMailbox {
-    fn eq(&self, other: &Self) -> bool {
-        self.mailbox_id == other.mailbox_id
-    }
-}
-
-impl Eq for UidMailbox {}
-
-impl UidMailbox {
-    pub fn new(mailbox_id: u32, uid: u32) -> Self {
-        UidMailbox { mailbox_id, uid }
-    }
-
-    pub fn new_unassigned(mailbox_id: u32) -> Self {
-        UidMailbox { mailbox_id, uid: 0 }
     }
 }

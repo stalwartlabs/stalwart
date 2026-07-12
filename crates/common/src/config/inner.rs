@@ -6,7 +6,7 @@
 
 use super::server::tls::build_self_signed_cert;
 use crate::{
-    Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache, MessageUidCache,
+    Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache, MessageUid,
     TlsConnectors,
     auth::{AccessTokenInner, AccountCache, DomainCache, MailingListCache, RoleCache, TenantCache},
     config::{
@@ -109,7 +109,7 @@ impl Caches {
                 cache.messages,
                 (std::mem::size_of::<u32>()
                     + std::mem::size_of::<Arc<MessageStoreCache>>()
-                    + (1024 * std::mem::size_of::<MessageUidCache>())
+                    + (1024 * std::mem::size_of::<MessageUid>())
                     + (15 * (std::mem::size_of::<MailboxCache>() + 60))) as u64,
             ),
             files: Cache::new(

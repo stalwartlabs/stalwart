@@ -24,10 +24,14 @@ impl SearchableField for EmailSearchField {
             SearchField::Email(EmailSearchField::Subject),
             SearchField::Email(EmailSearchField::Body),
             SearchField::Email(EmailSearchField::Attachment),
-            SearchField::Email(EmailSearchField::ReceivedAt),
-            SearchField::Email(EmailSearchField::SentAt),
-            SearchField::Email(EmailSearchField::Size),
-            SearchField::Email(EmailSearchField::HasAttachment),
+            #[cfg(feature = "test_mode")]
+            SearchField::Email(EmailSearchField::_ReceivedAt),
+            #[cfg(feature = "test_mode")]
+            SearchField::Email(EmailSearchField::_SentAt),
+            #[cfg(feature = "test_mode")]
+            SearchField::Email(EmailSearchField::_Size),
+            #[cfg(feature = "test_mode")]
+            SearchField::Email(EmailSearchField::_HasAttachment),
             SearchField::Email(EmailSearchField::Headers),
         ]
     }
@@ -37,13 +41,7 @@ impl SearchableField for EmailSearchField {
         {
             matches!(
                 self,
-                EmailSearchField::From
-                    | EmailSearchField::To
-                    | EmailSearchField::Subject
-                    | EmailSearchField::ReceivedAt
-                    | EmailSearchField::SentAt
-                    | EmailSearchField::Size
-                    | EmailSearchField::HasAttachment,
+                EmailSearchField::From | EmailSearchField::To | EmailSearchField::Subject
             )
         }
 
@@ -54,10 +52,10 @@ impl SearchableField for EmailSearchField {
                 EmailSearchField::From
                     | EmailSearchField::To
                     | EmailSearchField::Subject
-                    | EmailSearchField::ReceivedAt
-                    | EmailSearchField::SentAt
-                    | EmailSearchField::Size
-                    | EmailSearchField::HasAttachment
+                    | EmailSearchField::_ReceivedAt
+                    | EmailSearchField::_SentAt
+                    | EmailSearchField::_Size
+                    | EmailSearchField::_HasAttachment
                     | EmailSearchField::Bcc
                     | EmailSearchField::Cc
             )
