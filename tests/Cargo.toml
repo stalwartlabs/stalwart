@@ -89,5 +89,5 @@ time = "0.3"
 testcontainers = { version = "0.27", features = ["reusable-containers"] }
 rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"] }
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+[target.'cfg(not(any(target_env = "msvc", target_os = "freebsd")))'.dependencies]
 jemallocator = "0.5.0"
