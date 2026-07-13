@@ -495,12 +495,16 @@ load_rc_config \$name
 pidfile="/var/run/stalwart.pid"
 procname="${_bin}"
 command="/usr/sbin/daemon"
-command_args="-f -o \${stalwart_logfile} -p \${pidfile} -u \${stalwart_user} ${_bin} --config=\${stalwart_config}"
+command_args="-f -o \${stalwart_logfile} -p \${pidfile} ${_bin} --config=\${stalwart_config}"
 sig_stop="INT"
 start_precmd="stalwart_precmd"
 
 stalwart_precmd()
 {
+    # rc.subr runs the command as \${stalwart_user} (via su -m), which cannot
+    # create the pidfile in root-owned /var/run — pre-create it here as root
+    install -o "\${stalwart_user}" -g "\${stalwart_user}" -m 0600 /dev/null "\${pidfile}"
+
     # daemon(8) passes its environment through to the service
     if [ -r "\${stalwart_envfile}" ]; then
         set -a
