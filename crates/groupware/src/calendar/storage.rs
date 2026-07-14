@@ -26,11 +26,11 @@ use registry::{
     types::{EnumImpl, ObjectImpl, datetime::UTCDateTime},
 };
 use store::{
-    IterateParams, SerializeInfallible, U32_LEN, ValueKey,
+    IndexKey, IterateParams, SerializeInfallible, U32_LEN, ValueKey,
     roaring::RoaringBitmap,
     write::{
-        AlignedBytes, Archive, BatchBuilder, IndexPropertyClass, Operation, TaskQueueClass,
-        ValueClass, ValueOp, key::DeserializeBigEndian, now,
+        AlignedBytes, Archive, BatchBuilder, Operation, TaskQueueClass, ValueClass, ValueOp,
+        key::DeserializeBigEndian, now,
     },
 };
 use trc::AddContext;
@@ -41,8 +41,6 @@ use types::{
 };
 
 pub trait ItipAutoExpunge: Sync + Send {
-    fn itip_ids(&self, account_id: u32) -> impl Future<Output = trc::Result<RoaringBitmap>> + Send;
-
     fn itip_auto_expunge(
         &self,
         account_id: u32,
@@ -51,65 +49,25 @@ pub trait ItipAutoExpunge: Sync + Send {
 }
 
 impl ItipAutoExpunge for Server {
-    async fn itip_ids(&self, account_id: u32) -> trc::Result<RoaringBitmap> {
-        let mut document_ids = RoaringBitmap::new();
-        self.store()
-            .iterate(
-                IterateParams::new(
-                    ValueKey {
-                        account_id,
-                        collection: Collection::CalendarEventNotification.into(),
-                        document_id: 0,
-                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                            property: CalendarNotificationField::CreatedToId.into(),
-                            value: 0,
-                        }),
-                    },
-                    ValueKey {
-                        account_id,
-                        collection: Collection::CalendarEventNotification.into(),
-                        document_id: 0,
-                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                            property: CalendarNotificationField::CreatedToId.into(),
-                            value: u64::MAX,
-                        }),
-                    },
-                )
-                .no_values()
-                .ascending(),
-                |key, _| {
-                    document_ids.insert(key.deserialize_be_u32(key.len() - U32_LEN)?);
-
-                    Ok(true)
-                },
-            )
-            .await
-            .caused_by(trc::location!())
-            .map(|_| document_ids)
-    }
-
     async fn itip_auto_expunge(&self, account_id: u32, hold_period: u64) -> trc::Result<()> {
         let mut destroy_ids = RoaringBitmap::new();
+        let expire_before = (now().saturating_sub(hold_period) as i64).to_be_bytes();
         self.store()
             .iterate(
                 IterateParams::new(
-                    ValueKey {
+                    IndexKey {
                         account_id,
                         collection: Collection::CalendarEventNotification.into(),
                         document_id: 0,
-                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                            property: CalendarNotificationField::CreatedToId.into(),
-                            value: 0,
-                        }),
+                        field: CalendarNotificationField::Created.into(),
+                        key: &[][..],
                     },
-                    ValueKey {
+                    IndexKey {
                         account_id,
                         collection: Collection::CalendarEventNotification.into(),
                         document_id: 0,
-                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                            property: CalendarNotificationField::CreatedToId.into(),
-                            value: now().saturating_sub(hold_period),
-                        }),
+                        field: CalendarNotificationField::Created.into(),
+                        key: &expire_before[..],
                     },
                 )
                 .no_values()

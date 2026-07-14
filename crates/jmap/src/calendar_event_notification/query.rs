@@ -5,7 +5,7 @@
  */
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
-use common::{Server, auth::AccessToken};
+use common::{DavResourceMetadata, Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -16,17 +16,12 @@ use jmap_proto::{
     request::IntoValid,
 };
 use store::{
-    IterateParams, U32_LEN, U64_LEN, ValueKey,
     ahash::AHashSet,
     roaring::RoaringBitmap,
     search::{SearchFilter, SearchQuery},
-    write::{IndexPropertyClass, SearchIndex, ValueClass, key::DeserializeBigEndian},
+    write::SearchIndex,
 };
-use trc::AddContext;
-use types::{
-    collection::{Collection, SyncCollection},
-    field::CalendarNotificationField,
-};
+use types::collection::SyncCollection;
 
 pub trait CalendarEventNotificationQuery: Sync + Send {
     fn calendar_event_notification_query(
@@ -34,12 +29,6 @@ pub trait CalendarEventNotificationQuery: Sync + Send {
         request: QueryRequest<CalendarEventNotification>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
-}
-
-struct Notification {
-    document_id: u32,
-    created: u64,
-    event_id: u32,
 }
 
 impl CalendarEventNotificationQuery for Server {
@@ -57,64 +46,44 @@ impl CalendarEventNotificationQuery for Server {
                 SyncCollection::CalendarEventNotification,
             )
             .await?;
-        let mut notifications = Vec::with_capacity(16);
-        let mut document_ids = RoaringBitmap::new();
-
-        self.store()
-            .iterate(
-                IterateParams::new(
-                    ValueKey {
-                        account_id,
-                        collection: Collection::CalendarEventNotification.into(),
-                        document_id: 0,
-                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                            property: CalendarNotificationField::CreatedToId.into(),
-                            value: 0,
-                        }),
-                    },
-                    ValueKey {
-                        account_id,
-                        collection: Collection::CalendarEventNotification.into(),
-                        document_id: 0,
-                        class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                            property: CalendarNotificationField::CreatedToId.into(),
-                            value: u64::MAX,
-                        }),
-                    },
-                )
-                .ascending(),
-                |key, value| {
-                    let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
-                    notifications.push(Notification {
-                        document_id,
-                        created: key.deserialize_be_u64(key.len() - U32_LEN - U64_LEN)?,
-                        event_id: value.deserialize_be_u32(0)?,
-                    });
-                    document_ids.insert(document_id);
-
-                    Ok(true)
-                },
-            )
-            .await
-            .caused_by(trc::location!())?;
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
                 Filter::Property(cond) => match cond {
                     CalendarEventNotificationFilter::Before(before) => {
-                        let before = before.timestamp() as u64;
+                        let before = before.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            notifications
-                                .iter()
-                                .filter_map(|n| (n.created < before).then_some(n.document_id)),
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEventNotification {
+                                    names,
+                                    created_at,
+                                    ..
+                                } = &r.data
+                                {
+                                    (!names.is_empty() && *created_at < before)
+                                        .then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
                         )))
                     }
                     CalendarEventNotificationFilter::After(after) => {
-                        let after = after.timestamp() as u64;
+                        let after = after.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            notifications
-                                .iter()
-                                .filter_map(|n| (n.created > after).then_some(n.document_id)),
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEventNotification {
+                                    names,
+                                    created_at,
+                                    ..
+                                } = &r.data
+                                {
+                                    (!names.is_empty() && *created_at > after)
+                                        .then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
                         )))
                     }
                     CalendarEventNotificationFilter::CalendarEventIds(ids) => {
@@ -123,9 +92,19 @@ impl CalendarEventNotificationQuery for Server {
                             .map(|id| id.document_id())
                             .collect::<AHashSet<_>>();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            notifications
-                                .iter()
-                                .filter_map(|n| ids.contains(&n.event_id).then_some(n.document_id)),
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEventNotification {
+                                    names,
+                                    event_id,
+                                    ..
+                                } = &r.data
+                                {
+                                    (!names.is_empty() && ids.contains(event_id))
+                                        .then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
                         )))
                     }
                     unsupported => {
@@ -163,13 +142,9 @@ impl CalendarEventNotificationQuery for Server {
                 }
             };
         }
-        if !is_ascending {
-            notifications.reverse();
-        }
-
         let results = SearchQuery::new(SearchIndex::InMemory)
             .with_filters(filters)
-            .with_mask(document_ids)
+            .with_mask(cache.document_ids(false).collect())
             .filter()
             .into_bitmap();
 
@@ -181,11 +156,31 @@ impl CalendarEventNotificationQuery for Server {
         );
 
         if !results.is_empty() {
-            let results = results.into_iter().collect::<AHashSet<_>>();
-            for notification in notifications {
-                if results.contains(&notification.document_id)
-                    && !response.add(0, notification.document_id)
-                {
+            let mut notifications = cache
+                .resources
+                .iter()
+                .filter_map(|r| {
+                    if let DavResourceMetadata::CalendarEventNotification {
+                        names,
+                        created_at,
+                        ..
+                    } = &r.data
+                    {
+                        (!names.is_empty() && results.contains(r.document_id))
+                            .then_some((r.document_id, *created_at))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            notifications
+                .sort_unstable_by_key(|(document_id, created_at)| (*created_at, *document_id));
+            if !is_ascending {
+                notifications.reverse();
+            }
+
+            for (document_id, _) in notifications {
+                if !response.add(0, document_id) {
                     break;
                 }
             }

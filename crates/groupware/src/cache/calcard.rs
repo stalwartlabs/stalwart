@@ -8,8 +8,8 @@ use super::GroupwareCache;
 use crate::{
     DavResourceName, RFC_3986,
     calendar::{
-        ArchivedCalendar, ArchivedCalendarEvent, Calendar, CalendarEvent, SCHEDULE_INBOX_ID,
-        SCHEDULE_OUTBOX_ID, storage::ItipAutoExpunge,
+        ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarEventNotification, Calendar,
+        CalendarEvent, CalendarEventNotification, SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID,
     },
     contact::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard},
 };
@@ -182,10 +182,6 @@ pub(super) async fn build_scheduling_resources(
         .unwrap_or_default();
 
     let account_info = server.account(account_id).await?;
-    let item_ids = server
-        .itip_ids(account_id)
-        .await
-        .caused_by(trc::location!())?;
 
     update_lock.set_revision(last_change_id);
     let mut cache = DavResources {
@@ -194,8 +190,8 @@ pub(super) async fn build_scheduling_resources(
             DavResourceName::Scheduling.base_path(),
             percent_encoding::utf8_percent_encode(account_info.name(), RFC_3986),
         ),
-        paths: AHashSet::with_capacity((2 + item_ids.len()) as usize),
-        resources: Vec::with_capacity((2 + item_ids.len()) as usize),
+        paths: AHashSet::with_capacity(16),
+        resources: Vec::with_capacity(16),
         item_change_id: last_change_id,
         container_change_id: last_change_id,
         highest_change_id: last_change_id,
@@ -203,18 +199,35 @@ pub(super) async fn build_scheduling_resources(
         update_lock,
     };
 
-    for (document_id, is_container) in item_ids
-        .into_iter()
-        .map(|document_id| (document_id, false))
-        .chain([(SCHEDULE_INBOX_ID, true), (SCHEDULE_OUTBOX_ID, true)])
-    {
-        let path = path_from_scheduling(document_id, cache.resources.len(), is_container);
+    server
+        .archives(
+            account_id,
+            Collection::CalendarEventNotification,
+            &(),
+            |document_id, archive| {
+                let resource = resource_from_scheduling(
+                    archive.unarchive::<CalendarEventNotification>()?,
+                    document_id,
+                );
+                let path = path_from_scheduling(document_id, cache.resources.len(), false);
+
+                cache.size += (std::mem::size_of::<DavPath>() + (path.path.len() * 2)) as u64
+                    + std::mem::size_of::<DavResource>() as u64;
+                cache.paths.insert(path);
+                cache.resources.push(resource);
+
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+
+    for document_id in [SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID] {
+        let path = path_from_scheduling(document_id, cache.resources.len(), true);
         cache.size += (std::mem::size_of::<DavPath>() + (path.path.len() * 2)) as u64
             + std::mem::size_of::<DavResource>() as u64;
         cache.paths.insert(path);
-        cache
-            .resources
-            .push(resource_from_scheduling(document_id, is_container));
+        cache.resources.push(container_from_scheduling(document_id));
     }
 
     Ok(cache)
@@ -247,7 +260,7 @@ pub(super) fn build_simple_hierarchy(cache: &mut DavResources) {
                 cache.paths.insert(path);
             }
             DavResourceMetadata::CalendarEvent { names, .. }
-            | DavResourceMetadata::ContactCard { names } => {
+            | DavResourceMetadata::ContactCard { names, .. } => {
                 for name in names {
                     if let Some(parent_name) = name_idx.get(&name.parent_id) {
                         let path = DavPath {
@@ -314,20 +327,36 @@ pub(super) fn resource_from_event(event: &ArchivedCalendarEvent, document_id: u3
     }
 }
 
-pub(super) fn resource_from_scheduling(document_id: u32, is_container: bool) -> DavResource {
+pub(super) fn resource_from_scheduling(
+    event: &ArchivedCalendarEventNotification,
+    document_id: u32,
+) -> DavResource {
     DavResource {
         document_id,
         data: DavResourceMetadata::CalendarEventNotification {
-            names: if !is_container {
-                [DavName {
-                    name: format!("{document_id}.ics"),
-                    parent_id: SCHEDULE_INBOX_ID,
-                }]
-                .into_iter()
-                .collect()
-            } else {
-                Default::default()
-            },
+            names: [DavName {
+                name: format!("{document_id}.ics"),
+                parent_id: SCHEDULE_INBOX_ID,
+            }]
+            .into_iter()
+            .collect(),
+            created_at: event.created.to_native(),
+            event_id: event
+                .event_id
+                .as_ref()
+                .map(|v| v.to_native())
+                .unwrap_or(u32::MAX),
+        },
+    }
+}
+
+pub(super) fn container_from_scheduling(document_id: u32) -> DavResource {
+    DavResource {
+        document_id,
+        data: DavResourceMetadata::CalendarEventNotification {
+            names: Default::default(),
+            created_at: 0,
+            event_id: u32::MAX,
         },
     }
 }
@@ -379,6 +408,7 @@ pub(super) fn resource_from_addressbook(
 }
 
 pub(super) fn resource_from_card(card: &ArchivedContactCard, document_id: u32) -> DavResource {
+    let created_at = card.created.to_native();
     DavResource {
         document_id,
         data: DavResourceMetadata::ContactCard {
@@ -390,6 +420,12 @@ pub(super) fn resource_from_card(card: &ArchivedContactCard, document_id: u32) -
                     parent_id: name.parent_id.to_native(),
                 })
                 .collect(),
+            created_at,
+            modified_at: card
+                .modified
+                .to_native()
+                .saturating_sub(created_at)
+                .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
         },
     }
 }

@@ -5,7 +5,7 @@
  */
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
-use common::{Server, auth::AccessToken};
+use common::{DavResourceMetadata, Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -17,17 +17,11 @@ use jmap_proto::{
     types::state::State,
 };
 use store::{
-    IterateParams, U32_LEN, U64_LEN, ValueKey,
     roaring::RoaringBitmap,
     search::{ContactSearchField, SearchComparator, SearchFilter, SearchQuery},
-    write::{IndexPropertyClass, SearchIndex, ValueClass, key::DeserializeBigEndian},
+    write::SearchIndex,
 };
-use trc::AddContext;
-use types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-    field::ContactField,
-};
+use types::{acl::Acl, collection::SyncCollection};
 use utils::sanitize_email;
 
 pub trait ContactCardQuery: Sync + Send {
@@ -42,13 +36,6 @@ pub trait ContactCardQuery: Sync + Send {
         request: QueryRequest<AddressBook>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
-}
-
-#[derive(Clone)]
-struct CreatedUpdated {
-    document_id: u32,
-    created: u64,
-    updated: u64,
 }
 
 impl ContactCardQuery for Server {
@@ -66,62 +53,6 @@ impl ContactCardQuery for Server {
                 SyncCollection::AddressBook,
             )
             .await?;
-        let mut created_to_updated = Vec::new();
-
-        if request.filter.iter().any(|cond| {
-            matches!(
-                cond,
-                Filter::Property(
-                    ContactCardFilter::CreatedBefore(_)
-                        | ContactCardFilter::CreatedAfter(_)
-                        | ContactCardFilter::UpdatedBefore(_)
-                        | ContactCardFilter::UpdatedAfter(_)
-                )
-            )
-        }) || request.sort.as_ref().is_some_and(|v| {
-            v.iter().any(|sort| {
-                matches!(
-                    sort.property,
-                    ContactCardComparator::Created | ContactCardComparator::Updated
-                )
-            })
-        }) {
-            self.store()
-                .iterate(
-                    IterateParams::new(
-                        ValueKey {
-                            account_id,
-                            collection: Collection::ContactCard.into(),
-                            document_id: 0,
-                            class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                                property: ContactField::CreatedToUpdated.into(),
-                                value: 0,
-                            }),
-                        },
-                        ValueKey {
-                            account_id,
-                            collection: Collection::ContactCard.into(),
-                            document_id: 0,
-                            class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                                property: ContactField::CreatedToUpdated.into(),
-                                value: u64::MAX,
-                            }),
-                        },
-                    )
-                    .ascending(),
-                    |key, value| {
-                        created_to_updated.push(CreatedUpdated {
-                            document_id: key.deserialize_be_u32(key.len() - U32_LEN)?,
-                            created: key.deserialize_be_u64(key.len() - U32_LEN - U64_LEN)?,
-                            updated: value.deserialize_be_u64(0)?,
-                        });
-
-                        Ok(true)
-                    },
-                )
-                .await
-                .caused_by(trc::location!())?;
-        }
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -222,35 +153,65 @@ impl ContactCardQuery for Server {
                         filters.push(SearchFilter::End);
                     }
                     ContactCardFilter::CreatedBefore(before) => {
-                        let before = before.timestamp() as u64;
+                        let before = before.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            created_to_updated
-                                .iter()
-                                .filter_map(|cu| (cu.created < before).then_some(cu.document_id)),
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::ContactCard { created_at, .. } = &r.data
+                                {
+                                    (*created_at < before).then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
                         )));
                     }
                     ContactCardFilter::CreatedAfter(after) => {
-                        let after = after.timestamp() as u64;
+                        let after = after.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            created_to_updated
-                                .iter()
-                                .filter_map(|cu| (cu.created > after).then_some(cu.document_id)),
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::ContactCard { created_at, .. } = &r.data
+                                {
+                                    (*created_at > after).then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
                         )));
                     }
                     ContactCardFilter::UpdatedBefore(before) => {
-                        let before = before.timestamp() as u64;
+                        let before = before.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            created_to_updated
-                                .iter()
-                                .filter_map(|cu| (cu.updated < before).then_some(cu.document_id)),
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::ContactCard {
+                                    modified_at,
+                                    created_at,
+                                    ..
+                                } = &r.data
+                                {
+                                    ((*modified_at as i64 + *created_at) < before)
+                                        .then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
                         )));
                     }
                     ContactCardFilter::UpdatedAfter(after) => {
-                        let after = after.timestamp() as u64;
+                        let after = after.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            created_to_updated
-                                .iter()
-                                .filter_map(|cu| (cu.updated > after).then_some(cu.document_id)),
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::ContactCard {
+                                    modified_at,
+                                    created_at,
+                                    ..
+                                } = &r.data
+                                {
+                                    ((*modified_at as i64 + *created_at) > after)
+                                        .then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
                         )));
                     }
                     unsupported => {
@@ -280,22 +241,53 @@ impl ContactCardQuery for Server {
             .unwrap_or_default()
             .into_iter()
             .map(|comparator| match comparator.property {
-                ContactCardComparator::Created => Ok(SearchComparator::sorted_set(
-                    created_to_updated
+                ContactCardComparator::Created => {
+                    let mut items = cache
+                        .resources
                         .iter()
-                        .enumerate()
-                        .map(|(idx, u)| (u.document_id, idx as u32))
-                        .collect(),
-                    comparator.is_ascending,
-                )),
-                ContactCardComparator::Updated => {
-                    let mut updated = created_to_updated.clone();
-                    updated.sort_by_key(|a| a.updated);
+                        .filter_map(|r| {
+                            if let DavResourceMetadata::ContactCard { created_at, .. } = &r.data {
+                                Some((r.document_id, *created_at))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    items.sort_by_key(|(document_id, created_at)| (*created_at, *document_id));
+
                     Ok(SearchComparator::sorted_set(
-                        updated
+                        items
                             .iter()
                             .enumerate()
-                            .map(|(idx, u)| (u.document_id, idx as u32))
+                            .map(|(idx, (u, _))| (*u, idx as u32))
+                            .collect(),
+                        comparator.is_ascending,
+                    ))
+                }
+                ContactCardComparator::Updated => {
+                    let mut items = cache
+                        .resources
+                        .iter()
+                        .filter_map(|r| {
+                            if let DavResourceMetadata::ContactCard {
+                                modified_at,
+                                created_at,
+                                ..
+                            } = &r.data
+                            {
+                                Some((r.document_id, *modified_at as i64 + *created_at))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    items.sort_by_key(|(document_id, modified_at)| (*modified_at, *document_id));
+
+                    Ok(SearchComparator::sorted_set(
+                        items
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, (u, _))| (*u, idx as u32))
                             .collect(),
                         comparator.is_ascending,
                     ))

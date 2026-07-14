@@ -192,10 +192,10 @@ impl DavResource {
             DavResourceMetadata::CalendarEvent { names, .. } => {
                 names.iter().any(|name| name.parent_id == parent_id)
             }
-            DavResourceMetadata::ContactCard { names } => {
+            DavResourceMetadata::ContactCard { names, .. } => {
                 names.iter().any(|name| name.parent_id == parent_id)
             }
-            DavResourceMetadata::CalendarEventNotification { names } => {
+            DavResourceMetadata::CalendarEventNotification { names, .. } => {
                 names.is_empty() && parent_id == SCHEDULE_INBOX_ID
             }
             _ => false,
@@ -208,8 +208,10 @@ impl DavResource {
             DavResourceMetadata::CalendarEvent { names, .. } => {
                 names.first().map(|name| name.parent_id)
             }
-            DavResourceMetadata::ContactCard { names } => names.first().map(|name| name.parent_id),
-            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
+            DavResourceMetadata::ContactCard { names, .. } => {
+                names.first().map(|name| name.parent_id)
+            }
+            DavResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
                 Some(SCHEDULE_INBOX_ID)
             }
             _ => None,
@@ -219,8 +221,8 @@ impl DavResource {
     pub fn child_names(&self) -> Option<&[DavName]> {
         match &self.data {
             DavResourceMetadata::CalendarEvent { names, .. } => Some(names.as_slice()),
-            DavResourceMetadata::ContactCard { names } => Some(names.as_slice()),
-            DavResourceMetadata::CalendarEventNotification { names } if !names.is_empty() => {
+            DavResourceMetadata::ContactCard { names, .. } => Some(names.as_slice()),
+            DavResourceMetadata::CalendarEventNotification { names, .. } if !names.is_empty() => {
                 Some(names.as_slice())
             }
             _ => None,
@@ -232,7 +234,7 @@ impl DavResource {
             DavResourceMetadata::File { name, .. } => Some(name.as_str()),
             DavResourceMetadata::Calendar { name, .. } => Some(name.as_str()),
             DavResourceMetadata::AddressBook { name, .. } => Some(name.as_str()),
-            DavResourceMetadata::CalendarEventNotification { names } if names.is_empty() => {
+            DavResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
                 Some(if self.document_id == SCHEDULE_INBOX_ID {
                     "inbox"
                 } else {
@@ -304,7 +306,7 @@ impl DavResource {
         match &self.data {
             DavResourceMetadata::File { size, .. } => size.is_none(),
             DavResourceMetadata::Calendar { .. } | DavResourceMetadata::AddressBook { .. } => true,
-            DavResourceMetadata::CalendarEventNotification { names } => names.is_empty(),
+            DavResourceMetadata::CalendarEventNotification { names, .. } => names.is_empty(),
             _ => false,
         }
     }

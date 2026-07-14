@@ -353,6 +353,8 @@ pub enum DavResourceMetadata {
     },
     CalendarEventNotification {
         names: TinyVec<[DavName; 2]>,
+        created_at: i64,
+        event_id: u32,
     },
     AddressBook {
         name: String,
@@ -360,6 +362,8 @@ pub enum DavResourceMetadata {
     },
     ContactCard {
         names: TinyVec<[DavName; 2]>,
+        created_at: i64,
+        modified_at: i32,
     },
 }
 

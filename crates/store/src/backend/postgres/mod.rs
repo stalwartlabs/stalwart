@@ -93,19 +93,19 @@ impl PsqlSearchField for EmailSearchField {
             EmailSearchField::Subject => "subj",
             EmailSearchField::Body => "body",
             EmailSearchField::Attachment => "atta",
-            EmailSearchField::ReceivedAt => "rcvd",
-            EmailSearchField::SentAt => "sent",
-            EmailSearchField::Size => "size",
-            EmailSearchField::HasAttachment => "hatt",
+            EmailSearchField::_ReceivedAt => "rcvd",
+            EmailSearchField::_SentAt => "sent",
+            EmailSearchField::_Size => "size",
+            EmailSearchField::_HasAttachment => "hatt",
             EmailSearchField::Headers => "hdrs",
         }
     }
 
     fn column_type(&self) -> &'static str {
         match self {
-            EmailSearchField::ReceivedAt | EmailSearchField::SentAt => "BIGINT",
-            EmailSearchField::Size => "INTEGER",
-            EmailSearchField::HasAttachment => "BOOLEAN",
+            EmailSearchField::_ReceivedAt | EmailSearchField::_SentAt => "BIGINT",
+            EmailSearchField::_Size => "INTEGER",
+            EmailSearchField::_HasAttachment => "BOOLEAN",
             EmailSearchField::Headers => "JSONB",
             _ => "TSVECTOR",
         }

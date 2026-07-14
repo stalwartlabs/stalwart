@@ -58,19 +58,19 @@ impl MysqlSearchField for EmailSearchField {
             EmailSearchField::Subject => "subj",
             EmailSearchField::Body => "body",
             EmailSearchField::Attachment => "atta",
-            EmailSearchField::ReceivedAt => "rcvd",
-            EmailSearchField::SentAt => "sent",
-            EmailSearchField::Size => "size",
-            EmailSearchField::HasAttachment => "hatt",
+            EmailSearchField::_ReceivedAt => "rcvd",
+            EmailSearchField::_SentAt => "sent",
+            EmailSearchField::_Size => "size",
+            EmailSearchField::_HasAttachment => "hatt",
             EmailSearchField::Headers => "hdrs",
         }
     }
 
     fn column_type(&self) -> &'static str {
         match self {
-            EmailSearchField::ReceivedAt | EmailSearchField::SentAt => "BIGINT",
-            EmailSearchField::Size => "INT",
-            EmailSearchField::HasAttachment => "BOOLEAN",
+            EmailSearchField::_ReceivedAt | EmailSearchField::_SentAt => "BIGINT",
+            EmailSearchField::_Size => "INT",
+            EmailSearchField::_HasAttachment => "BOOLEAN",
             EmailSearchField::Headers => "JSON",
             EmailSearchField::From => "TEXT",
             EmailSearchField::To => "TEXT",

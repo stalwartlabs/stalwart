@@ -25,7 +25,7 @@ use nlp::language::{
 use store::{
     U32_LEN,
     search::{CalendarSearchField, IndexDocument, SearchField},
-    write::{IndexPropertyClass, SearchIndex, ValueClass},
+    write::SearchIndex,
     xxhash_rust::xxh3,
 };
 use types::{
@@ -143,12 +143,9 @@ impl IndexableObject for CalendarEventNotification {
             IndexValue::Quota {
                 used: self.size() as u32,
             },
-            IndexValue::Property {
-                field: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                    property: CalendarNotificationField::CreatedToId.into(),
-                    value: self.created as u64,
-                }),
-                value: self.event_id.unwrap_or(u32::MAX).into(),
+            IndexValue::Index {
+                field: CalendarNotificationField::Created.into(),
+                value: self.created.into(),
             },
             IndexValue::LogItem {
                 sync_collection: SyncCollection::CalendarEventNotification,
@@ -165,17 +162,9 @@ impl IndexableObject for &ArchivedCalendarEventNotification {
             IndexValue::Quota {
                 used: self.size() as u32,
             },
-            IndexValue::Property {
-                field: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                    property: CalendarNotificationField::CreatedToId.into(),
-                    value: self.created.to_native() as u64,
-                }),
-                value: self
-                    .event_id
-                    .as_ref()
-                    .map(|v| v.to_native())
-                    .unwrap_or(u32::MAX)
-                    .into(),
+            IndexValue::Index {
+                field: CalendarNotificationField::Created.into(),
+                value: self.created.to_native().into(),
             },
             IndexValue::LogItem {
                 sync_collection: SyncCollection::CalendarEventNotification,

@@ -17,7 +17,7 @@ use nlp::language::{
 };
 use store::{
     search::{ContactSearchField, IndexDocument, SearchField},
-    write::{IndexPropertyClass, SearchIndex, ValueClass},
+    write::SearchIndex,
     xxhash_rust::xxh3,
 };
 use types::{acl::AclGrant, collection::SyncCollection, field::ContactField};
@@ -79,13 +79,6 @@ impl IndexableObject for ContactCard {
                 field: ContactField::Email.into(),
                 value: self.emails().next().into(),
             },
-            IndexValue::Property {
-                field: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                    property: ContactField::CreatedToUpdated.into(),
-                    value: self.created as u64,
-                }),
-                value: self.modified.into(),
-            },
             IndexValue::SearchIndex {
                 index: SearchIndex::Contacts,
                 hash: self.hashes().fold(0, |acc, hash| acc ^ hash),
@@ -112,13 +105,6 @@ impl IndexableObject for &ArchivedContactCard {
             IndexValue::Index {
                 field: ContactField::Email.into(),
                 value: self.emails().next().into(),
-            },
-            IndexValue::Property {
-                field: ValueClass::IndexProperty(IndexPropertyClass::Integer {
-                    property: ContactField::CreatedToUpdated.into(),
-                    value: self.created.to_native() as u64,
-                }),
-                value: (self.modified.to_native() as u64).into(),
             },
             IndexValue::SearchIndex {
                 index: SearchIndex::Contacts,

@@ -18,7 +18,6 @@ pub enum ContactField {
     Uid,
     Email,
     Archive,
-    CreatedToUpdated,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,7 +30,7 @@ pub enum CalendarEventField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CalendarNotificationField {
-    CreatedToId,
+    Created,
     Archive,
 }
 
@@ -89,7 +88,6 @@ impl From<ContactField> for u8 {
         match value {
             ContactField::Uid => 0,
             ContactField::Email => 1,
-            ContactField::CreatedToUpdated => 2,
             ContactField::Archive => ARCHIVE_FIELD,
         }
     }
@@ -107,7 +105,7 @@ impl From<CalendarEventField> for u8 {
 impl From<CalendarNotificationField> for u8 {
     fn from(value: CalendarNotificationField) -> Self {
         match value {
-            CalendarNotificationField::CreatedToId => 0,
+            CalendarNotificationField::Created => 0,
             CalendarNotificationField::Archive => ARCHIVE_FIELD,
         }
     }

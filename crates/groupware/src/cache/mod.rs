@@ -6,7 +6,10 @@
 
 use crate::{
     cache::calcard::{build_scheduling_resources, path_from_scheduling, resource_from_scheduling},
-    calendar::{CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarPreferences},
+    calendar::{
+        CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarEventNotification,
+        CalendarPreferences,
+    },
     contact::{AddressBook, AddressBookPreferences, ContactCard},
     file::FileNode,
 };
@@ -269,8 +272,25 @@ impl GroupwareCache for Server {
                 match change {
                     Change::InsertItem(document_id) => {
                         let document_id = document_id as u32;
-                        paths.insert(path_from_scheduling(document_id, resources.len(), false));
-                        resources.push(resource_from_scheduling(document_id, false));
+                        if let Some(archive) = self
+                            .store()
+                            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                                account_id,
+                                Collection::CalendarEventNotification,
+                                document_id,
+                            ))
+                            .await
+                            .caused_by(trc::location!())?
+                        {
+                            let resource = resource_from_scheduling(
+                                archive
+                                    .unarchive::<CalendarEventNotification>()
+                                    .caused_by(trc::location!())?,
+                                document_id,
+                            );
+                            paths.insert(path_from_scheduling(document_id, resources.len(), false));
+                            resources.push(resource);
+                        }
                     }
                     Change::DeleteItem(document_id) => {
                         delete_ids.insert(document_id as u32);
