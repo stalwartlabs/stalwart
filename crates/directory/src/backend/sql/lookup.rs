@@ -52,6 +52,7 @@ impl SqlDirectory {
 
         // Obtain members
         if let Some(query) = &self.mappings.query_member_of {
+            let members = account.groups.get_or_insert_default();
             for row in self
                 .sql_store
                 .sql_query::<Rows>(query, vec![username.into()])
@@ -62,7 +63,7 @@ impl SqlDirectory {
                 if let Some(Value::Text(address)) = row.values.first()
                     && let Some(email) = sanitize_email(address)
                 {
-                    account.groups.push(email);
+                    members.push(email);
                 }
             }
         }
@@ -103,6 +104,7 @@ impl SqlDirectory {
             Recipient::Account(mut account) => {
                 // Obtain members
                 if let Some(query) = &self.mappings.query_member_of {
+                    let members = account.groups.get_or_insert_default();
                     for row in self
                         .sql_store
                         .sql_query::<Rows>(query, vec![account.email.as_str().into()])
@@ -113,7 +115,7 @@ impl SqlDirectory {
                         if let Some(Value::Text(address)) = row.values.first()
                             && let Some(email) = sanitize_email(address)
                         {
-                            account.groups.push(email);
+                            members.push(email);
                         }
                     }
                 }

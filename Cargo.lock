@@ -2124,9 +2124,9 @@ dependencies = [
 
 [[package]]
 name = "dns-update"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8114773ce0ea3c3443cfb63025aa02fcddddf5f2b3d090e822e10dbf0572c2"
+checksum = "0c07b2767be6aead1916e05cc9a655c7d34737eb071cda3f05f67031b29891c8"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
@@ -4386,9 +4386,9 @@ dependencies = [
 
 [[package]]
 name = "mail-auth"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a88908ddf3a07fa2e76873f84d28476d3c802173fee0a44f6c5e5472523e6986"
+checksum = "5dc03ec0f6be1788623ee3d275940ca0053ced3154eb881ffe70edf2f43d3d41"
 dependencies = [
  "aws-lc-rs",
  "flate2",
@@ -7706,9 +7706,9 @@ dependencies = [
 
 [[package]]
 name = "smtp-proto"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97c9f5dd7ec5cc6d743f33fcb96de4eb91bb1cc51c5e0ba40cb285a9012043da"
+checksum = "4570e312141d42f0cb8d4e532fc8ec96c805b308fcb9012d973558cccd9dee85"
 dependencies = [
  "rkyv",
  "serde",

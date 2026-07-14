@@ -632,8 +632,8 @@ fn is_known_resource<'x>(hostnames: impl IntoIterator<Item = &'x str>, uri: &str
     let authority = rest.split_once('/').map_or(rest, |(auth, _)| auth);
     let host = authority
         .rsplit_once(':')
-        .filter(|(h, _)| h.as_bytes().iter().all(|c| c.is_ascii_digit()))
-        .map_or(authority, |(h, _)| h);
+        .filter(|(_, port)| !port.is_empty() && port.as_bytes().iter().all(|c| c.is_ascii_digit()))
+        .map_or(authority, |(host, _)| host);
 
     supported
         && hostnames

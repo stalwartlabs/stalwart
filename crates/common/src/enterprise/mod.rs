@@ -171,7 +171,7 @@ impl Server {
         let mut domain_id = u32::MAX;
         let mut tenant_id = None;
         if let Some((d_id, t_id)) = self.domain(domain).await?.map(|d| (d.id, d.id_tenant))
-            && let Some(domain_record) = self.registry().object::<Domain>(domain_id.into()).await?
+            && let Some(domain_record) = self.registry().object::<Domain>(d_id.into()).await?
         {
             logo_url = domain_record.logo;
             domain_id = d_id;

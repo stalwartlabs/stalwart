@@ -101,6 +101,10 @@ impl FromStr for Duration {
 
         for ch in value.chars() {
             if ch.is_ascii_digit() {
+                if !multiplier.is_empty() {
+                    return Err(format!("Invalid duration value {:?}.", value));
+                }
+
                 digits.push(ch);
             } else if !ch.is_ascii_whitespace() {
                 multiplier.push(ch.to_ascii_lowercase());
@@ -119,7 +123,8 @@ impl FromStr for Duration {
         digits
             .parse::<u64>()
             .ok()
-            .map(|num| std::time::Duration::from_millis(num * multiplier))
+            .and_then(|num| num.checked_mul(multiplier))
+            .map(std::time::Duration::from_millis)
             .map(Duration)
             .ok_or_else(|| format!("Invalid duration value {:?}.", value))
     }

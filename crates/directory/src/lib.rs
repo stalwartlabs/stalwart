@@ -47,7 +47,7 @@ pub struct Account {
     pub email: String,
     pub email_aliases: Vec<String>,
     pub secret: Option<String>,
-    pub groups: Vec<String>,
+    pub groups: Option<Vec<String>>,
     pub description: Option<String>,
 }
 

@@ -6,7 +6,7 @@
 
 use crate::task_manager::TaskResult;
 use common::Server;
-use dns_update::{DnsRecord, DnsRecordType, Error as DnsUpdateError};
+use dns_update::{CAARecord, DnsRecord, DnsRecordType, Error as DnsUpdateError, KeyValue};
 use registry::schema::structs::{
     DnsManagement, Domain, Task, TaskDnsManagement, TaskDomainManagement, TaskStatus,
 };
@@ -73,11 +73,16 @@ async fn dns_management(server: &Server, task: &TaskDnsManagement) -> trc::Resul
 
     let mut errors = String::new();
     for ((name, record_type), mut recs) in by_owner {
-        if matches!(record_type, DnsRecordType::TXT) && !is_owned_txt_name(&name) {
+        let preserve_unrelated = match record_type {
+            DnsRecordType::TXT => !is_owned_txt_name(&name),
+            DnsRecordType::CAA => true,
+            _ => false,
+        };
+        if preserve_unrelated {
             match dns_updater.list_rrset(origin, &name, record_type).await {
                 Ok(existing) => {
                     for existing_rec in existing {
-                        if !recs.iter().any(|new| same_txt_family(new, &existing_rec)) {
+                        if !recs.iter().any(|new| same_rrset_family(new, &existing_rec)) {
                             recs.push(existing_rec);
                         }
                     }
@@ -138,6 +143,14 @@ async fn dns_management(server: &Server, task: &TaskDnsManagement) -> trc::Resul
     }
 }
 
+fn same_rrset_family(a: &DnsRecord, b: &DnsRecord) -> bool {
+    match (a, b) {
+        (DnsRecord::TXT(_), DnsRecord::TXT(_)) => same_txt_family(a, b),
+        (DnsRecord::CAA(_), DnsRecord::CAA(_)) => same_caa_family(a, b),
+        _ => false,
+    }
+}
+
 fn same_txt_family(a: &DnsRecord, b: &DnsRecord) -> bool {
     match (a, b) {
         (DnsRecord::TXT(va), DnsRecord::TXT(vb)) => match (txt_family(va), txt_family(vb)) {
@@ -148,10 +161,38 @@ fn same_txt_family(a: &DnsRecord, b: &DnsRecord) -> bool {
     }
 }
 
+fn same_caa_family(a: &DnsRecord, b: &DnsRecord) -> bool {
+    match (a, b) {
+        (DnsRecord::CAA(ca), DnsRecord::CAA(cb)) => match (ca, cb) {
+            (CAARecord::Issue { options: oa, .. }, CAARecord::Issue { options: ob, .. })
+            | (
+                CAARecord::IssueWild { options: oa, .. },
+                CAARecord::IssueWild { options: ob, .. },
+            ) => match (caa_account_uri(oa), caa_account_uri(ob)) {
+                (Some(ua), Some(ub)) => ua.eq_ignore_ascii_case(ub),
+                _ => false,
+            },
+            (CAARecord::Iodef { url: ua, .. }, CAARecord::Iodef { url: ub, .. }) => {
+                ua.eq_ignore_ascii_case(ub)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn caa_account_uri(options: &[KeyValue]) -> Option<&str> {
+    options
+        .iter()
+        .find(|kv| kv.key.eq_ignore_ascii_case("accounturi"))
+        .map(|kv| kv.value.as_str())
+}
+
 fn txt_family(value: &str) -> Option<&str> {
-    let rest = value.trim_start().strip_prefix("v=")?;
-    let end = rest.find([';', ' ']).unwrap_or(rest.len());
-    Some(&rest[..end])
+    value.trim_start().strip_prefix("v=").map(|rest| {
+        rest.split_once([';', ' '])
+            .map_or(rest, |(family, _)| family)
+    })
 }
 
 fn is_owned_txt_name(name: &str) -> bool {

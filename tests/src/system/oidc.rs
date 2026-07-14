@@ -359,7 +359,7 @@ pub async fn test(test: &mut TestServer) {
                 code_challenge: Some(PKCE_CHALLENGE.to_string()),
                 code_challenge_method: Some("S256".to_string()),
                 state: None,
-                resource: vec!["https://127.0.0.1:8899/jmap/session".to_string()],
+                resource: vec!["https://mail.example.org/jmap/session".to_string()],
             },
         )
         .await

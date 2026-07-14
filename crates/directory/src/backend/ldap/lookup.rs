@@ -120,11 +120,9 @@ impl LdapDirectory {
         conn: &mut Ldap,
         result: &mut LdapResult,
     ) -> trc::Result<()> {
-        if !result.account.groups.is_empty() {
-            for name in std::mem::take(&mut result.account.groups)
-                .into_iter()
-                .filter(|name| name.contains('='))
-            {
+        if let Some(group_dns) = result.account.groups.take() {
+            let mut groups = Vec::new();
+            for name in group_dns.into_iter().filter(|name| name.contains('=')) {
                 let (rs, _res) = conn
                     .search(
                         &name,
@@ -142,12 +140,17 @@ impl LdapDirectory {
                             && let Some(email) =
                                 value.first().map(|s| s.as_str()).and_then(sanitize_email)
                         {
-                            result.account.groups.push(email);
+                            groups.push(email);
                             break 'outer;
                         }
                     }
                 }
             }
+            result.account.groups = if groups.is_empty() {
+                None
+            } else {
+                Some(groups)
+            };
         } else if let Some(filter) = &self.mappings.filter_member_of {
             let filter = filter.build(&result.dn);
             let rs = conn
@@ -162,25 +165,31 @@ impl LdapDirectory {
                 .success()
                 .map_err(|err| err.into_error().caused_by(trc::location!()))?
                 .0;
+            let had_entries = !rs.is_empty();
+            let mut groups = Vec::new();
             for entry in rs {
                 for (attr, value) in SearchEntry::construct(entry).attrs {
                     if self.mappings.attr_email.contains(&attr.to_lowercase()) {
-                        result
-                            .account
-                            .groups
-                            .extend(value.into_iter().filter_map(|v| {
-                                sanitize_email(&v).or_else(|| {
-                                    trc::event!(
-                                        Store(trc::StoreEvent::LdapWarning),
-                                        Reason = "Group entry missing valid email attribute",
-                                        Details = v
-                                    );
-                                    None
-                                })
-                            }));
+                        groups.extend(value.into_iter().filter_map(|v| {
+                            sanitize_email(&v).or_else(|| {
+                                trc::event!(
+                                    Store(trc::StoreEvent::LdapWarning),
+                                    Reason = "Group entry missing valid email attribute",
+                                    Details = v
+                                );
+                                None
+                            })
+                        }));
                     }
                 }
             }
+            result.account.groups = if had_entries && groups.is_empty() {
+                None
+            } else {
+                Some(groups)
+            };
+        } else {
+            result.account.groups = Some(Vec::new());
         }
 
         Ok(())
@@ -253,7 +262,7 @@ impl LdapMappings {
                     account.description = Some(desc);
                 }
             } else if self.attr_groups.contains(&attr) {
-                account.groups.extend(value);
+                account.groups.get_or_insert_default().extend(value);
             } else if self.attr_class.contains(&attr) {
                 for value in value {
                     is_group |= value.eq_ignore_ascii_case(&self.group_class);

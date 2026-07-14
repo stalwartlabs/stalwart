@@ -29,7 +29,7 @@ pub async fn test() {
             email: "john.doe@example.org".into(),
             email_aliases: vec!["john@example.org".into()],
             secret: Some("$app$8958830913002348890$".into()),
-            groups: vec!["sales@example.org".into()],
+            groups: Some(vec!["sales@example.org".into()]),
             description: Some("John Doe".into()),
         }
     );
@@ -45,7 +45,10 @@ pub async fn test() {
             email: "jane.smith@example.org".into(),
             email_aliases: vec![],
             secret: Some("$app$4096614298472586996$".into()),
-            groups: vec!["sales@example.org".into(), "corporate@example.org".into()],
+            groups: Some(vec![
+                "sales@example.org".into(),
+                "corporate@example.org".into()
+            ]),
             description: Some("Jane Smith".into()),
         }
     );
@@ -76,7 +79,7 @@ pub async fn test() {
             email: "john.doe@example.org".into(),
             email_aliases: vec!["john@example.org".into()],
             secret: Some("this is John's LDAP password".into()),
-            groups: vec!["sales@example.org".into()],
+            groups: Some(vec!["sales@example.org".into()]),
             description: Some("John Doe".into()),
         }
     );
@@ -97,7 +100,7 @@ pub async fn test() {
             email: "john.doe@example.org".into(),
             email_aliases: vec!["john@example.org".into()],
             secret: Some("this is John's LDAP password".into()),
-            groups: vec!["sales@example.org".into()],
+            groups: Some(vec!["sales@example.org".into()]),
             description: Some("John Doe".into())
         })
     );
@@ -107,7 +110,10 @@ pub async fn test() {
             email: "jane.smith@example.org".into(),
             email_aliases: vec![],
             secret: Some("this is Jane's LDAP password".into()),
-            groups: vec!["sales@example.org".into(), "corporate@example.org".into()],
+            groups: Some(vec![
+                "sales@example.org".into(),
+                "corporate@example.org".into()
+            ]),
             description: Some("Jane Smith".into())
         })
     );

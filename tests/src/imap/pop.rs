@@ -73,7 +73,7 @@ pub async fn test(test: &TestServer) {
     pop3.send("STAT").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 3 603");
+        .assert_contains("+OK 3 609");
 
     // UTF8
     pop3.send("UTF8").await;
@@ -84,13 +84,13 @@ pub async fn test(test: &TestServer) {
     pop3.assert_read(ResponseType::Multiline)
         .await
         .assert_contains("+OK 3 messages")
-        .assert_contains("1 201")
-        .assert_contains("2 201")
-        .assert_contains("3 201");
+        .assert_contains("1 203")
+        .assert_contains("2 203")
+        .assert_contains("3 203");
     pop3.send("LIST 2").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 2 201");
+        .assert_contains("+OK 2 203");
 
     // UIDL
     pop3.send("UIDL").await;
@@ -109,13 +109,13 @@ pub async fn test(test: &TestServer) {
     pop3.send("RETR 1").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("I'm going to need those TPS 0 reports ASAP.")
         .assert_contains("So, if you could do that, that'd be great.");
     pop3.send("RETR 3").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("I'm going to need those TPS 2 reports ASAP.")
         .assert_contains("So, if you could do that, that'd be great.");
     pop3.send("RETR 4").await;
@@ -125,13 +125,13 @@ pub async fn test(test: &TestServer) {
     pop3.send("TOP 1 4").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("Subject: TPS Report 0")
         .assert_not_contains("I'm going to need those TPS 0 reports ASAP.");
     pop3.send("TOP 3 4").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("Subject: TPS Report 2")
         .assert_not_contains("I'm going to need those TPS 2 reports ASAP.");
 
@@ -148,7 +148,7 @@ pub async fn test(test: &TestServer) {
     pop3.send("STAT").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 3 603");
+        .assert_contains("+OK 3 609");
 
     // DELE + QUIT (should delete messages)
     pop3.send("DELE 2").await;
@@ -160,7 +160,7 @@ pub async fn test(test: &TestServer) {
     pop3.send("STAT").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 2 402");
+        .assert_contains("+OK 2 406");
     pop3.send("TOP 1 4").await;
     pop3.assert_read(ResponseType::Multiline)
         .await

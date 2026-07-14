@@ -97,7 +97,7 @@ pub async fn test() {
             email: "john@example.org".to_string(),
             email_aliases: vec!["john.doe@example.org".to_string(),],
             secret: Some("john secret".to_string()),
-            groups: vec!["sales@example.org".to_string()],
+            groups: Some(vec!["sales@example.org".to_string()]),
             description: Some("John Doe".to_string()),
         }
     );
@@ -118,7 +118,7 @@ pub async fn test() {
             email: "john@example.org".to_string(),
             email_aliases: vec!["john.doe@example.org".to_string()],
             secret: Some("john secret".to_string()),
-            groups: vec!["sales@example.org".to_string()],
+            groups: Some(vec!["sales@example.org".to_string()]),
             description: Some("John Doe".to_string()),
         })
     );
@@ -128,7 +128,7 @@ pub async fn test() {
             email: "jane@example.org".to_string(),
             email_aliases: vec![],
             secret: Some("jane secret".to_string()),
-            groups: vec!["sales@example.org".to_string()],
+            groups: Some(vec!["sales@example.org".to_string()]),
             description: Some("Jane Doe".to_string()),
         })
     );

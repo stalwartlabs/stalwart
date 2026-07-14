@@ -217,6 +217,7 @@ impl DnsUpdater {
                     region: Some(server.region),
                     hosted_zone_id: server.hosted_zone_id,
                     private_zone_only: Some(server.private_zone_only),
+                    endpoint: None,
                 };
                 Ok(DnsUpdater {
                     polling_interval: server.polling_interval.into_inner(),

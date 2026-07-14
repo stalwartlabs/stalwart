@@ -218,7 +218,7 @@ async fn data() {
         .await;
     assert_eq!(
         test.expect_message().await.read_message(&test).await,
-        load_test_message("no_msgid", "messages")
+        format!("{}\r\n", load_test_message("no_msgid", "messages"))
     );
 
     // Maximum one message per session is allowed for 10.0.0.1

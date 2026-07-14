@@ -201,7 +201,7 @@ impl Queue {
                     .queue_status
                     .store(!paused, Ordering::Relaxed);
                 self.is_paused = paused;
-                false
+                !paused
             }
             QueueEvent::ReloadSettings => {
                 let server = self.core.build_server();

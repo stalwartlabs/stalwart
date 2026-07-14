@@ -36267,7 +36267,7 @@ impl Default for SieveUserInterpreter {
             max_nested_includes: 3u64,
             max_nested_tests: 15u64,
             max_out_messages: 3u64,
-            max_received_headers: 10u64,
+            max_received_headers: 50u64,
             max_redirects: 1u64,
             max_script_size: 102400,
             max_string_length: 4096u64,

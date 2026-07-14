@@ -105,7 +105,7 @@ pub async fn test(test: &TestServer) {
             "urn:ietf:params:jmap:calendars": {
               "maxCalendarsPerEvent": null,
               "minDateTime": "0001-01-01T00:00:00Z",
-              "maxDateTime": "65534-12-31T23:59:59Z",
+              "maxDateTime": "9999-12-31T23:59:59Z",
               "maxExpandedQueryDuration": "P52W1D",
               "maxParticipantsPerEvent": 20,
               "mayCreateCalendar": true

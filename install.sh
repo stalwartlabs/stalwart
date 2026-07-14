@@ -486,7 +486,8 @@ desc="Stalwart Server"
 load_rc_config \$name
 
 : \${stalwart_enable:="NO"}
-: \${stalwart_user:="${_user}"}
+: \${stalwart_runas_user:="${_user}"}
+: \${stalwart_runas_group:="${_user}"}
 : \${stalwart_config:="${_config}"}
 : \${stalwart_envfile:="${_env}"}
 : \${stalwart_logfile:="${_log_dir}/stalwart.log"}
@@ -495,7 +496,7 @@ load_rc_config \$name
 pidfile="/var/run/stalwart.pid"
 procname="${_bin}"
 command="/usr/sbin/daemon"
-command_args="-f -o \${stalwart_logfile} -p \${pidfile} -u \${stalwart_user} ${_bin} --config=\${stalwart_config}"
+command_args="-f -o \${stalwart_logfile} -p \${pidfile} ${_bin} --config=\${stalwart_config}"
 sig_stop="INT"
 start_precmd="stalwart_precmd"
 
@@ -507,10 +508,12 @@ stalwart_precmd()
         . "\${stalwart_envfile}"
         set +a
     fi
-    ulimit -n "\${stalwart_fdlimit}"
 
-    # Binding privileged ports (25/443/465/993/...) as a non-root user
-    # requires: sysctl net.inet.ip.portrange.reservedhigh=0
+    # Stalwart binds its listeners as root, then setuid()s to this account
+    export RUN_AS_USER="\${stalwart_runas_user}"
+    export RUN_AS_GROUP="\${stalwart_runas_group}"
+
+    ulimit -n "\${stalwart_fdlimit}"
 }
 
 run_rc_command "\$1"

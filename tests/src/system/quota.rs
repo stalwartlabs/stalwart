@@ -448,7 +448,7 @@ pub async fn test(test: &mut TestServer) {
                 "jane@example.org",
                 "user1@example.org",
                 &format!("Ingest test {i}"),
-                513,
+                500,
             ))
             .unwrap(),
         )

@@ -29,7 +29,7 @@ pub async fn test() {
                 email: "john@unknown.org".to_string(),
                 email_aliases: vec![],
                 secret: "supersecret".to_string().into(),
-                groups: vec![],
+                groups: Some(vec![]),
                 description: "John Doe".to_string().into(),
             })
             .await
@@ -44,10 +44,10 @@ pub async fn test() {
             "j.doe@example.org".to_string(),
         ],
         secret: "supersecret".to_string().into(),
-        groups: vec![
+        groups: Some(vec![
             "corporate@example.org".to_string(),
             "sales@example.org".to_string(),
-        ],
+        ]),
         description: "John Doe".to_string().into(),
     };
     let result = test
@@ -162,8 +162,9 @@ pub async fn test() {
     account_in
         .email_aliases
         .push("johnny@example.org".to_string());
-    account_in.groups.pop();
-    account_in.groups.push("support@example.org".to_string());
+    let groups = account_in.groups.get_or_insert_default();
+    groups.pop();
+    groups.push("support@example.org".to_string());
     account_in.secret = "evenmoresecret".to_string().into();
     assert_eq!(
         test.server
@@ -226,6 +227,38 @@ pub async fn test() {
             .unwrap(),
         4
     );
+
+    account_in.groups = None;
+    test.server
+        .synchronize_account(account_in.clone())
+        .await
+        .unwrap();
+    let account_out = test
+        .server
+        .registry()
+        .object::<Account>(account_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .into_user()
+        .unwrap();
+    assert_eq!(account_out.member_group_ids.len(), 2);
+
+    account_in.groups = Some(vec![]);
+    test.server
+        .synchronize_account(account_in.clone())
+        .await
+        .unwrap();
+    let account_out = test
+        .server
+        .registry()
+        .object::<Account>(account_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .into_user()
+        .unwrap();
+    assert_eq!(account_out.member_group_ids.len(), 0);
 
     // Synchronize a group
     assert_eq!(

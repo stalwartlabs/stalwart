@@ -7,7 +7,6 @@
 use crate::config::mailstore::jmap::JmapConfig;
 use ahash::AHashSet;
 use calcard::icalendar::ICalendarDuration;
-use chrono::{DateTime, Utc};
 use jmap_proto::{
     object::{email::EmailComparator, file_node::FileNodeComparator},
     request::capability::{
@@ -84,8 +83,28 @@ impl JmapConfig {
             Capability::Calendars,
             Capabilities::Calendar(CalendarCapabilities {
                 max_calendars_per_event: None,
-                min_date_time: UTCDate::from_timestamp(DateTime::<Utc>::MIN_UTC.timestamp()),
-                max_date_time: UTCDate::from_timestamp(DateTime::<Utc>::MAX_UTC.timestamp()),
+                min_date_time: UTCDate {
+                    year: 1,
+                    month: 1,
+                    day: 1,
+                    hour: 0,
+                    minute: 0,
+                    second: 0,
+                    tz_before_gmt: false,
+                    tz_hour: 0,
+                    tz_minute: 0,
+                },
+                max_date_time: UTCDate {
+                    year: 9999,
+                    month: 12,
+                    day: 31,
+                    hour: 23,
+                    minute: 59,
+                    second: 59,
+                    tz_before_gmt: false,
+                    tz_hour: 0,
+                    tz_minute: 0,
+                },
                 max_expanded_query_duration: ICalendarDuration::from_seconds(86400 * 365)
                     .to_string(),
                 max_participants_per_event: bp

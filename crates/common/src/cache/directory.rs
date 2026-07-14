@@ -91,26 +91,28 @@ impl Server {
                         has_changes = true;
                     }
                 }
-                let mut member_group_ids = Vec::with_capacity(account.groups.len());
-                for email in account.groups {
-                    member_group_ids.push(
-                        self.synchronize_group(directory::Group {
-                            email,
-                            ..Default::default()
-                        })
-                        .await
-                        .caused_by(trc::location!())?
-                        .into(),
-                    );
-                }
-                if updated_account.member_group_ids.len() != member_group_ids.len()
-                    || !updated_account
-                        .member_group_ids
-                        .iter()
-                        .all(|id| member_group_ids.contains(id))
-                {
-                    updated_account.member_group_ids = member_group_ids.into();
-                    has_changes = true;
+                if let Some(groups) = account.groups {
+                    let mut member_group_ids = Vec::with_capacity(groups.len());
+                    for email in groups {
+                        member_group_ids.push(
+                            self.synchronize_group(directory::Group {
+                                email,
+                                ..Default::default()
+                            })
+                            .await
+                            .caused_by(trc::location!())?
+                            .into(),
+                        );
+                    }
+                    if updated_account.member_group_ids.len() != member_group_ids.len()
+                        || !updated_account
+                            .member_group_ids
+                            .iter()
+                            .all(|id| member_group_ids.contains(id))
+                    {
+                        updated_account.member_group_ids = member_group_ids.into();
+                        has_changes = true;
+                    }
                 }
 
                 if has_changes {
@@ -168,8 +170,8 @@ impl Server {
                         });
                     }
                 }
-                let mut member_group_ids = Vec::with_capacity(account.groups.len());
-                for email in account.groups {
+                let mut member_group_ids = Vec::new();
+                for email in account.groups.unwrap_or_default() {
                     member_group_ids.push(
                         self.synchronize_group(directory::Group {
                             email,

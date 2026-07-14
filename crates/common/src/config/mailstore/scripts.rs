@@ -32,6 +32,7 @@ pub struct Scripting {
     pub untrusted_runtime: Runtime,
     pub trusted_runtime: Runtime,
     pub trusted_compiler: Compiler,
+    pub max_received_headers: usize,
     pub from_addr: IfBlock,
     pub from_name: IfBlock,
     pub return_path: IfBlock,
@@ -65,7 +66,7 @@ impl Scripting {
             .with_cpu_limit(untrusted.max_cpu_cycles as usize)
             .with_max_variable_size(untrusted.max_var_size as usize)
             .with_max_redirects(untrusted.max_redirects as usize)
-            .with_max_received_headers(untrusted.max_received_headers as usize)
+            .with_max_received_headers(usize::MAX) // This is set to usize::MAX here, but the actual limit is enforced during ingestion.
             .with_max_header_size(untrusted.max_header_size as usize)
             .with_max_out_messages(untrusted.max_out_messages as usize)
             .with_default_vacation_expiry(untrusted.default_expiry_vacation.into_inner().as_secs())
@@ -180,6 +181,7 @@ impl Scripting {
             trusted_compiler,
             untrusted_scripts,
             trusted_scripts,
+            max_received_headers: untrusted.max_received_headers as usize,
             from_addr: bp.compile_expr(
                 ObjectType::SieveSystemScript.singleton(),
                 &trusted.ctx_default_from_address(),
@@ -209,6 +211,7 @@ impl Clone for Scripting {
             from_addr: self.from_addr.clone(),
             from_name: self.from_name.clone(),
             return_path: self.return_path.clone(),
+            max_received_headers: self.max_received_headers,
             sign: self.sign.clone(),
             trusted_scripts: self.trusted_scripts.clone(),
             untrusted_scripts: self.untrusted_scripts.clone(),
