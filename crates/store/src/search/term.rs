@@ -421,7 +421,6 @@ impl SearchField {
                 CalendarSearchField::Location => 5,
                 CalendarSearchField::Owner => 6,
                 CalendarSearchField::Attendee => 7,
-                CalendarSearchField::Start => 8,
                 CalendarSearchField::Uid => 9,
             },
             SearchField::Contact(field) => match field {

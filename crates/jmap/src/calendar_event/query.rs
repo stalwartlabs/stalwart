@@ -7,7 +7,7 @@
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
 use calcard::{common::timezone::Tz, jscalendar::JSCalendarDateTime};
 use chrono::offset::TimeZone;
-use common::{Server, auth::AccessToken};
+use common::{DavResourceMetadata, Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -215,19 +215,104 @@ impl CalendarEventQuery for Server {
                 .into_iter()
                 .map(|comparator| match comparator.property {
                     CalendarEventComparator::Start | CalendarEventComparator::RecurrenceId => {
-                        Ok(SearchComparator::field(
-                            CalendarSearchField::Start,
+                        let mut items = cache
+                            .resources
+                            .iter()
+                            .filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEvent { start, .. } = &r.data {
+                                    Some((r.document_id, *start))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        items.sort_by_key(|(document_id, start)| (*start, *document_id));
+
+                        Ok(SearchComparator::sorted_set(
+                            items
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, (u, _))| (*u, idx as u32))
+                                .collect(),
                             comparator.is_ascending,
                         ))
                     }
-                    CalendarEventComparator::Uid => Ok(SearchComparator::field(
-                        CalendarSearchField::Uid,
-                        comparator.is_ascending,
-                    )),
-                    CalendarEventComparator::Created | CalendarEventComparator::Updated => {
-                        Err(trc::JmapEvent::UnsupportedSort
-                            .into_err()
-                            .details(comparator.property.into_string().into_owned()))
+                    CalendarEventComparator::Uid => {
+                        let mut items = cache
+                            .resources
+                            .iter()
+                            .filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEvent { uid, .. } = &r.data {
+                                    Some((r.document_id, *uid))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        items.sort_by_key(|(document_id, uid)| (*uid, *document_id));
+
+                        Ok(SearchComparator::sorted_set(
+                            items
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, (u, _))| (*u, idx as u32))
+                                .collect(),
+                            comparator.is_ascending,
+                        ))
+                    }
+                    CalendarEventComparator::Created => {
+                        let mut items = cache
+                            .resources
+                            .iter()
+                            .filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEvent { created_at, .. } =
+                                    &r.data
+                                {
+                                    Some((r.document_id, *created_at))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        items.sort_by_key(|(document_id, created_at)| (*created_at, *document_id));
+
+                        Ok(SearchComparator::sorted_set(
+                            items
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, (u, _))| (*u, idx as u32))
+                                .collect(),
+                            comparator.is_ascending,
+                        ))
+                    }
+                    CalendarEventComparator::Updated => {
+                        let mut items = cache
+                            .resources
+                            .iter()
+                            .filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEvent {
+                                    modified_at,
+                                    created_at,
+                                    ..
+                                } = &r.data
+                                {
+                                    Some((r.document_id, *modified_at as i64 + *created_at))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        items
+                            .sort_by_key(|(document_id, modified_at)| (*modified_at, *document_id));
+
+                        Ok(SearchComparator::sorted_set(
+                            items
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, (u, _))| (*u, idx as u32))
+                                .collect(),
+                            comparator.is_ascending,
+                        ))
                     }
                     CalendarEventComparator::_T(other) => Err(trc::JmapEvent::UnsupportedSort
                         .into_err()
@@ -290,18 +375,10 @@ impl CalendarEventQuery for Server {
                     .caused_by(trc::location!())?;
 
                 // Expand recurrences
-                let uid = if has_uid_comparator {
-                    Arc::new(
-                        calendar_event
-                            .data
-                            .event
-                            .uids()
-                            .next()
-                            .unwrap_or_default()
-                            .to_string(),
-                    )
+                let uid: Arc<str> = if has_uid_comparator {
+                    Arc::from(calendar_event.data.event.uids().next().unwrap_or_default())
                 } else {
-                    Arc::new(String::new())
+                    Arc::from("")
                 };
                 for expansion in calendar_event
                     .data
@@ -420,7 +497,7 @@ struct SearchResult {
     start: [u8; std::mem::size_of::<i64>()],
     created: [u8; std::mem::size_of::<i64>()],
     updated: [u8; std::mem::size_of::<i64>()],
-    uid: Arc<String>,
+    uid: Arc<str>,
 }
 
 impl SearchResult {

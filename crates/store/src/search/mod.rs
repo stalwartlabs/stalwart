@@ -69,7 +69,6 @@ pub enum CalendarSearchField {
     Location,
     Owner,
     Attendee,
-    Start,
     Uid,
 }
 
@@ -310,7 +309,6 @@ impl SearchField {
                 CalendarSearchField::Location => "loc",
                 CalendarSearchField::Owner => "owner",
                 CalendarSearchField::Attendee => "attendee",
-                CalendarSearchField::Start => "start",
                 CalendarSearchField::Uid => "uid",
             },
             SearchField::Contact(field) => match field {

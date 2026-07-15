@@ -58,7 +58,6 @@ impl SearchField {
             }),
             SearchField::Id
             | SearchField::Email(EmailSearchField::_SentAt | EmailSearchField::_ReceivedAt)
-            | SearchField::Calendar(CalendarSearchField::Start)
             | SearchField::Tracing(TracingSearchField::QueueId | TracingSearchField::EventType) => {
                 json!({
                   "type": "long"

@@ -403,12 +403,6 @@ impl ArchivedCalendarEvent {
             .with_account_id(account_id)
             .with_document_id(document_id);
 
-        if index_fields.is_empty()
-            || index_fields.contains(&SearchField::Calendar(CalendarSearchField::Start))
-        {
-            document.index_integer(CalendarSearchField::Start, self.data.event_range_start());
-        }
-
         let mut detector = LanguageDetector::new();
         for component in self
             .data

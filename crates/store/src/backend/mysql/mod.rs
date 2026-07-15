@@ -91,16 +91,12 @@ impl MysqlSearchField for CalendarSearchField {
             CalendarSearchField::Location => "locn",
             CalendarSearchField::Owner => "ownr",
             CalendarSearchField::Attendee => "atnd",
-            CalendarSearchField::Start => "strt",
             CalendarSearchField::Uid => "uid",
         }
     }
 
     fn column_type(&self) -> &'static str {
-        match self {
-            CalendarSearchField::Start => "BIGINT NOT NULL",
-            _ => "TEXT",
-        }
+        "TEXT"
     }
 }
 

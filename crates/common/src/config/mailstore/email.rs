@@ -258,7 +258,7 @@ impl EmailConfig {
                             SearchCalendarField::Location => CalendarSearchField::Location,
                             SearchCalendarField::Owner => CalendarSearchField::Owner,
                             SearchCalendarField::Attendee => CalendarSearchField::Attendee,
-                            SearchCalendarField::Start => CalendarSearchField::Start,
+                            SearchCalendarField::Start => CalendarSearchField::Uid,
                             SearchCalendarField::Uid => CalendarSearchField::Uid,
                         })
                     })

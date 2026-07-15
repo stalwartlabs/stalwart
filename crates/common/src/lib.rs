@@ -350,6 +350,9 @@ pub enum DavResourceMetadata {
         names: TinyVec<[DavName; 2]>,
         start: i64,
         duration: u32,
+        created_at: i64,
+        modified_at: i32,
+        uid: u64,
     },
     CalendarEventNotification {
         names: TinyVec<[DavName; 2]>,

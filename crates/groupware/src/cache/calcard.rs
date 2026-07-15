@@ -19,7 +19,10 @@ use common::{
     TinyCalendarPreferences, UpdateLock,
 };
 use std::sync::Arc;
-use store::ahash::{AHashMap, AHashSet};
+use store::{
+    U64_LEN,
+    ahash::{AHashMap, AHashSet},
+};
 use trc::AddContext;
 use types::{
     acl::AclGrant,
@@ -310,6 +313,7 @@ pub(super) fn resource_from_calendar(calendar: &ArchivedCalendar, document_id: u
 
 pub(super) fn resource_from_event(event: &ArchivedCalendarEvent, document_id: u32) -> DavResource {
     let (start, duration) = event.data.event_range().unwrap_or_default();
+    let created_at = event.created.to_native();
     DavResource {
         document_id,
         data: DavResourceMetadata::CalendarEvent {
@@ -323,6 +327,23 @@ pub(super) fn resource_from_event(event: &ArchivedCalendarEvent, document_id: u3
                 .collect(),
             start,
             duration,
+            created_at,
+            modified_at: event
+                .modified
+                .to_native()
+                .saturating_sub(created_at)
+                .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            uid: event
+                .data
+                .event
+                .uids()
+                .map(|uid| {
+                    let mut uid_bytes = [0u8; U64_LEN];
+                    uid_bytes.copy_from_slice(&uid.as_bytes()[..uid.len().min(U64_LEN)]);
+                    u64::from_be_bytes(uid_bytes)
+                })
+                .next()
+                .unwrap_or_default(),
         },
     }
 }
