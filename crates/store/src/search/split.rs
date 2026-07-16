@@ -35,14 +35,14 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
                 filters.push(SearchFilter::End);
                 op_stack.pop()?;
             }
-            SearchFilter::Operator {
+            SearchFilter::Integer {
                 field: SearchField::AccountId,
-                value: SearchValue::Uint(id),
+                value,
                 ..
             } => {
-                account_id = id;
+                account_id = value;
             }
-            SearchFilter::Operator { .. } => {
+            SearchFilter::Text { .. } | SearchFilter::KeyValue { .. } => {
                 operators.entry(op_stack.len()).or_default().push(filter);
             }
             SearchFilter::DocumentSet(docs) => match document_sets.entry(op_stack.len()) {
@@ -57,6 +57,9 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
                     entry.insert(docs);
                 }
             },
+            SearchFilter::Integer { .. } => {
+                unreachable!("Id filters should have been handled earlier");
+            }
         }
     }
 
@@ -95,7 +98,9 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
                         }
                     }
                 }
-                SearchFilter::Operator { .. } => {}
+                SearchFilter::Text { .. }
+                | SearchFilter::Integer { .. }
+                | SearchFilter::KeyValue { .. } => {}
                 SearchFilter::DocumentSet(_) => {
                     if depth == 0 && j > i {
                         break;
@@ -109,10 +114,10 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
             j += 1;
         }
 
-        let mut external_filters = vec![SearchFilter::Operator {
+        let mut external_filters = vec![SearchFilter::Integer {
             field: SearchField::AccountId,
-            op: SearchOperator::Equal,
-            value: SearchValue::Uint(account_id),
+            op: Ordering::Equal,
+            value: account_id,
         }];
         let add_or =
             matches!(split.last(), Some(SplitFilter::Internal(SearchFilter::Or))) && j > i + 1;
@@ -603,21 +608,19 @@ mod tests {
     }
 
     fn account_id(id: u64) -> SearchFilter {
-        SearchFilter::Operator {
+        SearchFilter::Integer {
             field: SearchField::AccountId,
-            op: SearchOperator::Equal,
-            value: SearchValue::Uint(id),
+            op: Ordering::Equal,
+            value: id,
         }
     }
 
     fn other_op(value: &str) -> SearchFilter {
-        SearchFilter::Operator {
+        SearchFilter::Text {
             field: SearchField::DocumentId,
-            op: SearchOperator::Equal,
-            value: SearchValue::Text {
-                value: value.to_string(),
-                language: Language::None,
-            },
+            op: TextMatch::Keyword,
+            value: value.to_string(),
+            language: Language::None,
         }
     }
 
@@ -655,25 +658,33 @@ mod tests {
     fn print_search_filter_code(filter: &SearchFilter, indent_level: usize) {
         let indent = "    ".repeat(indent_level);
         match filter {
-            SearchFilter::Operator { field, op, value } => match (field, op, value) {
-                (SearchField::AccountId, SearchOperator::Equal, SearchValue::Uint(id)) => {
-                    print!("account_id({})", id);
-                }
-                (
-                    SearchField::DocumentId,
-                    SearchOperator::Equal,
-                    SearchValue::Text { value, .. },
-                ) => {
-                    print!("other_op(\"{}\")", value);
-                }
-                _ => {
-                    println!("SearchFilter::Operator {{");
-                    println!("{}    field: {:?},", indent, field);
-                    println!("{}    op: {:?},", indent, op);
-                    println!("{}    value: {:?},", indent, value);
-                    print!("{}}}", indent);
-                }
-            },
+            SearchFilter::Integer { value, .. } => {
+                print!("account_id({})", value);
+            }
+            SearchFilter::Text {
+                field: SearchField::DocumentId,
+                op: TextMatch::Keyword,
+                value,
+                ..
+            } => {
+                print!("other_op(\"{}\")", value);
+            }
+            SearchFilter::Text {
+                field, op, value, ..
+            } => {
+                println!("SearchFilter::Operator {{");
+                println!("{}    field: {:?},", indent, field);
+                println!("{}    match: {:?},", indent, op);
+                println!("{}    value: {:?},", indent, value);
+                print!("{}}}", indent);
+            }
+            SearchFilter::KeyValue { field, key, op } => {
+                println!("SearchFilter::KeyValue {{");
+                println!("{}    field: {:?},", indent, field);
+                println!("{}    key: {:?},", indent, key);
+                println!("{}    op: {:?},", indent, op);
+                print!("{}}}", indent);
+            }
             SearchFilter::DocumentSet(bitmap) => {
                 let ids: Vec<u32> = bitmap.iter().collect();
                 if ids.is_empty() {

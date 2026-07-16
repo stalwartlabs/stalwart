@@ -106,6 +106,12 @@ impl KeySerialize for u64 {
     }
 }
 
+impl KeySerialize for u128 {
+    fn serialize(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_be_bytes());
+    }
+}
+
 impl DeserializeBigEndian for &[u8] {
     fn deserialize_be_u16(&self, index: usize) -> trc::Result<u16> {
         self.get(index..index + U16_LEN)
@@ -263,7 +269,7 @@ impl ValueClass {
                     .write(account_id)
                     .write(collection)
                     .write(*property)
-                    .write(hash.as_bytes())
+                    .write(*hash)
                     .write(document_id),
                 IndexPropertyClass::Integer { property, value } => serializer
                     .write(account_id)
@@ -372,14 +378,12 @@ impl ValueClass {
                         } => serializer
                             .write(class)
                             .write(*account_id)
-                            .write(hash.payload())
-                            .write(hash.payload_len())
+                            .write(hash.as_key())
                             .write(*field)
                             .write(*document_id),
                         SearchIndexId::Global { id } => serializer
                             .write(class)
-                            .write(hash.payload())
-                            .write(hash.payload_len())
+                            .write(hash.as_key())
                             .write(*field)
                             .write(*id),
                     }
@@ -489,7 +493,7 @@ impl ValueClass {
         match self {
             ValueClass::Property(_) => U32_LEN * 2 + 3,
             ValueClass::IndexProperty(p) => match p {
-                IndexPropertyClass::Hash { hash, .. } => U32_LEN * 2 + 3 + hash.len(),
+                IndexPropertyClass::Hash { .. } => U32_LEN * 2 + 3 + (U64_LEN * 2),
                 IndexPropertyClass::Integer { .. } => U32_LEN * 2 + 3 + U64_LEN,
             },
             ValueClass::Acl(_) => U32_LEN * 3 + 2,
@@ -527,7 +531,7 @@ impl ValueClass {
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
             ValueClass::NodeId(_) => (U16_LEN * 3) + 1,
             ValueClass::SearchIndex(v) => match &v.typ {
-                SearchIndexType::Term { hash, .. } => U64_LEN + hash.len() + 2,
+                SearchIndexType::Term { hash, .. } => U64_LEN + hash.key_len() + 2,
                 SearchIndexType::Index { field, .. } => 1 + field.data.len() + U64_LEN,
                 SearchIndexType::Document => match &v.id {
                     SearchIndexId::Account { .. } => 1 + U32_LEN * 2,

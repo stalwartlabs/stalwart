@@ -9,7 +9,6 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
-    str::FromStr,
 };
 
 // A hash that can cheekily store small inputs directly without hashing them.
@@ -17,10 +16,9 @@ use std::{
     Copy, Clone, PartialEq, Eq, PartialOrd, Ord, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive,
 )]
 #[repr(transparent)]
-pub struct CheekyHash([u8; HASH_SIZE]);
+pub struct CheekyHash([u8; HASH_SIZE + 1]);
 
-const HASH_SIZE: usize = std::mem::size_of::<u64>() * 2;
-const HASH_PAYLOAD: usize = HASH_SIZE - 1;
+const HASH_SIZE: usize = std::mem::size_of::<u128>();
 
 pub type CheekyHashSet = HashSet<CheekyHash, nohash_hasher::BuildNoHashHasher<CheekyHash>>;
 pub type CheekyHashMap<V> = HashMap<CheekyHash, V, nohash_hasher::BuildNoHashHasher<CheekyHash>>;
@@ -28,87 +26,41 @@ pub type CheekyBTreeMap<V> = BTreeMap<CheekyHash, V>;
 
 impl CheekyHash {
     pub const HASH_SIZE: usize = HASH_SIZE;
-    pub const NULL: CheekyHash = CheekyHash([0u8; HASH_SIZE]);
-    pub const FULL: CheekyHash = CheekyHash([u8::MAX; HASH_SIZE]);
 
     pub fn new(bytes: impl AsRef<[u8]>) -> Self {
-        let mut hash = [0u8; HASH_SIZE];
         let bytes = bytes.as_ref();
+        let mut hash = [0u8; HASH_SIZE + 1];
 
-        if bytes.len() <= HASH_PAYLOAD {
-            hash[0] = bytes.len() as u8;
-            hash[1..1 + bytes.len()].copy_from_slice(bytes);
+        hash[HASH_SIZE] = bytes.len().min(u8::MAX as usize) as u8;
+
+        if bytes.len() <= HASH_SIZE {
+            hash[..bytes.len()].copy_from_slice(bytes);
         } else {
-            let h1 = xxhash_rust::xxh3::xxh3_64(bytes).to_be_bytes();
-            let h2 = farmhash::fingerprint64(bytes).to_be_bytes();
-            hash[0] = bytes.len().min(u8::MAX as usize) as u8;
-            hash[1..1 + std::mem::size_of::<u64>()].copy_from_slice(&h1);
-            hash[1 + std::mem::size_of::<u64>()..]
-                .copy_from_slice(&h2[..std::mem::size_of::<u64>() - 1]);
+            let h1 = xxhash_rust::xxh3::xxh3_128(bytes).to_be_bytes();
+            hash[..HASH_SIZE].copy_from_slice(&h1);
         }
 
         CheekyHash(hash)
     }
 
-    pub fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let len = *bytes.first()?;
-        let mut hash = [0u8; HASH_SIZE];
-        let hash_len = 1 + (len as usize).min(HASH_PAYLOAD);
-
-        hash[0] = len;
-        hash[1..hash_len].copy_from_slice(bytes.get(1..hash_len)?);
-        Some(CheekyHash(hash))
-    }
-
-    #[allow(clippy::len_without_is_empty)]
     #[inline(always)]
-    pub fn len(&self) -> usize {
-        (self.0[0] as usize).min(HASH_PAYLOAD) + 1
+    pub fn as_key(&self) -> &[u8] {
+        &self.0[..(self.0[HASH_SIZE] as usize).min(HASH_SIZE)]
     }
 
     #[inline(always)]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0[..self.len()]
+    pub fn key_len(&self) -> usize {
+        (self.0[HASH_SIZE] as usize).min(HASH_SIZE)
     }
 
     #[inline(always)]
-    pub fn as_raw_bytes(&self) -> &[u8; HASH_SIZE] {
-        &self.0
+    pub fn as_payload(&self) -> &[u8] {
+        &self.0[..HASH_SIZE]
     }
 
-    pub fn into_inner(self) -> [u8; HASH_SIZE] {
-        self.0
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        let len = self.0[0] as usize;
-        if len <= HASH_PAYLOAD {
-            &self.0[1..1 + len]
-        } else {
-            &self.0[1..]
-        }
-    }
-
-    pub fn payload_len(&self) -> u8 {
-        self.0[0]
-    }
-
+    #[inline(always)]
     fn as_u128(&self) -> u128 {
-        u128::from_be_bytes(self.0)
-    }
-}
-
-impl AsRef<[u8]> for CheekyHash {
-    fn as_ref(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-impl FromStr for CheekyHash {
-    type Err = std::num::ParseIntError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        u128::from_str_radix(s, 16).map(|n| CheekyHash(n.to_be_bytes()))
+        u128::from_be_bytes(self.as_payload().try_into().unwrap())
     }
 }
 
@@ -120,14 +72,12 @@ impl std::fmt::Display for CheekyHash {
 
 impl Hash for CheekyHash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let len = self.0[0] as usize;
-        if len <= HASH_PAYLOAD {
-            state.write_u64(xxhash_rust::xxh3::xxh3_64(&self.0[1..1 + len]));
+        let len = self.0[HASH_SIZE] as usize;
+        if len <= HASH_SIZE {
+            state.write_u64(xxhash_rust::xxh3::xxh3_64(&self.0[..len]));
         } else {
             state.write_u64(u64::from_be_bytes(
-                self.0[1..1 + std::mem::size_of::<u64>()]
-                    .try_into()
-                    .unwrap(),
+                self.0[..std::mem::size_of::<u64>()].try_into().unwrap(),
             ));
         }
     }
@@ -135,30 +85,12 @@ impl Hash for CheekyHash {
 
 impl IsEnabled for CheekyHash {}
 
-impl ArchivedCheekyHash {
-    #[inline(always)]
-    pub fn as_raw_bytes(&self) -> &[u8; HASH_SIZE] {
-        &self.0
-    }
-
-    #[inline(always)]
-    pub fn as_bytes(&self) -> &[u8] {
-        let len = self.0[0] as usize;
-        &self.0[..1 + len.min(HASH_PAYLOAD)]
-    }
-
-    #[inline(always)]
-    pub fn to_native(&self) -> CheekyHash {
-        CheekyHash(self.0)
-    }
-}
-
 impl Debug for CheekyHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.payload_len();
-        let payload = self.payload();
-        let payload_str = if len <= HASH_PAYLOAD as u8 {
-            std::str::from_utf8(payload).unwrap_or("<non-utf8>")
+        let len = self.0[HASH_SIZE] as usize;
+        let payload = self.as_payload();
+        let payload_str = if len <= HASH_SIZE {
+            std::str::from_utf8(&payload[..len]).unwrap_or("<non-utf8>")
         } else {
             "<hashed data>"
         };
@@ -173,85 +105,75 @@ impl Debug for CheekyHash {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_cheeky_hash_all() {
-        // Test 1: Empty input
+        // Test 1: Empty input is stored directly with an empty key
         let hash_empty = CheekyHash::new([]);
-        assert_eq!(
-            hash_empty.as_bytes()[0],
-            0,
-            "Empty input should have length 0"
+        assert!(
+            hash_empty.as_key().is_empty(),
+            "Empty input should have an empty key"
         );
         assert_eq!(
-            hash_empty.as_bytes().len(),
-            1,
-            "Empty input should only have length byte"
+            hash_empty.as_payload().len(),
+            HASH_SIZE,
+            "Payload is always HASH_SIZE bytes"
         );
 
-        // Test 2: Single byte input
+        // Test 2: Single byte input is stored directly
         let hash_single = CheekyHash::new([42]);
         assert_eq!(
-            hash_single.as_bytes()[0],
-            1,
-            "Single byte should have length 1"
+            hash_single.as_key(),
+            &[42u8][..],
+            "Single byte value should be preserved verbatim"
         );
-        assert_eq!(
-            hash_single.as_bytes()[1],
-            42,
-            "Single byte value should be preserved"
-        );
-        assert_eq!(hash_single.as_bytes().len(), 2);
 
-        // Test 3: Small input (less than HASH_LEN)
+        // Test 3: Small input (< HASH_SIZE) is stored directly
         let small_data = b"hello";
         let hash_small = CheekyHash::new(small_data);
-        assert_eq!(hash_small.as_bytes()[0], 5, "Length should be 5");
         assert_eq!(
-            &hash_small.as_bytes()[1..6],
-            small_data,
+            hash_small.as_key(),
+            &small_data[..],
             "Small data should be stored directly"
         );
-        assert_eq!(hash_small.as_bytes().len(), 6);
 
-        // Test 4: Input exactly at HASH_PAYLOAD boundary
-        let boundary_data = vec![1u8; HASH_PAYLOAD - 1];
+        // Test 4: Input exactly at the HASH_SIZE boundary is still stored directly
+        let boundary_data = vec![1u8; HASH_SIZE];
         let hash_boundary = CheekyHash::new(&boundary_data);
         assert_eq!(
-            hash_boundary.as_bytes()[0],
-            (HASH_PAYLOAD - 1) as u8,
-            "Length should be HASH_LEN"
-        );
-        assert_eq!(
-            &hash_boundary.as_bytes()[1..],
+            hash_boundary.as_key(),
             &boundary_data[..],
-            "Boundary data should be stored directly"
+            "Data of exactly HASH_SIZE bytes should be stored directly"
         );
 
-        // Test 5: Large input (greater than HASH_LEN) - uses hashing
-        let large_data = vec![7u8; HASH_SIZE];
+        // Test 5: Large input (> HASH_SIZE) is hashed
+        let large_data = vec![7u8; HASH_SIZE + 1];
         let hash_large = CheekyHash::new(&large_data);
         assert_eq!(
-            hash_large.as_bytes()[0],
-            HASH_SIZE as u8,
-            "Large data should have length byte set to HASH_LEN"
+            hash_large.as_key().len(),
+            HASH_SIZE,
+            "Hashed key is the 16-byte payload with no length byte"
         );
         assert_eq!(
-            hash_large.as_bytes().len(),
-            HASH_SIZE,
-            "Large data hash should be full length"
+            hash_large.as_key(),
+            hash_large.as_payload(),
+            "Hashed key is exactly the payload"
         );
-        // Verify it's actually hashed (not raw data)
         assert_ne!(
-            &hash_large.as_bytes()[1..],
-            &large_data[..HASH_PAYLOAD],
+            hash_large.as_payload(),
+            &large_data[..HASH_SIZE],
             "Large data should be hashed, not stored directly"
         );
 
-        // Test 6: AsRef<[u8]> trait
+        // Test 6: as_key vs as_payload for a short input
         let hash = CheekyHash::new(b"test");
-        let bytes_ref: &[u8] = hash.as_ref();
-        assert_eq!(bytes_ref, hash.as_bytes(), "AsRef should match as_bytes");
+        assert_eq!(hash.as_key(), &b"test"[..], "Short key is the raw input");
+        assert_eq!(
+            hash.as_payload().len(),
+            HASH_SIZE,
+            "Payload is always HASH_SIZE bytes"
+        );
 
         // Test 7: Copy, Clone, PartialEq traits
         let hash1 = CheekyHash::new(b"identical");
@@ -285,7 +207,6 @@ mod tests {
         );
 
         // Test 11: Hash trait (can be used in HashMap/HashSet)
-        use std::collections::HashMap;
         let mut map = HashMap::new();
         let key = CheekyHash::new(b"key");
         map.insert(key, "value");
@@ -295,12 +216,20 @@ mod tests {
             "CheekyHash should work as HashMap key"
         );
 
-        // Test 12: Debug trait
+        // Test 12: Debug trait renders the short payload without padding
         let hash = CheekyHash::new(b"debug");
         let debug_str = format!("{:?}", hash);
         assert!(
             debug_str.contains("CheekyHash"),
             "Debug output should contain type name"
+        );
+        assert!(
+            debug_str.contains("debug"),
+            "Debug output should contain the short payload"
+        );
+        assert!(
+            !debug_str.contains('\0'),
+            "Debug output should not leak padding null bytes"
         );
 
         // Test 13: CheekyHashSet and CheekyHashMap
@@ -314,6 +243,10 @@ mod tests {
             Some(&"map_value")
         );
 
-        println!("All CheekyHash tests passed!");
+        // Test 14: Short and long keys never collide in key space
+        let short = CheekyHash::new(vec![9u8; HASH_SIZE]);
+        let long = CheekyHash::new(vec![9u8; HASH_SIZE + 1]);
+        assert_ne!(short.as_key(), long.as_key());
+        assert_ne!(short, long);
     }
 }

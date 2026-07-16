@@ -39,7 +39,7 @@ pub async fn migrate_v0_16(server: &Server) -> trc::Result<()> {
         .search_store()
         .unindex(
             SearchQuery::new(SearchIndex::Tracing)
-                .with_filter(SearchFilter::lt(SearchField::Id, u64::MAX)),
+                .with_filter(SearchFilter::integer_lt(SearchField::Id, u64::MAX)),
         )
         .await
         .caused_by(trc::location!())?;

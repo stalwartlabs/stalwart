@@ -10,7 +10,10 @@ use crate::{
     spawn_op,
 };
 use common::network::SessionStream;
-use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
+use email::cache::{
+    MessageCacheFetch,
+    email::{MessageCacheAccess, SearchOperator},
+};
 use imap_proto::{
     Command, StatusResponse,
     protocol::{
@@ -27,7 +30,7 @@ use store::{
     query::log::Query,
     roaring::RoaringBitmap,
     search::{
-        EmailSearchField, SearchComparator, SearchFilter, SearchOperator, SearchQuery, SearchValue,
+        EmailSearchField, KeyValueMatch, SearchComparator, SearchFilter, SearchQuery, SearchValue,
     },
     write::{SearchIndex, now},
 };
@@ -540,27 +543,25 @@ impl<T: SessionStream> SessionData<T> {
                                 ));
                             }
                             header => {
-                                let op = if matches!(
+                                let op = if value.is_empty() {
+                                    KeyValueMatch::Exists
+                                } else if matches!(
                                     header,
                                     HeaderName::MessageId
                                         | HeaderName::InReplyTo
                                         | HeaderName::References
                                         | HeaderName::ResentMessageId
-                                ) || value.is_empty()
-                                {
-                                    SearchOperator::Equal
+                                ) {
+                                    KeyValueMatch::Equals(value)
                                 } else {
-                                    SearchOperator::Contains
+                                    KeyValueMatch::Contains(value)
                                 };
 
-                                filters.push(SearchFilter::cond(
-                                    EmailSearchField::Headers,
+                                filters.push(SearchFilter::KeyValue {
+                                    field: EmailSearchField::Headers.into(),
+                                    key: header.as_str().to_lowercase(),
                                     op,
-                                    SearchValue::KeyValues(
-                                        VecMap::with_capacity(1)
-                                            .with_append(header.as_str().to_lowercase(), value),
-                                    ),
-                                ));
+                                });
                             }
                         }
                     }
@@ -678,7 +679,10 @@ impl<T: SessionStream> SessionData<T> {
                     SearchComparator::sorted_set(set, comparator.ascending)
                 }
                 search::Sort::From | search::Sort::DisplayFrom => {
-                    SearchComparator::field(EmailSearchField::From, comparator.ascending)
+                    let todo = "fix sort";
+                    todo!()
+
+                    //SearchComparator::field(EmailSearchField::From, comparator.ascending)
                 }
                 search::Sort::Size => SearchComparator::sorted_set(
                     cache
@@ -690,10 +694,15 @@ impl<T: SessionStream> SessionData<T> {
                     comparator.ascending,
                 ),
                 search::Sort::Subject => {
-                    SearchComparator::field(EmailSearchField::Subject, comparator.ascending)
+                    let todo = "fix sort";
+                    todo!()
+
+                    //SearchComparator::field(EmailSearchField::Subject, comparator.ascending)
                 }
                 search::Sort::To | search::Sort::DisplayTo => {
-                    SearchComparator::field(EmailSearchField::To, comparator.ascending)
+                    let todo = "fix sort";
+                    todo!()
+                    //SearchComparator::field(EmailSearchField::To, comparator.ascending)
                 }
             });
         }

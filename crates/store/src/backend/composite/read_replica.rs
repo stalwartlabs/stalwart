@@ -10,7 +10,7 @@
 
 use crate::{
     Deserialize, IterateParams, Key, Store, ValueKey,
-    search::{IndexDocument, SearchComparator, SearchDocumentId, SearchFilter, SearchQuery},
+    search::{IndexDocument, SearchFilter, SearchQuery, SearchResults},
     write::{AssignedIds, Batch, SearchIndex, ValueClass},
 };
 use std::{
@@ -237,17 +237,16 @@ impl SQLReadReplica {
         }
     }
 
-    pub async fn query<R: SearchDocumentId>(
+    pub async fn query<R: SearchResults>(
         &self,
         index: SearchIndex,
         filters: &[SearchFilter],
-        sort: &[SearchComparator],
-    ) -> trc::Result<Vec<R>> {
+    ) -> trc::Result<R> {
         match &self.primary {
             #[cfg(feature = "postgres")]
-            Store::PostgreSQL(store) => store.query(index, filters, sort).await,
+            Store::PostgreSQL(store) => store.query(index, filters).await,
             #[cfg(feature = "mysql")]
-            Store::MySQL(store) => store.query(index, filters, sort).await,
+            Store::MySQL(store) => store.query(index, filters).await,
             _ => panic!("Invalid store type"),
         }
     }

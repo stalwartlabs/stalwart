@@ -188,7 +188,7 @@ pub enum ValueClass {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum IndexPropertyClass {
-    Hash { property: u8, hash: CheekyHash },
+    Hash { property: u8, hash: u128 },
     Integer { property: u8, value: u64 },
 }
 

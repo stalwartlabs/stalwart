@@ -11,7 +11,8 @@ use email::message::{
     messagedata::MessageData,
 };
 use registry::schema::structs::TaskMergeThreads;
-use std::{str::FromStr, time::Duration};
+use std::str::FromStr;
+use std::time::Duration;
 use store::{
     IterateParams, Key, U32_LEN, ValueKey,
     ahash::AHashMap,
@@ -26,7 +27,6 @@ use types::{
     collection::{Collection, SyncCollection},
     field::EmailField,
 };
-use utils::cheeky_hash::CheekyHash;
 
 const MAX_RETRIES: usize = 5;
 
@@ -54,13 +54,13 @@ async fn merge_threads(
     server: &Server,
     task_merge_threads: &TaskMergeThreads,
 ) -> trc::Result<TaskResult> {
-    let Ok(thread_hash) = CheekyHash::from_str(&task_merge_threads.thread_name) else {
+    let Ok(thread_hash) = u128::from_str(&task_merge_threads.thread_name) else {
         return Ok(TaskResult::permanent("Invalid thread hash"));
     };
     let Ok(mut message_ids) = task_merge_threads
         .message_ids
         .iter()
-        .map(|id| CheekyHash::from_str(id))
+        .map(|id| u128::from_str(id))
         .collect::<Result<Vec<_>, _>>()
     else {
         return Ok(TaskResult::permanent("Invalid message ids"));

@@ -9,13 +9,13 @@ use crate::{
         DeleteByQueryResponse, ElasticSearchStore, SearchResponse, main::assert_success,
     },
     search::{
-        IndexDocument, SearchComparator, SearchDocumentId, SearchField, SearchFilter,
-        SearchOperator, SearchQuery, SearchValue,
+        IndexDocument, KeyValueMatch, SearchField, SearchFilter, SearchQuery, SearchResults,
+        SearchValue, TextMatch,
     },
     write::SearchIndex,
 };
 use serde_json::{Map, Value, json};
-use std::fmt::Write;
+use std::{cmp::Ordering, fmt::Write};
 
 impl ElasticSearchStore {
     pub async fn index(&self, documents: Vec<IndexDocument>) -> trc::Result<()> {
@@ -54,14 +54,13 @@ impl ElasticSearchStore {
         .map(|_| ())
     }
 
-    pub async fn query<R: SearchDocumentId>(
+    pub async fn query<R: SearchResults>(
         &self,
         index: SearchIndex,
         filters: &[SearchFilter],
-        sort: &[SearchComparator],
-    ) -> trc::Result<Vec<R>> {
+    ) -> trc::Result<R> {
         let mut search_after: Option<Value> = None;
-        let mut results = Vec::new();
+        let mut results = R::default();
         let mut has_more = true;
 
         while has_more {
@@ -70,10 +69,6 @@ impl ElasticSearchStore {
                     Some(("query".to_string(), build_query(filters))),
                     Some(("size".to_string(), Value::from(10_000))),
                     Some(("_source".to_string(), Value::from(false))),
-                    Some((
-                        "sort".to_string(),
-                        build_sort(sort, R::field().field_name()),
-                    )),
                     search_after
                         .take()
                         .map(|sa| ("search_after".to_string(), sa)),
@@ -107,7 +102,7 @@ impl ElasticSearchStore {
 
             for hit in response.hits.hits {
                 search_after = hit.sort;
-                results.push(R::from_u64(hit.id));
+                results.insert(hit.id);
             }
         }
 
@@ -167,81 +162,73 @@ fn build_query(filters: &[SearchFilter]) -> Value {
 
     for filter in filters {
         match filter {
-            SearchFilter::Operator { field, op, value } => {
-                if field.is_text() && matches!(op, SearchOperator::Equal | SearchOperator::Contains)
-                {
-                    let SearchValue::Text { value, .. } = value else {
-                        debug_assert!(false, "Invalid value type for text field");
-                        continue;
-                    };
-
-                    if op != &SearchOperator::Equal {
-                        conditions.push(json!({
-                            "match": { field.field_name(): {
-                                "query": value,
-                                "operator": "and"
-                            } }
-                        }));
-                    } else {
-                        conditions.push(json!({
-                            "match_phrase": { field.field_name(): value }
-                        }));
+            SearchFilter::Text {
+                field,
+                op,
+                value,
+                language: _,
+            } => {
+                if field.is_text() {
+                    match op {
+                        TextMatch::Keyword => {
+                            conditions.push(json!({
+                                "match": { field.field_name(): value }
+                            }));
+                        }
+                        TextMatch::Phrase => {
+                            conditions.push(json!({
+                                "match_phrase": { field.field_name(): value }
+                            }));
+                        }
+                        TextMatch::Prefix => {
+                            conditions.push(json!({
+                                "match_phrase_prefix": { field.field_name(): value }
+                            }));
+                        }
                     }
                 } else {
-                    let value = match value {
-                        SearchValue::Text { value, .. } => json!(value),
-                        SearchValue::Int(value) => json!(value),
-                        SearchValue::Uint(value) => json!(value),
-                        SearchValue::Boolean(value) => json!(value),
-                        SearchValue::KeyValues(kv) => {
-                            let (key, value) = kv.iter().next().unwrap();
-
-                            let cond = if !value.is_empty() {
-                                if op == &SearchOperator::Equal {
-                                    json!({
-                                        "term": {
-                                            format!("{}.{}.keyword", field.field_name(), key): value
-                                        }
-                                    })
-                                } else {
-                                    json!({
-                                        "match": {
-                                            format!("{}.{}", field.field_name(), key): value
-                                        }
-                                    })
-                                }
-                            } else {
-                                json!({
-                                    "exists": { "field": format!("{}.{}", field.field_name(), key) }
-                                })
-                            };
-
-                            conditions.push(cond);
-                            continue;
-                        }
-                    };
-
-                    let cond = match op {
-                        SearchOperator::Equal | SearchOperator::Contains => json!({
-                            "term": { field.field_name(): value }
-                        }),
-                        op => {
-                            let op = match op {
-                                SearchOperator::LowerThan => "lt",
-                                SearchOperator::LowerEqualThan => "lte",
-                                SearchOperator::GreaterThan => "gt",
-                                SearchOperator::GreaterEqualThan => "gte",
-                                _ => unreachable!(),
-                            };
-
-                            json!({
-                                "range": { field.field_name(): { op: value } }
-                            })
-                        }
+                    let cond = if op == &TextMatch::Prefix {
+                        json!({ "prefix": { field.field_name(): value } })
+                    } else {
+                        json!({ "term": { field.field_name(): value } })
                     };
 
                     conditions.push(cond);
                 }
+            }
+            SearchFilter::KeyValue { field, key, op } => {
+                let cond = match op {
+                    KeyValueMatch::Equals(value) => json!({
+                        "term": {
+                            format!("{}.{}.keyword", field.field_name(), key): value
+                        }
+                    }),
+                    KeyValueMatch::Contains(value) => json!({
+                        "match": {
+                            format!("{}.{}", field.field_name(), key): value
+                        }
+                    }),
+                    KeyValueMatch::Exists => json!({
+                        "exists": { "field": format!("{}.{}", field.field_name(), key) }
+                    }),
+                };
+
+                conditions.push(cond);
+            }
+            SearchFilter::Integer { field, op, value } => {
+                let cond = match op {
+                    Ordering::Equal => json!({
+                        "term": { field.field_name(): value }
+                    }),
+                    Ordering::Less => json!({
+                        "range": { field.field_name(): { "lt": value } }
+                    }),
+                    Ordering::Greater => json!({
+                        "range": { field.field_name(): { "gt": value } }
+                    }),
+                };
+
+                conditions.push(cond);
             }
 
             SearchFilter::And | SearchFilter::Or | SearchFilter::Not => {
@@ -289,30 +276,6 @@ fn build_query(filters: &[SearchFilter]) -> Value {
     } else {
         json!({ "bool": { "must": conditions } })
     }
-}
-
-fn build_sort(sort: &[SearchComparator], tie_breaker: &str) -> Value {
-    Value::Array(
-        sort.iter()
-            .filter_map(|comp| match comp {
-                SearchComparator::Field { field, ascending } => {
-                    let field = if field.is_text() {
-                        format!("{}.keyword", field.field_name())
-                    } else {
-                        field.field_name().to_string()
-                    };
-
-                    Some(json!({
-                        field: if *ascending { "asc" } else { "desc" }
-                    }))
-                }
-                _ => None,
-            })
-            .chain([json!({
-                tie_breaker: "asc"
-            })])
-            .collect(),
-    )
 }
 
 fn json_serialize(request: &mut String, document: &IndexDocument) {

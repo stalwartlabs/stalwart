@@ -34,14 +34,17 @@ use registry::{
 };
 use std::future::Future;
 use std::{borrow::Cow, cmp::Ordering, fmt::Write, time::Instant};
-use store::write::{AlignedBytes, Archive, RegistryClass};
 use store::{
-    IndexKeyPrefix, IterateParams, SerializeInfallible, U32_LEN, ValueKey,
+    IndexKeyPrefix, IterateParams, SerializeInfallible, U32_LEN, U128_LEN, ValueKey,
     ahash::AHashMap,
     write::{
         AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, ValueClass,
         key::DeserializeBigEndian, now,
     },
+};
+use store::{
+    write::{AlignedBytes, Archive, RegistryClass},
+    xxhash_rust::xxh3::xxh3_128,
 };
 use tinyvec::TinyVec;
 use trc::{AddContext, MessageIngestEvent, SpamEvent};
@@ -54,7 +57,7 @@ use types::{
     keyword::Keyword,
     special_use::SpecialUse,
 };
-use utils::{cheeky_hash::CheekyHash, sanitize_email, snowflake::SnowflakeIdGenerator};
+use utils::{sanitize_email, snowflake::SnowflakeIdGenerator};
 
 #[derive(Default)]
 pub struct IngestedEmail {
@@ -103,7 +106,7 @@ pub trait EmailIngest: Sync + Send {
         &self,
         account_id: u32,
         thread_name: &str,
-        message_ids: &[CheekyHash],
+        message_ids: &[u128],
     ) -> impl Future<Output = trc::Result<ThreadResult>> + Send;
     fn assign_email_ids(
         &self,
@@ -136,7 +139,7 @@ pub trait EmailIngest: Sync + Send {
 
 pub struct ThreadResult {
     pub thread_id: Option<u32>,
-    pub thread_hash: CheekyHash,
+    pub thread_hash: u128,
     pub merge_ids: Vec<u32>,
     pub duplicate_ids: Vec<u32>,
 }
@@ -175,7 +178,7 @@ impl EmailIngest for Server {
                             if message_id.is_none() {
                                 message_id = id.to_string().into();
                             }
-                            message_ids.push(CheekyHash::new(id.as_bytes()));
+                            message_ids.push(xxh3_128(id.as_bytes()));
                         }
                     }),
                     HeaderName::InReplyTo
@@ -183,7 +186,7 @@ impl EmailIngest for Server {
                     | HeaderName::ResentMessageId => {
                         header.value.visit_text(|id| {
                             if !id.is_empty() {
-                                message_ids.push(CheekyHash::new(id.as_bytes()));
+                                message_ids.push(xxh3_128(id.as_bytes()));
                             }
                         });
                     }
@@ -756,15 +759,18 @@ impl EmailIngest for Server {
         &self,
         account_id: u32,
         thread_name: &str,
-        message_ids: &[CheekyHash],
+        message_ids: &[u128],
     ) -> trc::Result<ThreadResult> {
         let mut result = ThreadResult {
             thread_id: None,
-            thread_hash: CheekyHash::new(if !thread_name.is_empty() {
-                thread_name
-            } else {
-                "!"
-            }),
+            thread_hash: xxh3_128(
+                if !thread_name.is_empty() {
+                    thread_name
+                } else {
+                    "!"
+                }
+                .as_bytes(),
+            ),
             merge_ids: vec![],
             duplicate_ids: vec![],
         };
@@ -774,7 +780,7 @@ impl EmailIngest for Server {
         }
 
         // Find thread ids
-        let key_len = IndexKeyPrefix::len() + result.thread_hash.len() + U32_LEN;
+        let key_len = IndexKeyPrefix::len() + U128_LEN + U32_LEN;
         let document_id_pos = key_len - U32_LEN;
         let mut thread_merge = ThreadMerge::new();
         self.store()
@@ -809,11 +815,11 @@ impl EmailIngest for Server {
                             let document_id = key.deserialize_be_u32(document_id_pos)?;
                             let thread_id = value.deserialize_be_u32(0)?;
 
-                            if message_ids.len() == references.len() / CheekyHash::HASH_SIZE
+                            if message_ids.len() == references.len() / U128_LEN
                                 && references
-                                    .chunks_exact(CheekyHash::HASH_SIZE)
+                                    .chunks_exact(U128_LEN)
                                     .zip(message_ids.iter())
-                                    .all(|(a, b)| a == b.as_raw_bytes())
+                                    .all(|(a, b)| u128::from_be_bytes(a.try_into().unwrap()) == *b)
                             {
                                 result.duplicate_ids.push(document_id);
                             }
@@ -993,19 +999,16 @@ impl EmailIngest for Server {
     }
 }
 
-pub fn has_message_id(a: &[CheekyHash], b: &[u8]) -> bool {
+pub fn has_message_id(a: &[u128], b: &[u8]) -> bool {
     let mut i = 0;
     let mut j = 0;
 
     let a_len = a.len();
-    let b_len = b.len() / CheekyHash::HASH_SIZE;
+    let b_len = b.len() / U128_LEN;
 
     while i < a_len && j < b_len {
-        match a[i]
-            .as_raw_bytes()
-            .as_slice()
-            .cmp(&b[j * CheekyHash::HASH_SIZE..(j + 1) * CheekyHash::HASH_SIZE])
-        {
+        let bj = u128::from_be_bytes(b[j * U128_LEN..(j + 1) * U128_LEN].try_into().unwrap());
+        match a[i].cmp(&bj) {
             std::cmp::Ordering::Equal => return true,
             std::cmp::Ordering::Less => i += 1,
             std::cmp::Ordering::Greater => j += 1,
@@ -1024,11 +1027,11 @@ impl IngestSource<'_> {
 pub struct ThreadInfo;
 
 impl ThreadInfo {
-    pub fn serialize(thread_id: u32, ref_ids: &[CheekyHash]) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(U32_LEN + 1 + ref_ids.len() * CheekyHash::HASH_SIZE);
+    pub fn serialize(thread_id: u32, ref_ids: &[u128]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(U32_LEN + 1 + ref_ids.len() * U128_LEN);
         buf.extend_from_slice(&thread_id.to_be_bytes());
         for ref_id in ref_ids {
-            buf.extend_from_slice(ref_id.as_raw_bytes());
+            buf.extend_from_slice(ref_id.to_be_bytes().as_slice());
         }
         buf
     }

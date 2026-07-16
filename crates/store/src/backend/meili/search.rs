@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::AHashSet;
-use serde_json::{Map, Value, json};
-
 use crate::{
     backend::meili::{MeiliSearchResponse, MeiliSearchStore, main::assert_success},
     search::*,
     write::SearchIndex,
 };
-use std::fmt::{Display, Write};
+use ahash::AHashSet;
+use serde_json::{Map, Value, json};
+use std::{cmp::Ordering, fmt::Write};
 
 impl MeiliSearchStore {
     pub async fn index(&self, documents: Vec<IndexDocument>) -> trc::Result<()> {
@@ -67,12 +66,11 @@ impl MeiliSearchStore {
         Ok(())
     }
 
-    pub async fn query<R: SearchDocumentId>(
+    pub async fn query<R: SearchResults>(
         &self,
         index: SearchIndex,
         filters: &[SearchFilter],
-        sort: &[SearchComparator],
-    ) -> trc::Result<Vec<R>> {
+    ) -> trc::Result<R> {
         let filter_group = build_query(filters);
 
         let mut body = Map::new();
@@ -104,23 +102,6 @@ impl MeiliSearchStore {
             }
         }
 
-        if !sort.is_empty() {
-            let sort_arr: Vec<Value> = sort
-                .iter()
-                .filter_map(|comp| match comp {
-                    SearchComparator::Field { field, ascending } => Some(Value::String(format!(
-                        "{}:{}",
-                        field.field_name(),
-                        if *ascending { "asc" } else { "desc" }
-                    ))),
-                    _ => None,
-                })
-                .collect();
-            if !sort_arr.is_empty() {
-                body.insert("sort".to_string(), Value::Array(sort_arr));
-            }
-        }
-
         let resp = assert_success(
             self.client
                 .post(format!(
@@ -141,11 +122,11 @@ impl MeiliSearchStore {
 
         serde_json::from_str::<MeiliSearchResponse>(&text)
             .map(|results| {
-                results
-                    .hits
-                    .into_iter()
-                    .map(|hit| R::from_u64(hit.id))
-                    .collect()
+                let mut documents = R::default();
+                for hit in results.hits {
+                    documents.insert(hit.id);
+                }
+                documents
             })
             .map_err(|err| trc::StoreEvent::MeilisearchError.reason(err).details(text))
     }
@@ -200,23 +181,13 @@ fn build_query(filters: &[SearchFilter]) -> FilterGroup {
 
     for f in filters {
         match f {
-            SearchFilter::Operator { field, op, value } => {
-                if field.is_text() && matches!(op, SearchOperator::Equal | SearchOperator::Contains)
-                {
-                    let value = match value {
-                        SearchValue::Text { value, .. } => value,
-                        _ => {
-                            debug_assert!(
-                                false,
-                                "Text field search with non-text value is not supported"
-                            );
-                            ""
-                        }
-                    };
-
+            SearchFilter::Text {
+                field, op, value, ..
+            } => {
+                if field.is_text() {
                     search_on.insert(field.field_name());
 
-                    if matches!(op, SearchOperator::Equal) {
+                    if op == &TextMatch::Phrase {
                         queries.insert(format!("{value:?}"));
                     } else {
                         for token in value.split_whitespace() {
@@ -232,37 +203,50 @@ fn build_query(filters: &[SearchFilter]) -> FilterGroup {
                         }
                     }
 
-                    match value {
-                        SearchValue::Text { value, .. } => {
-                            filter.push_str(field.field_name());
-                            filter.push(' ');
-                            op.write_meli_op(&mut filter, format!("{value:?}"));
-                        }
-                        SearchValue::KeyValues(kv) => {
-                            let (key, value) = kv.iter().next().unwrap();
-                            filter.push_str(field.field_name());
-                            filter.push('.');
-                            filter.push_str(key);
-                            filter.push(' ');
-                            op.write_meli_op(&mut filter, format!("{value:?}"));
-                        }
-                        SearchValue::Int(v) => {
-                            filter.push_str(field.field_name());
-                            filter.push(' ');
-                            op.write_meli_op(&mut filter, v);
-                        }
-                        SearchValue::Uint(v) => {
-                            filter.push_str(field.field_name());
-                            filter.push(' ');
-                            op.write_meli_op(&mut filter, v);
-                        }
-                        SearchValue::Boolean(v) => {
-                            filter.push_str(field.field_name());
-                            filter.push(' ');
-                            op.write_meli_op(&mut filter, v);
-                        }
+                    filter.push_str(field.field_name());
+                    let _ = write!(filter, " = {value:?}");
+                }
+            }
+            SearchFilter::KeyValue { field, key, op } => {
+                if !filter.is_empty() && !filter.ends_with('(') {
+                    match operator {
+                        SearchFilter::And => filter.push_str(" AND "),
+                        SearchFilter::Or => filter.push_str(" OR "),
+                        _ => (),
                     }
                 }
+
+                filter.push_str(field.field_name());
+                filter.push('.');
+                filter.push_str(key);
+                match op {
+                    KeyValueMatch::Equals(value) => {
+                        let _ = write!(filter, " = {value:?}");
+                    }
+                    KeyValueMatch::Contains(value) => {
+                        let _ = write!(filter, " CONTAINS {value:?}");
+                    }
+                    KeyValueMatch::Exists => {
+                        filter.push_str(" EXISTS");
+                    }
+                }
+            }
+            SearchFilter::Integer { field, op, value } => {
+                if !filter.is_empty() && !filter.ends_with('(') {
+                    match operator {
+                        SearchFilter::And => filter.push_str(" AND "),
+                        SearchFilter::Or => filter.push_str(" OR "),
+                        _ => (),
+                    }
+                }
+
+                filter.push_str(field.field_name());
+                let cmp = match op {
+                    Ordering::Less => "<",
+                    Ordering::Equal => "=",
+                    Ordering::Greater => ">",
+                };
+                let _ = write!(filter, " {cmp} {value}");
             }
             SearchFilter::And | SearchFilter::Or => {
                 if !filter.is_empty() && !filter.ends_with('(') {
@@ -336,28 +320,6 @@ fn build_query(filters: &[SearchFilter]) -> FilterGroup {
         q,
         filter,
         search_on,
-    }
-}
-
-impl SearchOperator {
-    fn write_meli_op(&self, query: &mut String, value: impl Display) {
-        match self {
-            SearchOperator::LowerThan => {
-                let _ = write!(query, "< {value}");
-            }
-            SearchOperator::LowerEqualThan => {
-                let _ = write!(query, "<= {value}");
-            }
-            SearchOperator::GreaterThan => {
-                let _ = write!(query, "> {value}");
-            }
-            SearchOperator::GreaterEqualThan => {
-                let _ = write!(query, ">= {value}");
-            }
-            SearchOperator::Equal | SearchOperator::Contains => {
-                let _ = write!(query, "= {value}");
-            }
-        }
     }
 }
 

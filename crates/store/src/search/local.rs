@@ -61,11 +61,8 @@ impl SearchQuery {
     }
 
     pub fn with_account_id(mut self, account_id: u32) -> Self {
-        self.filters.push(SearchFilter::cond(
-            SearchField::AccountId,
-            SearchOperator::Equal,
-            SearchValue::Uint(account_id as u64),
-        ));
+        self.filters
+            .push(SearchFilter::integer_eq(SearchField::AccountId, account_id));
         self
     }
 
@@ -101,7 +98,9 @@ impl SearchQuery {
                         break;
                     }
                 }
-                SearchFilter::Operator { .. } => {
+                SearchFilter::Integer { .. }
+                | SearchFilter::Text { .. }
+                | SearchFilter::KeyValue { .. } => {
                     continue;
                 }
             };
@@ -210,7 +209,6 @@ impl QueryResults {
                                 *ascending,
                             )
                         }
-                        SearchComparator::Field { .. } => continue,
                     };
 
                     let ordering = if is_ascending { a.cmp(&b) } else { b.cmp(&a) };

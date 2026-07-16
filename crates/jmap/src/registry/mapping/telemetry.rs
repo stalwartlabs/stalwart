@@ -25,15 +25,12 @@ use registry::{
     },
     types::datetime::UTCDateTime,
 };
-use std::str::FromStr;
+use std::{cmp::Ordering, str::FromStr};
 use store::{
     Deserialize, IterateParams, ValueKey,
     ahash::AHashSet,
     registry::RegistryFilterOp,
-    search::{
-        SearchComparator, SearchField, SearchFilter, SearchOperator, SearchQuery,
-        TracingSearchField,
-    },
+    search::{SearchField, SearchFilter, SearchQuery, TracingSearchField},
     write::{SearchIndex, TelemetryClass, ValueClass, key::DeserializeBigEndian, now},
 };
 use trc::{AddContext, EventType, Key, MetricType};
@@ -48,17 +45,12 @@ pub(crate) async fn trace_get(
     } else {
         get.server
             .search_store()
-            .query_global(
-                SearchQuery::new(SearchIndex::Tracing)
-                    .with_filter(SearchFilter::gt(
-                        SearchField::Id,
-                        SnowflakeIdGenerator::from_timestamp(now() - 86400).unwrap_or_default(),
-                    ))
-                    .with_comparator(SearchComparator::Field {
-                        field: SearchField::Id,
-                        ascending: false,
-                    }),
-            )
+            .query_global(SearchQuery::new(SearchIndex::Tracing).with_filter(
+                SearchFilter::integer_gt(
+                    SearchField::Id,
+                    SnowflakeIdGenerator::from_timestamp(now() - 86400).unwrap_or_default(),
+                ),
+            ))
             .await?
             .into_iter()
             .take(get.server.core.jmap.get_max_objects)
@@ -205,24 +197,28 @@ pub(crate) async fn trace_query(
     req.request
         .extract_filters(|property, op, value| match property {
             Property::Timestamp => {
-                if let Some(id) = value
+                if let Some(value) = value
                     .as_str()
                     .and_then(|s| UTCDateTime::from_str(s).ok())
                     .and_then(|dt| SnowflakeIdGenerator::from_timestamp(dt.timestamp() as u64))
                 {
-                    let op = match op {
-                        RegistryFilterOp::Equal => SearchOperator::Equal,
-                        RegistryFilterOp::GreaterThan => SearchOperator::GreaterThan,
-                        RegistryFilterOp::GreaterEqualThan => SearchOperator::GreaterEqualThan,
-                        RegistryFilterOp::LowerThan => SearchOperator::LowerThan,
-                        RegistryFilterOp::LowerEqualThan => SearchOperator::LowerEqualThan,
+                    let (value, op) = match op {
+                        RegistryFilterOp::Equal => (value, Ordering::Equal),
+                        RegistryFilterOp::GreaterThan => (value, Ordering::Greater),
+                        RegistryFilterOp::GreaterEqualThan => {
+                            (value.saturating_sub(1), Ordering::Greater)
+                        }
+                        RegistryFilterOp::LowerThan => (value, Ordering::Less),
+                        RegistryFilterOp::LowerEqualThan => {
+                            (value.saturating_add(1), Ordering::Less)
+                        }
                         _ => return false,
                     };
 
-                    tracing_query.push(SearchFilter::Operator {
+                    tracing_query.push(SearchFilter::Integer {
                         field: SearchField::Id,
                         op,
-                        value: id.into(),
+                        value,
                     });
 
                     true
@@ -232,7 +228,7 @@ pub(crate) async fn trace_query(
             }
             Property::Event => {
                 if let Some(typ) = value.as_str().and_then(EventType::parse) {
-                    tracing_query.push(SearchFilter::eq(
+                    tracing_query.push(SearchFilter::integer_eq(
                         TracingSearchField::EventType,
                         typ.to_id() as u64,
                     ));
@@ -243,8 +239,10 @@ pub(crate) async fn trace_query(
             }
             Property::QueueId => {
                 if let Some(queue_id) = value.as_str().and_then(|s| Id::from_str(s).ok()) {
-                    tracing_query
-                        .push(SearchFilter::eq(TracingSearchField::QueueId, queue_id.id()));
+                    tracing_query.push(SearchFilter::integer_eq(
+                        TracingSearchField::QueueId,
+                        queue_id.id(),
+                    ));
                     true
                 } else {
                     false
@@ -299,15 +297,16 @@ pub(crate) async fn trace_query(
     if !tracing_query.iter().any(|f| {
         matches!(
             f,
-            SearchFilter::Operator {
-                field: SearchField::Tracing(
-                    TracingSearchField::Keywords | TracingSearchField::QueueId
-                ) | SearchField::Id,
+            SearchFilter::Text {
+                field: SearchField::Tracing(TracingSearchField::Keywords),
+                ..
+            } | SearchFilter::Integer {
+                field: SearchField::Tracing(TracingSearchField::QueueId) | SearchField::Id,
                 ..
             }
         )
     }) {
-        tracing_query.push(SearchFilter::gt(
+        tracing_query.push(SearchFilter::integer_gt(
             SearchField::Id,
             SnowflakeIdGenerator::from_timestamp(now() - 86400).unwrap_or_default(),
         ));
@@ -328,27 +327,28 @@ pub(crate) async fn trace_query(
     let results = req
         .server
         .search_store()
-        .query_global(
-            SearchQuery::new(SearchIndex::Tracing)
-                .with_filters(tracing_query)
-                .with_comparator(SearchComparator::Field {
-                    field: SearchField::Id,
-                    ascending: params.sort_ascending,
-                }),
-        )
+        .query_global(SearchQuery::new(SearchIndex::Tracing).with_filters(tracing_query))
         .await?;
 
     // Build response
     let mut response = QueryResponseBuilder::new(
-        results.len(),
+        results.len() as usize,
         req.server.core.jmap.query_max_results,
         State::Initial,
         &req.request,
     );
 
-    for id in results {
-        if !response.add_id(id.into()) {
-            break;
+    if params.sort_ascending {
+        for id in results {
+            if !response.add_id(id.into()) {
+                break;
+            }
+        }
+    } else {
+        for id in results.into_iter().rev() {
+            if !response.add_id(id.into()) {
+                break;
+            }
         }
     }
 

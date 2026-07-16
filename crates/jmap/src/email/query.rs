@@ -6,7 +6,10 @@
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
 use common::{MessageStoreCache, Server, auth::AccessToken};
-use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
+use email::cache::{
+    MessageCacheFetch,
+    email::{MessageCacheAccess, SearchOperator},
+};
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::email::{Email, EmailComparator, EmailFilter},
@@ -17,14 +20,11 @@ use std::future::Future;
 use store::{
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
-    search::{
-        EmailSearchField, SearchComparator, SearchFilter, SearchOperator, SearchQuery, SearchValue,
-    },
+    search::{EmailSearchField, KeyValueMatch, SearchComparator, SearchFilter, SearchQuery},
     write::SearchIndex,
 };
 use trc::AddContext;
 use types::{acl::Acl, keyword::Keyword};
-use utils::map::vec_map::VecMap;
 
 pub trait EmailQuery: Sync + Send {
     fn email_query(
@@ -131,28 +131,27 @@ impl EmailQuery for Server {
                         })?;
 
                         if let Some(header_name) = HeaderName::parse(header_name) {
-                            let value = header.next();
-                            let op = if matches!(
-                                header_name,
-                                HeaderName::MessageId
-                                    | HeaderName::InReplyTo
-                                    | HeaderName::References
-                                    | HeaderName::ResentMessageId
-                            ) || value.is_none()
-                            {
-                                SearchOperator::Equal
+                            let op = if let Some(value) = header.next() {
+                                if matches!(
+                                    header_name,
+                                    HeaderName::MessageId
+                                        | HeaderName::InReplyTo
+                                        | HeaderName::References
+                                        | HeaderName::ResentMessageId
+                                ) {
+                                    KeyValueMatch::Equals(value)
+                                } else {
+                                    KeyValueMatch::Contains(value)
+                                }
                             } else {
-                                SearchOperator::Contains
+                                KeyValueMatch::Exists
                             };
 
-                            filters.push(SearchFilter::cond(
-                                EmailSearchField::Headers,
+                            filters.push(SearchFilter::KeyValue {
+                                field: EmailSearchField::Headers.into(),
+                                key: header_name.as_str().to_lowercase(),
                                 op,
-                                SearchValue::KeyValues(VecMap::with_capacity(1).with_append(
-                                    header_name.as_str().to_lowercase(),
-                                    value.unwrap_or_default(),
-                                )),
-                            ));
+                            });
                         }
                     }
                     EmailFilter::InMailbox(mailbox) => {
@@ -331,13 +330,19 @@ impl EmailQuery for Server {
                     comparator.is_ascending,
                 ),
                 EmailComparator::From => {
-                    SearchComparator::field(EmailSearchField::From, comparator.is_ascending)
+                    let todo = "fix sort";
+                    todo!()
+                    //SearchComparator::field(EmailSearchField::From, comparator.is_ascending)
                 }
                 EmailComparator::To => {
-                    SearchComparator::field(EmailSearchField::To, comparator.is_ascending)
+                    let todo = "fix sort";
+                    todo!()
+                    //SearchComparator::field(EmailSearchField::To, comparator.is_ascending)
                 }
                 EmailComparator::Subject => {
-                    SearchComparator::field(EmailSearchField::Subject, comparator.is_ascending)
+                    let todo = "fix sort";
+                    todo!()
+                    //SearchComparator::field(EmailSearchField::Subject, comparator.is_ascending)
                 }
                 EmailComparator::SentAt => {
                     let mut sorted = cached_messages
@@ -379,7 +384,9 @@ impl EmailQuery for Server {
                 ),
                 // Non-standard
                 EmailComparator::Cc => {
-                    SearchComparator::field(EmailSearchField::Cc, comparator.is_ascending)
+                    let todo = "fix sort";
+                    todo!()
+                    //SearchComparator::field(EmailSearchField::Cc, comparator.is_ascending)
                 }
 
                 other => {

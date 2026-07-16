@@ -87,7 +87,7 @@ impl CalendarEventQuery for Server {
                         )))
                     }
                     CalendarEventFilter::Uid(uid) => {
-                        filters.push(SearchFilter::eq(CalendarSearchField::Uid, uid));
+                        filters.push(SearchFilter::text_eq(CalendarSearchField::Uid, uid));
                     }
                     CalendarEventFilter::Text(value) => {
                         let (text, language) =

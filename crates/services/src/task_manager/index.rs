@@ -251,14 +251,17 @@ impl SearchIndexTask for Server {
                 let multi_document = document_ids.len() > 1;
                 query
                     .add_filter(SearchFilter::And)
-                    .add_filter(SearchFilter::eq(SearchField::AccountId, account_id));
+                    .add_filter(SearchFilter::integer_eq(SearchField::AccountId, account_id));
 
                 if multi_document {
                     query.add_filter(SearchFilter::Or);
                 }
 
                 for document_id in document_ids {
-                    query.add_filter(SearchFilter::eq(SearchField::DocumentId, document_id));
+                    query.add_filter(SearchFilter::integer_eq(
+                        SearchField::DocumentId,
+                        document_id,
+                    ));
                 }
 
                 if multi_document {

@@ -137,54 +137,44 @@ impl IndexDocument {
 }
 
 impl SearchFilter {
-    pub fn cond(
-        field: impl Into<SearchField>,
-        op: SearchOperator,
-        value: impl Into<SearchValue>,
-    ) -> Self {
-        SearchFilter::Operator {
+    pub fn text_eq(field: impl Into<SearchField>, value: impl Into<String>) -> Self {
+        SearchFilter::Text {
             field: field.into(),
-            op,
+            op: TextMatch::Keyword,
+            value: value.into(),
+            language: Language::None,
+        }
+    }
+
+    pub fn text_prefix(field: impl Into<SearchField>, value: impl Into<String>) -> Self {
+        SearchFilter::Text {
+            field: field.into(),
+            op: TextMatch::Prefix,
+            value: value.into(),
+            language: Language::None,
+        }
+    }
+
+    pub fn integer_lt(field: impl Into<SearchField>, value: impl Into<u64>) -> Self {
+        SearchFilter::Integer {
+            field: field.into(),
+            op: Ordering::Less,
             value: value.into(),
         }
     }
 
-    pub fn eq(field: impl Into<SearchField>, value: impl Into<SearchValue>) -> Self {
-        SearchFilter::Operator {
+    pub fn integer_eq(field: impl Into<SearchField>, value: impl Into<u64>) -> Self {
+        SearchFilter::Integer {
             field: field.into(),
-            op: SearchOperator::Equal,
+            op: Ordering::Equal,
             value: value.into(),
         }
     }
 
-    pub fn lt(field: impl Into<SearchField>, value: impl Into<SearchValue>) -> Self {
-        SearchFilter::Operator {
+    pub fn integer_gt(field: impl Into<SearchField>, value: impl Into<u64>) -> Self {
+        SearchFilter::Integer {
             field: field.into(),
-            op: SearchOperator::LowerThan,
-            value: value.into(),
-        }
-    }
-
-    pub fn le(field: impl Into<SearchField>, value: impl Into<SearchValue>) -> Self {
-        SearchFilter::Operator {
-            field: field.into(),
-            op: SearchOperator::LowerEqualThan,
-            value: value.into(),
-        }
-    }
-
-    pub fn gt(field: impl Into<SearchField>, value: impl Into<SearchValue>) -> Self {
-        SearchFilter::Operator {
-            field: field.into(),
-            op: SearchOperator::GreaterThan,
-            value: value.into(),
-        }
-    }
-
-    pub fn ge(field: impl Into<SearchField>, value: impl Into<SearchValue>) -> Self {
-        SearchFilter::Operator {
-            field: field.into(),
-            op: SearchOperator::GreaterEqualThan,
+            op: Ordering::Greater,
             value: value.into(),
         }
     }
@@ -204,34 +194,23 @@ impl SearchFilter {
         language: Language,
     ) -> Self {
         let text = text.into();
-        let (is_exact, text) = if let Some(text) = text
+        let (op, text) = if let Some(text) = text
             .strip_prefix('"')
             .and_then(|t| t.strip_suffix('"'))
             .or_else(|| text.strip_prefix('\'').and_then(|t| t.strip_suffix('\'')))
         {
-            (true, text.to_string())
+            (TextMatch::Keyword, text.to_string())
+        } else if let Some(text) = text.strip_suffix('*') {
+            (TextMatch::Prefix, text.trim().to_string())
         } else {
-            (false, text)
+            (TextMatch::Phrase, text)
         };
 
-        if !matches!(language, Language::None) && is_exact {
-            SearchFilter::Operator {
-                field: field.into(),
-                op: SearchOperator::Equal,
-                value: SearchValue::Text {
-                    value: text,
-                    language,
-                },
-            }
-        } else {
-            SearchFilter::Operator {
-                field: field.into(),
-                op: SearchOperator::Contains,
-                value: SearchValue::Text {
-                    value: text,
-                    language,
-                },
-            }
+        SearchFilter::Text {
+            field: field.into(),
+            op,
+            value: text,
+            language,
         }
     }
 
@@ -251,33 +230,12 @@ impl SearchFilter {
 }
 
 impl SearchComparator {
-    pub fn field(field: impl Into<SearchField>, ascending: bool) -> Self {
-        Self::Field {
-            field: field.into(),
-            ascending,
-        }
-    }
-
     pub fn set(set: RoaringBitmap, ascending: bool) -> Self {
         Self::DocumentSet { set, ascending }
     }
 
     pub fn sorted_set(set: AHashMap<u32, u32>, ascending: bool) -> Self {
         Self::SortedSet { set, ascending }
-    }
-
-    pub fn ascending(field: impl Into<SearchField>) -> Self {
-        Self::Field {
-            field: field.into(),
-            ascending: true,
-        }
-    }
-
-    pub fn descending(field: impl Into<SearchField>) -> Self {
-        Self::Field {
-            field: field.into(),
-            ascending: false,
-        }
     }
 }
 

@@ -7,13 +7,13 @@
 use crate::{
     backend::postgres::{PostgresStore, PsqlSearchField, into_error, into_pool_error},
     search::{
-        IndexDocument, SearchComparator, SearchDocumentId, SearchFilter, SearchOperator,
-        SearchQuery, SearchValue,
+        IndexDocument, KeyValueMatch, SearchFilter, SearchQuery, SearchResults, SearchValue,
+        TextMatch,
     },
     write::SearchIndex,
 };
 use nlp::language::Language;
-use std::fmt::Write;
+use std::{cmp::Ordering, fmt::Write};
 use tokio_postgres::{
     IsolationLevel,
     types::{FromSql, ToSql, Type, WrongType},
@@ -42,11 +42,6 @@ impl PostgresStore {
                     query.push(',');
                 }
                 query.push_str(field.column());
-
-                if let Some(sort_column) = field.sort_column() {
-                    query.push(',');
-                    query.push_str(sort_column);
-                }
             }
 
             query.push_str(") VALUES (");
@@ -75,23 +70,9 @@ impl PostgresStore {
                         query.push_str(&value_ref);
                     }
 
-                    if field.sort_column().is_some() {
-                        if text_len > 255 {
-                            query.push_str(",left(");
-                            query.push_str(&value_ref);
-                            query.push_str(",255)");
-                        } else {
-                            query.push(',');
-                            query.push_str(&value_ref);
-                        }
-                    }
-
                     values.push(value as &(dyn ToSql + Sync));
                 } else {
                     query.push_str("NULL");
-                    if field.sort_column().is_some() {
-                        query.push_str(",NULL");
-                    }
                 }
             }
 
@@ -117,26 +98,24 @@ impl PostgresStore {
         trx.commit().await.map_err(into_error)
     }
 
-    pub async fn query<R: SearchDocumentId>(
+    pub async fn query<R: SearchResults>(
         &self,
         index: SearchIndex,
         filters: &[SearchFilter],
-        sort: &[SearchComparator],
-    ) -> trc::Result<Vec<R>> {
+    ) -> trc::Result<R> {
         let mut query = format!("SELECT {} FROM {}", R::field().column(), index.psql_table());
         let params = self.build_filter(&mut query, filters);
-        if !sort.is_empty() {
-            build_sort(&mut query, sort);
-        }
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let s = conn.prepare_cached(&query).await.map_err(into_error)?;
 
         conn.query(&s, params.as_slice())
             .await
             .and_then(|rows| {
-                rows.into_iter()
-                    .map(|row| row.try_get::<_, DocId>(0).map(|v| R::from_u64(v.0)))
-                    .collect::<Result<Vec<R>, _>>()
+                let mut results = R::default();
+                for row in rows {
+                    results.insert(row.try_get::<_, DocId>(0)?.0);
+                }
+                Ok(results)
             })
             .map_err(into_error)
     }
@@ -169,7 +148,12 @@ impl PostgresStore {
 
         for filter in filters {
             match filter {
-                SearchFilter::Operator { field, op, value } => {
+                SearchFilter::Text {
+                    field,
+                    op,
+                    value,
+                    language,
+                } => {
                     if !is_first {
                         match operator {
                             SearchFilter::And => query.push_str(" AND "),
@@ -180,45 +164,86 @@ impl PostgresStore {
                         is_first = false;
                     }
                     let value_pos = values.len() + 1;
-                    if field.is_text()
-                        && matches!(op, SearchOperator::Equal | SearchOperator::Contains)
-                    {
-                        query.push_str(field.column());
+                    query.push_str(field.column());
+                    if field.is_text() {
                         query.push(' ');
-
-                        let language = match &value {
-                            SearchValue::Text { language, .. } => {
-                                pg_lang(language).unwrap_or("simple")
+                        let language = pg_lang(language).unwrap_or("simple");
+                        match op {
+                            TextMatch::Keyword => {
+                                let _ =
+                                    write!(query, "@@ plainto_tsquery('{language}', ${value_pos})");
                             }
-                            _ => "simple",
-                        };
-                        let method = match op {
-                            SearchOperator::Equal => "phraseto_tsquery",
-                            _ => "plainto_tsquery",
-                        };
-                        let _ = write!(query, "@@ {method}('{language}', ${value_pos})");
-                        values.push(value as &(dyn ToSql + Sync));
-                    } else if let SearchValue::KeyValues(kv) = value {
-                        query.push_str(field.column());
-                        query.push(' ');
-
-                        let (key, value) = kv.iter().next().unwrap();
-                        values.push(key as &(dyn ToSql + Sync));
-
-                        if !value.is_empty() {
-                            let _ = write!(query, "->> ${value_pos} ");
-                            op.write_pqsql(query, values.len() + 1);
-                            values.push(value as &(dyn ToSql + Sync));
-                        } else {
-                            let _ = write!(query, " ? ${value_pos}");
+                            TextMatch::Phrase => {
+                                let _ = write!(
+                                    query,
+                                    "@@ phraseto_tsquery('{language}', ${value_pos})"
+                                );
+                            }
+                            TextMatch::Prefix => {
+                                let _ = write!(
+                                    query,
+                                    "@@ to_tsquery('simple', coalesce(nullif(array_to_string(tsvector_to_array(to_tsvector('simple', ${value_pos})), ':* & '), '') || ':*', ''))"
+                                );
+                            }
                         }
                     } else {
-                        query.push_str(field.sort_column().unwrap_or(field.column()));
-                        query.push(' ');
-
-                        op.write_pqsql(query, value_pos);
-                        values.push(value as &(dyn ToSql + Sync));
+                        match op {
+                            TextMatch::Prefix => {
+                                let _ = write!(query, " LIKE ${value_pos} || '%'");
+                            }
+                            _ => {
+                                let _ = write!(query, " = ${value_pos}");
+                            }
+                        }
                     }
+                    values.push(value as &(dyn ToSql + Sync));
+                }
+                SearchFilter::KeyValue { field, key, op } => {
+                    if !is_first {
+                        match operator {
+                            SearchFilter::And => query.push_str(" AND "),
+                            SearchFilter::Or => query.push_str(" OR "),
+                            _ => (),
+                        }
+                    } else {
+                        is_first = false;
+                    }
+                    query.push_str(field.column());
+                    query.push(' ');
+                    let key_pos = values.len() + 1;
+                    values.push(key as &(dyn ToSql + Sync));
+                    match op {
+                        KeyValueMatch::Equals(value) => {
+                            let value_pos = values.len() + 1;
+                            let _ = write!(query, "->> ${key_pos} = ${value_pos}");
+                            values.push(value as &(dyn ToSql + Sync));
+                        }
+                        KeyValueMatch::Contains(value) => {
+                            let value_pos = values.len() + 1;
+                            let _ = write!(query, "->> ${key_pos} LIKE '%' || ${value_pos} || '%'");
+                            values.push(value as &(dyn ToSql + Sync));
+                        }
+                        KeyValueMatch::Exists => {
+                            let _ = write!(query, " ? ${key_pos}");
+                        }
+                    }
+                }
+                SearchFilter::Integer { field, op, value } => {
+                    if !is_first {
+                        match operator {
+                            SearchFilter::And => query.push_str(" AND "),
+                            SearchFilter::Or => query.push_str(" OR "),
+                            _ => (),
+                        }
+                    } else {
+                        is_first = false;
+                    }
+                    let cmp = match op {
+                        Ordering::Less => "<",
+                        Ordering::Equal => "=",
+                        Ordering::Greater => ">",
+                    };
+                    let _ = write!(query, "{} {cmp} {value}", field.column());
                 }
                 SearchFilter::And | SearchFilter::Or => {
                     if !is_first {
@@ -268,31 +293,6 @@ impl PostgresStore {
         }
 
         values
-    }
-}
-
-fn build_sort(query: &mut String, sort: &[SearchComparator]) {
-    query.push_str(" ORDER BY ");
-    for (i, comparator) in sort.iter().enumerate() {
-        if i > 0 {
-            query.push_str(", ");
-        }
-        match comparator {
-            SearchComparator::Field { field, ascending } => {
-                query.push_str(field.sort_column().unwrap_or(field.column()));
-                if *ascending {
-                    query.push_str(" ASC");
-                } else {
-                    query.push_str(" DESC");
-                }
-            }
-            SearchComparator::DocumentSet { .. } | SearchComparator::SortedSet { .. } => {
-                debug_assert!(
-                    false,
-                    "DocumentSet and SortedSet comparators are not supported "
-                );
-            }
-        }
     }
 }
 
@@ -384,31 +384,6 @@ impl FromSql<'_> for DocId {
 
     fn accepts(typ: &Type) -> bool {
         matches!(typ, &Type::INT4 | &Type::INT8 | &Type::OID)
-    }
-}
-
-impl SearchOperator {
-    fn write_pqsql(&self, query: &mut String, value_pos: usize) {
-        match self {
-            SearchOperator::LowerThan => {
-                let _ = write!(query, "< ${value_pos}");
-            }
-            SearchOperator::LowerEqualThan => {
-                let _ = write!(query, "<= ${value_pos}");
-            }
-            SearchOperator::GreaterThan => {
-                let _ = write!(query, "> ${value_pos}");
-            }
-            SearchOperator::GreaterEqualThan => {
-                let _ = write!(query, ">= ${value_pos}");
-            }
-            SearchOperator::Equal => {
-                let _ = write!(query, "= ${value_pos}");
-            }
-            SearchOperator::Contains => {
-                let _ = write!(query, "LIKE '%' || ${value_pos} || '%'");
-            }
-        }
     }
 }
 

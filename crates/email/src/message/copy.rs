@@ -23,10 +23,13 @@ use registry::{
     },
     types::map::Map,
 };
-use store::write::{BatchBuilder, IndexPropertyClass, ValueClass};
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive},
+};
+use store::{
+    write::{BatchBuilder, IndexPropertyClass, ValueClass},
+    xxhash_rust::xxh3::xxh3_128,
 };
 use tinyvec::TinyVec;
 use trc::AddContext;
@@ -36,7 +39,6 @@ use types::{
     field::EmailField,
     keyword::Keyword,
 };
-use utils::cheeky_hash::CheekyHash;
 
 pub enum CopyMessageError {
     NotFound,
@@ -113,7 +115,7 @@ impl EmailCopy for Server {
                 MetadataHeaderName::MessageId => {
                     header.value.visit_text(|id| {
                         if !id.is_empty() {
-                            message_ids.push(CheekyHash::new(id.as_bytes()));
+                            message_ids.push(xxh3_128(id.as_bytes()));
                         }
                     });
                 }
@@ -122,7 +124,7 @@ impl EmailCopy for Server {
                 | MetadataHeaderName::ResentMessageId => {
                     header.value.visit_text(|id| {
                         if !id.is_empty() {
-                            message_ids.push(CheekyHash::new(id.as_bytes()));
+                            message_ids.push(xxh3_128(id.as_bytes()));
                         }
                     });
                 }

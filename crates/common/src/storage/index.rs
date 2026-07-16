@@ -28,7 +28,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::Field,
 };
-use utils::{cheeky_hash::CheekyHash, map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
+use utils::{map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexValue<'x> {
@@ -72,7 +72,6 @@ pub enum IndexItem<'x> {
     Slice(&'x [u8]),
     ShortInt([u8; std::mem::size_of::<u32>()]),
     LongInt([u8; std::mem::size_of::<u64>()]),
-    Hash(CheekyHash),
     None,
 }
 
@@ -83,7 +82,6 @@ impl IndexItem<'_> {
             IndexItem::Slice(s) => s,
             IndexItem::ShortInt(s) => s,
             IndexItem::LongInt(s) => s,
-            IndexItem::Hash(h) => h.as_bytes(),
             IndexItem::None => &[],
         }
     }
@@ -94,7 +92,6 @@ impl IndexItem<'_> {
             IndexItem::Slice(s) => s.to_vec(),
             IndexItem::ShortInt(s) => s.to_vec(),
             IndexItem::LongInt(s) => s.to_vec(),
-            IndexItem::Hash(h) => h.as_bytes().to_vec(),
             IndexItem::None => vec![],
         }
     }
@@ -132,7 +129,6 @@ impl std::hash::Hash for IndexItem<'_> {
             IndexItem::Slice(s) => s.hash(state),
             IndexItem::ShortInt(s) => s.as_slice().hash(state),
             IndexItem::LongInt(s) => s.as_slice().hash(state),
-            IndexItem::Hash(h) => h.hash(state),
             IndexItem::None => 0.hash(state),
         }
     }

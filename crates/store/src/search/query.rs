@@ -7,12 +7,7 @@
 use crate::{
     Store,
     backend::MAX_TOKEN_LENGTH,
-    search::{
-        QueryResults, SearchComparator, SearchField, SearchFilter, SearchOperator, SearchQuery,
-        SearchValue,
-        bm_u32::{BitmapCache, range_to_bitmap, sort_order},
-        bm_u64::{TreemapCache, range_to_treemap},
-    },
+    search::{QueryResults, SearchField, SearchFilter, SearchQuery, SearchValue},
     write::SEARCH_INDEX_MAX_FIELD_LEN,
 };
 use nlp::{language::stemmer::Stemmer, tokenizers::space::SpaceTokenizer};
@@ -22,7 +17,8 @@ use utils::cheeky_hash::CheekyHash;
 
 impl Store {
     pub(crate) async fn query_account(&self, query: SearchQuery) -> trc::Result<Vec<u32>> {
-        struct State {
+        todo!()
+        /*struct State {
             pub op: SearchFilter,
             pub bm: Option<RoaringBitmap>,
         }
@@ -36,9 +32,9 @@ impl Store {
         let mut account_id = u32::MAX;
 
         for filter in &query.filters {
-            if let SearchFilter::Operator {
+            if let SearchFilter::Integer {
                 field: SearchField::AccountId,
-                value: SearchValue::Uint(id),
+                id,
                 ..
             } = filter
             {
@@ -270,27 +266,15 @@ impl Store {
         }
 
         if results.len() > 1 && !query.comparators.is_empty() {
-            let mut comparators = Vec::with_capacity(query.comparators.len());
-            for comparator in query.comparators {
-                let comparator = match comparator {
-                    SearchComparator::Field { field, ascending } => SearchComparator::SortedSet {
-                        set: sort_order(self, query.index, account_id, field.u8_id()).await?,
-                        ascending,
-                    },
-                    _ => comparator,
-                };
-
-                comparators.push(comparator);
-            }
-
-            Ok(QueryResults::new(results, comparators).into_sorted())
+            Ok(QueryResults::new(results, query.comparators).into_sorted())
         } else {
             Ok(results.into_iter().collect::<Vec<_>>())
-        }
+        }*/
     }
 
-    pub(crate) async fn query_global(&self, query: SearchQuery) -> trc::Result<Vec<u64>> {
-        struct State {
+    pub(crate) async fn query_global(&self, query: SearchQuery) -> trc::Result<RoaringTreemap> {
+        todo!()
+        /*struct State {
             pub op: SearchFilter,
             pub bm: Option<RoaringTreemap>,
         }
@@ -401,23 +385,6 @@ impl Store {
             }
         }
 
-        if query.comparators.iter().all(|c| {
-            matches!(
-                c,
-                SearchComparator::Field {
-                    field: SearchField::Id,
-                    ascending: false
-                }
-            )
-        }) {
-            Ok(state
-                .bm
-                .unwrap_or_default()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>())
-        } else {
-            Ok(state.bm.unwrap_or_default().into_iter().collect::<Vec<_>>())
-        }
+        Ok(state.bm.unwrap_or_default())*/
     }
 }

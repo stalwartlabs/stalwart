@@ -106,10 +106,10 @@ impl ContactCardQuery for Server {
                         filters.push(SearchFilter::has_keyword(ContactSearchField::Member, value));
                     }
                     ContactCardFilter::Kind(value) => {
-                        filters.push(SearchFilter::eq(ContactSearchField::Kind, value));
+                        filters.push(SearchFilter::text_eq(ContactSearchField::Kind, value));
                     }
                     ContactCardFilter::Uid(value) => {
-                        filters.push(SearchFilter::eq(ContactSearchField::Uid, value))
+                        filters.push(SearchFilter::text_eq(ContactSearchField::Uid, value))
                     }
                     ContactCardFilter::Email(email) => filters.push(SearchFilter::has_keyword(
                         ContactSearchField::Email,

@@ -4,35 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-pub mod bm_u32;
-pub mod bm_u64;
 pub mod document;
 pub mod fields;
 pub mod index;
 pub mod local;
 pub mod query;
 pub mod split;
-pub mod term;
 
 use crate::write::SearchIndex;
 use ahash::AHashMap;
 use nlp::language::Language;
-use roaring::RoaringBitmap;
+use roaring::{RoaringBitmap, RoaringTreemap};
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
-use std::fmt::Display;
 use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign};
 use utils::map::vec_map::VecMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchOperator {
-    LowerThan,
-    LowerEqualThan,
-    GreaterThan,
-    GreaterEqualThan,
-    Equal,
-    Contains,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SearchField {
@@ -109,8 +95,8 @@ pub enum SearchValue {
     Boolean(bool),
 }
 
-pub trait SearchDocumentId: Sized + Copy + Display {
-    fn from_u64(id: u64) -> Self;
+pub trait SearchResults: Sized + Default {
+    fn insert(&mut self, id: u64);
     fn field() -> SearchField;
 }
 
@@ -124,10 +110,21 @@ pub struct SearchQuery {
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub enum SearchFilter {
-    Operator {
+    Text {
         field: SearchField,
-        op: SearchOperator,
-        value: SearchValue,
+        op: TextMatch,
+        value: String,
+        language: Language,
+    },
+    Integer {
+        field: SearchField,
+        op: Ordering,
+        value: u64,
+    },
+    KeyValue {
+        field: SearchField,
+        key: String,
+        op: KeyValueMatch,
     },
     DocumentSet(RoaringBitmap),
     And,
@@ -137,12 +134,22 @@ pub enum SearchFilter {
     End,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum TextMatch {
+    Keyword,
+    Prefix,
+    Phrase,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum KeyValueMatch {
+    Equals(String),
+    Contains(String),
+    Exists,
+}
+
 #[derive(Debug)]
 pub enum SearchComparator {
-    Field {
-        field: SearchField,
-        ascending: bool,
-    },
     DocumentSet {
         set: RoaringBitmap,
         ascending: bool,
@@ -240,23 +247,23 @@ impl From<String> for SearchValue {
     }
 }
 
-impl SearchDocumentId for u32 {
-    fn from_u64(id: u64) -> Self {
-        id as u32
-    }
-
+impl SearchResults for RoaringBitmap {
     fn field() -> SearchField {
         SearchField::DocumentId
     }
+
+    fn insert(&mut self, id: u64) {
+        self.insert(id as u32);
+    }
 }
 
-impl SearchDocumentId for u64 {
-    fn from_u64(id: u64) -> Self {
-        id
-    }
-
+impl SearchResults for RoaringTreemap {
     fn field() -> SearchField {
         SearchField::Id
+    }
+
+    fn insert(&mut self, id: u64) {
+        self.insert(id);
     }
 }
 
@@ -279,6 +286,73 @@ impl SearchIndex {
             SearchIndex::File => "st_file",
             SearchIndex::Tracing => "st_tracing",
             SearchIndex::InMemory => unreachable!(),
+        }
+    }
+}
+
+impl SearchIndex {
+    pub(crate) fn as_u8(&self) -> u8 {
+        match self {
+            SearchIndex::Email => 0,
+            SearchIndex::Calendar => 1,
+            SearchIndex::Contacts => 2,
+            SearchIndex::File => 3,
+            SearchIndex::Tracing => 4,
+            SearchIndex::InMemory => unreachable!(),
+        }
+    }
+}
+
+impl SearchField {
+    pub(crate) fn u8_id(&self) -> u8 {
+        match self {
+            SearchField::AccountId => 0,
+            SearchField::DocumentId => 1,
+            SearchField::Id => 2,
+            SearchField::Email(field) => match field {
+                EmailSearchField::From => 3,
+                EmailSearchField::To => 4,
+                EmailSearchField::Cc => 5,
+                EmailSearchField::Bcc => 6,
+                EmailSearchField::Subject => 7,
+                EmailSearchField::Body => 8,
+                EmailSearchField::Attachment => 9,
+                EmailSearchField::_ReceivedAt => 10,
+                EmailSearchField::_SentAt => 11,
+                EmailSearchField::_Size => 12,
+                EmailSearchField::_HasAttachment => 13,
+                EmailSearchField::Headers => 14,
+            },
+            SearchField::Calendar(field) => match field {
+                CalendarSearchField::Title => 3,
+                CalendarSearchField::Description => 4,
+                CalendarSearchField::Location => 5,
+                CalendarSearchField::Owner => 6,
+                CalendarSearchField::Attendee => 7,
+                CalendarSearchField::Uid => 9,
+            },
+            SearchField::Contact(field) => match field {
+                ContactSearchField::Member => 3,
+                ContactSearchField::Kind => 4,
+                ContactSearchField::Name => 5,
+                ContactSearchField::Nickname => 6,
+                ContactSearchField::Organization => 7,
+                ContactSearchField::Email => 8,
+                ContactSearchField::Phone => 9,
+                ContactSearchField::OnlineService => 10,
+                ContactSearchField::Address => 11,
+                ContactSearchField::Note => 12,
+                ContactSearchField::Uid => 13,
+            },
+            SearchField::File(field) => match field {
+                FileSearchField::Name => 3,
+                FileSearchField::Content => 4,
+            },
+            SearchField::Tracing(field) => match field {
+                TracingSearchField::EventType => 3,
+                TracingSearchField::QueueId => 4,
+                TracingSearchField::Keywords => 5,
+            },
         }
     }
 }

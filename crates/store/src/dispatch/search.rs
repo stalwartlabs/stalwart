@@ -7,12 +7,12 @@
 use crate::{
     SearchStore, Store,
     search::{
-        IndexDocument, SearchComparator, SearchField, SearchFilter, SearchOperator, SearchQuery,
-        SearchValue,
+        IndexDocument, QueryResults, SearchFilter, SearchQuery,
         split::{SplitFilter, split_filters},
     },
     write::SearchIndex,
 };
+use roaring::{RoaringBitmap, RoaringTreemap};
 use std::cmp::Ordering;
 use trc::AddContext;
 
@@ -34,17 +34,13 @@ impl SearchStore {
         let mut has_external_filters = false;
         for filter in &query.filters {
             match filter {
-                SearchFilter::Operator {
-                    field: SearchField::AccountId,
-                    op: SearchOperator::Equal,
-                    value: SearchValue::Uint(id),
-                } => {
-                    account_id = *id as u32;
+                SearchFilter::Integer { value, .. } => {
+                    account_id = *value as u32;
                 }
                 SearchFilter::DocumentSet(_) => {
                     has_local_filters = true;
                 }
-                SearchFilter::Operator { .. } => {
+                SearchFilter::Text { .. } => {
                     has_external_filters = true;
                 }
                 _ => (),
@@ -61,20 +57,12 @@ impl SearchStore {
             return Ok(query.mask.iter().collect());
         }
 
-        if !has_local_filters && query.comparators.iter().all(|c| c.is_external()) {
+        if !has_local_filters {
             return self
-                .sub_query(query.index, &query.filters, &query.comparators)
+                .sub_query(query.index, &query.filters)
                 .await
                 .map(|results| {
-                    if !results.is_empty() || has_external_filters {
-                        results
-                            .into_iter()
-                            .filter(|id| query.mask.contains(*id))
-                            .collect()
-                    } else {
-                        // Database sort is broken, return masked results
-                        query.mask.iter().collect()
-                    }
+                    QueryResults::new(results & query.mask, query.comparators).into_sorted()
                 })
                 .caused_by(trc::location!());
         }
@@ -93,10 +81,7 @@ impl SearchStore {
                     SplitFilter::External(external) => {
                         // Execute sub-query
                         filters.push(SearchFilter::DocumentSet(
-                            self.sub_query(query.index, &external, &[])
-                                .await?
-                                .into_iter()
-                                .collect(),
+                            self.sub_query(query.index, &external).await?,
                         ));
                     }
                     SplitFilter::Internal(filter) => {
@@ -122,72 +107,7 @@ impl SearchStore {
             Ordering::Less => Ok(vec![]),
             Ordering::Greater => {
                 if !query.comparators.is_empty() {
-                    let mut local = Vec::with_capacity(query.comparators.len());
-                    let mut external = Vec::with_capacity(query.comparators.len());
-                    let mut external_first = false;
-                    for (pos, comparator) in query.comparators.into_iter().enumerate() {
-                        if comparator.is_external() {
-                            external.push(comparator);
-                            if pos == 0 {
-                                external_first = true;
-                            }
-                        } else {
-                            local.push(comparator);
-                        }
-                    }
-
-                    if !external.is_empty() {
-                        let mut results = results.results().clone();
-                        let filters = vec![
-                            SearchFilter::Operator {
-                                field: SearchField::AccountId,
-                                op: SearchOperator::Equal,
-                                value: SearchValue::Uint(account_id as u64),
-                            },
-                            SearchFilter::Operator {
-                                field: SearchField::DocumentId,
-                                op: SearchOperator::GreaterEqualThan,
-                                value: SearchValue::Uint(results.min().unwrap() as u64),
-                            },
-                            SearchFilter::Operator {
-                                field: SearchField::DocumentId,
-                                op: SearchOperator::LowerEqualThan,
-                                value: SearchValue::Uint(results.max().unwrap() as u64),
-                            },
-                        ];
-
-                        let mut ordered_results = Vec::with_capacity(total_results as usize);
-                        for ordered_result in
-                            self.sub_query(query.index, &filters, &external).await?
-                        {
-                            if results.remove(ordered_result) {
-                                ordered_results.push(ordered_result);
-                            }
-                        }
-                        // Add any remaining results not yet in the index
-                        ordered_results.extend(results);
-
-                        if local.is_empty() {
-                            return Ok(ordered_results);
-                        }
-
-                        let comparator = SearchComparator::SortedSet {
-                            set: ordered_results
-                                .into_iter()
-                                .enumerate()
-                                .map(|(pos, id)| (id, pos as u32))
-                                .collect(),
-                            ascending: true,
-                        };
-
-                        if external_first {
-                            local.insert(0, comparator);
-                        } else {
-                            local.push(comparator);
-                        }
-                    }
-
-                    Ok(results.with_comparators(local).into_sorted())
+                    Ok(results.with_comparators(query.comparators).into_sorted())
                 } else {
                     Ok(results.results().iter().collect())
                 }
@@ -199,64 +119,43 @@ impl SearchStore {
         &self,
         index: SearchIndex,
         filters: &[SearchFilter],
-        sort: &[SearchComparator],
-    ) -> trc::Result<Vec<u32>> {
+    ) -> trc::Result<RoaringBitmap> {
         match self {
             SearchStore::Store(store) => match store {
                 #[cfg(feature = "postgres")]
-                Store::PostgreSQL(store) => store.query(index, filters, sort).await,
+                Store::PostgreSQL(store) => store.query(index, filters).await,
                 #[cfg(feature = "mysql")]
-                Store::MySQL(store) => store.query(index, filters, sort).await,
+                Store::MySQL(store) => store.query(index, filters).await,
                 // SPDX-SnippetBegin
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                 // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(store) => store.query(index, filters, sort).await,
+                Store::SQLReadReplica(store) => store.query(index, filters).await,
                 // SPDX-SnippetEnd
                 _ => unreachable!(),
             },
-            SearchStore::ElasticSearch(store) => store.query(index, filters, sort).await,
-            SearchStore::MeiliSearch(store) => store.query(index, filters, sort).await,
+            SearchStore::ElasticSearch(store) => store.query(index, filters).await,
+            SearchStore::MeiliSearch(store) => store.query(index, filters).await,
         }
     }
 
-    pub async fn query_global(&self, query: SearchQuery) -> trc::Result<Vec<u64>> {
+    pub async fn query_global(&self, query: SearchQuery) -> trc::Result<RoaringTreemap> {
         match self {
             SearchStore::Store(store) => match store {
                 #[cfg(feature = "postgres")]
-                Store::PostgreSQL(store) => {
-                    store
-                        .query(query.index, &query.filters, &query.comparators)
-                        .await
-                }
+                Store::PostgreSQL(store) => store.query(query.index, &query.filters).await,
                 #[cfg(feature = "mysql")]
-                Store::MySQL(store) => {
-                    store
-                        .query(query.index, &query.filters, &query.comparators)
-                        .await
-                }
+                Store::MySQL(store) => store.query(query.index, &query.filters).await,
                 // SPDX-SnippetBegin
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                 // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(store) => {
-                    store
-                        .query(query.index, &query.filters, &query.comparators)
-                        .await
-                }
+                Store::SQLReadReplica(store) => store.query(query.index, &query.filters).await,
                 // SPDX-SnippetEnd
                 store => store.query_global(query).await,
             },
-            SearchStore::ElasticSearch(store) => {
-                store
-                    .query(query.index, &query.filters, &query.comparators)
-                    .await
-            }
-            SearchStore::MeiliSearch(store) => {
-                store
-                    .query(query.index, &query.filters, &query.comparators)
-                    .await
-            }
+            SearchStore::ElasticSearch(store) => store.query(query.index, &query.filters).await,
+            SearchStore::MeiliSearch(store) => store.query(query.index, &query.filters).await,
         }
     }
 
@@ -372,12 +271,6 @@ impl SearchStore {
 
 impl SearchFilter {
     pub fn is_external(&self) -> bool {
-        matches!(self, SearchFilter::Operator { .. })
-    }
-}
-
-impl SearchComparator {
-    pub fn is_external(&self) -> bool {
-        matches!(self, SearchComparator::Field { .. })
+        matches!(self, SearchFilter::Text { .. })
     }
 }

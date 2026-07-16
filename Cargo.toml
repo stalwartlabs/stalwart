@@ -28,6 +28,8 @@ members = [
     "crates/trc",
     "crates/migration",
     "tests",
+    "benchmarks/search-bench",
+    "benchmarks/compress-bench",
 ]
 
 [profile.dev]

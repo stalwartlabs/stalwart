@@ -181,11 +181,7 @@ async fn create_search_tables<T: SearchableField + PsqlSearchField + 'static>(
 
     // Add other columns
     for field in T::all_fields() {
-        query.push_str(&format!("{} {}", field.column(), field.column_type()));
-        if let Some(sort_type) = field.sort_column_type() {
-            query.push_str(&format!(", {} {}", field.sort_column().unwrap(), sort_type));
-        }
-        query.push_str(", ");
+        query.push_str(&format!("{} {}, ", field.column(), field.column_type()));
     }
 
     // Add primary key constraint
@@ -213,7 +209,7 @@ async fn create_search_tables<T: SearchableField + PsqlSearchField + 'static>(
         }
 
         if field.is_indexed() {
-            let column_name = field.sort_column().unwrap_or(field.column());
+            let column_name = field.column();
             let create_index_query = format!(
                 "CREATE INDEX IF NOT EXISTS idx_{table_name}_{column_name} ON {table_name}({column_name})",
             );

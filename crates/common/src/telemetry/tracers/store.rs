@@ -116,7 +116,7 @@ impl TracingStore for Store {
             search_store
                 .unindex(
                     SearchQuery::new(SearchIndex::Tracing)
-                        .with_filter(SearchFilter::lt(SearchField::Id, until_span_id)),
+                        .with_filter(SearchFilter::integer_lt(SearchField::Id, until_span_id)),
                 )
                 .await
                 .caused_by(trc::location!())?;

@@ -21,6 +21,7 @@ use mail_parser::{
 use store::{
     Serialize,
     write::{Archiver, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, ValueClass},
+    xxhash_rust::xxh3::xxh3_128,
 };
 use trc::AddContext;
 use types::{
@@ -28,7 +29,6 @@ use types::{
     field::EmailField,
     keyword::{HASATTACHMENT, HASNOATTACHMENT},
 };
-use utils::cheeky_hash::CheekyHash;
 
 impl MessageMetadata {
     #[inline(always)]
@@ -88,11 +88,14 @@ impl ArchivedMessageMetadata {
             .clear(EmailField::Metadata)
             .clear(ValueClass::IndexProperty(IndexPropertyClass::Hash {
                 property: EmailField::Threading.into(),
-                hash: CheekyHash::new(if !thread_name.is_empty() {
-                    thread_name
-                } else {
-                    "!"
-                }),
+                hash: xxh3_128(
+                    if !thread_name.is_empty() {
+                        thread_name
+                    } else {
+                        "!"
+                    }
+                    .as_bytes(),
+                ),
             }))
             .clear(BlobOp::Link {
                 hash: BlobHash::from(&self.blob_hash),

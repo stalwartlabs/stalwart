@@ -10,14 +10,14 @@ use crate::{
         mysql::{MysqlSearchField, MysqlStore, into_error},
     },
     search::{
-        IndexDocument, SearchComparator, SearchDocumentId, SearchFilter, SearchOperator,
-        SearchQuery, SearchValue,
+        IndexDocument, KeyValueMatch, SearchFilter, SearchQuery, SearchResults, SearchValue,
+        TextMatch,
     },
     write::SearchIndex,
 };
 use mysql_async::{IsolationLevel, TxOpts, Value, prelude::Queryable};
 use nlp::tokenizers::word::WordTokenizer;
-use std::fmt::Write;
+use std::{cmp::Ordering, fmt::Write};
 
 impl MysqlStore {
     pub async fn index(&self, documents: Vec<IndexDocument>) -> trc::Result<()> {
@@ -75,28 +75,29 @@ impl MysqlStore {
         trx.commit().await.map_err(into_error)
     }
 
-    pub async fn query<R: SearchDocumentId>(
+    pub async fn query<R: SearchResults>(
         &self,
         index: SearchIndex,
         filters: &[SearchFilter],
-        sort: &[SearchComparator],
-    ) -> trc::Result<Vec<R>> {
+    ) -> trc::Result<R> {
         let mut query = format!(
             "SELECT {} FROM {}",
             R::field().column(),
             index.mysql_table()
         );
         let params = build_filter(&mut query, filters);
-        if !sort.is_empty() {
-            build_sort(&mut query, sort);
-        }
-
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
         let s = conn.prep(query).await.map_err(into_error)?;
 
         conn.exec::<i64, _, _>(s, params)
             .await
-            .map(|r| r.into_iter().map(|r| R::from_u64(r as u64)).collect())
+            .map(|r| {
+                let mut results = R::default();
+                for id in r {
+                    results.insert(id as u64);
+                }
+                results
+            })
             .map_err(into_error)
     }
 
@@ -126,7 +127,12 @@ fn build_filter(query: &mut String, filters: &[SearchFilter]) -> Vec<Value> {
 
     for filter in filters {
         match filter {
-            SearchFilter::Operator { field, op, value } => {
+            SearchFilter::Text {
+                field,
+                op,
+                value,
+                language: _,
+            } => {
                 if !is_first {
                     match operator {
                         SearchFilter::And => query.push_str(" AND "),
@@ -137,15 +143,11 @@ fn build_filter(query: &mut String, filters: &[SearchFilter]) -> Vec<Value> {
                     is_first = false;
                 }
 
-                if field.is_text() && matches!(op, SearchOperator::Equal | SearchOperator::Contains)
-                {
-                    let (value, mode) = match (value, op) {
-                        (SearchValue::Text { value, .. }, SearchOperator::Equal) => {
-                            (Value::Bytes(format!("{value:?}").into_bytes()), "BOOLEAN")
-                        }
-                        (SearchValue::Text { value, .. }, ..) => {
+                if field.is_text() {
+                    let text_query = match op {
+                        TextMatch::Phrase => format!("{value:?}"),
+                        TextMatch::Keyword => {
                             let mut text_query = String::with_capacity(value.len() + 1);
-
                             for item in WordTokenizer::new(value, MAX_TOKEN_LENGTH) {
                                 if !text_query.is_empty() {
                                     text_query.push(' ');
@@ -153,38 +155,83 @@ fn build_filter(query: &mut String, filters: &[SearchFilter]) -> Vec<Value> {
                                 text_query.push('+');
                                 text_query.push_str(&item.word);
                             }
-
-                            (Value::Bytes(text_query.into_bytes()), "BOOLEAN")
+                            text_query
                         }
-                        _ => {
-                            debug_assert!(false, "Invalid search value for text field");
-                            continue;
+                        TextMatch::Prefix => {
+                            let mut text_query = String::with_capacity(value.len() + 2);
+                            for item in WordTokenizer::new(value, MAX_TOKEN_LENGTH) {
+                                if !text_query.is_empty() {
+                                    text_query.push(' ');
+                                }
+                                text_query.push('+');
+                                text_query.push_str(&item.word);
+                                text_query.push('*');
+                            }
+                            text_query
                         }
                     };
-                    let _ = write!(query, "MATCH({}) AGAINST(? IN {mode} MODE)", field.column());
-                    values.push(value);
-                } else if let SearchValue::KeyValues(kv) = value {
-                    let (key, value) = kv.iter().next().unwrap();
-
-                    values.push(Value::Bytes(format!("$.{key:?}").into_bytes()));
-
-                    if !value.is_empty() {
-                        if op == &SearchOperator::Equal {
-                            let _ = write!(query, "JSON_EXTRACT({}, ?) = ?", field.column());
-                            values.push(Value::Bytes(value.as_bytes().to_vec()));
-                        } else {
-                            let _ = write!(query, "JSON_EXTRACT({}, ?) LIKE ?", field.column(),);
-                            values.push(Value::Bytes(format!("%{value}%").into_bytes()));
-                        }
-                    } else {
-                        let _ = write!(query, "JSON_CONTAINS_PATH({}, 'one', ?)", field.column(),);
-                    }
+                    let _ = write!(
+                        query,
+                        "MATCH({}) AGAINST(? IN BOOLEAN MODE)",
+                        field.column()
+                    );
+                    values.push(Value::Bytes(text_query.into_bytes()));
                 } else {
                     query.push_str(field.column());
-                    query.push(' ');
-                    op.write_mysql(query);
-                    values.push(to_mysql(value));
+                    match op {
+                        TextMatch::Prefix => {
+                            let _ = write!(query, " LIKE CONCAT(?, '%')");
+                        }
+                        _ => {
+                            query.push_str(" = ?");
+                        }
+                    }
+                    values.push(Value::Bytes(value.as_bytes().to_vec()));
                 }
+            }
+            SearchFilter::KeyValue { field, key, op } => {
+                if !is_first {
+                    match operator {
+                        SearchFilter::And => query.push_str(" AND "),
+                        SearchFilter::Or => query.push_str(" OR "),
+                        _ => (),
+                    }
+                } else {
+                    is_first = false;
+                }
+
+                values.push(Value::Bytes(format!("$.{key:?}").into_bytes()));
+
+                match op {
+                    KeyValueMatch::Equals(value) => {
+                        let _ = write!(query, "JSON_EXTRACT({}, ?) = ?", field.column());
+                        values.push(Value::Bytes(value.as_bytes().to_vec()));
+                    }
+                    KeyValueMatch::Contains(value) => {
+                        let _ = write!(query, "JSON_EXTRACT({}, ?) LIKE ?", field.column());
+                        values.push(Value::Bytes(format!("%{value}%").into_bytes()));
+                    }
+                    KeyValueMatch::Exists => {
+                        let _ = write!(query, "JSON_CONTAINS_PATH({}, 'one', ?)", field.column());
+                    }
+                }
+            }
+            SearchFilter::Integer { field, op, value } => {
+                if !is_first {
+                    match operator {
+                        SearchFilter::And => query.push_str(" AND "),
+                        SearchFilter::Or => query.push_str(" OR "),
+                        _ => (),
+                    }
+                } else {
+                    is_first = false;
+                }
+                let cmp = match op {
+                    Ordering::Less => "<",
+                    Ordering::Equal => "=",
+                    Ordering::Greater => ">",
+                };
+                let _ = write!(query, "{} {cmp} {value}", field.column());
             }
             SearchFilter::And | SearchFilter::Or => {
                 if !is_first {
@@ -227,63 +274,13 @@ fn build_filter(query: &mut String, filters: &[SearchFilter]) -> Vec<Value> {
             SearchFilter::DocumentSet(_) => {
                 debug_assert!(
                     false,
-                    "DocumentSet filters are not supported in Postgres backend"
+                    "DocumentSet filters are not supported in MySQL backend"
                 )
             }
         }
     }
 
     values
-}
-
-fn build_sort(query: &mut String, sort: &[SearchComparator]) {
-    query.push_str(" ORDER BY ");
-    for (i, comparator) in sort.iter().enumerate() {
-        if i > 0 {
-            query.push_str(", ");
-        }
-        match comparator {
-            SearchComparator::Field { field, ascending } => {
-                query.push_str(field.column());
-                if *ascending {
-                    query.push_str(" ASC");
-                } else {
-                    query.push_str(" DESC");
-                }
-            }
-            SearchComparator::DocumentSet { .. } | SearchComparator::SortedSet { .. } => {
-                debug_assert!(
-                    false,
-                    "DocumentSet and SortedSet comparators are not supported "
-                );
-            }
-        }
-    }
-}
-
-impl SearchOperator {
-    fn write_mysql(&self, query: &mut String) {
-        match self {
-            SearchOperator::LowerThan => {
-                let _ = write!(query, "< ?");
-            }
-            SearchOperator::LowerEqualThan => {
-                let _ = write!(query, "<= ?");
-            }
-            SearchOperator::GreaterThan => {
-                let _ = write!(query, "> ?");
-            }
-            SearchOperator::GreaterEqualThan => {
-                let _ = write!(query, ">= ?");
-            }
-            SearchOperator::Equal => {
-                let _ = write!(query, "= ?");
-            }
-            SearchOperator::Contains => {
-                let _ = write!(query, "LIKE '%' CONCAT('%', ?, '%')");
-            }
-        }
-    }
 }
 
 impl From<SearchValue> for Value {
@@ -305,17 +302,5 @@ impl From<SearchValue> for Value {
             SearchValue::Uint(i) => Value::Int(i as i64),
             SearchValue::Boolean(b) => Value::Int(b as i64),
         }
-    }
-}
-
-fn to_mysql(value: &SearchValue) -> Value {
-    match value {
-        SearchValue::Text { value, .. } => Value::Bytes(value.as_bytes().to_vec()),
-        SearchValue::KeyValues(vec_map) => serde_json::to_string(&vec_map)
-            .map(|v| Value::Bytes(v.into_bytes()))
-            .unwrap_or(Value::NULL),
-        SearchValue::Int(i) => Value::Int(*i),
-        SearchValue::Uint(i) => Value::Int(*i as i64),
-        SearchValue::Boolean(b) => Value::Int(*b as i64),
     }
 }

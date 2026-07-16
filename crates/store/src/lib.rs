@@ -96,6 +96,7 @@ pub struct LogKey {
     pub change_id: u64,
 }
 
+pub const U128_LEN: usize = std::mem::size_of::<u128>();
 pub const U64_LEN: usize = std::mem::size_of::<u64>();
 pub const U32_LEN: usize = std::mem::size_of::<u32>();
 pub const U16_LEN: usize = std::mem::size_of::<u16>();

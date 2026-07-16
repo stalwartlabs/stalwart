@@ -9,7 +9,7 @@ use common::{
     CustomKeywords, MessageCache, MessageStoreCache, MessageUid, MessagesCache, Server,
     auth::AccessToken, sharing::EffectiveAcl,
 };
-use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap, search::SearchOperator};
+use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, keyword::Keyword};
 use utils::map::bitmap::Bitmap;
@@ -160,6 +160,15 @@ impl MessagesCacheBuilder {
             size,
         }
     }
+}
+
+pub enum SearchOperator {
+    LowerThan,
+    LowerEqualThan,
+    GreaterThan,
+    GreaterEqualThan,
+    Equal,
+    Contains,
 }
 
 pub trait MessageCacheAccess {
