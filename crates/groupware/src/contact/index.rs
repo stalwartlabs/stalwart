@@ -72,10 +72,6 @@ impl IndexableObject for ContactCard {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
             IndexValue::Index {
-                field: ContactField::Uid.into(),
-                value: self.card.uid().into(),
-            },
-            IndexValue::Index {
                 field: ContactField::Email.into(),
                 value: self.emails().next().into(),
             },
@@ -98,10 +94,6 @@ impl IndexableObject for ContactCard {
 impl IndexableObject for &ArchivedContactCard {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         [
-            IndexValue::Index {
-                field: ContactField::Uid.into(),
-                value: self.card.uid().into(),
-            },
             IndexValue::Index {
                 field: ContactField::Email.into(),
                 value: self.emails().next().into(),
@@ -268,7 +260,6 @@ impl ArchivedContactCard {
                 ArchivedVCardProperty::Adr => (false, false, ContactSearchField::Address),
                 ArchivedVCardProperty::Note => (true, false, ContactSearchField::Note),
                 ArchivedVCardProperty::Kind => (false, true, ContactSearchField::Kind),
-                ArchivedVCardProperty::Uid => (false, true, ContactSearchField::Uid),
                 ArchivedVCardProperty::Member => (false, false, ContactSearchField::Member),
                 _ => continue,
             };

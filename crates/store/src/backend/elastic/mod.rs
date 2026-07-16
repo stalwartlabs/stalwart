@@ -66,10 +66,6 @@ impl SearchField {
             SearchField::Email(EmailSearchField::_HasAttachment) => json!({
               "type": "boolean"
             }),
-            SearchField::Calendar(CalendarSearchField::Uid)
-            | SearchField::Contact(ContactSearchField::Uid) => json!({
-              "type": "keyword",
-            }),
             SearchField::Email(
                 EmailSearchField::From | EmailSearchField::To | EmailSearchField::Subject,
             ) => json!({

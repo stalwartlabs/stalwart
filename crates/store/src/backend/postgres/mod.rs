@@ -118,7 +118,6 @@ impl PsqlSearchField for CalendarSearchField {
             CalendarSearchField::Location => "locn",
             CalendarSearchField::Owner => "ownr",
             CalendarSearchField::Attendee => "atnd",
-            CalendarSearchField::Uid => "uid",
         }
     }
 
@@ -140,13 +139,12 @@ impl PsqlSearchField for ContactSearchField {
             ContactSearchField::Address => "addr",
             ContactSearchField::Note => "note",
             ContactSearchField::Kind => "kind",
-            ContactSearchField::Uid => "uid",
         }
     }
 
     fn column_type(&self) -> &'static str {
         match self {
-            ContactSearchField::Kind | ContactSearchField::Uid => "TEXT",
+            ContactSearchField::Kind => "TEXT",
             _ => "TSVECTOR",
         }
     }

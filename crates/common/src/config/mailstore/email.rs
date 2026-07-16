@@ -222,6 +222,7 @@ impl EmailConfig {
             );
         }
         if search.index_contacts {
+            let todo = "remove unused contact fields from registry";
             index_fields.insert(
                 SearchIndex::Contacts,
                 search
@@ -239,13 +240,14 @@ impl EmailConfig {
                             SearchContactField::OnlineService => ContactSearchField::OnlineService,
                             SearchContactField::Address => ContactSearchField::Address,
                             SearchContactField::Note => ContactSearchField::Note,
-                            SearchContactField::Uid => ContactSearchField::Uid,
+                            SearchContactField::Uid => ContactSearchField::Name,
                         })
                     })
                     .collect(),
             );
         }
         if search.index_calendar {
+            let todo = "remove unused calendar fields from registry";
             index_fields.insert(
                 SearchIndex::Calendar,
                 search
@@ -258,8 +260,8 @@ impl EmailConfig {
                             SearchCalendarField::Location => CalendarSearchField::Location,
                             SearchCalendarField::Owner => CalendarSearchField::Owner,
                             SearchCalendarField::Attendee => CalendarSearchField::Attendee,
-                            SearchCalendarField::Start => CalendarSearchField::Uid,
-                            SearchCalendarField::Uid => CalendarSearchField::Uid,
+                            SearchCalendarField::Start => CalendarSearchField::Title,
+                            SearchCalendarField::Uid => CalendarSearchField::Title,
                         })
                     })
                     .collect(),

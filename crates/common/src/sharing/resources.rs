@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{DavResources, auth::AccessToken};
+use crate::{DavResourceMetadata, DavResources, auth::AccessToken};
 use store::roaring::RoaringBitmap;
 use types::acl::Acl;
 use utils::map::bitmap::Bitmap;
@@ -132,6 +132,26 @@ impl DavResources {
         }
 
         account_acls
+    }
+
+    pub fn uid_matches(&self, uid: &str) -> RoaringBitmap {
+        self.resources
+            .iter()
+            .filter_map(|resource| {
+                if let DavResourceMetadata::CalendarEvent {
+                    uid: resource_uid, ..
+                }
+                | DavResourceMetadata::ContactCard {
+                    uid: resource_uid, ..
+                } = &resource.data
+                    && resource_uid.as_ref() == uid
+                {
+                    Some(resource.document_id)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn document_ids(&self, is_container: bool) -> impl Iterator<Item = u32> {

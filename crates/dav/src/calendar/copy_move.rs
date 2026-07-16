@@ -483,7 +483,6 @@ async fn copy_event(
 
     // Validate UID
     assert_is_unique_uid(
-        server,
         server
             .fetch_dav_resources(
                 access_token.account_id(),
@@ -493,11 +492,9 @@ async fn copy_event(
             .await
             .caused_by(trc::location!())?
             .as_ref(),
-        to_account_id,
         to_calendar_id,
         event.inner.data.event.uids().next(),
-    )
-    .await?;
+    )?;
 
     let changed_by = access_token.account_tenant_ids();
     if from_account_id == to_account_id {
@@ -631,7 +628,6 @@ async fn move_event(
         || to_document_id.is_none()
     {
         assert_is_unique_uid(
-            server,
             server
                 .fetch_dav_resources(
                     access_token.account_id(),
@@ -641,11 +637,9 @@ async fn move_event(
                 .await
                 .caused_by(trc::location!())?
                 .as_ref(),
-            to_account_id,
             to_calendar_id,
             event.inner.data.event.uids().next(),
-        )
-        .await?;
+        )?;
     }
 
     let account_info = server

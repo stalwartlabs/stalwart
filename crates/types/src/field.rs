@@ -15,7 +15,6 @@ pub struct Field(u8);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ContactField {
-    Uid,
     Email,
     Archive,
 }
@@ -86,7 +85,6 @@ pub enum PrincipalField {
 impl From<ContactField> for u8 {
     fn from(value: ContactField) -> Self {
         match value {
-            ContactField::Uid => 0,
             ContactField::Email => 1,
             ContactField::Archive => ARCHIVE_FIELD,
         }

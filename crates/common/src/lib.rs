@@ -352,7 +352,7 @@ pub enum DavResourceMetadata {
         duration: u32,
         created_at: i64,
         modified_at: i32,
-        uid: u64,
+        uid: Arc<str>,
     },
     CalendarEventNotification {
         names: TinyVec<[DavName; 2]>,
@@ -367,6 +367,7 @@ pub enum DavResourceMetadata {
         names: TinyVec<[DavName; 2]>,
         created_at: i64,
         modified_at: i32,
+        uid: Arc<str>,
     },
 }
 

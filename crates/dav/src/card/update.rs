@@ -241,14 +241,7 @@ impl CardUpdateRequestHandler for Server {
             .await?;
 
             // Validate UID
-            assert_is_unique_uid(
-                self,
-                &resources,
-                account_id,
-                parent.document_id(),
-                vcard.uid(),
-            )
-            .await?;
+            assert_is_unique_uid(&resources, parent.document_id(), vcard.uid())?;
 
             // Validate quota
             if !bytes.is_empty() {

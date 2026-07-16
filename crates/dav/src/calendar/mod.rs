@@ -15,15 +15,13 @@ pub mod scheduling;
 pub mod update;
 
 use crate::{DavError, DavErrorCondition};
-use common::{DavResources, Server};
+use common::DavResources;
 use dav_proto::schema::{
     property::{CalDavProperty, CalendarData, DavProperty, WebDavProperty},
     response::CalCondition,
 };
 use groupware::scheduling::ItipError;
 use hyper::StatusCode;
-use trc::AddContext;
-use types::{collection::Collection, field::CalendarEventField};
 
 pub(crate) static CALENDAR_CONTAINER_PROPS: [DavProperty; 31] = [
     DavProperty::WebDav(WebDavProperty::CreationDate),
@@ -87,23 +85,13 @@ pub(crate) static CALENDAR_ITEM_PROPS: [DavProperty; 20] = [
     })),
 ];
 
-pub(crate) async fn assert_is_unique_uid(
-    server: &Server,
+pub(crate) fn assert_is_unique_uid(
     resources: &DavResources,
-    account_id: u32,
     calendar_id: u32,
     uid: Option<&str>,
 ) -> crate::Result<()> {
     if let Some(uid) = uid {
-        let hits = server
-            .document_ids_matching(
-                account_id,
-                Collection::CalendarEvent,
-                CalendarEventField::Uid,
-                uid.as_bytes(),
-            )
-            .await
-            .caused_by(trc::location!())?;
+        let hits = resources.uid_matches(uid);
 
         if !hits.is_empty() {
             for path in resources.children(calendar_id) {

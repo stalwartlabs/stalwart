@@ -55,7 +55,6 @@ pub enum CalendarSearchField {
     Location,
     Owner,
     Attendee,
-    Uid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,7 +69,6 @@ pub enum ContactSearchField {
     OnlineService,
     Address,
     Note,
-    Uid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -329,7 +327,6 @@ impl SearchField {
                 CalendarSearchField::Location => 5,
                 CalendarSearchField::Owner => 6,
                 CalendarSearchField::Attendee => 7,
-                CalendarSearchField::Uid => 9,
             },
             SearchField::Contact(field) => match field {
                 ContactSearchField::Member => 3,
@@ -342,7 +339,6 @@ impl SearchField {
                 ContactSearchField::OnlineService => 10,
                 ContactSearchField::Address => 11,
                 ContactSearchField::Note => 12,
-                ContactSearchField::Uid => 13,
             },
             SearchField::File(field) => match field {
                 FileSearchField::Name => 3,
@@ -383,7 +379,6 @@ impl SearchField {
                 CalendarSearchField::Location => "loc",
                 CalendarSearchField::Owner => "owner",
                 CalendarSearchField::Attendee => "attendee",
-                CalendarSearchField::Uid => "uid",
             },
             SearchField::Contact(field) => match field {
                 ContactSearchField::Member => "member",
@@ -396,7 +391,6 @@ impl SearchField {
                 ContactSearchField::OnlineService => "online",
                 ContactSearchField::Address => "addr",
                 ContactSearchField::Note => "note",
-                ContactSearchField::Uid => "uid",
             },
             SearchField::File(field) => match field {
                 FileSearchField::Name => "name",

@@ -426,7 +426,6 @@ impl ArchivedCalendarEvent {
                     ArchivedICalendarProperty::Attendee => {
                         (false, false, CalendarSearchField::Attendee)
                     }
-                    ArchivedICalendarProperty::Uid => (false, true, CalendarSearchField::Uid),
                     _ => continue,
                 };
                 let field = SearchField::Calendar(field);

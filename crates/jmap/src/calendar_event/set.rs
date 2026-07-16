@@ -609,7 +609,7 @@ impl CalendarEventSet for Server {
         }
 
         // Validate UID
-        if let Err(err) = assert_is_unique_uid(self, account_id, ical.uids().next()).await? {
+        if let Err(err) = assert_is_unique_uid(cache, ical.uids().next())? {
             return Ok(Err(err));
         }
 

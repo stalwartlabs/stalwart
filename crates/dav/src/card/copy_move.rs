@@ -465,7 +465,6 @@ async fn copy_card(
 
     // Validate UID
     assert_is_unique_uid(
-        server,
         server
             .fetch_dav_resources(
                 access_token.account_id(),
@@ -475,11 +474,9 @@ async fn copy_card(
             .await
             .caused_by(trc::location!())?
             .as_ref(),
-        to_account_id,
         to_addressbook_id,
         card.inner.card.uid(),
-    )
-    .await?;
+    )?;
 
     if from_account_id == to_account_id {
         let mut new_card = card
@@ -597,7 +594,6 @@ async fn move_card(
         || to_document_id.is_none()
     {
         assert_is_unique_uid(
-            server,
             server
                 .fetch_dav_resources(
                     access_token.account_id(),
@@ -607,11 +603,9 @@ async fn move_card(
                 .await
                 .caused_by(trc::location!())?
                 .as_ref(),
-            to_account_id,
             to_addressbook_id,
             card.inner.card.uid(),
-        )
-        .await?;
+        )?;
     }
 
     let mut batch = BatchBuilder::new();

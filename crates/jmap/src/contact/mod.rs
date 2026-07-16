@@ -5,10 +5,9 @@
  */
 
 use calcard::jscontact::JSContactProperty;
-use common::{DavName, DavResources, Server};
+use common::{DavName, DavResources};
 use jmap_proto::error::set::SetError;
-use trc::AddContext;
-use types::{collection::Collection, field::ContactField, id::Id};
+use types::id::Id;
 
 pub mod copy;
 pub mod get;
@@ -16,23 +15,13 @@ pub mod parse;
 pub mod query;
 pub mod set;
 
-pub(super) async fn assert_is_unique_uid(
-    server: &Server,
+pub(super) fn assert_is_unique_uid(
     resources: &DavResources,
-    account_id: u32,
     addressbook_ids: &[DavName],
     uid: Option<&str>,
 ) -> trc::Result<Result<(), SetError<JSContactProperty<Id>>>> {
     if let Some(uid) = uid {
-        let hits = server
-            .document_ids_matching(
-                account_id,
-                Collection::ContactCard,
-                ContactField::Uid,
-                uid.as_bytes(),
-            )
-            .await
-            .caused_by(trc::location!())?;
+        let hits = resources.uid_matches(uid);
         if !hits.is_empty() {
             for document_id in resources
                 .paths

@@ -357,13 +357,10 @@ impl CalendarUpdateRequestHandler for Server {
 
             // Validate ical object
             assert_is_unique_uid(
-                self,
                 &resources,
-                account_id,
                 parent.document_id(),
                 validate_ical(&ical)?.into(),
-            )
-            .await?;
+            )?;
 
             // Build event
             let mut next_email_alarm = None;

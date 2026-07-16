@@ -86,8 +86,16 @@ impl CalendarEventQuery for Server {
                             cache.children_ids(id.document_id()),
                         )))
                     }
-                    CalendarEventFilter::Uid(uid) => {
-                        filters.push(SearchFilter::text_eq(CalendarSearchField::Uid, uid));
+                    CalendarEventFilter::Uid(value) => {
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cache.resources.iter().filter_map(|r| {
+                                if let DavResourceMetadata::CalendarEvent { uid, .. } = &r.data {
+                                    (uid.as_ref() == value).then_some(r.document_id)
+                                } else {
+                                    None
+                                }
+                            }),
+                        )));
                     }
                     CalendarEventFilter::Text(value) => {
                         let (text, language) =
@@ -243,13 +251,20 @@ impl CalendarEventQuery for Server {
                             .iter()
                             .filter_map(|r| {
                                 if let DavResourceMetadata::CalendarEvent { uid, .. } = &r.data {
-                                    Some((r.document_id, *uid))
+                                    Some((r.document_id, uid.clone()))
                                 } else {
                                     None
                                 }
                             })
                             .collect::<Vec<_>>();
-                        items.sort_by_key(|(document_id, uid)| (*uid, *document_id));
+                        items.sort_by(|(doc_id_a, uid_a), (doc_id_b, uid_b)| {
+                            let uid_order = uid_a.cmp(uid_b);
+                            if uid_order == Ordering::Equal {
+                                doc_id_a.cmp(doc_id_b)
+                            } else {
+                                uid_order
+                            }
+                        });
 
                         Ok(SearchComparator::sorted_set(
                             items

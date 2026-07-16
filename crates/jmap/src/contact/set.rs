@@ -416,7 +416,7 @@ impl ContactCardSet for Server {
         };
 
         // Validate UID
-        if let Err(err) = assert_is_unique_uid(self, cache, account_id, &names, card.uid()).await? {
+        if let Err(err) = assert_is_unique_uid(cache, &names, card.uid())? {
             return Ok(Err(err));
         }
 

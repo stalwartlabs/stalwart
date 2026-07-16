@@ -5,7 +5,7 @@
  */
 
 use calcard::jscalendar::JSCalendarProperty;
-use common::Server;
+use common::{DavResources, Server};
 use jmap_proto::error::set::SetError;
 use trc::AddContext;
 use types::{collection::Collection, field::CalendarEventField, id::Id};
@@ -57,21 +57,12 @@ impl CalendarSyntheticId for Id {
     }
 }
 
-pub(super) async fn assert_is_unique_uid(
-    server: &Server,
-    account_id: u32,
+pub(super) fn assert_is_unique_uid(
+    resources: &DavResources,
     uid: Option<&str>,
 ) -> trc::Result<Result<(), SetError<JSCalendarProperty<Id>>>> {
     if let Some(uid) = uid
-        && server
-            .document_exists(
-                account_id,
-                Collection::CalendarEvent,
-                CalendarEventField::Uid,
-                uid.as_bytes(),
-            )
-            .await
-            .caused_by(trc::location!())?
+        && !resources.uid_matches(uid).is_empty()
     {
         Ok(Err(SetError::invalid_properties()
             .with_property(JSCalendarProperty::Uid)

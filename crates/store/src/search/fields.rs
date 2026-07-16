@@ -92,12 +92,11 @@ impl SearchableField for CalendarSearchField {
             SearchField::Calendar(CalendarSearchField::Location),
             SearchField::Calendar(CalendarSearchField::Owner),
             SearchField::Calendar(CalendarSearchField::Attendee),
-            SearchField::Calendar(CalendarSearchField::Uid),
         ]
     }
 
     fn is_indexed(&self) -> bool {
-        matches!(self, CalendarSearchField::Uid)
+        false
     }
 
     fn is_text(&self) -> bool {
@@ -126,12 +125,11 @@ impl SearchableField for ContactSearchField {
             SearchField::Contact(ContactSearchField::OnlineService),
             SearchField::Contact(ContactSearchField::Address),
             SearchField::Contact(ContactSearchField::Note),
-            SearchField::Contact(ContactSearchField::Uid),
         ]
     }
 
     fn is_indexed(&self) -> bool {
-        matches!(self, ContactSearchField::Uid | ContactSearchField::Kind)
+        matches!(self, ContactSearchField::Kind)
     }
 
     fn is_text(&self) -> bool {
