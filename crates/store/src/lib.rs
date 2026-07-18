@@ -186,6 +186,16 @@ pub enum BlobStore {
 #[derive(Clone)]
 pub enum SearchStore {
     Store(Store),
+    #[cfg(feature = "postgres")]
+    PostgreSQL(Arc<backend::postgres::PostgresStore>),
+    #[cfg(feature = "mysql")]
+    MySQL(Arc<backend::mysql::MysqlStore>),
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+    SQLReadReplica(Arc<backend::composite::read_replica::SQLReadReplica>),
+    // SPDX-SnippetEnd
     ElasticSearch(Arc<ElasticSearchStore>),
     MeiliSearch(Arc<MeiliSearchStore>),
 }

@@ -4,7 +4,30 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::store::{deflate_test_resource, query::FIELDS};
+use crate::store::deflate_test_resource;
+
+pub const FIELDS: [&str; 20] = [
+    "id",
+    "accession_number",
+    "artist",
+    "artistRole",
+    "artistId",
+    "title",
+    "dateText",
+    "medium",
+    "creditLine",
+    "year",
+    "acquisitionYear",
+    "dimensions",
+    "width",
+    "height",
+    "depth",
+    "units",
+    "inscription",
+    "thumbnailCopyright",
+    "thumbnailUrl",
+    "url",
+];
 use crate::utils::account::Account;
 use crate::utils::server::TestServer;
 use ::email::{cache::MessageCacheFetch, mailbox::Mailbox};

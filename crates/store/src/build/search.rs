@@ -14,6 +14,7 @@ use registry::schema::{prelude::ObjectType, structs};
 #[allow(unreachable_patterns)]
 impl SearchStore {
     pub async fn build(bp: &mut Bootstrap) -> Option<Self> {
+        let todo = "use internal fts if configured + map sqlreplicas + do not use global snowflake + call maintain";
         let result = match bp.setting_infallible::<structs::SearchStore>().await {
             structs::SearchStore::Default => {
                 return Some(SearchStore::Store(bp.data_store.clone()));
@@ -34,13 +35,23 @@ impl SearchStore {
             structs::SearchStore::PostgreSql(postgre_sql_store) => {
                 crate::backend::postgres::PostgresStore::open(postgre_sql_store)
                     .await
-                    .map(SearchStore::Store)
+                    .map(|store| match store {
+                        crate::Store::PostgreSQL(store) => SearchStore::PostgreSQL(store),
+                        #[cfg(feature = "enterprise")]
+                        crate::Store::SQLReadReplica(store) => SearchStore::SQLReadReplica(store),
+                        _ => unreachable!(),
+                    })
             }
             #[cfg(feature = "mysql")]
             structs::SearchStore::MySql(my_sql_store) => {
                 crate::backend::mysql::MysqlStore::open(my_sql_store)
                     .await
-                    .map(SearchStore::Store)
+                    .map(|store| match store {
+                        crate::Store::MySQL(store) => SearchStore::MySQL(store),
+                        #[cfg(feature = "enterprise")]
+                        crate::Store::SQLReadReplica(store) => SearchStore::SQLReadReplica(store),
+                        _ => unreachable!(),
+                    })
             }
             _ => Err("Binary was not compiled with the selected search store backend".to_string()),
         };

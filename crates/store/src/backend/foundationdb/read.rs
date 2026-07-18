@@ -17,7 +17,10 @@ use foundationdb::{
     future::FdbSlice,
     options::{self},
 };
-use futures::TryStreamExt;
+use futures::{
+    StreamExt, TryStreamExt,
+    stream::{self, SelectAll},
+};
 use std::time::Instant;
 
 #[allow(dead_code)]
@@ -224,6 +227,152 @@ impl FdbStore {
         }
 
         Ok(())
+    }
+
+    pub(crate) async fn iterate_many<T: Key>(
+        &self,
+        ranges: Vec<IterateParams<T>>,
+        mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
+    ) -> trc::Result<()> {
+        struct MultiChunk {
+            key: Vec<u8>,
+            bytes: Vec<u8>,
+            base_full: Vec<u8>,
+        }
+        struct RangeState {
+            begin: Vec<u8>,
+            end: Vec<u8>,
+            resume: Option<(Vec<u8>, bool)>,
+            done: bool,
+            chunk: Option<MultiChunk>,
+        }
+
+        let mut states = ranges
+            .iter()
+            .map(|params| RangeState {
+                begin: params.begin.serialize(WITH_SUBSPACE),
+                end: params.end.serialize(WITH_SUBSPACE),
+                resume: None,
+                done: false,
+                chunk: None,
+            })
+            .collect::<Vec<_>>();
+        let mut retry_count = 0;
+        let start = Instant::now();
+
+        'outer: loop {
+            let trx = self.read_trx().await?;
+            let mut streams = SelectAll::new();
+            for (idx, state) in states.iter_mut().enumerate() {
+                if state.done {
+                    continue;
+                }
+                state.chunk = None;
+                let begin = match &state.resume {
+                    Some((key, true)) => KeySelector::first_greater_or_equal(key.clone()),
+                    Some((key, false)) => KeySelector::first_greater_than(key.clone()),
+                    None => KeySelector::first_greater_or_equal(state.begin.clone()),
+                };
+                streams.push(
+                    trx.get_ranges(
+                        RangeOption {
+                            begin,
+                            end: KeySelector::first_greater_than(state.end.clone()),
+                            mode: options::StreamingMode::WantAll,
+                            reverse: false,
+                            ..Default::default()
+                        },
+                        true,
+                    )
+                    .map(move |result| (idx, Some(result)))
+                    .chain(stream::once(std::future::ready((idx, None)))),
+                );
+            }
+            if streams.is_empty() {
+                return Ok(());
+            }
+
+            let mut made_progress = false;
+            let error = loop {
+                match streams.next().await {
+                    Some((idx, Some(Ok(values)))) => {
+                        let state = &mut states[idx];
+                        let mut last_key = &[] as &[u8];
+                        for value in values.iter() {
+                            let full_key = value.key();
+                            let cb_key = full_key.get(1..).unwrap_or_default();
+                            let cb_value = value.value();
+                            last_key = full_key;
+
+                            if let Some(chunk) = &mut state.chunk
+                                && chunk.key.len() + 1 == cb_key.len()
+                                && cb_key[..chunk.key.len()] == chunk.key[..]
+                            {
+                                chunk.bytes.extend_from_slice(cb_value);
+                                continue;
+                            }
+                            if let Some(chunk) = state.chunk.take()
+                                && !cb(&chunk.key, &chunk.bytes)?
+                            {
+                                return Ok(());
+                            }
+
+                            if cb_value.len() < MAX_VALUE_SIZE {
+                                if !cb(cb_key, cb_value)? {
+                                    return Ok(());
+                                }
+                            } else {
+                                state.chunk = Some(MultiChunk {
+                                    key: cb_key.to_vec(),
+                                    bytes: cb_value.to_vec(),
+                                    base_full: full_key.to_vec(),
+                                });
+                            }
+                        }
+                        if !last_key.is_empty() {
+                            state.resume = if let Some(chunk) = &state.chunk {
+                                Some((chunk.base_full.clone(), true))
+                            } else {
+                                Some((last_key.to_vec(), false))
+                            };
+                            made_progress = true;
+                        }
+                    }
+                    Some((_, Some(Err(err)))) => {
+                        break err;
+                    }
+                    Some((idx, None)) => {
+                        let state = &mut states[idx];
+                        if let Some(chunk) = state.chunk.take()
+                            && !cb(&chunk.key, &chunk.bytes)?
+                        {
+                            return Ok(());
+                        }
+                        state.done = true;
+                        made_progress = true;
+                    }
+                    None => {
+                        return Ok(());
+                    }
+                }
+            };
+
+            drop(streams);
+            if error.code() == 1007 && made_progress {
+                self.version.expire();
+                continue 'outer;
+            } else if error.is_retryable()
+                && retry_count < MAX_COMMIT_ATTEMPTS
+                && start.elapsed() < MAX_COMMIT_TIME
+            {
+                self.version.expire();
+                trx.on_error(error).await.map_err(into_error)?;
+                retry_count += 1;
+                continue 'outer;
+            } else {
+                return Err(into_error(error));
+            }
+        }
     }
 
     pub(crate) async fn get_counter(

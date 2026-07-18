@@ -138,6 +138,34 @@ impl SQLReadReplica {
         .await
     }
 
+    pub async fn iterate_many<T: Key>(
+        &self,
+        ranges: Vec<IterateParams<T>>,
+        mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
+    ) -> trc::Result<()> {
+        let mut last_error = None;
+        for store in [
+            &self.replicas
+                [self.last_used_replica.fetch_add(1, Ordering::Relaxed) % self.replicas.len()],
+            &self.primary,
+        ] {
+            match match store {
+                #[cfg(feature = "postgres")]
+                Store::PostgreSQL(store) => store.iterate_many(ranges.clone(), &mut cb).await,
+                #[cfg(feature = "mysql")]
+                Store::MySQL(store) => store.iterate_many(ranges.clone(), &mut cb).await,
+                _ => panic!("Invalid store type"),
+            } {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        Err(last_error.unwrap())
+    }
+
     pub async fn iterate<T: Key>(
         &self,
         params: IterateParams<T>,

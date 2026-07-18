@@ -5,10 +5,9 @@
  */
 
 use calcard::jscalendar::JSCalendarProperty;
-use common::{DavResources, Server};
+use common::DavResources;
 use jmap_proto::error::set::SetError;
-use trc::AddContext;
-use types::{collection::Collection, field::CalendarEventField, id::Id};
+use types::id::Id;
 
 pub mod copy;
 pub mod get;

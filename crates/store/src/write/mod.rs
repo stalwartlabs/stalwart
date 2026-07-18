@@ -192,32 +192,47 @@ pub enum IndexPropertyClass {
     Integer { property: u8, value: u64 },
 }
 
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub struct SearchIndexClass {
-    pub index: SearchIndex,
-    pub id: SearchIndexId,
-    pub typ: SearchIndexType,
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub enum SearchIndexType {
-    Term { field: u8, hash: CheekyHash },
-    Index { field: SearchIndexField },
-    Document,
-}
-
-pub(crate) const SEARCH_INDEX_MAX_FIELD_LEN: usize = 128;
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
-pub struct SearchIndexField {
-    pub(crate) field_id: u8,
-    pub(crate) data: Vec<u8>,
-}
-
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
-pub enum SearchIndexId {
-    Account { account_id: u32, document_id: u32 },
-    Global { id: u64 },
+pub enum SearchIndexClass {
+    Term {
+        index: SearchIndex,
+        account_id: u32,
+        field: u8,
+        term: CheekyHash,
+        first_document_id: u32,
+    },
+    Wal {
+        index: SearchIndex,
+        account_id: u32,
+        id: u64,
+    },
+    Document {
+        index: SearchIndex,
+        account_id: u32,
+        document_id: u32,
+    },
+    Meta {
+        index: SearchIndex,
+        account_id: u32,
+    },
+    GlobalTerm {
+        index: SearchIndex,
+        field: u8,
+        term: CheekyHash,
+        first_document_id: u64,
+    },
+    GlobalWal {
+        index: SearchIndex,
+        id: u64,
+    },
+    GlobalDocument {
+        index: SearchIndex,
+        document_id: u64,
+    },
+    GlobalMeta {
+        index: SearchIndex,
+        kind: u8,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]

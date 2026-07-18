@@ -127,6 +127,48 @@ impl SqliteStore {
         .await
     }
 
+    pub(crate) async fn iterate_many<T: Key>(
+        &self,
+        ranges: Vec<IterateParams<T>>,
+        mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
+    ) -> trc::Result<()> {
+        let manager = self.conn_pool.clone();
+        self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
+            let table = char::from(ranges[0].begin.subspace());
+            let mut stmt = conn
+                .prepare_cached(&format!(
+                    "SELECT k, v FROM {table} WHERE k >= ? AND k <= ? ORDER BY k ASC"
+                ))
+                .map_err(into_error)?;
+
+            'outer: for params in &ranges {
+                let begin = params.begin.serialize(0);
+                let end = params.end.serialize(0);
+                let mut rows = stmt.query([&begin, &end]).map_err(into_error)?;
+                while let Some(row) = rows.next().map_err(into_error)? {
+                    let key = row
+                        .get_ref(0)
+                        .map_err(into_error)?
+                        .as_bytes()
+                        .map_err(into_error)?;
+                    let value = row
+                        .get_ref(1)
+                        .map_err(into_error)?
+                        .as_bytes()
+                        .map_err(into_error)?;
+
+                    if !cb(key, value)? {
+                        break 'outer;
+                    }
+                }
+            }
+
+            Ok(())
+        })
+        .await
+    }
+
     pub(crate) async fn get_counter(
         &self,
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,

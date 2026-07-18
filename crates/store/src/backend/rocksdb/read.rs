@@ -85,6 +85,36 @@ impl RocksDbStore {
         .await
     }
 
+    pub(crate) async fn iterate_many<T: Key>(
+        &self,
+        ranges: Vec<IterateParams<T>>,
+        mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
+    ) -> trc::Result<()> {
+        let db = self.db.clone();
+
+        self.spawn_worker(move || {
+            let cf = db.subspace_handle(ranges[0].begin.subspace());
+
+            'outer: for params in &ranges {
+                let begin = params.begin.serialize(0);
+                let end = params.end.serialize(0);
+
+                for row in db.iterator_cf(&cf, IteratorMode::From(&begin, Direction::Forward)) {
+                    let (key, value) = row.map_err(into_error)?;
+                    if key.as_ref() > end.as_slice() {
+                        break;
+                    }
+                    if !cb(&key, &value)? {
+                        break 'outer;
+                    }
+                }
+            }
+
+            Ok(())
+        })
+        .await
+    }
+
     pub(crate) async fn get_counter(
         &self,
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,

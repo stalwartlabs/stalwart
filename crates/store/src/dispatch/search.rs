@@ -7,7 +7,7 @@
 use crate::{
     SearchStore, Store,
     search::{
-        IndexDocument, QueryResults, SearchFilter, SearchQuery,
+        IndexDocument, QueryResults, SearchField, SearchFilter, SearchQuery,
         split::{SplitFilter, split_filters},
     },
     write::SearchIndex,
@@ -34,13 +34,19 @@ impl SearchStore {
         let mut has_external_filters = false;
         for filter in &query.filters {
             match filter {
-                SearchFilter::Integer { value, .. } => {
+                SearchFilter::Integer {
+                    value,
+                    field: SearchField::AccountId,
+                    ..
+                } => {
                     account_id = *value as u32;
                 }
                 SearchFilter::DocumentSet(_) => {
                     has_local_filters = true;
                 }
-                SearchFilter::Text { .. } => {
+                SearchFilter::Text { .. }
+                | SearchFilter::KeyValue { .. }
+                | SearchFilter::Integer { .. } => {
                     has_external_filters = true;
                 }
                 _ => (),
@@ -121,39 +127,39 @@ impl SearchStore {
         filters: &[SearchFilter],
     ) -> trc::Result<RoaringBitmap> {
         match self {
-            SearchStore::Store(store) => match store {
-                #[cfg(feature = "postgres")]
-                Store::PostgreSQL(store) => store.query(index, filters).await,
-                #[cfg(feature = "mysql")]
-                Store::MySQL(store) => store.query(index, filters).await,
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(store) => store.query(index, filters).await,
-                // SPDX-SnippetEnd
-                _ => unreachable!(),
-            },
+            #[cfg(feature = "postgres")]
+            SearchStore::PostgreSQL(store) => store.query(index, filters).await,
+            #[cfg(feature = "mysql")]
+            SearchStore::MySQL(store) => store.query(index, filters).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            SearchStore::SQLReadReplica(store) => store.query(index, filters).await,
+            // SPDX-SnippetEnd
             SearchStore::ElasticSearch(store) => store.query(index, filters).await,
             SearchStore::MeiliSearch(store) => store.query(index, filters).await,
+            SearchStore::Store(_) => unreachable!(),
         }
     }
 
     pub async fn query_global(&self, query: SearchQuery) -> trc::Result<RoaringTreemap> {
+        debug_assert!(
+            query.mask.is_empty() && query.comparators.is_empty(),
+            "global queries ignore mask and comparators"
+        );
         match self {
-            SearchStore::Store(store) => match store {
-                #[cfg(feature = "postgres")]
-                Store::PostgreSQL(store) => store.query(query.index, &query.filters).await,
-                #[cfg(feature = "mysql")]
-                Store::MySQL(store) => store.query(query.index, &query.filters).await,
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(store) => store.query(query.index, &query.filters).await,
-                // SPDX-SnippetEnd
-                store => store.query_global(query).await,
-            },
+            #[cfg(feature = "postgres")]
+            SearchStore::PostgreSQL(store) => store.query(query.index, &query.filters).await,
+            #[cfg(feature = "mysql")]
+            SearchStore::MySQL(store) => store.query(query.index, &query.filters).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            SearchStore::SQLReadReplica(store) => store.query(query.index, &query.filters).await,
+            // SPDX-SnippetEnd
+            SearchStore::Store(store) => store.query_global(query).await,
             SearchStore::ElasticSearch(store) => store.query(query.index, &query.filters).await,
             SearchStore::MeiliSearch(store) => store.query(query.index, &query.filters).await,
         }
@@ -161,39 +167,38 @@ impl SearchStore {
 
     pub async fn index(&self, documents: Vec<IndexDocument>) -> trc::Result<()> {
         match self {
-            SearchStore::Store(store) => match store {
-                #[cfg(feature = "postgres")]
-                Store::PostgreSQL(store) => store.index(documents).await,
-                #[cfg(feature = "mysql")]
-                Store::MySQL(store) => store.index(documents).await,
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(store) => store.index(documents).await,
-                // SPDX-SnippetEnd
-                store => store.index(documents).await,
-            },
+            #[cfg(feature = "postgres")]
+            SearchStore::PostgreSQL(store) => store.index(documents).await,
+            #[cfg(feature = "mysql")]
+            SearchStore::MySQL(store) => store.index(documents).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            SearchStore::SQLReadReplica(store) => store.index(documents).await,
+            // SPDX-SnippetEnd
+            SearchStore::Store(store) => store.index(documents).await,
             SearchStore::ElasticSearch(store) => store.index(documents).await,
             SearchStore::MeiliSearch(store) => store.index(documents).await,
         }
     }
 
     pub async fn unindex(&self, query: SearchQuery) -> trc::Result<u64> {
+        if let Some(store) = self.internal_fts() {
+            return store.unindex(query).await.map(|_| 0);
+        }
         match self {
-            SearchStore::Store(store) => match store {
-                #[cfg(feature = "postgres")]
-                Store::PostgreSQL(store) => store.unindex(query).await,
-                #[cfg(feature = "mysql")]
-                Store::MySQL(store) => store.unindex(query).await,
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(store) => store.unindex(query).await,
-                // SPDX-SnippetEnd
-                store => store.unindex(query).await.map(|_| 0),
-            },
+            #[cfg(feature = "postgres")]
+            SearchStore::PostgreSQL(store) => store.unindex(query).await,
+            #[cfg(feature = "mysql")]
+            SearchStore::MySQL(store) => store.unindex(query).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            SearchStore::SQLReadReplica(store) => store.unindex(query).await,
+            // SPDX-SnippetEnd
+            SearchStore::Store(store) => store.unindex(query).await.map(|_| 0),
             SearchStore::ElasticSearch(store) => store.unindex(query).await,
             SearchStore::MeiliSearch(store) => store.unindex(query).await,
         }
@@ -201,19 +206,7 @@ impl SearchStore {
 
     pub fn internal_fts(&self) -> Option<&Store> {
         match self {
-            SearchStore::Store(store) => match store {
-                #[cfg(feature = "postgres")]
-                Store::PostgreSQL(_) => None,
-                #[cfg(feature = "mysql")]
-                Store::MySQL(_) => None,
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(_) => None,
-                // SPDX-SnippetEnd
-                store => Some(store),
-            },
+            SearchStore::Store(store) => Some(store),
             _ => None,
         }
     }
@@ -221,7 +214,7 @@ impl SearchStore {
     pub fn is_mysql(&self) -> bool {
         match self {
             #[cfg(feature = "mysql")]
-            SearchStore::Store(Store::MySQL(_)) => true,
+            SearchStore::MySQL(_) => true,
             _ => false,
         }
     }
@@ -229,7 +222,7 @@ impl SearchStore {
     pub fn is_postgres(&self) -> bool {
         match self {
             #[cfg(feature = "postgres")]
-            SearchStore::Store(Store::PostgreSQL(_)) => true,
+            SearchStore::PostgreSQL(_) => true,
             _ => false,
         }
     }
@@ -244,25 +237,23 @@ impl SearchStore {
 
     pub async fn create_indexes(&self) -> trc::Result<()> {
         match self {
-            SearchStore::Store(store) => match store {
+            #[cfg(feature = "postgres")]
+            SearchStore::PostgreSQL(store) => store.create_search_tables().await,
+            #[cfg(feature = "mysql")]
+            SearchStore::MySQL(store) => store.create_search_tables().await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            SearchStore::SQLReadReplica(store) => match store.primary_store() {
                 #[cfg(feature = "postgres")]
-                Store::PostgreSQL(store) => store.create_search_tables().await,
+                Store::PostgreSQL(primary) => primary.create_search_tables().await,
                 #[cfg(feature = "mysql")]
-                Store::MySQL(store) => store.create_search_tables().await,
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-                Store::SQLReadReplica(store) => match store.primary_store() {
-                    #[cfg(feature = "postgres")]
-                    Store::PostgreSQL(primary) => primary.create_search_tables().await,
-                    #[cfg(feature = "mysql")]
-                    Store::MySQL(primary) => primary.create_search_tables().await,
-                    _ => Ok(()),
-                },
-                // SPDX-SnippetEnd
+                Store::MySQL(primary) => primary.create_search_tables().await,
                 _ => Ok(()),
             },
+            // SPDX-SnippetEnd
+            SearchStore::Store(_) => Ok(()),
             SearchStore::ElasticSearch(store) => store.create_indexes().await,
             SearchStore::MeiliSearch(store) => store.create_indexes().await,
         }
@@ -271,6 +262,9 @@ impl SearchStore {
 
 impl SearchFilter {
     pub fn is_external(&self) -> bool {
-        matches!(self, SearchFilter::Text { .. })
+        matches!(
+            self,
+            SearchFilter::Text { .. } | SearchFilter::KeyValue { .. }
+        )
     }
 }

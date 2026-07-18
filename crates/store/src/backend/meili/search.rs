@@ -87,6 +87,10 @@ impl MeiliSearchStore {
 
         if !filter_group.q.is_empty() {
             body.insert("q".to_string(), Value::String(filter_group.q));
+            body.insert(
+                "matchingStrategy".to_string(),
+                Value::String("all".to_string()),
+            );
 
             if !filter_group.search_on.is_empty() {
                 body.insert(
@@ -187,7 +191,7 @@ fn build_query(filters: &[SearchFilter]) -> FilterGroup {
                 if field.is_text() {
                     search_on.insert(field.field_name());
 
-                    if op == &TextMatch::Phrase {
+                    if op == &TextMatch::Exact {
                         queries.insert(format!("{value:?}"));
                     } else {
                         for token in value.split_whitespace() {

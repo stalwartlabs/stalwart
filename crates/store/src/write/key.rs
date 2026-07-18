@@ -15,9 +15,7 @@ use crate::{
     SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_PK, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
     SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
     SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
-    write::{
-        BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexId, SearchIndexType,
-    },
+    write::{BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexClass},
 };
 use registry::schema::prelude::ObjectType;
 use std::convert::TryInto;
@@ -368,58 +366,59 @@ impl ValueClass {
                 .write(*notify_account_id)
                 .write(u8::from(SyncCollection::ShareNotification))
                 .write(*notification_id),
-            ValueClass::SearchIndex(index) => match &index.typ {
-                SearchIndexType::Term { field, hash } => {
-                    let class = index.index.as_u8();
-                    match &index.id {
-                        SearchIndexId::Account {
-                            account_id,
-                            document_id,
-                        } => serializer
-                            .write(class)
-                            .write(*account_id)
-                            .write(hash.as_key())
-                            .write(*field)
-                            .write(*document_id),
-                        SearchIndexId::Global { id } => serializer
-                            .write(class)
-                            .write(hash.as_key())
-                            .write(*field)
-                            .write(*id),
-                    }
-                }
-                SearchIndexType::Index { field } => {
-                    let class = index.index.as_u8() | 1 << 6;
-                    match &index.id {
-                        SearchIndexId::Account {
-                            account_id,
-                            document_id,
-                        } => serializer
-                            .write(class)
-                            .write(*account_id)
-                            .write(field.field_id)
-                            .write(field.data.as_slice())
-                            .write(*document_id),
-                        SearchIndexId::Global { id } => serializer
-                            .write(class)
-                            .write(field.field_id)
-                            .write(field.data.as_slice())
-                            .write(*id),
-                    }
-                }
-                SearchIndexType::Document => {
-                    let class = index.index.as_u8() | 2 << 6;
-                    match &index.id {
-                        SearchIndexId::Account {
-                            account_id,
-                            document_id,
-                        } => serializer
-                            .write(class)
-                            .write(*account_id)
-                            .write(*document_id),
-                        SearchIndexId::Global { id } => serializer.write(class).write(*id),
-                    }
-                }
+            ValueClass::SearchIndex(search) => match search {
+                SearchIndexClass::Term {
+                    index,
+                    account_id,
+                    field,
+                    term,
+                    first_document_id,
+                } => serializer
+                    .write(SearchIndexClass::TYPE_TERM | index.to_u8())
+                    .write(*account_id)
+                    .write(*field)
+                    .write(term.as_key())
+                    .write(term.len() as u8)
+                    .write(*first_document_id),
+                SearchIndexClass::Wal {
+                    index,
+                    account_id,
+                    id,
+                } => serializer
+                    .write(SearchIndexClass::TYPE_WAL | index.to_u8())
+                    .write(*account_id)
+                    .write(*id),
+                SearchIndexClass::Document {
+                    index,
+                    account_id,
+                    document_id,
+                } => serializer
+                    .write(SearchIndexClass::TYPE_DOCUMENT | index.to_u8())
+                    .write(*account_id)
+                    .write(*document_id),
+                SearchIndexClass::Meta { index, account_id } => serializer
+                    .write(SearchIndexClass::TYPE_META | index.to_u8())
+                    .write(*account_id),
+                SearchIndexClass::GlobalTerm {
+                    index,
+                    field,
+                    term,
+                    first_document_id,
+                } => serializer
+                    .write(SearchIndexClass::TYPE_GLOBAL_TERM | index.to_u8())
+                    .write(*field)
+                    .write(term.as_key())
+                    .write(term.len() as u8)
+                    .write(*first_document_id),
+                SearchIndexClass::GlobalWal { index, id } => serializer
+                    .write(SearchIndexClass::TYPE_GLOBAL_WAL | index.to_u8())
+                    .write(*id),
+                SearchIndexClass::GlobalDocument { index, document_id } => serializer
+                    .write(SearchIndexClass::TYPE_GLOBAL_DOCUMENT | index.to_u8())
+                    .write(*document_id),
+                SearchIndexClass::GlobalMeta { index, kind } => serializer
+                    .write(SearchIndexClass::TYPE_GLOBAL_META | index.to_u8())
+                    .write(*kind),
             },
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
         }
@@ -530,13 +529,15 @@ impl ValueClass {
             ValueClass::ChangeId => U32_LEN,
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
             ValueClass::NodeId(_) => (U16_LEN * 3) + 1,
-            ValueClass::SearchIndex(v) => match &v.typ {
-                SearchIndexType::Term { hash, .. } => U64_LEN + hash.key_len() + 2,
-                SearchIndexType::Index { field, .. } => 1 + field.data.len() + U64_LEN,
-                SearchIndexType::Document => match &v.id {
-                    SearchIndexId::Account { .. } => 1 + U32_LEN * 2,
-                    SearchIndexId::Global { .. } => 1 + U64_LEN,
-                },
+            ValueClass::SearchIndex(v) => match v {
+                SearchIndexClass::Term { term, .. } => U32_LEN * 2 + term.key_len() + 3,
+                SearchIndexClass::Wal { .. } => U32_LEN + U64_LEN + 1,
+                SearchIndexClass::Document { .. } => U32_LEN * 2 + 1,
+                SearchIndexClass::Meta { .. } => U32_LEN + 1,
+                SearchIndexClass::GlobalTerm { term, .. } => U64_LEN + term.key_len() + 3,
+                SearchIndexClass::GlobalWal { .. } => U64_LEN + 1,
+                SearchIndexClass::GlobalDocument { .. } => U64_LEN + 1,
+                SearchIndexClass::GlobalMeta { .. } => 2,
             },
             ValueClass::Any(v) => v.key.len(),
         }
@@ -635,6 +636,34 @@ impl From<RegistryClass> for ValueClass {
 impl From<BlobOp> for ValueClass {
     fn from(value: BlobOp) -> Self {
         ValueClass::Blob(value)
+    }
+}
+
+impl SearchIndexClass {
+    pub const TYPE_WAL: u8 = 0 << 5;
+    pub const TYPE_TERM: u8 = 1 << 5;
+    pub const TYPE_DOCUMENT: u8 = 2 << 5;
+    pub const TYPE_META: u8 = 3 << 5;
+    pub const TYPE_GLOBAL_WAL: u8 = 4 << 5;
+    pub const TYPE_GLOBAL_TERM: u8 = 5 << 5;
+    pub const TYPE_GLOBAL_DOCUMENT: u8 = 6 << 5;
+    pub const TYPE_GLOBAL_META: u8 = 7 << 5;
+}
+
+impl From<SearchIndexClass> for ValueClass {
+    fn from(value: SearchIndexClass) -> Self {
+        ValueClass::SearchIndex(value)
+    }
+}
+
+impl From<SearchIndexClass> for ValueKey<ValueClass> {
+    fn from(value: SearchIndexClass) -> Self {
+        ValueKey {
+            account_id: 0,
+            collection: 0,
+            document_id: 0,
+            class: ValueClass::SearchIndex(value),
+        }
     }
 }
 

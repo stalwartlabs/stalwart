@@ -176,6 +176,36 @@ async fn build_search_store(typ: SearchStoreType, _path: &str) -> SearchStore {
                 ..Default::default()
             })
         }
+        SearchStoreType::PostgreSql => {
+            crate::utils::containers::ensure_postgres().await;
+            SearchStore::PostgreSql(PostgreSqlStore {
+                host: "localhost".into(),
+                port: 5432,
+                auth_username: "stalwart".to_string().into(),
+                auth_secret: SecretKeyOptional::Value(SecretKeyValue {
+                    secret: "stalwart".into(),
+                }),
+                database: "stalwart".into(),
+                use_tls: false,
+                allow_invalid_certs: true,
+                ..Default::default()
+            })
+        }
+        SearchStoreType::MySql => {
+            crate::utils::containers::ensure_mysql().await;
+            SearchStore::MySql(MySqlStore {
+                host: "localhost".into(),
+                port: 3307,
+                auth_username: "root".to_string().into(),
+                auth_secret: SecretKeyOptional::Value(SecretKeyValue {
+                    secret: "password".into(),
+                }),
+                database: "stalwart".into(),
+                use_tls: false,
+                allow_invalid_certs: true,
+                ..Default::default()
+            })
+        }
         _ => unreachable!(),
     }
 }

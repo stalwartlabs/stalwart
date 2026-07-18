@@ -140,7 +140,7 @@ impl SearchFilter {
     pub fn text_eq(field: impl Into<SearchField>, value: impl Into<String>) -> Self {
         SearchFilter::Text {
             field: field.into(),
-            op: TextMatch::Keyword,
+            op: TextMatch::Exact,
             value: value.into(),
             language: Language::None,
         }
@@ -199,11 +199,11 @@ impl SearchFilter {
             .and_then(|t| t.strip_suffix('"'))
             .or_else(|| text.strip_prefix('\'').and_then(|t| t.strip_suffix('\'')))
         {
-            (TextMatch::Keyword, text.to_string())
+            (TextMatch::Exact, text.to_string())
         } else if let Some(text) = text.strip_suffix('*') {
             (TextMatch::Prefix, text.trim().to_string())
         } else {
-            (TextMatch::Phrase, text)
+            (TextMatch::Standard, text)
         };
 
         SearchFilter::Text {

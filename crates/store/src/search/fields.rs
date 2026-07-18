@@ -39,25 +39,17 @@ impl SearchableField for EmailSearchField {
     fn is_indexed(&self) -> bool {
         #[cfg(not(feature = "test_mode"))]
         {
-            matches!(
-                self,
-                EmailSearchField::From | EmailSearchField::To | EmailSearchField::Subject
-            )
+            false
         }
 
         #[cfg(feature = "test_mode")]
         {
             matches!(
                 self,
-                EmailSearchField::From
-                    | EmailSearchField::To
-                    | EmailSearchField::Subject
-                    | EmailSearchField::_ReceivedAt
+                EmailSearchField::_ReceivedAt
                     | EmailSearchField::_SentAt
                     | EmailSearchField::_Size
                     | EmailSearchField::_HasAttachment
-                    | EmailSearchField::Bcc
-                    | EmailSearchField::Cc
             )
         }
     }
@@ -100,7 +92,7 @@ impl SearchableField for CalendarSearchField {
     }
 
     fn is_text(&self) -> bool {
-        !self.is_indexed()
+        true
     }
 }
 
@@ -133,7 +125,7 @@ impl SearchableField for ContactSearchField {
     }
 
     fn is_text(&self) -> bool {
-        !self.is_indexed()
+        !matches!(self, ContactSearchField::Kind)
     }
 }
 

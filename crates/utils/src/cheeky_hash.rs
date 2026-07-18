@@ -58,6 +58,23 @@ impl CheekyHash {
         &self.0[..HASH_SIZE]
     }
 
+    pub fn from_key_bytes(key: &[u8], len: u8) -> Option<Self> {
+        if key.len() == (len as usize).min(HASH_SIZE) {
+            let mut hash = [0u8; HASH_SIZE + 1];
+            hash[..key.len()].copy_from_slice(key);
+            hash[HASH_SIZE] = len;
+            Some(CheekyHash(hash))
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.0[HASH_SIZE] as usize
+    }
+
     #[inline(always)]
     fn as_u128(&self) -> u128 {
         u128::from_be_bytes(self.as_payload().try_into().unwrap())

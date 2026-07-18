@@ -107,6 +107,7 @@ impl PostgresStore {
             SUBSPACE_DIRECTORY,
             SUBSPACE_TELEMETRY_SPAN,
             SUBSPACE_TELEMETRY_METRIC,
+            SUBSPACE_SEARCH_INDEX,
         ] {
             let table = char::from(table);
             conn.execute(

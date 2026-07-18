@@ -106,6 +106,54 @@ impl Store {
         result
     }
 
+    pub async fn iterate_many<T: Key>(
+        &self,
+        ranges: Vec<IterateParams<T>>,
+        cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
+    ) -> trc::Result<()> {
+        debug_assert!(ranges.iter().all(|params| {
+            params.ascending
+                && !params.first
+                && params.begin.subspace() == ranges[0].begin.subspace()
+                && params.end.subspace() == ranges[0].begin.subspace()
+        }));
+        if ranges.is_empty() {
+            return Ok(());
+        }
+        let start_time = Instant::now();
+        let total = ranges.len();
+
+        let result = match self {
+            #[cfg(feature = "sqlite")]
+            Self::SQLite(store) => store.iterate_many(ranges, cb).await,
+            #[cfg(feature = "foundation")]
+            Self::FoundationDb(store) => store.iterate_many(ranges, cb).await,
+            #[cfg(feature = "postgres")]
+            Self::PostgreSQL(store) => store.iterate_many(ranges, cb).await,
+            #[cfg(feature = "mysql")]
+            Self::MySQL(store) => store.iterate_many(ranges, cb).await,
+            #[cfg(feature = "rocks")]
+            Self::RocksDb(store) => store.iterate_many(ranges, cb).await,
+            Self::Ephemeral(store) => store.iterate_many(ranges, cb).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            Self::SQLReadReplica(store) => store.iterate_many(ranges, cb).await,
+            // SPDX-SnippetEnd
+            Self::None => Err(trc::StoreEvent::NotConfigured.into()),
+        }
+        .caused_by(trc::location!());
+
+        trc::event!(
+            Store(StoreEvent::DataIterate),
+            Elapsed = start_time.elapsed(),
+            Total = total,
+        );
+
+        result
+    }
+
     pub async fn get_counter(
         &self,
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,

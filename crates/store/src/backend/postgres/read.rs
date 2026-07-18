@@ -10,6 +10,7 @@ use crate::{
     write::ValueClass,
 };
 use futures::{TryStreamExt, pin_mut};
+use std::fmt::Write;
 
 impl PostgresStore {
     pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -106,6 +107,84 @@ impl PostgresStore {
                     break;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn iterate_many<T: Key>(
+        &self,
+        ranges: Vec<IterateParams<T>>,
+        mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
+    ) -> trc::Result<()> {
+        const MAX_RANGES_PER_STMT: usize = 64;
+
+        let mut conn = self.conn_pool.get().await.map_err(into_pool_error)?;
+        let table = char::from(ranges[0].begin.subspace());
+        let bounds = ranges
+            .iter()
+            .map(|params| (params.begin.serialize(0), params.end.serialize(0)))
+            .collect::<Vec<_>>();
+
+        type RangeCallback<'y> =
+            &'y mut (dyn for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Send + Sync);
+
+        async fn emit(rows: tokio_postgres::RowStream, cb: RangeCallback<'_>) -> trc::Result<bool> {
+            pin_mut!(rows);
+            while let Some(row) = rows.try_next().await.map_err(into_error)? {
+                let key = row.try_get::<_, &[u8]>(0).map_err(into_error)?;
+                let value = row.try_get::<_, &[u8]>(1).map_err(into_error)?;
+                if !cb(key, value)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+
+        let build_query = |chunk: &[(Vec<u8>, Vec<u8>)]| {
+            let mut query = String::with_capacity(chunk.len() * 28 + 40);
+            let _ = write!(query, "SELECT k, v FROM {table} WHERE ");
+            for i in 0..chunk.len() {
+                if i > 0 {
+                    query.push_str(" OR ");
+                }
+                let _ = write!(query, "(k >= ${} AND k <= ${})", i * 2 + 1, i * 2 + 2);
+            }
+            query.push_str(" ORDER BY k ASC");
+            query
+        };
+
+        if bounds.len() <= MAX_RANGES_PER_STMT {
+            let s = conn
+                .prepare_cached(&build_query(&bounds))
+                .await
+                .map_err(into_error)?;
+            let params = bounds
+                .iter()
+                .flat_map(|(begin, end)| [begin, end])
+                .collect::<Vec<_>>();
+            let rows = conn.query_raw(&s, params).await.map_err(into_error)?;
+            emit(rows, &mut cb).await?;
+        } else {
+            let trx = conn.transaction().await.map_err(into_error)?;
+            trx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", &[])
+                .await
+                .map_err(into_error)?;
+            for chunk in bounds.chunks(MAX_RANGES_PER_STMT) {
+                let s = trx
+                    .prepare_cached(&build_query(chunk))
+                    .await
+                    .map_err(into_error)?;
+                let params = chunk
+                    .iter()
+                    .flat_map(|(begin, end)| [begin, end])
+                    .collect::<Vec<_>>();
+                let rows = trx.query_raw(&s, params).await.map_err(into_error)?;
+                if !emit(rows, &mut cb).await? {
+                    break;
+                }
+            }
+            trx.commit().await.map_err(into_error)?;
         }
 
         Ok(())

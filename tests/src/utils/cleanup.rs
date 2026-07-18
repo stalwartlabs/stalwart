@@ -68,7 +68,19 @@ pub async fn store_destroy(store: &Store) {
 pub async fn search_store_destroy(store: &SearchStore) {
     match &store {
         SearchStore::Store(store) => {
-            store_destroy_sql_indexes(store).await;
+            search_subspace_destroy(store).await;
+        }
+        #[cfg(feature = "postgres")]
+        SearchStore::PostgreSQL(store) => {
+            store_destroy_sql_indexes(&Store::PostgreSQL(store.clone())).await;
+        }
+        #[cfg(feature = "mysql")]
+        SearchStore::MySQL(store) => {
+            store_destroy_sql_indexes(&Store::MySQL(store.clone())).await;
+        }
+        #[cfg(any(feature = "postgres", feature = "mysql"))]
+        SearchStore::SQLReadReplica(store) => {
+            store_destroy_sql_indexes(store.primary_store()).await;
         }
         SearchStore::ElasticSearch(store) => {
             if let Err(err) = store.drop_indexes().await {
@@ -83,6 +95,22 @@ pub async fn search_store_destroy(store: &SearchStore) {
             store.create_indexes().await.unwrap();
         }
     }
+}
+
+async fn search_subspace_destroy(store: &Store) {
+    store
+        .delete_range(
+            AnyKey {
+                subspace: SUBSPACE_SEARCH_INDEX,
+                key: vec![0u8],
+            },
+            AnyKey {
+                subspace: SUBSPACE_SEARCH_INDEX,
+                key: vec![u8::MAX; 32],
+            },
+        )
+        .await
+        .unwrap();
 }
 
 #[allow(unused_variables)]

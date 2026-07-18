@@ -64,6 +64,32 @@ impl EphemeralStore {
         Ok(())
     }
 
+    pub(crate) async fn iterate_many<T: Key>(
+        &self,
+        ranges: Vec<IterateParams<T>>,
+        mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
+    ) -> trc::Result<()> {
+        let subspace = ranges[0].begin.subspace();
+        let state = self.state.read();
+        let Some(map) = state.subspaces.get(&subspace) else {
+            return Ok(());
+        };
+
+        'outer: for params in ranges {
+            let begin = params.begin.serialize(0);
+            let end = params.end.serialize(0);
+            if begin > end {
+                continue;
+            }
+            for (k, v) in map.range(begin..=end) {
+                if !cb(k.as_slice(), v.as_slice())? {
+                    break 'outer;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn get_counter(
         &self,
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,

@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+pub(crate) mod account;
+pub(crate) mod codec;
 pub mod document;
 pub mod fields;
+pub(crate) mod global;
 pub mod index;
 pub mod local;
-pub mod query;
+pub mod maintain;
 pub mod split;
+pub(crate) mod tokenize;
 
 use crate::write::SearchIndex;
 use ahash::AHashMap;
@@ -134,9 +138,9 @@ pub enum SearchFilter {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TextMatch {
-    Keyword,
+    Exact,
+    Standard,
     Prefix,
-    Phrase,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -283,19 +287,6 @@ impl SearchIndex {
             SearchIndex::Contacts => "st_contact",
             SearchIndex::File => "st_file",
             SearchIndex::Tracing => "st_tracing",
-            SearchIndex::InMemory => unreachable!(),
-        }
-    }
-}
-
-impl SearchIndex {
-    pub(crate) fn as_u8(&self) -> u8 {
-        match self {
-            SearchIndex::Email => 0,
-            SearchIndex::Calendar => 1,
-            SearchIndex::Contacts => 2,
-            SearchIndex::File => 3,
-            SearchIndex::Tracing => 4,
             SearchIndex::InMemory => unreachable!(),
         }
     }

@@ -169,15 +169,15 @@ impl PostgresStore {
                         query.push(' ');
                         let language = pg_lang(language).unwrap_or("simple");
                         match op {
-                            TextMatch::Keyword => {
-                                let _ =
-                                    write!(query, "@@ plainto_tsquery('{language}', ${value_pos})");
-                            }
-                            TextMatch::Phrase => {
+                            TextMatch::Exact => {
                                 let _ = write!(
                                     query,
                                     "@@ phraseto_tsquery('{language}', ${value_pos})"
                                 );
+                            }
+                            TextMatch::Standard => {
+                                let _ =
+                                    write!(query, "@@ plainto_tsquery('{language}', ${value_pos})");
                             }
                             TextMatch::Prefix => {
                                 let _ = write!(

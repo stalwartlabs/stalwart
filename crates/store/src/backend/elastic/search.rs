@@ -170,14 +170,17 @@ fn build_query(filters: &[SearchFilter]) -> Value {
             } => {
                 if field.is_text() {
                     match op {
-                        TextMatch::Keyword => {
-                            conditions.push(json!({
-                                "match": { field.field_name(): value }
-                            }));
-                        }
-                        TextMatch::Phrase => {
+                        TextMatch::Exact => {
                             conditions.push(json!({
                                 "match_phrase": { field.field_name(): value }
+                            }));
+                        }
+                        TextMatch::Standard => {
+                            conditions.push(json!({
+                                "match": { field.field_name(): {
+                                    "query": value,
+                                    "operator": "and"
+                                } }
                             }));
                         }
                         TextMatch::Prefix => {
@@ -216,15 +219,19 @@ fn build_query(filters: &[SearchFilter]) -> Value {
                 conditions.push(cond);
             }
             SearchFilter::Integer { field, op, value } => {
+                let clamped = (*value).min(i64::MAX as u64);
                 let cond = match op {
                     Ordering::Equal => json!({
-                        "term": { field.field_name(): value }
+                        "term": { field.field_name(): clamped }
+                    }),
+                    Ordering::Less if *value > clamped => json!({
+                        "range": { field.field_name(): { "lte": clamped } }
                     }),
                     Ordering::Less => json!({
-                        "range": { field.field_name(): { "lt": value } }
+                        "range": { field.field_name(): { "lt": clamped } }
                     }),
                     Ordering::Greater => json!({
-                        "range": { field.field_name(): { "gt": value } }
+                        "range": { field.field_name(): { "gt": clamped } }
                     }),
                 };
 

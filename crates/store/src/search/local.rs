@@ -141,12 +141,15 @@ impl SearchQuery {
 
             // And short-circuit
             if matches!(state.op, SearchFilter::And) && state.bm.as_ref().unwrap().is_empty() {
+                let mut depth = 0u32;
                 while let Some(filter) = filters.peek() {
-                    if matches!(filter, SearchFilter::End) {
-                        break;
-                    } else {
-                        filters.next();
+                    match filter {
+                        SearchFilter::And | SearchFilter::Or | SearchFilter::Not => depth += 1,
+                        SearchFilter::End if depth == 0 => break,
+                        SearchFilter::End => depth -= 1,
+                        _ => {}
                     }
+                    filters.next();
                 }
             }
         }

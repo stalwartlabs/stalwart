@@ -12,7 +12,8 @@ use crate::{
     backend::deserialize_i64_le,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        RegistryClass, TaskQueueClass, TelemetryClass, ValueClass, ValueOp, key::KeySerializer,
+        RegistryClass, SearchIndexClass, TaskQueueClass, TelemetryClass, ValueClass, ValueOp,
+        key::KeySerializer,
     },
     *,
 };
@@ -84,6 +85,21 @@ impl FdbStore {
 
                         match op {
                             ValueOp::Set(value) => {
+                                if matches!(
+                                    class,
+                                    ValueClass::SearchIndex(SearchIndexClass::Document { .. })
+                                ) {
+                                    trx.clear_range(
+                                        &KeySerializer::new(key.len() + 1)
+                                            .write(key.as_slice())
+                                            .write(0u8)
+                                            .finalize(),
+                                        &KeySerializer::new(key.len() + 1)
+                                            .write(key.as_slice())
+                                            .write(u8::MAX)
+                                            .finalize(),
+                                    );
+                                }
                                 if !chunk_value(&trx, &mut key, value) {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
@@ -186,6 +202,9 @@ impl FdbStore {
                                         | ValueClass::Telemetry(TelemetryClass::Metric { .. })
                                         | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
                                         | ValueClass::InMemory(_)
+                                        | ValueClass::SearchIndex(
+                                            SearchIndexClass::Document { .. }
+                                        )
                                 ) {
                                     // Clear range for potentially chunked values to avoid leaving orphaned chunks
                                     trx.clear_range(

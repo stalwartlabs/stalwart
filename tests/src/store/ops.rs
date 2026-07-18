@@ -18,6 +18,206 @@ use types::collection::SyncCollection;
 // FDB max value
 const MAX_VALUE_SIZE: usize = 100000;
 
+fn registry_item_key(object_id: u16, item_id: u64) -> ValueKey<ValueClass> {
+    use store::write::RegistryClass;
+    ValueKey {
+        account_id: 0,
+        collection: 0,
+        document_id: 0,
+        class: ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
+    }
+}
+
+fn parse_registry_item_key(key: &[u8]) -> (u16, u64) {
+    (
+        u16::from_be_bytes(key[0..2].try_into().unwrap()),
+        u64::from_be_bytes(key[2..10].try_into().unwrap()),
+    )
+}
+
+async fn test_iterate_many(db: &store::Store) {
+    use store::IterateParams;
+    use store::write::RegistryClass;
+
+    println!("Running iterate_many tests...");
+    let ranges_spec: &[(u16, u64)] = &[(1010, 4), (1020, 1), (1030, 25), (1050, 3)];
+    let mut batch = BatchBuilder::new();
+    batch
+        .with_account_id(0)
+        .with_collection(Collection::Email)
+        .with_document(0);
+    for (object_id, count) in ranges_spec {
+        for item_id in 0..*count {
+            batch.set(
+                ValueClass::Registry(RegistryClass::Item {
+                    object_id: *object_id,
+                    item_id,
+                }),
+                format!("value{object_id}-{item_id}").into_bytes(),
+            );
+        }
+    }
+    for item_id in 0..130u64 {
+        batch.set(
+            ValueClass::Registry(RegistryClass::Item {
+                object_id: 1060,
+                item_id,
+            }),
+            format!("point{item_id}").into_bytes(),
+        );
+    }
+    batch.set(
+        ValueClass::Registry(RegistryClass::Item {
+            object_id: 1070,
+            item_id: 0,
+        }),
+        vec![b'x'; 250_000],
+    );
+    batch.set(
+        ValueClass::Registry(RegistryClass::Item {
+            object_id: 1070,
+            item_id: 1,
+        }),
+        b"small".to_vec(),
+    );
+    db.write(batch.build_all()).await.unwrap();
+
+    // Multi-range scan with an empty range in between, per-range order preserved
+    let ranges = [1010u16, 1015, 1020, 1030, 1050]
+        .iter()
+        .map(|object_id| {
+            IterateParams::new(
+                registry_item_key(*object_id, 0),
+                registry_item_key(*object_id, u64::MAX),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut results: Vec<(u16, u64, String)> = Vec::new();
+    db.iterate_many(ranges, |key, value| {
+        let (object_id, item_id) = parse_registry_item_key(key);
+        results.push((
+            object_id,
+            item_id,
+            String::from_utf8(value.to_vec()).unwrap(),
+        ));
+        Ok(true)
+    })
+    .await
+    .unwrap();
+
+    let mut last_per_range: AHashSet<(u16, u64)> = AHashSet::new();
+    let mut last_item: std::collections::HashMap<u16, u64> = std::collections::HashMap::new();
+    for (object_id, item_id, _) in &results {
+        if let Some(last) = last_item.get(object_id) {
+            assert!(
+                item_id > last,
+                "per-range order violated for object {object_id}: {item_id} after {last}"
+            );
+        }
+        last_item.insert(*object_id, *item_id);
+        assert!(
+            last_per_range.insert((*object_id, *item_id)),
+            "duplicate delivery for ({object_id}, {item_id})"
+        );
+    }
+    let mut sorted_results = results;
+    sorted_results.sort();
+    let mut expected = Vec::new();
+    for (object_id, count) in ranges_spec {
+        for item_id in 0..*count {
+            expected.push((*object_id, item_id, format!("value{object_id}-{item_id}")));
+        }
+    }
+    assert_eq!(sorted_results, expected);
+
+    // Early abort stops all ranges
+    let mut seen = 0;
+    db.iterate_many(
+        vec![
+            IterateParams::new(
+                registry_item_key(1010, 0),
+                registry_item_key(1010, u64::MAX),
+            ),
+            IterateParams::new(
+                registry_item_key(1030, 0),
+                registry_item_key(1030, u64::MAX),
+            ),
+        ],
+        |_, _| {
+            seen += 1;
+            Ok(seen < 3)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(seen, 3, "early abort did not stop iteration");
+
+    let mut inverted = 0;
+    db.iterate_many(
+        vec![IterateParams::new(
+            registry_item_key(1030, 10),
+            registry_item_key(1030, 0),
+        )],
+        |_, _| {
+            inverted += 1;
+            Ok(true)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(inverted, 0, "inverted range must yield no rows");
+
+    // Point ranges, exceeding the SQL per-statement range limit
+    let ranges = (0..130u64)
+        .map(|item_id| {
+            IterateParams::new(
+                registry_item_key(1060, item_id),
+                registry_item_key(1060, item_id),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut point_results = Vec::new();
+    db.iterate_many(ranges, |key, value| {
+        let (object_id, item_id) = parse_registry_item_key(key);
+        assert_eq!(object_id, 1060);
+        assert_eq!(value, format!("point{item_id}").as_bytes());
+        point_results.push(item_id);
+        Ok(true)
+    })
+    .await
+    .unwrap();
+    point_results.sort_unstable();
+    assert_eq!(point_results, (0..130u64).collect::<Vec<_>>());
+
+    // Large values are reassembled inside multi-range scans
+    let mut large_results = Vec::new();
+    db.iterate_many(
+        vec![IterateParams::new(
+            registry_item_key(1070, 0),
+            registry_item_key(1070, u64::MAX),
+        )],
+        |key, value| {
+            let (_, item_id) = parse_registry_item_key(key);
+            large_results.push((item_id, value.to_vec()));
+            Ok(true)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(large_results.len(), 2);
+    assert_eq!(large_results[0].0, 0);
+    assert_eq!(large_results[0].1, vec![b'x'; 250_000]);
+    assert_eq!(large_results[1].0, 1);
+    assert_eq!(large_results[1].1, b"small".to_vec());
+
+    db.delete_range(
+        registry_item_key(1000, 0),
+        registry_item_key(u16::MAX, u64::MAX),
+    )
+    .await
+    .unwrap();
+}
+
 #[cfg(feature = "foundationdb")]
 fn value_gen(chunks: impl IntoIterator<Item = (u8, usize)>) -> Vec<u8> {
     let mut value = Vec::new();
@@ -29,6 +229,8 @@ fn value_gen(chunks: impl IntoIterator<Item = (u8, usize)>) -> Vec<u8> {
 
 pub async fn test(test: &TestServer) {
     let db = test.server.store().clone();
+
+    test_iterate_many(&db).await;
 
     #[cfg(feature = "foundationdb")]
     if matches!(db, store::Store::FoundationDb(_)) {
@@ -302,7 +504,8 @@ pub async fn test(test: &TestServer) {
                     },
                 ),
                 |key, value| {
-                    assert_eq!(std::str::from_utf8(key).unwrap(), format!("key{n:10}"));
+                    let (_, item_id) = parse_registry_item_key(key);
+                    assert_eq!(item_id, n);
                     assert_eq!(std::str::from_utf8(value).unwrap(), format!("value{n:10}"));
                     n += 1;
                     if n % 10000 == 0 {
@@ -314,6 +517,53 @@ pub async fn test(test: &TestServer) {
             )
             .await
             .unwrap();
+            assert_eq!(n, 900000);
+
+            println!("Running FoundationDB slow iterate_many test...");
+            let third = 300000u64;
+            let ranges = vec![
+                store::IterateParams::new(registry_item_key(0, 0), registry_item_key(0, third - 1)),
+                store::IterateParams::new(
+                    registry_item_key(0, third),
+                    registry_item_key(0, 2 * third - 1),
+                ),
+                store::IterateParams::new(
+                    registry_item_key(0, 2 * third),
+                    registry_item_key(0, u64::MAX),
+                ),
+            ];
+            let mut buckets: Vec<HashSet<u64>> = vec![HashSet::new(); 3];
+            let mut delivered = 0u64;
+            let mut redelivered = 0u64;
+            db.iterate_many(ranges, |key, value| {
+                let (_, item_id) = parse_registry_item_key(key);
+                assert_eq!(
+                    std::str::from_utf8(value).unwrap(),
+                    format!("value{item_id:10}")
+                );
+                let bucket = (item_id / third).min(2) as usize;
+                if !buckets[bucket].insert(item_id) {
+                    redelivered += 1;
+                }
+                delivered += 1;
+                if delivered.is_multiple_of(100000) {
+                    println!("Delivered {delivered} rows ({redelivered} redelivered)");
+                    std::thread::sleep(std::time::Duration::from_millis(2000));
+                }
+                Ok(true)
+            })
+            .await
+            .unwrap();
+            for (bucket, seen) in buckets.iter().enumerate() {
+                assert_eq!(
+                    seen.len() as u64,
+                    third,
+                    "bucket {bucket} is missing rows after retries"
+                );
+            }
+            println!(
+                "Slow iterate_many delivered {delivered} rows, {redelivered} redelivered after retries"
+            );
 
             // Delete 100 keys
             let mut batch = BatchBuilder::new();

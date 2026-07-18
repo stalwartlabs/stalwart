@@ -145,8 +145,8 @@ fn build_filter(query: &mut String, filters: &[SearchFilter]) -> Vec<Value> {
 
                 if field.is_text() {
                     let text_query = match op {
-                        TextMatch::Phrase => format!("{value:?}"),
-                        TextMatch::Keyword => {
+                        TextMatch::Exact => format!("{value:?}"),
+                        TextMatch::Standard => {
                             let mut text_query = String::with_capacity(value.len() + 1);
                             for item in WordTokenizer::new(value, MAX_TOKEN_LENGTH) {
                                 if !text_query.is_empty() {

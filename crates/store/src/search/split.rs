@@ -42,7 +42,9 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
             } => {
                 account_id = value;
             }
-            SearchFilter::Text { .. } | SearchFilter::KeyValue { .. } => {
+            SearchFilter::Text { .. }
+            | SearchFilter::KeyValue { .. }
+            | SearchFilter::Integer { .. } => {
                 operators.entry(op_stack.len()).or_default().push(filter);
             }
             SearchFilter::DocumentSet(docs) => match document_sets.entry(op_stack.len()) {
@@ -57,9 +59,6 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
                     entry.insert(docs);
                 }
             },
-            SearchFilter::Integer { .. } => {
-                unreachable!("Id filters should have been handled earlier");
-            }
         }
     }
 
@@ -618,7 +617,7 @@ mod tests {
     fn other_op(value: &str) -> SearchFilter {
         SearchFilter::Text {
             field: SearchField::DocumentId,
-            op: TextMatch::Keyword,
+            op: TextMatch::Exact,
             value: value.to_string(),
             language: Language::None,
         }
@@ -663,7 +662,7 @@ mod tests {
             }
             SearchFilter::Text {
                 field: SearchField::DocumentId,
-                op: TextMatch::Keyword,
+                op: TextMatch::Exact,
                 value,
                 ..
             } => {
