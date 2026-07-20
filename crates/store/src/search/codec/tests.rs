@@ -28,7 +28,7 @@ fn positions_roundtrip() {
         (0..MAX_TERM_POSITIONS as u32).map(|n| n * 3).collect(),
     ] {
         let mut buf = Vec::new();
-        encode_positions(&positions, &mut buf);
+        push_positions(&positions, &mut buf);
         let mut reader = Reader::new(&buf);
         let payload = reader.payload().unwrap();
         assert!(reader.is_empty());
@@ -123,7 +123,7 @@ fn wal_writer_split_roundtrip() {
             writer.push_entry(|buf| {
                 buf.push(field);
                 push_term(buf, &term);
-                encode_positions(&positions, buf);
+                push_positions(&positions, buf);
             });
             let mut payload = Vec::new();
             encode_positions(&positions, &mut payload);
@@ -323,7 +323,7 @@ fn global_key_roundtrips() {
 fn corrupted_input_is_rejected() {
     let mut decoded = Vec::new();
     assert_eq!(decode_positions(&[0x80], &mut decoded), None);
-    assert_eq!(decode_positions(&[5, 1, 1], &mut decoded), None);
+    assert_eq!(decode_positions(&[1, 1, 0x80], &mut decoded), None);
 
     assert_eq!(walk_chunk(0u32, &[0, 200, 1], |_, _| true), None);
     assert_eq!(walk_chunk(0u64, &[0x80], |_, _| true), None);

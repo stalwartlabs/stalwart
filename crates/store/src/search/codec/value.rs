@@ -32,7 +32,7 @@ impl<Id: SearchDocId> ChunkBuilder<Id> {
             Id::write_delta(&mut self.buf, document_id.delta_since(self.prev));
         }
         self.prev = document_id;
-        self.buf.extend_from_slice(payload);
+        Id::write_payload(&mut self.buf, payload);
         if self.buf.len() >= CHUNK_TARGET_BYTES {
             let first_document_id = self.first_document_id;
             Some((first_document_id, std::mem::take(&mut self.buf)))

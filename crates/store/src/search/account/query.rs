@@ -71,25 +71,27 @@ impl Plan {
     fn add_text(&mut self, field: u8, op: TextMatch, value: &str, language: Language) {
         match op {
             TextMatch::Exact => {
-                let words = tokenize::tokenize_query(value, language)
+                let mut words = tokenize::tokenize_query(value, language)
                     .into_iter()
                     .map(|token| CheekyHash::new(token.word.as_bytes()))
-                    .collect::<Vec<_>>();
-                match words.len() {
-                    0 => self.nodes.push(Node::Empty),
-                    1 => {
-                        let probe = self.probe(field, words[0]);
+                    .peekable();
+                if let Some(word) = words.next() {
+                    if words.peek().is_some() {
+                        let mut phrase = Vec::with_capacity(3);
+                        phrase.push(self.phrase_word(field, word));
+                        phrase.extend(words.map(|word| self.phrase_word(field, word)));
+                        self.nodes.push(Node::Phrase {
+                            field,
+                            words: phrase,
+                        });
+                    } else {
+                        let probe = self.probe(field, word);
                         self.nodes.push(Node::Probes {
                             groups: vec![vec![probe]],
                         });
                     }
-                    _ => {
-                        let words = words
-                            .into_iter()
-                            .map(|word| self.phrase_word(field, word))
-                            .collect();
-                        self.nodes.push(Node::Phrase { field, words });
-                    }
+                } else {
+                    self.nodes.push(Node::Empty);
                 }
             }
             TextMatch::Standard => {

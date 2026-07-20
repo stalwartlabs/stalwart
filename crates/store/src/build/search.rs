@@ -14,7 +14,7 @@ use registry::schema::{prelude::ObjectType, structs};
 #[allow(unreachable_patterns)]
 impl SearchStore {
     pub async fn build(bp: &mut Bootstrap) -> Option<Self> {
-        let todo = "use internal fts if configured + map sqlreplicas + do not use global snowflake + call maintain";
+        let todo = "use internal fts if configured + map sqlreplicas + do not use global snowflake + call maintain + reindex must unindex";
         let result = match bp.setting_infallible::<structs::SearchStore>().await {
             structs::SearchStore::Default => {
                 return Some(SearchStore::Store(bp.data_store.clone()));

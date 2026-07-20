@@ -102,7 +102,7 @@ impl Store {
         groups: AccountGroups,
     ) -> trc::Result<()> {
         for ((index, account_id), documents) in groups {
-            let mut old_records: AHashMap<u32, Vec<u8>> = AHashMap::new();
+            let mut tombstones = WalWriter::new(WAL_TOMBSTONES);
             if matches!(index, SearchIndex::Calendar | SearchIndex::Contacts) {
                 let mut document_ids = documents.keys().copied().collect::<Vec<_>>();
                 document_ids.sort_unstable();
@@ -116,7 +116,9 @@ impl Store {
                     .collect::<Vec<_>>();
                 self.iterate_many(ranges, |key, value| {
                     if let Some((_, document_id)) = codec::parse_document_key(key) {
-                        old_records.insert(document_id, value.to_vec());
+                        tombstones_from_record(&mut tombstones, document_id, value).ok_or_else(
+                            || trc::Error::corrupted_key(key, value.into(), trc::location!()),
+                        )?;
                     }
                     Ok(true)
                 })
@@ -124,26 +126,15 @@ impl Store {
                 .caused_by(trc::location!())?;
             }
 
-            if !old_records.is_empty() {
-                let mut tombstones = WalWriter::new(WAL_TOMBSTONES);
-                for doc in documents.values() {
-                    if let Some(record) = old_records.get(&doc.document_id) {
-                        tombstones_from_record(&mut tombstones, doc.document_id, record)
-                            .ok_or_else(|| {
-                                trc::Error::corrupted_key(record, None, trc::location!())
-                            })?;
-                    }
-                }
-                for (id, value) in tombstones.finish() {
-                    batch.set(
-                        ValueClass::SearchIndex(SearchIndexClass::Wal {
-                            index,
-                            account_id,
-                            id,
-                        }),
-                        value,
-                    );
-                }
+            for (id, value) in tombstones.finish() {
+                batch.set(
+                    ValueClass::SearchIndex(SearchIndexClass::Wal {
+                        index,
+                        account_id,
+                        id,
+                    }),
+                    value,
+                );
             }
 
             let mut adds = WalWriter::new(WAL_ADDS);
@@ -153,7 +144,7 @@ impl Store {
                     adds.push_entry(|buf| {
                         buf.push(*field);
                         codec::push_term(buf, term);
-                        codec::encode_positions(positions, buf);
+                        codec::push_positions(positions, buf);
                     });
                 }
                 for (field, term) in &doc.members {
@@ -247,26 +238,30 @@ impl Store {
                         IterateParams::new(codec::any_key(begin), codec::any_key(end))
                     })
                     .collect::<Vec<_>>();
-                let mut records: AHashMap<u32, Vec<u8>> = AHashMap::new();
+
+                let mut batch = BatchBuilder::new();
+                let mut tombstones = WalWriter::new(WAL_TOMBSTONES);
+
                 self.iterate_many(ranges, |key, value| {
                     if let Some((_, document_id)) = codec::parse_document_key(key) {
-                        records.insert(document_id, value.to_vec());
+                        batch.clear(ValueClass::SearchIndex(SearchIndexClass::Document {
+                            index,
+                            account_id,
+                            document_id,
+                        }));
+                        tombstones_from_record(&mut tombstones, document_id, value).ok_or_else(
+                            || trc::Error::corrupted_key(key, value.into(), trc::location!()),
+                        )?;
                     }
                     Ok(true)
                 })
                 .await
                 .caused_by(trc::location!())?;
-                if records.is_empty() {
+
+                if batch.is_empty() {
                     continue;
                 }
 
-                let mut tombstones = WalWriter::new(WAL_TOMBSTONES);
-                for (document_id, record) in &records {
-                    tombstones_from_record(&mut tombstones, *document_id, record)
-                        .ok_or_else(|| trc::Error::corrupted_key(record, None, trc::location!()))?;
-                }
-
-                let mut batch = BatchBuilder::new();
                 for (id, value) in tombstones.finish() {
                     batch.set(
                         ValueClass::SearchIndex(SearchIndexClass::Wal {
@@ -276,13 +271,6 @@ impl Store {
                         }),
                         value,
                     );
-                }
-                for document_id in records.keys() {
-                    batch.clear(ValueClass::SearchIndex(SearchIndexClass::Document {
-                        index,
-                        account_id,
-                        document_id: *document_id,
-                    }));
                 }
                 self.write(batch.build_all())
                     .await
