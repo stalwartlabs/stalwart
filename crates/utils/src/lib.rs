@@ -422,18 +422,63 @@ pub fn is_valid_domain(domain: &str) -> bool {
         "private",
         "localdomain",
     ];
-    psl::domain(domain.as_bytes()).is_some_and(|d| d.suffix().typ().is_some())
+    has_valid_public_suffix(domain)
         || RESERVED_TLDS.contains(&domain)
         || domain
             .rsplit_once('.')
             .is_some_and(|(_, tld)| RESERVED_TLDS.contains(&tld))
 }
 
+/// Returns `true` if `domain` is backed by a known public suffix.
+///
+/// This accepts both registrable domains (a known public suffix plus at least
+/// one additional label, e.g. `example.com`) and domains that are themselves a
+/// multi-label public suffix (an eTLD). Several eTLDs host real, deliverable
+/// mailboxes directly on the suffix, for example `gov.in`, `nic.in`, `co.in` or
+/// `ac.in`, so rejecting them would refuse valid recipients. Bare top-level
+/// domains (e.g. `com`, `in`) are still rejected as they contain no dot.
+fn has_valid_public_suffix(domain: &str) -> bool {
+    let bytes = domain.as_bytes();
+
+    // Registrable domain: a known public suffix plus at least one more label.
+    if psl::domain(bytes).is_some_and(|d| d.suffix().typ().is_some()) {
+        return true;
+    }
+
+    // The domain itself is a multi-label public suffix (eTLD) that may host
+    // mailboxes directly, e.g. `gov.in`. Exclude bare TLDs by requiring a dot.
+    domain.contains('.')
+        && psl::suffix(bytes).is_some_and(|s| s.typ().is_some() && s.as_bytes() == bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::DomainPart;
 
-    use super::{sanitize_domain, sanitize_email};
+    use super::{is_valid_domain, sanitize_domain, sanitize_email};
+
+    #[test]
+    fn public_suffix_domains_with_mailboxes_are_accepted() {
+        // eTLDs that host real, deliverable mailboxes directly on the suffix.
+        for domain in ["gov.in", "nic.in", "mil.in", "ac.in", "co.in"] {
+            assert!(is_valid_domain(domain), "{domain} should be valid");
+            assert_eq!(
+                sanitize_email(&format!("user@{domain}")).as_deref(),
+                Some(format!("user@{domain}").as_str()),
+                "user@{domain} should sanitize"
+            );
+        }
+
+        // Registrable domains under those suffixes remain valid.
+        assert!(is_valid_domain("example.gov.in"));
+
+        // Ordinary domains are unaffected.
+        assert!(is_valid_domain("example.com"));
+
+        // Bare TLDs / public suffixes without a leading label are still rejected.
+        assert!(!is_valid_domain("com"));
+        assert!(!is_valid_domain("in"));
+    }
 
     #[test]
     fn idn_domains_canonicalize_to_a_label() {
