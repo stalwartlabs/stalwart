@@ -4,33 +4,40 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
+use crate::utils::{
+    dns::DnsCache,
     http_server::{HttpMessage, spawn_mock_http_server},
-    jmap::server::enterprise::EnterpriseCore,
-    smtp::{DnsCache, TempDir, TestSMTP, session::TestSession},
+    server::TestServerBuilder,
 };
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashSet;
 use common::{
-    Core, Server,
-    auth::AccessToken,
-    config::spamfilter::SpamFilterAction,
-    enterprise::{
-        SpamFilterLlmConfig,
-        llm::{
-            AiApiConfig, ChatCompletionChoice, ChatCompletionRequest, ChatCompletionResponse,
-            Message,
-        },
+    Server,
+    auth::{AccountCache, AccountInfo},
+    config::mailstore::spamfilter::SpamFilterAction,
+    enterprise::llm::{
+        ChatCompletionChoice, ChatCompletionRequest, ChatCompletionResponse, Message,
     },
 };
-use email::message::ingest::EmailIngest;
 use http_proto::{JsonResponse, ToHttpResponse};
 use hyper::Method;
 use mail_auth::{
-    ArcOutput, DkimOutput, DkimResult, DmarcResult, IprevOutput, IprevResult, MX, SpfOutput,
-    SpfResult, dkim::Signature, dmarc::Policy,
+    ArcOutput, DkimOutput, DkimResult, DmarcResult, DnssecStatus, IprevOutput, IprevResult, MX,
+    SpfOutput, SpfResult, dkim::Signature, dmarc::Policy,
 };
 use mail_parser::MessageParser;
-use smtp::core::{Session, SessionAddress};
+use registry::{
+    schema::{
+        enums::{AiModelType, TaskSpamFilterMaintenanceType},
+        prelude::{ObjectType, Property},
+        structs::{
+            self, AiModel, MemoryLookupKey, SpamLlm, SpamLlmProperties, SpamSettings, Task,
+            TaskSpamFilterMaintenance, TaskStatus,
+        },
+    },
+    types::{float::Float, map::Map},
+};
+use serde_json::json;
+use smtp::core::SessionAddress;
 use smtp_proto::{MAIL_BODY_8BITMIME, MAIL_SMTPUTF8};
 use spam_filter::{
     SpamFilterInput,
@@ -57,166 +64,99 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use store::{Stores, write::BatchBuilder};
-use utils::config::Config;
-
-const CONFIG: &str = r#"
-[spam-filter.score]
-spam = "5.0"
-
-[spam-filter.llm]
-enable = true
-model = "dummy"
-prompt = "You are an AI assistant specialized in analyzing email content to detect unsolicited, commercial, or harmful messages. Format your response as follows, separated by commas: Category,Confidence,Explanation
-Here's the email to analyze, please provide your analysis based on the above instructions, ensuring your response is in the specified comma-separated format."
-separator = ","
-categories = ["Unsolicited", "Commercial", "Harmful", "Legitimate"]
-confidence = ["High", "Medium", "Low"]
-
-[spam-filter.llm.index]
-category = 0
-confidence = 1
-explanation = 2
-
-[spam-filter.classifier.samples]
-min-ham = 10
-min-spam = 10
-
-[session.rcpt]
-relay = true
-
-[storage]
-data = "spamdb"
-lookup = "spamdb"
-blob = "spamdb"
-fts = "spamdb"
-directory = "spamdb"
-
-[directory."spamdb"]
-type = "internal"
-store = "spamdb"
-
-[store."spamdb"]
-type = "rocksdb"
-path = "{PATH}/test_antispam.db"
-
-#[store."redis"]
-#type = "redis"
-#url = "redis://127.0.0.1"
-
-[http-lookup.STWT_OPENPHISH]
-enable = true
-url = "https://openphish.com/feed.txt"
-format = "list"
-retry = "1h"
-refresh = "12h"
-timeout = "30s"
-limits.size = 104857600
-limits.entries = 900000
-limits.entry-size = 512
-
-[http-lookup.STWT_PHISHTANK]
-enable = true
-url = "http://data.phishtank.com/data/online-valid.csv.gz"
-format = "csv"
-separator = ","
-index.key = 1
-skip-first = true
-gzipped = true
-retry = "1h"
-refresh = "6h"
-timeout = "30s"
-limits.size = 104857600
-limits.entries = 900000
-limits.entry-size = 512
-
-[http-lookup.STWT_DISPOSABLE_DOMAINS]
-enable = true
-url = "https://disposable.github.io/disposable-email-domains/domains_mx.txt"
-format = "list"
-retry = "1h"
-refresh = "24h"
-timeout = "30s"
-limits.size = 104857600
-limits.entries = 900000
-limits.entry-size = 512
-
-[http-lookup.STWT_FREE_DOMAINS]
-enable = true
-url = "https://gist.githubusercontent.com/okutbay/5b4974b70673dfdcc21c517632c1f984/raw/993a35930a8d24a1faab1b988d19d38d92afbba4/free_email_provider_domains.txt"
-format = "list"
-retry = "1h"
-refresh = "720h"
-timeout = "30s"
-limits.size = 104857600
-limits.entries = 900000
-limits.entry-size = 512
-
-[enterprise.ai.dummy]
-url = "https://127.0.0.1:9090/v1/chat/completions"
-type = "chat"
-model = "gpt-dummy"
-allow-invalid-certs = true
-
-[spam-filter.list]
-"file-extensions" = { "html" = "text/html|BAD", 
-                "pdf" = "application/pdf|NZ", 
-                "txt" = "text/plain|message/disposition-notification|text/rfc822-headers", 
-                "zip" = "AR", 
-                "js" = "BAD|NZ", 
-                "hta" = "BAD|NZ" }
-[lookup]
-"url-redirectors" = {"bit.ly", "redirect.io", "redirect.me", "redirect.org", "redirect.com", "redirect.net", "t.ly", "tinyurl.com"}
-"spam-traps" = {"spamtrap@*"}
-"trusted-domains" = {"stalw.art"}
-"surbl-hashbl" = {"bit.ly", "drive.google.com", "lnkiy.in"}
-"#;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn antispam() {
-    // Enable logging
-    crate::enable_logging();
-
-    // Prepare config
-    let tmp_dir = TempDir::new("smtp_antispam_test", true);
-    let mut config = CONFIG.replace("{PATH}", tmp_dir.temp_dir.as_path().to_str().unwrap());
-    let base_path = PathBuf::from(
-        std::env::var("SPAM_RULES_DIR")
-            .unwrap_or_else(|_| "/Users/me/code/spam-filter".to_string()),
-    );
-    for section in ["rules", "lists"] {
-        for entry in fs::read_dir(base_path.join(section)).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_file() {
-                let file_name = path.file_name().unwrap().to_str().unwrap();
-                if file_name.ends_with(".toml")
-                    && ((section == "rules" && file_name != "llm.toml")
-                        || (section == "lists" && file_name == "scores.toml"))
-                {
-                    let contents = fs::read_to_string(&path).unwrap();
-                    config.push_str("\n\n");
-                    config.push_str(&contents);
-                }
-            }
-        }
-    }
-
-    // Parse config
-    let mut config = Config::new(&config).unwrap();
-    config.resolve_all_macros().await;
-    let stores = Stores::parse_all(&mut config, false).await;
-    let mut core = Core::parse(&mut config, stores, Default::default())
+    let mut test = TestServerBuilder::new("smtp_antispam_test")
         .await
-        .enable_enterprise();
-    let ai_apis = AHashMap::from_iter([(
-        "dummy".to_string(),
-        AiApiConfig::parse(&mut config, "dummy").unwrap().into(),
-    )]);
-    core.enterprise.as_mut().unwrap().spam_filter_llm =
-        SpamFilterLlmConfig::parse(&mut config, &ai_apis);
-    crate::AssertConfig::assert_no_errors(config);
-    let server = TestSMTP::from_core(core).server;
+        .with_http_listener(19048)
+        .await
+        .build()
+        .await;
+
+    let admin = test.account("admin");
+    admin
+        .registry_create_object(SpamSettings {
+            score_spam: Float::new(5.0),
+            spam_filter_rules_url: std::env::var("SPAM_RULES_URL")
+                .unwrap_or_else(|_| {
+                    "file:///Users/me/code/spam-filter/spam-filter-rules.json.gz".to_string()
+                })
+                .into(),
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(structs::SpamClassifier {
+            min_ham_samples: 10,
+            min_spam_samples: 10,
+            ..Default::default()
+        })
+        .await;
+    let model_id = admin
+        .registry_create_object(AiModel {
+            model_type: AiModelType::Chat,
+            allow_invalid_certs: true,
+            model: "gpt-dummy".to_string(),
+            name: "dummy".to_string(),
+            url: "https://127.0.0.1:9090/v1/chat/completions".to_string(),
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(SpamLlm::Enable(SpamLlmProperties {
+            categories: Map::new(vec![
+                "Unsolicited".to_string(),
+                "Commercial".to_string(),
+                "Harmful".to_string(),
+                "Legitimate".to_string(),
+            ]),
+            confidence: Map::new(vec![
+                "High".to_string(),
+                "Medium".to_string(),
+                "Low".to_string(),
+            ]),
+            model_id,
+            prompt: "You are an AI assistant specialized in analyzing email content to detect spam"
+                .to_string(),
+            response_pos_category: 0,
+            response_pos_confidence: 1.into(),
+            response_pos_explanation: 2.into(),
+            separator: ",".to_string(),
+            ..Default::default()
+        }))
+        .await;
+    admin
+        .registry_create_object(MemoryLookupKey {
+            is_glob_pattern: true,
+            key: "spamtrap@*".into(),
+            namespace: "spam-traps".into(),
+        })
+        .await;
+    admin
+        .registry_create_object(MemoryLookupKey {
+            is_glob_pattern: true,
+            key: "redirect.*".into(),
+            namespace: "url-redirectors".into(),
+        })
+        .await;
+    admin.mta_allow_relaying().await;
+    admin.mta_no_auth().await;
+    admin.mta_allow_non_fqdn().await;
+    admin.reload_settings().await;
+
+    // Fetch rules
+    admin
+        .registry_create_object(Task::SpamFilterMaintenance(TaskSpamFilterMaintenance {
+            maintenance_type: TaskSpamFilterMaintenanceType::UpdateRules,
+            status: TaskStatus::now(),
+        }))
+        .await;
+    test.wait_for_tasks().await;
+    admin.reload_settings().await;
+    admin.reload_lookup_stores().await;
+    test.reload_core();
+    let admin = test.account("admin");
 
     // Add mock DNS entries
     for (domain, ip) in [
@@ -247,16 +187,16 @@ async fn antispam() {
             "127.0.0.64",
         ),
         (
-            "637d6717761b5de0c84108c894bb68f2.hashbl.surbl.org",
+            "ef6f530a68b77d782983e8712ff31fe5.hashbl.surbl.org",
             "127.0.0.8",
         ),
     ] {
-        server.ipv4_add(
+        test.server.ipv4_add(
             domain,
             vec![ip.parse().unwrap()],
             Instant::now() + Duration::from_secs(100),
         );
-        server.dnsbl_add(
+        test.server.dnsbl_add(
             domain,
             vec![ip.parse().unwrap()],
             Instant::now() + Duration::from_secs(100),
@@ -268,42 +208,47 @@ async fn antispam() {
         "gmail.com",
         "custom.disposable.org",
     ] {
-        server.mx_add(
+        test.server.mx_add(
             mx,
             vec![MX {
-                exchanges: vec!["127.0.0.1".parse().unwrap()],
+                exchanges: vec!["127.0.0.1".into()].into_boxed_slice(),
                 preference: 10,
             }],
+            DnssecStatus::Secure,
             Instant::now() + Duration::from_secs(100),
         );
     }
 
     // Spawn mock OpenAI server
-    let _tx = spawn_mock_http_server(Arc::new(|req: HttpMessage| {
-        assert_eq!(req.uri.path(), "/v1/chat/completions");
-        assert_eq!(req.method, Method::POST);
-        let req =
-            serde_json::from_slice::<ChatCompletionRequest>(req.body.as_ref().unwrap()).unwrap();
-        assert_eq!(req.model, "gpt-dummy");
-        let message = &req.messages[0].content;
-        assert!(message.contains("You are an AI assistant specialized in analyzing email"));
+    let _tx = spawn_mock_http_server(
+        &test,
+        Arc::new(|req: HttpMessage| {
+            assert_eq!(req.uri.path(), "/v1/chat/completions");
+            assert_eq!(req.method, Method::POST);
+            let req = serde_json::from_slice::<ChatCompletionRequest>(req.body.as_ref().unwrap())
+                .unwrap();
+            assert_eq!(req.model, "gpt-dummy");
+            let message = &req.messages[0].content;
+            assert!(message.contains("You are an AI assistant specialized in analyzing email"));
 
-        JsonResponse::new(&ChatCompletionResponse {
-            created: 0,
-            object: String::new(),
-            id: String::new(),
-            model: req.model,
-            choices: vec![ChatCompletionChoice {
-                index: 0,
-                finish_reason: "stop".to_string(),
-                message: Message {
-                    role: "assistant".to_string(),
-                    content: message.split_once("Subject: ").unwrap().1.to_string(),
-                },
-            }],
-        })
-        .into_http_response()
-    }))
+            JsonResponse::new(&ChatCompletionResponse {
+                created: 0,
+                object: String::new(),
+                id: String::new(),
+                model: req.model,
+                choices: vec![ChatCompletionChoice {
+                    index: 0,
+                    finish_reason: "stop".to_string(),
+                    message: Message {
+                        role: "assistant".to_string(),
+                        content: message.split_once("Subject: ").unwrap().1.to_string(),
+                    },
+                }],
+            })
+            .into_http_response()
+        }),
+        9090,
+    )
     .await;
 
     // Run tests
@@ -354,12 +299,10 @@ async fn antispam() {
                 continue;
             }
             "classifier_features" => {
-                classifier_features(&server, contents).await;
+                classifier_features(&test.server, contents).await;
                 continue;
             }
             "classifier" => {
-                let mut batch = BatchBuilder::new();
-                batch.with_account_id(u32::MAX);
                 for class in ["spam", "ham"] {
                     let contents =
                         fs::read_to_string(base_path.join(format!("classifier.{class}"))).unwrap();
@@ -369,17 +312,32 @@ async fn antispam() {
                             continue;
                         }
 
-                        let (hash, blob_hold) = server
-                            .put_temporary_blob(u32::MAX, sample.as_bytes(), 60)
+                        let blob_id = test
+                            .server
+                            .put_jmap_blob(u32::MAX, sample.as_bytes())
                             .await
                             .unwrap();
-                        server.add_spam_sample(&mut batch, hash, class == "spam", true, 0);
-                        batch.clear(blob_hold);
+                        admin
+                            .registry_create_many(
+                                ObjectType::SpamTrainingSample,
+                                [json!({
+                                    Property::BlobId: blob_id,
+                                    Property::IsSpam: class == "spam",
+                                })],
+                            )
+                            .await
+                            .created_id(0);
                     }
                 }
-                assert!(!batch.is_empty());
-                server.store().write(batch.build_all()).await.unwrap();
-                server.spam_train(false).await.unwrap();
+                admin
+                    .registry_create_object(Task::SpamFilterMaintenance(
+                        TaskSpamFilterMaintenance {
+                            maintenance_type: TaskSpamFilterMaintenanceType::Train,
+                            status: TaskStatus::now(),
+                        },
+                    ))
+                    .await;
+                test.wait_for_tasks().await;
             }
             _ => {}
         }
@@ -392,7 +350,7 @@ async fn antispam() {
             let mut in_params = true;
 
             // Build session
-            let mut session = Session::test(server.clone());
+            let mut session = test.new_mta_session();
             let mut arc_result = None;
             let mut dkim_result = None;
             let mut dkim_signatures = vec![];
@@ -420,10 +378,14 @@ async fn antispam() {
                             session.data.helo_domain = value.to_string();
                         }
                         "authenticated_as" => {
-                            session.data.authenticated_as = Some(Arc::new(AccessToken {
-                                name: value.to_string(),
-                                ..Default::default()
-                            }));
+                            session.data.authenticated_as = Some(AccountInfo {
+                                account_id: u32::MAX,
+                                addresses: vec![value.to_string()],
+                                account: Arc::new(AccountCache {
+                                    name: value.into(),
+                                    ..Default::default()
+                                }),
+                            });
                         }
                         "spf.result" | "spf_ehlo.result" => {
                             session.data.spf_mail_from =
@@ -481,7 +443,7 @@ async fn antispam() {
                                     result: IprevResult::None,
                                     ptr: None,
                                 })
-                                .ptr = Some(Arc::new(vec![value.to_string()]));
+                                .ptr = Some(Arc::from(vec![value.into()]));
                         }
                         "dmarc.result" => {
                             dmarc_result = DmarcResult::from_str(value).into();
@@ -558,6 +520,7 @@ async fn antispam() {
                     .spam_classify(
                         &parsed_message,
                         &dkim_domains,
+                        None,
                         arc_result.as_ref(),
                         dmarc_result.as_ref(),
                         dmarc_policy.as_ref(),
@@ -587,11 +550,13 @@ async fn antispam() {
             let mut spam_input = session.build_spam_input(
                 &parsed_message,
                 &dkim_domains,
+                None,
                 arc_result.as_ref(),
                 dmarc_result.as_ref(),
                 dmarc_policy.as_ref(),
             );
             spam_input.is_tls = is_tls;
+            let server = &test.server;
             let mut spam_ctx = server.spam_filter_init(spam_input);
             match test_name {
                 "html" => {

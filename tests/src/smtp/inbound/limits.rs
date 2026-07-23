@@ -4,41 +4,58 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant};
-
-use common::Core;
-use tokio::sync::watch;
-
-use smtp::core::Session;
-use utils::config::Config;
-
-use crate::smtp::{
-    TestSMTP,
-    session::{TestSession, VerifyResponse},
+use crate::{
+    smtp::session::{TestSession, VerifyResponse},
+    utils::server::TestServerBuilder,
 };
-
-const CONFIG: &str = r#"
-[session]
-transfer-limit = [{if = "remote_ip = '10.0.0.1'", then = 10},
-                 {else = 1024}]
-timeout = [{if = "remote_ip = '10.0.0.2'", then = '500ms'},
-           {else = '30m'}]
-duration = [{if = "remote_ip = '10.0.0.3'", then = '500ms'},
-            {else = '60m'}]
-"#;
+use registry::{
+    schema::structs::{Expression, ExpressionMatch, MtaInboundSession},
+    types::list::List,
+};
+use std::time::{Duration, Instant};
 
 #[tokio::test]
 async fn limits() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_inbound_limits_test")
+        .await
+        .with_http_listener(19013)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let mut config = Config::new(CONFIG).unwrap();
-    let core = Core::parse(&mut config, Default::default(), Default::default()).await;
-
-    let (_tx, rx) = watch::channel(true);
+    // Add test settings
+    let admin = test.account("admin");
+    admin
+        .registry_create_object(MtaInboundSession {
+            max_duration: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.3'".into(),
+                    then: "500ms".into(),
+                }]),
+                else_: "60m".into(),
+            },
+            timeout: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "500ms".into(),
+                }]),
+                else_: "30m".into(),
+            },
+            transfer_limit: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "10".into(),
+                }]),
+                else_: "1024".into(),
+            },
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
 
     // Exceed max line length
-    let mut session = Session::test_with_shutdown(TestSMTP::from_core(core).server, rx);
+    let (mut session, _tx) = test.new_mta_session_with_shutdown();
     session.data.remote_ip_str = "10.0.0.1".into();
     let mut buf = vec![b'A'; 4097];
     session.ingest(&buf).await.unwrap();

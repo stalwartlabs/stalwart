@@ -29,7 +29,7 @@ use calcard::{
 };
 use common::{
     DavName, Server,
-    auth::{AccessToken, ResourceToken, oauth::GrantType},
+    auth::{AccountInfo, oauth::GrantType},
     config::groupware::CalendarTemplateVariable,
     i18n,
 };
@@ -55,8 +55,7 @@ pub struct ItipRsvpUrl(String);
 pub trait ItipIngest: Sync + Send {
     fn itip_ingest(
         &self,
-        access_token: &AccessToken,
-        resource_token: &ResourceToken,
+        account_info: &AccountInfo,
         sender: &str,
         recipient: &str,
         itip_message: &str,
@@ -65,6 +64,7 @@ pub trait ItipIngest: Sync + Send {
     fn http_rsvp_url(
         &self,
         account_id: u32,
+        account_name: &str,
         document_id: u32,
         attendee: &str,
     ) -> impl Future<Output = Option<ItipRsvpUrl>> + Send;
@@ -79,8 +79,7 @@ pub trait ItipIngest: Sync + Send {
 impl ItipIngest for Server {
     async fn itip_ingest(
         &self,
-        access_token: &AccessToken,
-        resource_token: &ResourceToken,
+        account_info: &AccountInfo,
         sender: &str,
         recipient: &str,
         itip_message: &str,
@@ -134,7 +133,7 @@ impl ItipIngest for Server {
             }
         }
 
-        let itip_snapshots = itip_snapshot(&itip, access_token.emails.as_slice(), false)?;
+        let itip_snapshots = itip_snapshot(&itip, account_info.addresses(), false)?;
         if !itip_snapshots.sender_is_organizer_or_attendee(sender) {
             return Err(ItipIngestError::Message(
                 ItipError::SenderIsNotOrganizerNorAttendee,
@@ -142,14 +141,14 @@ impl ItipIngest for Server {
         }
 
         // Obtain changedBy
-        let changed_by = if let Some(id) = self.email_to_id(self.directory(), sender, 0).await? {
+        let changed_by = if let Some(id) = self.account_id_from_email(sender, true).await? {
             ChangedBy::PrincipalId(id)
         } else {
             ChangedBy::CalendarAddress(sender.into())
         };
 
         // Find event by UID
-        let account_id = access_token.primary_id;
+        let account_id = account_info.account_id();
         let document_id = self
             .document_ids_matching(
                 account_id,
@@ -181,8 +180,7 @@ impl ItipIngest for Server {
                     .caused_by(trc::location!())?;
 
                 // Process the iTIP message
-                let snapshots =
-                    itip_snapshot(&event.data.event, access_token.emails.as_slice(), false)?;
+                let snapshots = itip_snapshot(&event.data.event, account_info.addresses(), false)?;
                 let is_organizer_update = !itip_snapshots.organizer.email.is_local;
                 match itip_process_message(
                     &event.data.event,
@@ -206,7 +204,10 @@ impl ItipIngest for Server {
                             .saturating_sub(event_.inner.size.to_native() as u64);
                         if extra_bytes > 0
                             && self
-                                .has_available_quota(resource_token, extra_bytes)
+                                .has_available_quota(
+                                    self.account(account_id).await?.as_ref(),
+                                    extra_bytes,
+                                )
                                 .await
                                 .is_err()
                         {
@@ -253,7 +254,13 @@ impl ItipIngest for Server {
                         // Prepare write batch
                         let mut batch = BatchBuilder::new();
                         event
-                            .update(access_token, event_, account_id, document_id, &mut batch)
+                            .update(
+                                account_info.account_tenant_ids(),
+                                event_,
+                                account_id,
+                                document_id,
+                                &mut batch,
+                            )
                             .caused_by(trc::location!())?;
                         if prev_email_alarm != next_email_alarm {
                             if let Some(prev_alarm) = prev_email_alarm {
@@ -264,7 +271,12 @@ impl ItipIngest for Server {
                             }
                         }
                         itip_message
-                            .insert(access_token, account_id, itip_document_id, &mut batch)
+                            .insert(
+                                account_info.account_tenant_ids(),
+                                account_id,
+                                itip_document_id,
+                                &mut batch,
+                            )
                             .caused_by(trc::location!())?;
                         self.commit_batch(batch).await.caused_by(trc::location!())?;
 
@@ -301,7 +313,10 @@ impl ItipIngest for Server {
 
             // Validate quota
             if self
-                .has_available_quota(resource_token, itip_message.len() as u64)
+                .has_available_quota(
+                    self.account(account_id).await?.as_ref(),
+                    itip_message.len() as u64,
+                )
                 .await
                 .is_err()
             {
@@ -310,7 +325,7 @@ impl ItipIngest for Server {
 
             // Obtain parent calendar
             let Some(parent_id) = self
-                .get_or_create_default_calendar(access_token, account_id)
+                .get_or_create_default_calendar(account_id, account_id)
                 .await
                 .caused_by(trc::location!())?
             else {
@@ -359,7 +374,7 @@ impl ItipIngest for Server {
             let mut batch = BatchBuilder::new();
             event
                 .insert(
-                    access_token,
+                    account_info.account_tenant_ids(),
                     account_id,
                     document_id,
                     next_email_alarm,
@@ -367,7 +382,12 @@ impl ItipIngest for Server {
                 )
                 .caused_by(trc::location!())?;
             itip_message
-                .insert(access_token, account_id, itip_document_id, &mut batch)
+                .insert(
+                    account_info.account_tenant_ids(),
+                    account_id,
+                    itip_document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
             self.commit_batch(batch).await.caused_by(trc::location!())?;
 
@@ -378,6 +398,7 @@ impl ItipIngest for Server {
     async fn http_rsvp_url(
         &self,
         account_id: u32,
+        account_name: &str,
         document_id: u32,
         attendee: &str,
     ) -> Option<ItipRsvpUrl> {
@@ -386,8 +407,10 @@ impl ItipIngest for Server {
                 .encode_access_token(
                     GrantType::Rsvp,
                     account_id,
-                    &format!("{attendee};{document_id}"),
+                    account_name,
                     self.core.groupware.itip_http_rsvp_expiration,
+                    Some(&format!("{attendee};{document_id}")),
+                    None,
                 )
                 .await
             {
@@ -481,14 +504,14 @@ impl ItipIngest for Server {
 
                 if did_change {
                     // Prepare write batch
-                    let access_token = self
-                        .get_access_token(rsvp.account_id)
+                    let account_info = self
+                        .account(rsvp.account_id)
                         .await
                         .caused_by(trc::location!())?;
                     let mut batch = BatchBuilder::new();
                     new_event
                         .update(
-                            &access_token,
+                            account_info.account_tenant_ids(),
                             event,
                             rsvp.account_id,
                             rsvp.document_id,
@@ -541,16 +564,16 @@ async fn decode_rsvp_response(server: &Server, query: &str) -> Option<RsvpRespon
         .validate_access_token(GrantType::Rsvp.into(), token)
         .await
         .ok()?;
-    let (attendee, document_id) =
-        token
-            .client_id
-            .rsplit_once(';')
-            .and_then(|(attendee, doc_id)| {
-                doc_id
-                    .parse::<u32>()
-                    .ok()
-                    .map(|doc_id| (attendee.to_string(), doc_id))
-            })?;
+    let (attendee, document_id) = token
+        .claims
+        .as_deref()
+        .and_then(|claims| claims.rsplit_once(';'))
+        .and_then(|(attendee, doc_id)| {
+            doc_id
+                .parse::<u32>()
+                .ok()
+                .map(|doc_id| (attendee.to_string(), doc_id))
+        })?;
 
     RsvpResponse {
         account_id: token.account_id,

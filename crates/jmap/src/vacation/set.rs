@@ -7,9 +7,7 @@
 use super::get::VacationResponseGet;
 use crate::changes::state::StateManager;
 use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
-use email::sieve::{
-    SieveScript, VacationResponse, delete::SieveScriptDelete, ingest::SieveScriptIngest,
-};
+use email::sieve::{SieveScript, VacationResponse, ingest::SieveScriptIngest};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
@@ -60,10 +58,13 @@ impl VacationResponseSet for Server {
                 )
                 .await?,
             );
-        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+
+        for id in request.unwrap_destroy().into_valid() {
+            response.not_destroyed.append(id, SetError::singleton());
+        }
 
         // Process set or update requests
-        let mut create_id = None;
+        let create_id = None;
         let mut changes = None;
         match (request.create, request.update) {
             (Some(create), Some(update)) if !create.is_empty() && !update.is_empty() => {
@@ -72,37 +73,14 @@ impl VacationResponseSet for Server {
                     .details("Creating and updating on the same request is not allowed."));
             }
             (Some(create), _) if !create.is_empty() => {
-                for (id, obj) in create {
-                    if will_destroy.contains(&Id::singleton()) {
-                        response.not_created.append(
-                            id,
-                            SetError::new(SetErrorType::WillDestroy)
-                                .with_description("ID will be destroyed."),
-                        );
-                    } else if create_id.is_some() {
-                        response.not_created.append(
-                            id,
-                            SetError::forbidden()
-                                .with_description("Only one object can be created."),
-                        );
-                    } else {
-                        create_id = Some(id);
-                        changes = Some(obj);
-                    }
+                for (id, _obj) in create {
+                    response.not_created.append(id, SetError::singleton());
                 }
             }
             (_, Some(update)) if !update.is_empty() => {
                 for (id, obj) in update.into_valid() {
                     if id.is_singleton() {
-                        if !will_destroy.contains(&id) {
-                            changes = Some(obj);
-                        } else {
-                            response.not_updated.append(
-                                id,
-                                SetError::new(SetErrorType::WillDestroy)
-                                    .with_description("ID will be destroyed."),
-                            );
-                        }
+                        changes = Some(obj);
                     } else {
                         response.not_updated.append(
                             id,
@@ -112,9 +90,7 @@ impl VacationResponseSet for Server {
                 }
             }
             _ => {
-                if will_destroy.is_empty() {
-                    return Ok(response);
-                }
+                return Ok(response);
             }
         }
 
@@ -165,12 +141,12 @@ impl VacationResponseSet for Server {
             };
 
             // Parse properties
-            let mut is_active = false;
+            let mut is_active = document_id.is_some_and(|id| active_script_id == Some(id));
             let mut build_script = create_id.is_some();
             let vacation = sieve.vacation_response.as_mut().unwrap();
 
             for (property, mut value) in changes.into_expanded_object() {
-                if let Err(err) = response.resolve_self_references(&mut value) {
+                if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
                     return Ok(set_error(response, create_id, err));
                 };
 
@@ -245,6 +221,17 @@ impl VacationResponseSet for Server {
                             }
                         }
                     }
+                    (Key::Property(VacationResponseProperty::Id), value) => {
+                        if create_id.is_some() || !crate::matches_id(&value, Id::singleton()) {
+                            return Ok(set_error(
+                                response,
+                                create_id,
+                                SetError::invalid_properties()
+                                    .with_property(VacationResponseProperty::Id)
+                                    .with_description("The id property is immutable."),
+                            ));
+                        }
+                    }
                     _ => {
                         return Ok(set_error(
                             response,
@@ -260,7 +247,7 @@ impl VacationResponseSet for Server {
             let mut obj = ObjectIndexBuilder::new()
                 .with_current_opt(prev_sieve)
                 .with_changes(sieve)
-                .with_access_token(access_token);
+                .with_changed_by(access_token.account_tenant_ids());
 
             // Update id
             let document_id = if let Some(document_id) = document_id {
@@ -328,37 +315,6 @@ impl VacationResponseSet for Server {
                 );
             } else {
                 response.updated.append(Id::singleton(), None);
-            }
-        } else if !will_destroy.is_empty() {
-            for id in will_destroy {
-                if id.is_singleton()
-                    && let Some(document_id) = self.get_vacation_sieve_script_id(account_id).await?
-                {
-                    self.sieve_script_delete(account_id, document_id, access_token, &mut batch)
-                        .await?;
-                    if active_script_id == Some(document_id) {
-                        batch
-                            .with_collection(Collection::Principal)
-                            .with_document(0)
-                            .clear(PrincipalField::ActiveScriptId);
-                    }
-
-                    response.destroyed.push(id);
-                    break;
-                }
-
-                response.not_destroyed.append(id, SetError::not_found());
-            }
-
-            // Write changes
-            if !batch.is_empty() {
-                response.new_state = Some(
-                    self.commit_batch(batch)
-                        .await
-                        .and_then(|ids| ids.last_change_id(account_id))
-                        .caused_by(trc::location!())?
-                        .into(),
-                );
             }
         }
 
@@ -452,7 +408,7 @@ impl VacationResponseSet for Server {
 
         script.push(b'\"');
         for ch in message_body {
-            if [b'\\', b'\"'].contains(&ch) {
+            if b"\\\"".contains(&ch) {
                 script.push(b'\\');
             }
             script.push(ch);

@@ -18,7 +18,7 @@ use crate::{
         url::SpamFilterAnalyzeUrl,
     },
 };
-use common::{Server, config::spamfilter::SpamFilterAction};
+use common::{Server, config::mailstore::spamfilter::SpamFilterAction};
 use std::{fmt::Write, future::Future, vec};
 
 // SPDX-SnippetBegin
@@ -46,6 +46,7 @@ pub struct SpamFilterScore {
     pub headers: String,
     pub train_spam: Option<bool>,
     pub score: f32,
+    pub is_spam: bool,
 }
 
 impl SpamFilterAnalyzeScore for Server {
@@ -87,7 +88,7 @@ impl SpamFilterAnalyzeScore for Server {
         let mut total_results = 0;
         let mut user_results = vec![
             ctx.result.score >= self.core.spam.scores.spam_threshold;
-            ctx.input.env_rcpt_to.len()
+            ctx.input.env_rcpt_rewritten_to.len()
         ];
         if !ctx.result.classifier_confidence.is_empty() {
             for (idx, &confidence) in ctx.result.classifier_confidence.iter().enumerate() {
@@ -184,6 +185,7 @@ impl SpamFilterAnalyzeScore for Server {
                 headers,
                 train_spam,
                 score: final_score,
+                is_spam,
             })
         }
     }

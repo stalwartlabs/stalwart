@@ -4,17 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{cmp::Ordering, net::IpAddr, vec::IntoIter};
-
+use super::*;
+use crate::{Server, expr::StringCow};
 use compact_str::{CompactString, ToCompactString};
-use directory::backend::RcptType;
 use mail_auth::IpLookupStrategy;
+use std::{cmp::Ordering, net::IpAddr, vec::IntoIter};
 use store::{Deserialize, Rows, Value, dispatch::lookup::KeyValue};
 use trc::AddContext;
-
-use crate::{Server, expr::StringCow};
-
-use super::*;
 
 impl Server {
     pub(crate) async fn eval_fnc<'x>(
@@ -27,51 +23,53 @@ impl Server {
 
         match fnc_id {
             F_IS_LOCAL_DOMAIN => {
-                let directory = params.next_as_string();
                 let domain = params.next_as_string();
 
-                self.get_directory_or_default(directory.as_ref(), session_id)
-                    .is_local_domain(domain.as_ref())
+                self.domain(domain.as_str())
                     .await
                     .caused_by(trc::location!())
-                    .map(|v| v.into())
+                    .map(|v| v.is_some().into())
             }
             F_IS_LOCAL_ADDRESS => {
-                let directory = params.next_as_string();
                 let address = params.next_as_string();
 
-                self.get_directory_or_default(directory.as_ref(), session_id)
-                    .rcpt(address.as_ref())
+                self.rcpt_id_from_email(address.as_ref())
                     .await
                     .caused_by(trc::location!())
-                    .map(|v| (v != RcptType::Invalid).into())
+                    .map(|v| v.is_some().into())
             }
             F_KEY_GET => {
-                let store = params.next_as_string();
+                let Some(store) = self.get_lookup_store(params.next_as_string().as_str()) else {
+                    return Ok(Variable::default());
+                };
                 let key = params.next_as_string();
 
-                self.get_in_memory_store_or_default(store.as_str(), session_id)
+                store
                     .key_get::<VariableWrapper>(key.as_str())
                     .await
                     .map(|value| value.map(|v| v.into_inner()).unwrap_or_default())
                     .caused_by(trc::location!())
             }
             F_KEY_EXISTS => {
-                let store = params.next_as_string();
+                let Some(store) = self.get_lookup_store(params.next_as_string().as_str()) else {
+                    return Ok(Variable::default());
+                };
                 let key = params.next_as_string();
 
-                self.get_in_memory_store_or_default(store.as_str(), session_id)
+                store
                     .key_exists(key.as_str())
                     .await
                     .caused_by(trc::location!())
                     .map(|v| v.into())
             }
             F_KEY_SET => {
-                let store = params.next_as_string();
+                let Some(store) = self.get_lookup_store(params.next_as_string().as_str()) else {
+                    return Ok(Variable::default());
+                };
                 let key = params.next_as_string();
                 let value = params.next_as_string();
 
-                self.get_in_memory_store_or_default(store.as_ref(), session_id)
+                store
                     .key_set(KeyValue::new(
                         key.as_bytes().to_vec(),
                         value.as_bytes().to_vec(),
@@ -82,21 +80,25 @@ impl Server {
                     .map(|v| v.into())
             }
             F_COUNTER_INCR => {
-                let store = params.next_as_string();
+                let Some(store) = self.get_lookup_store(params.next_as_string().as_str()) else {
+                    return Ok(Variable::default());
+                };
                 let key = params.next_as_string();
                 let value = params.next_as_integer();
 
-                self.get_in_memory_store_or_default(store.as_ref(), session_id)
+                store
                     .counter_incr(KeyValue::new(key.into_owned(), value), true)
                     .await
                     .map(Variable::Integer)
                     .caused_by(trc::location!())
             }
             F_COUNTER_GET => {
-                let store = params.next_as_string();
+                let Some(store) = self.get_lookup_store(params.next_as_string().as_str()) else {
+                    return Ok(Variable::default());
+                };
                 let key = params.next_as_string();
 
-                self.get_in_memory_store_or_default(store.as_ref(), session_id)
+                store
                     .counter_get(key.as_bytes().to_vec())
                     .await
                     .map(Variable::Integer)
@@ -113,13 +115,24 @@ impl Server {
         mut arguments: FncParams<'x>,
         session_id: u64,
     ) -> trc::Result<Variable<'x>> {
-        let store = self.get_data_store(arguments.next_as_string().as_ref(), session_id);
+        let store_name = arguments.next_as_string();
+        let Some(store) = self
+            .get_lookup_store(store_name.as_ref())
+            .and_then(|v| v.into_store())
+        else {
+            return Err(trc::EventType::Eval(trc::EvalEvent::Error)
+                .into_err()
+                .id(store_name.into_owned())
+                .span_id(session_id)
+                .details("Store not found or is not a SQL store"));
+        };
         let query = arguments.next_as_string();
 
         if query.is_empty() {
             return Err(trc::EventType::Eval(trc::EvalEvent::Error)
                 .into_err()
-                .details("Empty query string"));
+                .details("Empty query string")
+                .span_id(session_id));
         }
 
         // Obtain arguments
@@ -205,13 +218,12 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
+                        .rrset
                         .iter()
                         .flat_map(|mx| {
                             mx.exchanges.iter().map(|host| {
                                 Variable::String(StringCow::Owned(
-                                    host.strip_suffix('.')
-                                        .unwrap_or(host.as_str())
-                                        .to_compact_string(),
+                                    host.strip_suffix('.').unwrap_or(host).to_compact_string(),
                                 ))
                             })
                         })
@@ -245,6 +257,7 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
+                        .rrset
                         .iter()
                         .map(|host| Variable::from(host.to_compact_string()))
                         .collect::<Vec<_>>()
@@ -260,6 +273,7 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
+                        .rrset
                         .iter()
                         .map(|ip| Variable::from(ip.to_compact_string()))
                         .collect::<Vec<_>>()
@@ -275,6 +289,7 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
+                        .rrset
                         .iter()
                         .map(|ip| Variable::from(ip.to_compact_string()))
                         .collect::<Vec<_>>()

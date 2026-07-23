@@ -48,6 +48,7 @@ pub fn register_functions_trusted() -> FunctionMap {
         .with_function("is_ipv4_addr", fn_is_ipv4_addr)
         .with_function("is_ipv6_addr", fn_is_ipv6_addr)
         .with_function("ip_reverse_name", fn_ip_reverse_name)
+        .with_function_args("is_ip_in_cidr", fn_is_ip_in_cidr, 2)
         .with_function("winnow", fn_winnow)
         .with_function("has_zwsp", fn_has_zwsp)
         .with_function("has_obscured", fn_has_obscured)

@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
-use mail_parser::DateTime;
-use utils::chained_bytes::SliceRange;
-
-use crate::protocol::literal_string_slice;
-
 use super::{
-    Flag, ImapResponse, Sequence, literal_string, quoted_or_literal_string,
+    Flag, ImapResponse, ObjectId, Sequence, literal_string, quoted_or_literal_string,
     quoted_or_literal_string_or_nil, quoted_rfc2822_or_nil, quoted_timestamp,
 };
+use crate::protocol::literal_string_slice;
+use mail_parser::DateTime;
+use std::borrow::Cow;
+use utils::chained_bytes::SliceRange;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
@@ -65,8 +62,7 @@ pub enum Attribute {
         lazy: bool,
     },
     ModSeq,
-    EmailId,
-    ThreadId,
+    ObjectId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,12 +126,7 @@ pub enum DataItem<'x> {
     ModSeq {
         modseq: u64,
     },
-    EmailId {
-        email_id: String,
-    },
-    ThreadId {
-        thread_id: String,
-    },
+    ObjectId(ObjectId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -837,15 +828,8 @@ impl DataItem<'_> {
                 buf.extend_from_slice(modseq.to_string().as_bytes());
                 buf.push(b')');
             }
-            DataItem::EmailId { email_id } => {
-                buf.extend_from_slice(b"EMAILID (");
-                buf.extend_from_slice(email_id.as_bytes());
-                buf.push(b')');
-            }
-            DataItem::ThreadId { thread_id } => {
-                buf.extend_from_slice(b"THREADID (");
-                buf.extend_from_slice(thread_id.as_bytes());
-                buf.push(b')');
+            DataItem::ObjectId(object_id) => {
+                object_id.serialize(buf);
             }
         }
     }

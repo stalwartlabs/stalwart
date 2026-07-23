@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, mail::mailbox::destroy_all_mailboxes_for_account};
+use crate::utils::server::TestServer;
 use jmap_client::mailbox::Role;
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Email Copy tests...");
-    let account = params.account("admin");
-    let mut client = account.client_owned().await;
+    let account = test.account("admin@example.com");
+    let mut client = account.jmap_client().await;
 
     // Create a mailbox on account 1
     let ac1_mailbox_id = client
@@ -96,7 +96,7 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Empty store
-    destroy_all_mailboxes_for_account(1).await;
-    destroy_all_mailboxes_for_account(2).await;
-    params.assert_is_empty().await;
+    account.destroy_all_mailboxes_for_account(1).await;
+    account.destroy_all_mailboxes_for_account(2).await;
+    test.assert_is_empty().await;
 }

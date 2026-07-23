@@ -59,7 +59,7 @@ impl MailboxQuery for Server {
                             ));
                         }
                         MailboxFilter::Name(name) => {
-                            #[cfg(feature = "test_mode")]
+                            #[cfg(any(feature = "dev_mode", feature = "test_mode"))]
                             {
                                 // Used for concurrent requests tests
                                 if name == "__sleep" {
@@ -120,7 +120,7 @@ impl MailboxQuery for Server {
                                     .items
                                     .iter()
                                     .filter(|mailbox| {
-                                        mailbox.subscribers.contains(&access_token.primary_id)
+                                        mailbox.subscribers.contains(&access_token.account_id())
                                             == is_subscribed
                                     })
                                     .map(|m| m.document_id)
@@ -247,7 +247,7 @@ impl MailboxQuery for Server {
 
             for document_id in results.results() {
                 let mut check_id = document_id;
-                for _ in 0..self.core.jmap.mailbox_max_depth {
+                for _ in 0..self.core.email.mailbox_max_depth {
                     if let Some(mailbox) = mailboxes.mailbox_by_id(&check_id) {
                         if let Some(parent_id) = mailbox.parent_id() {
                             if results.results().contains(parent_id) {

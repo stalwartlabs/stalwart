@@ -12,7 +12,7 @@ use std::{borrow::Cow, net::IpAddr, sync::Arc};
 use common::{
     Inner, Server,
     auth::AccessToken,
-    listener::{ServerInstance, limiter::InFlight},
+    network::{ServerInstance, limiter::InFlight},
 };
 
 use compact_str::CompactString;
@@ -35,7 +35,7 @@ pub enum State {
         auth_failures: u32,
     },
     Authenticated {
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         in_flight: Option<InFlight>,
     },
 }
@@ -208,7 +208,7 @@ impl StatusResponse {
         if !self.message.is_empty() {
             buf.extend_from_slice(b" \"");
             for ch in self.message.as_bytes() {
-                if [b'\"', b'\\'].contains(ch) {
+                if b"\"\\".contains(ch) {
                     buf.push(b'\\');
                 }
                 buf.push(*ch);
@@ -290,7 +290,7 @@ impl SerializeResponse for trc::Error {
             .unwrap_or_else(|| self.as_ref().message());
         buf.extend_from_slice(b" \"");
         for ch in message.as_bytes() {
-            if [b'\"', b'\\'].contains(ch) {
+            if b"\"\\".contains(ch) {
                 buf.push(b'\\');
             }
             buf.push(*ch);

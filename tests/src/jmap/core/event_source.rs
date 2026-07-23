@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, mail::delivery::SmtpConnection};
 use email::mailbox::INBOX_ID;
 use futures::StreamExt;
 use jmap_client::{
@@ -17,12 +16,14 @@ use store::ahash::AHashSet;
 use tokio::sync::mpsc;
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+use crate::utils::{server::TestServer, smtp::SmtpConnection};
+
+pub async fn test(test: &TestServer) {
     println!("Running EventSource tests...");
 
     // Create test account
-    let account = params.account("jdoe@example.com");
-    let client = account.client();
+    let account = test.account("jdoe@example.com");
+    let client = account.jmap_client().await;
 
     let mut changes = client
         .event_source(None::<Vec<_>>, false, 1.into(), None)
@@ -114,8 +115,8 @@ pub async fn test(params: &mut JMAPTest) {
     assert_ping(&mut event_rx).await;
     assert_ping(&mut event_rx).await;
 
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.assert_is_empty().await;
 }
 
 async fn assert_state(

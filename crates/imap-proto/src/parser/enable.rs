@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::ToCompactString;
-
 use crate::{
     Command,
     protocol::{capability::Capability, enable},
     receiver::{Request, bad},
 };
+use compact_str::ToCompactString;
 
 impl Request<Command> {
     pub fn parse_enable(self) -> trc::Result<enable::Arguments> {
@@ -42,6 +41,7 @@ impl Capability {
             "CONDSTORE" => Self::CondStore,
             "QRESYNC" => Self::QResync,
             "UTF8=ACCEPT" => Self::Utf8Accept,
+            "OBJECTID+" => Self::ObjectIdPlus,
         )
         .ok_or_else(|| {
             format!(
@@ -64,16 +64,42 @@ mod tests {
     fn parse_enable() {
         let mut receiver = Receiver::new();
 
-        assert_eq!(
-            receiver
-                .parse(&mut "t2 ENABLE IMAP4rev2 CONDSTORE\r\n".as_bytes().iter())
-                .unwrap()
-                .parse_enable()
-                .unwrap(),
-            enable::Arguments {
-                tag: "t2".into(),
-                capabilities: vec![Capability::IMAP4rev2, Capability::CondStore],
-            }
-        );
+        for (command, arguments) in [
+            (
+                "t2 ENABLE IMAP4rev2 CONDSTORE\r\n",
+                enable::Arguments {
+                    tag: "t2".into(),
+                    capabilities: vec![Capability::IMAP4rev2, Capability::CondStore],
+                },
+            ),
+            (
+                "t3 ENABLE OBJECTID+\r\n",
+                enable::Arguments {
+                    tag: "t3".into(),
+                    capabilities: vec![Capability::ObjectIdPlus],
+                },
+            ),
+            (
+                "t4 ENABLE CONDSTORE OBJECTID+ UTF8=ACCEPT\r\n",
+                enable::Arguments {
+                    tag: "t4".into(),
+                    capabilities: vec![
+                        Capability::CondStore,
+                        Capability::ObjectIdPlus,
+                        Capability::Utf8Accept,
+                    ],
+                },
+            ),
+        ] {
+            assert_eq!(
+                receiver
+                    .parse(&mut command.as_bytes().iter())
+                    .unwrap()
+                    .parse_enable()
+                    .unwrap(),
+                arguments,
+                "Failed to parse {command}"
+            );
+        }
     }
 }

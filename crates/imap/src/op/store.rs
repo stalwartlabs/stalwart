@@ -10,8 +10,7 @@ use crate::{
     spawn_op,
 };
 use ahash::AHashSet;
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     mailbox::TRASH_ID,
     message::{ingest::EmailIngest, metadata::MessageData},
@@ -25,6 +24,7 @@ use imap_proto::{
     },
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use store::{
     ValueKey,
@@ -43,6 +43,7 @@ impl<T: SessionStream> Session<T> {
         &mut self,
         request: Request<Command>,
         is_uid: bool,
+        spawn: bool,
     ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapStore)?;
@@ -52,13 +53,21 @@ impl<T: SessionStream> Session<T> {
         let (data, mailbox) = self.state.select_data();
         let is_condstore = self.is_condstore || mailbox.is_condstore;
 
-        spawn_op!(data, {
+        if spawn {
+            spawn_op!(data, {
+                let response = data
+                    .store(arguments, mailbox, is_uid, is_condstore, op_start)
+                    .await?;
+
+                data.write_bytes(response).await
+            })
+        } else {
             let response = data
                 .store(arguments, mailbox, is_uid, is_condstore, op_start)
                 .await?;
 
             data.write_bytes(response).await
-        })
+        }
     }
 }
 

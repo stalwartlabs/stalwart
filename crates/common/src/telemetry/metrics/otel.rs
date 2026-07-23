@@ -8,8 +8,8 @@ use crate::config::telemetry::OtelMetrics;
 use opentelemetry_sdk::metrics::{
     Temporality,
     data::{
-        Gauge, GaugeDataPoint, Histogram, HistogramDataPoint, Metric, ResourceMetrics,
-        ScopeMetrics, Sum, SumDataPoint,
+        AggregatedMetrics, Gauge, GaugeDataPoint, Histogram, HistogramDataPoint, Metric,
+        MetricData, ResourceMetrics, ScopeMetrics, Sum, SumDataPoint,
     },
     exporter::PushMetricExporter,
 };
@@ -23,78 +23,64 @@ impl OtelMetrics {
 
         // Add counters
         for counter in Collector::collect_counters(is_enterprise) {
-            metrics.push(Metric {
-                name: counter.id().name().into(),
-                description: counter.id().description().into(),
-                unit: "events".into(),
-                data: Box::new(Sum {
-                    data_points: vec![SumDataPoint {
-                        attributes: vec![],
-                        value: counter.value(),
-                        exemplars: vec![],
-                    }],
-                    temporality: Temporality::Cumulative,
-                    is_monotonic: true,
+            metrics.push(Metric::new(
+                counter.id().as_str(),
+                counter.id().description(),
+                "events",
+                AggregatedMetrics::U64(MetricData::Sum(Sum::new(
+                    vec![SumDataPoint::new(vec![], counter.value(), vec![])],
                     start_time,
                     time,
-                }),
-            });
+                    Temporality::Cumulative,
+                    true,
+                ))),
+            ));
         }
 
         // Add gauges
         for gauge in Collector::collect_gauges(is_enterprise) {
-            metrics.push(Metric {
-                name: gauge.id().name().into(),
-                description: gauge.id().description().into(),
-                unit: gauge.id().unit().into(),
-                data: Box::new(Gauge {
-                    data_points: vec![GaugeDataPoint {
-                        attributes: vec![],
-                        value: gauge.get(),
-                        exemplars: vec![],
-                    }],
-                    start_time: start_time.into(),
+            metrics.push(Metric::new(
+                gauge.id().as_str(),
+                gauge.id().description(),
+                gauge.id().unit(),
+                AggregatedMetrics::U64(MetricData::Gauge(Gauge::new(
+                    vec![GaugeDataPoint::new(vec![], gauge.get(), vec![])],
+                    Some(start_time),
                     time,
-                }),
-            });
+                ))),
+            ));
         }
 
         // Add histograms
         for histogram in Collector::collect_histograms(is_enterprise) {
-            metrics.push(Metric {
-                name: histogram.id().name().into(),
-                description: histogram.id().description().into(),
-                unit: histogram.id().unit().into(),
-                data: Box::new(Histogram {
-                    data_points: vec![HistogramDataPoint {
-                        attributes: vec![],
-                        count: histogram.count(),
-                        bounds: histogram.upper_bounds_vec(),
-                        bucket_counts: histogram.buckets_vec(),
-                        min: histogram.min(),
-                        max: histogram.max(),
-                        sum: histogram.sum(),
-                        exemplars: vec![],
-                    }],
-                    temporality: Temporality::Cumulative,
+            metrics.push(Metric::new(
+                histogram.id().as_str(),
+                histogram.id().description(),
+                histogram.id().unit(),
+                AggregatedMetrics::U64(MetricData::Histogram(Histogram::new(
+                    vec![HistogramDataPoint::new(
+                        vec![],
+                        histogram.count(),
+                        histogram.upper_bounds_vec(),
+                        histogram.buckets_vec(),
+                        histogram.min(),
+                        histogram.max(),
+                        histogram.sum(),
+                        vec![],
+                    )],
                     start_time,
                     time,
-                }),
-            });
+                    Temporality::Cumulative,
+                ))),
+            ));
         }
 
         // Export metrics
-        if let Err(err) = self
-            .exporter
-            .export(&mut ResourceMetrics {
-                resource: self.resource.clone(),
-                scope_metrics: vec![ScopeMetrics {
-                    scope: self.instrumentation.clone(),
-                    metrics,
-                }],
-            })
-            .await
-        {
+        let rm = ResourceMetrics::new(
+            self.resource.clone(),
+            vec![ScopeMetrics::new(self.instrumentation.clone(), metrics)],
+        );
+        if let Err(err) = self.exporter.export(&rm).await {
             trc::event!(
                 Telemetry(TelemetryEvent::OtelMetricsExporterError),
                 Reason = err.to_string(),

@@ -4,65 +4,38 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{SqliteStore, into_error, pool::SqliteConnectionManager};
+use crate::*;
+use ::registry::schema::structs;
 use r2d2::Pool;
 use tokio::sync::oneshot;
-use utils::config::{Config, utils::AsKey};
-
-use crate::*;
-
-use super::{SqliteStore, into_error, pool::SqliteConnectionManager};
 
 impl SqliteStore {
-    pub fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let db = Self {
+    pub fn open(config: structs::SqliteStore) -> Result<Store, String> {
+        Ok(Store::SQLite(Arc::new(SqliteStore {
             conn_pool: Pool::builder()
-                .max_size(
-                    config
-                        .property((&prefix, "pool.max-connections"))
-                        .unwrap_or_else(|| (num_cpus::get() * 4) as u32),
-                )
-                .build(
-                    SqliteConnectionManager::file(config.value_require((&prefix, "path"))?)
-                        .with_init(|c| {
-                            c.execute_batch(concat!(
-                                "PRAGMA journal_mode = WAL; ",
-                                "PRAGMA synchronous = NORMAL; ",
-                                "PRAGMA temp_store = memory;",
-                                "PRAGMA busy_timeout = 30000;"
-                            ))
-                        }),
-                )
-                .map_err(|err| {
-                    config.new_build_error(
-                        prefix.as_str(),
-                        format!("Failed to build connection pool: {err}"),
-                    )
-                })
-                .ok()?,
+                .max_size(config.pool_max_connections as u32)
+                .build(SqliteConnectionManager::file(&config.path).with_init(|c| {
+                    c.execute_batch(concat!(
+                        "PRAGMA journal_mode = WAL; ",
+                        "PRAGMA synchronous = NORMAL; ",
+                        "PRAGMA temp_store = memory;",
+                        "PRAGMA busy_timeout = 30000;"
+                    ))
+                }))
+                .map_err(|err| format!("Failed to build connection pool: {err}"))?,
             worker_pool: rayon::ThreadPoolBuilder::new()
                 .num_threads(std::cmp::max(
                     config
-                        .property::<usize>((&prefix, "pool.workers"))
+                        .pool_workers
                         .filter(|v| *v > 0)
+                        .map(|v| v as usize)
                         .unwrap_or_else(num_cpus::get),
                     4,
                 ))
                 .build()
-                .map_err(|err| {
-                    config.new_build_error(
-                        prefix.as_str(),
-                        format!("Failed to build worker pool: {err}"),
-                    )
-                })
-                .ok()?,
-        };
-
-        if let Err(err) = db.create_tables() {
-            config.new_build_error(prefix.as_str(), format!("Failed to create tables: {err}"));
-        }
-
-        Some(db)
+                .map_err(|err| format!("Failed to build worker pool: {err}"))?,
+        })))
     }
 
     #[cfg(feature = "test_mode")]
@@ -85,18 +58,19 @@ impl SqliteStore {
         Ok(db)
     }
 
-    pub(super) fn create_tables(&self) -> trc::Result<()> {
+    pub(crate) fn create_tables(&self) -> trc::Result<()> {
         let conn = self.conn_pool.get().map_err(into_error)?;
 
         for table in [
             SUBSPACE_ACL,
-            SUBSPACE_DIRECTORY,
             SUBSPACE_TASK_QUEUE,
-            SUBSPACE_BLOB_EXTRA,
+            SUBSPACE_DELETED_ITEMS,
+            SUBSPACE_SPAM_SAMPLES,
             SUBSPACE_BLOB_LINK,
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,
-            SUBSPACE_SETTINGS,
+            SUBSPACE_REGISTRY,
+            SUBSPACE_REGISTRY_PK,
             SUBSPACE_QUEUE_MESSAGE,
             SUBSPACE_QUEUE_EVENT,
             SUBSPACE_REPORT_OUT,
@@ -106,6 +80,7 @@ impl SqliteStore {
             SUBSPACE_TELEMETRY_SPAN,
             SUBSPACE_TELEMETRY_METRIC,
             SUBSPACE_SEARCH_INDEX,
+            SUBSPACE_DIRECTORY,
         ] {
             let table = char::from(table);
             conn.execute(
@@ -120,16 +95,18 @@ impl SqliteStore {
             .map_err(into_error)?;
         }
 
-        let table = char::from(SUBSPACE_INDEXES);
-        conn.execute(
-            &format!(
-                "CREATE TABLE IF NOT EXISTS {table} (
+        for table in [SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX] {
+            let table = char::from(table);
+            conn.execute(
+                &format!(
+                    "CREATE TABLE IF NOT EXISTS {table} (
                         k BLOB PRIMARY KEY
                 )"
-            ),
-            [],
-        )
-        .map_err(into_error)?;
+                ),
+                [],
+            )
+            .map_err(into_error)?;
+        }
 
         for table in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
             conn.execute(

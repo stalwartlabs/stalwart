@@ -9,7 +9,7 @@ use super::{
 };
 use crate::core::ImapId;
 use ahash::AHashMap;
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use email::cache::MessageCacheFetch;
 use imap_proto::protocol::{Sequence, expunge, select::Exists};
 use std::collections::BTreeMap;
@@ -194,23 +194,28 @@ impl SelectedMailbox {
         if !sequence.is_saved_search() {
             let mut ids = AHashMap::new();
             let state = self.state.lock();
+            let (id_to_imap, uid_max, total_messages) =
+                if let Some(next) = state.next_state.as_ref() {
+                    (
+                        &next.next_state.id_to_imap,
+                        next.next_state.uid_max,
+                        next.next_state.total_messages,
+                    )
+                } else {
+                    (&state.id_to_imap, state.uid_max, state.total_messages)
+                };
 
             if is_uid {
-                let id_to_imap = state
-                    .next_state
-                    .as_ref()
-                    .map(|s| &s.next_state.id_to_imap)
-                    .unwrap_or(&state.id_to_imap);
-                if !state.id_to_imap.is_empty() {
+                if !id_to_imap.is_empty() {
                     for (id, imap_id) in id_to_imap {
-                        if sequence.contains(imap_id.uid, state.uid_max) {
+                        if sequence.contains(imap_id.uid, uid_max) {
                             ids.insert(*id, *imap_id);
                         }
                     }
                 }
-            } else if !state.id_to_imap.is_empty() {
-                for (id, imap_id) in &state.id_to_imap {
-                    if sequence.contains(imap_id.seqnum, state.total_messages as u32) {
+            } else if !id_to_imap.is_empty() {
+                for (id, imap_id) in id_to_imap {
+                    if sequence.contains(imap_id.seqnum, total_messages as u32) {
                         ids.insert(*id, *imap_id);
                     }
                 }

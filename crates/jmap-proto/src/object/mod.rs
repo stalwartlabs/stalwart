@@ -25,6 +25,7 @@ pub mod participant_identity;
 pub mod principal;
 pub mod push_subscription;
 pub mod quota;
+pub mod registry;
 pub mod search_snippet;
 pub mod share_notification;
 pub mod sieve;

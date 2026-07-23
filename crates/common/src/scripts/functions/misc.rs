@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::net::IpAddr;
+use std::{net::IpAddr, str::FromStr};
 
 use mail_auth::common::resolver::ToReverseName;
+use registry::types::ipmask::IpAddrOrMask;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 use sieve::{Context, runtime::Variable};
+use utils::HexEncode;
 
 use super::ApplyString;
 
@@ -41,6 +43,16 @@ pub fn fn_is_ipv6_addr<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     v[0].to_string()
         .parse::<std::net::IpAddr>()
         .is_ok_and(|ip| matches!(ip, IpAddr::V6(_)))
+        .into()
+}
+
+pub fn fn_is_ip_in_cidr<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+    let Ok(ip) = v[0].to_string().parse::<IpAddr>() else {
+        return false.into();
+    };
+    IpAddrOrMask::from_str(v[1].to_string().as_ref())
+        .map(|mask| mask.matches(&ip))
+        .unwrap_or(false)
         .into()
 }
 
@@ -78,17 +90,17 @@ pub fn fn_hash<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
         "sha1" => {
             let mut hasher = Sha1::new();
             hasher.update(value.as_bytes());
-            format!("{:x}", hasher.finalize()).into()
+            hasher.finalize().hex_encode().into()
         }
         "sha256" => {
             let mut hasher = Sha256::new();
             hasher.update(value.as_bytes());
-            format!("{:x}", hasher.finalize()).into()
+            hasher.finalize().hex_encode().into()
         }
         "sha512" => {
             let mut hasher = Sha512::new();
             hasher.update(value.as_bytes());
-            format!("{:x}", hasher.finalize()).into()
+            hasher.finalize().hex_encode().into()
         }
         _ => Variable::default(),
     })

@@ -9,6 +9,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
+    str::FromStr,
 };
 
 // A hash that can cheekily store small inputs directly without hashing them.
@@ -91,11 +92,29 @@ impl CheekyHash {
     pub fn payload_len(&self) -> u8 {
         self.0[0]
     }
+
+    fn as_u128(&self) -> u128 {
+        u128::from_be_bytes(self.0)
+    }
 }
 
 impl AsRef<[u8]> for CheekyHash {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
+    }
+}
+
+impl FromStr for CheekyHash {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        u128::from_str_radix(s, 16).map(|n| CheekyHash(n.to_be_bytes()))
+    }
+}
+
+impl std::fmt::Display for CheekyHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:032x}", self.as_u128())
     }
 }
 

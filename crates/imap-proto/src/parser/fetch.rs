@@ -4,19 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-use std::iter::Peekable;
-use std::vec::IntoIter;
-
-use compact_str::{CompactString, ToCompactString, format_compact};
-
+use super::{PushUnique, parse_number, parse_sequence_set};
 use crate::{
     Command,
     protocol::fetch::{self, Attribute, Section},
     receiver::{Request, Token, bad},
 };
-
-use super::{PushUnique, parse_number, parse_sequence_set};
+use compact_str::{CompactString, ToCompactString, format_compact};
+use std::borrow::Cow;
+use std::iter::Peekable;
+use std::vec::IntoIter;
 
 impl Request<Command> {
     #[allow(clippy::while_let_on_iterator)]
@@ -313,10 +310,8 @@ impl Request<Command> {
                                     while let Some(token) = tokens.next() {
                                         match token {
                                             Token::ParenthesisClose => break,
-                                            Token::Argument(value) => {
-                                                if value.eq_ignore_ascii_case(b"LAZY") {
+                                            Token::Argument(value) if value.eq_ignore_ascii_case(b"LAZY") => {
                                                     is_lazy = true;
-                                                }
                                             }
                                             _ => (),
                                         }
@@ -330,11 +325,8 @@ impl Request<Command> {
                         "MODSEQ" => {
                             attributes.push_unique(Attribute::ModSeq);
                         },
-                        "EMAILID" => {
-                            attributes.push_unique(Attribute::EmailId);
-                        },
-                        "THREADID" => {
-                            attributes.push_unique(Attribute::ThreadId);
+                        "OBJECTID" => {
+                            attributes.push_unique(Attribute::ObjectId);
                         },
                         _ => {
                             return Err(bad(
@@ -798,6 +790,26 @@ mod tests {
                     attributes: vec![Attribute::Uid],
                     changed_since: 1.into(),
                     include_vanished: true,
+                },
+            ),
+            (
+                "A010 FETCH 1:* (OBJECTID)\r\n",
+                fetch::Arguments {
+                    tag: "A010".into(),
+                    sequence_set: Sequence::range(1.into(), None),
+                    attributes: vec![Attribute::ObjectId],
+                    changed_since: None,
+                    include_vanished: false,
+                },
+            ),
+            (
+                "A011 FETCH 1 (UID OBJECTID FLAGS)\r\n",
+                fetch::Arguments {
+                    tag: "A011".into(),
+                    sequence_set: Sequence::number(1),
+                    attributes: vec![Attribute::Uid, Attribute::ObjectId, Attribute::Flags],
+                    changed_since: None,
+                    include_vanished: false,
                 },
             ),
         ] {

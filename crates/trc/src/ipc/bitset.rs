@@ -6,7 +6,7 @@
 
 use super::{USIZE_BITS, USIZE_BITS_MASK};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Bitset<const N: usize>(pub(crate) [usize; N]);
 
 impl<const N: usize> Bitset<N> {
@@ -50,6 +50,12 @@ impl<const N: usize> Bitset<N> {
     }
 
     pub fn difference(&mut self, other: &Self) {
+        for i in 0..N {
+            self.0[i] &= !other.0[i];
+        }
+    }
+
+    pub fn clear_many(&mut self, other: &Self) {
         for i in 0..N {
             self.0[i] &= !other.0[i];
         }

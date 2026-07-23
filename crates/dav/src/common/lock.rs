@@ -202,7 +202,7 @@ impl LockRequestHandler for Server {
                             locks
                                 .0
                                 .iter()
-                                .filter(|lock| lock.owner == access_token.primary_id)
+                                .filter(|lock| lock.owner == access_token.account_id())
                         })
                         .count()
                         >= self.core.groupware.max_locks_per_user
@@ -270,7 +270,7 @@ impl LockRequestHandler for Server {
                 }
 
                 lock_item.lock_id = store::rand::random::<u64>() ^ expires;
-                lock_item.owner = access_token.primary_id;
+                lock_item.owner = access_token.account_id();
                 lock_item.depth_infinity = matches!(headers.depth, Depth::Infinity);
                 lock_item.owner_dav = lock_info.owner;
                 lock_item.exclusive = matches!(lock_info.lock_scope, LockScope::Exclusive);
@@ -346,24 +346,21 @@ impl LockRequestHandler for Server {
     ) -> crate::Result<()> {
         let no_if_headers = headers.if_.is_empty();
         match method {
-            DavMethod::GET | DavMethod::HEAD => {
+            DavMethod::GET | DavMethod::HEAD if no_if_headers => {
                 // Return early for GET/HEAD requests without If headers
-                if no_if_headers {
-                    return Ok(());
-                }
+                return Ok(());
             }
             DavMethod::COPY
             | DavMethod::MOVE
             | DavMethod::POST
             | DavMethod::PUT
-            | DavMethod::PATCH => {
+            | DavMethod::PATCH
                 if headers.overwrite_fail
                     && resources.last().is_some_and(|r| {
                         r.etag.is_some() || r.document_id.is_some_and(|id| id != u32::MAX)
-                    })
-                {
-                    return Err(DavError::Code(StatusCode::PRECONDITION_FAILED));
-                }
+                    }) =>
+            {
+                return Err(DavError::Code(StatusCode::PRECONDITION_FAILED));
             }
             _ => {}
         }
@@ -557,7 +554,7 @@ impl LockRequestHandler for Server {
                 if needs_sync_token && resource_state.sync_token.is_none() {
                     let id = self
                         .fetch_dav_resources(
-                            access_token,
+                            access_token.account_id(),
                             resource_state.account_id,
                             resource_state.collection.into(),
                         )
@@ -605,7 +602,18 @@ impl LockRequestHandler for Server {
             return lock_response;
         }
 
-        Err(DavError::Code(StatusCode::PRECONDITION_FAILED))
+        Err(DavError::Code(
+            if matches!(method, DavMethod::GET | DavMethod::HEAD)
+                && headers
+                    .if_
+                    .iter()
+                    .any(|if_| if_.list.iter().any(|cond| cond.is_none_match()))
+            {
+                StatusCode::NOT_MODIFIED
+            } else {
+                StatusCode::PRECONDITION_FAILED
+            },
+        ))
     }
 }
 

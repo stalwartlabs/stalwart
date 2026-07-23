@@ -11,13 +11,20 @@ use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
-    object::calendar_event::{self, CalendarEventComparator, CalendarEventFilter},
+    object::{
+        calendar,
+        calendar_event::{self, CalendarEventComparator, CalendarEventFilter},
+    },
     request::MaybeInvalid,
+    types::state::State,
 };
 use nlp::language::Language;
 use std::{cmp::Ordering, sync::Arc};
 use store::{
-    ValueKey, roaring::RoaringBitmap, search::{CalendarSearchField, SearchComparator, SearchFilter, SearchQuery}, write::{AlignedBytes, Archive, SearchIndex}
+    ValueKey,
+    roaring::RoaringBitmap,
+    search::{CalendarSearchField, SearchComparator, SearchFilter, SearchQuery},
+    write::{AlignedBytes, Archive, SearchIndex},
 };
 use trc::AddContext;
 use types::{
@@ -32,6 +39,12 @@ pub trait CalendarEventQuery: Sync + Send {
         request: QueryRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
+
+    fn calendar_query(
+        &self,
+        request: QueryRequest<calendar::Calendar>,
+        access_token: &AccessToken,
+    ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
 impl CalendarEventQuery for Server {
@@ -43,7 +56,11 @@ impl CalendarEventQuery for Server {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
         let default_tz = request.arguments.time_zone.unwrap_or(Tz::UTC);
         let mut filter: Option<TimeRange> = None;
@@ -74,7 +91,7 @@ impl CalendarEventQuery for Server {
                     }
                     CalendarEventFilter::Text(value) => {
                         let (text, language) =
-                            Language::detect(value, self.core.jmap.default_language);
+                            Language::detect(value, self.core.email.default_language);
                         filters.push(SearchFilter::Or);
                         filters.push(SearchFilter::has_text(
                             CalendarSearchField::Title,
@@ -107,21 +124,21 @@ impl CalendarEventQuery for Server {
                         filters.push(SearchFilter::has_text_detect(
                             CalendarSearchField::Title,
                             title,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     CalendarEventFilter::Description(description) => {
                         filters.push(SearchFilter::has_text_detect(
                             CalendarSearchField::Description,
                             description,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     CalendarEventFilter::Location(location) => {
                         filters.push(SearchFilter::has_text_detect(
                             CalendarSearchField::Location,
                             location,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     CalendarEventFilter::Owner(owner) => {
@@ -355,6 +372,38 @@ impl CalendarEventQuery for Server {
             }
             response.build()
         }
+    }
+
+    async fn calendar_query(
+        &self,
+        request: QueryRequest<calendar::Calendar>,
+        access_token: &AccessToken,
+    ) -> trc::Result<QueryResponse> {
+        let account_id = request.account_id.document_id();
+        let cache = self
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
+            .await?;
+
+        let results = cache.document_ids(true).collect::<Vec<_>>();
+
+        let mut response = QueryResponseBuilder::new(
+            results.len() as usize,
+            self.core.jmap.query_max_results,
+            State::Initial,
+            &request,
+        );
+
+        for document_id in results {
+            if !response.add(0, document_id) {
+                break;
+            }
+        }
+
+        response.build()
     }
 }
 

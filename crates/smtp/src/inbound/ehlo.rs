@@ -7,7 +7,7 @@
 use crate::{core::Session, scripts::ScriptResult};
 use common::{
     config::smtp::session::{Mechanism, Stage},
-    listener::SessionStream,
+    network::SessionStream,
 };
 use mail_auth::{
     SpfResult,
@@ -115,7 +115,7 @@ impl<T: SessionStream> Session<T> {
             }
 
             // Milter filtering
-            if let Err(message) = self.run_milters(Stage::Ehlo, None).await {
+            if let Err(message) = self.run_milters(Stage::Ehlo, None, None).await {
                 self.data.mail_from = None;
                 self.data.helo_domain = prev_helo_domain;
                 self.data.spf_ehlo = None;

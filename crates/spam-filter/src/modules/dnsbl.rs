@@ -4,24 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::expression::SpamFilterResolver;
+use crate::SpamFilterContext;
+use common::{
+    Server,
+    config::mailstore::spamfilter::{DnsBlServer, Element, IpResolver, Location},
+    expr::functions::ResolveVariable,
+};
+use mail_auth::{Error, common::resolver::ToFqdn};
 use std::{
     net::Ipv4Addr,
     sync::Arc,
     time::{Duration, Instant},
 };
-
-use common::{
-    Server,
-    config::spamfilter::{DnsBlServer, Element, IpResolver, Location},
-    expr::functions::ResolveVariable,
-};
-
-use mail_auth::{Error, common::resolver::IntoFqdn};
 use trc::SpamEvent;
-
-use crate::SpamFilterContext;
-
-use super::expression::SpamFilterResolver;
 
 pub(crate) async fn check_dnsbl(
     server: &Server,
@@ -124,7 +120,7 @@ async fn is_dnsbl(
                 .smtp
                 .resolvers
                 .dns
-                .ipv4_lookup_raw((&zone).into_fqdn().as_ref())
+                .ipv4_lookup_raw(zone.to_fqdn().as_ref())
                 .await
             {
                 Ok(result) => {
@@ -151,14 +147,14 @@ async fn is_dnsbl(
                     ));
 
                     server.inner.cache.dns_rbl.insert_with_expiry(
-                        zone.to_string(),
+                        zone.into(),
                         Some(entry.clone()),
                         result.expires,
                     );
 
                     entry
                 }
-                Err(Error::DnsRecordNotFound(_)) => {
+                Err(Error::Dns(mail_auth::DnsError::RecordNotFound(_))) => {
                     trc::event!(
                         Spam(SpamEvent::Dnsbl),
                         Hostname = zone.clone(),
@@ -168,7 +164,7 @@ async fn is_dnsbl(
                     );
 
                     server.inner.cache.dns_rbl.insert(
-                        zone.to_string(),
+                        zone.into(),
                         None,
                         Duration::from_secs(86400),
                     );

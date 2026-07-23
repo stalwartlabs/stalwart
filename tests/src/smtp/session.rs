@@ -4,20 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, path::PathBuf, sync::Arc};
-
+use base64::{Engine, engine::general_purpose};
 use common::{
     Server,
     config::server::ServerProtocol,
-    listener::{ServerInstance, SessionStream, TcpAcceptor, limiter::ConcurrencyLimiter},
+    network::{ServerInstance, SessionStream, TcpAcceptor, limiter::ConcurrencyLimiter},
 };
 use rustls::{ServerConfig, server::ResolvesServerCert};
+use smtp::core::{Session, SessionAddress, SessionData, SessionParameters, State};
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::watch,
 };
-
-use smtp::core::{Session, SessionAddress, SessionData, SessionParameters, State};
 use tokio_rustls::TlsAcceptor;
 use utils::snowflake::SnowflakeIdGenerator;
 
@@ -88,6 +87,8 @@ pub trait TestSession {
     fn write_rx(&mut self, data: &str);
     async fn rset(&mut self);
     async fn cmd(&mut self, cmd: &str, expected_code: &str) -> Vec<String>;
+    async fn auth_plain(&mut self, username: &str, secret: &str, expected_code: &str);
+    async fn auth_login(&mut self, username: &str, secret: &str, expected_code: &str);
     async fn ehlo(&mut self, host: &str) -> Vec<String>;
     async fn mail_from(&mut self, from: &str, expected_code: &str);
     async fn rcpt_to(&mut self, to: &str, expected_code: &str);
@@ -156,6 +157,22 @@ impl TestSession for Session<DummyIo> {
     async fn cmd(&mut self, cmd: &str, expected_code: &str) -> Vec<String> {
         self.ingest(format!("{cmd}\r\n").as_bytes()).await.unwrap();
         self.response().assert_code(expected_code)
+    }
+
+    async fn auth_plain(&mut self, username: &str, secret: &str, expected_code: &str) {
+        let cmd = format!(
+            "AUTH PLAIN {}",
+            general_purpose::STANDARD.encode(format!("\0{username}\0{secret}"))
+        );
+        self.cmd(&cmd, expected_code).await;
+    }
+
+    async fn auth_login(&mut self, username: &str, secret: &str, expected_code: &str) {
+        self.cmd("AUTH LOGIN", "334").await;
+        self.cmd(&general_purpose::STANDARD.encode(username), "334")
+            .await;
+        self.cmd(&general_purpose::STANDARD.encode(secret), expected_code)
+            .await;
     }
 
     async fn ehlo(&mut self, host: &str) -> Vec<String> {

@@ -5,10 +5,10 @@
  */
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
@@ -49,7 +49,7 @@ impl<T: SessionStream> Session<T> {
         if name == new_name {
             return Ok(StatusResponse::ok("Old and new script names are the same.").into_bytes());
         }
-        let account_id = self.state.access_token().primary_id();
+        let account_id = self.state.access_token().account_id();
         let document_id = self.get_script_id(account_id, &name).await?;
         if self.validate_name(account_id, &new_name).await?.is_some() {
             return Err(trc::ManageSieveEvent::Error

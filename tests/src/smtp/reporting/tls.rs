@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{io::Read, sync::Arc, time::Duration};
-
+use crate::{
+    smtp::{inbound::TestMessage, session::VerifyResponse},
+    utils::server::TestServerBuilder,
+};
 use common::{config::smtp::report::AggregateFrequency, ipc::TlsEvent};
 use mail_auth::{
     common::parse::TxtRecordParser,
@@ -13,56 +15,84 @@ use mail_auth::{
     mta_sts::TlsRpt,
     report::tlsrpt::{FailureDetails, PolicyType, ResultType, TlsReport},
 };
-use store::write::QueueClass;
-
+use registry::schema::structs::{Expression, ReportSettings, TlsInternalReport, TlsReportSettings};
 use smtp::reporting::tls::{TLS_HTTP_REPORT, TlsReporting};
-
-use crate::smtp::{
-    TestSMTP,
-    inbound::{TestMessage, sign::SIGNATURES},
-    session::VerifyResponse,
-};
-
-const CONFIG: &str = r#"
-[session.rcpt]
-relay = true
-
-[report]
-submitter = "'mx.example.org'"
-
-[report.tls.aggregate]
-from-name = "'Report Subsystem'"
-from-address = "'reports@example.org'"
-org-name = "'Foobar, Inc.'"
-contact-info = "'https://foobar.org/contact'"
-send = "daily"
-max-size = 1532
-sign = "['rsa']"
-"#;
+use std::{io::Read, sync::Arc, time::Duration};
 
 #[tokio::test]
 async fn report_tls() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_report_tls_test")
+        .await
+        .with_http_listener(19047)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
 
-    // Create scheduler
-    let mut local = TestSMTP::new("smtp_report_tls_test", CONFIG.to_string() + SIGNATURES).await;
-    let core = local.build_smtp();
-    let qr = &mut local.queue_receiver;
+    let admin = test.account("admin");
+    let domain_id = admin.find_or_create_domain("example.org").await;
+    admin.create_dkim_signatures(domain_id).await;
+    admin
+        .registry_create_object(ReportSettings {
+            outbound_report_submitter: Expression {
+                else_: "'mx.example.org'".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(TlsReportSettings {
+            contact_info: Expression {
+                else_: "'https://foobar.org/contact'".into(),
+                ..Default::default()
+            },
+            dkim_sign_domain: Expression {
+                else_: "'example.org'".into(),
+                ..Default::default()
+            },
+            from_address: Expression {
+                else_: "'reports@example.org'".into(),
+                ..Default::default()
+            },
+            from_name: Expression {
+                else_: "'Report Subsystem'".into(),
+                ..Default::default()
+            },
+            org_name: Expression {
+                else_: "'Foobar, Inc.'".into(),
+                ..Default::default()
+            },
+            send_frequency: Expression {
+                else_: "daily".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin.mta_no_auth().await;
+    admin.mta_allow_non_fqdn().await;
+    admin.mta_allow_relaying().await;
+    admin.reload_settings().await;
+    test.reload_core();
+    test.expect_reload_settings().await;
 
     // Schedule TLS reports to be delivered via email
     let tls_record = Arc::new(TlsRpt::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.org").unwrap());
 
     for _ in 0..2 {
         // Add two successful records
-        core.schedule_tls(Box::new(TlsEvent {
-            domain: "foobar.org".to_string(),
-            policy: common::ipc::PolicyType::None,
-            failure: None,
-            tls_record: tls_record.clone(),
-            interval: AggregateFrequency::Daily,
-        }))
-        .await;
+        test.server
+            .schedule_tls(Box::new(TlsEvent {
+                domain: "foobar.org".to_string(),
+                policy: common::ipc::PolicyType::None,
+                failure: None,
+                tls_record: tls_record.clone(),
+                interval: AggregateFrequency::Daily,
+                span_id: 0,
+            }))
+            .await;
     }
 
     for (policy, rt) in [
@@ -84,48 +114,46 @@ async fn report_tls() {
             ResultType::StsWebpkiInvalid,
         ),
     ] {
-        core.schedule_tls(Box::new(TlsEvent {
-            domain: "foobar.org".to_string(),
-            policy,
-            failure: FailureDetails::new(rt).into(),
-            tls_record: tls_record.clone(),
-            interval: AggregateFrequency::Daily,
-        }))
-        .await;
+        test.server
+            .schedule_tls(Box::new(TlsEvent {
+                domain: "foobar.org".to_string(),
+                policy,
+                failure: FailureDetails::new(rt).into(),
+                tls_record: tls_record.clone(),
+                interval: AggregateFrequency::Daily,
+                span_id: 0,
+            }))
+            .await;
     }
 
     // Wait for flush
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let reports = qr.read_report_events().await;
-    assert_eq!(reports.len(), 3);
-    let mut tls_reports = Vec::with_capacity(3);
-    for report in reports {
-        match report {
-            QueueClass::TlsReportHeader(event) => {
-                tls_reports.push(event);
-            }
-            _ => unreachable!(),
-        }
-    }
-    core.send_tls_aggregate_report(tls_reports).await;
+    let reports = test.read_report_events::<TlsInternalReport>().await;
+    assert_eq!(reports.len(), 1);
+    let (report_id, report) = reports.into_iter().next().unwrap();
+    assert_eq!(report.report.policies.len(), 3);
+    test.server
+        .send_tls_aggregate_report(report_id.id())
+        .await
+        .unwrap();
 
     // Expect report
-    let message = qr.expect_message().await;
+    let message = test.expect_message().await;
     assert_eq!(
         message.message.recipients.last().unwrap().address(),
         "reports@foobar.org"
     );
     assert_eq!(message.message.return_path.as_ref(), "reports@example.org");
     message
-        .read_lines(qr)
+        .read_lines(&test)
         .await
-        .assert_contains("DKIM-Signature: v=1; a=rsa-sha256; s=rsa; d=example.com;")
+        .assert_contains("DKIM-Signature: v=1; a=rsa-sha256; s=rsa; d=example.org;")
         .assert_contains("To: <reports@foobar.org>")
         .assert_contains("Report Domain: foobar.org")
         .assert_contains("Submitter: mx.example.org");
 
     // Verify generated report
-    let report = TlsReport::parse_rfc5322(message.read_message(qr).await.as_bytes()).unwrap();
+    let report = TlsReport::parse_rfc5322(message.read_message(&test).await.as_bytes()).unwrap();
     assert_eq!(report.organization_name.unwrap(), "Foobar, Inc.");
     assert_eq!(report.contact_info.unwrap(), "https://foobar.org/contact");
     assert_eq!(report.policies.len(), 3);
@@ -145,10 +173,10 @@ async fn report_tls() {
             }
             PolicyType::Sts => {
                 seen[1] = true;
-                assert_eq!(policy.summary.total_failure, 2);
+                assert_eq!(policy.summary.total_failure, 3);
                 assert_eq!(policy.summary.total_success, 0);
                 assert_eq!(policy.policy.policy_domain, "foobar.org");
-                assert_eq!(policy.failure_details.len(), 2);
+                assert_eq!(policy.failure_details.len(), 3);
                 assert!(
                     policy
                         .failure_details
@@ -160,6 +188,12 @@ async fn report_tls() {
                         .failure_details
                         .iter()
                         .any(|d| d.result_type == ResultType::StsPolicyInvalid)
+                );
+                assert!(
+                    policy
+                        .failure_details
+                        .iter()
+                        .any(|d| d.result_type == ResultType::StsWebpkiInvalid)
                 );
             }
             PolicyType::NoPolicyFound => {
@@ -186,24 +220,24 @@ async fn report_tls() {
 
     for _ in 0..2 {
         // Add two successful records
-        core.schedule_tls(Box::new(TlsEvent {
-            domain: "foobar.org".to_string(),
-            policy: common::ipc::PolicyType::None,
-            failure: None,
-            tls_record: tls_record.clone(),
-            interval: AggregateFrequency::Daily,
-        }))
-        .await;
+        test.server
+            .schedule_tls(Box::new(TlsEvent {
+                domain: "foobar.org".to_string(),
+                policy: common::ipc::PolicyType::None,
+                failure: None,
+                tls_record: tls_record.clone(),
+                interval: AggregateFrequency::Daily,
+                span_id: 0,
+            }))
+            .await;
     }
 
-    let reports = qr.read_report_events().await;
+    let reports = test.read_report_events::<TlsInternalReport>().await;
     assert_eq!(reports.len(), 1);
-    match reports.into_iter().next().unwrap() {
-        QueueClass::TlsReportHeader(event) => {
-            core.send_tls_aggregate_report(vec![event]).await;
-        }
-        _ => unreachable!(),
-    }
+    test.server
+        .send_tls_aggregate_report(reports.first().unwrap().0.id())
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Uncompress report
@@ -217,5 +251,5 @@ async fn report_tls() {
         assert_eq!(report.contact_info.unwrap(), "https://foobar.org/contact");
         assert_eq!(report.policies.len(), 1);
     }
-    qr.assert_report_is_empty().await;
+    test.assert_report_is_empty::<TlsInternalReport>().await;
 }

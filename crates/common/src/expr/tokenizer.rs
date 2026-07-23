@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, iter::Peekable, slice::Iter, time::Duration};
-
-use ahash::AHashMap;
-use regex::Regex;
-use utils::config::utils::ParseValue;
-
 use super::{
     functions::{ASYNC_FUNCTIONS, FUNCTIONS},
     *,
 };
+use ahash::AHashSet;
+use regex::Regex;
+use registry::{schema::enums::ExpressionConstant, types::EnumImpl};
+use std::{borrow::Cow, iter::Peekable, slice::Iter};
+use trc::MetricType;
 
 pub struct Tokenizer<'x> {
     pub(crate) iter: Peekable<Iter<'x, u8>>,
@@ -30,7 +29,8 @@ pub struct Tokenizer<'x> {
 
 #[derive(Debug, Default, Clone)]
 pub struct TokenMap {
-    pub tokens: AHashMap<Cow<'static, str>, Token>,
+    pub variables: AHashSet<ExpressionVariable>,
+    pub constants: AHashSet<ExpressionConstant>,
 }
 
 impl<'x> Tokenizer<'x> {
@@ -89,24 +89,54 @@ impl<'x> Tokenizer<'x> {
                     self.buf.push(ch);
                 }
                 _ => {
-                    let (prev_token, ch) = if ch == b'(' && self.buf.eq(b"matches") {
-                        // Parse regular expressions
-                        let stop_ch = self.find_char(b"\"'")?;
-                        let regex_str = self.parse_string(stop_ch)?;
-                        let regex = Regex::new(&regex_str).map_err(|e| {
-                            format!("Invalid regular expression {:?}: {}", regex_str, e)
-                        })?;
-                        self.has_alpha = false;
-                        self.buf.clear();
-                        self.find_char(b",")?;
-                        (Token::Regex(regex).into(), b'(')
-                    } else if ch == b'(' && self.buf.eq(b"config_get") {
-                        // Parse setting
-                        let stop_ch = self.find_char(b"\"'")?;
-                        let setting_str = self.parse_string(stop_ch)?;
-                        self.has_alpha = false;
-                        self.buf.clear();
-                        (Token::Setting(Setting::from(setting_str)).into(), b'(')
+                    let (prev_token, ch) = if ch == b'(' && !self.buf.is_empty() {
+                        match self.buf.as_slice() {
+                            b"matches" => {
+                                // Parse regular expressions
+                                let stop_ch = self.find_char(b"\"'")?;
+                                let regex_str = self.parse_string(stop_ch)?;
+                                let regex = Regex::new(&regex_str).map_err(|e| {
+                                    format!("Invalid regular expression {:?}: {}", regex_str, e)
+                                })?;
+                                self.has_alpha = false;
+                                self.buf.clear();
+                                self.find_char(b",")?;
+                                (Token::Regex(regex).into(), b'(')
+                            }
+                            b"metric" => {
+                                let stop_ch = self.find_char(b"\"'")?;
+                                let metric_str = self.parse_string(stop_ch)?;
+                                let metric = MetricType::parse(&metric_str).ok_or_else(|| {
+                                    format!("Invalid metric name {:?}", metric_str)
+                                })?;
+                                self.has_alpha = false;
+                                self.buf.clear();
+                                (Token::System(SystemVariable::Metric(metric)).into(), b'(')
+                            }
+                            b"system" => {
+                                let stop_ch = self.find_char(b"\"'")?;
+                                let var = match self.parse_string(stop_ch)?.as_str() {
+                                    "domain" => SystemVariable::Domain,
+                                    "hostname" => SystemVariable::Hostname,
+                                    "node_id" => SystemVariable::NodeId,
+                                    "node_hostname" => SystemVariable::NodeHostname,
+                                    "node_role" => SystemVariable::NodeRole,
+                                    other => {
+                                        return Err(format!(
+                                            "Invalid system variable name {:?}",
+                                            other
+                                        ));
+                                    }
+                                };
+                                self.has_alpha = false;
+                                self.buf.clear();
+                                (Token::System(var).into(), b'(')
+                            }
+                            _ => {
+                                self.is_start = false;
+                                (self.parse_buf()?.into(), ch)
+                            }
+                        }
                     } else if !self.buf.is_empty() {
                         self.is_start = false;
                         (self.parse_buf()?.into(), ch)
@@ -331,9 +361,23 @@ impl<'x> Tokenizer<'x> {
                     id: *idx + FUNCTIONS.len() as u32,
                     num_args: *num_args,
                 })
-            } else if let Some(token) = self.token_map.tokens.get(buf.as_str()) {
-                Ok(token.clone())
-            } else if let Ok(duration) = Duration::parse_value(&buf) {
+            } else if let Some(variable) = ExpressionVariable::parse(buf.as_str()) {
+                if self.token_map.variables.is_empty()
+                    || self.token_map.variables.contains(&variable)
+                {
+                    Ok(Token::Variable(variable))
+                } else {
+                    Err(format!("Variable {:?} not allowed in this context", buf))
+                }
+            } else if let Some(constant) = ExpressionConstant::parse(buf.as_str()) {
+                if self.token_map.constants.is_empty()
+                    || self.token_map.constants.contains(&constant)
+                {
+                    Ok(Token::Constant(Constant::Static(constant)))
+                } else {
+                    Err(format!("Constant {:?} not allowed in this context", buf))
+                }
+            } else if let Ok(duration) = registry::types::duration::Duration::from_str(&buf) {
                 Ok(Token::Constant(Constant::Integer(
                     duration.as_millis() as i64
                 )))
@@ -345,83 +389,13 @@ impl<'x> Tokenizer<'x> {
 }
 
 impl TokenMap {
-    pub fn with_all_variables(self) -> Self {
-        self.with_variables(&[
-            V_RECIPIENT,
-            V_RECIPIENT_DOMAIN,
-            V_SENDER,
-            V_SENDER_DOMAIN,
-            V_MX,
-            V_HELO_DOMAIN,
-            V_AUTHENTICATED_AS,
-            V_LISTENER,
-            V_REMOTE_IP,
-            V_REMOTE_PORT,
-            V_LOCAL_IP,
-            V_LOCAL_PORT,
-            V_PRIORITY,
-            V_PROTOCOL,
-            V_TLS,
-            V_QUEUE_RETRY_NUM,
-            V_QUEUE_NOTIFY_NUM,
-            V_QUEUE_EXPIRES_IN,
-            V_QUEUE_LAST_STATUS,
-            V_QUEUE_LAST_ERROR,
-            V_QUEUE_NAME,
-            V_QUEUE_AGE,
-            V_ASN,
-            V_COUNTRY,
-            V_RECEIVED_FROM_IP,
-            V_RECEIVED_VIA_PORT,
-            V_SOURCE,
-            V_SIZE,
-        ])
-    }
-
-    pub fn with_variables(mut self, variables: &[u32]) -> Self {
-        for (name, idx) in VARIABLES_MAP {
-            if variables.contains(idx) {
-                self.tokens
-                    .insert(Cow::Borrowed(name), Token::Variable(*idx));
-            }
-        }
-
+    pub fn with_variables(mut self, variables: &[ExpressionVariable]) -> Self {
+        self.variables.extend(variables.iter().copied());
         self
     }
 
-    pub fn with_variables_map<I, V>(mut self, vars: I) -> Self
-    where
-        I: IntoIterator<Item = (V, u32)>,
-        V: Into<Cow<'static, str>>,
-    {
-        for (name, idx) in vars {
-            self.tokens.insert(name.into(), Token::Variable(idx));
-        }
-
-        self
-    }
-
-    pub fn set_constants<I, T>(mut self, consts: I) -> Self
-    where
-        I: IntoIterator<Item = (&'static str, T)>,
-        T: Into<Constant>,
-    {
-        for (name, constant) in consts {
-            self.tokens
-                .insert(Cow::Borrowed(name), Token::Constant(constant.into()));
-        }
-
-        self
-    }
-
-    pub fn with_constants<T: ConstantValue>(mut self) -> Self {
-        T::add_constants(&mut self);
-        self
-    }
-
-    pub fn add_constant(&mut self, name: &'static str, constant: impl Into<Constant>) -> &mut Self {
-        self.tokens
-            .insert(Cow::Borrowed(name), Token::Constant(constant.into()));
+    pub fn with_constants(mut self, constants: &[ExpressionConstant]) -> Self {
+        self.constants.extend(constants.iter().copied());
         self
     }
 }

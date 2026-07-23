@@ -52,7 +52,7 @@ impl EmailQuery for Server {
                 Filter::Property(cond) => match cond {
                     EmailFilter::Text(text) => {
                         let (text, language) =
-                            Language::detect(text, self.core.jmap.default_language);
+                            Language::detect(text, self.core.email.default_language);
 
                         filters.push(SearchFilter::Or);
                         filters.push(SearchFilter::has_text(
@@ -115,12 +115,12 @@ impl EmailQuery for Server {
                     EmailFilter::Subject(text) => filters.push(SearchFilter::has_text_detect(
                         EmailSearchField::Subject,
                         text,
-                        self.core.jmap.default_language,
+                        self.core.email.default_language,
                     )),
                     EmailFilter::Body(text) => filters.push(SearchFilter::has_text_detect(
                         EmailSearchField::Body,
                         text,
-                        self.core.jmap.default_language,
+                        self.core.email.default_language,
                     )),
                     EmailFilter::Header(header) => {
                         let mut header = header.into_iter();
@@ -172,11 +172,11 @@ impl EmailQuery for Server {
                                 if item
                                     .mailboxes
                                     .iter()
-                                    .any(|mb| mailboxes.contains(&mb.mailbox_id))
+                                    .any(|mb| !mailboxes.contains(&mb.mailbox_id))
                                 {
-                                    None
-                                } else {
                                     Some(item.document_id)
+                                } else {
+                                    None
                                 }
                             }),
                         )));
@@ -349,15 +349,30 @@ impl EmailQuery for Server {
             )
             .await?;
 
+        let collapse_threads = request.arguments.collapse_threads.unwrap_or(false);
+        let total_results = if collapse_threads {
+            let mut seen_thread_ids = AHashSet::new();
+            results
+                .iter()
+                .filter_map(|document_id| {
+                    cached_messages
+                        .email_by_id(document_id)
+                        .map(|email| email.thread_id)
+                })
+                .filter(|thread_id| seen_thread_ids.insert(*thread_id))
+                .count()
+        } else {
+            results.len()
+        };
+
         let mut response = QueryResponseBuilder::new(
-            results.len(),
+            total_results,
             self.core.jmap.query_max_results,
             cached_messages.get_state(false),
             &request,
         );
 
         if !results.is_empty() {
-            let collapse_threads = request.arguments.collapse_threads.unwrap_or(false);
             let mut seen_thread_ids = AHashSet::new();
 
             for document_id in results {

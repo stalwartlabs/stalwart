@@ -13,43 +13,45 @@
         "type": "CardDav",
         "data": {
           "type": "AddressData",
-          "data": [
-            {
-              "group": null,
-              "name": {
-                "type": "Version"
+          "data": {
+            "properties": [
+              {
+                "group": null,
+                "name": {
+                  "type": "Version"
+                },
+                "no_value": false
               },
-              "no_value": false
-            },
-            {
-              "group": null,
-              "name": {
-                "type": "Uid"
+              {
+                "group": null,
+                "name": {
+                  "type": "Uid"
+                },
+                "no_value": false
               },
-              "no_value": false
-            },
-            {
-              "group": null,
-              "name": {
-                "type": "Nickname"
+              {
+                "group": null,
+                "name": {
+                  "type": "Nickname"
+                },
+                "no_value": false
               },
-              "no_value": false
-            },
-            {
-              "group": null,
-              "name": {
-                "type": "Email"
+              {
+                "group": null,
+                "name": {
+                  "type": "Email"
+                },
+                "no_value": false
               },
-              "no_value": false
-            },
-            {
-              "group": null,
-              "name": {
-                "type": "Fn"
-              },
-              "no_value": false
-            }
-          ]
+              {
+                "group": null,
+                "name": {
+                  "type": "Fn"
+                },
+                "no_value": false
+              }
+            ]
+          }
         }
       }
     ]

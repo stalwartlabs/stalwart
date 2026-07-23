@@ -68,7 +68,10 @@ pub(crate) static CARD_ITEM_PROPS: [DavProperty; 20] = [
     DavProperty::WebDav(WebDavProperty::GetContentLanguage),
     DavProperty::WebDav(WebDavProperty::GetContentLength),
     DavProperty::WebDav(WebDavProperty::GetContentType),
-    DavProperty::CardDav(CardDavProperty::AddressData(vec![])),
+    DavProperty::CardDav(CardDavProperty::AddressData {
+        properties: Vec::new(),
+        version: None,
+    }),
 ];
 
 pub(crate) async fn assert_is_unique_uid(

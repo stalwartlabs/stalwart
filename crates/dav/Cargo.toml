@@ -1,6 +1,6 @@
 [package]
 name = "dav"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [dependencies]
@@ -10,6 +10,7 @@ store = { path = "../store" }
 utils = { path = "../utils" }
 groupware = { path = "../groupware" }
 directory = { path = "../directory" }
+registry = { path = "../registry" }
 http_proto = { path = "../http-proto" }
 types = { path = "../types" }
 trc = { path = "../trc" }
@@ -25,4 +26,5 @@ chrono = "0.4.40"
 
 [features]
 test_mode = []
+dev_mode = []
 enterprise = []

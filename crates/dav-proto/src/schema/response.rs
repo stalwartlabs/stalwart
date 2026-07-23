@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, fmt::Display};
-
+use super::{
+    Namespaces,
+    property::{DavProperty, Privilege},
+    request::{DavPropertyValue, Filter},
+};
 use calcard::{
     icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardProperty},
 };
 use hyper::StatusCode;
-
-use super::{
-    property::{DavProperty, Privilege},
-    request::{DavPropertyValue, Filter},
-    Namespaces,
-};
+use std::{borrow::Cow, fmt::Display};
 
 pub struct MultiStatus {
     pub namespaces: Namespaces,

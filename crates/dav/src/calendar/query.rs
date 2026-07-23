@@ -68,7 +68,11 @@ impl CalendarQueryRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let Some(resource) = resources.by_path(
@@ -86,7 +90,7 @@ impl CalendarQueryRequestHandler for Server {
         // Obtain shared ids
         let shared_ids = if !access_token.is_member(account_id) {
             resources
-                .shared_containers(access_token, [Acl::ReadItems], false)
+                .shared_items(access_token, [Acl::ReadItems], false)
                 .into()
         } else {
             None
@@ -424,8 +428,7 @@ impl CalendarQueryHandler {
             Vec::with_capacity(4);
 
         if data.expand.is_some() {
-            self.expanded_times
-                .sort_unstable_by(|a, b| a.start.cmp(&b.start));
+            self.expanded_times.sort_unstable_by_key(|a| a.start);
         }
 
         loop {
@@ -559,35 +562,41 @@ impl CalendarQueryHandler {
                             let _ = write!(&mut out, "END:{component_name}\r\n");
                         }
                     }
-                } else if entries.peek().is_some() {
+                } else if entries.peek().is_some()
+                    || (component.component_type == ICalendarComponentType::VCalendar
+                        && !component.component_ids.is_empty())
+                {
                     let _ = write!(&mut out, "BEGIN:{component_name}\r\n");
 
-                    if data.limit_freebusy.is_none()
-                        || component.component_type != ICalendarComponentType::VFreebusy
-                    {
-                        for (entry, with_value) in entries {
-                            let _ = entry.write_to(&mut out, with_value);
-                        }
-                    } else {
-                        // Filter freebusy
-                        let range = data.limit_freebusy.unwrap();
-                        for (entry, with_value) in entries {
-                            if matches!(entry.name, ArchivedICalendarProperty::Freebusy) {
-                                let mut fb_in_range =
-                                    freebusy_in_range(entry, &range, self.default_tz).peekable();
-                                if fb_in_range.peek().is_none() {
-                                    continue;
-                                } else {
-                                    let _ = ICalendarEntry {
-                                        name: ICalendarProperty::Freebusy,
-                                        params: rkyv_deserialize(&entry.params)
-                                            .ok()
-                                            .unwrap_or_default(),
-                                        values: fb_in_range.collect(),
+                    match data.limit_freebusy {
+                        Some(range)
+                            if component.component_type == ICalendarComponentType::VFreebusy =>
+                        {
+                            // Filter freebusy
+                            for (entry, with_value) in entries {
+                                if matches!(entry.name, ArchivedICalendarProperty::Freebusy) {
+                                    let mut fb_in_range =
+                                        freebusy_in_range(entry, &range, self.default_tz)
+                                            .peekable();
+                                    if fb_in_range.peek().is_none() {
+                                        continue;
+                                    } else {
+                                        let _ = ICalendarEntry {
+                                            name: ICalendarProperty::Freebusy,
+                                            params: rkyv_deserialize(&entry.params)
+                                                .ok()
+                                                .unwrap_or_default(),
+                                            values: fb_in_range.collect(),
+                                        }
+                                        .write_to(&mut out);
                                     }
-                                    .write_to(&mut out);
+                                } else {
+                                    let _ = entry.write_to(&mut out, with_value);
                                 }
-                            } else {
+                            }
+                        }
+                        _ => {
+                            for (entry, with_value) in entries {
                                 let _ = entry.write_to(&mut out, with_value);
                             }
                         }

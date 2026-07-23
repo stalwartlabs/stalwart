@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    jmap::{Account, JMAPTest, wait_for_index},
-    store::{deflate_test_resource, query::FIELDS},
-};
+use crate::store::{deflate_test_resource, query::FIELDS};
+use crate::utils::account::Account;
+use crate::utils::server::TestServer;
 use ::email::{cache::MessageCacheFetch, mailbox::Mailbox};
 use ahash::AHashSet;
-use common::{Server, storage::index::ObjectIndexBuilder};
+use common::storage::index::ObjectIndexBuilder;
 use jmap_client::{
     client::Client,
     core::query::{Comparator, Filter},
@@ -32,13 +31,13 @@ const MAX_THREADS: usize = 100;
 const MAX_MESSAGES: usize = 1000;
 const MAX_MESSAGES_PER_THREAD: usize = 100;
 
-pub async fn test(params: &mut JMAPTest, insert: bool) {
+pub async fn test(test: &TestServer) {
     println!("Running Email Query tests...");
-    let server = params.server.clone();
-    let account = params.account("jdoe@example.com");
-    let client = account.client();
+    let server = test.server.clone();
+    let account = test.account("jdoe@example.com");
+    let client = account.jmap_client().await;
 
-    if insert {
+    if test.is_reset() {
         // Add some "virtual" mailbox ids so create doesn't fail
         let mut batch = BatchBuilder::new();
         let account_id = Id::from_str(client.default_account_id())
@@ -71,11 +70,10 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
 
         // Create test messages
         println!("Inserting JMAP Mail query test messages...");
-        create(&server, account).await;
+        create(test, account).await;
 
         assert_eq!(
-            params
-                .server
+            test.server
                 .get_cached_messages(account_id)
                 .await
                 .unwrap()
@@ -89,16 +87,16 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
         );
 
         // Wait for indexing to complete
-        wait_for_index(&server).await;
+        test.wait_for_tasks().await;
     }
 
-    let can_stem = !params.server.search_store().is_mysql();
+    let can_stem = !test.server.search_store().is_mysql();
 
     println!("Running JMAP Mail query tests...");
-    query(client, can_stem).await;
+    query(&client, can_stem).await;
 
     println!("Running JMAP Mail query options tests...");
-    query_options(client).await;
+    query_options(&client).await;
 
     println!("Deleting all messages...");
     let mut request = client.build();
@@ -112,8 +110,8 @@ pub async fn test(params: &mut JMAPTest, insert: bool) {
         .unwrap_set_email()
         .unwrap();
 
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.assert_is_empty().await;
 }
 
 pub async fn query(client: &Client, can_stem: bool) {
@@ -163,8 +161,11 @@ pub async fn query(client: &Client, can_stem: bool) {
             ],
             if can_stem {
                 vec![
-                    "T10330", "N01744", "N01743", "N04885", "N02688", "N02122", "A00059", "A00058",
-                    "N02123", "T00651", "T09439", "N05001", "T05848", "T05508",
+                    /*"T10330", "N01744", "N01743", "N04885", "N02688", "N02122", "A00059", "A00058",
+                    "N02123", "T00651", "T09439", "N05001", "T05848", "T05508",*/
+                    "T09187", "T10330", "N01744", "N01743", "N04885", "N02688", "N02122", "A00059",
+                    "A00057", "A00058", "N02123", "T00651", "T09439", "N05001", "A01072", "A01061",
+                    "AR00050", "T02310", "T05848", "T05508", "P20078", "P20079",
                 ]
             } else {
                 vec!["T10330", "N02122", "N02123", "T09439"]
@@ -273,11 +274,11 @@ pub async fn query(client: &Client, can_stem: bool) {
                 email::query::Comparator::sent_at(),
             ],
             vec![
-                "N01496", "N05916", "N01046", "N00675", "N01320", "N01321", "N00273", "N01453",
-                "N02984", "T09417", "T01882", "T08820", "N04689", "T08891", "T00986", "N00316",
-                "N03544", "N04296", "N04297", "T08234", "N00112", "T00211", "N01497", "N02639",
-                "N02640", "T00925", "T11683", "T08269", "D00001", "D00002", "D00046", "N00121",
-                "N00126", "T08626",
+                "T09417", "T01882", "T08820", "N04689", "T08891", "T00986", "N00316", "N03544",
+                "N04296", "N04297", "T08234", "N00112", "T00211", "N01497", "N02639", "N02640",
+                "T00925", "T11683", "T08269", "D00001", "D00002", "D00046", "N00121", "N00126",
+                "T08626", "N01496", "N05916", "N01046", "N00675", "N01320", "N01321", "N00273",
+                "N01453", "N02984",
             ],
         ),
         (
@@ -288,11 +289,11 @@ pub async fn query(client: &Client, can_stem: bool) {
                 email::query::Comparator::sent_at(),
             ],
             vec![
-                "T09417", "T01882", "T08820", "N04689", "T08891", "T00986", "N00316", "N03544",
-                "N04296", "N04297", "T08234", "N00112", "T00211", "N01497", "N02639", "N02640",
-                "T00925", "T11683", "T08269", "D00001", "D00002", "D00046", "N00121", "N00126",
-                "T08626", "N01496", "N05916", "N01046", "N00675", "N01320", "N01321", "N00273",
-                "N01453", "N02984",
+                "N01496", "N05916", "N01046", "N00675", "N01320", "N01321", "N00273", "N01453",
+                "N02984", "T09417", "T01882", "T08820", "N04689", "T08891", "T00986", "N00316",
+                "N03544", "N04296", "N04297", "T08234", "N00112", "T00211", "N01497", "N02639",
+                "N02640", "T00925", "T11683", "T08269", "D00001", "D00002", "D00046", "N00121",
+                "N00126", "T08626",
             ],
         ),
         (
@@ -306,9 +307,9 @@ pub async fn query(client: &Client, can_stem: bool) {
                 email::query::Comparator::sent_at(),
             ],
             vec![
-                "N04326", "N01610", "N02920", "N01587", "T00167", "T00168", "N01554", "N01535",
-                "N01536", "N01622", "N01754", "N01594", "N01559", "N02123", "N01940", "N03594",
-                "N01494", "N04271",
+                "N01559", "N02123", "N01940", "N03594", "N01494", "N04271", "N04326", "N01610",
+                "N02920", "N01587", "T00167", "T00168", "N01554", "N01535", "N01536", "N01622",
+                "N01754", "N01594",
             ],
         ),
         (
@@ -322,9 +323,9 @@ pub async fn query(client: &Client, can_stem: bool) {
                 email::query::Comparator::sent_at(),
             ],
             vec![
-                "N01559", "N02123", "N01940", "N03594", "N01494", "N04271", "N04326", "N01610",
-                "N02920", "N01587", "T00167", "T00168", "N01554", "N01535", "N01536", "N01622",
-                "N01754", "N01594",
+                "N04326", "N01610", "N02920", "N01587", "T00167", "T00168", "N01554", "N01535",
+                "N01536", "N01622", "N01754", "N01594", "N01559", "N02123", "N01940", "N03594",
+                "N01494", "N04271",
             ],
         ),
         (
@@ -339,12 +340,12 @@ pub async fn query(client: &Client, can_stem: bool) {
                 email::query::Comparator::sent_at(),
             ],
             vec![
-                "T09455", "T09334", "T10965", "T08626", "T09417", "T08951", "T01851", "T01852",
-                "T08761", "T08123", "T08756", "T10561", "T10562", "T10563", "T00986", "T03424",
-                "T03427", "T08234", "T08133", "T06866", "T08897", "T00996", "T00997", "T01095",
-                "T03393", "T09456", "T00188", "T02362", "T09065", "T09547", "T10330", "T09187",
-                "T03433", "T08635", "T02366", "T03436", "T09150", "T01861", "T09759", "T11683",
-                "T02368", "T02369", "T08269", "T01018", "T10066", "T01710", "T01711", "T05764",
+                "T09417", "T08951", "T01851", "T01852", "T08761", "T08123", "T08756", "T10561",
+                "T10562", "T10563", "T00986", "T03424", "T03427", "T08234", "T08133", "T06866",
+                "T08897", "T00996", "T00997", "T01095", "T03393", "T09456", "T00188", "T02362",
+                "T09065", "T09547", "T10330", "T09187", "T03433", "T08635", "T02366", "T03436",
+                "T09150", "T01861", "T09759", "T11683", "T02368", "T02369", "T08269", "T01018",
+                "T10066", "T01710", "T01711", "T05764", "T09455", "T09334", "T10965", "T08626",
             ],
         ),
         (
@@ -359,12 +360,12 @@ pub async fn query(client: &Client, can_stem: bool) {
                 email::query::Comparator::sent_at(),
             ],
             vec![
-                "T09417", "T08951", "T01851", "T01852", "T08761", "T08123", "T08756", "T10561",
-                "T10562", "T10563", "T00986", "T03424", "T03427", "T08234", "T08133", "T06866",
-                "T08897", "T00996", "T00997", "T01095", "T03393", "T09456", "T00188", "T02362",
-                "T09065", "T09547", "T10330", "T09187", "T03433", "T08635", "T02366", "T03436",
-                "T09150", "T01861", "T09759", "T11683", "T02368", "T02369", "T08269", "T01018",
-                "T10066", "T01710", "T01711", "T05764", "T09455", "T09334", "T10965", "T08626",
+                "T09455", "T09334", "T10965", "T08626", "T09417", "T08951", "T01851", "T01852",
+                "T08761", "T08123", "T08756", "T10561", "T10562", "T10563", "T00986", "T03424",
+                "T03427", "T08234", "T08133", "T06866", "T08897", "T00996", "T00997", "T01095",
+                "T03393", "T09456", "T00188", "T02362", "T09065", "T09547", "T10330", "T09187",
+                "T03433", "T08635", "T02366", "T03436", "T09150", "T01861", "T09759", "T11683",
+                "T02368", "T02369", "T08269", "T01018", "T10066", "T01710", "T01711", "T05764",
             ],
         ),
     ] {
@@ -594,12 +595,12 @@ pub async fn query_options(client: &Client) {
                 limit: 10,
             },
             vec![
-                "N05779", "N04652", "N01534", "A00845", "N03409", "N03410", "N02061", "N02426",
-                "N00662", "N01205",
+                "T03614", "N05779", "N04652", "N01534", "A00845", "N03409", "N03410", "N02061",
+                "N02426", "N00662",
             ],
             vec![
-                "N00443", "N02237", "T03025", "N01722", "N01356", "N01800", "T05475", "T01587",
-                "N05779", "N01205",
+                "N00436", "N00443", "N02237", "T03025", "N01722", "N01356", "N01800", "T05475",
+                "T01587", "N05779",
             ],
         ),
         (
@@ -615,8 +616,14 @@ pub async fn query_options(client: &Client) {
                 anchor_offset: -10,
                 limit: 10,
             },
-            vec!["N01496"],
-            vec!["N01496"],
+            vec![
+                "N01496", "N01320", "N01321", "N05916", "N00273", "N01453", "N02984", "T08820",
+                "N00112", "T00211",
+            ],
+            vec![
+                "N01496", "N01320", "N05916", "N01453", "T08820", "N01046", "N00675", "T08891",
+                "T01882", "N04296",
+            ],
         ),
         (
             EmailQuery {
@@ -709,7 +716,7 @@ pub async fn query_options(client: &Client) {
     }
 }
 
-pub async fn create(server: &Server, account: &Account) {
+pub async fn create(test: &TestServer, account: &Account) {
     let sent_at = now();
     let now = Instant::now();
     let mut fields = AHashMap::default();
@@ -852,7 +859,7 @@ pub async fn create(server: &Server, account: &Account) {
 
     let mut tasks = Vec::new();
     for chunk in chunks {
-        let client = account.client_owned().await;
+        let client = account.jmap_client().await;
         tasks.push(tokio::spawn(async move {
             for (raw_message, mailbox_ids, keywords, sent_at) in chunk {
                 client
@@ -867,7 +874,7 @@ pub async fn create(server: &Server, account: &Account) {
         task.await.unwrap();
     }
 
-    wait_for_index(server).await;
+    test.wait_for_tasks().await;
 
     println!(
         "Imported {} messages in {} ms (single thread).",

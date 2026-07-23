@@ -30,11 +30,27 @@ impl PostgresStore {
             .map_err(into_error)
             .and_then(|r| {
                 if let Some(r) = r {
-                    Ok(Some(U::deserialize(r.get(0))?))
+                    Ok(Some(U::deserialize_with_key(&key, r.get(0))?))
                 } else {
                     Ok(None)
                 }
             })
+    }
+
+    pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
+        let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
+        let s = conn
+            .prepare_cached(&format!(
+                "SELECT 1 FROM {} WHERE k = $1",
+                char::from(key.subspace())
+            ))
+            .await
+            .map_err(into_error)?;
+        let key = key.serialize(0);
+        conn.query_opt(&s, &[&key])
+            .await
+            .map_err(into_error)
+            .map(|r| r.is_some())
     }
 
     pub(crate) async fn iterate<T: Key>(

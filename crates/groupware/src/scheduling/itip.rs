@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::scheduling::{ArchivedItipSummary, ItipMessage, ItipMessages};
+use crate::scheduling::{ItipMessage, ItipMessages, ItipSummary};
 use calcard::{
     common::{IanaString, PartialDateTime},
     icalendar::{
@@ -14,11 +14,10 @@ use calcard::{
     },
 };
 use common::PROD_ID;
-use store::{
-    Serialize,
-    write::{Archiver, BatchBuilder, TaskEpoch, TaskQueueClass, ValueClass},
+use registry::schema::structs::{
+    Task, TaskCalendarItipContents, TaskCalendarItipMessage, TaskStatus,
 };
-use trc::AddContext;
+use store::write::BatchBuilder;
 
 pub(crate) fn itip_build_envelope(method: ICalendarMethod) -> ICalendarComponent {
     ICalendarComponent {
@@ -116,28 +115,26 @@ pub(crate) fn itip_export_component(
             (
                 ICalendarProperty::Organizer | ICalendarProperty::Attendee,
                 ItipExportAs::Attendee(attendee_entry_ids),
-            ) => {
-                if attendee_entry_ids.contains(&(entry_id as u16))
-                    || entry.name == ICalendarProperty::Organizer
-                {
-                    comp.entries.push(ICalendarEntry {
-                        name: entry.name.clone(),
-                        params: entry
-                            .params
-                            .iter()
-                            .filter(|param| {
-                                !matches!(
-                                    &param.name,
-                                    ICalendarParameterName::ScheduleStatus
-                                        | ICalendarParameterName::ScheduleAgent
-                                        | ICalendarParameterName::ScheduleForceSend
-                                )
-                            })
-                            .cloned()
-                            .collect(),
-                        values: entry.values.clone(),
-                    });
-                }
+            ) if attendee_entry_ids.contains(&(entry_id as u16))
+                || entry.name == ICalendarProperty::Organizer =>
+            {
+                comp.entries.push(ICalendarEntry {
+                    name: entry.name.clone(),
+                    params: entry
+                        .params
+                        .iter()
+                        .filter(|param| {
+                            !matches!(
+                                &param.name,
+                                ICalendarParameterName::ScheduleStatus
+                                    | ICalendarParameterName::ScheduleAgent
+                                    | ICalendarParameterName::ScheduleForceSend
+                            )
+                        })
+                        .cloned()
+                        .collect(),
+                    values: entry.values.clone(),
+                });
             }
             (
                 ICalendarProperty::RequestStatus
@@ -273,28 +270,26 @@ pub(crate) fn can_attendee_modify_property(
 impl ItipMessages {
     pub fn new(messages: Vec<ItipMessage<ICalendar>>) -> Self {
         ItipMessages {
-            messages: messages.into_iter().map(|m| m.into()).collect(),
+            messages: messages
+                .into_iter()
+                .map(|m| TaskCalendarItipContents {
+                    from: m.from,
+                    i_calendar_data: m.message.to_string(),
+                    is_from_organizer: m.from_organizer,
+                    summary: serde_json::to_string(&m.summary).unwrap_or_default(),
+                    to: m.to.into(),
+                })
+                .collect(),
         }
     }
 
     pub fn queue(self, batch: &mut BatchBuilder) -> trc::Result<()> {
-        let due = TaskEpoch::now().with_random_sequence_id();
-        batch.set(
-            ValueClass::TaskQueue(TaskQueueClass::SendImip {
-                due,
-                is_payload: false,
-            }),
-            vec![],
-        );
-        batch.set(
-            ValueClass::TaskQueue(TaskQueueClass::SendImip {
-                due,
-                is_payload: true,
-            }),
-            Archiver::new(self)
-                .serialize()
-                .caused_by(trc::location!())?,
-        );
+        batch.schedule_task(Task::CalendarItipMessage(TaskCalendarItipMessage {
+            account_id: batch.last_account_id().unwrap().into(),
+            document_id: batch.last_document_id().unwrap().into(),
+            messages: self.messages.into(),
+            status: TaskStatus::now(),
+        }));
 
         Ok(())
     }
@@ -312,13 +307,13 @@ impl From<ItipMessage<ICalendar>> for ItipMessage<String> {
     }
 }
 
-impl ArchivedItipSummary {
+impl ItipSummary {
     pub fn method(&self) -> &str {
         match self {
-            ArchivedItipSummary::Invite(_) => ICalendarMethod::Request.as_str(),
-            ArchivedItipSummary::Update { method, .. } => method.as_str(),
-            ArchivedItipSummary::Cancel(_) => ICalendarMethod::Cancel.as_str(),
-            ArchivedItipSummary::Rsvp { .. } => ICalendarMethod::Reply.as_str(),
+            ItipSummary::Invite(_) => ICalendarMethod::Request.as_str(),
+            ItipSummary::Update { method, .. } => method.as_str(),
+            ItipSummary::Cancel(_) => ICalendarMethod::Cancel.as_str(),
+            ItipSummary::Rsvp { .. } => ICalendarMethod::Reply.as_str(),
         }
     }
 }

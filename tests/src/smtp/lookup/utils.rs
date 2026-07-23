@@ -4,20 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::net::IpAddr;
-
-use crate::smtp::TestSMTP;
+use crate::utils::server::TestServerBuilder;
 use ::smtp::outbound::NextHop;
-use common::{
-    Core,
-    config::smtp::{
-        queue::{MxConfig, QueueExpiry, QueueName},
-        report::AggregateFrequency,
-        resolver::{Mode, MxPattern, Policy},
-    },
+use common::config::smtp::{
+    queue::{MxConfig, QueueExpiry, QueueName},
+    report::AggregateFrequency,
+    resolver::{Mode, MxPattern, Policy},
 };
-use mail_auth::{IpLookupStrategy, MX};
+use mail_auth::{DnssecStatus, IpLookupStrategy, MX, RecordSet};
 use mail_parser::DateTime;
+use registry::{
+    schema::{
+        enums::MtaIpStrategy,
+        structs::{
+            Expression, MtaConnectionIpHost, MtaConnectionStrategy, MtaOutboundStrategy, MtaRoute,
+            MtaRouteMx,
+        },
+    },
+    types::{ipaddr::IpAddr, list::List},
+};
 use smtp::{
     outbound::{
         lookup::{SourceIp, ToNextHop},
@@ -29,60 +34,11 @@ use smtp::{
     },
     reporting::AggregateTimestamp,
 };
+use std::{str::FromStr, sync::Arc};
 use store::write::now;
-use utils::config::Config;
-
-const CONFIG: &str = r#"
-[queue.connection.test.timeout]
-connect = "10s"
-
-[queue.connection.test]
-ehlo-hostname = "test.example.com"
-source-ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4", 
-              "a:b::1", "a:b::2", "a:b::3", "a:b::4"]
-
-[queue.source-ip."10.0.0.1"]
-ehlo-hostname = "test1.example.com"
-
-[queue.source-ip."10.0.0.2"]
-ehlo-hostname = "test2.example.com"
-
-[queue.source-ip."10.0.0.3"]
-ehlo-hostname = "test3.example.com"
-
-[queue.source-ip."10.0.0.4"]
-ehlo-hostname = "test4.example.com"
-
-[queue.source-ip."a:b::1"]
-ehlo-hostname = "test5.example.com"
-
-[queue.source-ip."a:b::2"]
-ehlo-hostname = "test6.example.com"
-
-[queue.source-ip."a:b::3"]
-ehlo-hostname = "test7.example.com"
-
-[queue.source-ip."a:b::4"]
-ehlo-hostname = "test8.example.com"
-
-[queue.test-v4.type]
-type = "mx"
-ip-lookup-strategy = "ipv4_then_ipv6"
-
-[queue.test-v6.type]
-type = "mx"
-ip-lookup-strategy = "ipv6_then_ipv4"
-
-[queue.strategy]
-schedule = "source + ' ' + received_from_ip + ' ' + received_via_port + ' ' + queue_name + ' ' + last_error + ' ' + rcpt_domain + ' ' + size + ' ' + queue_age"
-
-"#;
 
 #[tokio::test]
 async fn strategies() {
-    // Enable logging
-    crate::enable_logging();
-
     let ipv6: [IpAddr; 4] = [
         "a:b::1".parse().unwrap(),
         "a:b::2".parse().unwrap(),
@@ -108,9 +64,90 @@ async fn strategies() {
         "test8.example.com".to_string(),
     ];
 
-    let mut config = Config::new(CONFIG).unwrap();
-    let test =
-        TestSMTP::from_core(Core::parse(&mut config, Default::default(), Default::default()).await);
+    let mut test = TestServerBuilder::new("smtp_strategies_test")
+        .await
+        .with_http_listener(19016)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+
+    // Add test settings
+    let admin = test.account("admin");
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(MtaConnectionStrategy {
+            name: "test".into(),
+            ehlo_hostname: "test.example.com".to_string().into(),
+            connect_timeout: 10_000u64.into(),
+            source_ips: List::from_iter([
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test1.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+                },
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test2.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("10.0.0.2").unwrap(),
+                },
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test3.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("10.0.0.3").unwrap(),
+                },
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test4.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("10.0.0.4").unwrap(),
+                },
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test5.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("a:b::1").unwrap(),
+                },
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test6.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("a:b::2").unwrap(),
+                },
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test7.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("a:b::3").unwrap(),
+                },
+                MtaConnectionIpHost {
+                    ehlo_hostname: "test8.example.com".to_string().into(),
+                    source_ip: IpAddr::from_str("a:b::4").unwrap(),
+                },
+            ]),
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaRoute::Mx(MtaRouteMx {
+            ip_lookup_strategy: MtaIpStrategy::V4ThenV6,
+            name: "test-v4".into(),
+            ..Default::default()
+        }))
+        .await;
+    admin
+        .registry_create_object(MtaRoute::Mx(MtaRouteMx {
+            ip_lookup_strategy: MtaIpStrategy::V6ThenV4,
+            name: "test-v6".into(),
+            ..Default::default()
+        }))
+        .await;
+    admin
+        .registry_create_object(MtaOutboundStrategy {
+            schedule: Expression {
+                else_: concat!(
+                    "source + ' ' + received_from_ip + ' ' + ",
+                    "received_via_port + ' ' + queue_name + ' ' + ",
+                    "last_error + ' ' + rcpt_domain + ' ' + size + ' ' + queue_age"
+                )
+                .into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
 
     let conn = test
         .server
@@ -128,12 +165,18 @@ async fn strategies() {
             let ip_host = conn.source_ip(is_ipv4).unwrap();
             if is_ipv4 {
                 assert_eq!(
-                    &ipv4_hosts[ipv4.iter().position(|&ip| ip == ip_host.ip).unwrap()],
+                    &ipv4_hosts[ipv4
+                        .iter()
+                        .position(|&ip| ip.into_inner() == ip_host.ip)
+                        .unwrap()],
                     ip_host.host.as_ref().unwrap()
                 );
             } else {
                 assert_eq!(
-                    &ipv6_hosts[ipv6.iter().position(|&ip| ip == ip_host.ip).unwrap()],
+                    &ipv6_hosts[ipv6
+                        .iter()
+                        .position(|&ip| ip.into_inner() == ip_host.ip)
+                        .unwrap()],
                     ip_host.host.as_ref().unwrap()
                 );
             }
@@ -164,7 +207,7 @@ async fn strategies() {
         env_id: None,
         priority: 0,
         size: 978,
-        quota_keys: Default::default(),
+        metadata: Default::default(),
     };
 
     assert_eq!(
@@ -182,29 +225,28 @@ async fn strategies() {
 
 #[test]
 fn to_remote_hosts() {
-    let mx = vec![
-        MX {
-            exchanges: vec!["mx1".to_string(), "mx2".to_string()],
-            preference: 10,
-        },
-        MX {
-            exchanges: vec![
-                "mx3".to_string(),
-                "mx4".to_string(),
-                "mx5".to_string(),
-                "mx6".to_string(),
-            ],
-            preference: 20,
-        },
-        MX {
-            exchanges: vec!["mx7".to_string(), "mx8".to_string()],
-            preference: 10,
-        },
-        MX {
-            exchanges: vec!["mx9".to_string(), "mxA".to_string()],
-            preference: 10,
-        },
-    ];
+    let mx: RecordSet<MX> = RecordSet {
+        rrset: Arc::from(vec![
+            MX {
+                exchanges: vec!["mx1".into(), "mx2".into()].into_boxed_slice(),
+                preference: 10,
+            },
+            MX {
+                exchanges: vec!["mx3".into(), "mx4".into(), "mx5".into(), "mx6".into()]
+                    .into_boxed_slice(),
+                preference: 20,
+            },
+            MX {
+                exchanges: vec!["mx7".into(), "mx8".into()].into_boxed_slice(),
+                preference: 10,
+            },
+            MX {
+                exchanges: vec!["mx9".into(), "mxA".into()].into_boxed_slice(),
+                preference: 10,
+            },
+        ]),
+        dnssec_status: DnssecStatus::Indeterminate,
+    };
     let mx_config = MxConfig {
         max_mx: 7,
         max_multi_homed: 2,
@@ -217,10 +259,13 @@ fn to_remote_hosts() {
             assert!((*host.as_bytes().last().unwrap() - b'0') <= 8);
         }
     }
-    let mx = vec![MX {
-        exchanges: vec![".".to_string()],
-        preference: 0,
-    }];
+    let mx: RecordSet<MX> = RecordSet {
+        rrset: Arc::from(vec![MX {
+            exchanges: vec![".".into()].into_boxed_slice(),
+            preference: 0,
+        }]),
+        dnssec_status: DnssecStatus::Indeterminate,
+    };
     assert!(mx.to_remote_hosts("domain", &mx_config).is_none());
 }
 
@@ -241,7 +286,8 @@ max_age: 604800",
                     MxPattern::Equals("mail.example.com".to_string()),
                     MxPattern::StartsWith("example.net".to_string()),
                     MxPattern::Equals("backupmx.example.com".to_string()),
-                ],
+                ]
+                .into_boxed_slice(),
                 max_age: 604800,
             },
         ),
@@ -258,7 +304,8 @@ max_age: 86400
                 mx: vec![
                     MxPattern::Equals("gmail-smtp-in.l.google.com".to_string()),
                     MxPattern::StartsWith("gmail-smtp-in.l.google.com".to_string()),
-                ],
+                ]
+                .into_boxed_slice(),
                 max_age: 86400,
             },
         ),

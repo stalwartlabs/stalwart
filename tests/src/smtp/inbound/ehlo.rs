@@ -4,59 +4,112 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant};
-
-use common::Core;
-use mail_auth::{SpfResult, common::parse::TxtRecordParser, spf::Spf};
-
-use smtp::core::Session;
-use utils::config::Config;
-
-use crate::smtp::{
-    DnsCache, TestSMTP,
-    session::{TestSession, VerifyResponse},
+use crate::{
+    smtp::session::{TestSession, VerifyResponse},
+    utils::{dns::DnsCache, server::TestServerBuilder},
 };
-
-const CONFIG: &str = r#"
-[session.data.limits]
-size = [{if = "remote_ip = '10.0.0.1'", then = 1024},
-        {else = 2048}]
-
-[session.extensions]
-future-release = [{if = "remote_ip = '10.0.0.1'", then = '1h'},
-                  {else = false}]
-mt-priority = [{if = "remote_ip = '10.0.0.1'", then = 'nsep'},
-               {else = false}]
-
-[session.ehlo]
-reject-non-fqdn = "starts_with(remote_ip, '10.0.0.')"
-
-[auth.spf.verify]
-ehlo = [{if = "remote_ip = '10.0.0.2'", then = 'strict'},
-        {else = 'relaxed'}]
-"#;
+use mail_auth::{SpfResult, common::parse::TxtRecordParser, spf::Spf};
+use registry::{
+    schema::structs::{
+        Expression, ExpressionMatch, MtaExtensions, MtaStageData, MtaStageEhlo, SenderAuth,
+    },
+    types::list::List,
+};
+use std::time::{Duration, Instant};
 
 #[tokio::test]
 async fn ehlo() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_ehlo_test")
+        .await
+        .with_http_listener(19005)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let mut config = Config::new(CONFIG).unwrap();
-    let core = Core::parse(&mut config, Default::default(), Default::default()).await;
-    let server = TestSMTP::from_core(core).server;
-    server.txt_add(
+    // Add test settings
+    let admin = test.account("admin");
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(MtaExtensions {
+            future_release: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "1h".into(),
+                }]),
+                else_: "false".into(),
+            },
+            mt_priority: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "nsep".into(),
+                }]),
+                else_: "false".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageEhlo {
+            reject_non_fqdn: Expression {
+                else_: "starts_with(remote_ip, '10.0.0.')".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageData {
+            max_message_size: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "1024".into(),
+                }]),
+                else_: "2048".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(SenderAuth {
+            dmarc_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            reverse_ip_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            spf_ehlo_verify: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "strict".into(),
+                }]),
+                else_: "relaxed".into(),
+            },
+            spf_from_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
+
+    test.server.txt_add(
         "mx1.foobar.org",
         Spf::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),
     );
-    server.txt_add(
+    test.server.txt_add(
         "mx2.foobar.org",
         Spf::parse(b"v=spf1 ip4:10.0.0.2 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),
     );
 
     // Reject non-FQDN domains
-    let mut session = Session::test(server);
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.1".into();
     session.data.remote_ip = session.data.remote_ip_str.parse().unwrap();
     session.stream.tls = false;

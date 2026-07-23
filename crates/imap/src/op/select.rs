@@ -6,17 +6,17 @@
 
 use super::{ImapContext, ToModSeq};
 use crate::core::{SavedSearch, SelectedMailbox, Session, State};
-use common::listener::SessionStream;
-use directory::Permission;
+use common::network::SessionStream;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{
-        ImapResponse, Sequence, fetch,
+        ImapResponse, ObjectId, Sequence, fetch,
         list::ListItem,
         select::{HighestModSeq, Response},
     },
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use types::id::Id;
 
@@ -35,12 +35,36 @@ impl<T: SessionStream> Session<T> {
         let arguments = request.parse_select(self.is_utf8)?;
         let data = self.state.session_data();
 
+        // Activate OBJECTID+ when the OBJECTID parameter is supplied
+        if arguments.objectid.is_some()
+            && let Some(enabled) = self.activate_objectid()
+        {
+            self.write_bytes(enabled).await?;
+        }
+
+        // Once activated, every SELECT/EXAMINE returns the compound OBJECTID response code
+        let want_objectid = self.is_objectid;
+
         // Refresh mailboxes
         data.synchronize_mailboxes(false)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
-        if let Some(mailbox) = data.get_mailbox_by_name(&arguments.mailbox_name) {
+        // Resolve the mailbox by its object identifiers (with fallback to the name)
+        let mailbox = arguments
+            .objectid
+            .as_ref()
+            .and_then(
+                |objectid| match (objectid.account_id, objectid.mailbox_id) {
+                    (Some(account_id), Some(mailbox_id)) => {
+                        data.get_mailbox_by_id(account_id.document_id(), mailbox_id.document_id())
+                    }
+                    _ => None,
+                },
+            )
+            .or_else(|| data.get_mailbox_by_name(&arguments.mailbox_name));
+
+        if let Some(mailbox) = mailbox {
             // Try obtaining the mailbox from the cache
             let state = data
                 .fetch_messages(&mailbox, None)
@@ -129,8 +153,11 @@ impl<T: SessionStream> Session<T> {
                 is_rev2,
                 is_utf8,
                 highest_modseq,
-                mailbox_id: Id::from_parts(mailbox.id.account_id, mailbox.id.mailbox_id)
-                    .to_string(),
+                objectid: want_objectid.then(|| ObjectId {
+                    mailbox_id: Some(Id::from(mailbox.id.mailbox_id)),
+                    account_id: Some(Id::from(mailbox.id.account_id)),
+                    ..Default::default()
+                }),
             };
 
             // Update state

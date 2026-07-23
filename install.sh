@@ -19,136 +19,279 @@ main() {
     need_cmd uname
     need_cmd mktemp
     need_cmd chmod
+    need_cmd chown
     need_cmd mkdir
     need_cmd rm
-    need_cmd rmdir
     need_cmd tar
+    need_cmd cp
+    need_cmd hostname
 
-    # Make sure we are running as root
-    if [ "$(id -u)" -ne 0 ] ; then
+    # Require root
+    if [ "$(id -u)" -ne 0 ]; then
         err "❌ Install failed: This program needs to run as root."
     fi
 
     # Detect OS
-    local _os="unknown"
-    local _uname="$(uname)"
-    _account="stalwart"
-    if [ "${_uname}" = "Linux" ]; then
-        _os="linux"
-    elif [ "${_uname}" = "Darwin" ]; then
-        _os="macos"
-        _account="_stalwart"
-    fi
+    local _os _uname _account
+    _uname="$(uname)"
+    case "$_uname" in
+        Linux)   _os="linux"; _account="stalwart" ;;
+        Darwin)  _os="macos"; _account="_stalwart" ;;
+        FreeBSD) _os="freebsd"; _account="stalwart" ;;
+        *)       err "❌ Install failed: Unsupported OS: $_uname" ;;
+    esac
 
-    # Read arguments
-    local _dir="/opt/stalwart"
-
-    # Default component setting
+    # Parse arguments
     local _component="stalwart"
-
-    # Loop through the arguments
-    for arg in "$@"; do
-        case "$arg" in
+    local _prefix=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
             --fdb)
                 _component="stalwart-foundationdb"
                 ;;
+            -h|--help)
+                print_usage
+                exit 0
+                ;;
+            --*|-*)
+                err "❌ Unknown flag: $1 (try --help)"
+                ;;
             *)
-                if [ -n "$arg" ]; then
-                    _dir=$arg
+                if [ -n "$_prefix" ]; then
+                    err "❌ Only one prefix argument is allowed, got: $_prefix $1"
                 fi
+                _prefix="$1"
                 ;;
         esac
+        shift
     done
 
-    # Detect platform architecture
+    # Derive install paths — FHS by default, self-contained under a custom prefix
+    local _bin_dir _bin_file _conf_dir _log_dir _data_dir _env_file _config_file
+    if [ -z "$_prefix" ]; then
+        _bin_dir="/usr/local/bin"
+        _log_dir="/var/log/stalwart"
+        if [ "$_os" = "freebsd" ]; then
+            # hier(7): third-party config lives under /usr/local/etc,
+            # variable data under /var/db
+            _conf_dir="/usr/local/etc/stalwart"
+            _data_dir="/var/db/stalwart"
+        else
+            _conf_dir="/etc/stalwart"
+            _data_dir="/var/lib/stalwart"
+        fi
+    else
+        _bin_dir="${_prefix}/bin"
+        _conf_dir="${_prefix}/etc"
+        _log_dir="${_prefix}/logs"
+        _data_dir="${_prefix}/data"
+    fi
+    _bin_file="${_bin_dir}/stalwart"
+    _config_file="${_conf_dir}/config.json"
+    _env_file="${_conf_dir}/stalwart.env"
+
+    # Detect architecture
     get_architecture || return 1
     local _arch="$RETVAL"
     assert_nz "$_arch" "arch"
 
+    # Create service account
+    create_account "$_os" "$_account"
+
     # Create directories
-    ensure mkdir -p "$_dir" "$_dir/bin" "$_dir/etc" "$_dir/logs"
+    ensure mkdir -p "$_bin_dir" "$_conf_dir" "$_log_dir" "$_data_dir"
 
-    # Download latest binary
+    # Download and install the binary
     say "⏳ Downloading ${_component} for ${_arch}..."
-    local _file="${_dir}/bin/stalwart.tar.gz"
-    local _url="${BASE_URL}/${_component}-${_arch}.tar.gz"
-    ensure mkdir -p "$_dir"
-    ensure downloader "$_url" "$_file" "$_arch"
-    ensure tar zxvf "$_file" -C "$_dir/bin"
+    local _tmp _tar _src_name
+    _tmp="$(mktemp -d)"
+    _tar="${_tmp}/stalwart.tar.gz"
+    ensure downloader "${BASE_URL}/${_component}-${_arch}.tar.gz" "$_tar" "$_arch"
+    ensure tar zxf "$_tar" -C "$_tmp"
+    _src_name="stalwart"
     if [ "$_component" = "stalwart-foundationdb" ]; then
-        ignore mv "$_dir/bin/stalwart-foundationdb" "$_dir/bin/stalwart"
+        _src_name="stalwart-foundationdb"
     fi
-    ignore chmod +x "$_dir/bin/stalwart"
-    ignore rm "$_file"
+    ensure cp "${_tmp}/${_src_name}" "$_bin_file"
+    ensure chmod 0755 "$_bin_file"
+    ensure rm -rf "$_tmp"
 
-    # Create system account
-    if ! id -u ${_account} > /dev/null 2>&1; then
-        say "🖥️  Creating '${_account}' account..."
-        if [ "${_os}" = "macos" ]; then
-            local _last_uid="$(dscacheutil -q user | grep uid | awk '{print $2}' | sort -n | tail -n 1)"
-            local _last_gid="$(dscacheutil -q group | grep gid | awk '{print $2}' | sort -n | tail -n 1)"
-            local _uid="$((_last_uid+1))"
-            local _gid="$((_last_gid+1))"
-
-            ensure dscl /Local/Default -create Groups/_stalwart
-            ensure dscl /Local/Default -create Groups/_stalwart Password \*
-            ensure dscl /Local/Default -create Groups/_stalwart PrimaryGroupID $_gid
-            ensure dscl /Local/Default -create Groups/_stalwart RealName "Stalwart service"
-            ensure dscl /Local/Default -create Groups/_stalwart RecordName _stalwart stalwart
-
-            ensure dscl /Local/Default -create Users/_stalwart
-            ensure dscl /Local/Default -create Users/_stalwart NFSHomeDirectory /Users/_stalwart
-            ensure dscl /Local/Default -create Users/_stalwart Password \*
-            ensure dscl /Local/Default -create Users/_stalwart PrimaryGroupID $_gid
-            ensure dscl /Local/Default -create Users/_stalwart RealName "Stalwart service"
-            ensure dscl /Local/Default -create Users/_stalwart RecordName _stalwart stalwart
-            ensure dscl /Local/Default -create Users/_stalwart UniqueID $_uid
-            ensure dscl /Local/Default -create Users/_stalwart UserShell /bin/bash
-
-            ensure dscl /Local/Default -delete /Users/_stalwart AuthenticationAuthority
-            ensure dscl /Local/Default -delete /Users/_stalwart PasswordPolicyOptions
-        else
-            ensure useradd ${_account} -s /usr/sbin/nologin -M -r -U
-        fi
+    # Create env file if absent (preserve user edits on reinstall)
+    if [ ! -e "$_env_file" ]; then
+        say "📝 Writing env file at ${_env_file}..."
+        write_env_file "$_env_file"
     fi
 
-    # Run init
-    ignore $_dir/bin/stalwart --init "$_dir"
-
-    # Set permissions
+    # Ownership and permissions
     say "🔐 Setting permissions..."
-    ensure chown -R ${_account}:${_account} "$_dir"
-    ensure chmod -R 755 "$_dir"
-    ensure chmod 700 "$_dir/etc/config.toml"
+    ensure chown "${_account}:${_account}" "$_conf_dir" "$_log_dir" "$_data_dir"
+    ensure chmod 0750 "$_conf_dir" "$_log_dir" "$_data_dir"
+    ensure chown "root:${_account}" "$_env_file"
+    ensure chmod 0640 "$_env_file"
 
-    # Create service file
+    # Install and start the service
     say "🚀 Starting service..."
-    if [ "${_os}" = "linux" ]; then
-        local _issystemdlinux=$(command -v systemctl)
-        if [ -n "$_issystemdlinux" ]; then
-            create_service_linux_systemd "$_dir"
-        else
-            create_service_linux_initd "$_dir"
-        fi
-    elif [ "${_os}" = "macos" ]; then
-        create_service_macos "$_dir"
-    fi
+    local _service_type=""
+    case "$_os" in
+        linux)
+            if check_cmd systemctl; then
+                create_service_linux_systemd "$_bin_file" "$_config_file" "$_env_file" "$_account"
+                _service_type="systemd"
+            else
+                create_service_linux_initd "$_bin_file" "$_config_file" "$_env_file" "$_account"
+                _service_type="initd"
+            fi
+            ;;
+        macos)
+            create_service_macos "$_bin_file" "$_config_file" "$_env_file" "$_account"
+            _service_type="launchd"
+            ;;
+        freebsd)
+            create_service_freebsd "$_bin_file" "$_config_file" "$_env_file" "$_account" "$_log_dir"
+            _service_type="rcd"
+            ;;
+    esac
 
-    # Installation complete
-    local _host=$(hostname -f)
-    say "🎉 Installation complete! Continue the setup at http://$_host:8080/login"
+    # Completion message
+    local _host
+    _host="$(hostname -f 2>/dev/null || hostname)"
+    say ""
+    say "🎉 Installation complete!"
+    say ""
+    say "Stalwart is running in bootstrap mode. A temporary administrator"
+    say "password was generated at startup and printed to the service logs."
+    say ""
+    say "👉 To find the password, inspect the service logs:"
+    case "$_service_type" in
+        systemd)
+            say "     journalctl -u stalwart -n 200 | grep -A8 'bootstrap mode'"
+            ;;
+        initd)
+            say "     grep -A8 'bootstrap mode' /var/log/syslog 2>/dev/null \\"
+            say "       || grep -A8 'bootstrap mode' /var/log/messages"
+            ;;
+        launchd)
+            say "     sudo log show --predicate 'process == \"stalwart\"' --last 5m"
+            ;;
+        rcd)
+            say "     grep -A8 'bootstrap mode' ${_log_dir}/stalwart.log"
+            ;;
+    esac
+    say ""
+    say "   Or set STALWART_RECOVERY_ADMIN=admin:<password> in"
+    say "   ${_env_file} and restart the service to pin a credential."
+    say ""
+    say "   Finish setup at: http://${_host}:8080/admin"
+    say ""
 
     return 0
 }
 
-# Functions to create service files
+print_usage() {
+    cat <<'EOF'
+Usage: install.sh [--fdb] [PREFIX]
+
+Install Stalwart into standard FHS paths or under a custom prefix.
+
+Options:
+  --fdb       Install the FoundationDB build.
+  -h, --help  Show this help.
+
+With no PREFIX, Stalwart is installed under standard FHS paths:
+  binary   /usr/local/bin/stalwart
+  config   /etc/stalwart/config.json      (/usr/local/etc/stalwart/config.json on FreeBSD)
+  env      /etc/stalwart/stalwart.env     (/usr/local/etc/stalwart/stalwart.env on FreeBSD)
+  logs     /var/log/stalwart/
+  data     /var/lib/stalwart/             (/var/db/stalwart on FreeBSD)
+
+When PREFIX is provided, a self-contained layout is used instead:
+  binary   $PREFIX/bin/stalwart
+  config   $PREFIX/etc/config.json
+  env      $PREFIX/etc/stalwart.env
+  logs     $PREFIX/logs/
+  data     $PREFIX/data/
+EOF
+}
+
+write_env_file() {
+    cat > "$1" <<'EOF'
+# Environment variables for the Stalwart service.
+# Uncomment and edit an entry to override its default.
+
+# Override the hostname used in HTTP responses
+#STALWART_HOSTNAME=mail.example.com
+
+# Override the public base URL published in OAuth, OIDC, and JMAP discovery
+# documents. Accepts scheme, host, optional port, and optional path prefix.
+#STALWART_PUBLIC_URL=https://mail.example.com
+
+# Enable bootstrap / recovery mode on startup. Accepted: 1, true. Default: false.
+#STALWART_RECOVERY_MODE=true
+
+# Log level while in recovery mode. Default: info.
+#STALWART_RECOVERY_MODE_LOG_LEVEL=debug
+
+# HTTP port used in recovery mode. Default: 8080.
+#STALWART_RECOVERY_MODE_PORT=9090
+
+# Fixed administrator credentials — format: username:password
+# Default: a temporary random password is generated and printed to the logs.
+#STALWART_RECOVERY_ADMIN=admin:changeme
+
+# Cluster role assigned to this node. Must match a role name defined in the
+# cluster registry. Leave unset for a standalone (non-clustered) deployment.
+#STALWART_ROLE=primary
+
+# Push-notification shard this node is responsible for, when running in a
+# cluster.
+#STALWART_PUSH_SHARD=1
+EOF
+}
+
+create_account() {
+    local _os="$1"
+    local _account="$2"
+    if id -u "$_account" > /dev/null 2>&1; then
+        return 0
+    fi
+    say "🖥️  Creating '${_account}' account..."
+    if [ "$_os" = "macos" ]; then
+        local _last_uid _last_gid _uid _gid
+        _last_uid="$(dscacheutil -q user | grep uid | awk '{print $2}' | sort -n | tail -n 1)"
+        _last_gid="$(dscacheutil -q group | grep gid | awk '{print $2}' | sort -n | tail -n 1)"
+        _uid="$((_last_uid+1))"
+        _gid="$((_last_gid+1))"
+
+        ensure dscl /Local/Default -create Groups/_stalwart
+        ensure dscl /Local/Default -create Groups/_stalwart Password \*
+        ensure dscl /Local/Default -create Groups/_stalwart PrimaryGroupID $_gid
+        ensure dscl /Local/Default -create Groups/_stalwart RealName "Stalwart service"
+        ensure dscl /Local/Default -create Groups/_stalwart RecordName _stalwart stalwart
+
+        ensure dscl /Local/Default -create Users/_stalwart
+        ensure dscl /Local/Default -create Users/_stalwart NFSHomeDirectory /var/empty
+        ensure dscl /Local/Default -create Users/_stalwart Password \*
+        ensure dscl /Local/Default -create Users/_stalwart PrimaryGroupID $_gid
+        ensure dscl /Local/Default -create Users/_stalwart RealName "Stalwart service"
+        ensure dscl /Local/Default -create Users/_stalwart RecordName _stalwart stalwart
+        ensure dscl /Local/Default -create Users/_stalwart UniqueID $_uid
+        ensure dscl /Local/Default -create Users/_stalwart UserShell /usr/bin/false
+
+        ensure dscl /Local/Default -delete /Users/_stalwart AuthenticationAuthority
+        ensure dscl /Local/Default -delete /Users/_stalwart PasswordPolicyOptions
+    elif [ "$_os" = "freebsd" ]; then
+        ensure pw useradd -n "$_account" -c "Stalwart service" -d /nonexistent -s /usr/sbin/nologin -w no
+    else
+        ensure useradd "$_account" -s /usr/sbin/nologin -M -r -U
+    fi
+}
+
 create_service_linux_systemd() {
-    local _dir="$1"
-    cat <<EOF | sed "s|__PATH__|$_dir|g" > /etc/systemd/system/stalwart.service
+    local _bin="$1" _config="$2" _env="$3" _user="$4"
+    cat > /etc/systemd/system/stalwart.service <<EOF
 [Unit]
 Description=Stalwart
 Conflicts=postfix.service sendmail.service exim4.service
-ConditionPathExists=__PATH__/etc/config.toml
 After=network-online.target
 
 [Service]
@@ -158,10 +301,11 @@ KillMode=process
 KillSignal=SIGINT
 Restart=on-failure
 RestartSec=5
-ExecStart=__PATH__/bin/stalwart --config=__PATH__/etc/config.toml
+EnvironmentFile=-${_env}
+ExecStart=${_bin} --config=${_config}
 SyslogIdentifier=stalwart
-User=stalwart
-Group=stalwart
+User=${_user}
+Group=${_user}
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
@@ -173,13 +317,13 @@ EOF
 }
 
 create_service_linux_initd() {
-    local _dir="$1"
-    cat <<"EOF" | sed "s|__PATH__|$_dir|g" > /etc/init.d/stalwart
+    local _bin="$1" _config="$2" _env="$3" _user="$4"
+    cat > /etc/init.d/stalwart <<EOF
 #!/bin/sh
 ### BEGIN INIT INFO
 # Provides:          stalwart
-# Required-Start:    $network
-# Required-Stop:     $network
+# Required-Start:    \$network
+# Required-Stop:     \$network
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: Stalwart Server
@@ -192,91 +336,75 @@ PATH=/sbin:/usr/sbin:/bin:/usr/bin
 . /lib/init/vars.sh
 . /lib/lsb/init-functions
 
-# Service Config
-DAEMON=__PATH__/bin/stalwart
-DAEMON_ARGS="--config=__PATH__/etc/config.toml"
+DAEMON=${_bin}
+DAEMON_ARGS="--config=${_config}"
+ENV_FILE=${_env}
 PIDFILE=/var/run/stalwart.pid
 ULIMIT_NOFILE=65536
 
-# Exit if the package is not installed
-[ -x "$DAEMON" ] || exit 0
+[ -x "\$DAEMON" ] || exit 0
 
-# Exit if config file doesn't exist
-[ -f "__PATH__/etc/config.toml" ] || exit 0
+if [ -r "\$ENV_FILE" ]; then
+    set -a
+    . "\$ENV_FILE"
+    set +a
+fi
 
-# Read configuration variable file if it is present
-[ -r /etc/default/stalwart ] && . /etc/default/stalwart
-
-# Increase file descriptor limit
-ulimit -n $ULIMIT_NOFILE
+ulimit -n \$ULIMIT_NOFILE
 
 do_start()
 {
-    # Return
-    #   0 if daemon has been started
-    #   1 if daemon was already running
-    #   2 if daemon could not be started
-    start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON --test > /dev/null \
+    start-stop-daemon --start --quiet --pidfile \$PIDFILE --exec \$DAEMON --test > /dev/null \\
         || return 1
-    start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON \
-        --background --make-pidfile --chuid stalwart:stalwart \
-        -- $DAEMON_ARGS \
+    start-stop-daemon --start --quiet --pidfile \$PIDFILE --exec \$DAEMON \\
+        --background --make-pidfile --chuid ${_user}:${_user} \\
+        -- \$DAEMON_ARGS \\
         || return 2
 }
 
 do_stop()
 {
-    # Return
-    #   0 if daemon has been stopped
-    #   1 if daemon was already stopped
-    #   2 if daemon could not be stopped
-    #   other if a failure occurred
-    start-stop-daemon --stop --quiet --retry=INT/30/KILL/5 --pidfile $PIDFILE --name stalwart
-    RETVAL="$?"
-    [ "$RETVAL" = 2 ] && return 2
-    # Wait for children to finish too if this is a daemon that forks
-    # and if the daemon is only ever run from this initscript.
-    start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec $DAEMON
-    [ "$?" = 2 ] && return 2
-    # Many daemons don't delete their pidfiles when they exit.
-    rm -f $PIDFILE
-    return "$RETVAL"
+    start-stop-daemon --stop --quiet --retry=INT/30/KILL/5 --pidfile \$PIDFILE --name stalwart
+    RETVAL="\$?"
+    [ "\$RETVAL" = 2 ] && return 2
+    start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec \$DAEMON
+    [ "\$?" = 2 ] && return 2
+    rm -f \$PIDFILE
+    return "\$RETVAL"
 }
 
-case "$1" in
+case "\$1" in
   start)
-    [ "$VERBOSE" != no ] && log_daemon_msg "Starting Stalwart Server" "stalwart"
+    [ "\$VERBOSE" != no ] && log_daemon_msg "Starting Stalwart Server" "stalwart"
     do_start
-    case "$?" in
-        0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-        2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+    case "\$?" in
+        0|1) [ "\$VERBOSE" != no ] && log_end_msg 0 ;;
+        2)   [ "\$VERBOSE" != no ] && log_end_msg 1 ;;
     esac
     ;;
   stop)
-    [ "$VERBOSE" != no ] && log_daemon_msg "Stopping Stalwart Server" "stalwart"
+    [ "\$VERBOSE" != no ] && log_daemon_msg "Stopping Stalwart Server" "stalwart"
     do_stop
-    case "$?" in
-        0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-        2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+    case "\$?" in
+        0|1) [ "\$VERBOSE" != no ] && log_end_msg 0 ;;
+        2)   [ "\$VERBOSE" != no ] && log_end_msg 1 ;;
     esac
     ;;
   status)
-    status_of_proc "$DAEMON" "stalwart" && exit 0 || exit $?
+    status_of_proc "\$DAEMON" "stalwart" && exit 0 || exit \$?
     ;;
   restart)
     log_daemon_msg "Restarting Stalwart Server" "stalwart"
     do_stop
-    case "$?" in
+    case "\$?" in
       0|1)
         do_start
-        case "$?" in
+        case "\$?" in
             0) log_end_msg 0 ;;
-            1) log_end_msg 1 ;; # Old process is still running
-            *) log_end_msg 1 ;; # Failed to start
+            *) log_end_msg 1 ;;
         esac
         ;;
       *)
-        # Failed to stop
         log_end_msg 1
         ;;
     esac
@@ -290,34 +418,40 @@ esac
 exit 0
 EOF
     chmod +x /etc/init.d/stalwart
-
-    cat <<EOF > /etc/default/stalwart
-# Configuration for Stalwart init script being run during
-# the boot sequence
-
-# Set to 'yes' to enable additional verbosity
-#VERBOSE=no
-EOF
     update-rc.d stalwart defaults
     service stalwart start
 }
 
 create_service_macos() {
-    local _dir="$1"
-    cat <<EOF | sed "s|__PATH__|$_dir|g" > /Library/LaunchDaemons/stalwart.mail.plist
+    local _bin="$1" _config="$2" _env="$3" _user="$4"
+    local _plist="/Library/LaunchDaemons/stalwart.mail.plist"
+
+    # Remove any legacy LaunchDaemons from a prior install
+    if [ -f "$_plist" ]; then
+        launchctl bootout system/ "$_plist" 2>/dev/null || true
+        rm -f "$_plist"
+    fi
+
+    # launchd has no EnvironmentFile equivalent — wrap with sh to source the env file
+    cat > "$_plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN"
     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
     <dict>
         <key>Label</key>
-        <string>stalwart.mail</string>
+        <string>stalwart</string>
         <key>ServiceDescription</key>
         <string>Stalwart</string>
+        <key>UserName</key>
+        <string>${_user}</string>
+        <key>GroupName</key>
+        <string>${_user}</string>
         <key>ProgramArguments</key>
         <array>
-            <string>__PATH__/bin/stalwart</string>
-            <string>--config=__PATH__/etc/config.toml</string>
+            <string>/bin/sh</string>
+            <string>-c</string>
+            <string>set -a; if [ -r "${_env}" ]; then . "${_env}"; fi; set +a; exec "${_bin}" --config="${_config}"</string>
         </array>
         <key>RunAtLoad</key>
         <true/>
@@ -326,7 +460,67 @@ create_service_macos() {
     </dict>
 </plist>
 EOF
-    launchctl bootstrap system/ /Library/LaunchDaemons/stalwart.mail.plist
+    chmod 0644 "$_plist"
+    chown root:wheel "$_plist"
+    launchctl bootout system/ "$_plist" 2>/dev/null || true
+    launchctl bootstrap system/ "$_plist"
+}
+
+create_service_freebsd() {
+    local _bin="$1" _config="$2" _env="$3" _user="$4" _log_dir="$5"
+    ensure mkdir -p /usr/local/etc/rc.d
+    cat > /usr/local/etc/rc.d/stalwart <<EOF
+#!/bin/sh
+
+# PROVIDE: stalwart
+# REQUIRE: NETWORKING LOGIN
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="stalwart"
+rcvar="stalwart_enable"
+desc="Stalwart Server"
+
+load_rc_config \$name
+
+: \${stalwart_enable:="NO"}
+: \${stalwart_runas_user:="${_user}"}
+: \${stalwart_runas_group:="${_user}"}
+: \${stalwart_config:="${_config}"}
+: \${stalwart_envfile:="${_env}"}
+: \${stalwart_logfile:="${_log_dir}/stalwart.log"}
+: \${stalwart_fdlimit:="65536"}
+
+pidfile="/var/run/stalwart.pid"
+procname="${_bin}"
+command="/usr/sbin/daemon"
+command_args="-f -o \${stalwart_logfile} -p \${pidfile} ${_bin} --config=\${stalwart_config}"
+sig_stop="INT"
+start_precmd="stalwart_precmd"
+
+stalwart_precmd()
+{
+    # daemon(8) passes its environment through to the service
+    if [ -r "\${stalwart_envfile}" ]; then
+        set -a
+        . "\${stalwart_envfile}"
+        set +a
+    fi
+
+    # Stalwart binds its listeners as root, then setuid()s to this account
+    export RUN_AS_USER="\${stalwart_runas_user}"
+    export RUN_AS_GROUP="\${stalwart_runas_group}"
+
+    ulimit -n "\${stalwart_fdlimit}"
+}
+
+run_rc_command "\$1"
+EOF
+    chmod +x /usr/local/etc/rc.d/stalwart
+    sysrc stalwart_enable=YES
+    service stalwart stop > /dev/null 2>&1 || true
+    service stalwart start
 }
 
 

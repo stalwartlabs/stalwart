@@ -4,76 +4,142 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use base64::{Engine, engine::general_purpose};
-use store::Store;
-use utils::config::{Config, utils::AsKey};
-
-use super::{Authentication, EndpointType, OpenIdConfig, OpenIdDirectory};
+use crate::Directory;
+use crate::backend::oidc::lookup::fetch_jwks_keys;
+use crate::backend::oidc::{
+    DiscoveryDocument, JwksCache, OidcConfig, OidcDiscovery, OidcError, OpenIdDirectory,
+};
+use registry::schema::structs;
+use reqwest::Client;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+use trc::AuthEvent;
 
 impl OpenIdDirectory {
-    pub fn from_config(config: &mut Config, prefix: impl AsKey, data_store: Store) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let endpoint_type = match config.value_require((&prefix, "endpoint.method"))? {
-            "introspect" => match config.value_require((&prefix, "auth.method"))? {
-                #[allow(clippy::to_string_in_format_args)]
-                "basic" => EndpointType::Introspect(Authentication::Header(format!(
-                    "Basic {}",
-                    general_purpose::STANDARD.encode(
-                        format!(
-                            "{}:{}",
-                            config
-                                .value_require((&prefix, "auth.username"))?
-                                .to_string(),
-                            config.value_require((&prefix, "auth.secret"))?
+    pub async fn open(config: structs::OidcDirectory) -> Result<Directory, String> {
+        Self::new(OidcConfig {
+            issue_url: config.issuer_url,
+            require_aud: config.require_audience,
+            require_scopes: config.require_scopes.into_inner(),
+            claim_email: config.claim_username,
+            claim_name: config.claim_name,
+            claim_groups: config.claim_groups,
+            default_domain: config.username_domain,
+        })
+        .await
+        .map(Directory::OpenId)
+        .map_err(|err| err.to_string())
+    }
+
+    pub async fn new(config: OidcConfig) -> Result<Self, OidcError> {
+        let http = Client::builder()
+            .user_agent("Stalwart/1.0")
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| OidcError::Network(format!("HTTP client build failed: {e}")))?;
+        let discovery_url = format!(
+            "{}/.well-known/openid-configuration",
+            config.issue_url.trim_end_matches('/')
+        );
+        let discovery_bytes = http
+            .get(&discovery_url)
+            .send()
+            .await
+            .map_err(|e| OidcError::Network(format!("Discovery fetch failed: {e}")))?
+            .error_for_status()
+            .map_err(|e| OidcError::Provider(format!("Discovery HTTP error: {e}")))?
+            .bytes()
+            .await
+            .map_err(|e| OidcError::Provider(format!("Discovery HTTP error: {e}")))?;
+        let discovery: DiscoveryDocument = serde_json::from_slice(&discovery_bytes)
+            .map_err(|e| OidcError::Provider(format!("Discovery JSON parse error: {e}")))?;
+
+        let normalised_issue = config.issue_url.trim_end_matches('/');
+        let normalised_issuer = discovery.issuer.trim_end_matches('/');
+        if normalised_issuer != normalised_issue {
+            return Err(OidcError::Provider(format!(
+                "Issuer mismatch: discovery document says '{}' but configured issue_url is '{}'",
+                discovery.issuer, config.issue_url,
+            )));
+        }
+
+        if let Some(supported) = &discovery.scopes_supported {
+            for scope in &config.require_scopes {
+                if !supported.contains(scope) {
+                    trc::event!(
+                        Auth(AuthEvent::Warning),
+                        Url = config.issue_url.to_string(),
+                        Reason = format!(
+                            "Required scope '{}' is not in scopes_supported from the IdP",
+                            scope
                         )
-                        .as_bytes()
-                    )
-                ))),
-                "token" => EndpointType::Introspect(Authentication::Header(format!(
-                    "Bearer {}",
-                    config.value_require((&prefix, "auth.token"))?
-                ))),
-                "user-token" => EndpointType::Introspect(Authentication::Bearer),
-                "none" => EndpointType::Introspect(Authentication::None),
-                _ => {
-                    config.new_build_error(
-                        (&prefix, "auth.method"),
-                        "Invalid authentication method, must be 'header', 'bearer' or 'none'",
                     );
-                    return None;
                 }
-            },
-            "userinfo" => EndpointType::UserInfo,
-            _ => {
-                config.new_build_error(
-                    (&prefix, "endpoint.method"),
-                    "Invalid endpoint method, must be 'introspect' or 'userinfo'",
-                );
-                return None;
             }
-        };
+        }
 
-        let email_field = config.value_require((&prefix, "fields.email"))?.to_string();
+        if let Some(supported) = &discovery.claims_supported {
+            let check = |name: &str, label: &str| {
+                if !supported.iter().any(|c| c == name) {
+                    trc::event!(
+                        Auth(AuthEvent::Warning),
+                        Url = config.issue_url.to_string(),
+                        Reason = format!(
+                            "Configured {} claim '{}' is not in claims_supported from the IdP",
+                            label, name
+                        )
+                    );
+                }
+            };
+            check(&config.claim_email, "claim_email");
+            if let Some(n) = &config.claim_name {
+                check(n, "claim_name");
+            }
+            if let Some(g) = &config.claim_groups {
+                check(g, "claim_groups");
+            }
+        }
 
-        Some(OpenIdDirectory {
-            config: OpenIdConfig {
-                endpoint: config.value_require((&prefix, "endpoint.url"))?.to_string(),
-                endpoint_type,
-                endpoint_timeout: config
-                    .property_or_default::<Duration>((&prefix, "timeout"), "30s")
-                    .unwrap_or_else(|| Duration::from_secs(30)),
-                username_field: config
-                    .value((&prefix, "fields.username"))
-                    .filter(|&v| v != email_field)
-                    .map(|v| v.to_string()),
-                email_field,
-                full_name_field: config
-                    .value((&prefix, "fields.full-name"))
-                    .map(|v| v.to_string()),
+        /*{
+            let cache = Arc::clone(&cache);
+            let http = http.clone();
+            let jwks_uri = discovery.jwks_uri.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(24 * 3600));
+                interval.tick().await;
+                loop {
+                    interval.tick().await;
+                    match fetch_jwks_keys(&http, &jwks_uri).await {
+                        Ok(new_keys) => {
+                            let mut guard = cache.write().await;
+                            guard.keys = new_keys;
+                            guard.last_updated = Instant::now();
+                        }
+                        Err(e) => {
+                            trc::event!(
+                                Auth(AuthEvent::Warning),
+                                Url = jwks_uri.to_string(),
+                                Reason = format!("Background JWKS refresh failed: {e}")
+                            );
+                        }
+                    }
+                }
+            });
+        }*/
+
+        let cache = RwLock::new(JwksCache {
+            keys: fetch_jwks_keys(&http, &discovery.jwks_uri).await?,
+            last_updated: Instant::now(),
+        });
+
+        Ok(Self {
+            discovery: OidcDiscovery {
+                url: config.issue_url.clone(),
+                document: discovery,
             },
-            data_store,
+            config,
+            http,
+            cache,
         })
     }
 }

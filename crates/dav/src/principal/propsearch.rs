@@ -11,10 +11,10 @@ use dav_proto::schema::{
     request::{PrincipalPropertySearch, PropFind},
     response::MultiStatus,
 };
-use directory::{Type, backend::internal::manage::ManageDirectory};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use store::roaring::RoaringBitmap;
+use registry::schema::prelude::{ObjectType, Property};
+use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::collection::Collection;
 
@@ -46,21 +46,15 @@ impl PrincipalPropSearch for Server {
 
         let mut response = MultiStatus::new(Vec::with_capacity(16));
         if let Some(search_for) = search_for {
-            // Return all principals
-            let principals = self
-                .store()
-                .list_principals(
-                    search_for.as_str().into(),
-                    access_token.tenant_id(),
-                    &[Type::Individual, Type::Group],
-                    false,
-                    0,
-                    0,
+            let ids = self
+                .registry()
+                .query::<RoaringBitmap>(
+                    RegistryQuery::new(ObjectType::Account)
+                        .with_tenant(access_token.tenant_id())
+                        .text(Property::Text, search_for),
                 )
                 .await
                 .caused_by(trc::location!())?;
-
-            let ids = RoaringBitmap::from_iter(principals.items.into_iter().map(|p| p.id()));
 
             if !ids.is_empty() {
                 if request.properties.is_empty() {

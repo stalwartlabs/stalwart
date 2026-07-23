@@ -86,7 +86,7 @@ impl<'x> RequestHeaders<'x> {
             "Accept" => {
                 for value in value.split(',') {
                     if value.trim().starts_with("text/vcard") && let Some(version) = value.split_once("version=")
-                                .and_then(|(_, version)| VCardVersion::try_parse(version.trim())) {
+                                .and_then(|(_, version)| VCardVersion::try_parse(version.trim().trim_matches('"'))) {
                         if let Some(max_vcard_version) = &mut self.max_vcard_version {
                             if version > *max_vcard_version {
                                 *max_vcard_version = version;

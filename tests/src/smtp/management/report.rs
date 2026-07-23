@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
-use ahash::{AHashMap, HashSet};
+use crate::utils::server::TestServerBuilder;
+use ahash::AHashMap;
 use common::{
-    config::{server::ServerProtocol, smtp::report::AggregateFrequency},
+    config::smtp::report::AggregateFrequency,
     ipc::{DmarcEvent, PolicyType, TlsEvent},
 };
-
-use http::management::queue::Report;
 use mail_auth::{
     common::parse::TxtRecordParser,
     dmarc::Dmarc,
@@ -22,239 +19,239 @@ use mail_auth::{
         tlsrpt::{FailureDetails, ResultType},
     },
 };
-use reqwest::Method;
-
-use crate::{
-    jmap::ManagementApi,
-    smtp::{TestSMTP, management::queue::List},
+use registry::schema::{
+    prelude::{ObjectType, Property},
+    structs::{
+        DmarcInternalReport, DmarcReportSettings, Expression, TlsInternalReport, TlsReportSettings,
+    },
 };
-use smtp::reporting::{SmtpReporting, scheduler::SpawnReport};
-
-const CONFIG: &str = r#"
-[storage]
-directory = "local"
-
-[directory."local"]
-type = "memory"
-
-[[directory."local".principals]]
-name = "admin"
-type = "admin"
-description = "Superuser"
-secret = "secret"
-class = "admin"
-
-[session.rcpt]
-relay = true
-
-[report.dmarc.aggregate]
-max-size = 1024
-
-[report.tls.aggregate]
-max-size = 1024
-"#;
+use smtp::reporting::send::MtaReportSend;
+use std::sync::Arc;
 
 #[tokio::test]
 #[serial_test::serial]
 async fn manage_reports() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_report_manage")
+        .await
+        .with_http_listener(19048)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
 
-    // Start reporting service
-    let local = TestSMTP::new("smtp_manage_reports", CONFIG).await;
-    let _rx = local.start(&[ServerProtocol::Http]).await;
-    let core = local.build_smtp();
-    local
-        .report_receiver
-        .report_rx
-        .spawn(local.server.inner.clone());
+    let admin = test.account("admin");
+    admin
+        .registry_create_object(TlsReportSettings {
+            max_report_size: Expression {
+                else_: "1024".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(DmarcReportSettings {
+            aggregate_max_report_size: Expression {
+                else_: "1024".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin.mta_allow_relaying().await;
+    admin.mta_no_auth().await;
+    admin.mta_allow_non_fqdn().await;
+    admin.reload_settings().await;
+    test.reload_core();
+    test.expect_reload_settings().await;
+    let admin = test.account("admin");
 
     // Send test reporting events
-    core.schedule_report(DmarcEvent {
-        domain: "foobar.org".to_string(),
-        report_record: Record::new()
-            .with_source_ip("192.168.1.2".parse().unwrap())
-            .with_action_disposition(ActionDisposition::Pass)
-            .with_dmarc_dkim_result(DmarcResult::Pass)
-            .with_dmarc_spf_result(DmarcResult::Fail)
-            .with_envelope_from("hello@example.org")
-            .with_envelope_to("other@example.org")
-            .with_header_from("bye@example.org"),
-        dmarc_record: Arc::new(
-            Dmarc::parse(b"v=DMARC1; p=reject; rua=mailto:reports@foobar.org").unwrap(),
-        ),
-        interval: AggregateFrequency::Daily,
-    })
-    .await;
-    core.schedule_report(DmarcEvent {
-        domain: "foobar.net".to_string(),
-        report_record: Record::new()
-            .with_source_ip("a:b:c::e:f".parse().unwrap())
-            .with_action_disposition(ActionDisposition::Reject)
-            .with_dmarc_dkim_result(DmarcResult::Fail)
-            .with_dmarc_spf_result(DmarcResult::Pass),
-        dmarc_record: Arc::new(
-            Dmarc::parse(
-                b"v=DMARC1; p=quarantine; rua=mailto:reports@foobar.net,mailto:reports@example.net",
-            )
-            .unwrap(),
-        ),
-        interval: AggregateFrequency::Weekly,
-    })
-    .await;
-    core.schedule_report(TlsEvent {
-        domain: "foobar.org".to_string(),
-        policy: PolicyType::None,
-        failure: None,
-        tls_record: Arc::new(TlsRpt::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.org").unwrap()),
-        interval: AggregateFrequency::Daily,
-    })
-    .await;
-    core.schedule_report(TlsEvent {
-        domain: "foobar.net".to_string(),
-        policy: PolicyType::Sts(None),
-        failure: FailureDetails::new(ResultType::StsPolicyInvalid).into(),
-        tls_record: Arc::new(TlsRpt::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.net").unwrap()),
-        interval: AggregateFrequency::Weekly,
-    })
-    .await;
+    test.server
+        .schedule_report(DmarcEvent {
+            domain: "foobar.org".to_string(),
+            report_record: Record::new()
+                .with_source_ip("192.168.1.2".parse().unwrap())
+                .with_action_disposition(ActionDisposition::Pass)
+                .with_dmarc_dkim_result(DmarcResult::Pass)
+                .with_dmarc_spf_result(DmarcResult::Fail)
+                .with_envelope_from("hello@example.org")
+                .with_envelope_to("other@example.org")
+                .with_header_from("bye@example.org"),
+            dmarc_record: Arc::new(
+                Dmarc::parse(b"v=DMARC1; p=reject; rua=mailto:reports@foobar.org").unwrap(),
+            ),
+            interval: AggregateFrequency::Daily,
+            span_id: 0,
+        })
+        .await;
+    test.server
+        .schedule_report(DmarcEvent {
+            domain: "foobar.net".to_string(),
+            report_record: Record::new()
+                .with_source_ip("a:b:c::e:f".parse().unwrap())
+                .with_action_disposition(ActionDisposition::Reject)
+                .with_dmarc_dkim_result(DmarcResult::Fail)
+                .with_dmarc_spf_result(DmarcResult::Pass),
+            dmarc_record: Arc::new(
+                Dmarc::parse(
+                    concat!(
+                        "v=DMARC1; p=quarantine; rua=mailto:reports",
+                        "@foobar.net,mailto:reports@example.net"
+                    )
+                    .as_bytes(),
+                )
+                .unwrap(),
+            ),
+            interval: AggregateFrequency::Weekly,
+            span_id: 0,
+        })
+        .await;
+    test.server
+        .schedule_report(TlsEvent {
+            domain: "foobar.org".to_string(),
+            policy: PolicyType::None,
+            failure: None,
+            tls_record: Arc::new(
+                TlsRpt::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.org").unwrap(),
+            ),
+            interval: AggregateFrequency::Daily,
+            span_id: 0,
+        })
+        .await;
+    test.server
+        .schedule_report(TlsEvent {
+            domain: "foobar.net".to_string(),
+            policy: PolicyType::Sts(None),
+            failure: FailureDetails::new(ResultType::StsPolicyInvalid).into(),
+            tls_record: Arc::new(
+                TlsRpt::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.net").unwrap(),
+            ),
+            interval: AggregateFrequency::Weekly,
+            span_id: 0,
+        })
+        .await;
 
-    // List reports
-    let api = ManagementApi::default();
-    let ids = api
-        .request::<List<String>>(Method::GET, "/api/queue/reports")
-        .await
-        .unwrap()
-        .unwrap_data()
-        .items;
-    assert_eq!(ids.len(), 4);
-    let mut id_map = AHashMap::new();
-    let mut id_map_rev = AHashMap::new();
-    for (report, id) in api.get_reports(&ids).await.into_iter().zip(ids) {
-        let mut parts = id.split('!');
-        let report = report.unwrap();
-        let mut id_num = if parts.next().unwrap() == "t" {
-            assert!(matches!(report, Report::Tls { .. }));
-            2
-        } else {
-            assert!(matches!(report, Report::Dmarc { .. }));
-            0
-        };
-        let (domain, range_to, range_from) = match report {
-            Report::Dmarc {
-                domain,
-                range_to,
-                range_from,
-                ..
-            } => (domain, range_to, range_from),
-            Report::Tls {
-                domain,
-                range_to,
-                range_from,
-                ..
-            } => (domain, range_to, range_from),
-        };
-        assert_eq!(parts.next().unwrap(), domain);
-        let diff = range_to.to_timestamp() - range_from.to_timestamp();
-        if domain == "foobar.org" {
+    // List DMARC reports
+    let mut dmarc_name_to_id = AHashMap::new();
+    let mut dmarc_id_to_name = AHashMap::new();
+    for (id, report) in admin.registry_get_all::<DmarcInternalReport>().await {
+        let diff =
+            report.report.date_range_end.timestamp() - report.report.date_range_begin.timestamp();
+        if report.domain == "foobar.org" {
             assert_eq!(diff, 86400);
         } else {
             assert_eq!(diff, 7 * 86400);
-            id_num += 1;
         }
-        id_map.insert(char::from(b'a' + id_num).to_string(), id.clone());
-        id_map_rev.insert(id, char::from(b'a' + id_num).to_string());
+        dmarc_name_to_id.insert(report.domain.clone(), id);
+        dmarc_id_to_name.insert(id, report.domain);
     }
+    assert_eq!(dmarc_name_to_id.len(), 2);
+
+    // List TLS reports
+    let mut tls_name_to_id = AHashMap::new();
+    let mut tls_id_to_name = AHashMap::new();
+    for (id, report) in admin.registry_get_all::<TlsInternalReport>().await {
+        let diff =
+            report.report.date_range_end.timestamp() - report.report.date_range_start.timestamp();
+        if report.domain == "foobar.org" {
+            assert_eq!(diff, 86400);
+        } else {
+            assert_eq!(diff, 7 * 86400);
+        }
+        tls_name_to_id.insert(report.domain.clone(), id);
+        tls_id_to_name.insert(id, report.domain);
+    }
+    assert_eq!(tls_name_to_id.len(), 2);
 
     // Test list search
-    for (query, expected_ids) in [
-        ("/api/queue/reports?type=dmarc", vec!["a", "b"]),
-        ("/api/queue/reports?type=tls", vec!["c", "d"]),
-        ("/api/queue/reports?domain=foobar.org", vec!["a", "c"]),
-        ("/api/queue/reports?domain=foobar.net", vec!["b", "d"]),
-        ("/api/queue/reports?domain=foobar.org&type=dmarc", vec!["a"]),
-        ("/api/queue/reports?domain=foobar.net&type=tls", vec!["d"]),
+    for (object, query, expected_ids) in [
+        (
+            ObjectType::DmarcInternalReport,
+            vec![],
+            vec![
+                dmarc_name_to_id["foobar.org"],
+                dmarc_name_to_id["foobar.net"],
+            ],
+        ),
+        (
+            ObjectType::TlsInternalReport,
+            vec![],
+            vec![tls_name_to_id["foobar.org"], tls_name_to_id["foobar.net"]],
+        ),
+        (
+            ObjectType::DmarcInternalReport,
+            vec![(Property::Domain, "foobar.org".to_string())],
+            vec![dmarc_name_to_id["foobar.org"]],
+        ),
+        (
+            ObjectType::DmarcInternalReport,
+            vec![(Property::Domain, "foobar.net".to_string())],
+            vec![dmarc_name_to_id["foobar.net"]],
+        ),
+        (
+            ObjectType::TlsInternalReport,
+            vec![(Property::Domain, "foobar.org".to_string())],
+            vec![tls_name_to_id["foobar.org"]],
+        ),
+        (
+            ObjectType::TlsInternalReport,
+            vec![(Property::Domain, "foobar.net".to_string())],
+            vec![tls_name_to_id["foobar.net"]],
+        ),
     ] {
-        let expected_ids = HashSet::from_iter(expected_ids.into_iter().map(|s| s.to_string()));
-        let ids = api
-            .request::<List<String>>(Method::GET, query)
-            .await
-            .unwrap()
-            .unwrap_data()
-            .items
-            .into_iter()
-            .map(|id| id_map_rev.get(&id).unwrap().clone())
-            .collect::<HashSet<_>>();
-        assert_eq!(ids, expected_ids, "failed for {query}");
+        assert_eq!(
+            admin
+                .registry_query_ids(object, query.clone(), Vec::<&str>::new())
+                .await,
+            expected_ids,
+            "failed for {object:?} with query {query:?}"
+        );
     }
 
     // Cancel reports
-    for id in ["a", "b"] {
-        assert!(
-            api.request::<bool>(
-                Method::DELETE,
-                &format!("/api/queue/reports/{}", id_map.get(id).unwrap(),)
-            )
+    for (object, id) in [
+        (
+            ObjectType::DmarcInternalReport,
+            dmarc_name_to_id["foobar.org"],
+        ),
+        (ObjectType::TlsInternalReport, tls_name_to_id["foobar.org"]),
+    ] {
+        admin
+            .registry_destroy(object, vec![id])
             .await
-            .unwrap()
-            .unwrap_data(),
-            "failed for {id}"
+            .assert_destroyed(&[id]);
+    }
+    for (object, id) in [
+        (
+            ObjectType::DmarcInternalReport,
+            dmarc_name_to_id["foobar.net"],
+        ),
+        (ObjectType::TlsInternalReport, tls_name_to_id["foobar.net"]),
+    ] {
+        assert_eq!(
+            admin
+                .registry_query_ids(object, Vec::<(&str, &str)>::new(), Vec::<&str>::new())
+                .await,
+            vec![id],
+            "failed for {object:?}"
         );
     }
-    assert_eq!(
-        api.request::<List<String>>(Method::GET, "/api/queue/reports")
-            .await
-            .unwrap()
-            .unwrap_data()
-            .items
-            .len(),
-        2
-    );
-    let mut ids = api
-        .get_reports(&[
-            id_map.get("a").unwrap().clone(),
-            id_map.get("b").unwrap().clone(),
-            id_map.get("c").unwrap().clone(),
-            id_map.get("d").unwrap().clone(),
-        ])
-        .await
-        .into_iter();
-    assert!(ids.next().unwrap().is_none());
-    assert!(ids.next().unwrap().is_none());
-    assert!(ids.next().unwrap().is_some());
-    assert!(ids.next().unwrap().is_some());
 
     // Cancel all reports
-    assert!(
-        api.request::<bool>(Method::DELETE, "/api/queue/reports")
-            .await
-            .unwrap()
-            .unwrap_data()
+    admin
+        .registry_destroy_all(ObjectType::DmarcInternalReport)
+        .await;
+    admin
+        .registry_destroy_all(ObjectType::TlsInternalReport)
+        .await;
+    assert_eq!(
+        admin.registry_get_all::<DmarcInternalReport>().await,
+        Vec::new()
     );
     assert_eq!(
-        api.request::<List<String>>(Method::GET, "/api/queue/reports")
-            .await
-            .unwrap()
-            .unwrap_data()
-            .items
-            .len(),
-        0
+        admin.registry_get_all::<TlsInternalReport>().await,
+        Vec::new()
     );
-}
-
-impl ManagementApi {
-    async fn get_reports(&self, ids: &[String]) -> Vec<Option<Report>> {
-        let mut results = Vec::with_capacity(ids.len());
-
-        for id in ids {
-            let report = self
-                .request::<Report>(Method::GET, &format!("/api/queue/reports/{id}",))
-                .await
-                .unwrap()
-                .try_unwrap_data();
-            results.push(report);
-        }
-
-        results
-    }
 }

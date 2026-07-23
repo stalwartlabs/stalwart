@@ -9,70 +9,65 @@ use crate::core::Mailbox;
 use ahash::AHashMap;
 use common::{
     auth::AccessToken,
-    listener::{SessionStream, limiter::InFlight},
+    network::{SessionStream, limiter::InFlight},
     sharing::EffectiveAcl,
 };
-use directory::backend::internal::manage::ManageDirectory;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
     mailbox::INBOX_ID,
 };
 use imap_proto::protocol::list::Attribute;
 use parking_lot::Mutex;
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, atomic::Ordering},
-};
+use std::{collections::BTreeMap, sync::atomic::Ordering};
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive},
 };
 use trc::AddContext;
-use types::{acl::Acl, collection::Collection, id::Id, keyword::Keyword, special_use::SpecialUse};
+use types::{acl::Acl, collection::Collection, keyword::Keyword, special_use::SpecialUse};
 
 impl<T: SessionStream> SessionData<T> {
     pub async fn new(
         session: &Session<T>,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         in_flight: Option<InFlight>,
     ) -> trc::Result<Self> {
         let mut session = SessionData {
             stream_tx: session.stream_tx.clone(),
             server: session.server.clone(),
-            account_id: access_token.primary_id(),
+            account_id: access_token.account_id(),
             session_id: session.session_id,
             mailboxes: Mutex::new(vec![]),
             state: access_token.state().into(),
+            remote_addr: session.remote_addr,
             access_token,
             in_flight,
         };
-        let access_token = session.access_token.clone();
 
         // Fetch mailboxes for the main account
         let mut mailboxes = vec![
             session
-                .fetch_account_mailboxes(session.account_id, None, &access_token, None)
+                .fetch_account_mailboxes(session.account_id, None, &session.access_token, None)
                 .await
                 .caused_by(trc::location!())?
                 .unwrap(),
         ];
 
         // Fetch shared mailboxes
-        for &account_id in access_token.shared_accounts(Collection::Mailbox) {
+        for &account_id in session.access_token.shared_accounts(Collection::Mailbox) {
             let prefix: String = format!(
                 "{}/{}",
-                session.server.core.jmap.shared_folder,
+                session.server.core.email.shared_folder,
                 session
                     .server
-                    .store()
-                    .get_principal_name(account_id)
+                    .account(account_id)
                     .await
                     .caused_by(trc::location!())?
-                    .unwrap_or_else(|| Id::from(account_id).to_string())
+                    .name()
             );
             mailboxes.push(
                 session
-                    .fetch_account_mailboxes(account_id, prefix.into(), &access_token, None)
+                    .fetch_account_mailboxes(account_id, prefix.into(), &session.access_token, None)
                     .await
                     .caused_by(trc::location!())?
                     .unwrap(),
@@ -100,9 +95,7 @@ impl<T: SessionStream> SessionData<T> {
             return Ok(None);
         }
 
-        let shared_mailbox_ids = if access_token.is_primary_id(account_id)
-            || access_token.member_of.contains(&account_id)
-        {
+        let shared_mailbox_ids = if access_token.is_member(account_id) {
             None
         } else {
             cache.shared_mailboxes(access_token, Acl::Read).into()
@@ -150,7 +143,7 @@ impl<T: SessionStream> SessionData<T> {
             let effective_mailbox_id = self
                 .server
                 .core
-                .jmap
+                .email
                 .default_folders
                 .iter()
                 .find(|f| f.name == mailbox_name || f.aliases.iter().any(|a| a == &mailbox_name))
@@ -168,7 +161,7 @@ impl<T: SessionStream> SessionData<T> {
                         .items
                         .iter()
                         .any(|child| child.parent_id == mailbox.document_id),
-                    is_subscribed: mailbox.subscribers.contains(&access_token.primary_id()),
+                    is_subscribed: mailbox.subscribers.contains(&access_token.account_id()),
                     special_use: match mailbox.role {
                         SpecialUse::Trash => Some(Attribute::Trash),
                         SpecialUse::Junk => Some(Attribute::Junk),
@@ -217,8 +210,7 @@ impl<T: SessionStream> SessionData<T> {
 
         // Obtain access token
         let access_token = self
-            .server
-            .get_access_token(self.account_id)
+            .refresh_access_token()
             .await
             .caused_by(trc::location!())?;
         let state = access_token.state();
@@ -236,7 +228,7 @@ impl<T: SessionStream> SessionData<T> {
                     .copied()
                     .collect::<Vec<_>>();
                 for account in mailboxes.drain(..) {
-                    if access_token.is_primary_id(account.account_id)
+                    if access_token.is_account_id(account.account_id)
                         || has_access_to.contains(&account.account_id)
                     {
                         new_accounts.push(account);
@@ -267,13 +259,12 @@ impl<T: SessionStream> SessionData<T> {
             for account_id in added_account_ids {
                 let prefix: String = format!(
                     "{}/{}",
-                    self.server.core.jmap.shared_folder,
+                    self.server.core.email.shared_folder,
                     self.server
-                        .store()
-                        .get_principal_name(account_id)
+                        .account(account_id)
                         .await
                         .caused_by(trc::location!())?
-                        .unwrap_or_else(|| Id::from(account_id).to_string())
+                        .name()
                 );
                 added_accounts.push(
                     self.fetch_account_mailboxes(account_id, prefix.into(), &access_token, None)
@@ -393,13 +384,28 @@ impl<T: SessionStream> SessionData<T> {
         None
     }
 
+    pub fn get_mailbox_by_id(&self, account_id: u32, mailbox_id: u32) -> Option<MailboxId> {
+        for account in self.mailboxes.lock().iter() {
+            if account.account_id == account_id
+                && account.mailbox_names.values().any(|id| *id == mailbox_id)
+            {
+                return MailboxId {
+                    account_id,
+                    mailbox_id,
+                }
+                .into();
+            }
+        }
+        None
+    }
+
     pub async fn check_mailbox_acl(
         &self,
         account_id: u32,
         document_id: u32,
         item: Acl,
     ) -> trc::Result<bool> {
-        let access_token = self.get_access_token().await?;
+        let access_token = self.refresh_access_token().await?;
         Ok(access_token.is_member(account_id)
             || self
                 .server

@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use crate::core::Session;
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use imap_proto::{Command, StatusResponse, receiver::Request};
 
 impl<T: SessionStream> Session<T> {

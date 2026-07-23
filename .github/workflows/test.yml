@@ -19,24 +19,18 @@ jobs:
     needs: style
     runs-on: ubuntu-latest
 
+    env:
+      STORE: RocksDb
+      RUST_MIN_STACK: "16777216"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.1
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          curl -LO https://github.com/glauth/glauth/releases/download/v2.2.0/glauth-linux-arm64
-          chmod a+rx glauth-linux-arm64
-          nohup ./glauth-linux-arm64 -c tests/resources/ldap.cfg &
-          curl -Lo minio.deb https://dl.min.io/server/minio/release/linux-amd64/archive/minio_20230629051228.0.0_amd64.deb
-          sudo dpkg -i minio.deb
-          mkdir ~/minio
-          nohup minio server ~/minio --console-address :9090 &
-          curl -LO https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod a+rx mc
-          ./mc alias set myminio http://localhost:9000 minioadmin minioadmin
-          ./mc mb tmp
+      # External services (OpenLDAP, Keycloak, PostgreSQL, MySQL, Redis, NATS,
+      # MinIO, OpenSearch, Meilisearch) are provisioned on demand by the test
+      # suite via testcontainers using the Docker daemon available on the
+      # runner; see tests/src/utils/containers.rs.
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2

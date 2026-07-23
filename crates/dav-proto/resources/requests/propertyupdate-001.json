@@ -175,7 +175,9 @@
                           10
                         ],
                         "bysetpos": [],
-                        "wkst": null
+                        "wkst": null,
+                        "rscale": null,
+                        "skip": null
                       }
                     }
                   ]
@@ -293,7 +295,9 @@
                           4
                         ],
                         "bysetpos": [],
-                        "wkst": null
+                        "wkst": null,
+                        "rscale": null,
+                        "skip": null
                       }
                     }
                   ]

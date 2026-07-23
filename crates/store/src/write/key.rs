@@ -5,21 +5,27 @@
  */
 
 use super::{
-    AnyKey, BlobOp, DirectoryClass, InMemoryClass, QueueClass, ReportClass, ReportEvent,
-    TaskQueueClass, TelemetryClass, ValueClass,
+    AnyKey, BlobOp, InMemoryClass, QueueClass, TaskQueueClass, TelemetryClass, ValueClass,
 };
 use crate::{
-    Deserialize, IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL, SUBSPACE_BLOB_EXTRA,
-    SUBSPACE_BLOB_LINK, SUBSPACE_COUNTER, SUBSPACE_DIRECTORY, SUBSPACE_IN_MEMORY_COUNTER,
+    IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL, SUBSPACE_BLOB_LINK, SUBSPACE_COUNTER,
+    SUBSPACE_DELETED_ITEMS, SUBSPACE_DIRECTORY, SUBSPACE_IN_MEMORY_COUNTER,
     SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY,
-    SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REPORT_IN,
-    SUBSPACE_REPORT_OUT, SUBSPACE_SEARCH_INDEX, SUBSPACE_SETTINGS, SUBSPACE_TASK_QUEUE,
-    SUBSPACE_TELEMETRY_METRIC, SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey,
-    WITH_SUBSPACE,
-    write::{BlobLink, IndexPropertyClass, SearchIndex, SearchIndexId, SearchIndexType},
+    SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REGISTRY,
+    SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_PK, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
+    SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
+    SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
+    write::{
+        BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexId, SearchIndexType,
+    },
 };
+use registry::schema::prelude::ObjectType;
 use std::convert::TryInto;
-use types::{blob_hash::BLOB_HASH_LEN, collection::SyncCollection, field::Field};
+use types::{
+    blob_hash::BLOB_HASH_LEN,
+    collection::{Collection, SyncCollection},
+    field::{Field, MailboxField},
+};
 use utils::codec::leb128::Leb128_;
 
 pub struct KeySerializer {
@@ -103,51 +109,33 @@ impl KeySerialize for u64 {
 impl DeserializeBigEndian for &[u8] {
     fn deserialize_be_u16(&self, index: usize) -> trc::Result<u16> {
         self.get(index..index + U16_LEN)
+            .and_then(|bytes| bytes.try_into().ok())
             .ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Value, *self)
-            })
-            .and_then(|bytes| {
-                bytes.try_into().map_err(|_| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Value, *self)
-                })
             })
             .map(u16::from_be_bytes)
     }
 
     fn deserialize_be_u32(&self, index: usize) -> trc::Result<u32> {
         self.get(index..index + U32_LEN)
+            .and_then(|bytes| bytes.try_into().ok())
             .ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Value, *self)
-            })
-            .and_then(|bytes| {
-                bytes.try_into().map_err(|_| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Value, *self)
-                })
             })
             .map(u32::from_be_bytes)
     }
 
     fn deserialize_be_u64(&self, index: usize) -> trc::Result<u64> {
         self.get(index..index + U64_LEN)
+            .and_then(|bytes| bytes.try_into().ok())
             .ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Value, *self)
-            })
-            .and_then(|bytes| {
-                bytes.try_into().map_err(|_| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Value, *self)
-                })
             })
             .map(u64::from_be_bytes)
     }
@@ -159,10 +147,6 @@ impl<T: AsRef<ValueClass>> ValueKey<T> {
             document_id,
             ..self
         }
-    }
-
-    pub fn is_counter(&self) -> bool {
-        self.class.as_ref().is_counter(self.collection)
     }
 }
 
@@ -294,49 +278,8 @@ impl ValueClass {
                 .write(collection)
                 .write(document_id),
             ValueClass::TaskQueue(task) => match task {
-                TaskQueueClass::UpdateIndex {
-                    index,
-                    is_insert,
-                    due,
-                } => serializer
-                    .write(due.inner())
-                    .write(account_id)
-                    .write(if *is_insert { 7u8 } else { 8u8 })
-                    .write(document_id)
-                    .write(index.to_u8()),
-                TaskQueueClass::SendAlarm {
-                    due,
-                    event_id,
-                    alarm_id,
-                    is_email_alert,
-                } => serializer
-                    .write(due.inner())
-                    .write(account_id)
-                    .write(if *is_email_alert { 3u8 } else { 6u8 })
-                    .write(document_id)
-                    .write(*event_id)
-                    .write(*alarm_id),
-                TaskQueueClass::SendImip { due, is_payload } => {
-                    if !*is_payload {
-                        serializer
-                            .write(due.inner())
-                            .write(account_id)
-                            .write(4u8)
-                            .write(document_id)
-                    } else {
-                        serializer
-                            .write(u64::MAX)
-                            .write(account_id)
-                            .write(5u8)
-                            .write(document_id)
-                            .write(due.inner())
-                    }
-                }
-                TaskQueueClass::MergeThreads { due } => serializer
-                    .write(due.inner())
-                    .write(account_id)
-                    .write(9u8)
-                    .write(document_id),
+                TaskQueueClass::Task { id } => serializer.write(0u64).write(*id),
+                TaskQueueClass::Due { id, due } => serializer.write(*due).write(*id),
             },
             ValueClass::Blob(op) => match op {
                 BlobOp::Commit { hash } => serializer.write::<&[u8]>(hash.as_ref()),
@@ -352,47 +295,47 @@ impl ValueClass {
                         .write(account_id)
                         .write(*until),
                 },
-                BlobOp::Quota { hash, until } => serializer
-                    .write(BlobLink::QUOTA_LINK)
-                    .write(account_id)
-                    .write::<&[u8]>(hash.as_ref())
-                    .write(*until),
-                BlobOp::Undelete { hash, until } => serializer
-                    .write(BlobLink::UNDELETE_LINK)
-                    .write(account_id)
-                    .write::<&[u8]>(hash.as_ref())
-                    .write(*until),
-                BlobOp::SpamSample { hash, until } => serializer
-                    .write(BlobLink::SPAM_SAMPLE_LINK)
-                    .write(*until)
-                    .write(account_id)
-                    .write::<&[u8]>(hash.as_ref()),
             },
-            ValueClass::Config(key) => serializer.write(key.as_slice()),
             ValueClass::InMemory(lookup) => match lookup {
                 InMemoryClass::Key(key) => serializer.write(key.as_slice()),
                 InMemoryClass::Counter(key) => serializer.write(key.as_slice()),
             },
-            ValueClass::Directory(directory) => match directory {
-                DirectoryClass::NameToId(name) => serializer.write(0u8).write(name.as_slice()),
-                DirectoryClass::EmailToId(email) => serializer.write(1u8).write(email.as_slice()),
-                DirectoryClass::Principal(uid) => serializer.write(2u8).write_leb128(*uid),
-                DirectoryClass::UsedQuota(uid) => serializer.write(4u8).write_leb128(*uid),
-                DirectoryClass::MemberOf {
-                    principal_id,
-                    member_of,
-                } => serializer.write(5u8).write(*principal_id).write(*member_of),
-                DirectoryClass::Members {
-                    principal_id,
-                    has_member,
+            ValueClass::Registry(registry) => match registry {
+                RegistryClass::Item { object_id, item_id } => {
+                    serializer.write(*object_id).write(*item_id)
+                }
+                RegistryClass::IndexId { object_id, item_id } => {
+                    serializer.write(u16::MAX).write(*object_id).write(*item_id)
+                }
+                RegistryClass::Index {
+                    index_id,
+                    object_id,
+                    item_id,
+                    key,
                 } => serializer
-                    .write(6u8)
-                    .write(*principal_id)
-                    .write(*has_member),
-                DirectoryClass::Index { word, principal_id } => serializer
-                    .write(7u8)
-                    .write(word.as_slice())
-                    .write(*principal_id),
+                    .write(*object_id)
+                    .write(*index_id)
+                    .write(key.as_slice())
+                    .write(*item_id),
+                RegistryClass::Reference {
+                    to_object_id,
+                    to_item_id,
+                    from_object_id,
+                    from_item_id,
+                } => serializer
+                    .write(*to_object_id)
+                    .write(*to_item_id)
+                    .write(*from_object_id)
+                    .write(*from_item_id),
+                RegistryClass::PrimaryKey {
+                    object_id,
+                    index_id,
+                    key,
+                } => serializer
+                    .write((*object_id).unwrap_or(u16::MAX))
+                    .write(*index_id)
+                    .write(key.as_slice()),
+                RegistryClass::IdCounter { object_id } => serializer.write(*object_id),
             },
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(queue_id) => serializer.write(*queue_id),
@@ -400,59 +343,18 @@ impl ValueClass {
                     .write(event.due)
                     .write(event.queue_id)
                     .write(event.queue_name.as_slice()),
-                QueueClass::DmarcReportHeader(event) => serializer
-                    .write(0u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id)
-                    .write(0u8),
-                QueueClass::TlsReportHeader(event) => serializer
-                    .write(0u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id)
-                    .write(1u8),
-                QueueClass::DmarcReportEvent(event) => serializer
-                    .write(1u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id),
-                QueueClass::TlsReportEvent(event) => serializer
-                    .write(2u8)
-                    .write(event.due)
-                    .write(event.domain.as_bytes())
-                    .write(event.policy_hash)
-                    .write(event.seq_id),
                 QueueClass::QuotaCount(key) => serializer.write(0u8).write(key.as_slice()),
                 QueueClass::QuotaSize(key) => serializer.write(1u8).write(key.as_slice()),
             },
-            ValueClass::Report(report) => match report {
-                ReportClass::Tls { id, expires } => {
-                    serializer.write(0u8).write(*expires).write(*id)
-                }
-                ReportClass::Dmarc { id, expires } => {
-                    serializer.write(1u8).write(*expires).write(*id)
-                }
-                ReportClass::Arf { id, expires } => {
-                    serializer.write(2u8).write(*expires).write(*id)
-                }
-            },
             ValueClass::Telemetry(telemetry) => match telemetry {
-                TelemetryClass::Span { span_id } => serializer.write(*span_id),
-                TelemetryClass::Metric {
-                    timestamp,
-                    metric_id,
-                    node_id,
-                } => serializer
-                    .write(*timestamp)
-                    .write_leb128(*metric_id)
-                    .write_leb128(*node_id),
+                TelemetryClass::Span(span_id) => serializer.write(*span_id),
+                TelemetryClass::Metric(metric_id) => serializer.write(*metric_id),
             },
             ValueClass::DocumentId => serializer.write(account_id).write(collection),
             ValueClass::ChangeId => serializer.write(account_id),
+            ValueClass::Quota => serializer.write(account_id).write(u8::MAX),
+            ValueClass::TenantQuota(tenant_id) => serializer.write(*tenant_id).write(u8::MAX - 1),
+            ValueClass::NodeId(node_id) => serializer.write(u32::MAX).write(*node_id),
             ValueClass::ShareNotification {
                 notification_id,
                 notify_account_id,
@@ -521,12 +423,6 @@ impl ValueClass {
     }
 }
 
-impl BlobLink {
-    pub const QUOTA_LINK: u8 = 0;
-    pub const UNDELETE_LINK: u8 = 1;
-    pub const SPAM_SAMPLE_LINK: u8 = 2;
-}
-
 impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for IndexKey<T> {
     fn subspace(&self) -> u8 {
         SUBSPACE_INDEXES
@@ -568,6 +464,26 @@ impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for AnyKey<T> {
     }
 }
 
+const MAILBOX_COLLECTION: u8 = Collection::Mailbox as u8;
+const MAILBOX_COUNTER_FIELD: u8 = MailboxField::UidCounter as u8;
+const REG_ARCHIVED_ITEM: u16 = ObjectType::ArchivedItem as u16;
+const REG_SPAM_SAMPLE: u16 = ObjectType::SpamTrainingSample as u16;
+const REG_ACCOUNT: u16 = ObjectType::Account as u16;
+const REG_DOMAIN: u16 = ObjectType::Domain as u16;
+const REG_TENANT: u16 = ObjectType::Tenant as u16;
+const REG_ROLE: u16 = ObjectType::Role as u16;
+const REG_OAUTH_CLIENT: u16 = ObjectType::OAuthClient as u16;
+const REG_MAILING_LIST: u16 = ObjectType::MailingList as u16;
+const REG_MASKED_EMAIL: u16 = ObjectType::MaskedEmail as u16;
+const REG_PUBLIC_KEY: u16 = ObjectType::PublicKey as u16;
+const REG_TRACE: u16 = ObjectType::Trace as u16;
+const REG_METRIC: u16 = ObjectType::Metric as u16;
+const REPORT_EXTERNAL_ARF: u16 = ObjectType::ArfExternalReport as u16;
+const REPORT_EXTERNAL_DMARC: u16 = ObjectType::DmarcExternalReport as u16;
+const REPORT_EXTERNAL_TLS: u16 = ObjectType::TlsExternalReport as u16;
+const REPORT_INTERNAL_DMARC: u16 = ObjectType::DmarcInternalReport as u16;
+const REPORT_INTERNAL_TLS: u16 = ObjectType::TlsInternalReport as u16;
+
 impl ValueClass {
     pub fn serialized_size(&self) -> usize {
         match self {
@@ -577,13 +493,14 @@ impl ValueClass {
                 IndexPropertyClass::Integer { .. } => U32_LEN * 2 + 3 + U64_LEN,
             },
             ValueClass::Acl(_) => U32_LEN * 3 + 2,
-            ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v))
-            | ValueClass::Config(v) => v.len(),
-            ValueClass::Directory(d) => match d {
-                DirectoryClass::NameToId(v) | DirectoryClass::EmailToId(v) => v.len(),
-                DirectoryClass::Principal(_) | DirectoryClass::UsedQuota(_) => U32_LEN,
-                DirectoryClass::Members { .. } | DirectoryClass::MemberOf { .. } => U32_LEN * 2,
-                DirectoryClass::Index { word, .. } => word.len() + U32_LEN,
+            ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v)) => v.len(),
+            ValueClass::Registry(registry) => match registry {
+                RegistryClass::Item { .. } => U16_LEN + U64_LEN + 1,
+                RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 1,
+                RegistryClass::Index { key, .. } => (U16_LEN * 2) + U64_LEN + key.len() + 1,
+                RegistryClass::PrimaryKey { key, .. } => (U16_LEN * 2) + key.len() + 1,
+                RegistryClass::IndexId { .. } => U16_LEN + U64_LEN + 1,
+                RegistryClass::IdCounter { .. } => U16_LEN + 1,
             },
             ValueClass::Blob(op) => match op {
                 BlobOp::Commit { .. } => BLOB_HASH_LEN,
@@ -595,43 +512,20 @@ impl ValueClass {
                             BlobLink::Temporary { .. } => U32_LEN + U64_LEN,
                         }
                 }
-                BlobOp::Quota { .. } | BlobOp::Undelete { .. } => {
-                    BLOB_HASH_LEN + U32_LEN + U64_LEN + 1
-                }
-                BlobOp::SpamSample { .. } => BLOB_HASH_LEN + U32_LEN + 2,
             },
-            ValueClass::TaskQueue(e) => match e {
-                TaskQueueClass::UpdateIndex { .. } => (U64_LEN * 2) + 2,
-                TaskQueueClass::SendAlarm { .. } | TaskQueueClass::MergeThreads { .. } => {
-                    U64_LEN + (U32_LEN * 3) + 1
-                }
-                TaskQueueClass::SendImip { is_payload, .. } => {
-                    if *is_payload {
-                        (U64_LEN * 2) + (U32_LEN * 2) + 1
-                    } else {
-                        U64_LEN + (U32_LEN * 2) + 1
-                    }
-                }
-            },
+            ValueClass::TaskQueue(_) => (U64_LEN * 2) + 1,
             ValueClass::Queue(q) => match q {
                 QueueClass::Message(_) => U64_LEN,
                 QueueClass::MessageEvent(_) => U64_LEN * 3,
-                QueueClass::DmarcReportEvent(event) | QueueClass::TlsReportEvent(event) => {
-                    event.domain.len() + U64_LEN * 3
-                }
-                QueueClass::DmarcReportHeader(event) | QueueClass::TlsReportHeader(event) => {
-                    event.domain.len() + (U64_LEN * 3) + 1
-                }
                 QueueClass::QuotaCount(v) | QueueClass::QuotaSize(v) => v.len(),
             },
-            ValueClass::Report(_) => U64_LEN * 2 + 1,
             ValueClass::Telemetry(telemetry) => match telemetry {
-                TelemetryClass::Span { .. } => U64_LEN + 1,
-                TelemetryClass::Metric { .. } => U64_LEN * 2 + 1,
+                TelemetryClass::Span(_) | TelemetryClass::Metric(_) => U64_LEN + 1,
             },
-            ValueClass::DocumentId => U32_LEN + 1,
+            ValueClass::DocumentId | ValueClass::Quota | ValueClass::TenantQuota(_) => U32_LEN + 1,
             ValueClass::ChangeId => U32_LEN,
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
+            ValueClass::NodeId(_) => (U16_LEN * 3) + 1,
             ValueClass::SearchIndex(v) => match &v.typ {
                 SearchIndexType::Term { hash, .. } => U64_LEN + hash.len() + 2,
                 SearchIndexType::Index { field, .. } => 1 + field.data.len() + U64_LEN,
@@ -647,7 +541,7 @@ impl ValueClass {
     pub fn subspace(&self, collection: u8) -> u8 {
         match self {
             ValueClass::Property(field) => {
-                if *field == 84 && collection == 1 {
+                if collection == MAILBOX_COLLECTION && *field == MAILBOX_COUNTER_FIELD {
                     SUBSPACE_COUNTER
                 } else {
                     SUBSPACE_PROPERTY
@@ -658,49 +552,50 @@ impl ValueClass {
             ValueClass::TaskQueue { .. } => SUBSPACE_TASK_QUEUE,
             ValueClass::Blob(op) => match op {
                 BlobOp::Commit { .. } | BlobOp::Link { .. } => SUBSPACE_BLOB_LINK,
-                BlobOp::Quota { .. } | BlobOp::Undelete { .. } | BlobOp::SpamSample { .. } => {
-                    SUBSPACE_BLOB_EXTRA
-                }
             },
-            ValueClass::Config(_) => SUBSPACE_SETTINGS,
+            ValueClass::Registry(registry) => match registry {
+                RegistryClass::Item { object_id, .. } => match *object_id {
+                    REG_ACCOUNT | REG_DOMAIN | REG_TENANT | REG_ROLE | REG_OAUTH_CLIENT
+                    | REG_MAILING_LIST | REG_MASKED_EMAIL | REG_PUBLIC_KEY => SUBSPACE_DIRECTORY,
+                    REG_ARCHIVED_ITEM => SUBSPACE_DELETED_ITEMS,
+                    REG_SPAM_SAMPLE => SUBSPACE_SPAM_SAMPLES,
+                    REG_TRACE => SUBSPACE_TELEMETRY_SPAN,
+                    REG_METRIC => SUBSPACE_TELEMETRY_METRIC,
+                    REPORT_EXTERNAL_ARF | REPORT_EXTERNAL_DMARC | REPORT_EXTERNAL_TLS => {
+                        SUBSPACE_REPORT_IN
+                    }
+                    REPORT_INTERNAL_DMARC | REPORT_INTERNAL_TLS => SUBSPACE_REPORT_OUT,
+                    _ => SUBSPACE_REGISTRY,
+                },
+                RegistryClass::IndexId { .. } | RegistryClass::Index { .. } => {
+                    SUBSPACE_REGISTRY_IDX
+                }
+                RegistryClass::Reference { .. } | RegistryClass::PrimaryKey { .. } => {
+                    SUBSPACE_REGISTRY_PK
+                }
+                RegistryClass::IdCounter { .. } => SUBSPACE_COUNTER,
+            },
+            ValueClass::NodeId(_) => SUBSPACE_REGISTRY_PK,
             ValueClass::InMemory(lookup) => match lookup {
                 InMemoryClass::Key(_) => SUBSPACE_IN_MEMORY_VALUE,
                 InMemoryClass::Counter(_) => SUBSPACE_IN_MEMORY_COUNTER,
             },
-            ValueClass::Directory(directory) => match directory {
-                DirectoryClass::UsedQuota(_) => SUBSPACE_QUOTA,
-                _ => SUBSPACE_DIRECTORY,
-            },
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(_) => SUBSPACE_QUEUE_MESSAGE,
                 QueueClass::MessageEvent(_) => SUBSPACE_QUEUE_EVENT,
-                QueueClass::DmarcReportHeader(_)
-                | QueueClass::TlsReportHeader(_)
-                | QueueClass::DmarcReportEvent(_)
-                | QueueClass::TlsReportEvent(_) => SUBSPACE_REPORT_OUT,
                 QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_) => SUBSPACE_QUOTA,
             },
-            ValueClass::Report(_) => SUBSPACE_REPORT_IN,
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span { .. } => SUBSPACE_TELEMETRY_SPAN,
                 TelemetryClass::Metric { .. } => SUBSPACE_TELEMETRY_METRIC,
             },
-            ValueClass::DocumentId | ValueClass::ChangeId => SUBSPACE_COUNTER,
+            ValueClass::DocumentId
+            | ValueClass::ChangeId
+            | ValueClass::Quota
+            | ValueClass::TenantQuota(_) => SUBSPACE_COUNTER,
             ValueClass::ShareNotification { .. } => SUBSPACE_LOGS,
             ValueClass::SearchIndex(_) => SUBSPACE_SEARCH_INDEX,
             ValueClass::Any(any) => any.subspace,
-        }
-    }
-
-    pub fn is_counter(&self, collection: u8) -> bool {
-        match self {
-            ValueClass::Directory(DirectoryClass::UsedQuota(_))
-            | ValueClass::InMemory(InMemoryClass::Counter(_))
-            | ValueClass::Queue(QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_))
-            | ValueClass::DocumentId
-            | ValueClass::ChangeId => true,
-            ValueClass::Property(84) if collection == 1 => true, // TODO: Find a more elegant way to do this
-            _ => false,
         }
     }
 }
@@ -716,45 +611,26 @@ impl From<ValueClass> for ValueKey<ValueClass> {
     }
 }
 
-impl From<DirectoryClass> for ValueKey<ValueClass> {
-    fn from(value: DirectoryClass) -> Self {
+impl From<RegistryClass> for ValueKey<ValueClass> {
+    fn from(value: RegistryClass) -> Self {
         ValueKey {
             account_id: 0,
             collection: 0,
             document_id: 0,
-            class: ValueClass::Directory(value),
+            class: ValueClass::Registry(value),
         }
     }
 }
 
-impl From<DirectoryClass> for ValueClass {
-    fn from(value: DirectoryClass) -> Self {
-        ValueClass::Directory(value)
+impl From<RegistryClass> for ValueClass {
+    fn from(value: RegistryClass) -> Self {
+        ValueClass::Registry(value)
     }
 }
 
 impl From<BlobOp> for ValueClass {
     fn from(value: BlobOp) -> Self {
         ValueClass::Blob(value)
-    }
-}
-
-impl Deserialize for ReportEvent {
-    fn deserialize(key: &[u8]) -> trc::Result<Self> {
-        Ok(ReportEvent {
-            due: key.deserialize_be_u64(1)?,
-            policy_hash: key.deserialize_be_u64(key.len() - (U64_LEN * 2 + 1))?,
-            seq_id: key.deserialize_be_u64(key.len() - (U64_LEN + 1))?,
-            domain: key
-                .get(U64_LEN + 1..key.len() - (U64_LEN * 2 + 1))
-                .and_then(|domain| std::str::from_utf8(domain).ok())
-                .map(|s| s.to_string())
-                .ok_or_else(|| {
-                    trc::StoreEvent::DataCorruption
-                        .caused_by(trc::location!())
-                        .ctx(trc::Key::Key, key)
-                })?,
-        })
     }
 }
 

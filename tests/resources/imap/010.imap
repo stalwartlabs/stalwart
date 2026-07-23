@@ -54,8 +54,13 @@ Subject: submsg
 
 Hello world
 
-BINARY[] {16}
-[binary content]
+BINARY[] {88}
+From: sub@domain.org
+Date: Sun, 12 Aug 2012 12:34:56 +0300
+Subject: submsg
+
+Hello world
+
 BINARY.SIZE[] 88
 ----------------------------------
 BODY[HEADER] {108}
@@ -86,8 +91,13 @@ Subject: submsg
 
 Hello world
 
-BINARY[1] {16}
-[binary content]
+BINARY[1] {88}
+From: sub@domain.org
+Date: Sun, 12 Aug 2012 12:34:56 +0300
+Subject: submsg
+
+Hello world
+
 BINARY.SIZE[1] 88
 ----------------------------------
 BODY[1.HEADER] {76}

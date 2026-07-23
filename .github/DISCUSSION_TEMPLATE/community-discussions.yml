@@ -1,0 +1,30 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!IMPORTANT]
+        > **Stalwart support has moved to [support.stalw.art](https://support.stalw.art).**
+        >
+        > For an official response from the Stalwart maintainers, please post your question on the support portal. You can sign in there with your existing GitHub account; no separate registration is required.
+        >
+        > You are welcome to start a discussion here and other community members may still reply, but the maintainers no longer answer support questions through GitHub Discussions, so your question may go unanswered unless you also post it at [support.stalw.art](https://support.stalw.art).
+        >
+        > Before opening a new report, please review the [documentation](https://stalw.art/docs/) and the [FAQ](https://stalw.art/docs/faq). Most reported issues turn out to be configuration problems rather than actual bugs.
+  - type: textarea
+    attributes:
+      label: Topic
+      description: Describe the question, problem, or topic you want to discuss with the community.
+      placeholder: |
+        I am trying to configure SMTP relay with Stalwart and I am running into ...
+    validations:
+      required: true
+  - type: checkboxes
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I have reviewed the [documentation](https://stalw.art/docs/) and the [FAQ](https://stalw.art/docs/faq) and confirm that my question is not addressed there.
+          required: true
+        - label: I understand that maintainers no longer answer support questions through GitHub Discussions, and that for an official response from the Stalwart team I need to post my question at [support.stalw.art](https://support.stalw.art).
+          required: true
+        - label: I agree to follow the project's [Code of Conduct](https://github.com/stalwartlabs/.github/blob/main/CODE_OF_CONDUCT.md).
+          required: true

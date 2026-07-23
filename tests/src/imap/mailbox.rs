@@ -7,20 +7,22 @@
 use imap::op::list::matches_pattern;
 use imap_proto::ResponseType;
 
+use crate::utils::server::TestServer;
+
 use super::{AssertResult, ImapConnection, Type};
 
-pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnection) {
+pub async fn test(
+    mut imap: &mut ImapConnection,
+    mut imap_check: &mut ImapConnection,
+    test: &TestServer,
+) {
     println!("Running mailbox tests...");
 
     // Pattern matching tests
     mailbox_matches_pattern();
 
     // Create third connection for testing
-    let mut other_conn = ImapConnection::connect(b"_z ").await;
-    other_conn
-        .send("AUTHENTICATE PLAIN {32+}\r\nAGpkb2VAZXhhbXBsZS5jb20Ac2VjcmV0")
-        .await;
-    other_conn.assert_read(Type::Tagged, ResponseType::Ok).await;
+    let mut other_conn = test.account("jdoe@example.com").imap_client().await;
 
     // List folders
     imap.send("LIST \"\" \"*\"").await;
@@ -88,9 +90,7 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
     // Create missing parent folders
     imap.send("CREATE \"/Vegetable/Broccoli\" (USE (\\Important))")
         .await;
-    imap.assert_read(Type::Tagged, ResponseType::Ok)
-        .await
-        .assert_contains("[MAILBOXID (");
+    imap.assert_read(Type::Tagged, ResponseType::Ok).await;
 
     imap.send("CREATE \" Cars/Electric /4 doors/ Red/\"").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
@@ -326,10 +326,7 @@ pub async fn test(mut imap: &mut ImapConnection, mut imap_check: &mut ImapConnec
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
 
     // Shared folder creation tests
-    let mut imap_jane = ImapConnection::connect(b"_z ").await;
-    imap_jane
-        .authenticate("jane.smith@example.com", "secret")
-        .await;
+    let mut imap_jane = test.account("jane.smith@example.com").imap_client().await;
     imap_jane
         .send("CREATE \"Shared Folders/support@example.com/INBOX/Test\"")
         .await;

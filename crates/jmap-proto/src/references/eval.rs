@@ -84,6 +84,9 @@ impl Response<'_> {
                         GetResponseMethod::PrincipalAvailability(response) => {
                             response.eval_jptr(path, &mut results)
                         }
+                        GetResponseMethod::Registry(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
                     },
                     ResponseMethod::Changes(response) => match response {
                         ChangesResponseMethod::Email(response) => {
@@ -175,6 +178,8 @@ pub(crate) trait EvalObjectReferences {
         response: &Response<'_>,
         graph: &mut Graph<'_>,
         depth: usize,
+        max_depth: usize,
+        eval_strings: bool,
     ) -> trc::Result<()>;
 }
 
@@ -188,81 +193,86 @@ where
         response: &Response<'_>,
         graph: &mut Graph<'_>,
         depth: usize,
+        max_depth: usize,
+        eval_strings: bool,
     ) -> trc::Result<()> {
-        let Value::Object(obj) = self else {
-            return Ok(());
-        };
-
-        for (key, value) in obj.as_mut_vec() {
-            // Resolve patch with references (e.g. mailboxIds/#idRef)
-            if depth == 0
-                && let Key::Property(property) = key
-                && let Some(id_ref) = property.as_id_ref()
-            {
-                if let Some(id) = response.created_ids.get(id_ref) {
-                    if !property.try_set_id(id.clone()) {
+        match self {
+            Value::Element(element) => {
+                if let Some(id_ref) = element.as_id_ref() {
+                    if let Some(id) = response.created_ids.get(id_ref) {
+                        if !element.try_set_id(id.clone()) {
+                            return Err(trc::JmapEvent::InvalidResultReference
+                                .into_err()
+                                .details("Id reference points to invalid type."));
+                        }
+                    } else if let Graph::Some { child_id, graph } = graph {
+                        graph
+                            .entry(child_id.to_string())
+                            .or_insert_with(Vec::new)
+                            .push(id_ref.to_string());
+                    } else {
                         return Err(trc::JmapEvent::InvalidResultReference
                             .into_err()
-                            .details("Id reference points to invalid type."));
+                            .details(format_compact!("Id reference {id_ref:?} not found.")));
                     }
-                } else {
-                    return Err(trc::JmapEvent::InvalidResultReference
-                        .into_err()
-                        .details(format_compact!("Id reference {id_ref:?} not found.")));
                 }
             }
-
-            match value {
-                Value::Element(element) => {
-                    if let Some(id_ref) = element.as_id_ref() {
+            Value::Array(items) if depth < max_depth => {
+                // Resolve references in arrays (e.g. emailIds: [#idRef1, #idRef2])
+                for item in items {
+                    item.eval_object_references(
+                        response,
+                        graph,
+                        depth + 1,
+                        max_depth,
+                        eval_strings,
+                    )?;
+                }
+            }
+            Value::Object(items) if depth < max_depth => {
+                // Resolve references in JMAP sets (e.g. mailboxIds: { "#idRef1": true, "#idRef2": true })
+                for (key, value) in items.as_mut_vec() {
+                    if let Key::Property(property) = key
+                        && let Some(id_ref) = property.as_id_ref()
+                    {
                         if let Some(id) = response.created_ids.get(id_ref) {
-                            if !element.try_set_id(id.clone()) {
+                            if !property.try_set_id(id.clone()) {
                                 return Err(trc::JmapEvent::InvalidResultReference
                                     .into_err()
                                     .details("Id reference points to invalid type."));
                             }
-                        } else if let Graph::Some { child_id, graph } = graph {
-                            graph
-                                .entry(child_id.to_string())
-                                .or_insert_with(Vec::new)
-                                .push(id_ref.to_string());
                         } else {
                             return Err(trc::JmapEvent::InvalidResultReference
                                 .into_err()
                                 .details(format_compact!("Id reference {id_ref:?} not found.")));
                         }
+                    } else if eval_strings
+                        && let Some(id) = key
+                            .as_string_key()
+                            .and_then(|k| k.strip_prefix('#'))
+                            .and_then(|id_ref| response.created_ids.get(id_ref))
+                    {
+                        *key = Key::Owned(match id {
+                            AnyId::Id(id) => id.to_string(),
+                            AnyId::BlobId(id) => id.to_string(),
+                        });
+                    }
+
+                    if matches!(
+                        value,
+                        Value::Element(_) | Value::Array(_) | Value::Object(_)
+                    ) {
+                        value.eval_object_references(
+                            response,
+                            graph,
+                            depth + 1,
+                            max_depth,
+                            eval_strings,
+                        )?;
                     }
                 }
-                Value::Array(items) if depth == 0 => {
-                    // Resolve references in arrays (e.g. emailIds: [#idRef1, #idRef2])
-                    for item in items {
-                        item.eval_object_references(response, graph, depth + 1)?;
-                    }
-                }
-                Value::Object(items) if depth == 0 => {
-                    // Resolve references in JMAP sets (e.g. mailboxIds: { "#idRef1": true, "#idRef2": true })
-                    for (key, _) in items.as_mut_vec() {
-                        if let Key::Property(property) = key
-                            && let Some(id_ref) = property.as_id_ref()
-                        {
-                            if let Some(id) = response.created_ids.get(id_ref) {
-                                if !property.try_set_id(id.clone()) {
-                                    return Err(trc::JmapEvent::InvalidResultReference
-                                        .into_err()
-                                        .details("Id reference points to invalid type."));
-                                }
-                            } else {
-                                return Err(trc::JmapEvent::InvalidResultReference
-                                    .into_err()
-                                    .details(format_compact!(
-                                        "Id reference {id_ref:?} not found."
-                                    )));
-                            }
-                        }
-                    }
-                }
-                _ => {}
             }
+            _ => {}
         }
 
         Ok(())

@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::utils::{
+    jmap::{IntoJmapSet, JmapUtils},
+    server::TestServer,
+};
 use futures::StreamExt;
 use jmap_client::{
     CalendarAlert, PushObject, client_ws::WebSocketMessage, event_source::PushNotification,
@@ -15,14 +19,12 @@ use std::time::Instant;
 use store::write::now;
 use tokio::sync::mpsc;
 
-use crate::jmap::{IntoJmapSet, JMAPTest, JmapUtils};
-
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Calendar Alarm tests...");
-    let account = params.account("jdoe@example.com");
+    let account = test.account("jdoe@example.com");
     let account_id = account.id_string();
-    let client = account.client();
-    let client_ws = account.client_owned().await;
+    let client = account.jmap_client().await;
+    let client_ws = account.jmap_client().await;
 
     // Create test calendar
     let response = account
@@ -169,5 +171,5 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Cleanup
     account.destroy_all_calendars().await;
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }

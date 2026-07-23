@@ -4,19 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
 use crate::{
     responses::XmlEscape,
     schema::{
+        Namespace, Namespaces,
         property::{DavProperty, Privilege},
         response::{
             Ace, AclRestrictions, GrantDeny, Href, List, Principal, PrincipalSearchProperty,
             PrincipalSearchPropertySet, RequiredPrincipal, Resource, SupportedPrivilege,
         },
-        Namespace, Namespaces,
     },
 };
+use std::fmt::Display;
 
 impl Display for SupportedPrivilege {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

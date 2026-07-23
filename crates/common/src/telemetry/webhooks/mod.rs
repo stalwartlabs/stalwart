@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{LONG_1Y_SLUMBER, config::telemetry::WebhookTracer};
+use aws_lc_rs::hmac;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use serde::Serialize;
 use std::{
     sync::{
         Arc,
@@ -11,11 +15,6 @@ use std::{
     },
     time::Instant,
 };
-
-use crate::{LONG_1Y_SLUMBER, config::telemetry::WebhookTracer};
-use base64::{Engine, engine::general_purpose::STANDARD};
-use ring::hmac;
-use serde::Serialize;
 use store::write::now;
 use tokio::sync::mpsc;
 use trc::{

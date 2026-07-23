@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{io::SeekFrom, ops::Range, path::PathBuf};
-
+use crate::BlobStore;
+use registry::schema::structs;
+use std::{io::SeekFrom, ops::Range, path::PathBuf, sync::Arc};
 use tokio::{
     fs::{self, File},
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
 };
-use utils::{
-    codec::base32_custom::Base32Writer,
-    config::{Config, utils::AsKey},
-};
+use utils::codec::base32_custom::Base32Writer;
 
 pub struct FsStore {
     path: PathBuf,
@@ -21,30 +19,18 @@ pub struct FsStore {
 }
 
 impl FsStore {
-    pub async fn open(config: &mut Config, prefix: impl AsKey) -> Option<Self> {
-        let prefix = prefix.as_key();
-        let path = PathBuf::from(config.value_require((&prefix, "path"))?);
+    pub async fn open(config: structs::FileSystemStore) -> Result<BlobStore, String> {
+        let path = PathBuf::from(&config.path);
         if !path.exists() {
             fs::create_dir_all(&path)
                 .await
-                .map_err(|e| {
-                    config.new_build_error(
-                        (&prefix, "path"),
-                        format!("Failed to create directory: {e}"),
-                    )
-                })
-                .ok()?;
+                .map_err(|e| format!("Failed to create directory: {e}"))?;
         }
 
-        Some(FsStore {
+        Ok(BlobStore::Fs(Arc::new(FsStore {
             path,
-            hash_levels: std::cmp::min(
-                config
-                    .property_or_default((&prefix, "depth"), "2")
-                    .unwrap_or(2),
-                5,
-            ),
-        })
+            hash_levels: std::cmp::min(config.depth as usize, 5),
+        })))
     }
 
     pub(crate) async fn get_blob(

@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+#![warn(clippy::large_futures)]
+
 pub mod context;
 pub mod request;
 pub mod response;
 
 pub use form_urlencoded;
 
-use std::{net::IpAddr, sync::Arc};
-
-use common::listener::ServerInstance;
+use common::network::ServerInstance;
 use hyper::StatusCode;
+use std::{net::IpAddr, sync::Arc};
 
 pub type HttpRequest = hyper::Request<hyper::body::Incoming>;
 

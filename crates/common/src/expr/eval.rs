@@ -4,20 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{cmp::Ordering, fmt::Display};
-
-use compact_str::{CompactString, ToCompactString, format_compact};
-use hyper::StatusCode;
-use trc::EvalEvent;
-
-use crate::Server;
-
 use super::{
-    BinaryOperator, Constant, Expression, ExpressionItem, Setting, StringCow, UnaryOperator,
+    BinaryOperator, Constant, Expression, ExpressionItem, StringCow, SystemVariable, UnaryOperator,
     Variable,
     functions::{FUNCTIONS, ResolveVariable},
     if_block::IfBlock,
 };
+use crate::Server;
+use compact_str::{CompactString, ToCompactString, format_compact};
+use hyper::StatusCode;
+use registry::{
+    schema::prelude::Property,
+    types::{EnumImpl, id::ObjectId},
+};
+use std::{cmp::Ordering, fmt::Display};
+use trc::{Collector, EvalEvent};
 
 impl Server {
     pub async fn eval_if<'x, R: TryFrom<Variable<'x>>, V: ResolveVariable>(
@@ -30,7 +31,8 @@ impl Server {
             trc::event!(
                 Eval(EvalEvent::Result),
                 SpanId = session_id,
-                Id = if_block.key.clone(),
+                Id = if_block.id.to_string(),
+                Key = if_block.property.as_str(),
                 Result = ""
             );
 
@@ -51,7 +53,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Result),
                     SpanId = session_id,
-                    Id = if_block.key.clone(),
+                    Id = if_block.id.to_string(),
+                    Key = if_block.property.as_str(),
                     Result = format!("{result:?}"),
                 );
 
@@ -61,7 +64,8 @@ impl Server {
                         trc::event!(
                             Eval(EvalEvent::Result),
                             SpanId = session_id,
-                            Id = if_block.key.clone(),
+                            Id = if_block.id.to_string(),
+                            Key = if_block.property.as_str(),
                             Result = "",
                         );
 
@@ -73,7 +77,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Error),
                     SpanId = session_id,
-                    Id = if_block.key.clone(),
+                    Id = if_block.id.to_string(),
+                    Key = if_block.property.as_str(),
                     CausedBy = err,
                 );
 
@@ -86,7 +91,8 @@ impl Server {
         &'x self,
         expr: &'x Expression,
         resolver: &'x V,
-        expr_id: &str,
+        obj_id: ObjectId,
+        property: Property,
         session_id: u64,
     ) -> Option<R> {
         if expr.is_empty() {
@@ -107,7 +113,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Result),
                     SpanId = session_id,
-                    Id = expr_id.to_compact_string(),
+                    Id = obj_id.to_string(),
+                    Key = property.as_str(),
                     Result = format!("{result:?}"),
                 );
 
@@ -117,7 +124,8 @@ impl Server {
                         trc::event!(
                             Eval(EvalEvent::Error),
                             SpanId = session_id,
-                            Id = expr_id.to_compact_string(),
+                            Id = obj_id.to_string(),
+                            Key = property.as_str(),
                             Details = "Failed to convert result",
                         );
 
@@ -129,7 +137,8 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Error),
                     SpanId = session_id,
-                    Id = expr_id.to_compact_string(),
+                    Id = obj_id.to_string(),
+                    Key = property.as_str(),
                     CausedBy = err,
                 );
 
@@ -210,25 +219,27 @@ impl<'x, V: ResolveVariable> EvalContext<'x, V, Expression, &mut Vec<CompactStri
                             .to_compact_string(),
                     )));
                 }
-                ExpressionItem::Setting(setting) => match setting {
-                    Setting::Hostname => {
+                ExpressionItem::System(setting) => match setting {
+                    SystemVariable::Hostname => {
                         stack.push(self.core.core.network.server_name.as_str().into())
                     }
-                    Setting::ReportDomain => {
-                        stack.push(self.core.core.network.report_domain.as_str().into())
+                    SystemVariable::Domain => {
+                        stack.push(self.core.core.email.default_domain_name.as_str().into())
                     }
-                    Setting::NodeId => stack.push(self.core.core.network.node_id.into()),
-                    Setting::Other(key) => stack.push(
+                    SystemVariable::NodeId => stack.push(self.core.core.network.node_id.into()),
+                    SystemVariable::NodeHostname => {
+                        stack.push(self.core.registry().local_hostname().into())
+                    }
+                    SystemVariable::NodeRole => stack.push(
                         self.core
-                            .core
-                            .storage
-                            .config
-                            .get(key)
-                            .await?
+                            .registry()
+                            .cluster_role()
                             .unwrap_or_default()
-                            .to_compact_string()
                             .into(),
                     ),
+                    SystemVariable::Metric(variable) => {
+                        stack.push(Variable::Float(Collector::read_metric(*variable)));
+                    }
                 },
                 ExpressionItem::UnaryOperator(op) => {
                     let value = stack.pop().unwrap_or_default();
@@ -361,6 +372,8 @@ impl<'x> Variable<'x> {
                     a
                 }
             }
+            (a, Variable::Constant(_)) => a,
+            (Variable::Constant(_), b) => b,
         }
     }
 
@@ -485,6 +498,7 @@ impl<'x> Variable<'x> {
             Variable::String(s) => Variable::String(StringCow::Borrowed(s.as_str())),
             Variable::Integer(n) => Variable::Integer(*n),
             Variable::Float(n) => Variable::Float(*n),
+            Variable::Constant(c) => Variable::Constant(*c),
             Variable::Array(l) => Variable::Array(l.iter().map(|v| v.to_ref()).collect::<Vec<_>>()),
         }
     }
@@ -495,6 +509,7 @@ impl<'x> Variable<'x> {
             Variable::Integer(n) => *n != 0,
             Variable::String(s) => !s.is_empty(),
             Variable::Array(a) => !a.is_empty(),
+            Variable::Constant(_) => true,
         }
     }
 
@@ -514,10 +529,12 @@ impl<'x> Variable<'x> {
                         Variable::Integer(v) => result.push_str(&v.to_compact_string()),
                         Variable::Float(v) => result.push_str(&v.to_compact_string()),
                         Variable::Array(_) => {}
+                        Variable::Constant(c) => result.push_str(c.as_str()),
                     }
                 }
                 StringCow::Owned(result)
             }
+            Variable::Constant(c) => StringCow::Borrowed(c.as_str()),
         }
     }
 
@@ -537,10 +554,12 @@ impl<'x> Variable<'x> {
                         Variable::Integer(v) => result.push_str(&v.to_compact_string()),
                         Variable::Float(v) => result.push_str(&v.to_compact_string()),
                         Variable::Array(_) => {}
+                        Variable::Constant(c) => result.push_str(c.as_str()),
                     }
                 }
                 StringCow::Owned(result)
             }
+            Variable::Constant(c) => StringCow::Borrowed(c.as_str()),
         }
     }
 
@@ -567,6 +586,7 @@ impl<'x> Variable<'x> {
             Variable::String(s) => s.len(),
             Variable::Integer(_) | Variable::Float(_) => 2,
             Variable::Array(l) => l.iter().map(|v| v.len() + 2).sum(),
+            Variable::Constant(c) => c.as_str().len(),
         }
     }
 
@@ -605,6 +625,7 @@ impl<'x> Variable<'x> {
             Variable::String(s) => Variable::String(StringCow::Owned(s.into_owned())),
             Variable::Integer(n) => Variable::Integer(n),
             Variable::Float(n) => Variable::Float(n),
+            Variable::Constant(c) => Variable::Constant(c),
             Variable::Array(l) => Variable::Array(l.into_iter().map(|v| v.into_owned()).collect()),
         }
     }
@@ -646,7 +667,10 @@ impl PartialOrd for Variable<'_> {
             }
             (Self::Array(a), Self::Array(b)) => a.partial_cmp(b),
             (Self::Array(_) | Self::String(_), _) => Ordering::Greater.into(),
-            (_, Self::Array(_)) => Ordering::Less.into(),
+            (Self::Constant(a), Self::Constant(b)) => a.to_id().partial_cmp(&b.to_id()),
+            (_, Self::Array(_) | Self::Constant(_)) | (Self::Constant(_), _) => {
+                Ordering::Less.into()
+            }
         }
     }
 }
@@ -672,6 +696,7 @@ impl Display for Variable<'_> {
                 }
                 Ok(())
             }
+            Variable::Constant(c) => c.as_str().fmt(f),
         }
     }
 }
@@ -682,6 +707,7 @@ impl<'x> From<&'x Constant> for Variable<'x> {
             Constant::Integer(i) => Variable::Integer(*i),
             Constant::Float(f) => Variable::Float(*f),
             Constant::String(s) => Variable::String(StringCow::Borrowed(s.as_str())),
+            Constant::Static(c) => Variable::Constant(*c),
         }
     }
 }

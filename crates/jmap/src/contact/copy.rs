@@ -22,7 +22,11 @@ use jmap_proto::{
     },
     types::state::State,
 };
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -50,6 +54,7 @@ impl JmapContactCardCopy for Server {
     ) -> trc::Result<CopyResponse<contact::ContactCard>> {
         let account_id = request.account_id.document_id();
         let from_account_id = request.from_account_id.document_id();
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
 
         if account_id == from_account_id {
             return Err(trc::JmapEvent::InvalidArguments
@@ -57,7 +62,11 @@ impl JmapContactCardCopy for Server {
                 .details("From accountId is equal to fromAccountId"));
         }
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await
             .caused_by(trc::location!())?;
         let old_state = cache.assert_state(false, &request.if_in_state)?;
@@ -71,7 +80,11 @@ impl JmapContactCardCopy for Server {
         };
 
         let from_cache = self
-            .fetch_dav_resources(access_token, from_account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                from_account_id,
+                SyncCollection::AddressBook,
+            )
             .await
             .caused_by(trc::location!())?;
         let from_contact_ids = if access_token.is_member(from_account_id) {
@@ -134,6 +147,7 @@ impl JmapContactCardCopy for Server {
                     &cache,
                     &mut batch,
                     access_token,
+                    &account,
                     account_id,
                     &can_add_address_books,
                     contact.card.into_jscontact(),
@@ -172,14 +186,14 @@ impl JmapContactCardCopy for Server {
             *next_call = Call {
                 id: String::new(),
                 name: MethodName::new(MethodObject::ContactCard, MethodFunction::Set),
-                method: RequestMethod::Set(SetRequestMethod::ContactCard(SetRequest {
+                method: RequestMethod::Set(SetRequestMethod::ContactCard(Box::new(SetRequest {
                     account_id: request.from_account_id,
                     if_in_state: request.destroy_from_if_in_state,
                     create: None,
                     update: None,
                     destroy: MaybeResultReference::Value(destroy_ids).into(),
                     arguments: Default::default(),
-                })),
+                }))),
             }
             .into();
         }

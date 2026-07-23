@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+#![warn(clippy::large_futures)]
+
 use calcard::common::timezone::Tz;
 use common::DavResources;
 use percent_encoding::{AsciiSet, CONTROLS};
@@ -146,4 +148,11 @@ impl DavCalendarResource for DavResources {
             .and_then(|c| c.calendar_preferences(account_id))
             .map(|p| p.tz)
     }
+}
+
+pub fn strip_mailto_scheme(value: &str) -> &str {
+    value
+        .split_once(':')
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("mailto"))
+        .map_or(value, |(_, address)| address.trim())
 }

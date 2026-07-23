@@ -50,7 +50,7 @@ impl MtaStsLookup for Server {
             Ok(record) => record,
             Err(err) => {
                 // Return the cached policy in case of failure
-                return if let Some(value) = self.inner.cache.dbs_mta_sts.get(domain) {
+                return if let Some(value) = self.inner.cache.dns_mta_sts.get(domain) {
                     Ok(value)
                 } else {
                     Err(err.into())
@@ -59,7 +59,7 @@ impl MtaStsLookup for Server {
         };
 
         // Check if the policy has been cached
-        if let Some(value) = self.inner.cache.dbs_mta_sts.get(domain)
+        if let Some(value) = self.inner.cache.dns_mta_sts.get(domain)
             && value.id == record.id
         {
             return Ok(value);
@@ -87,8 +87,8 @@ impl MtaStsLookup for Server {
             record.id.clone(),
         )?);
 
-        self.inner.cache.dbs_mta_sts.insert(
-            domain.to_string(),
+        self.inner.cache.dns_mta_sts.insert(
+            domain.into(),
             policy.clone(),
             Duration::from_secs(if (3600..31557600).contains(&policy.max_age) {
                 policy.max_age
@@ -114,10 +114,10 @@ impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Dns(err) => match err {
-                mail_auth::Error::DnsRecordNotFound(code) => {
+                mail_auth::Error::Dns(mail_auth::DnsError::RecordNotFound(code)) => {
                     write!(f, "Record not found: {code:?}")
                 }
-                mail_auth::Error::InvalidRecordType => {
+                mail_auth::Error::Dns(mail_auth::DnsError::InvalidRecordType) => {
                     f.write_str("Failed to parse MTA-STS DNS record.")
                 }
                 _ => write!(f, "DNS lookup error: {err}"),

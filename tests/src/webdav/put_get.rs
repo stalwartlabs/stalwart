@@ -6,35 +6,45 @@
 
 use types::collection::Collection;
 
-use super::WebDavTest;
+use crate::utils::server::TestServer;
+
+use crate::utils::webdav::GenerateTestDavResource;
 use crate::webdav::*;
 
-pub async fn test(test: &WebDavTest) {
+pub async fn test(test: &TestServer) {
     println!("Running PUT/GET tests...");
-    let client = test.client("john");
+    let client = test.account("john@example.com").webdav_client();
 
     // Simple PUT
     let mut files = AHashMap::new();
     for (path, ct, content) in [
-        ("/dav/file/john/file1.txt", "text/plain", TEST_FILE_1),
-        ("/dav/file/john/file2.txt", "text/x-other", TEST_FILE_2),
         (
-            "/dav/card/john/default/card1.vcf",
+            "/dav/file/john%40example.com/file1.txt",
+            "text/plain",
+            TEST_FILE_1,
+        ),
+        (
+            "/dav/file/john%40example.com/file2.txt",
+            "text/x-other",
+            TEST_FILE_2,
+        ),
+        (
+            "/dav/card/john%40example.com/default/card1.vcf",
             "text/vcard; charset=utf-8",
             TEST_VCARD_1,
         ),
         (
-            "/dav/card/john/default/card2.vcf",
+            "/dav/card/john%40example.com/default/card2.vcf",
             "text/vcard; charset=utf-8",
             TEST_VCARD_2,
         ),
         (
-            "/dav/cal/john/default/event1.ics",
+            "/dav/cal/john%40example.com/default/event1.ics",
             "text/calendar; charset=utf-8",
             TEST_ICAL_1,
         ),
         (
-            "/dav/cal/john/default/event2.ics",
+            "/dav/cal/john%40example.com/default/event2.ics",
             "text/calendar; charset=utf-8",
             TEST_ICAL_2,
         ),
@@ -62,9 +72,9 @@ pub async fn test(test: &WebDavTest) {
 
     // PUT under a non-existing parent should fail
     for (path, contents) in [
-        ("/dav/file/john/foo/file1.txt", TEST_FILE_1),
-        ("/dav/card/john/foo/card1.vcf", TEST_VCARD_1),
-        ("/dav/cal/john/foo/event1.ics", TEST_ICAL_1),
+        ("/dav/file/john%40example.com/foo/file1.txt", TEST_FILE_1),
+        ("/dav/card/john%40example.com/foo/card1.vcf", TEST_VCARD_1),
+        ("/dav/cal/john%40example.com/foo/event1.ics", TEST_ICAL_1),
     ] {
         client
             .request("PUT", path, contents)
@@ -74,13 +84,16 @@ pub async fn test(test: &WebDavTest) {
 
     // PUT under resources should fail
     for (path, contents) in [
-        ("/dav/file/john/file1.txt/other-file.txt", TEST_FILE_1),
         (
-            "/dav/card/john/default/card1.vcf/other-file.vcf",
+            "/dav/file/john%40example.com/file1.txt/other-file.txt",
+            TEST_FILE_1,
+        ),
+        (
+            "/dav/card/john%40example.com/default/card1.vcf/other-file.vcf",
             TEST_VCARD_1,
         ),
         (
-            "/dav/cal/john/default/event1.ics/other-file.ical",
+            "/dav/cal/john%40example.com/default/event1.ics/other-file.ical",
             TEST_ICAL_1,
         ),
     ] {
@@ -93,13 +106,13 @@ pub async fn test(test: &WebDavTest) {
     // PUT a non-vCard/iCalendar file should fail
     for (path, ct, content, precondition) in [
         (
-            "/dav/card/john/card3.vcf",
+            "/dav/card/john%40example.com/card3.vcf",
             "text/vcard; charset=utf-8",
             TEST_FILE_1,
             "B:supported-address-data",
         ),
         (
-            "/dav/cal/john/event3.ics",
+            "/dav/cal/john%40example.com/event3.ics",
             "text/calendar; charset=utf-8",
             TEST_FILE_2,
             "A:supported-calendar-data",
@@ -116,19 +129,19 @@ pub async fn test(test: &WebDavTest) {
     let conf = &test.server.core.groupware;
     for (path, contents, max_size, expect) in [
         (
-            "/dav/file/john/chunky-file1.txt",
+            "/dav/file/john%40example.com/chunky-file1.txt",
             TEST_FILE_1,
             conf.max_file_size,
             None,
         ),
         (
-            "/dav/card/john/chunky-card1.vcf",
+            "/dav/card/john%40example.com/chunky-card1.vcf",
             TEST_VCARD_1,
             conf.max_vcard_size,
             Some("B:max-resource-size"),
         ),
         (
-            "/dav/cal/john/chunky-event1.ics",
+            "/dav/cal/john%40example.com/chunky-event1.ics",
             TEST_ICAL_1,
             conf.max_ical_size,
             Some("A:max-resource-size"),
@@ -152,13 +165,16 @@ pub async fn test(test: &WebDavTest) {
     }
 
     // PUT requests cannot exceed quota
-    let mike_noquota = test.client("mike");
+    let mike_noquota = test.account("mike@example.com").webdav_client();
     for resource_type in [
         DavResourceName::File,
         DavResourceName::Card,
         DavResourceName::Cal,
     ] {
-        let path = format!("{}/mike/quota-test/", resource_type.base_path());
+        let path = format!(
+            "{}/mike%40example.com/quota-test/",
+            resource_type.base_path()
+        );
         mike_noquota
             .mkcol("MKCOL", &path, [], [])
             .await
@@ -199,25 +215,29 @@ pub async fn test(test: &WebDavTest) {
 
     // PUT precondition enforcement
     let modseq = [
-        test.resources("john", Collection::FileNode)
+        test.resources("john@example.com", Collection::FileNode)
             .await
             .highest_change_id,
-        test.resources("john", Collection::Calendar)
+        test.resources("john@example.com", Collection::Calendar)
             .await
             .highest_change_id,
-        test.resources("john", Collection::AddressBook)
+        test.resources("john@example.com", Collection::AddressBook)
             .await
             .highest_change_id,
     ];
     for (path, ct, content) in [
-        ("/dav/file/john/file1.txt", "text/plain", TEST_FILE_1),
         (
-            "/dav/card/john/default/card1.vcf",
+            "/dav/file/john%40example.com/file1.txt",
+            "text/plain",
+            TEST_FILE_1,
+        ),
+        (
+            "/dav/card/john%40example.com/default/card1.vcf",
             "text/vcard; charset=utf-8",
             TEST_VCARD_1,
         ),
         (
-            "/dav/cal/john/default/event1.ics",
+            "/dav/cal/john%40example.com/default/event1.ics",
             "text/calendar; charset=utf-8",
             TEST_ICAL_1,
         ),
@@ -271,13 +291,13 @@ pub async fn test(test: &WebDavTest) {
     }
     assert_eq!(
         [
-            test.resources("john", Collection::FileNode)
+            test.resources("john@example.com", Collection::FileNode)
                 .await
                 .highest_change_id,
-            test.resources("john", Collection::Calendar)
+            test.resources("john@example.com", Collection::Calendar)
                 .await
                 .highest_change_id,
-            test.resources("john", Collection::AddressBook)
+            test.resources("john@example.com", Collection::AddressBook)
                 .await
                 .highest_change_id,
         ],
@@ -315,18 +335,18 @@ pub async fn test(test: &WebDavTest) {
     // PUT requests require unique UIDs
     for (path, ct, content, precond_key, precond_value) in [
         (
-            "/dav/card/john/default/card5.vcf",
+            "/dav/card/john%40example.com/default/card5.vcf",
             "text/vcard; charset=utf-8",
             TEST_VCARD_1,
             "B:no-uid-conflict.D:href",
-            "/dav/card/john/default/card1.vcf",
+            "/dav/card/john%40example.com/default/card1.vcf",
         ),
         (
-            "/dav/cal/john/default/event5.ics",
+            "/dav/cal/john%40example.com/default/event5.ics",
             "text/calendar; charset=utf-8",
             TEST_ICAL_1,
             "A:no-uid-conflict.D:href",
-            "/dav/cal/john/default/event1.ics",
+            "/dav/cal/john%40example.com/default/event1.ics",
         ),
     ] {
         client
@@ -345,7 +365,7 @@ pub async fn test(test: &WebDavTest) {
     client
         .request_with_headers(
             "PUT",
-            "/dav/cal/john/default/invalid.ics",
+            "/dav/cal/john%40example.com/default/invalid.ics",
             [
                 ("content-type", "text/calendar; charset=utf-8"),
                 ("if-none-match", "*"),
@@ -375,7 +395,7 @@ END:VCALENDAR
     client
         .request_with_headers(
             "PUT",
-            "/dav/cal/john/default/invalid.ics",
+            "/dav/cal/john%40example.com/default/invalid.ics",
             [
                 ("content-type", "text/calendar; charset=utf-8"),
                 ("if-none-match", "*"),
@@ -403,13 +423,25 @@ END:VCALENDAR
 
     // Deleting unknown/invalid destinations should fail
     for (path, expect) in [
-        ("/dav/file/john/unknown.txt", StatusCode::NOT_FOUND),
-        ("/dav/card/john/default/unknown.txt", StatusCode::NOT_FOUND),
-        ("/dav/cal/john/default/unknown.txt", StatusCode::NOT_FOUND),
-        ("/dav/file/john", StatusCode::FORBIDDEN),
-        ("/dav/cal/john", StatusCode::FORBIDDEN),
-        ("/dav/card/john", StatusCode::FORBIDDEN),
-        ("/dav/pal/john", StatusCode::METHOD_NOT_ALLOWED),
+        (
+            "/dav/file/john%40example.com/unknown.txt",
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "/dav/card/john%40example.com/default/unknown.txt",
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "/dav/cal/john%40example.com/default/unknown.txt",
+            StatusCode::NOT_FOUND,
+        ),
+        ("/dav/file/john%40example.com", StatusCode::FORBIDDEN),
+        ("/dav/cal/john%40example.com", StatusCode::FORBIDDEN),
+        ("/dav/card/john%40example.com", StatusCode::FORBIDDEN),
+        (
+            "/dav/pal/john%40example.com",
+            StatusCode::METHOD_NOT_ALLOWED,
+        ),
         ("/dav/file", StatusCode::FORBIDDEN),
         ("/dav/cal", StatusCode::FORBIDDEN),
         ("/dav/card", StatusCode::FORBIDDEN),

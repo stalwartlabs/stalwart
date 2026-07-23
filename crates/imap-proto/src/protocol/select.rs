@@ -6,7 +6,7 @@
 
 use crate::{ResponseCode, StatusResponse};
 
-use super::{ImapResponse, Sequence, list::ListItem};
+use super::{ImapResponse, ObjectId, Sequence, list::ListItem};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
@@ -14,6 +14,7 @@ pub struct Arguments {
     pub mailbox_name: String,
     pub condstore: bool,
     pub qresync: Option<QResync>,
+    pub objectid: Option<ObjectId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +40,7 @@ pub struct Response {
     pub is_utf8: bool,
     pub closed_previous: bool,
     pub highest_modseq: Option<HighestModSeq>,
-    pub mailbox_id: String,
+    pub objectid: Option<ObjectId>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,9 +91,11 @@ impl ImapResponse for Response {
         if let Some(highest_modseq) = self.highest_modseq {
             highest_modseq.serialize(&mut buf);
         }
-        buf.extend_from_slice(b"* OK [MAILBOXID (");
-        buf.extend_from_slice(self.mailbox_id.as_bytes());
-        buf.extend_from_slice(b")] Unique Mailbox ID\r\n");
+        if let Some(objectid) = &self.objectid {
+            buf.extend_from_slice(b"* OK [");
+            objectid.serialize(&mut buf);
+            buf.extend_from_slice(b"] Object identifiers\r\n");
+        }
         buf
     }
 }
@@ -131,12 +134,23 @@ impl Exists {
 
 #[cfg(test)]
 mod tests {
-    use crate::protocol::{ImapResponse, list::ListItem};
+    use crate::protocol::{ImapResponse, ObjectId, list::ListItem};
+    use types::id::Id;
 
     use super::HighestModSeq;
 
     #[test]
     fn serialize_select() {
+        let objectid = ObjectId {
+            mailbox_id: Some(Id::from(1u32)),
+            account_id: Some(Id::from(2u32)),
+            ..Default::default()
+        };
+        let mut objectid_line = b"* OK [".to_vec();
+        objectid.serialize(&mut objectid_line);
+        objectid_line.extend_from_slice(b"] Object identifiers\r\n");
+        let objectid_line = String::from_utf8(objectid_line).unwrap();
+
         for (mut response, _tag, expected_v2, expected_v1) in [
             (
                 super::Response {
@@ -150,29 +164,35 @@ mod tests {
                     is_rev2: true,
                     is_utf8: true,
                     highest_modseq: HighestModSeq::new(100).into(),
-                    mailbox_id: "abc".into(),
+                    objectid: Some(objectid.clone()),
                 },
                 "A142",
-                concat!(
-                    "* 172 EXISTS\r\n",
-                    "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n",
-                    "* LIST () \"/\" \"INBOX\"\r\n",
-                    "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
-                    "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
-                    "* OK [UIDNEXT 4392] Next predicted UID\r\n",
-                    "* OK [HIGHESTMODSEQ 100] Highest Modseq\r\n",
-                    "* OK [MAILBOXID (abc)] Unique Mailbox ID\r\n"
+                format!(
+                    concat!(
+                        "* 172 EXISTS\r\n",
+                        "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n",
+                        "* LIST () \"/\" \"INBOX\"\r\n",
+                        "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
+                        "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
+                        "* OK [UIDNEXT 4392] Next predicted UID\r\n",
+                        "* OK [HIGHESTMODSEQ 100] Highest Modseq\r\n",
+                        "{}"
+                    ),
+                    objectid_line
                 ),
-                concat!(
-                    "* 172 EXISTS\r\n",
-                    "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\Recent)\r\n",
-                    "* 5 RECENT\r\n",
-                    "* OK [UNSEEN 3] Unseen messages\r\n",
-                    "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
-                    "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
-                    "* OK [UIDNEXT 4392] Next predicted UID\r\n",
-                    "* OK [HIGHESTMODSEQ 100] Highest Modseq\r\n",
-                    "* OK [MAILBOXID (abc)] Unique Mailbox ID\r\n"
+                format!(
+                    concat!(
+                        "* 172 EXISTS\r\n",
+                        "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\Recent)\r\n",
+                        "* 5 RECENT\r\n",
+                        "* OK [UNSEEN 3] Unseen messages\r\n",
+                        "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
+                        "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
+                        "* OK [UIDNEXT 4392] Next predicted UID\r\n",
+                        "* OK [HIGHESTMODSEQ 100] Highest Modseq\r\n",
+                        "{}"
+                    ),
+                    objectid_line
                 ),
             ),
             (
@@ -187,30 +207,36 @@ mod tests {
                     is_rev2: true,
                     is_utf8: true,
                     highest_modseq: None,
-                    mailbox_id: "abc".into(),
+                    objectid: Some(objectid.clone()),
                 },
                 "A142",
-                concat!(
-                    "* OK [CLOSED] Closed previous mailbox\r\n",
-                    "* 172 EXISTS\r\n",
-                    "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n",
-                    "* LIST () \"/\" \"~peter/mail/台北/日本語\" (\"OLDNAME\" ",
-                    "(\"~peter/mail/&U,BTFw-/&ZeVnLIqe-\"))\r\n",
-                    "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
-                    "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
-                    "* OK [UIDNEXT 4392] Next predicted UID\r\n",
-                    "* OK [MAILBOXID (abc)] Unique Mailbox ID\r\n"
+                format!(
+                    concat!(
+                        "* OK [CLOSED] Closed previous mailbox\r\n",
+                        "* 172 EXISTS\r\n",
+                        "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n",
+                        "* LIST () \"/\" \"~peter/mail/台北/日本語\" (\"OLDNAME\" ",
+                        "(\"~peter/mail/&U,BTFw-/&ZeVnLIqe-\"))\r\n",
+                        "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
+                        "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
+                        "* OK [UIDNEXT 4392] Next predicted UID\r\n",
+                        "{}"
+                    ),
+                    objectid_line
                 ),
-                concat!(
-                    "* OK [CLOSED] Closed previous mailbox\r\n",
-                    "* 172 EXISTS\r\n",
-                    "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\Recent)\r\n",
-                    "* 5 RECENT\r\n",
-                    "* OK [UNSEEN 3] Unseen messages\r\n",
-                    "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
-                    "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
-                    "* OK [UIDNEXT 4392] Next predicted UID\r\n",
-                    "* OK [MAILBOXID (abc)] Unique Mailbox ID\r\n"
+                format!(
+                    concat!(
+                        "* OK [CLOSED] Closed previous mailbox\r\n",
+                        "* 172 EXISTS\r\n",
+                        "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\Recent)\r\n",
+                        "* 5 RECENT\r\n",
+                        "* OK [UNSEEN 3] Unseen messages\r\n",
+                        "* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
+                        "* OK [UIDVALIDITY 3857529045] UIDs valid\r\n",
+                        "* OK [UIDNEXT 4392] Next predicted UID\r\n",
+                        "{}"
+                    ),
+                    objectid_line
                 ),
             ),
         ] {

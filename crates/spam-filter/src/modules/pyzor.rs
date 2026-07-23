@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    borrow::Cow,
-    io::Write,
-    net::SocketAddr,
-    time::{Duration, SystemTime},
-};
-
-use common::config::spamfilter::PyzorConfig;
+use common::config::mailstore::spamfilter::PyzorConfig;
 use mail_parser::{Message, PartType, decoders::html::add_html_token};
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 use sha1::{Digest, Sha1};
+use std::{
+    borrow::Cow,
+    net::SocketAddr,
+    time::{Duration, SystemTime},
+};
 use tokio::net::UdpSocket;
+use utils::HexEncode;
 
 const MIN_LINE_LENGTH: usize = 8;
 const ATOMIC_NUM_LINES: usize = 4;
@@ -139,7 +138,23 @@ async fn pyzor_send_message(
     }
 }
 
-trait PyzorDigest<W: Write> {
+trait PyzorWrite {
+    fn write_all(&mut self, data: &[u8]);
+}
+
+impl PyzorWrite for Vec<u8> {
+    fn write_all(&mut self, data: &[u8]) {
+        self.extend_from_slice(data);
+    }
+}
+
+impl PyzorWrite for Sha1 {
+    fn write_all(&mut self, data: &[u8]) {
+        self.update(data);
+    }
+}
+
+trait PyzorDigest<W: PyzorWrite> {
     fn pyzor_digest(&self, writer: W) -> W;
 }
 
@@ -147,7 +162,7 @@ pub trait PyzorCheck {
     fn pyzor_check_message(&self) -> String;
 }
 
-impl<W: Write> PyzorDigest<W> for Message<'_> {
+impl<W: PyzorWrite> PyzorDigest<W> for Message<'_> {
     fn pyzor_digest(&self, writer: W) -> W {
         let parts = self
             .parts
@@ -179,15 +194,15 @@ impl PyzorCheck for Message<'_> {
 
 fn pyzor_create_message(message: &Message<'_>, time: u64, thread: u16) -> String {
     // Hash message
-    let hash = message.pyzor_digest(Sha1::new()).finalize();
+    let hash = message.pyzor_digest(Sha1::new()).finalize().hex_encode();
     // Hash key
     let mut hash_key = Sha1::new();
     hash_key.update("anonymous:".as_bytes());
-    let hash_key = hash_key.finalize();
+    let hash_key = hash_key.finalize().hex_encode();
 
     // Hash message
     let message = format!(
-        "Op: check\nOp-Digest: {hash:x}\nThread: {thread}\nPV: 2.1\nUser: anonymous\nTime: {time}"
+        "Op: check\nOp-Digest: {hash}\nThread: {thread}\nPV: 2.1\nUser: anonymous\nTime: {time}"
     );
     let mut msg_hash = Sha1::new();
     msg_hash.update(message.as_bytes());
@@ -196,16 +211,16 @@ fn pyzor_create_message(message: &Message<'_>, time: u64, thread: u16) -> String
     // Sign
     let mut sig = Sha1::new();
     sig.update(msg_hash);
-    sig.update(format!(":{time}:{hash_key:x}"));
-    let sig = sig.finalize();
+    sig.update(format!(":{time}:{hash_key}"));
+    let sig = sig.finalize().hex_encode();
 
-    format!("{message}\nSig: {sig:x}\n")
+    format!("{message}\nSig: {sig}\n")
 }
 
 fn pyzor_digest<'x, I, W>(mut writer: W, lines: I) -> W
 where
     I: Iterator<Item = &'x str>,
-    W: Write,
+    W: PyzorWrite,
 {
     let mut result = Vec::with_capacity(16);
 
@@ -268,13 +283,13 @@ where
         for (offset, length) in DIGEST_SPEC {
             for i in 0..*length {
                 if let Some(line) = result.get((*offset * result.len() / 100) + i) {
-                    let _ = writer.write_all(line.as_bytes());
+                    writer.write_all(line.as_bytes());
                 }
             }
         }
     } else {
         for line in result {
-            let _ = writer.write_all(line.as_bytes());
+            writer.write_all(line.as_bytes());
         }
     }
 
@@ -421,6 +436,7 @@ mod test {
     use mail_parser::MessageParser;
     use sha1::Digest;
     use sha1::Sha1;
+    use utils::HexEncode;
 
     use super::pyzor_create_message;
     use super::pyzor_send_message;
@@ -575,14 +591,12 @@ mod test {
 
         // Test SHA hash
         assert_eq!(
-            format!(
-                "{:x}",
-                MessageParser::new()
-                    .parse(HTML_TEXT_STYLE_SCRIPT)
-                    .unwrap()
-                    .pyzor_digest(Sha1::new(),)
-                    .finalize()
-            ),
+            MessageParser::new()
+                .parse(HTML_TEXT_STYLE_SCRIPT)
+                .unwrap()
+                .pyzor_digest(Sha1::new(),)
+                .finalize()
+                .hex_encode(),
             "b2c27325a034c581df0c9ef37e4a0d63208a3e7e",
         )
     }

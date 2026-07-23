@@ -89,6 +89,19 @@ impl MeiliSearchStore {
 
         if !filter_group.q.is_empty() {
             body.insert("q".to_string(), Value::String(filter_group.q));
+
+            if !filter_group.search_on.is_empty() {
+                body.insert(
+                    "attributesToSearchOn".to_string(),
+                    Value::Array(
+                        filter_group
+                            .search_on
+                            .into_iter()
+                            .map(|field| Value::String(field.to_string()))
+                            .collect(),
+                    ),
+                );
+            }
         }
 
         if !sort.is_empty() {
@@ -171,6 +184,7 @@ impl MeiliSearchStore {
 struct FilterGroup {
     q: String,
     filter: String,
+    search_on: AHashSet<&'static str>,
 }
 
 fn build_query(filters: &[SearchFilter]) -> FilterGroup {
@@ -182,6 +196,7 @@ fn build_query(filters: &[SearchFilter]) -> FilterGroup {
     let mut is_first = true;
     let mut filter = String::new();
     let mut queries = AHashSet::new();
+    let mut search_on = AHashSet::new();
 
     for f in filters {
         match f {
@@ -198,6 +213,8 @@ fn build_query(filters: &[SearchFilter]) -> FilterGroup {
                             ""
                         }
                     };
+
+                    search_on.insert(field.field_name());
 
                     if matches!(op, SearchOperator::Equal) {
                         queries.insert(format!("{value:?}"));
@@ -315,7 +332,11 @@ fn build_query(filters: &[SearchFilter]) -> FilterGroup {
         }
     }
 
-    FilterGroup { q, filter }
+    FilterGroup {
+        q,
+        filter,
+        search_on,
+    }
 }
 
 impl SearchOperator {

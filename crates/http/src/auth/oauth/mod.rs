@@ -53,6 +53,27 @@ pub struct OAuthCode {
     pub client_id: String,
     pub nonce: Option<String>,
     pub params: String,
+    pub code_challenge: PkceCodeChallenge,
+    pub scope: Option<String>,
+    pub resources: Vec<String>,
+}
+
+#[derive(
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    rkyv::Archive,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+)]
+#[rkyv(compare(PartialEq))]
+pub enum PkceCodeChallenge {
+    None,
+    S256(String),
+    Plain(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -150,21 +171,6 @@ pub enum ErrorType {
     AccessDenied,
     #[serde(rename = "expired_token")]
     ExpiredToken,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "camelCase")]
-pub enum OAuthCodeRequest {
-    Code {
-        client_id: String,
-        redirect_uri: Option<String>,
-        #[serde(default)]
-        nonce: Option<String>,
-    },
-    Device {
-        code: String,
-    },
 }
 
 impl TokenResponse {

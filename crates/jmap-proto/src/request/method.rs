@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
+use crate::request::capability::Capability;
+use registry::{
+    schema::prelude::{OBJ_SINGLETON, ObjectType},
+    types::EnumImpl,
+};
+use std::{borrow::Cow, fmt::Display};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MethodName {
@@ -35,6 +40,32 @@ pub enum MethodObject {
     FileNode,
     ParticipantIdentity,
     ShareNotification,
+    Registry(ObjectType),
+}
+
+impl MethodObject {
+    pub fn capability(&self) -> Capability {
+        match self {
+            MethodObject::Email
+            | MethodObject::Mailbox
+            | MethodObject::Thread
+            | MethodObject::SearchSnippet => Capability::Mail,
+            MethodObject::Core | MethodObject::PushSubscription => Capability::Core,
+            MethodObject::Blob => Capability::Blob,
+            MethodObject::Identity | MethodObject::EmailSubmission => Capability::Submission,
+            MethodObject::VacationResponse => Capability::VacationResponse,
+            MethodObject::SieveScript => Capability::Sieve,
+            MethodObject::Principal | MethodObject::ShareNotification => Capability::Principals,
+            MethodObject::Quota => Capability::Quota,
+            MethodObject::Calendar
+            | MethodObject::CalendarEvent
+            | MethodObject::CalendarEventNotification
+            | MethodObject::ParticipantIdentity => Capability::Calendars,
+            MethodObject::AddressBook | MethodObject::ContactCard => Capability::Contacts,
+            MethodObject::FileNode => Capability::FileNode,
+            MethodObject::Registry(_) => Capability::Stalwart,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +87,7 @@ pub enum MethodFunction {
 
 impl Display for MethodName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(self.as_str().as_ref())
     }
 }
 
@@ -72,7 +103,7 @@ impl MethodName {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> Cow<'static, str> {
         match (self.fnc, self.obj) {
             (MethodFunction::Get, MethodObject::PushSubscription) => "PushSubscription/get",
             (MethodFunction::Set, MethodObject::PushSubscription) => "PushSubscription/set",
@@ -122,7 +153,9 @@ impl MethodName {
             (MethodFunction::Query, MethodObject::Principal) => "Principal/query",
             (MethodFunction::Changes, MethodObject::Principal) => "Principal/changes",
             (MethodFunction::QueryChanges, MethodObject::Principal) => "Principal/queryChanges",
-            (MethodFunction::GetAvailability, MethodObject::Principal) => "Principal/getAvailability",
+            (MethodFunction::GetAvailability, MethodObject::Principal) => {
+                "Principal/getAvailability"
+            }
 
             (MethodFunction::Get, MethodObject::Quota) => "Quota/get",
             (MethodFunction::Changes, MethodObject::Quota) => "Quota/changes",
@@ -137,6 +170,7 @@ impl MethodName {
             (MethodFunction::Get, MethodObject::AddressBook) => "AddressBook/get",
             (MethodFunction::Changes, MethodObject::AddressBook) => "AddressBook/changes",
             (MethodFunction::Set, MethodObject::AddressBook) => "AddressBook/set",
+            (MethodFunction::Query, MethodObject::AddressBook) => "AddressBook/query",
 
             (MethodFunction::Get, MethodObject::ContactCard) => "ContactCard/get",
             (MethodFunction::Changes, MethodObject::ContactCard) => "ContactCard/changes",
@@ -151,42 +185,66 @@ impl MethodName {
             (MethodFunction::Query, MethodObject::FileNode) => "FileNode/query",
             (MethodFunction::QueryChanges, MethodObject::FileNode) => "FileNode/queryChanges",
             (MethodFunction::Set, MethodObject::FileNode) => "FileNode/set",
+            (MethodFunction::Copy, MethodObject::FileNode) => "FileNode/copy",
 
             (MethodFunction::Get, MethodObject::ShareNotification) => "ShareNotification/get",
-            (MethodFunction::Changes, MethodObject::ShareNotification) => "ShareNotification/changes",
+            (MethodFunction::Changes, MethodObject::ShareNotification) => {
+                "ShareNotification/changes"
+            }
             (MethodFunction::Query, MethodObject::ShareNotification) => "ShareNotification/query",
-            (MethodFunction::QueryChanges, MethodObject::ShareNotification) => "ShareNotification/queryChanges",
+            (MethodFunction::QueryChanges, MethodObject::ShareNotification) => {
+                "ShareNotification/queryChanges"
+            }
             (MethodFunction::Set, MethodObject::ShareNotification) => "ShareNotification/set",
 
             (MethodFunction::Get, MethodObject::Calendar) => "Calendar/get",
             (MethodFunction::Changes, MethodObject::Calendar) => "Calendar/changes",
             (MethodFunction::Set, MethodObject::Calendar) => "Calendar/set",
+            (MethodFunction::Query, MethodObject::Calendar) => "Calendar/query",
 
             (MethodFunction::Get, MethodObject::CalendarEvent) => "CalendarEvent/get",
             (MethodFunction::Changes, MethodObject::CalendarEvent) => "CalendarEvent/changes",
             (MethodFunction::Query, MethodObject::CalendarEvent) => "CalendarEvent/query",
-            (MethodFunction::QueryChanges, MethodObject::CalendarEvent) => "CalendarEvent/queryChanges",
+            (MethodFunction::QueryChanges, MethodObject::CalendarEvent) => {
+                "CalendarEvent/queryChanges"
+            }
             (MethodFunction::Set, MethodObject::CalendarEvent) => "CalendarEvent/set",
             (MethodFunction::Copy, MethodObject::CalendarEvent) => "CalendarEvent/copy",
             (MethodFunction::Parse, MethodObject::CalendarEvent) => "CalendarEvent/parse",
 
-            (MethodFunction::Get, MethodObject::CalendarEventNotification) => "CalendarEventNotification/get",
-            (MethodFunction::Changes, MethodObject::CalendarEventNotification) => "CalendarEventNotification/changes",
-            (MethodFunction::Query, MethodObject::CalendarEventNotification) => "CalendarEventNotification/query",
-            (MethodFunction::QueryChanges, MethodObject::CalendarEventNotification) => "CalendarEventNotification/queryChanges",
-            (MethodFunction::Set, MethodObject::CalendarEventNotification) => "CalendarEventNotification/set",
+            (MethodFunction::Get, MethodObject::CalendarEventNotification) => {
+                "CalendarEventNotification/get"
+            }
+            (MethodFunction::Changes, MethodObject::CalendarEventNotification) => {
+                "CalendarEventNotification/changes"
+            }
+            (MethodFunction::Query, MethodObject::CalendarEventNotification) => {
+                "CalendarEventNotification/query"
+            }
+            (MethodFunction::QueryChanges, MethodObject::CalendarEventNotification) => {
+                "CalendarEventNotification/queryChanges"
+            }
+            (MethodFunction::Set, MethodObject::CalendarEventNotification) => {
+                "CalendarEventNotification/set"
+            }
 
             (MethodFunction::Get, MethodObject::ParticipantIdentity) => "ParticipantIdentity/get",
-            (MethodFunction::Changes, MethodObject::ParticipantIdentity) => "ParticipantIdentity/changes",
+            (MethodFunction::Changes, MethodObject::ParticipantIdentity) => {
+                "ParticipantIdentity/changes"
+            }
             (MethodFunction::Set, MethodObject::ParticipantIdentity) => "ParticipantIdentity/set",
 
             (MethodFunction::Echo, MethodObject::Core) => "Core/echo",
+            (method, MethodObject::Registry(obj)) => {
+                return Cow::Owned(format!("x:{}/{}", obj.as_str(), method.as_str()));
+            }
             _ => "error",
         }
+        .into()
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-       hashify::tiny_map!(s.as_bytes(), 
+        hashify::tiny_map!(s.as_bytes(),
             "PushSubscription/get" => (MethodObject::PushSubscription, MethodFunction::Get),
             "PushSubscription/set" => (MethodObject::PushSubscription, MethodFunction::Set),
 
@@ -248,6 +306,7 @@ impl MethodName {
             "AddressBook/get" => (MethodObject::AddressBook, MethodFunction::Get),
             "AddressBook/changes" => (MethodObject::AddressBook, MethodFunction::Changes),
             "AddressBook/set" => (MethodObject::AddressBook, MethodFunction::Set),
+            "AddressBook/query" => (MethodObject::AddressBook, MethodFunction::Query),
 
             "ContactCard/get" => (MethodObject::ContactCard, MethodFunction::Get),
             "ContactCard/changes" => (MethodObject::ContactCard, MethodFunction::Changes),
@@ -262,6 +321,7 @@ impl MethodName {
             "FileNode/query" => (MethodObject::FileNode, MethodFunction::Query),
             "FileNode/queryChanges" => (MethodObject::FileNode, MethodFunction::QueryChanges),
             "FileNode/set" => (MethodObject::FileNode, MethodFunction::Set),
+            "FileNode/copy" => (MethodObject::FileNode, MethodFunction::Copy),
 
             "ShareNotification/get" => (MethodObject::ShareNotification, MethodFunction::Get),
             "ShareNotification/changes" => (MethodObject::ShareNotification, MethodFunction::Changes),
@@ -272,6 +332,7 @@ impl MethodName {
             "Calendar/get" => (MethodObject::Calendar, MethodFunction::Get),
             "Calendar/changes" => (MethodObject::Calendar, MethodFunction::Changes),
             "Calendar/set" => (MethodObject::Calendar, MethodFunction::Set),
+            "Calendar/query" => (MethodObject::Calendar, MethodFunction::Query),
 
             "CalendarEvent/get" => (MethodObject::CalendarEvent, MethodFunction::Get),
             "CalendarEvent/changes" => (MethodObject::CalendarEvent, MethodFunction::Changes),
@@ -293,9 +354,22 @@ impl MethodName {
 
             "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
 
-        ).map(|(obj, fnc)| MethodName { obj, fnc })
-    }
+        ).or_else(|| {
+            let (obj, fnc) = s.strip_prefix("x:")?.split_once('/')?;
+            let obj = ObjectType::parse(obj)?;
+            let fnc = hashify::tiny_map!(fnc.as_bytes(),
+                "get" => MethodFunction::Get,
+                "set" => MethodFunction::Set,
+                "query" => MethodFunction::Query,
+            )?;
 
+            if obj.flags() & OBJ_SINGLETON == 0 || fnc != MethodFunction::Query {
+                (MethodObject::Registry(obj), fnc).into()
+            } else {
+                None
+            }
+        }).map(|(obj, fnc)| MethodName { obj, fnc })
+    }
 }
 
 impl Display for MethodObject {
@@ -322,10 +396,42 @@ impl Display for MethodObject {
             MethodObject::CalendarEvent => "CalendarEvent",
             MethodObject::CalendarEventNotification => "CalendarEventNotification",
             MethodObject::ShareNotification => "ShareNotification",
+            MethodObject::Registry(obj) => {
+                f.write_str("x:")?;
+                return f.write_str(obj.as_str());
+            }
         })
     }
 }
 
+impl MethodFunction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MethodFunction::Get => "get",
+            MethodFunction::Set => "set",
+            MethodFunction::Changes => "changes",
+            MethodFunction::Query => "query",
+            MethodFunction::QueryChanges => "queryChanges",
+            MethodFunction::Copy => "copy",
+            MethodFunction::Import => "import",
+            MethodFunction::Parse => "parse",
+            MethodFunction::Validate => "validate",
+            MethodFunction::Lookup => "lookup",
+            MethodFunction::Upload => "upload",
+            MethodFunction::Echo => "echo",
+            MethodFunction::GetAvailability => "getAvailability",
+        }
+    }
+}
+
+impl MethodObject {
+    pub fn unwrap_registry(self) -> ObjectType {
+        match self {
+            MethodObject::Registry(obj) => obj,
+            _ => panic!("Not a registry method object"),
+        }
+    }
+}
 
 impl<'de> serde::Deserialize<'de> for MethodName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -334,9 +440,8 @@ impl<'de> serde::Deserialize<'de> for MethodName {
     {
         let value = <&str>::deserialize(deserializer)?;
 
-        MethodName::parse(value).ok_or_else(|| {
-            serde::de::Error::custom(format!("Invalid method name: {:?}", value))
-        })
+        MethodName::parse(value)
+            .ok_or_else(|| serde::de::Error::custom(format!("Invalid method name: {:?}", value)))
     }
 }
 
@@ -345,6 +450,6 @@ impl serde::Serialize for MethodName {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.as_str())
+        serializer.serialize_str(self.as_str().as_ref())
     }
 }

@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
-use r2d2::Pool;
-
 use self::pool::SqliteConnectionManager;
+use r2d2::Pool;
+use std::fmt::Display;
 
 pub mod blob;
 pub mod lookup;

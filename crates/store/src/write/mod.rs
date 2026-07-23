@@ -169,11 +169,9 @@ pub enum ValueClass {
     Acl(u32),
     InMemory(InMemoryClass),
     TaskQueue(TaskQueueClass),
-    Directory(DirectoryClass),
     Blob(BlobOp),
-    Config(Vec<u8>),
+    Registry(RegistryClass),
     Queue(QueueClass),
-    Report(ReportClass),
     Telemetry(TelemetryClass),
     SearchIndex(SearchIndexClass),
     Any(AnyClass),
@@ -183,6 +181,9 @@ pub enum ValueClass {
     },
     DocumentId,
     ChangeId,
+    Quota,
+    TenantQuota(u32),
+    NodeId(u16),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -221,29 +222,9 @@ pub enum SearchIndexId {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum TaskQueueClass {
-    UpdateIndex {
-        due: TaskEpoch,
-        index: SearchIndex,
-        is_insert: bool,
-    },
-    SendAlarm {
-        due: TaskEpoch,
-        event_id: u16,
-        alarm_id: u16,
-        is_email_alert: bool,
-    },
-    SendImip {
-        due: TaskEpoch,
-        is_payload: bool,
-    },
-    MergeThreads {
-        due: TaskEpoch,
-    },
+    Task { id: u64 },
+    Due { id: u64, due: u64 },
 }
-
-#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
-#[repr(transparent)]
-pub struct TaskEpoch(pub(crate) u64);
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub enum SearchIndex {
@@ -268,45 +249,49 @@ pub enum InMemoryClass {
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub enum DirectoryClass {
-    NameToId(Vec<u8>),
-    EmailToId(Vec<u8>),
-    Index { word: Vec<u8>, principal_id: u32 },
-    MemberOf { principal_id: u32, member_of: u32 },
-    Members { principal_id: u32, has_member: u32 },
-    Principal(u32),
-    UsedQuota(u32),
+pub enum RegistryClass {
+    Item {
+        object_id: u16,
+        item_id: u64,
+    },
+    Reference {
+        to_object_id: u16,
+        to_item_id: u64,
+        from_object_id: u16,
+        from_item_id: u64,
+    },
+    Index {
+        index_id: u16,
+        object_id: u16,
+        item_id: u64,
+        key: Vec<u8>,
+    },
+    IndexId {
+        object_id: u16,
+        item_id: u64,
+    },
+    PrimaryKey {
+        object_id: Option<u16>,
+        index_id: u16,
+        key: Vec<u8>,
+    },
+    IdCounter {
+        object_id: u16,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum QueueClass {
     Message(u64),
     MessageEvent(QueueEvent),
-    DmarcReportHeader(ReportEvent),
-    DmarcReportEvent(ReportEvent),
-    TlsReportHeader(ReportEvent),
-    TlsReportEvent(ReportEvent),
     QuotaCount(Vec<u8>),
     QuotaSize(Vec<u8>),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub enum ReportClass {
-    Tls { id: u64, expires: u64 },
-    Dmarc { id: u64, expires: u64 },
-    Arf { id: u64, expires: u64 },
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum TelemetryClass {
-    Span {
-        span_id: u64,
-    },
-    Metric {
-        timestamp: u64,
-        metric_id: u64,
-        node_id: u64,
-    },
+    Span(u64),
+    Metric(u64),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -314,14 +299,6 @@ pub struct QueueEvent {
     pub due: u64,
     pub queue_id: u64,
     pub queue_name: [u8; 8],
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub struct ReportEvent {
-    pub due: u64,
-    pub policy_hash: u64,
-    pub seq_id: u64,
-    pub domain: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Default)]
@@ -373,9 +350,6 @@ pub struct SetOperation {
 pub enum BlobOp {
     Commit { hash: BlobHash },
     Link { hash: BlobHash, to: BlobLink },
-    Quota { hash: BlobHash, until: u64 },
-    Undelete { hash: BlobHash, until: u64 },
-    SpamSample { hash: BlobHash, until: u64 },
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -483,16 +457,6 @@ impl AssignedIds {
                     .caused_by(trc::location!())
                     .ctx(trc::Key::Reason, "No counter ids were created")
             })
-    }
-}
-
-impl QueueClass {
-    pub fn due(&self) -> Option<u64> {
-        match self {
-            QueueClass::DmarcReportHeader(report_event) => report_event.due.into(),
-            QueueClass::TlsReportHeader(report_event) => report_event.due.into(),
-            _ => None,
-        }
     }
 }
 
@@ -718,58 +682,5 @@ impl Default for Params {
 impl AsRef<[Param]> for Params {
     fn as_ref(&self) -> &[Param] {
         &self.0
-    }
-}
-
-impl TaskEpoch {
-    /*
-      Structure of the 64-bit epoch:
-       4 bytes: seconds since custom epoch (1632280000)
-       2 bytes: attempt number
-       2 bytes: sequence id
-    */
-
-    const EPOCH_OFFSET: u64 = 1632280000;
-
-    pub fn now() -> Self {
-        Self::new(now())
-    }
-
-    pub fn new(timestamp: u64) -> Self {
-        Self(timestamp.saturating_sub(Self::EPOCH_OFFSET) << 32)
-    }
-
-    pub fn with_attempt(mut self, attempt: u16) -> Self {
-        self.0 |= (attempt as u64) << 16;
-        self
-    }
-
-    pub fn with_sequence_id(mut self, sequence_id: u16) -> Self {
-        self.0 |= sequence_id as u64;
-        self
-    }
-
-    pub fn with_random_sequence_id(self) -> Self {
-        self.with_sequence_id(rand::random())
-    }
-
-    pub fn due(&self) -> u64 {
-        (self.0 >> 32) + Self::EPOCH_OFFSET
-    }
-
-    pub fn attempt(&self) -> u16 {
-        (self.0 >> 16) as u16
-    }
-
-    pub fn sequence_id(&self) -> u16 {
-        self.0 as u16
-    }
-
-    pub fn inner(&self) -> u64 {
-        self.0
-    }
-
-    pub fn from_inner(inner: u64) -> Self {
-        Self(inner)
     }
 }

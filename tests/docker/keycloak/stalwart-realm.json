@@ -1,0 +1,205 @@
+{
+  "realm": "stalwart",
+  "enabled": true,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "stalwart",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "stalwart-secret",
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [
+        "openid",
+        "email",
+        "profile",
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "email-claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "stalwart",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "stalwart-fallback",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "stalwart-fallback-secret",
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [
+        "openid"
+      ],
+      "optionalClientScopes": [
+        "email",
+        "profile",
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "email-claim-userinfo-only",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "id.token.claim": "false",
+            "access.token.claim": "false",
+            "claim.name": "email",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "groups-userinfo-only",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "false",
+            "access.token.claim": "false",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "stalwart",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "john.doe@example.org",
+      "enabled": true,
+      "email": "john.doe@example.org",
+      "emailVerified": true,
+      "firstName": "John",
+      "lastName": "Doe",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "this is an OIDC password",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/sales@example.org"
+      ]
+    },
+    {
+      "username": "jane.smith@example.org",
+      "enabled": true,
+      "email": "jane.smith@example.org",
+      "emailVerified": true,
+      "firstName": "Jane",
+      "lastName": "Smith",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "this is an OIDC password",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/sales@example.org",
+        "/corporate@example.org"
+      ]
+    },
+    {
+      "username": "bill.foobar@example.org",
+      "enabled": true,
+      "email": "bill.foobar@example.org",
+      "emailVerified": true,
+      "firstName": "Bill",
+      "lastName": "Foobar",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "this is an OIDC password",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/corporate@example.org"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "sales@example.org",
+      "path": "/sales@example.org"
+    },
+    {
+      "name": "corporate@example.org",
+      "path": "/corporate@example.org"
+    }
+  ]
+}

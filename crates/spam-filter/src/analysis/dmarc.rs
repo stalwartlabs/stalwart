@@ -7,7 +7,7 @@
 use std::future::Future;
 
 use common::Server;
-use mail_auth::{DkimResult, DmarcResult, SpfResult, dmarc::Policy};
+use mail_auth::{Dkim2Result, DkimResult, DmarcResult, SpfResult, dmarc::Policy};
 
 use crate::SpamFilterContext;
 
@@ -50,6 +50,18 @@ impl SpamFilterAnalyzeDmarc for Server {
                 DkimResult::TempError(_) => "DKIM_TEMPFAIL",
                 DkimResult::Neutral(_) | DkimResult::None => "DKIM_NA",
             },
+        );
+
+        ctx.result.add_tag(
+            ctx.input
+                .dkim2_result
+                .map_or("DKIM2_NA", |r| match r.result() {
+                    Dkim2Result::Pass => "DKIM2_ALLOW",
+                    Dkim2Result::Fail(_) => "DKIM2_REJECT",
+                    Dkim2Result::PermError(_) => "DKIM2_PERMFAIL",
+                    Dkim2Result::TempError(_) => "DKIM2_TEMPFAIL",
+                    Dkim2Result::None => "DKIM2_NA",
+                }),
         );
 
         ctx.result

@@ -19,13 +19,14 @@ members = [
     "crates/spam-filter",
     "crates/nlp",
     "crates/store",
+    "crates/coordinator",
     "crates/directory",
+    "crates/registry",
     "crates/services",
     "crates/utils",
     "crates/common",
     "crates/trc",
     "crates/migration",
-    "crates/cli",
     "tests",
 ]
 

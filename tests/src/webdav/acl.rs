@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::utils::{server::TestServer, webdav::GenerateTestDavResource};
 use dav_proto::schema::property::{DavProperty, WebDavProperty};
 use groupware::DavResourceName;
 use hyper::StatusCode;
 
-use crate::webdav::GenerateTestDavResource;
-
-use super::{DavResponse, DummyWebDavClient, WebDavTest};
-
-pub async fn test(test: &WebDavTest) {
-    let owner_client = test.client("bill");
-    let sharee_client = test.client("john");
+pub async fn test(test: &TestServer) {
+    let owner_client = test.account("bill@example.com").webdav_client();
+    let sharee_client = test.account("john@example.com").webdav_client();
 
     for resource_type in [
         DavResourceName::File,
@@ -23,10 +20,16 @@ pub async fn test(test: &WebDavTest) {
     ] {
         println!("Running ACL tests ({})...", resource_type.base_path());
         let is_file = resource_type == DavResourceName::File;
-        let sharee_principal = format!("{}/john/", DavResourceName::Principal.base_path());
-        let sharee_base_path = format!("{}/john/", resource_type.base_path());
-        let owner_principal = format!("{}/bill/", DavResourceName::Principal.base_path());
-        let owner_base_path = format!("{}/bill/", resource_type.base_path());
+        let sharee_principal = format!(
+            "{}/john%40example.com/",
+            DavResourceName::Principal.base_path()
+        );
+        let sharee_base_path = format!("{}/john%40example.com/", resource_type.base_path());
+        let owner_principal = format!(
+            "{}/bill%40example.com/",
+            DavResourceName::Principal.base_path()
+        );
+        let owner_base_path = format!("{}/bill%40example.com/", resource_type.base_path());
 
         // Create a resource for the owner
         let owner_folder = format!("{owner_base_path}test-shared/");
@@ -128,6 +131,11 @@ pub async fn test(test: &WebDavTest) {
                     .properties(&owner_file)
                     .with_status(StatusCode::OK)
                     .is_defined(DavProperty::WebDav(WebDavProperty::GetETag));
+                sharee_client
+                    .request("REPORT", &owner_folder, CALENDAR_QUERY_ANY_VEVENT)
+                    .await
+                    .with_status(StatusCode::MULTI_STATUS)
+                    .with_hrefs([owner_file.as_str()]);
             }
             DavResourceName::Card => {
                 sharee_client
@@ -136,6 +144,11 @@ pub async fn test(test: &WebDavTest) {
                     .properties(&owner_file)
                     .with_status(StatusCode::OK)
                     .is_defined(DavProperty::WebDav(WebDavProperty::GetETag));
+                sharee_client
+                    .request("REPORT", &owner_folder, ADDRESSBOOK_QUERY_ANY_FN)
+                    .await
+                    .with_status(StatusCode::MULTI_STATUS)
+                    .with_hrefs([owner_file.as_str()]);
             }
             _ => {}
         }
@@ -399,40 +412,27 @@ pub async fn test(test: &WebDavTest) {
     test.assert_is_empty().await;
 }
 
-impl DummyWebDavClient {
-    pub async fn acl<'x>(
-        &self,
-        query: &str,
-        principal_href: &str,
-        grant: impl IntoIterator<Item = &'x str>,
-    ) -> DavResponse {
-        let body = ACL_QUERY.replace("$HREF", principal_href).replace(
-            "$GRANT",
-            &grant.into_iter().fold(String::new(), |mut output, g| {
-                use std::fmt::Write;
-                let _ = write!(output, "<D:privilege><D:{g}/></D:privilege>");
-                output
-            }),
-        );
-        self.request("ACL", query, &body).await
-    }
-}
-
-const ACL_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
-   <D:acl xmlns:D="DAV:">
-     <D:ace>
-       <D:principal>
-         <D:href>$HREF</D:href>
-       </D:principal>
-       <D:grant>
-         $GRANT
-       </D:grant>
-     </D:ace>
-   </D:acl>"#;
-
 const ACL_PRINCIPAL_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
    <D:acl-principal-prop-set xmlns:D="DAV:">
      <D:prop>
        <D:displayname/>
      </D:prop>
    </D:acl-principal-prop-set>"#;
+
+const CALENDAR_QUERY_ANY_VEVENT: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop><D:getetag/></D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT"/>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>"#;
+
+const ADDRESSBOOK_QUERY_ANY_FN: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+     <D:prop><D:getetag/></D:prop>
+     <C:filter>
+       <C:prop-filter name="FN"/>
+     </C:filter>
+   </C:addressbook-query>"#;

@@ -7,7 +7,7 @@
 use super::{Error, RawElement, Token, UnexpectedToken, XmlValueParser};
 use crate::schema::{Attribute, AttributeValue, Element, NamedElement, Namespace};
 use quick_xml::{
-    NsReader,
+    NsReader, XmlVersion,
     events::{Event, attributes::AttrError},
     name::ResolveResult,
 };
@@ -46,12 +46,13 @@ impl<'x> Tokenizer<'x> {
                 }
                 Event::Text(text) if text.iter().any(|ch| !ch.is_ascii_whitespace()) => {
                     return text
-                        .xml_content()
+                        .xml_content(XmlVersion::Implicit1_0)
                         .map(Token::Text)
                         .map_err(|err| Error::Xml(Box::new(err.into())));
                 }
                 Event::GeneralRef(entity) => {
-                    hashify::fnc_map!(entity.as_ref(),
+                    let entity_ref: &[u8] = entity.as_ref();
+                    hashify::fnc_map!(entity_ref,
                         b"lt" => { return Ok(Token::Text("<".into())); },
                         b"gt" => { return Ok(Token::Text(">".into())); },
                         b"amp" => { return Ok(Token::Text("&".into())); },
@@ -65,7 +66,7 @@ impl<'x> Tokenizer<'x> {
                     );
 
                     return entity
-                        .xml_content()
+                        .xml_content(XmlVersion::Implicit1_0)
                         .map(Token::Text)
                         .map_err(|err| Error::Xml(Box::new(err.into())));
                 }
@@ -281,7 +282,7 @@ impl RawElement<'_> {
         &self,
     ) -> impl Iterator<Item = super::Result<Attribute<T>>> + '_ {
         self.element.attributes().filter_map(|attr| match attr {
-            Ok(attr) => match attr.unescape_value() {
+            Ok(attr) => match attr.normalized_value(XmlVersion::Implicit1_0) {
                 Ok(value) => Attribute::from_param(attr.key.as_ref(), value).map(Ok),
                 Err(err) => Some(Err(err.into())),
             },

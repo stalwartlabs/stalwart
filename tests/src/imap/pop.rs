@@ -4,22 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{jmap::mail::delivery::SmtpConnection, smtp::session::VerifyResponse};
-use mail_send::smtp::tls::build_tls_connector;
-use rustls_pki_types::ServerName;
-use std::time::Duration;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf},
-    net::TcpStream,
+use crate::utils::{
+    imap::AssertResult,
+    pop3::{Pop3Connection, ResponseType},
+    server::TestServer,
+    smtp::SmtpConnection,
 };
-use tokio_rustls::client::TlsStream;
 
-pub async fn test() {
+pub async fn test(test: &TestServer) {
     println!("Running POP3 tests...");
 
     // Send 3 test emails
     for i in 0..3 {
-        let mut lmtp = SmtpConnection::connect_port(11201).await;
+        let mut lmtp = SmtpConnection::connect().await;
         lmtp.ingest(
             "bill@example.com",
             &["popper@example.com"],
@@ -41,8 +38,8 @@ pub async fn test() {
     }
 
     // Connect to POP3
+    let account = test.account("popper@example.com");
     let mut pop3 = Pop3Connection::connect().await;
-    pop3.assert_read(ResponseType::Ok).await;
 
     // Capabilities
     pop3.send("CAPA").await;
@@ -64,22 +61,19 @@ pub async fn test() {
     pop3.assert_read(ResponseType::Err).await;
     pop3.send("USER popper@example.com").await;
     pop3.assert_read(ResponseType::Ok).await;
-    pop3.send("PASS secret").await;
+    pop3.send(&format!("PASS {}", account.secret())).await;
     pop3.assert_read(ResponseType::Ok).await;
     pop3.send("QUIT").await;
 
     // Authenticate using AUTH PLAIN
     let mut pop3 = Pop3Connection::connect().await;
-    pop3.assert_read(ResponseType::Ok).await;
-    pop3.send("AUTH PLAIN AHBvcHBlckBleGFtcGxlLmNvbQBzZWNyZXQ=")
-        .await;
-    pop3.assert_read(ResponseType::Ok).await;
+    pop3.authenticate(account.name(), account.secret()).await;
 
     // STAT
     pop3.send("STAT").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 3 603");
+        .assert_contains("+OK 3 609");
 
     // UTF8
     pop3.send("UTF8").await;
@@ -90,13 +84,13 @@ pub async fn test() {
     pop3.assert_read(ResponseType::Multiline)
         .await
         .assert_contains("+OK 3 messages")
-        .assert_contains("1 201")
-        .assert_contains("2 201")
-        .assert_contains("3 201");
+        .assert_contains("1 203")
+        .assert_contains("2 203")
+        .assert_contains("3 203");
     pop3.send("LIST 2").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 2 201");
+        .assert_contains("+OK 2 203");
 
     // UIDL
     pop3.send("UIDL").await;
@@ -115,13 +109,13 @@ pub async fn test() {
     pop3.send("RETR 1").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("I'm going to need those TPS 0 reports ASAP.")
         .assert_contains("So, if you could do that, that'd be great.");
     pop3.send("RETR 3").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("I'm going to need those TPS 2 reports ASAP.")
         .assert_contains("So, if you could do that, that'd be great.");
     pop3.send("RETR 4").await;
@@ -131,13 +125,13 @@ pub async fn test() {
     pop3.send("TOP 1 4").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("Subject: TPS Report 0")
         .assert_not_contains("I'm going to need those TPS 0 reports ASAP.");
     pop3.send("TOP 3 4").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
-        .assert_contains("+OK 201 octets")
+        .assert_contains("+OK 203 octets")
         .assert_contains("Subject: TPS Report 2")
         .assert_not_contains("I'm going to need those TPS 2 reports ASAP.");
 
@@ -149,22 +143,24 @@ pub async fn test() {
     pop3.send("RSET").await;
     pop3.assert_read(ResponseType::Ok).await;
     pop3.send("QUIT").await;
-    let mut pop3 = Pop3Connection::connect_and_login().await;
+    let mut pop3 = Pop3Connection::connect().await;
+    pop3.authenticate(account.name(), account.secret()).await;
     pop3.send("STAT").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 3 603");
+        .assert_contains("+OK 3 609");
 
     // DELE + QUIT (should delete messages)
     pop3.send("DELE 2").await;
     pop3.assert_read(ResponseType::Ok).await;
     pop3.send("QUIT").await;
     pop3.assert_read(ResponseType::Ok).await;
-    let mut pop3 = Pop3Connection::connect_and_login().await;
+    let mut pop3 = Pop3Connection::connect().await;
+    pop3.authenticate(account.name(), account.secret()).await;
     pop3.send("STAT").await;
     pop3.assert_read(ResponseType::Ok)
         .await
-        .assert_contains("+OK 2 402");
+        .assert_contains("+OK 2 406");
     pop3.send("TOP 1 4").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
@@ -180,98 +176,11 @@ pub async fn test() {
     pop3.assert_read(ResponseType::Ok).await;
     pop3.send("QUIT").await;
     pop3.assert_read(ResponseType::Ok).await;
-    let mut pop3 = Pop3Connection::connect_and_login().await;
+    let mut pop3 = Pop3Connection::connect().await;
+    pop3.authenticate(account.name(), account.secret()).await;
     pop3.send("STAT").await;
     pop3.assert_read(ResponseType::Ok)
         .await
         .assert_contains("+OK 0 0");
     pop3.send("QUIT").await;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResponseType {
-    Ok,
-    Multiline,
-    Err,
-}
-
-pub struct Pop3Connection {
-    reader: Lines<BufReader<ReadHalf<TlsStream<TcpStream>>>>,
-    writer: WriteHalf<TlsStream<TcpStream>>,
-}
-
-impl Pop3Connection {
-    pub async fn connect() -> Self {
-        let (reader, writer) = tokio::io::split(
-            build_tls_connector(true)
-                .connect(
-                    ServerName::try_from("pop3.example.org").unwrap().to_owned(),
-                    TcpStream::connect("127.0.0.1:4110").await.unwrap(),
-                )
-                .await
-                .unwrap(),
-        );
-        Pop3Connection {
-            reader: BufReader::new(reader).lines(),
-            writer,
-        }
-    }
-
-    pub async fn connect_and_login() -> Self {
-        let mut pop3 = Self::connect().await;
-        pop3.assert_read(ResponseType::Ok).await;
-        pop3.send("AUTH PLAIN AHBvcHBlckBleGFtcGxlLmNvbQBzZWNyZXQ=")
-            .await;
-        pop3.assert_read(ResponseType::Ok).await;
-        pop3
-    }
-
-    pub async fn assert_read(&mut self, rt: ResponseType) -> Vec<String> {
-        let lines = self.read(matches!(rt, ResponseType::Multiline)).await;
-        if lines.last().unwrap().starts_with(match rt {
-            ResponseType::Ok => "+OK",
-            ResponseType::Multiline => ".",
-            ResponseType::Err => "-ERR",
-        }) {
-            lines
-        } else {
-            panic!("Expected {:?} from server but got: {:?}", rt, lines);
-        }
-    }
-
-    pub async fn read(&mut self, is_multiline: bool) -> Vec<String> {
-        let mut lines = Vec::new();
-        loop {
-            match tokio::time::timeout(Duration::from_millis(1500), self.reader.next_line()).await {
-                Ok(Ok(Some(line))) => {
-                    let is_done = (!is_multiline && line.starts_with("+OK"))
-                        || (is_multiline && line == ".")
-                        || line.starts_with("-ERR");
-                    //let c = println!("<- {:?}", line);
-                    lines.push(line);
-                    if is_done {
-                        return lines;
-                    }
-                }
-                Ok(Ok(None)) => {
-                    panic!("Invalid response: {:?}.", lines);
-                }
-                Ok(Err(err)) => {
-                    panic!("Connection broken: {} ({:?})", err, lines);
-                }
-                Err(_) => panic!("Timeout while waiting for server response: {:?}", lines),
-            }
-        }
-    }
-
-    pub async fn send(&mut self, text: &str) {
-        //let c = println!("-> {:?}", text);
-        self.writer.write_all(text.as_bytes()).await.unwrap();
-        self.writer.write_all(b"\r\n").await.unwrap();
-    }
-
-    pub async fn send_raw(&mut self, text: &str) {
-        //let c = println!("-> {:?}", text);
-        self.writer.write_all(text.as_bytes()).await.unwrap();
-    }
 }

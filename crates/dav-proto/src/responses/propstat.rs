@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
-use hyper::StatusCode;
-
 use crate::schema::{
     request::DavPropertyValue,
     response::{Condition, List, Prop, PropStat, ResponseDescription, Status},
 };
+use hyper::StatusCode;
+use std::fmt::Display;
 
 impl Display for PropStat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -55,7 +53,7 @@ impl PropStat {
     }
 
     pub fn with_prop(mut self, prop: impl Into<DavPropertyValue>) -> Self {
-        self.prop.0 .0.push(prop.into());
+        self.prop.0.0.push(prop.into());
         self
     }
 

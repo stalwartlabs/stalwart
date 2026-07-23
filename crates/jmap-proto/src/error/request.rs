@@ -34,6 +34,33 @@ pub enum RequestErrorType {
     Other,
 }
 
+#[derive(Debug, Clone)]
+pub struct RateLimitPolicy {
+    pub name: &'static str,
+    pub limit: u64,
+    pub remaining: u64,
+    pub window: Option<u64>,
+    pub reset: Option<u64>,
+    pub unit: RateLimitUnit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateLimitUnit {
+    Requests,
+    ContentBytes,
+    ConcurrentRequests,
+}
+
+impl RateLimitUnit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RateLimitUnit::Requests => "requests",
+            RateLimitUnit::ContentBytes => "content-bytes",
+            RateLimitUnit::ConcurrentRequests => "concurrent-requests",
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct RequestError<'x> {
     #[serde(rename = "type")]
@@ -44,6 +71,10 @@ pub struct RequestError<'x> {
     pub detail: Cow<'x, str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<RequestLimitError>,
+    #[serde(skip)]
+    pub rate_limit: Vec<RateLimitPolicy>,
+    #[serde(skip)]
+    pub retry_after: Option<u64>,
 }
 
 impl<'x> RequestError<'x> {
@@ -58,7 +89,26 @@ impl<'x> RequestError<'x> {
             title: Some(title.into()),
             detail: detail.into(),
             limit: None,
+            rate_limit: Vec::new(),
+            retry_after: None,
         }
+    }
+
+    pub fn with_rate_limit(mut self, policy: RateLimitPolicy) -> Self {
+        if let Some(reset) = policy.reset
+            && self.retry_after.is_none_or(|r| reset > r)
+        {
+            self.retry_after = Some(reset);
+        }
+        self.rate_limit.push(policy);
+        self
+    }
+
+    pub fn with_retry_after(mut self, seconds: u64) -> Self {
+        if self.retry_after.is_none_or(|r| seconds > r) {
+            self.retry_after = Some(seconds);
+        }
+        self
     }
 
     pub fn internal_server_error() -> Self {
@@ -101,7 +151,7 @@ impl<'x> RequestError<'x> {
 
     pub fn over_blob_quota(max_files: usize, max_bytes: usize) -> Self {
         RequestError::blank(
-            403,
+            429,
             "Quota exceeded",
             format!(
                 "You have exceeded the blob upload quota of {} files or {} bytes.",
@@ -171,6 +221,8 @@ impl<'x> RequestError<'x> {
             }
             .into(),
             limit: Some(limit_type),
+            rate_limit: Vec::new(),
+            retry_after: None,
         }
     }
 
@@ -201,6 +253,8 @@ impl<'x> RequestError<'x> {
                 capability
             )
             .into(),
+            rate_limit: Vec::new(),
+            retry_after: None,
         }
     }
 
@@ -211,6 +265,8 @@ impl<'x> RequestError<'x> {
             title: None,
             status: 400,
             detail: format!("Failed to parse JSON: {detail}").into(),
+            rate_limit: Vec::new(),
+            retry_after: None,
         }
     }
 
@@ -221,12 +277,149 @@ impl<'x> RequestError<'x> {
             title: None,
             status: 400,
             detail: detail.into(),
+            rate_limit: Vec::new(),
+            retry_after: None,
         }
+    }
+}
+
+impl RateLimitPolicy {
+    pub fn new(name: &'static str, limit: u64) -> Self {
+        RateLimitPolicy {
+            name,
+            limit,
+            remaining: 0,
+            window: None,
+            reset: None,
+            unit: RateLimitUnit::Requests,
+        }
+    }
+
+    pub fn with_window(mut self, window: u64) -> Self {
+        self.window = Some(window);
+        self
+    }
+
+    pub fn with_reset(mut self, reset: u64) -> Self {
+        self.reset = Some(reset);
+        self
+    }
+
+    pub fn with_remaining(mut self, remaining: u64) -> Self {
+        self.remaining = remaining;
+        self
+    }
+
+    pub fn with_unit(mut self, unit: RateLimitUnit) -> Self {
+        self.unit = unit;
+        self
+    }
+
+    pub fn fmt_policy(&self, out: &mut String) {
+        use std::fmt::Write;
+        let _ = write!(out, "\"{}\";q={}", self.name, self.limit);
+        if let Some(window) = self.window {
+            let _ = write!(out, ";w={window}");
+        }
+        if !matches!(self.unit, RateLimitUnit::Requests) {
+            let _ = write!(out, ";qu=\"{}\"", self.unit.as_str());
+        }
+    }
+
+    pub fn fmt_state(&self, out: &mut String) {
+        use std::fmt::Write;
+        let _ = write!(out, "\"{}\";r={}", self.name, self.remaining);
+        if let Some(reset) = self.reset {
+            let _ = write!(out, ";t={reset}");
+        }
+    }
+}
+
+impl<'x> RequestError<'x> {
+    pub fn rate_limit_policy_header(&self) -> Option<String> {
+        if self.rate_limit.is_empty() {
+            return None;
+        }
+        let mut out = String::new();
+        for (i, policy) in self.rate_limit.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            policy.fmt_policy(&mut out);
+        }
+        Some(out)
+    }
+
+    pub fn rate_limit_state_header(&self) -> Option<String> {
+        if self.rate_limit.is_empty() {
+            return None;
+        }
+        let mut out = String::new();
+        for (i, policy) in self.rate_limit.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            policy.fmt_state(&mut out);
+        }
+        Some(out)
     }
 }
 
 impl Display for RequestError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.detail)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limit_headers_match_spec() {
+        // Spec example: RateLimit-Policy: "burst";q=100;w=60,"daily";q=1000;w=86400
+        let mut p1 = String::new();
+        RateLimitPolicy::new("burst", 100)
+            .with_window(60)
+            .fmt_policy(&mut p1);
+        assert_eq!(p1, r#""burst";q=100;w=60"#);
+
+        // Spec example: RateLimit-Policy: "peruser";q=65535;qu="content-bytes";w=10
+        let mut p2 = String::new();
+        RateLimitPolicy::new("peruser", 65535)
+            .with_window(10)
+            .with_unit(RateLimitUnit::ContentBytes)
+            .fmt_policy(&mut p2);
+        assert_eq!(p2, r#""peruser";q=65535;w=10;qu="content-bytes""#);
+
+        // Spec example: RateLimit: "default";r=50;t=30
+        let mut s = String::new();
+        RateLimitPolicy::new("default", 100)
+            .with_remaining(50)
+            .with_reset(30)
+            .fmt_state(&mut s);
+        assert_eq!(s, r#""default";r=50;t=30"#);
+
+        // Two policies in one header
+        let err = RequestError::too_many_requests()
+            .with_rate_limit(
+                RateLimitPolicy::new("burst", 100)
+                    .with_window(60)
+                    .with_reset(30),
+            )
+            .with_rate_limit(
+                RateLimitPolicy::new("daily", 1000)
+                    .with_window(86400)
+                    .with_reset(3600),
+            );
+        assert_eq!(
+            err.rate_limit_policy_header().as_deref(),
+            Some(r#""burst";q=100;w=60, "daily";q=1000;w=86400"#),
+        );
+        assert_eq!(
+            err.rate_limit_state_header().as_deref(),
+            Some(r#""burst";r=0;t=30, "daily";r=0;t=3600"#),
+        );
+        assert_eq!(err.retry_after, Some(3600));
     }
 }

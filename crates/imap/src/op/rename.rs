@@ -8,18 +8,21 @@ use crate::{
     core::{Session, SessionData},
     spawn_op,
 };
-use common::{listener::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
+use email::cache::MessageCacheFetch;
 use imap_proto::{
-    Command, ResponseCode, StatusResponse, protocol::rename::Arguments, receiver::Request,
+    Command, ResponseCode, StatusResponse,
+    protocol::{ObjectId, rename::Arguments},
+    receiver::Request,
 };
+use registry::schema::enums::{Permission, StorageQuota};
 use std::time::Instant;
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive, BatchBuilder},
 };
 use trc::AddContext;
-use types::{acl::Acl, collection::Collection};
+use types::{acl::Acl, collection::Collection, id::Id};
 
 use super::ImapContext;
 
@@ -31,9 +34,10 @@ impl<T: SessionStream> Session<T> {
         let op_start = Instant::now();
         let arguments = request.parse_rename(self.is_utf8)?;
         let data = self.state.session_data();
+        let is_objectid = self.is_objectid;
 
         spawn_op!(data, {
-            let response = data.rename_folder(arguments, op_start).await?;
+            let response = data.rename_folder(arguments, is_objectid, op_start).await?;
             data.write_bytes(response.into_bytes()).await
         })
     }
@@ -43,6 +47,7 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn rename_folder(
         &self,
         arguments: Arguments,
+        is_objectid: bool,
         op_start: Instant,
     ) -> trc::Result<StatusResponse> {
         // Refresh mailboxes
@@ -110,7 +115,7 @@ impl<T: SessionStream> SessionData<T> {
 
         // Validate ACL
         let access_token = self
-            .get_access_token()
+            .refresh_access_token()
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
         if access_token.is_shared(params.account_id)
@@ -129,6 +134,38 @@ impl<T: SessionStream> SessionData<T> {
 
         // Get new mailbox name from path
         let new_mailbox_name = params.path.pop().unwrap();
+
+        // Validate quota
+        if !params.path.is_empty() {
+            let account = self
+                .server
+                .account(params.account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?;
+            let mailbox_count = self
+                .server
+                .get_cached_messages(params.account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?
+                .mailboxes
+                .items
+                .len();
+            if mailbox_count + params.path.len()
+                > self
+                    .server
+                    .object_quota(account.object_quotas(), StorageQuota::MaxMailboxes)
+                    as usize
+            {
+                return Err(trc::ImapEvent::Error
+                    .into_err()
+                    .details(concat!(
+                        "There are too many mailboxes, ",
+                        "please delete some before adding a new one."
+                    ))
+                    .code(ResponseCode::OverQuota)
+                    .id(arguments.tag.clone()));
+            }
+        }
 
         // Build batch
         let mut parent_id = params.parent_mailbox_id.map(|id| id + 1).unwrap_or(0);
@@ -184,15 +221,26 @@ impl<T: SessionStream> SessionData<T> {
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
+        let account_id = params.account_id;
+
         trc::event!(
             Imap(trc::ImapEvent::RenameMailbox),
             SpanId = self.session_id,
-            AccountId = params.account_id,
+            AccountId = account_id,
             MailboxName = arguments.new_mailbox_name,
             MailboxId = mailbox_id,
             Elapsed = op_start.elapsed()
         );
 
-        Ok(StatusResponse::completed(Command::Rename).with_tag(arguments.tag))
+        let response = StatusResponse::completed(Command::Rename).with_tag(arguments.tag);
+        Ok(if is_objectid {
+            response.with_code(ResponseCode::ObjectId(ObjectId {
+                mailbox_id: Some(Id::from(mailbox_id)),
+                account_id: Some(Id::from(account_id)),
+                ..Default::default()
+            }))
+        } else {
+            response
+        })
     }
 }

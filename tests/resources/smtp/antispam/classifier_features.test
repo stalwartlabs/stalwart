@@ -2320,18 +2320,6 @@ important;">
   },
   {
     "type": "hostname",
-    "value": "gmailapi.google.com"
-  },
-  {
-    "type": "hostname",
-    "value": "google.com"
-  },
-  {
-    "type": "hostname",
-    "value": "mail-wm1-x32d.google.com"
-  },
-  {
-    "type": "hostname",
     "value": "mail.gmail.com"
   },
   {

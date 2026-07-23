@@ -15,7 +15,7 @@ use crate::{
 };
 use common::{
     Server,
-    config::spamfilter::{Element, Location},
+    config::mailstore::spamfilter::{Element, Location},
 };
 use mail_auth::DkimResult;
 use mail_parser::{HeaderName, HeaderValue, Host, parsers::MessageStream};

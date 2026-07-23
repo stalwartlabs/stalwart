@@ -8,9 +8,8 @@ use super::{Message, QueueId, Status, spool::SmtpSpool};
 use crate::queue::{Recipient, spool::LOCK_EXPIRY};
 use ahash::AHashMap;
 use common::{
-    Inner,
+    BuildServer, Inner,
     config::smtp::queue::{QueueExpiry, QueueName},
-    core::BuildServer,
     ipc::{QueueEvent, QueueEventStatus},
 };
 use rand::{Rng, seq::SliceRandom};
@@ -69,6 +68,8 @@ impl Queue {
     }
 
     pub async fn start(&mut self) {
+        trc::event!(Queue(trc::QueueEvent::Started));
+
         loop {
             let mut refresh_queue;
 
@@ -167,6 +168,7 @@ impl Queue {
 
                 match status {
                     QueueEventStatus::Completed => {
+                        self.core.ipc.task_tx.notify_one();
                         self.locked.remove(&(queue_id, queue_name));
                         !self.locked.is_empty() || !queue_stats.has_capacity()
                     }
@@ -199,7 +201,7 @@ impl Queue {
                     .queue_status
                     .store(!paused, Ordering::Relaxed);
                 self.is_paused = paused;
-                false
+                !paused
             }
             QueueEvent::ReloadSettings => {
                 let server = self.core.build_server();

@@ -9,7 +9,7 @@
 #![warn(clippy::cast_possible_wrap)]
 #![warn(clippy::cast_sign_loss)]
 
-use common::{config::server::ServerProtocol, core::BuildServer, manager::boot::BootManager};
+use common::{BuildServer, config::server::ServerProtocol, manager::boot::BootManager};
 use http::HttpSessionManager;
 use imap::core::ImapSessionManager;
 use managesieve::core::ManageSieveSessionManager;
@@ -20,15 +20,23 @@ use std::time::Duration;
 use trc::Collector;
 use utils::wait_for_shutdown;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(feature = "dev_mode")]
+pub mod test_data;
+
+#[cfg(not(any(target_env = "msvc", target_os = "freebsd")))]
 use jemallocator::Jemalloc;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(not(any(target_env = "msvc", target_os = "freebsd")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    // Install AWS-LC-RS as the default Rustls crypto provider
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("failed to install aws-lc-rs as the default rustls crypto provider");
+
     // Load config and apply macros
     let mut init = Box::pin(BootManager::init()).await;
 
@@ -47,8 +55,8 @@ async fn main() -> std::io::Result<()> {
     init.start_queue_manager();
 
     // Log configuration errors
-    init.config.log_errors();
-    init.config.log_warnings();
+    init.bootstrap.log_errors();
+    init.bootstrap.log_warnings();
 
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -57,6 +65,13 @@ async fn main() -> std::io::Result<()> {
     #[cfg(feature = "enterprise")]
     init.inner.build_server().log_license_details();
     // SPDX-SnippetEnd
+
+    #[cfg(feature = "dev_mode")]
+    if std::env::var("INSERT_TEST_DATA").is_ok() {
+        let server = init.inner.build_server();
+        test_data::insert_test_data(&server).await;
+        server.insert_test_metrics().await;
+    }
 
     // Spawn servers
     let (shutdown_tx, shutdown_rx) = init.servers.spawn(|server, acceptor, shutdown_rx| {

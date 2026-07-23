@@ -4,20 +4,29 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::WebDavTest;
-use crate::{TEST_USERS, webdav::prop::ALL_DAV_PROPERTIES};
+use crate::utils::server::TestServer;
+use crate::webdav::prop::ALL_DAV_PROPERTIES;
 use dav_proto::schema::property::{DavProperty, PrincipalProperty, WebDavProperty};
 use groupware::DavResourceName;
 use hyper::StatusCode;
 
-pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
+pub async fn test(test: &TestServer, assisted_discovery: bool) {
     println!("Running principals tests...");
-    let client = test.client("jane");
+    let client = test.account("jane@example.com").webdav_client();
     let principal_path = format!("D:href:{}/", DavResourceName::Principal.base_path());
-    let jane_principal_path = format!("D:href:{}/jane/", DavResourceName::Principal.base_path());
+    let jane_principal_path = format!(
+        "D:href:{}/jane%40example.com/",
+        DavResourceName::Principal.base_path()
+    );
 
-    let path_support_card = format!("D:href:{}/support/", DavResourceName::Card.base_path());
-    let path_support_cal = format!("D:href:{}/support/", DavResourceName::Cal.base_path());
+    let path_support_card = format!(
+        "D:href:{}/support%40example.com/",
+        DavResourceName::Card.base_path()
+    );
+    let path_support_cal = format!(
+        "D:href:{}/support%40example.com/",
+        DavResourceName::Cal.base_path()
+    );
 
     // Test 1: PROPFIND on /dav/pal should return all principals
     let response = client
@@ -26,22 +35,34 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
             ALL_DAV_PROPERTIES,
         )
         .await;
-    for (account, _, name, email) in TEST_USERS {
+    for account_ in test.accounts.values().filter(|a| a.name().contains('@')) {
+        let account_name = account_.name().replace('@', "%40");
+        let email = account_.name();
+        let description = account_.description();
+
         let props = response.properties(&format!(
             "{}/{}/",
             DavResourceName::Principal.base_path(),
-            account
+            account_name
         ));
         let path_pal = format!(
             "D:href:{}/{}/",
             DavResourceName::Principal.base_path(),
-            account
+            account_name
         );
-        let path_card = format!("D:href:{}/{}/", DavResourceName::Card.base_path(), account);
-        let path_cal = format!("D:href:{}/{}/", DavResourceName::Cal.base_path(), account);
+        let path_card = format!(
+            "D:href:{}/{}/",
+            DavResourceName::Card.base_path(),
+            account_name
+        );
+        let path_cal = format!(
+            "D:href:{}/{}/",
+            DavResourceName::Cal.base_path(),
+            account_name
+        );
         props
             .get(DavProperty::WebDav(WebDavProperty::DisplayName))
-            .with_values([*name])
+            .with_values([description])
             .with_status(StatusCode::OK);
         props
             .get(DavProperty::WebDav(WebDavProperty::CurrentUserPrincipal))
@@ -55,7 +76,7 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
             .get(DavProperty::WebDav(WebDavProperty::Owner))
             .with_values([path_pal.as_str()])
             .with_status(StatusCode::OK);
-        if *account == "jane" && !assisted_discovery {
+        if account_name == "jane%40example.com" && !assisted_discovery {
             props
                 .get(DavProperty::Principal(PrincipalProperty::CalendarHomeSet))
                 .with_values([path_cal.as_str(), path_support_cal.as_str()])
@@ -104,12 +125,16 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
             .with_status(StatusCode::OK);
         props
             .get(DavProperty::Principal(PrincipalProperty::CalendarUserType))
-            .with_values(["INDIVIDUAL"])
+            .with_values([if account_name == "support%40example.com" {
+                "GROUP"
+            } else {
+                "INDIVIDUAL"
+            }])
             .with_status(StatusCode::OK);
         props
             .get(DavProperty::Principal(PrincipalProperty::ScheduleInboxURL))
             .with_values([format!(
-                "D:href:{}/{account}/inbox/",
+                "D:href:{}/{account_name}/inbox/",
                 DavResourceName::Scheduling.base_path()
             )
             .as_str()])
@@ -117,7 +142,7 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
         props
             .get(DavProperty::Principal(PrincipalProperty::ScheduleOutboxURL))
             .with_values([format!(
-                "D:href:{}/{account}/outbox/",
+                "D:href:{}/{account_name}/outbox/",
                 DavResourceName::Scheduling.base_path()
             )
             .as_str()])
@@ -210,24 +235,36 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
         if assisted_discovery {
             props
                 .get(DavProperty::Principal(PrincipalProperty::CalendarHomeSet))
-                .with_values(
-                    [format!("D:href:{}/jane/", DavResourceName::Cal.base_path()).as_str()],
+                .with_values([format!(
+                    "D:href:{}/jane%40example.com/",
+                    DavResourceName::Cal.base_path()
                 )
+                .as_str()])
                 .with_status(StatusCode::OK);
             props
                 .get(DavProperty::Principal(
                     PrincipalProperty::AddressbookHomeSet,
                 ))
-                .with_values([
-                    format!("D:href:{}/jane/", DavResourceName::Card.base_path()).as_str(),
-                ])
+                .with_values([format!(
+                    "D:href:{}/jane%40example.com/",
+                    DavResourceName::Card.base_path()
+                )
+                .as_str()])
                 .with_status(StatusCode::OK);
         } else {
             props
                 .get(DavProperty::Principal(PrincipalProperty::CalendarHomeSet))
                 .with_values([
-                    format!("D:href:{}/jane/", DavResourceName::Cal.base_path()).as_str(),
-                    format!("D:href:{}/support/", DavResourceName::Cal.base_path()).as_str(),
+                    format!(
+                        "D:href:{}/jane%40example.com/",
+                        DavResourceName::Cal.base_path()
+                    )
+                    .as_str(),
+                    format!(
+                        "D:href:{}/support%40example.com/",
+                        DavResourceName::Cal.base_path()
+                    )
+                    .as_str(),
                 ])
                 .with_status(StatusCode::OK);
             props
@@ -235,28 +272,49 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
                     PrincipalProperty::AddressbookHomeSet,
                 ))
                 .with_values([
-                    format!("D:href:{}/jane/", DavResourceName::Card.base_path()).as_str(),
-                    format!("D:href:{}/support/", DavResourceName::Card.base_path()).as_str(),
+                    format!(
+                        "D:href:{}/jane%40example.com/",
+                        DavResourceName::Card.base_path()
+                    )
+                    .as_str(),
+                    format!(
+                        "D:href:{}/support%40example.com/",
+                        DavResourceName::Card.base_path()
+                    )
+                    .as_str(),
                 ])
                 .with_status(StatusCode::OK);
         }
 
-        for (account, _, name, _) in TEST_USERS
-            .iter()
-            .filter(|(account, _, _, _)| ["jane", "support"].contains(account))
+        for account_ in test
+            .accounts
+            .values()
+            .filter(|account| ["jane@example.com", "support@example.com"].contains(&account.name()))
         {
-            let path_card = format!("D:href:{}/{}/", DavResourceName::Card.base_path(), account);
-            let path_cal = format!("D:href:{}/{}/", DavResourceName::Cal.base_path(), account);
+            let account_name = account_.name().replace('@', "%40");
+            let description = account_.description();
+
+            let path_card = format!(
+                "D:href:{}/{}/",
+                DavResourceName::Card.base_path(),
+                account_name
+            );
+            let path_cal = format!(
+                "D:href:{}/{}/",
+                DavResourceName::Cal.base_path(),
+                account_name
+            );
             let path_pal = format!(
                 "D:href:{}/{}/",
                 DavResourceName::Principal.base_path(),
-                account
+                account_name
             );
-            let props = response.properties(&format!("{}/{account}/", resource_type.base_path()));
+            let props =
+                response.properties(&format!("{}/{account_name}/", resource_type.base_path()));
 
             props
                 .get(DavProperty::WebDav(WebDavProperty::DisplayName))
-                .with_values([*name])
+                .with_values([description])
                 .with_status(StatusCode::OK);
             props
                 .get(DavProperty::WebDav(WebDavProperty::ResourceType))
@@ -286,7 +344,7 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
                 .get(DavProperty::WebDav(WebDavProperty::Owner))
                 .with_values([path_pal.as_str()])
                 .with_status(StatusCode::OK);
-            if *account == "jane" && !assisted_discovery {
+            if account_name == "jane%40example.com" && !assisted_discovery {
                 props
                     .get(DavProperty::Principal(PrincipalProperty::CalendarHomeSet))
                     .with_values([path_cal.as_str(), path_support_cal.as_str()])
@@ -334,8 +392,8 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
             .with_status(StatusCode::MULTI_STATUS)
             .into_propfind_response(None);
         response.with_hrefs([
-            format!("{}/jane/", resource_type.base_path()).as_str(),
-            format!("{}/support/", resource_type.base_path()).as_str(),
+            format!("{}/jane%40example.com/", resource_type.base_path()).as_str(),
+            format!("{}/support%40example.com/", resource_type.base_path()).as_str(),
         ]);
     }
 
@@ -350,8 +408,16 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
         .with_status(StatusCode::MULTI_STATUS)
         .into_propfind_response(None);
     response.with_hrefs([
-        format!("{}/jane/", DavResourceName::Principal.base_path()).as_str(),
-        format!("{}/support/", DavResourceName::Principal.base_path()).as_str(),
+        format!(
+            "{}/jane%40example.com/",
+            DavResourceName::Principal.base_path()
+        )
+        .as_str(),
+        format!(
+            "{}/support%40example.com/",
+            DavResourceName::Principal.base_path()
+        )
+        .as_str(),
     ]);
 
     // Test 5: principal-search-property-set REPORT
@@ -384,17 +450,24 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
         .with_status(StatusCode::MULTI_STATUS)
         .into_propfind_response(None);
     response.with_hrefs([
-        format!("{}/jane/", DavResourceName::Principal.base_path()).as_str(),
-        format!("{}/john/", DavResourceName::Principal.base_path()).as_str(),
+        format!(
+            "{}/jane%40example.com/",
+            DavResourceName::Principal.base_path()
+        )
+        .as_str(),
+        format!(
+            "{}/john%40example.com/",
+            DavResourceName::Principal.base_path()
+        )
+        .as_str(),
     ]);
     response
-        .properties(&format!("{}/jane/", DavResourceName::Principal.base_path()))
+        .properties(&format!(
+            "{}/jane%40example.com/",
+            DavResourceName::Principal.base_path()
+        ))
         .get(DavProperty::WebDav(WebDavProperty::DisplayName))
-        .with_values([TEST_USERS
-            .iter()
-            .find(|(account, _, _, _)| *account == "jane")
-            .unwrap()
-            .2])
+        .with_values([test.account("jane@example.com").description()])
         .with_status(StatusCode::OK);
     client
         .request(
@@ -405,10 +478,16 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
         .await
         .with_status(StatusCode::MULTI_STATUS)
         .into_propfind_response(None)
-        .with_hrefs([format!("{}/support/", DavResourceName::Principal.base_path()).as_str()]);
+        .with_hrefs([format!(
+            "{}/support%40example.com/",
+            DavResourceName::Principal.base_path()
+        )
+        .as_str()]);
 
     client.delete_default_containers().await;
-    client.delete_default_containers_by_account("support").await;
+    client
+        .delete_default_containers_by_account("support@example.com")
+        .await;
     test.assert_is_empty().await;
 }
 

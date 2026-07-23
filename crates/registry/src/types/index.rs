@@ -1,0 +1,234 @@
+/*
+ * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
+ */
+
+use crate::{
+    schema::prelude::{ObjectType, Property},
+    types::{id::ObjectId, ipmask::IpAddrOrMask},
+};
+use ahash::AHashSet;
+use std::borrow::Cow;
+use types::id::Id;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum IndexKey<'x> {
+    Unique {
+        property: Property,
+        value_1: IndexValue<'x>,
+        value_2: IndexValue<'x>,
+        global: bool,
+    },
+    Search {
+        property: Property,
+        value: IndexValue<'x>,
+    },
+    ForeignKey {
+        object_id: ObjectId,
+        type_filter: IndexValue<'x>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ObjectFilter<'x> {
+    pub property: Property,
+    pub value: IndexValue<'x>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum IndexValue<'x> {
+    Text(Cow<'x, str>),
+    Bytes(Vec<u8>),
+    U64(u64),
+    I64(i64),
+    U16(u16),
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IndexSchema {
+    pub prop: Property,
+    pub typ: IndexSchemaType,
+    pub value: IndexSchemaValueType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum IndexSchemaType {
+    Unique,
+    Search,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum IndexSchemaValueType {
+    Keyword,
+    Text,
+    Number,
+    Enum,
+    Boolean,
+    Id,
+    IpMask,
+}
+
+#[derive(Debug, Default)]
+
+pub struct IndexBuilder<'x> {
+    pub keys: AHashSet<IndexKey<'x>>,
+}
+
+impl<'x> IndexBuilder<'x> {
+    pub fn typ(&mut self, typ: u16) {
+        self.keys.insert(IndexKey::Search {
+            property: Property::Type,
+            value: IndexValue::U16(typ),
+        });
+    }
+
+    pub fn unique(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
+        self.keys.insert(IndexKey::Unique {
+            property,
+            value_1: value.into(),
+            value_2: IndexValue::None,
+            global: false,
+        });
+    }
+
+    pub fn search(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
+        let value = value.into();
+        if value != IndexValue::None {
+            self.keys.insert(IndexKey::Search { property, value });
+        }
+    }
+
+    pub fn text(&mut self, property: Property, value: &'x str) {
+        for word in value
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| s.len() > 1)
+        {
+            if word
+                .chars()
+                .all(|ch| ch.is_lowercase() || !ch.is_alphabetic())
+            {
+                self.keys.insert(IndexKey::Search {
+                    property,
+                    value: IndexValue::Text(Cow::Borrowed(word)),
+                });
+            } else {
+                self.keys.insert(IndexKey::Search {
+                    property,
+                    value: IndexValue::Text(Cow::Owned(word.to_lowercase())),
+                });
+            }
+        }
+    }
+
+    pub fn unique_global(&mut self, property: Property, value: impl Into<IndexValue<'x>>) {
+        self.keys.insert(IndexKey::Unique {
+            property,
+            value_1: value.into(),
+            value_2: IndexValue::None,
+            global: true,
+        });
+    }
+
+    pub fn unique_global_composite(
+        &mut self,
+        property: Property,
+        value: impl Into<IndexValue<'x>>,
+        composite: impl Into<IndexValue<'x>>,
+    ) {
+        self.keys.insert(IndexKey::Unique {
+            property,
+            value_1: value.into(),
+            value_2: composite.into(),
+            global: true,
+        });
+    }
+
+    pub fn foreign_key(&mut self, object: ObjectType, id: Option<Id>, type_filter: Option<u16>) {
+        if let Some(id) = id {
+            self.keys.insert(IndexKey::ForeignKey {
+                object_id: ObjectId::new(object, id),
+                type_filter: type_filter.map(IndexValue::U16).unwrap_or(IndexValue::None),
+            });
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+}
+
+impl IndexSchema {
+    pub const fn new(prop: Property, typ: IndexSchemaType, value: IndexSchemaValueType) -> Self {
+        Self { prop, typ, value }
+    }
+}
+
+impl From<u64> for IndexValue<'_> {
+    fn from(value: u64) -> Self {
+        IndexValue::U64(value)
+    }
+}
+
+impl From<&u64> for IndexValue<'_> {
+    fn from(value: &u64) -> Self {
+        IndexValue::U64(*value)
+    }
+}
+
+impl From<i64> for IndexValue<'_> {
+    fn from(value: i64) -> Self {
+        IndexValue::I64(value)
+    }
+}
+
+impl From<&i64> for IndexValue<'_> {
+    fn from(value: &i64) -> Self {
+        IndexValue::I64(*value)
+    }
+}
+
+impl<'x> From<&'x IpAddrOrMask> for IndexValue<'x> {
+    fn from(value: &'x IpAddrOrMask) -> Self {
+        IndexValue::Bytes(value.to_index_key())
+    }
+}
+
+impl<'x> From<&'x trc::EventType> for IndexValue<'x> {
+    fn from(value: &'x trc::EventType) -> Self {
+        IndexValue::U16(value.to_id())
+    }
+}
+
+impl<'x> From<&'x str> for IndexValue<'x> {
+    fn from(value: &'x str) -> Self {
+        IndexValue::Text(value.into())
+    }
+}
+
+impl<'x> From<&'x String> for IndexValue<'x> {
+    fn from(value: &'x String) -> Self {
+        IndexValue::Text(Cow::Borrowed(value.as_str()))
+    }
+}
+
+impl<'x> From<&'x Id> for IndexValue<'x> {
+    fn from(value: &'x Id) -> Self {
+        IndexValue::U64(value.id())
+    }
+}
+
+impl<'x, T> From<&'x Option<T>> for IndexValue<'x>
+where
+    IndexValue<'x>: std::convert::From<&'x T>,
+{
+    fn from(value: &'x Option<T>) -> Self {
+        match value {
+            Some(id) => id.into(),
+            None => IndexValue::None,
+        }
+    }
+}

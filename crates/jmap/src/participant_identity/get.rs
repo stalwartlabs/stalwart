@@ -5,7 +5,6 @@
  */
 
 use common::Server;
-use directory::{PrincipalData, QueryParams};
 use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
@@ -36,7 +35,7 @@ impl ParticipantIdentityGet for Server {
         &self,
         mut request: GetRequest<participant_identity::ParticipantIdentity>,
     ) -> trc::Result<GetResponse<participant_identity::ParticipantIdentity>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             ParticipantIdentityProperty::Id,
             ParticipantIdentityProperty::Name,
@@ -50,11 +49,13 @@ impl ParticipantIdentityGet for Server {
             account_id: request.account_id.into(),
             state: None,
             list: Vec::new(),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
         let Some(identities) = identities else {
-            response.not_found = ids.unwrap_or_default();
+            for id in ids.unwrap_or_default() {
+                response.push_not_found(id);
+            }
             return Ok(response);
         };
 
@@ -77,7 +78,7 @@ impl ParticipantIdentityGet for Server {
             // Obtain the identity object
             let document_id = id.document_id();
             let Some(identity) = identities.identities.iter().find(|i| i.id == document_id) else {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             };
 
@@ -128,36 +129,17 @@ impl ParticipantIdentityGet for Server {
             return Ok(Some(identities));
         }
 
-        // Obtain principal
-        let principal = if let Some(principal) = self
-            .core
-            .storage
-            .directory
-            .query(QueryParams::id(account_id).with_return_member_of(false))
+        // Obtain account info
+        let account_info = self
+            .account_info(account_id)
             .await
-            .caused_by(trc::location!())?
-        {
-            principal
-        } else {
-            return Ok(None);
-        };
-        let mut emails = Vec::new();
-        let mut description = None;
-        for data in principal.data {
-            match data {
-                PrincipalData::PrimaryEmail(v) | PrincipalData::EmailAlias(v) => emails.push(v),
-                PrincipalData::Description(v) => description = Some(v),
-                _ => {}
-            }
-        }
-        let num_emails = emails.len();
-        if num_emails == 0 {
-            return Ok(None);
-        }
+            .caused_by(trc::location!())?;
+        let name = account_info.description().unwrap_or(account_info.name());
 
         // Build identities
         let identities = ParticipantIdentities {
-            identities: emails
+            identities: account_info
+                .addresses()
                 .iter()
                 .enumerate()
                 .map(|(id, email)| ParticipantIdentity {
@@ -167,7 +149,7 @@ impl ParticipantIdentityGet for Server {
                 })
                 .collect(),
             default: 0,
-            default_name: description.unwrap_or(principal.name),
+            default_name: name.to_string(),
         };
 
         let mut batch = BatchBuilder::new();

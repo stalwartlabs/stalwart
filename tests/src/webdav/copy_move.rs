@@ -4,16 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{DavResponse, WebDavTest};
-use crate::webdav::GenerateTestDavResource;
+use crate::utils::{
+    server::TestServer,
+    webdav::{DavResponse, GenerateTestDavResource},
+};
 use ahash::AHashSet;
 use dav_proto::Depth;
 use groupware::DavResourceName;
 use hyper::StatusCode;
+use registry::schema::structs::Action;
 
-pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
-    let client = test.client("jane");
-    let mike_noquota = test.client("mike");
+pub async fn test(test: &TestServer, assisted_discovery: bool) {
+    let admin = test.account("admin@example.com");
+    let client = test.account("jane@example.com").webdav_client();
+    let mike_noquota = test.account("mike@example.com").webdav_client();
 
     for resource_type in [
         DavResourceName::File,
@@ -21,8 +25,8 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
         DavResourceName::Card,
     ] {
         println!("Running COPY/MOVE tests ({})...", resource_type.base_path());
-        let user_base_path = format!("{}/jane", resource_type.base_path());
-        let group_base_path = format!("{}/support", resource_type.base_path());
+        let user_base_path = format!("{}/jane%40example.com", resource_type.base_path());
+        let group_base_path = format!("{}/support%40example.com", resource_type.base_path());
         let default_test_depth = if resource_type == DavResourceName::File {
             2
         } else {
@@ -73,7 +77,7 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
         client.validate_values(&hierarchy).await;
 
         // Delete cache an resync
-        test.clear_cache();
+        admin.registry_create_object(Action::InvalidateCaches).await;
         let response = client
             .sync_collection(
                 &user_base_path,
@@ -724,7 +728,10 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
 
         // Test 19: Quota enforcement (on CalDAV/CardDAV items are linked, not copied therefore there is no quota increase)
         if resource_type == DavResourceName::File {
-            let path = format!("{}/mike/quota-test/", resource_type.base_path());
+            let path = format!(
+                "{}/mike%40example.com/quota-test/",
+                resource_type.base_path()
+            );
             let content = resource_type.generate();
             mike_noquota
                 .mkcol("MKCOL", &path, [], [])
@@ -744,7 +751,11 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
                         &path,
                         [(
                             "destination",
-                            format!("{}/mike/quota-test{i}", resource_type.base_path()).as_str(),
+                            format!(
+                                "{}/mike%40example.com/quota-test{i}",
+                                resource_type.base_path()
+                            )
+                            .as_str(),
                         )],
                         &content,
                     )
@@ -775,7 +786,10 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
                 mike_noquota
                     .request(
                         "DELETE",
-                        &format!("{}/mike/quota-test{i}", resource_type.base_path()),
+                        &format!(
+                            "{}/mike%40example.com/quota-test{i}",
+                            resource_type.base_path()
+                        ),
                         "",
                     )
                     .await
@@ -785,7 +799,9 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
     }
 
     client.delete_default_containers().await;
-    client.delete_default_containers_by_account("support").await;
+    client
+        .delete_default_containers_by_account("support@example.com")
+        .await;
     mike_noquota.delete_default_containers().await;
     test.assert_is_empty().await;
 }
@@ -796,7 +812,9 @@ fn assert_result(response: &DavResponse, hierarchy: &[(String, String)]) {
         .hrefs()
         .into_iter()
         .filter(|h| {
-            !h.ends_with("/jane/") && !h.ends_with("/support/") && !h.ends_with("/default/")
+            !h.ends_with("/jane%40example.com/")
+                && !h.ends_with("/support%40example.com/")
+                && !h.ends_with("/default/")
         })
         .collect::<AHashSet<_>>();
     let hierarchy = hierarchy

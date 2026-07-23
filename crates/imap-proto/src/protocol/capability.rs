@@ -20,6 +20,7 @@ pub enum Capability {
     Idle,
     Namespace,
     Id,
+    Rights,
     Children,
     MultiAppend,
     Binary,
@@ -45,7 +46,7 @@ pub enum Capability {
     LiteralPlus, //LITERAL+
     UnAuthenticate,
     StatusSize, //STATUS=SIZE
-    ObjectId,
+    ObjectIdPlus,
     Preview,
     Utf8Accept,
     Auth(Mechanism),
@@ -54,15 +55,6 @@ pub enum Capability {
     QuotaSet,
     JmapAccess,
 }
-
-/*
-
-STORAGE 	The physical space estimate, in units of 1024 octets, of the mailboxes governed by the quota root. 	DELETED-STORAGE STATUS request data item and response data item 	N/A 	[Alexey_Melnikov] 	[IESG] 	[RFC9208, Section 5.1]
-MESSAGE 	The number of messages stored within the mailboxes governed by the quota root. 	DELETED STATUS request data item and response data item 	N/A 	[Alexey_Melnikov] 	[IESG] 	[RFC9208, Section 5.2]
-MAILBOX 	The number of mailboxes governed by the quota root. 	N/A 	N/A 	[Alexey_Melnikov] 	[IESG] 	[RFC9208, Section 5.3]
-ANNOTATION-STORAGE
-
-*/
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuotaResourceName {
@@ -89,7 +81,7 @@ impl Capability {
             Capability::LiteralPlus => b"LITERAL+",
             Capability::UnAuthenticate => b"UNAUTHENTICATE",
             Capability::StatusSize => b"STATUS=SIZE",
-            Capability::ObjectId => b"OBJECTID",
+            Capability::ObjectIdPlus => b"OBJECTID+",
             Capability::Preview => b"PREVIEW",
             Capability::Idle => b"IDLE",
             Capability::Namespace => b"NAMESPACE",
@@ -99,6 +91,7 @@ impl Capability {
             Capability::Binary => b"BINARY",
             Capability::Unselect => b"UNSELECT",
             Capability::ACL => b"ACL",
+            Capability::Rights => b"RIGHTS=texk",
             Capability::UIDPlus => b"UIDPLUS",
             Capability::ESearch => b"ESEARCH",
             Capability::SASLIR => b"SASL-IR",
@@ -140,11 +133,11 @@ impl Capability {
             Capability::LiteralPlus,
             Capability::Id,
             Capability::Utf8Accept,
-            Capability::JmapAccess,
         ];
 
         if is_authenticated {
             capabilities.extend([
+                Capability::JmapAccess,
                 Capability::Idle,
                 Capability::Namespace,
                 Capability::Children,
@@ -169,8 +162,9 @@ impl Capability {
                 Capability::QResync,
                 Capability::UnAuthenticate,
                 Capability::StatusSize,
-                Capability::ObjectId,
+                Capability::ObjectIdPlus,
                 Capability::Preview,
+                Capability::Rights,
                 Capability::Quota,
                 Capability::QuotaResource(QuotaResourceName::Storage),
             ]);

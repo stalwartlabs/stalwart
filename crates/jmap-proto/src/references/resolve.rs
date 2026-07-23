@@ -57,32 +57,61 @@ impl Response<'_> {
                     request.resolve_references(self)?
                 }
                 GetRequestMethod::PrincipalAvailability(_) => (),
+                GetRequestMethod::Registry(request) => request.resolve_references(self)?,
             },
             RequestMethod::Set(request) => match request {
-                SetRequestMethod::Email(request) => request.resolve_references(self)?,
-                SetRequestMethod::Mailbox(request) => request.resolve_references(self)?,
-                SetRequestMethod::Identity(request) => request.resolve_references(self)?,
-                SetRequestMethod::EmailSubmission(request) => request.resolve_references(self)?,
-                SetRequestMethod::PushSubscription(request) => request.resolve_references(self)?,
-                SetRequestMethod::Sieve(request) => request.resolve_references(self)?,
-                SetRequestMethod::VacationResponse(request) => request.resolve_references(self)?,
-                SetRequestMethod::AddressBook(request) => request.resolve_references(self)?,
-                SetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
-                SetRequestMethod::FileNode(request) => request.resolve_references(self)?,
-                SetRequestMethod::ShareNotification(request) => request.resolve_references(self)?,
-                SetRequestMethod::Calendar(request) => request.resolve_references(self)?,
-                SetRequestMethod::CalendarEvent(request) => request.resolve_references(self)?,
+                SetRequestMethod::Email(request) => request.resolve_references(self, 2, false)?,
+                SetRequestMethod::Mailbox(request) => request.resolve_references(self, 1, false)?,
+                SetRequestMethod::Identity(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::EmailSubmission(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::PushSubscription(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::Sieve(request) => request.resolve_references(self, 1, false)?,
+                SetRequestMethod::VacationResponse(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::AddressBook(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::ContactCard(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::FileNode(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::ShareNotification(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::Calendar(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::CalendarEvent(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
                 SetRequestMethod::CalendarEventNotification(request) => {
-                    request.resolve_references(self)?
+                    request.resolve_references(self, 1, false)?
                 }
                 SetRequestMethod::ParticipantIdentity(request) => {
-                    request.resolve_references(self)?
+                    request.resolve_references(self, 1, false)?
                 }
+                SetRequestMethod::Registry(request) => request.resolve_references(self, 5, true)?,
             },
             RequestMethod::Copy(request) => match request {
-                CopyRequestMethod::Email(request) => request.resolve_references(self)?,
-                CopyRequestMethod::CalendarEvent(request) => request.resolve_references(self)?,
-                CopyRequestMethod::ContactCard(request) => request.resolve_references(self)?,
+                CopyRequestMethod::Email(request) => request.resolve_references(self, 1, false)?,
+                CopyRequestMethod::CalendarEvent(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                CopyRequestMethod::ContactCard(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                CopyRequestMethod::FileNode(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
                 CopyRequestMethod::Blob(_) => (),
             },
             RequestMethod::ImportEmail(request) => request.resolve_references(self)?,
@@ -107,8 +136,31 @@ where
 {
     fn get_created_id(&self, id_ref: &str) -> Option<AnyId>;
 
-    fn resolve_self_references(&self, value: &mut Value<'_, P, E>) -> Result<(), SetError<P>> {
+    fn resolve_self_references(
+        &self,
+        value: &mut Value<'_, P, E>,
+        depth: usize,
+        eval_strings: bool,
+    ) -> Result<(), SetError<P>> {
         match value {
+            Value::Object(obj) if eval_strings && depth < 5 => {
+                for (key, value) in obj.as_mut_vec() {
+                    if let Some(id) = key
+                        .as_string_key()
+                        .and_then(|k| k.strip_prefix('#'))
+                        .and_then(|id_ref| self.get_created_id(id_ref))
+                    {
+                        *key = Key::Owned(match id {
+                            AnyId::Id(id) => id.to_string(),
+                            AnyId::BlobId(id) => id.to_string(),
+                        });
+                    }
+
+                    if matches!(value, Value::Object(_) | Value::Array(_)) {
+                        self.resolve_self_references(value, depth + 1, eval_strings)?;
+                    }
+                }
+            }
             Value::Element(element) => {
                 if let Some(id_ref) = element.as_id_ref() {
                     if let Some(id) = self.get_created_id(id_ref) {
@@ -122,9 +174,9 @@ where
                     }
                 }
             }
-            Value::Array(items) => {
+            Value::Array(items) if depth < 5 => {
                 for item in items {
-                    self.resolve_self_references(item)?;
+                    self.resolve_self_references(item, depth + 1, eval_strings)?;
                 }
             }
             _ => {}
@@ -136,6 +188,15 @@ where
 
 pub(crate) trait ResolveReference {
     fn resolve_references(&mut self, response: &Response<'_>) -> trc::Result<()>;
+}
+
+pub(crate) trait ResolveSetReference {
+    fn resolve_references(
+        &mut self,
+        response: &Response<'_>,
+        max_depth: usize,
+        eval_strings: bool,
+    ) -> trc::Result<()>;
 }
 
 impl<T: JmapObject> ResolveReference for GetRequest<T> {
@@ -189,8 +250,13 @@ impl<T: JmapObject> ResolveReference for GetRequest<T> {
     }
 }
 
-impl<'x, T: JmapObject> ResolveReference for SetRequest<'x, T> {
-    fn resolve_references(&mut self, response: &Response<'_>) -> trc::Result<()> {
+impl<'x, T: JmapObject> ResolveSetReference for SetRequest<'x, T> {
+    fn resolve_references(
+        &mut self,
+        response: &Response<'_>,
+        max_depth: usize,
+        eval_strings: bool,
+    ) -> trc::Result<()> {
         // Resolve create references
         if let Some(create) = &mut self.create {
             let mut graph = HashMap::with_capacity(create.len());
@@ -202,6 +268,8 @@ impl<'x, T: JmapObject> ResolveReference for SetRequest<'x, T> {
                         graph: &mut graph,
                     },
                     0,
+                    max_depth,
+                    eval_strings,
                 )?;
             }
 
@@ -214,7 +282,7 @@ impl<'x, T: JmapObject> ResolveReference for SetRequest<'x, T> {
         // Resolve update references
         if let Some(update) = &mut self.update {
             for obj in update.values_mut() {
-                obj.eval_object_references(response, &mut Graph::None, 0)?;
+                obj.eval_object_references(response, &mut Graph::None, 0, max_depth, eval_strings)?;
             }
         }
 
@@ -233,11 +301,16 @@ impl<'x, T: JmapObject> ResolveReference for SetRequest<'x, T> {
     }
 }
 
-impl<'x, T: JmapObject> ResolveReference for CopyRequest<'x, T> {
-    fn resolve_references(&mut self, response: &Response<'_>) -> trc::Result<()> {
+impl<'x, T: JmapObject> ResolveSetReference for CopyRequest<'x, T> {
+    fn resolve_references(
+        &mut self,
+        response: &Response<'_>,
+        max_depth: usize,
+        eval_strings: bool,
+    ) -> trc::Result<()> {
         // Resolve create references
         for (id, obj) in self.create.iter_mut() {
-            obj.eval_object_references(response, &mut Graph::None, 0)?;
+            obj.eval_object_references(response, &mut Graph::None, 0, max_depth, eval_strings)?;
 
             if let MaybeIdReference::Reference(ir) = id {
                 *id = MaybeIdReference::Id(response.eval_id_reference(ir)?);

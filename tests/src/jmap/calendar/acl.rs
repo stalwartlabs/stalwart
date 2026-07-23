@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, JmapUtils};
+use crate::utils::{jmap::JmapUtils, server::TestServer};
 use calcard::jscalendar::JSCalendarProperty;
 use jmap_proto::{
     object::{calendar::CalendarProperty, share_notification::ShareNotificationProperty},
@@ -13,10 +13,10 @@ use jmap_proto::{
 use serde_json::json;
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Calendar ACL tests...");
-    let john = params.account("jdoe@example.com");
-    let jane = params.account("jane.smith@example.com");
+    let john = test.account("jdoe@example.com");
+    let jane = test.account("jane.smith@example.com");
     let john_id = john.id_string().to_string();
     let jane_id = jane.id_string().to_string();
 
@@ -707,5 +707,5 @@ pub async fn test(params: &mut JMAPTest) {
     // Destroy all mailboxes
     john.destroy_all_calendars().await;
     jane.destroy_all_calendars().await;
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }

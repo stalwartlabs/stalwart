@@ -55,7 +55,7 @@ impl EmailGet for Server {
         mut request: GetRequest<Email>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Email>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             EmailProperty::Id,
             EmailProperty::BlobId,
@@ -131,7 +131,7 @@ impl EmailGet for Server {
             account_id: request.account_id.into(),
             state: cache.get_state(false).into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
         // Check if we need to fetch the raw headers or body
@@ -153,7 +153,7 @@ impl EmailGet for Server {
         for id in ids {
             // Obtain the email object
             if !message_ids.contains(id.document_id()) {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             }
             let metadata_ = match self
@@ -168,7 +168,7 @@ impl EmailGet for Server {
             {
                 Some(metadata) => metadata,
                 None => {
-                    response.not_found.push(id);
+                    response.push_not_found(id);
                     continue;
                 }
             };
@@ -180,7 +180,7 @@ impl EmailGet for Server {
             let data = match cache.email_by_id(&id.document_id()) {
                 Some(data) => data,
                 None => {
-                    response.not_found.push(id);
+                    response.push_not_found(id);
                     continue;
                 }
             };
@@ -212,7 +212,7 @@ impl EmailGet for Server {
                         CausedBy = trc::location!(),
                     );
 
-                    response.not_found.push(id);
+                    response.push_not_found(id);
                     continue;
                 }
             }

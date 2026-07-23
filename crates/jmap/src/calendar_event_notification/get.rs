@@ -25,7 +25,10 @@ use jmap_proto::{
     },
     types::date::UTCDate,
 };
-use store::{ValueKey, write::{AlignedBytes, Archive, serialize::rkyv_deserialize}};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, serialize::rkyv_deserialize},
+};
 use trc::AddContext;
 use types::{
     blob::BlobId,
@@ -47,7 +50,7 @@ impl CalendarEventNotificationGet for Server {
         mut request: GetRequest<calendar_event_notification::CalendarEventNotification>,
         access_token: &AccessToken,
     ) -> trc::Result<CalendarEventNotificationGetResponse> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             CalendarEventNotificationProperty::Id,
             CalendarEventNotificationProperty::Created,
@@ -57,7 +60,7 @@ impl CalendarEventNotificationGet for Server {
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_dav_resources(
-                access_token,
+                access_token.account_id(),
                 account_id,
                 SyncCollection::CalendarEventNotification,
             )
@@ -77,7 +80,7 @@ impl CalendarEventNotificationGet for Server {
             account_id: request.account_id.into(),
             state: cache.get_state(false).into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
         for id in ids {
@@ -94,7 +97,7 @@ impl CalendarEventNotificationGet for Server {
             {
                 event
             } else {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             };
             let event = _event
@@ -119,9 +122,10 @@ impl CalendarEventNotificationGet for Server {
 
                         match &event.changed_by {
                             ArchivedChangedBy::PrincipalId(id) => {
-                                if let Ok(token) = self.get_access_token(id.to_native()).await {
-                                    changed_by.name = token.description.clone().unwrap_or_default();
-                                    changed_by.email = token.emails.first().cloned();
+                                if let Ok(account) = self.account(id.to_native()).await {
+                                    changed_by.name =
+                                        account.description().unwrap_or(account.name()).to_string();
+                                    changed_by.email = account.name().to_string().into();
                                 }
                                 changed_by.principal_id = Some(id.to_native().into());
                             }

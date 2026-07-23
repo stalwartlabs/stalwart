@@ -7,6 +7,7 @@
 use super::{SqliteStore, into_error};
 use crate::{
     IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
+    SUBSPACE_REGISTRY_IDX,
     write::{AssignedIds, Batch, MergeResult, Operation, ValueClass, ValueOp},
 };
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
@@ -14,12 +15,10 @@ use trc::AddContext;
 
 impl SqliteStore {
     pub(crate) async fn write(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
-        let mut conn = self
-            .conn_pool
-            .get()
-            .map_err(into_error)
-            .caused_by(trc::location!())?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let mut conn = manager.get().map_err(into_error)?;
+
             let mut account_id = u32::MAX;
             let mut collection = u8::MAX;
             let mut document_id = u32::MAX;
@@ -71,19 +70,29 @@ impl SqliteStore {
                     }
                     Operation::Value { class, op } => {
                         let key = class.serialize(account_id, collection, document_id, 0);
-                        let table = char::from(class.subspace(collection));
+                        let subspace = class.subspace(collection);
+                        let table = char::from(subspace);
 
                         match op {
                             ValueOp::Set(value) => {
-                                trx.prepare_cached(&format!(
-                                    "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
-                                    table
-                                ))
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?
-                                .execute([&key, value])
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?;
+                                if subspace != SUBSPACE_REGISTRY_IDX {
+                                    trx.prepare_cached(&format!(
+                                        "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
+                                        table
+                                    ))
+                                    .map_err(into_error)
+                                    .caused_by(trc::location!())?
+                                    .execute([&key, value])
+                                    .map_err(into_error)
+                                    .caused_by(trc::location!())?;
+                                } else {
+                                    trx.prepare_cached("INSERT OR IGNORE INTO b (k) VALUES (?)")
+                                        .map_err(into_error)
+                                        .caused_by(trc::location!())?
+                                        .execute([&key])
+                                        .map_err(into_error)
+                                        .caused_by(trc::location!())?;
+                                }
                             }
                             ValueOp::SetFnc(set_op) => {
                                 let value = (set_op.fnc)(&set_op.params, &result)?;
@@ -271,12 +280,9 @@ impl SqliteStore {
     }
 
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
-        let conn = self
-            .conn_pool
-            .get()
-            .map_err(into_error)
-            .caused_by(trc::location!())?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
                 conn.prepare_cached(&format!("DELETE FROM {} WHERE v = 0", char::from(subspace),))
                     .map_err(into_error)
@@ -292,12 +298,10 @@ impl SqliteStore {
     }
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
-        let conn = self
-            .conn_pool
-            .get()
-            .map_err(into_error)
-            .caused_by(trc::location!())?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
+
             conn.prepare_cached(&format!(
                 "DELETE FROM {} WHERE k >= ? AND k < ?",
                 char::from(from.subspace()),

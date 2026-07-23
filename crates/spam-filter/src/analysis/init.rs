@@ -279,8 +279,13 @@ impl SpamFilterInit for Server {
                 env_from_postmaster: env_from_addr.address.is_empty()
                     || POSTMASTER_ADDRESSES.contains(&env_from_addr.local_part.as_str()),
                 env_from_addr,
-                env_to_addr: input
-                    .env_rcpt_to
+                env_to_orig_addr: input
+                    .env_rcpt_orig_to
+                    .iter()
+                    .map(|rcpt| Email::new(rcpt))
+                    .collect(),
+                env_to_rewritten_addr: input
+                    .env_rcpt_rewritten_to
                     .iter()
                     .map(|rcpt| Email::new(rcpt))
                     .collect(),

@@ -65,34 +65,18 @@ impl FromStr for UTCDate {
                         break;
                     }
                 }
-                b'T' => {
-                    if pos == 2 {
-                        pos += 1;
-                    } else {
-                        break;
-                    }
+                b'T' if pos == 2 => {
+                    pos += 1;
                 }
-                b':' => {
-                    if [3, 4, 6].contains(&pos) {
-                        pos += 1;
-                    } else {
-                        break;
-                    }
+                b':' if [3, 4, 6].contains(&pos) => {
+                    pos += 1;
                 }
-                b'+' => {
-                    if pos == 5 {
-                        pos += 1;
-                        skip_digits = false;
-                    } else {
-                        break;
-                    }
+                b'+' if pos == 5 => {
+                    pos += 1;
+                    skip_digits = false;
                 }
-                b'.' => {
-                    if pos == 5 {
-                        skip_digits = true;
-                    } else {
-                        break;
-                    }
+                b'.' if pos == 5 => {
+                    skip_digits = true;
                 }
                 b'Z' | b'z' => (),
                 _ => {

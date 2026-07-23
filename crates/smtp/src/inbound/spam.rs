@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{config::spamfilter::SpamFilterAction, listener::SessionStream};
-use mail_auth::{ArcOutput, DkimOutput, DmarcResult, dmarc::Policy};
+use crate::core::Session;
+use common::{config::mailstore::spamfilter::SpamFilterAction, network::SessionStream};
+use mail_auth::{ArcOutput, DkimOutput, DmarcResult, dkim2::Dkim2Output, dmarc::Policy};
 use mail_parser::Message;
 use spam_filter::{
     SpamFilterInput,
@@ -15,13 +16,12 @@ use spam_filter::{
     },
 };
 
-use crate::core::Session;
-
 impl<T: SessionStream> Session<T> {
     pub async fn spam_classify<'x>(
         &'x self,
         message: &'x Message<'x>,
         dkim_result: &'x [DkimOutput<'x>],
+        dkim2_result: Option<&'x Dkim2Output<'x>>,
         arc_result: Option<&'x ArcOutput<'x>>,
         dmarc_result: Option<&'x DmarcResult>,
         dmarc_policy: Option<&'x Policy>,
@@ -30,6 +30,7 @@ impl<T: SessionStream> Session<T> {
         let mut ctx = server.spam_filter_init(self.build_spam_input(
             message,
             dkim_result,
+            dkim2_result,
             arc_result,
             dmarc_result,
             dmarc_policy,
@@ -48,6 +49,7 @@ impl<T: SessionStream> Session<T> {
         &'x self,
         message: &'x Message<'x>,
         dkim_result: &'x [DkimOutput<'x>],
+        dkim2_result: Option<&'x Dkim2Output<'x>>,
         arc_result: Option<&'x ArcOutput>,
         dmarc_result: Option<&'x DmarcResult>,
         dmarc_policy: Option<&'x Policy>,
@@ -59,12 +61,13 @@ impl<T: SessionStream> Session<T> {
             spf_ehlo_result: self.data.spf_ehlo.as_ref(),
             spf_mail_from_result: self.data.spf_mail_from.as_ref(),
             dkim_result,
+            dkim2_result,
             dmarc_result,
             dmarc_policy,
             iprev_result: self.data.iprev.as_ref(),
             remote_ip: self.data.remote_ip,
             ehlo_domain: self.data.helo_domain.as_str().into(),
-            authenticated_as: self.data.authenticated_as.as_ref().map(|a| a.name.as_str()),
+            authenticated_as: self.data.authenticated_as.as_ref().map(|a| a.name()),
             asn: self.data.asn_geo_data.asn.as_ref().map(|a| a.id),
             country: self.data.asn_geo_data.country.as_ref().map(|c| c.as_str()),
             is_tls: self.stream.is_tls(),
@@ -80,11 +83,22 @@ impl<T: SessionStream> Session<T> {
                 .as_ref()
                 .map(|m| m.flags)
                 .unwrap_or_default(),
-            env_rcpt_to: self
+            env_rcpt_rewritten_to: self
                 .data
                 .rcpt_to
                 .iter()
                 .map(|r| r.address_lcase.as_str())
+                .collect(),
+            env_rcpt_orig_to: self
+                .data
+                .rcpt_to
+                .iter()
+                .map(|r| {
+                    r.dsn_info
+                        .as_deref()
+                        .and_then(|info| info.strip_prefix("rfc822;"))
+                        .unwrap_or(r.address_lcase.as_str())
+                })
                 .collect(),
             is_test: false,
             is_train: false,

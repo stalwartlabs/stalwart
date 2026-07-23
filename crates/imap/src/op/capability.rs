@@ -7,16 +7,17 @@
 use std::time::Instant;
 
 use crate::core::Session;
-use common::listener::SessionStream;
-use directory::Permission;
+use common::network::SessionStream;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{
         ImapResponse,
         capability::{Capability, Response},
+        quoted_string,
     },
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_capability(&mut self, request: Request<Command>) -> trc::Result<()> {
@@ -70,6 +71,35 @@ impl<T: SessionStream> Session<T> {
                     .as_bytes()
                     .to_vec(),
                 ),
+        )
+        .await
+    }
+
+    pub async fn handle_jmap_access(&mut self, request: Request<Command>) -> trc::Result<()> {
+        // Validate access
+        self.assert_has_permission(Permission::ImapCapability)?;
+
+        let op_start = Instant::now();
+        trc::event!(
+            Imap(trc::ImapEvent::Capabilities),
+            SpanId = self.session_id,
+            Elapsed = op_start.elapsed()
+        );
+
+        let mut response = b"* JMAPACCESS ".to_vec();
+        quoted_string(
+            &mut response,
+            &format!(
+                "{}/.well-known/jmap",
+                self.server.core.network.http.url_https
+            ),
+        );
+        response.extend_from_slice(b"\r\n");
+
+        self.write_bytes(
+            StatusResponse::completed(Command::GetJmapAccess)
+                .with_tag(request.tag)
+                .serialize(response),
         )
         .await
     }

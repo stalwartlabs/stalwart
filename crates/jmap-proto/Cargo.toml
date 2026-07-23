@@ -1,12 +1,13 @@
 [package]
 name = "jmap_proto"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [dependencies]
 utils = { path = "../utils" }
 types = { path = "../types" }
 trc = { path = "../trc" }
+registry = { path = "../registry" }
 jmap-tools = { version = "0.1" }
 calcard = { version = "0.3" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 

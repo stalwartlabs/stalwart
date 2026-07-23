@@ -32,8 +32,8 @@ pub enum BlobClass {
 impl Default for BlobClass {
     fn default() -> Self {
         BlobClass::Reserved {
-            account_id: 0,
-            expires: 0,
+            account_id: u32::MAX,
+            expires: u64::MAX,
         }
     }
 }
@@ -63,6 +63,10 @@ impl BlobClass {
             }
             BlobClass::Linked { .. } => true,
         }
+    }
+
+    pub fn is_superuser(&self) -> bool {
+        matches!(self, BlobClass::Reserved { account_id, expires } if *account_id == u32::MAX && *expires == u64::MAX)
     }
 }
 
@@ -222,6 +226,10 @@ impl BlobId {
             0
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.hash.is_empty()
+    }
 }
 
 impl serde::Serialize for BlobId {
@@ -230,6 +238,16 @@ impl serde::Serialize for BlobId {
         S: serde::Serializer,
     {
         serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for BlobId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        BlobId::from_str(<&str>::deserialize(deserializer)?)
+            .map_err(|_| serde::de::Error::custom("invalid BlobId"))
     }
 }
 

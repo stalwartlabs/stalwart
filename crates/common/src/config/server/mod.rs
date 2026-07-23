@@ -4,14 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Display, net::SocketAddr, sync::Arc, time::Duration};
-
+use crate::network::TcpAcceptor;
 use ahash::AHashMap;
+use registry::{
+    schema::structs::NetworkListener,
+    types::{id::ObjectId, ipmask::IpAddrOrMask},
+};
 use serde::{Deserialize, Serialize};
+use std::{fmt::Display, net::SocketAddr, sync::Arc};
+use store::registry::RegistryObject;
 use tokio::net::TcpSocket;
-use utils::{config::ipmask::IpAddrMask, snowflake::SnowflakeIdGenerator};
-
-use crate::listener::TcpAcceptor;
+use utils::snowflake::SnowflakeIdGenerator;
 
 pub mod listener;
 pub mod tls;
@@ -21,14 +24,16 @@ pub struct Listeners {
     pub servers: Vec<Listener>,
     pub tcp_acceptors: AHashMap<String, TcpAcceptor>,
     pub span_id_gen: Arc<SnowflakeIdGenerator>,
+    parsed_listeners: Vec<RegistryObject<NetworkListener>>,
 }
 
 #[derive(Debug, Default)]
 pub struct Listener {
+    pub registry_id: ObjectId,
     pub id: String,
     pub protocol: ServerProtocol,
     pub listeners: Vec<TcpListener>,
-    pub proxy_networks: Vec<IpAddrMask>,
+    pub proxy_networks: Vec<IpAddrOrMask>,
     pub max_connections: u64,
     pub span_id_gen: Arc<SnowflakeIdGenerator>,
 }
@@ -41,7 +46,6 @@ pub struct TcpListener {
 
     // TCP options
     pub ttl: Option<u32>,
-    pub linger: Option<Duration>,
     pub nodelay: bool,
 }
 

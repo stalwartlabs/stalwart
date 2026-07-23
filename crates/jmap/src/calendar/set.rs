@@ -5,6 +5,7 @@
  */
 
 use crate::api::acl::{JmapAcl, JmapRights};
+use crate::changes::state::JmapCacheState;
 use calcard::jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType};
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{
@@ -21,7 +22,7 @@ use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
     object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
-    request::{IntoValid, reference::MaybeIdReference},
+    request::{MaybeInvalid, reference::MaybeIdReference},
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Map, Value};
@@ -36,6 +37,7 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
     field::PrincipalField,
+    id::Id,
 };
 
 pub trait CalendarSet: Sync + Send {
@@ -56,10 +58,15 @@ impl CalendarSet for Server {
     ) -> trc::Result<SetResponse<calendar::Calendar>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
-        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(cache.assert_state(true, &request.if_in_state)?);
+        let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
         let mut set_default = None;
 
@@ -90,7 +97,7 @@ impl CalendarSet for Server {
             };
 
             // Process changes
-            if let Err(err) = update_calendar(object, &mut calendar, access_token) {
+            if let Err(err) = update_calendar(None, object, &mut calendar, access_token) {
                 response.not_created.append(id, err);
                 continue 'create;
             }
@@ -102,7 +109,9 @@ impl CalendarSet for Server {
                     continue 'create;
                 }
 
-                self.refresh_acls(&calendar.acls, None).await;
+                self.refresh_acls(&calendar.acls, None)
+                    .await
+                    .caused_by(trc::location!())?;
             }
 
             // Insert record
@@ -112,7 +121,12 @@ impl CalendarSet for Server {
                 .await
                 .caused_by(trc::location!())?;
             calendar
-                .insert(access_token, account_id, document_id, &mut batch)
+                .insert(
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
 
             if let Some(MaybeIdReference::Reference(id_ref)) =
@@ -126,7 +140,14 @@ impl CalendarSet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update().into_valid() {
+        'update: for (id, object) in request.unwrap_update() {
+            let id = match id {
+                MaybeInvalid::Value(id) => id,
+                invalid => {
+                    response.not_updated.append(invalid, SetError::not_found());
+                    continue 'update;
+                }
+            };
             // Make sure id won't be destroyed
             if will_destroy.contains(&id) {
                 response.not_updated.append(id, SetError::will_destroy());
@@ -157,13 +178,14 @@ impl CalendarSet for Server {
                 .caused_by(trc::location!())?;
 
             // Apply changes
-            let has_acl_changes = match update_calendar(object, &mut new_calendar, access_token) {
-                Ok(has_acl_changes_) => has_acl_changes_,
-                Err(err) => {
-                    response.not_updated.append(id, err);
-                    continue 'update;
-                }
-            };
+            let has_acl_changes =
+                match update_calendar(Some(id), object, &mut new_calendar, access_token) {
+                    Ok(has_acl_changes_) => has_acl_changes_,
+                    Err(err) => {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                };
 
             // Validate ACL
             if is_shared {
@@ -183,12 +205,19 @@ impl CalendarSet for Server {
                     continue 'update;
                 }
                 self.refresh_archived_acls(&new_calendar.acls, calendar.inner.acls.as_slice())
-                    .await;
+                    .await
+                    .caused_by(trc::location!())?;
             }
 
             // Update record
             new_calendar
-                .update(access_token, calendar, account_id, document_id, &mut batch)
+                .update(
+                    access_token.account_tenant_ids(),
+                    calendar,
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
                 .caused_by(trc::location!())?;
             response.updated.append(id, None);
         }
@@ -264,8 +293,17 @@ impl CalendarSet for Server {
                 destroy_parents.insert(document_id);
 
                 // Delete record
+                let delete_path = cache
+                    .container_resource_path_by_id(document_id)
+                    .map(|resource| cache.format_resource(resource));
                 DestroyArchive(calendar)
-                    .delete(access_token, account_id, document_id, None, &mut batch)
+                    .delete(
+                        access_token.account_tenant_ids(),
+                        account_id,
+                        document_id,
+                        delete_path,
+                        &mut batch,
+                    )
                     .caused_by(trc::location!())?;
 
                 if default_calendar_id == Some(document_id) {
@@ -277,6 +315,10 @@ impl CalendarSet for Server {
 
             // Delete children
             if !destroy_children.is_empty() {
+                let account_info = self
+                    .account_info(access_token.account_id())
+                    .await
+                    .caused_by(trc::location!())?;
                 for document_id in destroy_children {
                     if let Some(event_) = self
                         .store()
@@ -299,7 +341,7 @@ impl CalendarSet for Server {
                         {
                             // Event only belongs to calendars being deleted, delete it
                             DestroyArchive(event).delete_all(
-                                access_token,
+                                &account_info,
                                 account_id,
                                 document_id,
                                 false,
@@ -314,7 +356,7 @@ impl CalendarSet for Server {
                                 .names
                                 .retain(|n| !destroy_parents.contains(&n.parent_id));
                             new_event.update(
-                                access_token,
+                                access_token.account_tenant_ids(),
                                 event,
                                 account_id,
                                 document_id,
@@ -369,6 +411,7 @@ impl CalendarSet for Server {
 }
 
 fn update_calendar(
+    expected_id: Option<Id>,
     updates: Value<'_, CalendarProperty, CalendarValue>,
     calendar: &mut Calendar,
     access_token: &AccessToken,
@@ -515,6 +558,13 @@ fn update_calendar(
                     }
                 }
             }
+            (CalendarProperty::Id, value) => {
+                if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {
+                    return Err(SetError::invalid_properties()
+                        .with_property(CalendarProperty::Id)
+                        .with_description("The id property is immutable."));
+                }
+            }
             (property, _) => {
                 return Err(SetError::invalid_properties()
                     .with_property(property)
@@ -550,12 +600,12 @@ fn value_to_default_alert(
         };
 
         match (key, value) {
-            (CalendarProperty::Type, Value::Element(CalendarValue::Type(value))) => {
-                if value != JSCalendarType::Alert {
-                    return Err(SetError::invalid_properties()
-                        .with_property(CalendarProperty::Trigger)
-                        .with_description("Invalid alert object type."));
-                }
+            (CalendarProperty::Type, Value::Element(CalendarValue::Type(value)))
+                if value != JSCalendarType::Alert =>
+            {
+                return Err(SetError::invalid_properties()
+                    .with_property(CalendarProperty::Trigger)
+                    .with_description("Invalid alert object type."));
             }
             (
                 CalendarProperty::Action,
@@ -583,12 +633,12 @@ fn value_to_default_alert(
                             alert.offset = value;
                             has_offset = true;
                         }
-                        (CalendarProperty::Offset, Value::Element(CalendarValue::Type(value))) => {
-                            if value != JSCalendarType::OffsetTrigger {
-                                return Err(SetError::invalid_properties()
-                                    .with_property(CalendarProperty::Trigger)
-                                    .with_description("Invalid alert trigger type."));
-                            }
+                        (CalendarProperty::Offset, Value::Element(CalendarValue::Type(value)))
+                            if value != JSCalendarType::OffsetTrigger =>
+                        {
+                            return Err(SetError::invalid_properties()
+                                .with_property(CalendarProperty::Trigger)
+                                .with_description("Invalid alert trigger type."));
                         }
                         _ => {}
                     }

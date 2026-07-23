@@ -1,6 +1,6 @@
 [package]
 name = "email"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [dependencies]
@@ -13,6 +13,7 @@ common = { path =  "../common" }
 directory = { path =  "../directory" }
 groupware = { path =  "../groupware" }
 spam-filter = { path =  "../spam-filter" }
+registry = { path =  "../registry" }
 smtp-proto = { version = "0.2", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
 mail-builder = { version = "0.4" }
@@ -20,19 +21,21 @@ sieve-rs = { version = "0.7", features = ["rkyv"] }
 tokio = { version = "1.47", features = ["net", "macros"] }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-aes = "0.8.3"
+aes = "0.9"
 aes-gcm = "0.10.1"
 aes-gcm-siv = "0.11.1"
-cbc = { version = "0.1.2", features = ["alloc"] }
-rasn = "0.10"
-rasn-cms = "0.10"
-rasn-pkix = "0.10"
-rsa = "0.9.2"
+chacha20poly1305 = "0.10"
+cbc = { version = "0.2", features = ["alloc"] }
+rasn = "0.28"
+rasn-cms = "0.28"
+rasn-pkix = "0.28"
+rsa = { version = "0.9.2", features = ["sha2"] }
 rand = "0.8"
 sequoia-openpgp = { version = "2.0", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 hashify = "0.2"
 rkyv = { version = "0.8.10", features = ["little_endian"] }
 compact_str = "0.9.0"
+tinyvec = { version = "1.10.0", features = ["alloc"] }
 
 [features]
 test_mode = []

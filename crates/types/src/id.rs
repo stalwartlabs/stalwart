@@ -112,7 +112,7 @@ impl Id {
 
     #[inline(always)]
     pub fn document_id(&self) -> DocumentId {
-        (self.0 & 0xFFFFFFFF) as DocumentId
+        self.0 as DocumentId
     }
 
     #[inline(always)]

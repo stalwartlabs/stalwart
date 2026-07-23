@@ -4,16 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{IntoJmapSet, JMAPTest, JmapUtils, calendar::event::*};
+use crate::{
+    jmap::calendar::event::*,
+    utils::{
+        jmap::{IntoJmapSet, JmapUtils},
+        server::TestServer,
+    },
+};
 use calcard::jscalendar::JSCalendarProperty;
 use jmap_proto::request::method::MethodObject;
 use serde_json::json;
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Principal Availability tests...");
-    let john = params.account("jdoe@example.com");
-    let jane = params.account("jane.smith@example.com");
+    let john = test.account("jdoe@example.com");
+    let jane = test.account("jane.smith@example.com");
     let john_id = john.id_string().to_string();
     let jane_id = jane.id_string().to_string();
 
@@ -74,6 +80,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_calls(json!([[
             "Principal/getAvailability",
             {
+                "accountId": &jane_id,
                 "id": &john_id,
                 "utcStart": "2006-01-01T00:00:00Z",
                 "utcEnd": "2006-01-08T00:00:00Z",
@@ -106,6 +113,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_calls(json!([[
             "Principal/getAvailability",
             {
+                "accountId": &jane_id,
                 "id": &john_id,
                 "utcStart": "2006-01-01T00:00:00Z",
                 "utcEnd": "2006-01-08T00:00:00Z",
@@ -177,6 +185,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_calls(json!([[
             "Principal/getAvailability",
             {
+                "accountId": &jane_id,
                 "id": &john_id,
                 "utcStart": "2006-01-01T00:00:00Z",
                 "utcEnd": "2006-01-08T00:00:00Z",
@@ -205,6 +214,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_calls(json!([[
             "Principal/getAvailability",
             {
+                "accountId": &jane_id,
                 "id": &john_id,
                 "utcStart": "2006-01-01T00:00:00Z",
                 "utcEnd": "2006-01-08T00:00:00Z",
@@ -240,6 +250,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_calls(json!([[
             "Principal/getAvailability",
             {
+                "accountId": &jane_id,
                 "id": &john_id,
                 "utcStart": "2006-01-01T00:00:00Z",
                 "utcEnd": "2006-01-08T00:00:00Z",
@@ -251,5 +262,5 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Cleanup
     john.destroy_all_calendars().await;
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }

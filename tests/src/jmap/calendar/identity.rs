@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, JmapUtils};
+use crate::utils::{jmap::JmapUtils, server::TestServer};
 use jmap_proto::{
     object::participant_identity::ParticipantIdentityProperty, request::method::MethodObject,
 };
@@ -12,9 +12,9 @@ use serde_json::json;
 use store::write::BatchBuilder;
 use types::{collection::Collection, field::PrincipalField};
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Participant Identity tests...");
-    let account = params.account("jdoe@example.com");
+    let account = test.account("jdoe@example.com");
 
     // Obtain all identities
     let response = account
@@ -146,6 +146,6 @@ pub async fn test(params: &mut JMAPTest) {
         .with_collection(Collection::Principal)
         .with_document(0)
         .clear(PrincipalField::ParticipantIdentities);
-    params.server.commit_batch(batch).await.unwrap();
-    params.assert_is_empty().await;
+    test.server.commit_batch(batch).await.unwrap();
+    test.assert_is_empty().await;
 }

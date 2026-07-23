@@ -66,7 +66,7 @@ impl<'de, T: JmapObject> DeserializeArguments<'de> for QueryChangesRequest<T> {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"filter" => {
                 self.filter = map.next_value::<FilterWrapper<T::Filter>>()?.0;

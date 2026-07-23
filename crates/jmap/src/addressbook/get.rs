@@ -12,7 +12,11 @@ use jmap_proto::{
     object::addressbook::{self, AddressBookProperty, AddressBookValue},
 };
 use jmap_tools::{Map, Value};
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, ValueClass}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, ValueClass},
+};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
@@ -34,7 +38,7 @@ impl AddressBookGet for Server {
         mut request: GetRequest<addressbook::AddressBook>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<addressbook::AddressBook>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             AddressBookProperty::Id,
             AddressBookProperty::Name,
@@ -46,7 +50,11 @@ impl AddressBookGet for Server {
         ]);
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await?;
         let address_book_ids = if access_token.is_member(account_id) {
             cache.document_ids(true).collect::<RoaringBitmap>()
@@ -84,14 +92,14 @@ impl AddressBookGet for Server {
             account_id: request.account_id.into(),
             state: cache.get_state(true).into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
         for id in ids {
             // Obtain the address_book object
             let document_id = id.document_id();
             if !address_book_ids.contains(document_id) {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             }
             let _address_book = if let Some(address_book) = self
@@ -105,7 +113,7 @@ impl AddressBookGet for Server {
             {
                 address_book
             } else {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             };
             let address_book = _address_book
@@ -154,7 +162,7 @@ impl AddressBookGet for Server {
                             address_book
                                 .subscribers
                                 .iter()
-                                .any(|account_id| *account_id == access_token.primary_id()),
+                                .any(|account_id| *account_id == access_token.account_id()),
                         );
                     }
                     AddressBookProperty::ShareWith => {

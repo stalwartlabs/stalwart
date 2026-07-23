@@ -5,15 +5,15 @@
  */
 
 use crate::scheduling::{
-    Email, InstanceId, ItipEntryValue, ItipError, ItipMessage, ItipSnapshot, ItipSnapshots,
-    ItipSummary,
+    Email, InstanceId, ItipEntry, ItipEntryValue, ItipError, ItipMessage, ItipSnapshot,
+    ItipSnapshots, ItipSummary,
     itip::{
         ItipExportAs, can_attendee_modify_property, itip_add_tz, itip_build_envelope,
         itip_export_component,
     },
     organizer::organizer_request_full,
 };
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 use calcard::{
     common::PartialDateTime,
     icalendar::{
@@ -46,6 +46,11 @@ pub(crate) fn attendee_handle_update(
                 (Some(local_attendee), Some(old_local_attendee))
                     if local_attendee.email == old_local_attendee.email =>
                 {
+                    // Distinguish a genuine add/remove of a restricted property from a value-only drift
+                    // caused by a client re-encoding the same property
+                    let old_name_counts = count_entry_names(&old_instance.entries);
+                    let new_name_counts = count_entry_names(&instance.entries);
+
                     // Check added fields
                     let mut send_update = false;
                     for new_entry in instance.entries.difference(&old_instance.entries) {
@@ -80,9 +85,13 @@ pub(crate) fn attendee_handle_update(
                                     &instance.comp.component_type,
                                     new_entry.name,
                                 ) {
-                                    return Err(ItipError::CannotModifyProperty(
-                                        new_entry.name.clone(),
-                                    ));
+                                    if name_count(&new_name_counts, new_entry.name)
+                                        > name_count(&old_name_counts, new_entry.name)
+                                    {
+                                        return Err(ItipError::CannotModifyProperty(
+                                            new_entry.name.clone(),
+                                        ));
+                                    }
                                 } else {
                                     send_update = send_update
                                         || (instance.comp.component_type
@@ -149,7 +158,9 @@ pub(crate) fn attendee_handle_update(
                         if !can_attendee_modify_property(
                             &instance.comp.component_type,
                             removed_entry.name,
-                        ) {
+                        ) && name_count(&old_name_counts, removed_entry.name)
+                            > name_count(&new_name_counts, removed_entry.name)
+                        {
                             // Removing these properties is not allowed
                             return Err(ItipError::CannotModifyProperty(
                                 removed_entry.name.clone(),
@@ -350,4 +361,19 @@ pub(crate) fn attendee_decline<'x>(
 
         (cancel_comp, &local_attendee.email)
     })
+}
+
+fn count_entry_names<'a>(
+    entries: &'a AHashSet<ItipEntry<'a>>,
+) -> AHashMap<&'a ICalendarProperty, usize> {
+    let mut counts = AHashMap::with_capacity(entries.len());
+    for entry in entries {
+        *counts.entry(entry.name).or_insert(0) += 1;
+    }
+    counts
+}
+
+#[inline]
+fn name_count(counts: &AHashMap<&ICalendarProperty, usize>, name: &ICalendarProperty) -> usize {
+    counts.get(name).copied().unwrap_or(0)
 }

@@ -73,7 +73,13 @@ pub struct CalendarEventNotificationGetResponse {
     pub list: Vec<CalendarEventNotificationObject>,
 
     #[serde(rename = "notFound")]
-    pub not_found: Vec<Id>,
+    pub not_found: Vec<crate::request::MaybeInvalid<Id>>,
+}
+
+impl CalendarEventNotificationGetResponse {
+    pub fn push_not_found(&mut self, id: Id) {
+        self.not_found.push(crate::request::MaybeInvalid::Value(id));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

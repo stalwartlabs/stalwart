@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use types::dead_property::DeadProperty;
-
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, Token},
+    parser::{DavParser, Token, tokenizer::Tokenizer},
     schema::{
+        Element, NamedElement, Namespace,
         property::{LockScope, LockType},
         request::LockInfo,
-        Element, NamedElement, Namespace,
     },
 };
+use types::dead_property::DeadProperty;
 
 impl DavParser for LockInfo {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {

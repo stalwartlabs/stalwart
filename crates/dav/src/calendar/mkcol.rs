@@ -57,7 +57,11 @@ impl CalendarMkColRequestHandler for Server {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         } else if name.contains('/')
             || self
-                .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+                .fetch_dav_resources(
+                    access_token.account_id(),
+                    account_id,
+                    SyncCollection::Calendar,
+                )
                 .await
                 .caused_by(trc::location!())?
                 .by_path(name)
@@ -126,7 +130,12 @@ impl CalendarMkColRequestHandler for Server {
             .await
             .caused_by(trc::location!())?;
         calendar
-            .insert(access_token, account_id, document_id, &mut batch)
+            .insert(
+                access_token.account_tenant_ids(),
+                account_id,
+                document_id,
+                &mut batch,
+            )
             .caused_by(trc::location!())?;
         let etag = batch.etag();
         self.commit_batch(batch).await.caused_by(trc::location!())?;

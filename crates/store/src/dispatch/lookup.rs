@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use registry::schema::structs::Rate;
 use std::borrow::Cow;
-
 use trc::AddContext;
-use utils::config::Rate;
 
 #[allow(unused_imports)]
 use crate::{
@@ -20,7 +19,7 @@ use crate::{
 };
 use crate::{
     SerializeInfallible,
-    backend::http::lookup::HttpStoreGet,
+    backend::{http::lookup::HttpStoreGet, memory::StaticMemoryStore},
     write::{InMemoryClass, assert::AssertValue},
 };
 
@@ -226,9 +225,18 @@ impl InMemoryStore {
             #[cfg(feature = "enterprise")]
             InMemoryStore::Sharded(store) => store.key_get(key).await,
             // SPDX-SnippetEnd
-            InMemoryStore::Static(store) => Ok(store
-                .get(key.into().as_str())
-                .map(|value| T::from(value.clone()))),
+            InMemoryStore::Static(store) => Ok(match store.as_ref() {
+                StaticMemoryStore::Map(map) => map
+                    .get(key.into().as_str())
+                    .map(|value| T::from(value.clone())),
+                StaticMemoryStore::Set(set) => {
+                    if set.contains(key.into().as_str()) {
+                        Some(T::from(Value::Bool(true)))
+                    } else {
+                        None
+                    }
+                }
+            }),
             InMemoryStore::Http(store) => {
                 Ok(store.get(key.into().as_str()).map(|value| T::from(value)))
             }
@@ -263,11 +271,11 @@ impl InMemoryStore {
     pub async fn key_exists(&self, key: impl Into<LookupKey<'_>>) -> trc::Result<bool> {
         match self {
             InMemoryStore::Store(store) => store
-                .get_value::<LookupValue<()>>(ValueKey::from(ValueClass::InMemory(
+                .get_value::<LookupValue<Empty>>(ValueKey::from(ValueClass::InMemory(
                     InMemoryClass::Key(key.into().into_bytes()),
                 )))
                 .await
-                .map(|value| matches!(value, Some(LookupValue::Value(())))),
+                .map(|value| matches!(value, Some(LookupValue::Value(Empty)))),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_exists(key.into().as_bytes()).await,
             // SPDX-SnippetBegin
@@ -276,7 +284,10 @@ impl InMemoryStore {
             #[cfg(feature = "enterprise")]
             InMemoryStore::Sharded(store) => store.key_exists(key).await,
             // SPDX-SnippetEnd
-            InMemoryStore::Static(store) => Ok(store.get(key.into().as_str()).is_some()),
+            InMemoryStore::Static(store) => Ok(match store.as_ref() {
+                StaticMemoryStore::Map(map) => map.get(key.into().as_str()).is_some(),
+                StaticMemoryStore::Set(set) => set.contains(key.into().as_str()),
+            }),
             InMemoryStore::Http(store) => Ok(store.contains(key.into().as_str())),
         }
         .caused_by(trc::location!())
@@ -290,8 +301,9 @@ impl InMemoryStore {
         soft_check: bool,
     ) -> trc::Result<Option<u64>> {
         let now = now();
-        let range_start = now / rate.period.as_secs();
-        let range_end = (range_start * rate.period.as_secs()) + rate.period.as_secs();
+        let period = rate.period.as_secs().max(1);
+        let range_start = now / period;
+        let range_end = (range_start * period) + period;
         let expires_in = range_end - now;
 
         let mut bucket = Vec::with_capacity(key.len() + U64_LEN + 1);
@@ -307,7 +319,7 @@ impl InMemoryStore {
             self.counter_get(bucket).await.caused_by(trc::location!())? + 1
         };
 
-        if requests <= rate.requests as i64 {
+        if requests <= rate.count as i64 {
             Ok(None)
         } else {
             Ok(Some(expires_in))
@@ -504,6 +516,13 @@ impl InMemoryStore {
             _ => false,
         }
     }
+
+    pub fn into_store(self) -> Option<Store> {
+        match self {
+            InMemoryStore::Store(store) => Some(store),
+            _ => None,
+        }
+    }
 }
 
 pub enum LookupKey<'x> {
@@ -617,6 +636,8 @@ impl<T> KeyValue<T> {
     }
 }
 
+struct Empty;
+
 enum LookupValue<T> {
     Value(T),
     None,
@@ -634,6 +655,12 @@ impl<T: Deserialize> Deserialize for LookupValue<T> {
                 LookupValue::None
             })
         })
+    }
+}
+
+impl Deserialize for Empty {
+    fn deserialize(_bytes: &[u8]) -> trc::Result<Self> {
+        Ok(Empty)
     }
 }
 

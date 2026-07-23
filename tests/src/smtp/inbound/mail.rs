@@ -4,108 +4,169 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant, SystemTime};
-
-use common::Core;
-use mail_auth::{IprevResult, SpfResult, common::parse::TxtRecordParser, spf::Spf};
-use smtp_proto::{MAIL_BY_NOTIFY, MAIL_BY_RETURN, MAIL_REQUIRETLS};
-
-use smtp::core::Session;
-use store::Stores;
-use utils::config::Config;
-
-use crate::smtp::{
-    DnsCache, TempDir, TestSMTP,
-    session::{TestSession, VerifyResponse},
+use crate::{
+    smtp::session::{TestSession, VerifyResponse},
+    utils::{dns::DnsCache, server::TestServerBuilder},
 };
-
-const CONFIG: &str = r#"
-[storage]
-data = "rocksdb"
-lookup = "rocksdb"
-blob = "rocksdb"
-fts = "rocksdb"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/data.db"
-
-[session.ehlo]
-require = true
-
-[auth.spf.verify]
-ehlo = 'relaxed'
-mail-from = [{if = "remote_ip = '10.0.0.2'", then = 'strict'},
-             {else = 'relaxed'}]
-
-[auth.iprev]
-verify = [{if = "remote_ip = '10.0.0.2'", then = 'strict'},
-          {else = 'relaxed'}]
-
-[session.extensions]
-future-release = [{if = "remote_ip = '10.0.0.2'", then = '1d'},
-                  {else = false}]
-deliver-by = [{if = "remote_ip = '10.0.0.2'", then = '1d'},
-             {else = false}]
-requiretls = [{if = "remote_ip = '10.0.0.2'", then = true},
-            {else = false}]
-mt-priority = [{if = "remote_ip = '10.0.0.2'", then = 'nsep'},
-               {else = false}]
-
-[session.mail]
-is-allowed = "sender_domain != 'blocked.com'"
-
-[session.data.limits]
-size = [{if = "remote_ip = '10.0.0.2'", then = 2048},
-        {else = 1024}]
-
-[[queue.limiter.inbound]]
-match = "remote_ip = '10.0.0.1'"
-key = 'sender'
-rate = '2/1s'
-enable = true
-
-"#;
+use mail_auth::{IprevResult, SpfResult, common::parse::TxtRecordParser, spf::Spf};
+use registry::{
+    schema::{
+        enums::MtaInboundThrottleKey,
+        structs::{
+            Expression, ExpressionMatch, MtaExtensions, MtaInboundThrottle, MtaStageData,
+            MtaStageEhlo, MtaStageMail, Rate, SenderAuth,
+        },
+    },
+    types::{list::List, map::Map},
+};
+use smtp_proto::{MAIL_BY_NOTIFY, MAIL_BY_RETURN, MAIL_REQUIRETLS};
+use std::time::{Duration, Instant, SystemTime};
 
 #[tokio::test]
 async fn mail() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_mail_from_test")
+        .await
+        .with_http_listener(19003)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let tmp_dir = TempDir::new("smtp_mail_test", true);
-    let mut config = Config::new(tmp_dir.update_config(CONFIG)).unwrap();
-    let stores = Stores::parse_all(&mut config, false).await;
-    let core = Core::parse(&mut config, stores, Default::default()).await;
-    let server = TestSMTP::from_core(core).server;
+    // Add test settings
+    let admin = test.account("admin");
+    admin
+        .registry_create_object(MtaStageEhlo {
+            require: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(SenderAuth {
+            reverse_ip_verify: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "strict".into(),
+                }]),
+                else_: "relaxed".into(),
+            },
+            spf_ehlo_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            spf_from_verify: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "strict".into(),
+                }]),
+                else_: "relaxed".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaExtensions {
+            deliver_by: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "1d".into(),
+                }]),
+                else_: "false".into(),
+            },
+            future_release: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "1d".into(),
+                }]),
+                else_: "false".into(),
+            },
+            mt_priority: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "nsep".into(),
+                }]),
+                else_: "false".into(),
+            },
+            require_tls: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageMail {
+            is_sender_allowed: Expression {
+                else_: "sender_domain != 'blocked.com'".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageData {
+            max_message_size: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.2'".into(),
+                    then: "2048".into(),
+                }]),
+                else_: "1024".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaInboundThrottle {
+            description: "Test throttle".into(),
+            enable: true,
+            key: Map::new(vec![MtaInboundThrottleKey::Sender]),
+            match_: Expression {
+                else_: "remote_ip = '10.0.0.1'".into(),
+                ..Default::default()
+            },
+            rate: Rate {
+                count: 2,
+                period: 1000u64.into(),
+            },
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
 
-    server.txt_add(
+    test.server.txt_add(
         "foobar.org",
         Spf::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),
     );
-    server.txt_add(
+    test.server.txt_add(
         "mx1.foobar.org",
         Spf::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),
     );
-    server.ptr_add(
+    test.server.ptr_add(
         "10.0.0.1".parse().unwrap(),
         vec!["mx1.foobar.org.".to_string()],
         Instant::now() + Duration::from_secs(5),
     );
-    server.ipv4_add(
+    test.server.ipv4_add(
         "mx1.foobar.org.",
         vec!["10.0.0.1".parse().unwrap()],
         Instant::now() + Duration::from_secs(5),
     );
-    server.ptr_add(
+    test.server.ptr_add(
         "10.0.0.2".parse().unwrap(),
         vec!["mx2.foobar.org.".to_string()],
         Instant::now() + Duration::from_secs(5),
     );
 
     // Be rude and do not say EHLO
-    let mut session = Session::test(server.clone());
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.1".into();
     session.data.remote_ip = session.data.remote_ip_str.parse().unwrap();
     session.eval_session_params().await;
@@ -195,7 +256,7 @@ async fn mail() {
         .unwrap();
     session.response().assert_code("550 5.7.25");
     session.data.iprev = None;
-    server.ipv4_add(
+    test.server.ipv4_add(
         "mx2.foobar.org.",
         vec!["10.0.0.2".parse().unwrap()],
         Instant::now() + Duration::from_secs(5),
@@ -207,7 +268,7 @@ async fn mail() {
         .await
         .unwrap();
     session.response().assert_code("550 5.7.23");
-    server.txt_add(
+    test.server.txt_add(
         "foobar.org",
         Spf::parse(b"v=spf1 ip4:10.0.0.1 ip4:10.0.0.2 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),

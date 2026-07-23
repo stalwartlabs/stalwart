@@ -9,7 +9,7 @@ use base64::engine::general_purpose;
 use std::env;
 use std::io::{self, Write};
 use store::write::{AnyClass, AnyKey, BatchBuilder, ValueClass};
-use store::{Deserialize, IterateParams, SUBSPACE_INDEXES, Store};
+use store::{Deserialize, IterateParams, SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX, Store};
 
 const HELP: &str = concat!(
     "Stalwart Server v",
@@ -72,7 +72,9 @@ pub async fn store_console(store: Store) {
                                     key: to_key.collect::<Vec<_>>(),
                                 },
                             )
-                            .set_values(![SUBSPACE_INDEXES].contains(&from_subspace)),
+                            .set_values(
+                                ![SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX].contains(&from_subspace),
+                            ),
                             |key, value| {
                                 print!("{}", char::from(from_subspace));
                                 print_escaped(key);

@@ -6,7 +6,7 @@
 
 use std::{sync::Arc, time::SystemTime};
 
-use common::listener::SessionStream;
+use common::network::SessionStream;
 
 use mail_auth::common::resolver::ToReverseName;
 use sieve::{Envelope, Sieve, runtime::Variable};
@@ -146,15 +146,16 @@ impl<T: SessionStream> Session<T> {
         script: Arc<Sieve>,
         params: ScriptParameters<'_>,
     ) -> ScriptResult {
-        self.server
-            .run_script(
+        Box::pin(
+            self.server.run_script(
                 script_id,
                 script,
                 params
                     .with_session_id(self.data.session_id)
                     .with_envelope(&self.server, self, self.data.session_id)
                     .await,
-            )
-            .await
+            ),
+        )
+        .await
     }
 }

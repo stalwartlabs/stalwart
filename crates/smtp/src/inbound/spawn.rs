@@ -4,24 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
-use common::{
-    config::smtp::session::Stage,
-    core::BuildServer,
-    listener::{self, SessionManager, SessionStream},
-};
-
-use tokio_rustls::server::TlsStream;
-use trc::{SecurityEvent, SmtpEvent};
-
 use crate::{
     core::{Session, SessionData, SessionParameters, SmtpSessionManager, State},
     scripts::ScriptResult,
 };
+use common::{
+    BuildServer,
+    config::smtp::session::Stage,
+    network::{self, SessionManager, SessionStream},
+};
+use std::time::Instant;
+use tokio_rustls::server::TlsStream;
+use trc::{SecurityEvent, SmtpEvent};
 
 impl SessionManager for SmtpSessionManager {
-    async fn handle<T: SessionStream>(self, session: listener::SessionData<T>) {
+    async fn handle<T: SessionStream>(self, session: network::SessionData<T>) {
         // Build server and create session
         let server = self.inner.build_server();
         let _in_flight = session.in_flight;
@@ -101,7 +98,7 @@ impl<T: SessionStream> Session<T> {
         }
 
         // Milter filtering
-        if let Err(message) = self.run_milters(Stage::Connect, None).await {
+        if let Err(message) = self.run_milters(Stage::Connect, None, None).await {
             let _ = self.write(message.message.as_bytes()).await;
             return false;
         }
@@ -156,7 +153,7 @@ impl<T: SessionStream> Session<T> {
                                 if bytes_read > 0 {
                                     if Instant::now() < self.data.valid_until && bytes_read <= self.data.bytes_left  {
                                         self.data.bytes_left -= bytes_read;
-                                        match self.ingest(&buf[..bytes_read]).await {
+                                        match Box::pin(self.ingest(&buf[..bytes_read])).await {
                                             Ok(true) => (),
                                             Ok(false) => {
                                                 return true;

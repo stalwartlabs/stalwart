@@ -8,6 +8,7 @@ use crate::core::throttle::NewKey;
 use common::{
     KV_RATE_LIMIT_SMTP, Server, config::smtp::QueueRateLimiter, expr::functions::ResolveVariable,
 };
+use registry::schema::prelude::Property;
 use std::future::Future;
 use store::write::now;
 
@@ -29,16 +30,20 @@ impl IsAllowed for Server {
     ) -> Result<(), u64> {
         if throttle.expr.is_empty()
             || self
-                .eval_expr(&throttle.expr, envelope, "throttle", session_id)
+                .eval_expr(
+                    &throttle.expr,
+                    envelope,
+                    throttle.id,
+                    Property::Match,
+                    session_id,
+                )
                 .await
                 .unwrap_or(false)
         {
             let key = throttle.new_key(envelope, "outbound");
 
             match self
-                .core
-                .storage
-                .lookup
+                .in_memory_store()
                 .is_rate_allowed(KV_RATE_LIMIT_SMTP, key.as_ref(), &throttle.rate, false)
                 .await
             {
@@ -46,10 +51,10 @@ impl IsAllowed for Server {
                     trc::event!(
                         Queue(trc::QueueEvent::RateLimitExceeded),
                         SpanId = session_id,
-                        Id = throttle.id.clone(),
+                        Id = throttle.id.to_string(),
                         Limit = vec![
-                            trc::Value::from(throttle.rate.requests),
-                            trc::Value::from(throttle.rate.period)
+                            trc::Value::from(throttle.rate.count),
+                            trc::Value::from(throttle.rate.period.into_inner())
                         ],
                     );
 

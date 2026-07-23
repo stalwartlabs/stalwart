@@ -109,7 +109,7 @@ impl Event<EventType> {
     }
 
     pub fn send_with_metrics(self) {
-        Collector::record_metric(self.inner, self.inner.id(), &self.keys);
+        Collector::record_metric(self.inner, self.inner.to_id() as usize, &self.keys);
         self.send();
     }
 }

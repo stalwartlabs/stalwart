@@ -5,7 +5,7 @@
  */
 
 use crate::core::{Session, StatusResponse};
-use common::listener::SessionStream;
+use common::network::SessionStream;
 use jmap_proto::request::capability::Capabilities;
 use std::time::Instant;
 

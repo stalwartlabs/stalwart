@@ -1,25 +1,27 @@
 [package]
 name = "trc"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [dependencies]
 event_macro = { path = "./event-macro" }
-mail-auth = { version = "0.7.1" }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
+mail-auth = { version = "0.11", features = ["arc"] }
+mail-parser = { version = "0.11", features = ["full_encoding"] }
 base64 = "0.22.1"
 serde = "1.0"
 serde_json = "1.0.120"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"]}
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"]}
 rtrb = "0.3.1"
 parking_lot = "0.12.3"
 tokio = { version = "1.47", features = ["net", "macros"] }
 ahash = "0.8.11"
 rkyv = { version = "0.8.10", features = ["little_endian"] }
 compact_str = "0.9.0"
+hashify = "0.2.7"
 
 [features]
 test_mode = []
+dev_mode = []
 enterprise = []
 
 [dev-dependencies]

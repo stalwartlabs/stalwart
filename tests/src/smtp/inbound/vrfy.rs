@@ -4,81 +4,81 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Core;
-
-use store::Stores;
-use utils::config::Config;
-
-use smtp::core::Session;
-
 use crate::{
-    AssertConfig,
-    smtp::{
-        TempDir, TestSMTP,
-        session::{TestSession, VerifyResponse},
-    },
+    smtp::session::{TestSession, VerifyResponse},
+    utils::server::TestServerBuilder,
 };
-
-const CONFIG: &str = r#"
-[storage]
-data = "rocksdb"
-lookup = "rocksdb"
-blob = "rocksdb"
-fts = "rocksdb"
-directory = "local"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/data.db"
-
-[directory."local"]
-type = "memory"
-
-[[directory."local".principals]]
-name = "john"
-description = "John Doe"
-secret = "secret"
-email = ["john@foobar.org"]
-email-list = ["sales@foobar.org"]
-
-[[directory."local".principals]]
-name = "jane"
-description = "Jane Doe"
-secret = "p4ssw0rd"
-email = "jane@foobar.org"
-email-list = ["sales@foobar.org"]
-
-[[directory."local".principals]]
-name = "bill"
-description = "Bill Foobar"
-secret = "p4ssw0rd"
-email = "bill@foobar.org"
-email-list = ["sales@foobar.org"]
-
-[session.rcpt]
-directory = "'local'"
-
-[session.extensions]
-vrfy = [{if = "remote_ip = '10.0.0.1'", then = true},
-        {else = false}]
-expn = [{if = "remote_ip = '10.0.0.1'", then = true},
-        {else = false}]
-
-"#;
+use registry::{
+    schema::structs::{Expression, ExpressionMatch, MailingList, MtaExtensions},
+    types::{list::List, map::Map},
+};
 
 #[tokio::test]
 async fn vrfy_expn() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_vrfy_test")
+        .await
+        .with_http_listener(19006)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let tmp_dir = TempDir::new("smtp_vrfy_test", true);
-    let mut config = Config::new(tmp_dir.update_config(CONFIG)).unwrap();
-    let stores = Stores::parse_all(&mut config, false).await;
-    let core = Core::parse(&mut config, stores, Default::default()).await;
-    config.assert_no_errors();
+    // Create test users
+    let admin = test.account("admin");
+    for (name, secret, description, aliases) in [
+        ("john@foobar.org", "12345 + extra safety", "John Doe", &[]),
+        ("jane@foobar.org", "abcde + extra safety", "Jane Smith", &[]),
+        (
+            "bill@foobar.org",
+            "p4ssw0rd + extra safety",
+            "Bill Foobar",
+            &[],
+        ),
+    ] {
+        admin
+            .create_user_account(name, secret, description, aliases, vec![])
+            .await;
+    }
+    let domain_id = admin.find_or_create_domain("foobar.org").await;
+    admin
+        .registry_create_object(MailingList {
+            domain_id,
+            name: "sales".into(),
+            recipients: Map::new(vec![
+                "john@foobar.org".into(),
+                "jane@foobar.org".into(),
+                "bill@foobar.org".into(),
+            ]),
+            ..Default::default()
+        })
+        .await;
+
+    // Add test settings
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(MtaExtensions {
+            vrfy: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            expn: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
 
     // EHLO should not advertise VRFY/EXPN to 10.0.0.2
-    let mut session = Session::test(TestSMTP::from_core(core).server);
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.2".into();
     session.eval_session_params().await;
     session
@@ -86,7 +86,7 @@ async fn vrfy_expn() {
         .await
         .assert_not_contains("EXPN")
         .assert_not_contains("VRFY");
-    session.cmd("VRFY john", "252 2.5.1").await;
+    session.cmd("VRFY john@foobar.org", "252 2.5.1").await;
     session.cmd("EXPN sales@foobar.org", "252 2.5.1").await;
 
     // EHLO should advertise VRFY/EXPN for 10.0.0.1
@@ -99,7 +99,9 @@ async fn vrfy_expn() {
         .assert_contains("VRFY");
 
     // Successful VRFY
-    session.cmd("VRFY john", "250 john@foobar.org").await;
+    session
+        .cmd("VRFY john@foobar.org", "250 john@foobar.org")
+        .await;
 
     // Successful EXPN
     session

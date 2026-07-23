@@ -4,450 +4,275 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{
-    io::Cursor,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
-
+use crate::network::acme::ParsedCert;
 use ahash::{AHashMap, AHashSet};
-use base64::{
-    Engine,
-    engine::general_purpose::{self, STANDARD},
-};
-use dns_update::{DnsUpdater, TsigAlgorithm, providers::rfc2136::DnsAddress};
 use rcgen::generate_simple_self_signed;
+use registry::{
+    schema::{
+        prelude::Object,
+        structs::{Certificate, PublicText, SecretText, SystemSettings},
+    },
+    types::{datetime::UTCDateTime, map::Map},
+};
 use rustls::{
     SupportedProtocolVersion,
-    crypto::ring::sign::any_supported_type,
+    crypto::aws_lc_rs::sign::any_supported_type,
     sign::CertifiedKey,
     version::{TLS12, TLS13},
 };
-use rustls_pemfile::{Item, certs, read_one};
+use rustls_pemfile::{Item, certs, read_all};
 use rustls_pki_types::PrivateKeyDer;
-use utils::config::Config;
-use x509_parser::{
-    certificate::X509Certificate,
-    der_parser::asn1_rs::FromDer,
-    extensions::{GeneralName, ParsedExtension},
-};
-
-use crate::listener::{
-    acme::{
-        AcmeProvider, ChallengeSettings, EabSettings, directory::LETS_ENCRYPT_PRODUCTION_DIRECTORY,
-    },
-    tls::AcmeProviders,
+use std::{io::Cursor, sync::Arc};
+use store::{
+    registry::{bootstrap::Bootstrap, write::RegistryWrite},
+    write::now,
 };
 
 pub static TLS13_VERSION: &[&SupportedProtocolVersion] = &[&TLS13];
 pub static TLS12_VERSION: &[&SupportedProtocolVersion] = &[&TLS12];
 
-impl AcmeProviders {
-    pub fn parse(config: &mut Config) -> Self {
-        let mut providers = AHashMap::new();
+pub(crate) async fn parse_certificates(
+    bp: &mut Bootstrap,
+    certificates: &mut AHashMap<Box<str>, Arc<CertifiedKey>>,
+    subject_names: &mut AHashSet<Box<str>>,
+) {
+    let system = bp.setting_infallible::<SystemSettings>().await;
 
-        // Parse ACME providers
-        'outer: for acme_id in config.sub_keys("acme", ".directory") {
-            let acme_id = acme_id.as_str();
-            let directory = config
-                .value(("acme", acme_id, "directory"))
-                .unwrap_or(LETS_ENCRYPT_PRODUCTION_DIRECTORY)
-                .trim()
-                .to_string();
-            let contact = config
-                .values(("acme", acme_id, "contact"))
-                .filter_map(|(_, v)| {
-                    let v = v.trim().to_string();
-                    if !v.is_empty() { Some(v) } else { None }
-                })
-                .collect::<Vec<_>>();
-            let renew_before: Duration = config
-                .property_or_default(("acme", acme_id, "renew-before"), "30d")
-                .unwrap_or_else(|| Duration::from_secs(30 * 24 * 60 * 60));
+    // Parse certificates
+    let now = now() as i64;
+    let mut certs_expired = Vec::new();
+    let mut certs_expirations = AHashMap::new();
+    for cert_obj in bp.list_infallible::<Certificate>().await {
+        let obj_id = cert_obj.id;
+        let revision = cert_obj.revision;
+        let mut cert = cert_obj.object;
 
-            if directory.is_empty() {
-                config.new_parse_error(format!("acme.{acme_id}.directory"), "Missing property");
-                continue;
-            }
-
-            if contact.is_empty() {
-                config.new_parse_error(format!("acme.{acme_id}.contact"), "Missing property");
-                continue;
-            }
-
-            // Parse challenge type
-            let challenge = match config
-                .value(("acme", acme_id, "challenge"))
-                .unwrap_or("tls-alpn-01")
-            {
-                "tls-alpn-01" => ChallengeSettings::TlsAlpn01,
-                "http-01" => ChallengeSettings::Http01,
-                "dns-01" => match build_dns_updater(config, acme_id) {
-                    Some(updater) => ChallengeSettings::Dns01 {
-                        updater,
-                        origin: config
-                            .value(("acme", acme_id, "origin"))
-                            .map(|s| s.to_string()),
-                        polling_interval: config
-                            .property_or_default(("acme", acme_id, "polling-interval"), "15s")
-                            .unwrap_or_else(|| Duration::from_secs(15)),
-                        propagation_timeout: config
-                            .property_or_default(("acme", acme_id, "propagation-timeout"), "1m")
-                            .unwrap_or_else(|| Duration::from_secs(60)),
-                        ttl: config
-                            .property_or_default(("acme", acme_id, "ttl"), "5m")
-                            .unwrap_or_else(|| Duration::from_secs(5 * 60))
-                            .as_secs() as u32,
-                    },
-                    None => {
-                        continue;
-                    }
-                },
-                _ => {
-                    config
-                        .new_parse_error(("acme", acme_id, "challenge"), "Invalid challenge type");
+        let is_file_backed = matches!(cert.certificate, PublicText::File(_))
+            || matches!(cert.private_key, SecretText::File(_));
+        let mut public = None;
+        let mut refreshed_meta = None;
+        if is_file_backed {
+            let pem = match cert.certificate.value().await {
+                Ok(value) => value.into_owned().into_bytes(),
+                Err(err) => {
+                    bp.build_error(obj_id, format!("Failed to obtain certificate value: {err}"));
                     continue;
                 }
             };
+            match ParsedCert::parse(&pem) {
+                Ok(parsed) => {
+                    let not_valid_after =
+                        UTCDateTime::from_timestamp(parsed.valid_not_after.timestamp());
+                    let not_valid_before =
+                        UTCDateTime::from_timestamp(parsed.valid_not_before.timestamp());
+                    let sans = Map::new(parsed.sans);
+                    if cert.not_valid_after != not_valid_after
+                        || cert.not_valid_before != not_valid_before
+                        || cert.issuer != parsed.issuer
+                        || cert.subject_alternative_names != sans
+                    {
+                        refreshed_meta =
+                            Some((not_valid_after, not_valid_before, parsed.issuer, sans));
+                    }
+                    public = Some(pem);
+                }
+                Err(err) => {
+                    bp.build_error(obj_id, format!("Invalid certificate: {err}"));
+                    continue;
+                }
+            }
+        }
 
-            // Domains covered by this ACME manager
-            let domains = config
-                .values(("acme", acme_id, "domains"))
-                .map(|(_, s)| s.trim().to_string())
-                .collect::<Vec<_>>();
-            if !matches!(challenge, ChallengeSettings::Dns01 { .. })
-                && domains.iter().any(|d| d.starts_with("*."))
-            {
-                config.new_parse_error(
-                    ("acme", acme_id, "domains"),
-                    "Wildcard domains are only supported with DNS-01 challenge",
+        let (not_valid_after, not_valid_before) = match refreshed_meta.as_ref() {
+            Some((after, before, _, _)) => (after.timestamp(), before.timestamp()),
+            None => (
+                cert.not_valid_after.timestamp(),
+                cert.not_valid_before.timestamp(),
+            ),
+        };
+
+        if not_valid_after <= now {
+            certs_expired.push((
+                obj_id,
+                cert.subject_alternative_names.clone().into_inner(),
+                Object {
+                    inner: cert.into(),
+                    revision,
+                },
+            ));
+            continue;
+        } else if not_valid_before > now {
+            continue; // Skip certificates that are not yet valid
+        }
+
+        let secret = match cert.private_key.secret().await {
+            Ok(secret) => secret.into_owned().into_bytes(),
+            Err(err) => {
+                bp.build_error(
+                    obj_id,
+                    format!("Failed to obtain private key secret: {err}"),
                 );
-                continue 'outer;
+                continue;
             }
+        };
+        let public = match public {
+            Some(public) => public,
+            None => match cert.certificate.value().await {
+                Ok(value) => value.into_owned().into_bytes(),
+                Err(err) => {
+                    bp.build_error(obj_id, format!("Failed to obtain certificate value: {err}"));
+                    continue;
+                }
+            },
+        };
 
-            // Obtain EAB settings
-            let eab = if let (Some(eab_kid), Some(eab_hmac_key)) = (
-                config
-                    .value(("acme", acme_id, "eab.kid"))
-                    .filter(|s| !s.is_empty()),
-                config
-                    .value(("acme", acme_id, "eab.hmac-key"))
-                    .filter(|s| !s.is_empty()),
-            ) {
-                if let Ok(hmac_key) =
-                    general_purpose::URL_SAFE_NO_PAD.decode(eab_hmac_key.trim().as_bytes())
-                {
-                    EabSettings {
-                        kid: eab_kid.to_string(),
-                        hmac_key,
-                    }
-                    .into()
-                } else {
-                    config.new_build_error(
-                        format!("acme.{acme_id}.eab.hmac-key"),
-                        "Failed to base64 decode HMAC key",
+        if let Some((not_valid_after, not_valid_before, issuer, sans)) = refreshed_meta {
+            let old = Object {
+                inner: cert.clone().into(),
+                revision,
+            };
+            cert.not_valid_after = not_valid_after;
+            cert.not_valid_before = not_valid_before;
+            cert.issuer = issuer;
+            cert.subject_alternative_names = sans;
+            let new = Object {
+                inner: cert.clone().into(),
+                revision,
+            };
+            if let Err(err) = bp
+                .registry
+                .write(RegistryWrite::update(obj_id.id(), &new, &old))
+                .await
+            {
+                trc::error!(
+                    err.details("Failed to refresh TLS certificate metadata in registry.")
+                        .caused_by(trc::location!())
+                );
+            }
+        }
+
+        // Add default certificate
+        if system
+            .default_certificate_id
+            .as_ref()
+            .is_some_and(|id| *id == obj_id.id())
+        {
+            cert.subject_alternative_names
+                .push_unchecked("*".to_string());
+        }
+
+        // Ensure that the most up-to-date certificate is used
+        cert.subject_alternative_names.inner_mut().retain(|name| {
+            if certs_expirations
+                .get(name)
+                .is_none_or(|expires| *expires < not_valid_after)
+            {
+                certs_expirations.insert(name.clone(), not_valid_after);
+                true
+            } else {
+                false
+            }
+        });
+
+        match build_certified_key(public, secret) {
+            Ok(key) => {
+                // Add certificates
+                let key = Arc::new(key);
+                for name in cert.subject_alternative_names.into_inner() {
+                    subject_names.insert(name.as_str().into());
+                    certificates.insert(
+                        name.strip_prefix("*.")
+                            .map(Into::into)
+                            .unwrap_or_else(|| name.into_boxed_str()),
+                        key.clone(),
                     );
-                    None
-                }
-            } else {
-                None
-            };
-
-            // This ACME manager is the default when SNI is not available
-            let default = config
-                .property::<bool>(("acme", acme_id, "default"))
-                .unwrap_or_default();
-
-            if !domains.is_empty() {
-                match AcmeProvider::new(
-                    acme_id.to_string(),
-                    directory,
-                    domains,
-                    contact,
-                    challenge,
-                    eab,
-                    renew_before,
-                    default,
-                ) {
-                    Ok(acme_provider) => {
-                        providers.insert(acme_id.to_string(), acme_provider);
-                    }
-                    Err(err) => {
-                        config.new_build_error(format!("acme.{acme_id}"), err.to_string());
-                    }
                 }
             }
+            Err(err) => {
+                bp.build_error(obj_id, format!("Invalid certificate: {err}"));
+            }
         }
-
-        AcmeProviders { providers }
     }
-}
 
-#[allow(clippy::unnecessary_to_owned)]
-fn build_dns_updater(config: &mut Config, acme_id: &str) -> Option<DnsUpdater> {
-    let timeout = config
-        .property_or_default(("acme", acme_id, "timeout"), "30s")
-        .unwrap_or_else(|| Duration::from_secs(30));
-
-    match config.value_require(("acme", acme_id, "provider"))? {
-        "rfc2136-tsig" => {
-            let algorithm: TsigAlgorithm = config
-                .value_require(("acme", acme_id, "tsig-algorithm"))?
-                .parse()
-                .map_err(|_| {
-                    config.new_parse_error(("acme", acme_id, "tsig-algorithm"), "Invalid algorithm")
-                })
-                .ok()?;
-            let key = STANDARD
-                .decode(config.value_require(("acme", acme_id, "secret"))?.trim())
-                .map_err(|_| {
-                    config.new_parse_error(
-                        ("acme", acme_id, "secret"),
-                        "Failed to base64 decode secret",
-                    )
-                })
-                .ok()?;
-            let host = config.property_require::<IpAddr>(("acme", acme_id, "host"))?;
-            let port = config
-                .property_or_default::<u16>(("acme", acme_id, "port"), "53")
-                .unwrap_or(53);
-            let addr = if config.value(("acme", acme_id, "protocol")) == Some("tcp") {
-                DnsAddress::Tcp(SocketAddr::new(host, port))
+    // Remove expired certificates
+    if !certs_expired.is_empty() {
+        for (id, sans, object) in certs_expired {
+            if let Err(err) = bp
+                .registry
+                .write(RegistryWrite::delete_object(id, &object))
+                .await
+            {
+                trc::error!(
+                    err.details("Failed to delete expired TLS certificate from registry.")
+                        .caused_by(trc::location!())
+                );
             } else {
-                DnsAddress::Udp(SocketAddr::new(host, port))
-            };
-
-            DnsUpdater::new_rfc2136_tsig(
-                addr,
-                config
-                    .value_require(("acme", acme_id, "key"))?
-                    .trim()
-                    .to_string(),
-                key,
-                algorithm,
-            )
-            .map_err(|err| {
-                config.new_build_error(
-                    ("acme", acme_id, "provider"),
-                    format!("Failed to create RFC2136-TSIG DNS updater: {err}"),
-                )
-            })
-            .ok()
-        }
-        "cloudflare" => DnsUpdater::new_cloudflare(
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            config.value(("acme", acme_id, "user")).map(|s| s.trim()),
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create Cloudflare DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        "digitalocean" => DnsUpdater::new_digitalocean(
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create DigitalOcean DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        "desec" => DnsUpdater::new_desec(
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create Desec DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        "ovh" => DnsUpdater::new_ovh(
-            config
-                .value_require(("acme", acme_id, "key"))
-                .map(|s| s.trim())?
-                .to_string(),
-            config
-                .value_require(("acme", acme_id, "secret"))?
-                .trim()
-                .to_string(),
-            config
-                .value_require(("acme", acme_id, "consumer-key"))?
-                .trim()
-                .to_string(),
-            config
-                .value_require(("acme", acme_id, "ovh-endpoint"))?
-                .parse()
-                .map_err(|_| {
-                    config
-                        .new_parse_error(("acme", acme_id, "ovh-endpoint"), "Invalid OVH endpoint")
-                })
-                .ok()?,
-            timeout.into(),
-        )
-        .map_err(|err| {
-            config.new_build_error(
-                ("acme", acme_id, "provider"),
-                format!("Failed to create OVH DNS updater: {err}"),
-            )
-        })
-        .ok(),
-        _ => {
-            config.new_parse_error(("acme", acme_id, "provider"), "Unsupported provider");
-            None
-        }
-    }
-}
-
-pub(crate) fn parse_certificates(
-    config: &mut Config,
-    certificates: &mut AHashMap<String, Arc<CertifiedKey>>,
-    subject_names: &mut AHashSet<String>,
-) {
-    // Parse certificates
-    for cert_id in config.sub_keys("certificate", ".cert") {
-        let cert_id = cert_id.as_str();
-        let key_cert = ("certificate", cert_id, "cert");
-        let key_pk = ("certificate", cert_id, "private-key");
-
-        let cert = config
-            .value_require(key_cert)
-            .map(|s| s.as_bytes().to_vec());
-        let pk = config.value_require(key_pk).map(|s| s.as_bytes().to_vec());
-
-        if let (Some(cert), Some(pk)) = (cert, pk) {
-            match build_certified_key(cert, pk) {
-                Ok(cert) => {
-                    match cert
-                        .end_entity_cert()
-                        .map_err(|err| format!("Failed to obtain end entity cert: {err}"))
-                        .and_then(|cert| {
-                            X509Certificate::from_der(cert.as_ref())
-                                .map_err(|err| format!("Failed to parse end entity cert: {err}"))
-                        }) {
-                        Ok((_, parsed)) => {
-                            // Add CNs and SANs to the list of names
-                            let mut names = AHashSet::new();
-                            for name in parsed.subject().iter_common_name() {
-                                if let Ok(name) = name.as_str() {
-                                    names.insert(name.to_string());
-                                }
-                            }
-                            for ext in parsed.extensions() {
-                                if let ParsedExtension::SubjectAlternativeName(san) =
-                                    ext.parsed_extension()
-                                {
-                                    for name in &san.general_names {
-                                        let name = match name {
-                                            GeneralName::DNSName(name) => name.to_string(),
-                                            GeneralName::IPAddress(ip) => match ip.len() {
-                                                4 => Ipv4Addr::from(
-                                                    <[u8; 4]>::try_from(*ip).unwrap(),
-                                                )
-                                                .to_string(),
-                                                16 => Ipv6Addr::from(
-                                                    <[u8; 16]>::try_from(*ip).unwrap(),
-                                                )
-                                                .to_string(),
-                                                _ => continue,
-                                            },
-                                            _ => {
-                                                continue;
-                                            }
-                                        };
-                                        names.insert(name);
-                                    }
-                                }
-                            }
-
-                            // Add custom SNIs
-                            names.extend(
-                                config
-                                    .values(("certificate", cert_id, "subjects"))
-                                    .map(|(_, v)| v.trim().to_string()),
-                            );
-
-                            // Add domain names
-                            subject_names.extend(names.iter().cloned());
-
-                            // Add certificates
-                            let cert = Arc::new(cert);
-                            for name in names {
-                                certificates.insert(
-                                    name.strip_prefix("*.")
-                                        .map(|name| name.to_string())
-                                        .unwrap_or(name),
-                                    cert.clone(),
-                                );
-                            }
-
-                            // Add default certificate
-                            if config
-                                .property::<bool>(("certificate", cert_id, "default"))
-                                .unwrap_or_default()
-                            {
-                                certificates.insert("*".to_string(), cert.clone());
-                            }
-                        }
-                        Err(err) => config.new_build_error(format!("certificate.{cert_id}"), err),
-                    }
-                }
-                Err(err) => config.new_build_error(format!("certificate.{cert_id}"), err),
+                trc::event!(
+                    Tls(trc::TlsEvent::ExpiredCertificateRemoved),
+                    Details = sans
+                );
             }
         }
     }
 }
 
-pub(crate) fn build_certified_key(cert: Vec<u8>, pk: Vec<u8>) -> Result<CertifiedKey, String> {
+pub(crate) fn build_certified_key(
+    cert: Vec<u8>,
+    pk_bytes: Vec<u8>,
+) -> Result<CertifiedKey, String> {
+    let mut pk = None;
+    for item in read_all(&mut Cursor::new(pk_bytes)) {
+        match item.map_err(|err| format!("Failed to read private key PEM: {err}"))? {
+            Item::Pkcs8Key(key) => {
+                pk = Some(PrivateKeyDer::Pkcs8(key));
+                break;
+            }
+            Item::Pkcs1Key(key) => {
+                pk = Some(PrivateKeyDer::Pkcs1(key));
+                break;
+            }
+            Item::Sec1Key(key) => {
+                pk = Some(PrivateKeyDer::Sec1(key));
+                break;
+            }
+            _ => continue, // Skip certificates, DH params, etc.
+        }
+    }
+    let pk = pk.ok_or_else(|| "No private keys found.".to_string())?;
     let cert = certs(&mut Cursor::new(cert))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| format!("Failed to read certificates: {err}"))?;
-    if cert.is_empty() {
-        return Err("No certificates found.".to_string());
-    }
-    let pk = match read_one(&mut Cursor::new(pk))
-        .map_err(|err| format!("Failed to read private keys.: {err}",))?
-        .into_iter()
-        .next()
-    {
-        Some(Item::Pkcs8Key(key)) => PrivateKeyDer::Pkcs8(key),
-        Some(Item::Pkcs1Key(key)) => PrivateKeyDer::Pkcs1(key),
-        Some(Item::Sec1Key(key)) => PrivateKeyDer::Sec1(key),
-        Some(_) => return Err("Unsupported private keys found.".to_string()),
-        None => return Err("No private keys found.".to_string()),
-    };
 
-    Ok(CertifiedKey {
-        cert,
-        key: any_supported_type(&pk)
-            .map_err(|err| format!("Failed to sign certificate: {err}",))?,
-        ocsp: None,
-    })
+    if !cert.is_empty() {
+        Ok(CertifiedKey {
+            cert,
+            key: any_supported_type(&pk)
+                .map_err(|err| format!("Failed to sign certificate: {err}",))?,
+            ocsp: None,
+        })
+    } else {
+        Err("No certificates found.".to_string())
+    }
 }
 
 pub(crate) fn build_self_signed_cert(
     domains: impl Into<Vec<String>>,
 ) -> Result<CertifiedKey, String> {
-    let cert = generate_simple_self_signed(domains)
+    let domains = domains
+        .into()
+        .into_iter()
+        .map(|domain| {
+            if domain.is_ascii() {
+                domain
+            } else {
+                idna::domain_to_ascii(&domain).unwrap_or(domain)
+            }
+        })
+        .collect::<Vec<_>>();
+    let rcgen::CertifiedKey { cert, signing_key } = generate_simple_self_signed(domains)
         .map_err(|err| format!("Failed to generate self-signed certificate: {err}",))?;
     build_certified_key(
-        cert.serialize_pem().unwrap().into_bytes(),
-        cert.serialize_private_key_pem().into_bytes(),
+        cert.pem().into_bytes(),
+        signing_key.serialize_pem().into_bytes(),
     )
 }

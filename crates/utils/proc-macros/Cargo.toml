@@ -1,6 +1,6 @@
 [package]
 name = "proc_macros"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [lib]

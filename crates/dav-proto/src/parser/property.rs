@@ -18,7 +18,7 @@ use calcard::{
     Entry, Parser,
     common::{IanaParse, PartialDateTime},
     icalendar::{ICalendar, ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
-    vcard::{VCardParameterName, VCardProperty},
+    vcard::{VCardParameterName, VCardProperty, VCardVersion},
 };
 use mail_parser::DateTime;
 use types::{TimeRange, dead_property::DeadProperty};
@@ -48,11 +48,18 @@ impl Tokenizer<'_> {
                             ns: Namespace::CardDav,
                             element: Element::AddressData,
                         },
-                    ..
+                    raw,
                 } => {
-                    elements.push(DavProperty::CardDav(CardDavProperty::AddressData(
-                        self.collect_address_data()?,
-                    )));
+                    let mut version = None;
+                    for attribute in raw.attributes::<VCardPropertyWithGroup>() {
+                        if let Attribute::Version(value) = attribute? {
+                            version = VCardVersion::try_parse(value.trim().trim_matches('"'));
+                        }
+                    }
+                    elements.push(DavProperty::CardDav(CardDavProperty::AddressData {
+                        properties: self.collect_address_data()?,
+                        version,
+                    }));
                 }
                 Token::ElementStart { name, .. } => {
                     if let Some(property) = DavProperty::from_element(name) {
@@ -510,9 +517,12 @@ impl DavProperty {
             (Namespace::CardDav, Element::PrincipalAddress) => {
                 Some(DavProperty::Principal(PrincipalProperty::PrincipalAddress))
             }
-            (Namespace::CardDav, Element::AddressData) => Some(DavProperty::CardDav(
-                CardDavProperty::AddressData(Default::default()),
-            )),
+            (Namespace::CardDav, Element::AddressData) => {
+                Some(DavProperty::CardDav(CardDavProperty::AddressData {
+                    properties: Default::default(),
+                    version: None,
+                }))
+            }
             (Namespace::CardDav, Element::MaxResourceSize) => {
                 Some(DavProperty::CardDav(CardDavProperty::MaxResourceSize))
             }

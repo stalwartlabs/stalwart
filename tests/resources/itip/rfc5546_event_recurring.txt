@@ -890,3 +890,98 @@ SEQUENCE:3
 END:VEVENT
 END:VCALENDAR
 
+# Attendee decline of a recurring event tolerates client-side RRULE drift
+> put a@example.com rrule-drift@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+UID:rrule-drift@example.com
+SEQUENCE:0
+DTSTAMP:19970526T083000Z
+DTSTART:19970603T210000Z
+DTEND:19970603T220000Z
+SUMMARY:Weekly Sync
+RRULE:FREQ=WEEKLY;BYDAY=TU
+ORGANIZER:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
+ATTENDEE;RSVP=TRUE:mailto:b@example.com
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: b@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 865371600, tz_id: 32768 })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: None, interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Tuesday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Weekly Sync")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Weekly Sync
+DTEND:19970603T220000Z
+DTSTART:19970603T210000Z
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ORGANIZER:mailto:a@example.com
+UID:rrule-drift@example.com
+RRULE:FREQ=WEEKLY;BYDAY=TU
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+
+# Deliver the REQUEST to B
+> send
+
+# B declines the master. Their client re-encoded the RRULE to include an explicit INTERVAL=1
+> put b@example.com rrule-drift@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+UID:rrule-drift@example.com
+SEQUENCE:0
+DTSTAMP:19970526T090000Z
+DTSTART:19970603T210000Z
+DTEND:19970603T220000Z
+SUMMARY:Weekly Sync
+RRULE:FREQ=WEEKLY;BYDAY=TU;INTERVAL=1
+ORGANIZER:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;PARTSTAT=DECLINED:mailto:b@example.com
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: b@example.com
+to: a@example.com
+summary: rsvp DECLINED
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 865371600, tz_id: 32768 })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: None, interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Tuesday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Weekly Sync")
+BEGIN:VCALENDAR
+METHOD:REPLY
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Weekly Sync
+DTEND:19970603T220000Z
+DTSTART:19970603T210000Z
+ATTENDEE;RSVP=TRUE;PARTSTAT=DECLINED:mailto:b@example.com
+ORGANIZER:mailto:a@example.com
+UID:rrule-drift@example.com
+DTSTAMP:0
+SEQUENCE:0
+REQUEST-STATUS:2.0;Success
+END:VEVENT
+END:VCALENDAR
+
+# Deliver the REPLY to A
+> send
+

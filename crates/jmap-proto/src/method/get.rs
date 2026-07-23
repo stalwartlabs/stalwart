@@ -7,7 +7,7 @@
 use crate::{
     object::JmapObject,
     request::{
-        IntoValid, MaybeInvalid,
+        MaybeInvalid,
         deserialize::{DeserializeArguments, deserialize_request},
         reference::{MaybeIdReference, MaybeResultReference, ResultReference},
     },
@@ -37,7 +37,13 @@ pub struct GetResponse<T: JmapObject> {
     pub list: Vec<Value<'static, T::Property, T::Element>>,
 
     #[serde(rename = "notFound")]
-    pub not_found: Vec<T::Id>,
+    pub not_found: Vec<MaybeInvalid<T::Id>>,
+}
+
+impl<T: JmapObject> GetResponse<T> {
+    pub fn push_not_found(&mut self, id: T::Id) {
+        self.not_found.push(MaybeInvalid::Value(id));
+    }
 }
 
 impl<'de, T: JmapObject> DeserializeArguments<'de> for GetRequest<T> {
@@ -47,7 +53,7 @@ impl<'de, T: JmapObject> DeserializeArguments<'de> for GetRequest<T> {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"ids" => {
                 self.ids = map.next_value::<Option<Vec<MaybeIdReference<T::Id>>>>()?.map(MaybeResultReference::Value);
@@ -116,16 +122,30 @@ impl<T: JmapObject> GetRequest<T> {
         }
     }
 
-    pub fn unwrap_ids(&mut self, max_objects_in_get: usize) -> trc::Result<Option<Vec<T::Id>>> {
+    #[allow(clippy::type_complexity)]
+    pub fn unwrap_ids(
+        &mut self,
+        max_objects_in_get: usize,
+    ) -> trc::Result<(Option<Vec<T::Id>>, Vec<MaybeInvalid<T::Id>>)> {
         if let Some(ids) = self.ids.take() {
             let ids = ids.unwrap();
             if ids.len() <= max_objects_in_get {
-                Ok(Some(ids.into_valid().collect::<Vec<_>>()))
+                let mut valid = Vec::with_capacity(ids.len());
+                let mut invalid = Vec::new();
+                for id in ids {
+                    match id {
+                        MaybeIdReference::Id(id) => valid.push(id),
+                        MaybeIdReference::Invalid(s) | MaybeIdReference::Reference(s) => {
+                            invalid.push(MaybeInvalid::Invalid(s))
+                        }
+                    }
+                }
+                Ok((Some(valid), invalid))
             } else {
                 Err(trc::JmapEvent::RequestTooLarge.into_err())
             }
         } else {
-            Ok(None)
+            Ok((None, Vec::new()))
         }
     }
 }

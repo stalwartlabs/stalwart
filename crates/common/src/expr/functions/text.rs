@@ -7,6 +7,7 @@
 use compact_str::{CompactString, ToCompactString, format_compact};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
+use utils::HexEncode;
 
 use crate::expr::{StringCow, Variable};
 
@@ -341,17 +342,17 @@ pub(crate) fn fn_hash(v: Vec<Variable>) -> Variable {
         "sha1" => {
             let mut hasher = Sha1::new();
             hasher.update(value.as_bytes());
-            format_compact!("{:x}", hasher.finalize()).into()
+            hasher.finalize().hex_encode().to_compact_string().into()
         }
         "sha256" => {
             let mut hasher = Sha256::new();
             hasher.update(value.as_bytes());
-            format_compact!("{:x}", hasher.finalize()).into()
+            hasher.finalize().hex_encode().to_compact_string().into()
         }
         "sha512" => {
             let mut hasher = Sha512::new();
             hasher.update(value.as_bytes());
-            format_compact!("{:x}", hasher.finalize()).into()
+            hasher.finalize().hex_encode().to_compact_string().into()
         }
         _ => Variable::default(),
     }

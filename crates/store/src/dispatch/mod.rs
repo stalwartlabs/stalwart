@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use roaring::RoaringBitmap;
-
 use crate::Store;
+use roaring::RoaringBitmap;
 
 pub mod blob;
 pub mod lookup;
-pub mod pubsub;
 pub mod search;
 pub mod store;
 
@@ -27,6 +25,7 @@ impl Store {
             Self::MySQL(_) => "mysql",
             #[cfg(feature = "rocks")]
             Self::RocksDb(_) => "rocksdb",
+            Self::Ephemeral(_) => "ephemeral",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL

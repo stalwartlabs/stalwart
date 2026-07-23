@@ -10,7 +10,7 @@
         <key>ProgramArguments</key>
         <array>
             <string>__PATH__/bin/stalwart</string>
-            <string>--config=__PATH__/etc/config.toml</string>
+            <string>--config=__PATH__/etc/config.json</string>
         </array>
         <key>RunAtLoad</key>
         <true/>

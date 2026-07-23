@@ -7,7 +7,7 @@ homepage = "https://stalw.art"
 keywords = ["imap", "jmap", "smtp", "email", "mail", "webdav", "server"]
 categories = ["email"]
 license = "AGPL-3.0-only OR LicenseRef-SEL"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [[bin]]
@@ -16,9 +16,11 @@ path = "src/main.rs"
 
 [dependencies]
 store = { path = "../store" }
+coordinator = { path = "../coordinator" }
 jmap = { path = "../jmap" }
 types = { path = "../types" }
 smtp = { path = "../smtp" }
+smtp-proto = { version = "0.2", features = ["rkyv", "serde"] }
 imap = { path = "../imap" }
 pop3 = { path = "../pop3" }
 spam-filter = { path = "../spam-filter" }
@@ -32,26 +34,30 @@ groupware = { path = "../groupware" }
 services = { path = "../services" }
 trc = { path = "../trc" }
 utils = { path = "../utils" }
+registry = { path = "../registry" }
+http_proto = { path = "../http-proto" }
 migration = { path = "../migration" }
 tokio = { version = "1.47", features = ["full"] }
+rustls = { version = "0.23.5", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+[target.'cfg(not(any(target_env = "msvc", target_os = "freebsd")))'.dependencies]
 jemallocator = "0.5.0"
 
 [features]
+#default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "azure", "nats", "enterprise", "zenoh", "kafka"]
 #default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "azure", "nats", "enterprise"]
 default = ["rocks", "enterprise"]
-sqlite = ["store/sqlite"]
+sqlite = ["store/sqlite", "directory/sqlite"]
 foundationdb = ["store/foundation", "common/foundation"]
-postgres = ["store/postgres"]
-mysql = ["store/mysql"]
+postgres = ["store/postgres", "directory/postgres"]
+mysql = ["store/mysql", "directory/mysql"]
 rocks = ["store/rocks"]
 s3 = ["store/s3"]
-redis = ["store/redis"]
-nats = ["store/nats"]
+redis = ["store/redis", "coordinator/redis"]
 azure = ["store/azure"]
-zenoh = ["store/zenoh"]
-kafka = ["store/kafka"]
+nats = ["coordinator/nats"]
+zenoh = ["coordinator/zenoh"]
+kafka = ["coordinator/kafka"]
 enterprise = [ "jmap/enterprise", 
                "smtp/enterprise", 
                "common/enterprise", 
@@ -66,3 +72,9 @@ enterprise = [ "jmap/enterprise",
                "trc/enterprise",
                "services/enterprise",
                "migration/enterprise" ]
+dev_mode = [ "common/dev_mode", 
+             "trc/dev_mode", 
+             "dav/dev_mode",
+             "http/dev_mode",
+             "http_proto/dev_mode",
+             "jmap/dev_mode" ]

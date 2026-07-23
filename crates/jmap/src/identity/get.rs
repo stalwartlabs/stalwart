@@ -6,7 +6,6 @@
 
 use crate::changes::state::StateManager;
 use common::{Server, storage::index::ObjectIndexBuilder};
-use directory::{PrincipalData, QueryParams};
 use email::identity::{ArchivedEmailAddress, Identity};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
@@ -15,7 +14,10 @@ use jmap_proto::{
 use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::{
-    ValueKey, rkyv::{option::ArchivedOption, vec::ArchivedVec}, roaring::RoaringBitmap, write::{AlignedBytes, Archive, BatchBuilder}
+    ValueKey,
+    rkyv::{option::ArchivedOption, vec::ArchivedVec},
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -41,7 +43,7 @@ impl IdentityGet for Server {
         &self,
         mut request: GetRequest<identity::Identity>,
     ) -> trc::Result<GetResponse<identity::Identity>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             IdentityProperty::Id,
             IdentityProperty::Name,
@@ -70,14 +72,14 @@ impl IdentityGet for Server {
                 .await?
                 .into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
         for id in ids {
             // Obtain the identity object
             let document_id = id.document_id();
             if !identity_ids.contains(document_id) {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             }
             let _identity = if let Some(identity) = self
@@ -91,7 +93,7 @@ impl IdentityGet for Server {
             {
                 identity
             } else {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             };
             let identity = _identity
@@ -154,34 +156,11 @@ impl IdentityGet for Server {
             return Ok(identity_ids);
         }
 
-        // Obtain principal
-        let principal = if let Some(principal) = self
-            .core
-            .storage
-            .directory
-            .query(QueryParams::id(account_id).with_return_member_of(false))
+        // Obtain account info
+        let account_info = self
+            .account_info(account_id)
             .await
-            .caused_by(trc::location!())?
-        {
-            principal
-        } else {
-            return Ok(identity_ids);
-        };
-
-        let mut emails = Vec::new();
-        let mut description = None;
-        for data in principal.data {
-            match data {
-                PrincipalData::PrimaryEmail(v) | PrincipalData::EmailAlias(v) => emails.push(v),
-                PrincipalData::Description(v) => description = Some(v),
-                _ => {}
-            }
-        }
-
-        let num_emails = emails.len();
-        if num_emails == 0 {
-            return Ok(identity_ids);
-        }
+            .caused_by(trc::location!())?;
 
         let mut batch = BatchBuilder::new();
         batch
@@ -189,21 +168,25 @@ impl IdentityGet for Server {
             .with_collection(Collection::Identity);
 
         // Create identities
-        let name = description.unwrap_or(principal.name);
+        let name = account_info.description().unwrap_or(account_info.name());
         let mut next_document_id = self
             .store()
-            .assign_document_ids(account_id, Collection::Identity, num_emails as u64)
+            .assign_document_ids(
+                account_id,
+                Collection::Identity,
+                account_info.addresses().len() as u64,
+            )
             .await
             .caused_by(trc::location!())?;
-        for email in &emails {
+        for email in account_info.addresses() {
             let email = sanitize_email(email).unwrap_or_default();
             if email.is_empty() || email.starts_with('@') {
                 continue;
             }
             let name = if name.is_empty() {
-                email.clone()
+                email.to_string()
             } else {
-                name.clone()
+                name.to_string()
             };
             let document_id = next_document_id;
             next_document_id -= 1;

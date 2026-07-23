@@ -4,24 +4,28 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
-use directory::QueryParams;
+use common::{Server, storage::index::ObjectIndexBuilder};
 use email::identity::{EmailAddress, Identity};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
     object::identity::{self, IdentityProperty, IdentityValue},
     references::resolve::ResolveCreatedReference,
-    request::IntoValid,
+    request::MaybeInvalid,
     types::state::State,
 };
 use jmap_tools::{Key, Value};
+use registry::schema::enums::StorageQuota;
 use std::future::Future;
-use store::{ValueKey, write::{AlignedBytes, Archive, BatchBuilder}};
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive, BatchBuilder},
+};
 use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
     field::{Field, IdentityField},
+    id::Id,
 };
 use utils::sanitize_email;
 
@@ -29,7 +33,6 @@ pub trait IdentitySet: Sync + Send {
     fn identity_set(
         &self,
         request: SetRequest<'_, identity::Identity>,
-        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<identity::Identity>>> + Send;
 }
 
@@ -37,14 +40,17 @@ impl IdentitySet for Server {
     async fn identity_set(
         &self,
         mut request: SetRequest<'_, identity::Identity>,
-        access_token: &AccessToken,
     ) -> trc::Result<SetResponse<identity::Identity>> {
         let account_id = request.account_id.document_id();
         let identity_ids = self
             .document_ids(account_id, Collection::Identity, IdentityField::DocumentId)
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
-        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
+        let account_info = self
+            .account_info(account_id)
+            .await
+            .caused_by(trc::location!())?;
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -53,8 +59,10 @@ impl IdentitySet for Server {
 
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response
-                    .resolve_self_references(&mut value)
-                    .and_then(|_| validate_identity_value(&property, value, &mut identity, true))
+                    .resolve_self_references(&mut value, 0, false)
+                    .and_then(|_| {
+                        validate_identity_value(None, &property, value, &mut identity, true)
+                    })
                 {
                     response.not_created.append(id, err);
                     continue 'create;
@@ -63,11 +71,10 @@ impl IdentitySet for Server {
 
             // Validate email address
             if !identity.email.is_empty() {
-                if self
-                    .directory()
-                    .query(QueryParams::id(account_id).with_return_member_of(false))
-                    .await?
-                    .is_none_or(|p| !p.email_addresses().any(|e| e == identity.email))
+                if !account_info
+                    .addresses()
+                    .iter()
+                    .any(|e| e == &identity.email)
                 {
                     response.not_created.append(
                         id,
@@ -90,7 +97,12 @@ impl IdentitySet for Server {
             }
 
             // Validate quota
-            if identity_ids.len() >= access_token.object_quota(Collection::Identity) as u64 {
+            if identity_ids.len()
+                >= self.object_quota(
+                    account_info.object_quotas(),
+                    StorageQuota::MaxEmailIdentities,
+                ) as u64
+            {
                 response.not_created.append(
                     id,
                     SetError::new(SetErrorType::OverQuota).with_description(concat!(
@@ -119,7 +131,14 @@ impl IdentitySet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update().into_valid() {
+        'update: for (id, object) in request.unwrap_update() {
+            let id = match id {
+                MaybeInvalid::Value(id) => id,
+                invalid => {
+                    response.not_updated.append(invalid, SetError::not_found());
+                    continue 'update;
+                }
+            };
             // Make sure id won't be destroyed
             if will_destroy.contains(&id) {
                 response.not_updated.append(id, SetError::will_destroy());
@@ -150,9 +169,18 @@ impl IdentitySet for Server {
                 .caused_by(trc::location!())?;
 
             for (property, mut value) in object.into_expanded_object() {
-                if let Err(err) = response.resolve_self_references(&mut value).and_then(|_| {
-                    validate_identity_value(&property, value, &mut new_identity, false)
-                }) {
+                if let Err(err) = response
+                    .resolve_self_references(&mut value, 0, false)
+                    .and_then(|_| {
+                        validate_identity_value(
+                            Some(id),
+                            &property,
+                            value,
+                            &mut new_identity,
+                            false,
+                        )
+                    })
+                {
                     response.not_updated.append(id, err);
                     continue 'update;
                 }
@@ -208,6 +236,7 @@ impl IdentitySet for Server {
 }
 
 fn validate_identity_value(
+    expected_id: Option<Id>,
     property: &Key<'_, IdentityProperty>,
     value: Value<'_, IdentityProperty, IdentityValue>,
     identity: &mut Identity,
@@ -297,6 +326,13 @@ fn validate_identity_value(
         }
         (IdentityProperty::ReplyTo, Value::Null) => identity.reply_to = None,
         (IdentityProperty::Bcc, Value::Null) => identity.bcc = None,
+        (IdentityProperty::Id, value) => {
+            if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {
+                return Err(SetError::invalid_properties()
+                    .with_property(IdentityProperty::Id)
+                    .with_description("The id property is immutable."));
+            }
+        }
         (property, _) => {
             return Err(SetError::invalid_properties()
                 .with_property(property.clone())

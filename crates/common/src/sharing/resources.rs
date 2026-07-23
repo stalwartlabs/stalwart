@@ -47,6 +47,12 @@ impl DavResources {
         if !shared_containers.is_empty() {
             let mut document_ids = RoaringBitmap::new();
 
+            for resource in &self.resources {
+                if !resource.is_container() && shared_containers.contains(resource.document_id) {
+                    document_ids.insert(resource.document_id);
+                }
+            }
+
             for path in &self.paths {
                 if let Some(parent_id) = path.parent_id
                     && shared_containers.contains(parent_id)
@@ -59,6 +65,28 @@ impl DavResources {
         } else {
             shared_containers
         }
+    }
+
+    pub fn shared_documents(
+        &self,
+        access_token: &AccessToken,
+        check_acls: impl IntoIterator<Item = Acl>,
+        match_any: bool,
+    ) -> RoaringBitmap {
+        let shared_containers = self.shared_containers(access_token, check_acls, match_any);
+        let mut document_ids = shared_containers.clone();
+
+        if !shared_containers.is_empty() {
+            for path in &self.paths {
+                if let Some(parent_id) = path.parent_id
+                    && shared_containers.contains(parent_id)
+                {
+                    document_ids.insert(self.resources[path.resource_idx].document_id);
+                }
+            }
+        }
+
+        document_ids
     }
 
     pub fn has_access_to_container(

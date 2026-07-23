@@ -4,19 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::utils::{cleanup::store_assert_is_empty, server::TestServer};
 use ahash::AHashSet;
 use std::collections::HashSet;
 use store::{
-    Store, ValueKey,
+    ValueKey,
     rand::{self, Rng},
-    write::{
-        AlignedBytes, Archive, Archiver, BatchBuilder, DirectoryClass, MergeResult, Params,
-        ValueClass,
-    },
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, MergeResult, Params, ValueClass},
 };
-use types::collection::{Collection, SyncCollection};
-
-use crate::store::cleanup::store_assert_is_empty;
+use types::collection::Collection;
+use types::collection::SyncCollection;
 
 // FDB max value
 const MAX_VALUE_SIZE: usize = 100000;
@@ -30,17 +27,18 @@ fn value_gen(chunks: impl IntoIterator<Item = (u8, usize)>) -> Vec<u8> {
     value
 }
 
-pub async fn test(db: Store) {
-    #[cfg(feature = "foundationdb")]
-    if matches!(db, Store::FoundationDb(_)) {
-        use types::collection::Collection;
+pub async fn test(test: &TestServer) {
+    let db = test.server.store().clone();
 
+    #[cfg(feature = "foundationdb")]
+    if matches!(db, store::Store::FoundationDb(_)) {
+        use store::write::RegistryClass;
         println!("Running FoundationDB chunked iterator test...");
         let kvs = [
-            ("a", value_gen([(b'a', 1)])),
-            ("b", value_gen([(b'b', MAX_VALUE_SIZE), (b'0', 1)])),
+            (1, value_gen([(b'a', 1)])),
+            (2, value_gen([(b'b', MAX_VALUE_SIZE), (b'0', 1)])),
             (
-                "c",
+                3,
                 value_gen([
                     (b'c', MAX_VALUE_SIZE),
                     (b'1', MAX_VALUE_SIZE),
@@ -48,10 +46,10 @@ pub async fn test(db: Store) {
                 ]),
             ),
             (
-                "d",
+                4,
                 value_gen([(b'd', MAX_VALUE_SIZE), (b'3', MAX_VALUE_SIZE)]),
             ),
-            ("e", value_gen([(b'e', 1)])),
+            (5, value_gen([(b'e', 1)])),
         ];
         let mut batch = BatchBuilder::new();
         batch
@@ -60,7 +58,13 @@ pub async fn test(db: Store) {
             .with_document(0);
 
         for (key, value) in &kvs {
-            batch.set(ValueClass::Config(key.as_bytes().to_vec()), value.clone());
+            batch.set(
+                ValueClass::Registry(RegistryClass::Item {
+                    object_id: *key,
+                    item_id: 0,
+                }),
+                value.clone(),
+            );
         }
         db.write(batch.build_all()).await.unwrap();
 
@@ -72,13 +76,19 @@ pub async fn test(db: Store) {
                     account_id: 0,
                     collection: 0,
                     document_id: 0,
-                    class: ValueClass::Config(b"".to_vec()),
+                    class: ValueClass::Registry(RegistryClass::Item {
+                        object_id: 0,
+                        item_id: 0,
+                    }),
                 },
                 ValueKey {
                     account_id: 0,
                     collection: 0,
                     document_id: 0,
-                    class: ValueClass::Config(b"\xFF".to_vec()),
+                    class: ValueClass::Registry(RegistryClass::Item {
+                        object_id: u16::MAX,
+                        item_id: u64::MAX,
+                    }),
                 },
             ),
             |key, value| {
@@ -96,14 +106,144 @@ pub async fn test(db: Store) {
                 account_id: 0,
                 collection: 0,
                 document_id: 0,
-                class: ValueClass::Config(b"".to_vec()),
+                class: ValueClass::Registry(RegistryClass::Item {
+                    object_id: 0,
+                    item_id: 0,
+                }),
             },
             ValueKey {
                 account_id: 0,
                 collection: 0,
                 document_id: 0,
-                class: ValueClass::Config(b"\xFF".to_vec()),
+                class: ValueClass::Registry(RegistryClass::Item {
+                    object_id: u16::MAX,
+                    item_id: u64::MAX,
+                }),
             },
+        )
+        .await
+        .unwrap();
+
+        // Read-your-writes through the cached read version: overwrite a key in a tight loop
+        println!("Running FoundationDB read-your-writes test...");
+        for n in 0u64..200 {
+            db.write(
+                BatchBuilder::new()
+                    .with_account_id(0)
+                    .with_collection(Collection::Email)
+                    .with_document(0)
+                    .set(
+                        ValueClass::Registry(RegistryClass::Item {
+                            object_id: 100,
+                            item_id: 0,
+                        }),
+                        n.to_be_bytes().to_vec(),
+                    )
+                    .build_all(),
+            )
+            .await
+            .unwrap();
+
+            let got = db
+                .get_value::<u64>(ValueKey {
+                    account_id: 0,
+                    collection: 0,
+                    document_id: 0,
+                    class: ValueClass::Registry(RegistryClass::Item {
+                        object_id: 100,
+                        item_id: 0,
+                    }),
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(got, n, "stale read: wrote {n} but read back {got}");
+        }
+        db.write(
+            BatchBuilder::new()
+                .with_account_id(0)
+                .with_collection(Collection::Email)
+                .with_document(0)
+                .clear(ValueClass::Registry(RegistryClass::Item {
+                    object_id: 100,
+                    item_id: 0,
+                }))
+                .build_all(),
+        )
+        .await
+        .unwrap();
+
+        // Read-version cache monotonicity under concurrency: while a writer increments a counter
+        println!("Running FoundationDB read-version monotonicity test...");
+        let n_increments = 500u64;
+
+        let writer = {
+            let db = db.clone();
+            tokio::spawn(async move {
+                for _ in 0..n_increments {
+                    db.write(
+                        BatchBuilder::new()
+                            .with_account_id(0)
+                            .with_collection(Collection::Email)
+                            .with_document(5000)
+                            .add_and_get(ValueClass::Quota, 1)
+                            .build_all(),
+                    )
+                    .await
+                    .unwrap();
+                }
+            })
+        };
+
+        let mut readers = Vec::new();
+        for _ in 0..16 {
+            let db = db.clone();
+            readers.push(tokio::spawn(async move {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+                let mut last = 0i64;
+                while std::time::Instant::now() < deadline {
+                    let current = db
+                        .get_counter(ValueKey {
+                            account_id: 0,
+                            collection: 0,
+                            document_id: 5000,
+                            class: ValueClass::Quota,
+                        })
+                        .await
+                        .unwrap();
+                    assert!(
+                        current >= last,
+                        "read version regressed: counter went from {last} to {current}"
+                    );
+                    last = current;
+                }
+            }));
+        }
+
+        writer.await.unwrap();
+        for reader in readers {
+            reader.await.unwrap();
+        }
+
+        assert_eq!(
+            db.get_counter(ValueKey {
+                account_id: 0,
+                collection: 0,
+                document_id: 5000,
+                class: ValueClass::Quota,
+            })
+            .await
+            .unwrap(),
+            n_increments as i64,
+            "counter did not reach the expected total"
+        );
+        db.write(
+            BatchBuilder::new()
+                .with_account_id(0)
+                .with_collection(Collection::Email)
+                .with_document(5000)
+                .clear(ValueClass::Quota)
+                .build_all(),
         )
         .await
         .unwrap();
@@ -118,7 +258,10 @@ pub async fn test(db: Store) {
                 .with_document(0);
             for n in 0..900000 {
                 batch.set(
-                    ValueClass::Config(format!("key{n:10}").into_bytes()),
+                    ValueClass::Registry(RegistryClass::Item {
+                        object_id: 0,
+                        item_id: n,
+                    }),
                     format!("value{n:10}").into_bytes(),
                 );
 
@@ -143,13 +286,19 @@ pub async fn test(db: Store) {
                         account_id: 0,
                         collection: 0,
                         document_id: 0,
-                        class: ValueClass::Config(b"".to_vec()),
+                        class: ValueClass::Registry(RegistryClass::Item {
+                            object_id: 0,
+                            item_id: 0,
+                        }),
                     },
                     ValueKey {
                         account_id: 0,
                         collection: 0,
                         document_id: 0,
-                        class: ValueClass::Config(b"\xFF".to_vec()),
+                        class: ValueClass::Registry(RegistryClass::Item {
+                            object_id: 0,
+                            item_id: u64::MAX,
+                        }),
                     },
                 ),
                 |key, value| {
@@ -173,7 +322,10 @@ pub async fn test(db: Store) {
                 .with_collection(Collection::Email)
                 .with_document(0);
             for n in 0..900000 {
-                batch.clear(ValueClass::Config(format!("key{n:10}").into_bytes()));
+                batch.clear(ValueClass::Registry(RegistryClass::Item {
+                    object_id: 0,
+                    item_id: n,
+                }));
 
                 if n % 10000 == 0 {
                     db.write(batch.build_all()).await.unwrap();
@@ -264,7 +416,7 @@ pub async fn test(db: Store) {
                     .with_account_id(0)
                     .with_collection(Collection::Email)
                     .with_document(0)
-                    .add_and_get(ValueClass::Directory(DirectoryClass::UsedQuota(0)), 1);
+                    .add_and_get(ValueClass::Quota, 1);
                 db.write(builder.build_all())
                     .await
                     .unwrap()
@@ -287,7 +439,7 @@ pub async fn test(db: Store) {
             account_id: 0,
             collection: 0,
             document_id: 0,
-            class: ValueClass::Directory(DirectoryClass::UsedQuota(0)),
+            class: ValueClass::Quota,
         })
         .await
         .unwrap(),
@@ -475,7 +627,7 @@ pub async fn test(db: Store) {
             .clear(ValueClass::Property(0))
             .clear(ValueClass::Property(2))
             .clear(ValueClass::Property(3))
-            .clear(ValueClass::Directory(DirectoryClass::UsedQuota(0)))
+            .clear(ValueClass::Quota)
             .clear(ValueClass::ChangeId);
 
         for document_id in 0..1000 {

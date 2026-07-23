@@ -4,83 +4,98 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Core;
-
-use store::Stores;
-use utils::config::Config;
-
 use crate::{
-    AssertConfig,
-    smtp::{
-        TempDir, TestSMTP,
-        session::{TestSession, VerifyResponse},
-    },
+    smtp::session::{TestSession, VerifyResponse},
+    utils::server::TestServerBuilder,
 };
-use smtp::core::{Session, State};
-
-const CONFIG: &str = r#"
-[storage]
-data = "rocksdb"
-lookup = "rocksdb"
-blob = "rocksdb"
-fts = "rocksdb"
-directory = "local"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/queue.db"
-
-[directory."local"]
-type = "memory"
-
-[[directory."local".principals]]
-name = "john"
-description = "John Doe"
-secret = "secret"
-email = ["john@example.org", "jdoe@example.org", "john.doe@example.org"]
-email-list = ["info@example.org"]
-member-of = ["sales"]
-
-[[directory."local".principals]]
-name = "jane"
-description = "Jane Doe"
-secret = "p4ssw0rd"
-email = "jane@example.org"
-email-list = ["info@example.org"]
-member-of = ["sales", "support"]
-
-[session.auth]
-require = [{if = "remote_ip = '10.0.0.1'", then = true},
-           {else = false}]
-mechanisms = [{if = "remote_ip = '10.0.0.1' && is_tls", then = "[plain, login]"},
-              {else = 0}]
-directory = [{if = "remote_ip = '10.0.0.1'", then = "'local'"},
-             {else = false}]
-must-match-sender = true
-
-[session.auth.errors]
-total = [{if = "remote_ip = '10.0.0.1'", then = 2},
-              {else = 3}]
-wait = "100ms"
-
-[session.extensions]
-future-release = [{if = '!is_empty(authenticated_as)', then = '1d'},
-                  {else = false}]
-"#;
+use registry::{
+    schema::structs::{Expression, ExpressionMatch, MtaExtensions, MtaStageAuth},
+    types::list::List,
+};
+use smtp::core::State;
 
 #[tokio::test]
 async fn auth() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_auth_test")
+        .await
+        .with_http_listener(19001)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let tmp_dir = TempDir::new("smtp_auth_test", true);
-    let mut config = Config::new(tmp_dir.update_config(CONFIG)).unwrap();
-    let stores = Stores::parse_all(&mut config, false).await;
-    let core = Core::parse(&mut config, stores, Default::default()).await;
-    config.assert_no_errors();
+    // Create test users
+    let admin = test.account("admin");
+    for (name, secret, description, aliases) in [
+        (
+            "john@example.org",
+            "12345 + extra safety",
+            "John Doe",
+            &["john.doe@example.org"][..],
+        ),
+        (
+            "jane@example.org",
+            "abcde + extra safety",
+            "Jane Smith",
+            &["jane@example.org"],
+        ),
+    ] {
+        admin
+            .create_user_account(name, secret, description, aliases, vec![])
+            .await;
+    }
+
+    // Add test settings
+    admin
+        .registry_create_object(MtaStageAuth {
+            max_failures: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "2".into(),
+                }]),
+                else_: "3".into(),
+            },
+            must_match_sender: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            require: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            sasl_mechanisms: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1' && is_tls".into(),
+                    then: "[plain, login]".into(),
+                }]),
+                else_: "0".into(),
+            },
+            wait_on_fail: Expression {
+                else_: "100ms".into(),
+                ..Default::default()
+            },
+        })
+        .await;
+    admin
+        .registry_create_object(MtaExtensions {
+            future_release: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "!is_empty(authenticated_as)".into(),
+                    then: "1d".into(),
+                }]),
+                else_: "false".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
 
     // EHLO should not advertise plain text auth without TLS
-    let mut session = Session::test(TestSMTP::from_core(core).server);
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.1".into();
     session.eval_session_params().await;
     session.stream.tls = false;
@@ -102,7 +117,7 @@ async fn auth() {
 
     // Invalid password should be rejected
     session
-        .cmd("AUTH PLAIN AGpvaG4AY2hpbWljaGFuZ2Fz", "535 5.7.8")
+        .auth_plain("john@example.org", "wrong pass", "535 5.7.8")
         .await;
 
     // Session should be disconnected after second invalid auth attempt
@@ -119,7 +134,7 @@ async fn auth() {
     // Successful PLAIN authentication
     session.data.auth_errors = 0;
     session
-        .cmd("AUTH PLAIN AGpvaG4Ac2VjcmV0", "235 2.7.0")
+        .auth_plain("john@example.org", "12345 + extra safety", "235 2.7.0")
         .await;
 
     // Users should be able to send emails only from their own email addresses
@@ -129,7 +144,7 @@ async fn auth() {
 
     // Should not be able to authenticate twice
     session
-        .cmd("AUTH PLAIN AGpvaG4Ac2VjcmV0", "503 5.5.1")
+        .auth_plain("john@example.org", "12345 + extra safety", "503 5.5.1")
         .await;
 
     // FUTURERELEASE extension should be available after authenticating
@@ -143,9 +158,9 @@ async fn auth() {
 
     // Successful LOGIN authentication
     session.data.authenticated_as.take();
-    session.cmd("AUTH LOGIN", "334").await;
-    session.cmd("amFuZQ==", "334").await;
-    session.cmd("cDRzc3cwcmQ=", "235 2.7.0").await;
+    session
+        .auth_login("john@example.org", "12345 + extra safety", "235 2.7.0")
+        .await;
 
     // Login should not be advertised to 10.0.0.2
     session.data.remote_ip_str = "10.0.0.2".into();
@@ -158,6 +173,6 @@ async fn auth() {
         .assert_not_contains(" PLAIN")
         .assert_not_contains(" LOGIN");
     session
-        .cmd("AUTH PLAIN AGpvaG4Ac2VjcmV0", "503 5.5.1")
+        .auth_plain("john@example.org", "12345 + extra safety", "503 5.5.1")
         .await;
 }

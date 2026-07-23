@@ -15,43 +15,14 @@ use mail_auth::{
     mta_sts::TlsRpt,
     report::{Record, tlsrpt::FailureDetails},
 };
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Instant,
+use registry::{schema::prelude::ObjectType, types::id::ObjectId};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
-use store::{BlobStore, InMemoryStore, Store};
 use tokio::sync::{Semaphore, SemaphorePermit, mpsc};
 use types::type_state::{DataType, StateChange};
 use utils::map::bitmap::Bitmap;
-
-pub enum HousekeeperEvent {
-    AcmeReschedule {
-        provider_id: String,
-        renew_at: Instant,
-    },
-    Purge(PurgeType),
-    ReloadSettings,
-    Exit,
-}
-
-pub enum PurgeType {
-    Data(Store),
-    Blobs {
-        store: Store,
-        blob_store: BlobStore,
-    },
-    Lookup {
-        store: InMemoryStore,
-        prefix: Option<Vec<u8>>,
-    },
-    Account {
-        account_id: Option<u32>,
-        use_roles: bool,
-    },
-}
 
 #[derive(Debug)]
 pub enum PushEvent {
@@ -101,12 +72,38 @@ pub struct CalendarAlert {
 #[derive(Debug)]
 pub enum BroadcastEvent {
     PushNotification(PushNotification),
-    InvalidateAccessTokens(Vec<u32>),
-    InvalidateGroupwareCache(Vec<u32>),
-    ReloadPushServers(u32),
-    ReloadSettings,
-    ReloadBlockedIps,
-    ReloadSpamFilter,
+    PushServerUpdate(u32),
+    RegistryChange(RegistryChange),
+    CacheInvalidate(Vec<CacheInvalidation>),
+    CacheInvalidateAll,
+    CacheInvalidateNegative,
+    MtaQueueStatus { is_running: bool },
+    QueueRefresh,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RegistryChange {
+    Insert(ObjectId),
+    Delete(ObjectId),
+    Reload(ObjectType),
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum CacheInvalidation {
+    AccessToken(u32),
+    DavResources(u32),
+    Domain(u32),
+    Account(u32),
+    DkimSignature(u32),
+    Tenant(u32),
+    Role(u32),
+    List(u32),
+    DomainLogo(u32),
+    TenantLogo(u32),
+    EmailNegative {
+        domain_id: u32,
+        local_part_hash: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -142,6 +139,7 @@ pub struct DmarcEvent {
     pub report_record: Record,
     pub dmarc_record: Arc<Dmarc>,
     pub interval: AggregateFrequency,
+    pub span_id: u64,
 }
 
 #[derive(Debug)]
@@ -151,6 +149,7 @@ pub struct TlsEvent {
     pub failure: Option<FailureDetails>,
     pub tls_record: Arc<TlsRpt>,
     pub interval: AggregateFrequency,
+    pub span_id: u64,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
@@ -193,6 +192,12 @@ impl TrainTaskController {
 
     pub fn should_stop(&self) -> bool {
         self.stop_flag.load(Ordering::SeqCst)
+    }
+}
+
+impl BroadcastEvent {
+    pub fn reload(object: ObjectType) -> Self {
+        BroadcastEvent::RegistryChange(RegistryChange::Reload(object))
     }
 }
 

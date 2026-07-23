@@ -80,6 +80,7 @@ impl CommandParser for Command {
             "ID" => Command::Id,
             "GETQUOTA" => Command::GetQuota,
             "GETQUOTAROOT" => Command::GetQuotaRoot,
+            "GETJMAPACCESS" => Command::GetJmapAccess,
         )
     }
 
@@ -413,7 +414,16 @@ impl<T: PartialEq> PushUnique<T> for Vec<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::protocol::Sequence;
+    use crate::{Command, protocol::Sequence, receiver::CommandParser};
+
+    #[test]
+    fn parse_command() {
+        assert_eq!(
+            Command::parse(b"GETJMAPACCESS", false),
+            Some(Command::GetJmapAccess)
+        );
+        assert_eq!(Command::parse(b"NOTACOMMAND", false), None);
+    }
 
     #[test]
     fn parse_sequence_set() {

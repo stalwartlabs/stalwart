@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
 use crate::schema::{
-    response::{List, MkColResponse, PropStat},
     Namespace, Namespaces,
+    response::{List, MkColResponse, PropStat},
 };
+use std::fmt::Display;
 
 impl Display for MkColResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

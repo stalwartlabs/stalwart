@@ -1,0 +1,47 @@
+name: Redirect new discussions to the support portal
+
+on:
+  discussion:
+    types: [created]
+
+permissions:
+  discussions: write
+
+jobs:
+  redirect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post support portal redirect
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const discussion = context.payload.discussion;
+            const author = (discussion.user && discussion.user.login) || '';
+
+            const body = [
+              `Hi @${author}, thanks for posting!`,
+              ``,
+              `Stalwart support has moved to **[support.stalw.art](https://support.stalw.art)**. The support portal is now the canonical place to ask questions, request help, and report issues for triage. Other community members may still reply here, but the maintainers no longer answer support questions through GitHub Discussions, so your question may go unanswered unless you also post it on the portal.`,
+              ``,
+              `You can sign in to support.stalw.art with your existing GitHub account, so no separate registration is required. Google, Discord, LinkedIn, and email/password sign-in are also available.`,
+              ``,
+              `**Why we are unifying our support channels**`,
+              ``,
+              `Until now, Stalwart support has been spread across GitHub Discussions, Discord, Matrix, and Reddit. As the project has grown, tracking parallel inboxes and deduplicating threads has become unsustainable; the result has been slower answers, repeated work for the people helping out, and good information buried in chat scrollback where the next person with the same question would never find it.`,
+              ``,
+              `[support.stalw.art](https://support.stalw.art) is a Discourse instance that we operate ourselves, hosted at Hetzner in Germany and GDPR-compliant.`,
+              ``,
+              `Thank you for helping us keep the conversation in one place.`,
+            ].join('\n');
+
+            await github.graphql(
+              `mutation($discussionId: ID!, $body: String!) {
+                addDiscussionComment(input: { discussionId: $discussionId, body: $body }) {
+                  comment { id }
+                }
+              }`,
+              {
+                discussionId: discussion.node_id,
+                body,
+              }
+            );

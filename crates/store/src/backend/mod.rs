@@ -7,18 +7,15 @@
 #[cfg(feature = "azure")]
 pub mod azure;
 pub mod elastic;
+pub mod ephemeral;
 #[cfg(feature = "foundation")]
 pub mod foundationdb;
 pub mod fs;
 pub mod http;
-#[cfg(feature = "kafka")]
-pub mod kafka;
 pub mod meili;
 pub mod memory;
 #[cfg(feature = "mysql")]
 pub mod mysql;
-#[cfg(feature = "nats")]
-pub mod nats;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 #[cfg(feature = "redis")]
@@ -29,8 +26,6 @@ pub mod rocksdb;
 pub mod s3;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
-#[cfg(feature = "zenoh")]
-pub mod zenoh;
 
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>

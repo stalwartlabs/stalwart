@@ -20,7 +20,7 @@ macro_rules! bail {
 macro_rules! error {
     ($err:expr $(,)?) => {
         let err = $err;
-        let event_id = err.as_ref().id();
+        let event_id = err.as_ref().to_id() as usize;
 
         if $crate::Collector::is_metric(event_id) {
             $crate::Collector::record_metric(*err.as_ref(), event_id, err.keys());

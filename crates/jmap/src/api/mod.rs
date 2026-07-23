@@ -10,7 +10,7 @@ use common::ipc::{CalendarAlert, PushNotification};
 use http_proto::{HttpResponse, JsonResponse, ToHttpResponse};
 use hyper::StatusCode;
 use jmap_proto::{
-    error::request::{RequestError, RequestLimitError},
+    error::request::{RateLimitPolicy, RateLimitUnit, RequestError, RequestLimitError},
     request::capability::Session,
     response::{Response, status::PushObject},
     types::state::State,
@@ -49,7 +49,18 @@ impl ToJmapHttpResponse for Session {
 
 impl ToJmapHttpResponse for RequestError<'_> {
     fn into_http_response(self) -> HttpResponse {
-        HttpResponse::new(StatusCode::from_u16(self.status).unwrap_or(StatusCode::BAD_REQUEST))
+        let mut response =
+            HttpResponse::new(StatusCode::from_u16(self.status).unwrap_or(StatusCode::BAD_REQUEST));
+        if let Some(retry_after) = self.retry_after {
+            response = response.with_header("Retry-After", retry_after.to_string());
+        }
+        if let Some(policy) = self.rate_limit_policy_header() {
+            response = response.with_header("RateLimit-Policy", policy);
+        }
+        if let Some(state) = self.rate_limit_state_header() {
+            response = response.with_header("RateLimit", state);
+        }
+        response
             .with_content_type("application/problem+json")
             .with_text_body(serde_json::to_string(&self).unwrap_or_default())
     }
@@ -74,33 +85,90 @@ impl ToRequestError for trc::Error {
                 trc::JmapEvent::NotRequest => RequestError::not_request(details),
                 _ => RequestError::invalid_parameters(),
             },
-            trc::EventType::Limit(cause) => match cause {
-                trc::LimitEvent::SizeRequest => RequestError::limit(RequestLimitError::SizeRequest),
-                trc::LimitEvent::SizeUpload => RequestError::limit(RequestLimitError::SizeUpload),
-                trc::LimitEvent::CallsIn => RequestError::limit(RequestLimitError::CallsIn),
-                trc::LimitEvent::ConcurrentRequest | trc::LimitEvent::ConcurrentConnection => {
-                    RequestError::limit(RequestLimitError::ConcurrentRequest)
+            trc::EventType::Limit(cause) => {
+                let reset = self.value(trc::Key::Expires).and_then(|v| v.to_uint());
+                let limit = self.value(trc::Key::Limit).and_then(|v| v.to_uint());
+                let total = self.value(trc::Key::Total).and_then(|v| v.to_uint());
+                let size = self.value(trc::Key::Size).and_then(|v| v.to_uint());
+
+                match cause {
+                    trc::LimitEvent::SizeRequest => {
+                        RequestError::limit(RequestLimitError::SizeRequest)
+                    }
+                    trc::LimitEvent::SizeUpload => {
+                        RequestError::limit(RequestLimitError::SizeUpload)
+                    }
+                    trc::LimitEvent::CallsIn => RequestError::limit(RequestLimitError::CallsIn),
+                    trc::LimitEvent::ConcurrentRequest | trc::LimitEvent::ConcurrentConnection => {
+                        let mut policy =
+                            RateLimitPolicy::new("concurrent-requests", limit.unwrap_or(0))
+                                .with_unit(RateLimitUnit::ConcurrentRequests);
+                        if let Some(reset) = reset {
+                            policy = policy.with_reset(reset);
+                        }
+                        RequestError::limit(RequestLimitError::ConcurrentRequest)
+                            .with_rate_limit(policy)
+                    }
+                    trc::LimitEvent::ConcurrentUpload => {
+                        let mut policy =
+                            RateLimitPolicy::new("concurrent-uploads", limit.unwrap_or(0))
+                                .with_unit(RateLimitUnit::ConcurrentRequests);
+                        if let Some(reset) = reset {
+                            policy = policy.with_reset(reset);
+                        }
+                        RequestError::limit(RequestLimitError::ConcurrentUpload)
+                            .with_rate_limit(policy)
+                    }
+                    trc::LimitEvent::Quota => RequestError::over_quota(),
+                    trc::LimitEvent::TenantQuota => RequestError::tenant_over_quota(),
+                    trc::LimitEvent::BlobQuota => {
+                        let mut err = RequestError::over_blob_quota(
+                            total.unwrap_or(0) as usize,
+                            size.unwrap_or(0) as usize,
+                        );
+                        if let Some(total) = total {
+                            let mut policy = RateLimitPolicy::new("blob-upload-files", total);
+                            if let Some(reset) = reset {
+                                policy = policy.with_reset(reset);
+                            }
+                            err = err.with_rate_limit(policy);
+                        }
+                        if let Some(size) = size {
+                            let mut policy = RateLimitPolicy::new("blob-upload-bytes", size)
+                                .with_unit(RateLimitUnit::ContentBytes);
+                            if let Some(reset) = reset {
+                                policy = policy.with_reset(reset);
+                            }
+                            err = err.with_rate_limit(policy);
+                        }
+                        err
+                    }
+                    trc::LimitEvent::TooManyRequests => {
+                        let mut err = RequestError::too_many_requests();
+                        if let Some(limit) = limit {
+                            let mut policy = RateLimitPolicy::new("requests", limit);
+                            if let Some(reset) = reset {
+                                policy = policy.with_reset(reset);
+                            }
+                            err = err.with_rate_limit(policy);
+                        } else if let Some(reset) = reset {
+                            err = err.with_retry_after(reset);
+                        }
+                        err
+                    }
                 }
-                trc::LimitEvent::ConcurrentUpload => {
-                    RequestError::limit(RequestLimitError::ConcurrentUpload)
-                }
-                trc::LimitEvent::Quota => RequestError::over_quota(),
-                trc::LimitEvent::TenantQuota => RequestError::tenant_over_quota(),
-                trc::LimitEvent::BlobQuota => RequestError::over_blob_quota(
-                    self.value(trc::Key::Total)
-                        .and_then(|v| v.to_uint())
-                        .unwrap_or_default() as usize,
-                    self.value(trc::Key::Size)
-                        .and_then(|v| v.to_uint())
-                        .unwrap_or_default() as usize,
-                ),
-                trc::LimitEvent::TooManyRequests => RequestError::too_many_requests(),
-            },
+            }
             trc::EventType::Auth(cause) => match cause {
-                trc::AuthEvent::MissingTotp => {
-                    RequestError::blank(402, "TOTP code required", cause.message())
+                trc::AuthEvent::MfaRequired => {
+                    RequestError::blank(402, "MFA code required", self.as_ref().message())
                 }
-                trc::AuthEvent::TooManyAttempts => RequestError::too_many_auth_attempts(),
+                trc::AuthEvent::TooManyAttempts => {
+                    let mut err = RequestError::too_many_auth_attempts();
+                    if let Some(reset) = self.value(trc::Key::Expires).and_then(|v| v.to_uint()) {
+                        err = err.with_retry_after(reset);
+                    }
+                    err
+                }
                 _ => RequestError::unauthorized(),
             },
             trc::EventType::Security(cause) => match cause {
@@ -108,8 +176,19 @@ impl ToRequestError for trc::Error {
                 | trc::SecurityEvent::ScanBan
                 | trc::SecurityEvent::AbuseBan
                 | trc::SecurityEvent::LoiterBan
-                | trc::SecurityEvent::IpBlocked => RequestError::too_many_auth_attempts(),
-                trc::SecurityEvent::Unauthorized => RequestError::forbidden(),
+                | trc::SecurityEvent::IpBlocked => {
+                    let mut err = RequestError::too_many_auth_attempts();
+                    if let Some(reset) = self.value(trc::Key::Expires).and_then(|v| v.to_uint()) {
+                        err = err.with_retry_after(reset);
+                    }
+                    err
+                }
+                trc::SecurityEvent::Unauthorized | trc::SecurityEvent::IpUnauthorized => {
+                    RequestError::forbidden()
+                }
+                trc::SecurityEvent::IpBlockExpired | trc::SecurityEvent::IpAllowExpired => {
+                    RequestError::internal_server_error()
+                }
             },
             trc::EventType::Resource(cause) => match cause {
                 trc::ResourceEvent::NotFound => RequestError::not_found(),

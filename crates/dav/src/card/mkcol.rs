@@ -57,7 +57,11 @@ impl CardMkColRequestHandler for Server {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         } else if name.contains('/')
             || self
-                .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+                .fetch_dav_resources(
+                    access_token.account_id(),
+                    account_id,
+                    SyncCollection::AddressBook,
+                )
                 .await
                 .caused_by(trc::location!())?
                 .by_path(name)
@@ -122,8 +126,13 @@ impl CardMkColRequestHandler for Server {
             .assign_document_ids(account_id, Collection::AddressBook, 1)
             .await
             .caused_by(trc::location!())?;
-        book.insert(access_token, account_id, document_id, &mut batch)
-            .caused_by(trc::location!())?;
+        book.insert(
+            access_token.account_tenant_ids(),
+            account_id,
+            document_id,
+            &mut batch,
+        )
+        .caused_by(trc::location!())?;
         let etag = batch.etag();
         self.commit_batch(batch).await.caused_by(trc::location!())?;
 

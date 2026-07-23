@@ -6,7 +6,7 @@
 
 use crate::utf7::utf7_encode;
 
-use super::quoted_string;
+use super::{ObjectId, quoted_string};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
@@ -25,7 +25,7 @@ pub enum Status {
     Size,
     Recent,
     HighestModSeq,
-    MailboxId,
+    ObjectId,
     DeletedStorage,
 }
 
@@ -39,6 +39,7 @@ pub struct StatusItem {
 pub enum StatusItemType {
     Number(u64),
     String(String),
+    ObjectId(ObjectId),
 }
 
 impl StatusItem {
@@ -63,7 +64,7 @@ impl StatusItem {
                 Status::Deleted => b"DELETED ",
                 Status::Size => b"SIZE ",
                 Status::HighestModSeq => b"HIGHESTMODSEQ ",
-                Status::MailboxId => b"MAILBOXID ",
+                Status::ObjectId => b"OBJECTID ",
                 Status::Recent => b"RECENT ",
                 Status::DeletedStorage => b"DELETED-STORAGE ",
             });
@@ -77,6 +78,9 @@ impl StatusItem {
                     buf.extend_from_slice(str.as_bytes());
                     buf.push(b')');
                 }
+                StatusItemType::ObjectId(object_id) => {
+                    object_id.serialize_kvpairs(buf);
+                }
             }
         }
         buf.extend_from_slice(b")\r\n");
@@ -85,24 +89,37 @@ impl StatusItem {
 
 #[cfg(test)]
 mod tests {
-    use crate::protocol::status::{Status, StatusItem, StatusItemType};
+    use crate::protocol::{
+        ObjectId,
+        status::{Status, StatusItem, StatusItemType},
+    };
+    use types::id::Id;
 
     #[test]
     fn serialize_status() {
+        let objectid = ObjectId {
+            mailbox_id: Some(Id::from(1u32)),
+            account_id: Some(Id::from(2u32)),
+            ..Default::default()
+        };
+        let mut kvpairs = Vec::new();
+        objectid.serialize_kvpairs(&mut kvpairs);
+        let kvpairs = String::from_utf8(kvpairs).unwrap();
+
         let mut buf = Vec::new();
         StatusItem {
             mailbox_name: "blurdybloop".into(),
             items: vec![
                 (Status::Messages, StatusItemType::Number(231)),
                 (Status::UidNext, StatusItemType::Number(44292)),
-                (Status::MailboxId, StatusItemType::String("abc-123".into())),
+                (Status::ObjectId, StatusItemType::ObjectId(objectid.clone())),
             ],
         }
         .serialize(&mut buf, true);
 
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "* STATUS \"blurdybloop\" (MESSAGES 231 UIDNEXT 44292 MAILBOXID (abc-123))\r\n"
+            format!("* STATUS \"blurdybloop\" (MESSAGES 231 UIDNEXT 44292 OBJECTID {kvpairs})\r\n")
         );
     }
 }

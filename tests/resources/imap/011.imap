@@ -152,8 +152,30 @@ m2 body
 
 epilogue
 
-BINARY[] {16}
-[binary content]
+BINARY[] {260}
+From: sub@domain.org
+Date: Sun, 12 Aug 2012 12:34:56 +0300
+Subject: submsg
+Content-Type: multipart/digest; boundary="foo"
+
+prologue
+
+--foo 
+
+From: m1@example.com
+Subject: m1
+
+m1 body
+
+--foo 
+X-Mime: m2 header
+
+From: m2@example.com
+Subject: m2
+
+m2 body
+
+--foo--
 BINARY.SIZE[] 260
 ----------------------------------
 BODY[HEADER] {108}
@@ -224,8 +246,30 @@ m2 body
 
 epilogue
 
-BINARY[1] {16}
-[binary content]
+BINARY[1] {260}
+From: sub@domain.org
+Date: Sun, 12 Aug 2012 12:34:56 +0300
+Subject: submsg
+Content-Type: multipart/digest; boundary="foo"
+
+prologue
+
+--foo 
+
+From: m1@example.com
+Subject: m1
+
+m1 body
+
+--foo 
+X-Mime: m2 header
+
+From: m2@example.com
+Subject: m2
+
+m2 body
+
+--foo--
 BINARY.SIZE[1] 260
 ----------------------------------
 BODY[1.HEADER] {123}
@@ -267,8 +311,12 @@ Subject: m1
 
 m1 body
 
-BINARY[1.1] {16}
-[binary content]
+BINARY[1.1] {42}
+From: m1@example.com
+Subject: m1
+
+m1 body
+
 BINARY.SIZE[1.1] 42
 ----------------------------------
 BODY[1.1.HEADER] {34}
@@ -299,8 +347,12 @@ Subject: m2
 
 m2 body
 
-BINARY[1.2] {16}
-[binary content]
+BINARY[1.2] {42}
+From: m2@example.com
+Subject: m2
+
+m2 body
+
 BINARY.SIZE[1.2] 42
 ----------------------------------
 BODY[1.2.HEADER] {34}

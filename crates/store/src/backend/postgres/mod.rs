@@ -11,9 +11,7 @@ use crate::{
     },
     write::SearchIndex,
 };
-use ahash::AHashSet;
 use deadpool_postgres::Pool;
-use nlp::language::Language;
 
 pub mod blob;
 pub mod lookup;
@@ -25,12 +23,11 @@ pub mod write;
 
 pub struct PostgresStore {
     pub(crate) conn_pool: Pool,
-    pub(crate) languages: AHashSet<Language>,
 }
 
 #[inline(always)]
 fn into_error(err: tokio_postgres::error::Error) -> trc::Error {
-    let mut local_err = trc::StoreEvent::PostgresqlError.reason(err.to_string());
+    let mut local_err = trc::StoreEvent::PostgresqlError.reason(error_chain(&err));
     if let Some(db_err) = err.as_db_error() {
         local_err = local_err.code(db_err.code().code().to_string());
         if let Some(detail) = db_err.detail() {
@@ -44,9 +41,26 @@ fn into_error(err: tokio_postgres::error::Error) -> trc::Error {
     local_err
 }
 
+fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let cause_message = cause.to_string();
+        if !cause_message.is_empty() && !message.ends_with(&cause_message) {
+            message.push_str(": ");
+            message.push_str(&cause_message);
+        }
+        source = cause.source();
+    }
+    message
+}
+
 #[inline(always)]
-fn into_pool_error(err: deadpool::managed::PoolError<tokio_postgres::Error>) -> trc::Error {
-    trc::StoreEvent::PostgresqlError.reason(err)
+fn into_pool_error(err: deadpool_postgres::PoolError) -> trc::Error {
+    match err {
+        deadpool_postgres::PoolError::Backend(err) => into_error(err),
+        err => trc::StoreEvent::PostgresqlError.reason(error_chain(&err)),
+    }
 }
 
 impl SearchIndex {

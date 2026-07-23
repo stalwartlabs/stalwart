@@ -4,31 +4,47 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, collections::BTreeSet, fmt::Display, io::Cursor};
-
-use aes::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
-
+use aes::cipher::{BlockModeEncrypt, KeyIvInit, block_padding::Pkcs7};
+use aes_gcm::{
+    Aes256Gcm,
+    aead::{AeadInPlace, KeyInit, generic_array::GenericArray},
+};
+use chacha20poly1305::ChaCha20Poly1305;
+use common::auth::{
+    ACCOUNT_FLAG_ENCRYPT_ALGO_AES256, ACCOUNT_FLAG_ENCRYPT_ALGO_AES256_GCM,
+    ACCOUNT_FLAG_ENCRYPT_ALGO_CHACHA20_POLY1305, ACCOUNT_FLAG_ENCRYPT_METHOD_PGP,
+    ACCOUNT_FLAG_ENCRYPT_TRAIN_SPAM_FILTER, EncryptionKeys,
+};
 use mail_builder::{encoders::base64::base64_encode_mime, mime::make_boundary};
-use mail_parser::{Message, MimeHeaders, PartType, decoders::base64::base64_decode};
+use mail_parser::{Message, MimeHeaders, PartType};
 use openpgp::{
     parse::Parse,
     serialize::stream,
     types::{KeyFlags, SymmetricAlgorithm},
 };
 use rand::{RngCore, SeedableRng, rngs::StdRng};
-use rasn::types::{ObjectIdentifier, OctetString};
+use rasn::Encoder;
+use rasn::types::{OctetString, Oid, SetOf};
 use rasn_cms::{
-    AlgorithmIdentifier, CONTENT_DATA, CONTENT_ENVELOPED_DATA, EncryptedContent,
+    AlgorithmIdentifier, AuthEnvelopedData, CONTENT_DATA, CONTENT_ENVELOPED_DATA, EncryptedContent,
     EncryptedContentInfo, EncryptedKey, EnvelopedData, IssuerAndSerialNumber,
     KeyTransRecipientInfo, RecipientIdentifier, RecipientInfo,
     algorithms::{AES128_CBC, AES256_CBC, RSA},
     pkcs7_compat::EncapsulatedContentInfo,
 };
-use rsa::{Pkcs1v15Encrypt, RsaPublicKey, pkcs1::DecodeRsaPublicKey};
+use rsa::{Oaep, Pkcs1v15Encrypt, RsaPublicKey, pkcs1::DecodeRsaPublicKey, sha2::Sha256};
 use sequoia_openpgp as openpgp;
-use store::{Deserialize, write::Archive};
+use std::io::Cursor;
 
-const P: openpgp::policy::StandardPolicy<'static> = openpgp::policy::StandardPolicy::new();
+const AES256_GCM: &Oid =
+    Oid::JOINT_ISO_ITU_T_COUNTRY_US_ORGANIZATION_GOV_CSOR_NIST_ALGORITHMS_AES256_GCM;
+const CHACHA20_POLY1305: &Oid = Oid::const_new(&[1, 2, 840, 113549, 1, 9, 16, 3, 18]);
+const CONTENT_AUTH_ENVELOPED_DATA: &Oid =
+    Oid::ISO_MEMBER_BODY_US_RSADSI_PKCS9_SMIME_CT_AUTH_ENVELOPED_DATA;
+const SHA256: &Oid =
+    Oid::JOINT_ISO_ITU_T_COUNTRY_US_ORGANIZATION_GOV_CSOR_NIST_ALGORITHMS_HASH_SHA256;
+const MGF1: &Oid = Oid::ISO_MEMBER_BODY_US_RSADSI_PKCS1_MGF1;
+const RSAES_OAEP: &Oid = Oid::ISO_MEMBER_BODY_US_RSADSI_PKCS1_RSAES_OAEP;
 
 #[derive(Debug)]
 pub enum EncryptMessageError {
@@ -36,90 +52,12 @@ pub enum EncryptMessageError {
     Error(String),
 }
 
-#[derive(
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    rkyv::Archive,
-    Debug,
-    Clone,
-    Copy,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[rkyv(derive(Clone, Copy))]
-pub enum Algorithm {
-    Aes128,
-    Aes256,
-}
-
-#[derive(
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    rkyv::Archive,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub enum EncryptionMethod {
-    PGP,
-    SMIME,
-}
-
-#[derive(
-    Clone,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    rkyv::Archive,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct EncryptionParams {
-    pub certs: Box<[Box<[u8]>]>,
-    pub flags: u64,
-}
-
-pub const ENCRYPT_TRAIN_SPAM_FILTER: u64 = 1;
-pub const ENCRYPT_METHOD_SMIME: u64 = 1 << 1;
-pub const ENCRYPT_METHOD_PGP: u64 = 1 << 2;
-pub const ENCRYPT_ALGO_AES256: u64 = 1 << 3;
-pub const ENCRYPT_ALGO_AES128: u64 = 1 << 4;
-
-#[derive(
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    rkyv::Archive,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    Default,
-)]
-#[serde(tag = "type")]
-#[serde(rename_all = "camelCase")]
-pub enum EncryptionType {
-    PGP {
-        algo: Algorithm,
-        certs: String,
-        allow_spam_training: bool,
-    },
-    SMIME {
-        algo: Algorithm,
-        certs: String,
-        allow_spam_training: bool,
-    },
-    #[default]
-    Disabled,
-}
-
 #[allow(async_fn_in_trait)]
 pub trait EncryptMessage {
     async fn encrypt(
         &self,
-        params: &ArchivedEncryptionParams,
+        keys: &EncryptionKeys,
+        flags: u64,
     ) -> Result<Vec<u8>, EncryptMessageError>;
     fn is_encrypted(&self) -> bool;
 }
@@ -127,8 +65,16 @@ pub trait EncryptMessage {
 impl EncryptMessage for Message<'_> {
     async fn encrypt(
         &self,
-        params: &ArchivedEncryptionParams,
+        keys: &EncryptionKeys,
+        flags: u64,
     ) -> Result<Vec<u8>, EncryptMessageError> {
+        if flags & ACCOUNT_FLAG_ENCRYPT_METHOD_PGP != 0 && flags.cipher().is_aead() {
+            return Err(EncryptMessageError::Error(
+                "AES-256-GCM and ChaCha20-Poly1305 are only supported for S/MIME encryption."
+                    .into(),
+            ));
+        }
+
         let root = self.root_part();
         let raw_message = self.raw_message();
         let mut outer_message = Vec::with_capacity((raw_message.len() as f64 * 1.5) as usize);
@@ -149,263 +95,246 @@ impl EncryptMessage for Message<'_> {
         inner_message.extend_from_slice(&raw_message[root.raw_body_offset() as usize..]);
 
         // Encrypt inner message
-        match params.method() {
-            EncryptionMethod::PGP => {
-                // Prepare encrypted message
-                let boundary = make_boundary("_");
-                outer_message.extend_from_slice(
-                    concat!(
-                        "Content-Type: multipart/encrypted;\r\n\t",
-                        "protocol=\"application/pgp-encrypted\";\r\n\t",
-                        "boundary=\""
-                    )
-                    .as_bytes(),
-                );
-                outer_message.extend_from_slice(boundary.as_bytes());
-                outer_message.extend_from_slice(
-                    concat!(
-                        "\"\r\n\r\n",
-                        "OpenPGP/MIME message (Automatically encrypted by Stalwart)\r\n\r\n",
-                        "--"
-                    )
-                    .as_bytes(),
-                );
-                outer_message.extend_from_slice(boundary.as_bytes());
-                outer_message.extend_from_slice(
-                    concat!(
-                        "\r\nContent-Type: application/pgp-encrypted\r\n\r\n",
-                        "Version: 1\r\n\r\n--"
-                    )
-                    .as_bytes(),
-                );
-                outer_message.extend_from_slice(boundary.as_bytes());
-                outer_message.extend_from_slice(
-                    concat!(
-                        "\r\nContent-Type: application/octet-stream; name=\"encrypted.asc\"\r\n",
-                        "Content-Disposition: inline; filename=\"encrypted.asc\"\r\n\r\n"
-                    )
-                    .as_bytes(),
-                );
+        if flags & ACCOUNT_FLAG_ENCRYPT_METHOD_PGP != 0 {
+            // Prepare encrypted message
+            let boundary = make_boundary("_");
+            outer_message.extend_from_slice(
+                concat!(
+                    "Content-Type: multipart/encrypted;\r\n\t",
+                    "protocol=\"application/pgp-encrypted\";\r\n\t",
+                    "boundary=\""
+                )
+                .as_bytes(),
+            );
+            outer_message.extend_from_slice(boundary.as_bytes());
+            outer_message.extend_from_slice(
+                concat!(
+                    "\"\r\n\r\n",
+                    "OpenPGP/MIME message (Automatically encrypted by Stalwart)\r\n\r\n",
+                    "--"
+                )
+                .as_bytes(),
+            );
+            outer_message.extend_from_slice(boundary.as_bytes());
+            outer_message.extend_from_slice(
+                concat!(
+                    "\r\nContent-Type: application/pgp-encrypted\r\n\r\n",
+                    "Version: 1\r\n\r\n--"
+                )
+                .as_bytes(),
+            );
+            outer_message.extend_from_slice(boundary.as_bytes());
+            outer_message.extend_from_slice(
+                concat!(
+                    "\r\nContent-Type: application/octet-stream; name=\"encrypted.asc\"\r\n",
+                    "Content-Disposition: inline; filename=\"encrypted.asc\"\r\n\r\n"
+                )
+                .as_bytes(),
+            );
 
-                let certs = params
-                    .certs
-                    .iter()
-                    .map(openpgp::Cert::from_bytes)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|err| {
-                        EncryptMessageError::Error(format!(
-                            "Failed to parse OpenPGP public key: {}",
-                            err
-                        ))
-                    })?;
-
-                // Encrypt contents (TODO: use rayon)
-                let algo = params.algo();
-                let encrypted_contents = tokio::task::spawn_blocking(move || {
-                    // Parse public key
-                    let mut keys = Vec::with_capacity(certs.len());
-                    let policy = openpgp::policy::StandardPolicy::new();
-
-                    for cert in &certs {
-                        for key in cert
-                            .keys()
-                            .with_policy(&policy, None)
-                            .supported()
-                            .alive()
-                            .revoked(false)
-                            .key_flags(KeyFlags::empty().set_transport_encryption())
-                        {
-                            keys.push(key);
-                        }
-                    }
-
-                    // Compose a writer stack corresponding to the output format and
-                    // packet structure we want.
-                    let mut sink = Vec::with_capacity(inner_message.len());
-
-                    // Stream an OpenPGP message.
-                    let message = stream::Armorer::new(stream::Message::new(&mut sink))
-                        .build()
-                        .map_err(|err| {
-                            EncryptMessageError::Error(format!("Failed to create armorer: {}", err))
-                        })?;
-                    let message = stream::Encryptor::for_recipients(message, keys)
-                        .symmetric_algo(match algo {
-                            Algorithm::Aes128 => SymmetricAlgorithm::AES128,
-                            Algorithm::Aes256 => SymmetricAlgorithm::AES256,
-                        })
-                        .build()
-                        .map_err(|err| {
-                            EncryptMessageError::Error(format!(
-                                "Failed to build encryptor: {}",
-                                err
-                            ))
-                        })?;
-                    let mut message =
-                        stream::LiteralWriter::new(message).build().map_err(|err| {
-                            EncryptMessageError::Error(format!(
-                                "Failed to create literal writer: {}",
-                                err
-                            ))
-                        })?;
-                    std::io::copy(&mut Cursor::new(inner_message), &mut message).map_err(
-                        |err| {
-                            EncryptMessageError::Error(format!(
-                                "Failed to encrypt message: {}",
-                                err
-                            ))
-                        },
-                    )?;
-                    message.finalize().map_err(|err| {
-                        EncryptMessageError::Error(format!("Failed to finalize message: {}", err))
-                    })?;
-
-                    String::from_utf8(sink).map_err(|err| {
-                        EncryptMessageError::Error(format!(
-                            "Failed to convert encrypted message to UTF-8: {}",
-                            err
-                        ))
-                    })
-                })
-                .await
+            let certs = keys
+                .iter()
+                .map(openpgp::Cert::from_bytes)
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(|err| {
-                    EncryptMessageError::Error(format!("Failed to encrypt message: {}", err))
-                })??;
-                outer_message.extend_from_slice(encrypted_contents.as_bytes());
-                outer_message.extend_from_slice(b"\r\n--");
-                outer_message.extend_from_slice(boundary.as_bytes());
-                outer_message.extend_from_slice(b"--\r\n");
-            }
-            EncryptionMethod::SMIME => {
-                // Generate random IV
-                let mut rng = StdRng::from_entropy();
-                let mut iv = vec![0u8; 16];
-                rng.fill_bytes(&mut iv);
-
-                // Generate random key
-                let mut key = vec![0u8; params.key_size()];
-                rng.fill_bytes(&mut key);
-
-                // Encrypt contents (TODO: use rayon)
-                let algo = params.algo();
-                let (encrypted_contents, key, iv) = tokio::task::spawn_blocking(move || {
-                    (algo.encrypt(&key, &iv, &inner_message), key, iv)
-                })
-                .await
-                .map_err(|err| {
-                    EncryptMessageError::Error(format!("Failed to encrypt message: {}", err))
+                    EncryptMessageError::Error(format!(
+                        "Failed to parse OpenPGP public key: {}",
+                        err
+                    ))
                 })?;
 
-                // Encrypt key using public keys
-                #[allow(clippy::mutable_key_type)]
-                let mut recipient_infos = BTreeSet::new();
-                for cert in params.certs.iter() {
-                    let cert =
-                        rasn::der::decode::<rasn_pkix::Certificate>(cert).map_err(|err| {
-                            EncryptMessageError::Error(format!(
-                                "Failed to parse certificate: {}",
-                                err
-                            ))
-                        })?;
+            // Encrypt contents (TODO: use rayon)
+            let encrypted_contents = tokio::task::spawn_blocking(move || {
+                // Parse public key
+                let mut keys = Vec::with_capacity(certs.len());
+                let policy = openpgp::policy::StandardPolicy::new();
 
-                    let public_key = RsaPublicKey::from_pkcs1_der(
-                        cert.tbs_certificate
-                            .subject_public_key_info
-                            .subject_public_key
-                            .as_raw_slice(),
-                    )
-                    .map_err(|err| {
-                        EncryptMessageError::Error(format!("Failed to parse public key: {}", err))
-                    })?;
-                    let encrypted_key = public_key
-                        .encrypt(&mut rng, Pkcs1v15Encrypt, &key[..])
-                        .map_err(|err| {
-                            EncryptMessageError::Error(format!("Failed to encrypt key: {}", err))
-                        })
-                        .unwrap();
-
-                    recipient_infos.insert(RecipientInfo::KeyTransRecipientInfo(
-                        KeyTransRecipientInfo {
-                            version: 0.into(),
-                            rid: RecipientIdentifier::IssuerAndSerialNumber(
-                                IssuerAndSerialNumber {
-                                    issuer: cert.tbs_certificate.issuer,
-                                    serial_number: cert.tbs_certificate.serial_number,
-                                },
-                            ),
-                            key_encryption_algorithm: AlgorithmIdentifier {
-                                algorithm: RSA.into(),
-                                parameters: Some(
-                                    rasn::der::encode(&())
-                                        .map_err(|err| {
-                                            EncryptMessageError::Error(format!(
-                                                "Failed to encode RSA algorithm identifier: {}",
-                                                err
-                                            ))
-                                        })?
-                                        .into(),
-                                ),
-                            },
-                            encrypted_key: EncryptedKey::from(encrypted_key),
-                        },
-                    ));
+                for cert in &certs {
+                    for key in cert
+                        .keys()
+                        .with_policy(&policy, None)
+                        .supported()
+                        .alive()
+                        .revoked(false)
+                        .key_flags(KeyFlags::empty().set_transport_encryption())
+                    {
+                        keys.push(key);
+                    }
                 }
 
-                let pkcs7 = rasn::der::encode(&EncapsulatedContentInfo {
-                    content_type: CONTENT_ENVELOPED_DATA.into(),
-                    content: Some(
-                        rasn::der::encode(&EnvelopedData {
-                            version: 0.into(),
-                            originator_info: None,
-                            recipient_infos,
-                            encrypted_content_info: EncryptedContentInfo {
-                                content_type: CONTENT_DATA.into(),
-                                content_encryption_algorithm: AlgorithmIdentifier {
-                                    algorithm: params.to_algorithm_identifier(),
-                                    parameters: Some(
-                                        rasn::der::encode(&OctetString::from(iv))
-                                            .map_err(|err| {
-                                                EncryptMessageError::Error(format!(
-                                                    "Failed to encode IV: {}",
-                                                    err
-                                                ))
-                                            })?
-                                            .into(),
-                                    ),
-                                },
-                                encrypted_content: Some(EncryptedContent::from(encrypted_contents)),
-                            },
-                            unprotected_attrs: None,
-                        })
-                        .map_err(|err| {
-                            EncryptMessageError::Error(format!(
-                                "Failed to encode EnvelopedData: {}",
-                                err
-                            ))
-                        })?
-                        .into(),
-                    ),
-                })
-                .map_err(|err| {
-                    EncryptMessageError::Error(format!("Failed to encode ContentInfo: {}", err))
+                // Compose a writer stack corresponding to the output format and
+                // packet structure we want.
+                let mut sink = Vec::with_capacity(inner_message.len());
+
+                // Stream an OpenPGP message.
+                let message = stream::Armorer::new(stream::Message::new(&mut sink))
+                    .build()
+                    .map_err(|err| {
+                        EncryptMessageError::Error(format!("Failed to create armorer: {}", err))
+                    })?;
+                let message = stream::Encryptor::for_recipients(message, keys)
+                    .symmetric_algo(flags.algo())
+                    .build()
+                    .map_err(|err| {
+                        EncryptMessageError::Error(format!("Failed to build encryptor: {}", err))
+                    })?;
+                let mut message = stream::LiteralWriter::new(message).build().map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to create literal writer: {}", err))
+                })?;
+                std::io::copy(&mut Cursor::new(inner_message), &mut message).map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to encrypt message: {}", err))
+                })?;
+                message.finalize().map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to finalize message: {}", err))
                 })?;
 
-                // Generate message
-                outer_message.extend_from_slice(
-                    concat!(
-                        "Content-Type: application/pkcs7-mime;\r\n",
-                        "\tname=\"smime.p7m\";\r\n",
-                        "\tsmime-type=enveloped-data\r\n",
-                        "Content-Disposition: attachment;\r\n",
-                        "\tfilename=\"smime.p7m\"\r\n",
-                        "Content-Transfer-Encoding: base64\r\n\r\n"
-                    )
-                    .as_bytes(),
-                );
-                base64_encode_mime(&pkcs7, &mut outer_message, false).map_err(|err| {
-                    EncryptMessageError::Error(format!("Failed to base64 encode PKCS7: {}", err))
+                String::from_utf8(sink).map_err(|err| {
+                    EncryptMessageError::Error(format!(
+                        "Failed to convert encrypted message to UTF-8: {}",
+                        err
+                    ))
+                })
+            })
+            .await
+            .map_err(|err| {
+                EncryptMessageError::Error(format!("Failed to encrypt message: {}", err))
+            })??;
+            outer_message.extend_from_slice(encrypted_contents.as_bytes());
+            outer_message.extend_from_slice(b"\r\n--");
+            outer_message.extend_from_slice(boundary.as_bytes());
+            outer_message.extend_from_slice(b"--\r\n");
+        } else {
+            let cipher = flags.cipher();
+
+            // Generate random nonce
+            let mut rng = StdRng::from_entropy();
+            let mut nonce = vec![0u8; cipher.nonce_size()];
+            rng.fill_bytes(&mut nonce);
+
+            // Generate random key
+            let mut key = vec![0u8; cipher.key_size()];
+            rng.fill_bytes(&mut key);
+
+            // Encrypt contents (TODO: use rayon)
+            let (encrypted_contents, mac, key, nonce) = tokio::task::spawn_blocking(move || {
+                let (encrypted_contents, mac) = cipher.encrypt(&key, &nonce, &inner_message);
+                (encrypted_contents, mac, key, nonce)
+            })
+            .await
+            .map_err(|err| {
+                EncryptMessageError::Error(format!("Failed to encrypt message: {}", err))
+            })?;
+
+            // Encrypt key using public keys
+            let key_encryption_algorithm = cipher.key_encryption_algorithm()?;
+            let mut recipient_infos = SetOf::new();
+            for cert in keys.iter() {
+                let cert = rasn::der::decode::<rasn_pkix::Certificate>(cert).map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to parse certificate: {}", err))
                 })?;
+
+                let public_key = RsaPublicKey::from_pkcs1_der(
+                    cert.tbs_certificate
+                        .subject_public_key_info
+                        .subject_public_key
+                        .as_raw_slice(),
+                )
+                .map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to parse public key: {}", err))
+                })?;
+                let encrypted_key = if cipher.is_aead() {
+                    public_key.encrypt(&mut rng, Oaep::new::<Sha256>(), &key[..])
+                } else {
+                    public_key.encrypt(&mut rng, Pkcs1v15Encrypt, &key[..])
+                }
+                .map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to encrypt key: {}", err))
+                })?;
+
+                recipient_infos.insert(RecipientInfo::KeyTransRecipientInfo(
+                    KeyTransRecipientInfo {
+                        version: 0.into(),
+                        rid: RecipientIdentifier::IssuerAndSerialNumber(IssuerAndSerialNumber {
+                            issuer: cert.tbs_certificate.issuer,
+                            serial_number: cert.tbs_certificate.serial_number,
+                        }),
+                        key_encryption_algorithm: key_encryption_algorithm.clone(),
+                        encrypted_key: EncryptedKey::from(encrypted_key),
+                    },
+                ));
             }
+
+            let encrypted_content_info = EncryptedContentInfo {
+                content_type: CONTENT_DATA.into(),
+                content_encryption_algorithm: cipher.content_encryption_algorithm(&nonce)?,
+                encrypted_content: Some(EncryptedContent::from(encrypted_contents)),
+            };
+
+            let (content_type, content) = if let Some(mac) = mac {
+                (
+                    CONTENT_AUTH_ENVELOPED_DATA,
+                    rasn::der::encode(&AuthEnvelopedData {
+                        version: 0.into(),
+                        originator_info: None,
+                        recipient_infos,
+                        auth_encrypted_content_info: encrypted_content_info,
+                        auth_attrs: None,
+                        mac: OctetString::from(mac),
+                        unauth_attrs: None,
+                    })
+                    .map_err(|err| {
+                        EncryptMessageError::Error(format!(
+                            "Failed to encode AuthEnvelopedData: {}",
+                            err
+                        ))
+                    })?,
+                )
+            } else {
+                (
+                    CONTENT_ENVELOPED_DATA,
+                    rasn::der::encode(&EnvelopedData {
+                        version: 0.into(),
+                        originator_info: None,
+                        recipient_infos,
+                        encrypted_content_info,
+                        unprotected_attrs: None,
+                    })
+                    .map_err(|err| {
+                        EncryptMessageError::Error(format!(
+                            "Failed to encode EnvelopedData: {}",
+                            err
+                        ))
+                    })?,
+                )
+            };
+
+            let pkcs7 = rasn::der::encode(&EncapsulatedContentInfo {
+                content_type: content_type.into(),
+                content: Some(content.into()),
+            })
+            .map_err(|err| {
+                EncryptMessageError::Error(format!("Failed to encode ContentInfo: {}", err))
+            })?;
+
+            // Generate message
+            outer_message.extend_from_slice(b"Content-Type: application/pkcs7-mime;\r\n");
+            outer_message.extend_from_slice(b"\tname=\"smime.p7m\";\r\n\tsmime-type=");
+            outer_message.extend_from_slice(if cipher.is_aead() {
+                b"authenticated-enveloped-data\r\n"
+            } else {
+                b"enveloped-data\r\n"
+            });
+            outer_message.extend_from_slice(
+                concat!(
+                    "Content-Disposition: attachment;\r\n",
+                    "\tfilename=\"smime.p7m\"\r\n",
+                    "Content-Transfer-Encoding: base64\r\n\r\n"
+                )
+                .as_bytes(),
+            );
+            base64_encode_mime(&pkcs7, &mut outer_message, false).map_err(|err| {
+                EncryptMessageError::Error(format!("Failed to base64 encode PKCS7: {}", err))
+            })?;
         }
 
         Ok(outer_message)
@@ -451,10 +380,11 @@ impl EncryptMessage for Message<'_> {
             }
 
             match text_part {
-                Some(text) if self.parts.len() == 1 || is_multipart => {
-                    if text.trim_start().starts_with("-----BEGIN PGP MESSAGE-----") {
-                        return true;
-                    }
+                Some(text)
+                    if (self.parts.len() == 1 || is_multipart)
+                        && text.trim_start().starts_with("-----BEGIN PGP MESSAGE-----") =>
+                {
+                    return true;
                 }
                 _ => (),
             }
@@ -464,272 +394,189 @@ impl EncryptMessage for Message<'_> {
     }
 }
 
-impl ArchivedEncryptionParams {
-    pub fn method(&self) -> EncryptionMethod {
-        if self.flags & ENCRYPT_METHOD_PGP != 0 {
-            EncryptionMethod::PGP
+pub trait EncryptionFlags {
+    fn cipher(&self) -> SymmetricCipher;
+    fn can_train_spam_filter(&self) -> bool;
+    fn algo(&self) -> SymmetricAlgorithm;
+}
+
+impl EncryptionFlags for u64 {
+    fn cipher(&self) -> SymmetricCipher {
+        if *self & ACCOUNT_FLAG_ENCRYPT_ALGO_AES256_GCM != 0 {
+            SymmetricCipher::Aes256Gcm
+        } else if *self & ACCOUNT_FLAG_ENCRYPT_ALGO_CHACHA20_POLY1305 != 0 {
+            SymmetricCipher::ChaCha20Poly1305
+        } else if *self & ACCOUNT_FLAG_ENCRYPT_ALGO_AES256 != 0 {
+            SymmetricCipher::Aes256Cbc
         } else {
-            EncryptionMethod::SMIME
+            SymmetricCipher::Aes128Cbc
         }
     }
 
-    pub fn algo(&self) -> Algorithm {
-        if self.flags & ENCRYPT_ALGO_AES256 != 0 {
-            Algorithm::Aes256
-        } else {
-            Algorithm::Aes128
-        }
+    fn can_train_spam_filter(&self) -> bool {
+        *self & ACCOUNT_FLAG_ENCRYPT_TRAIN_SPAM_FILTER != 0
     }
 
-    fn key_size(&self) -> usize {
-        if self.flags & ENCRYPT_ALGO_AES256 != 0 {
-            32
+    fn algo(&self) -> SymmetricAlgorithm {
+        if *self & ACCOUNT_FLAG_ENCRYPT_ALGO_AES256 != 0 {
+            SymmetricAlgorithm::AES256
         } else {
-            16
+            SymmetricAlgorithm::AES128
         }
-    }
-
-    fn to_algorithm_identifier(&self) -> ObjectIdentifier {
-        if self.flags & ENCRYPT_ALGO_AES256 != 0 {
-            AES256_CBC.into()
-        } else {
-            AES128_CBC.into()
-        }
-    }
-
-    pub fn can_train_spam_filter(&self) -> bool {
-        self.flags & ENCRYPT_TRAIN_SPAM_FILTER != 0
     }
 }
 
-impl Algorithm {
-    fn encrypt(&self, key: &[u8], iv: &[u8], contents: &[u8]) -> Vec<u8> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SymmetricCipher {
+    Aes128Cbc,
+    Aes256Cbc,
+    Aes256Gcm,
+    ChaCha20Poly1305,
+}
+
+impl SymmetricCipher {
+    fn key_size(self) -> usize {
         match self {
-            Algorithm::Aes128 => cbc::Encryptor::<aes::Aes128>::new(key.into(), iv.into())
-                .encrypt_padded_vec_mut::<Pkcs7>(contents),
-            Algorithm::Aes256 => cbc::Encryptor::<aes::Aes256>::new(key.into(), iv.into())
-                .encrypt_padded_vec_mut::<Pkcs7>(contents),
+            SymmetricCipher::Aes128Cbc => 16,
+            SymmetricCipher::Aes256Cbc
+            | SymmetricCipher::Aes256Gcm
+            | SymmetricCipher::ChaCha20Poly1305 => 32,
         }
     }
-}
 
-#[allow(clippy::type_complexity)]
-pub fn try_parse_certs(
-    expected_method: EncryptionMethod,
-    cert: Vec<u8>,
-) -> Result<Box<[Box<[u8]>]>, Cow<'static, str>> {
-    // Check if it's a PEM file
-    let (flags, certs) = if let Some(result) = try_parse_pem(&cert)? {
-        (result.flags, result.certs)
-    } else if rasn::der::decode::<rasn_pkix::Certificate>(&cert[..]).is_ok() {
-        (
-            ENCRYPT_METHOD_SMIME,
-            Box::from_iter([cert.into_boxed_slice()]),
+    fn nonce_size(self) -> usize {
+        match self {
+            SymmetricCipher::Aes128Cbc | SymmetricCipher::Aes256Cbc => 16,
+            SymmetricCipher::Aes256Gcm | SymmetricCipher::ChaCha20Poly1305 => 12,
+        }
+    }
+
+    fn is_aead(self) -> bool {
+        matches!(
+            self,
+            SymmetricCipher::Aes256Gcm | SymmetricCipher::ChaCha20Poly1305
         )
-    } else if let Ok(cert_) = openpgp::Cert::from_bytes(&cert[..]) {
-        if !has_pgp_keys(cert_) {
-            (
-                ENCRYPT_METHOD_PGP,
-                Box::from_iter([cert.into_boxed_slice()]),
-            )
-        } else {
-            return Err("Could not find any suitable keys in certificate".into());
-        }
-    } else {
-        return Err("Could not find any valid certificates".into());
-    };
-
-    if expected_method.flags() & flags != 0 {
-        Ok(certs)
-    } else {
-        Err("No valid certificates found for the selected encryption".into())
-    }
-}
-
-fn has_pgp_keys(cert: openpgp::Cert) -> bool {
-    cert.keys()
-        .with_policy(&P, None)
-        .supported()
-        .alive()
-        .revoked(false)
-        .key_flags(KeyFlags::empty().set_transport_encryption())
-        .next()
-        .is_some()
-}
-
-#[allow(clippy::type_complexity)]
-fn try_parse_pem(bytes_: &[u8]) -> Result<Option<EncryptionParams>, Cow<'static, str>> {
-    if let Some(internal) = std::str::from_utf8(bytes_)
-        .ok()
-        .and_then(|cert| cert.strip_prefix("-----STALWART CERTIFICATE-----"))
-    {
-        return base64_decode(internal.as_bytes())
-            .ok_or(Cow::from("Failed to decode base64"))
-            .and_then(|bytes| {
-                Archive::deserialize_owned(bytes)
-                    .and_then(|arch| arch.deserialize::<EncryptionParams>())
-                    .map_err(|_| Cow::from("Failed to deserialize internal certificate"))
-            })
-            .map(Some);
     }
 
-    let mut bytes = bytes_.iter().enumerate();
-    let mut buf = vec![];
-    let mut method = None;
-    let mut certs: Vec<Box<[u8]>> = vec![];
-
-    loop {
-        // Find start of PEM block
-        let mut start_pos = 0;
-        for (pos, &ch) in bytes.by_ref() {
-            if ch.is_ascii_whitespace() {
-                continue;
-            } else if ch == b'-' {
-                start_pos = pos;
-                break;
-            } else {
-                return Ok(None);
+    fn encrypt(self, key: &[u8], nonce: &[u8], contents: &[u8]) -> (Vec<u8>, Option<Vec<u8>>) {
+        match self {
+            SymmetricCipher::Aes128Cbc => (
+                cbc::Encryptor::<aes::Aes128>::new_from_slices(key, nonce)
+                    .expect("invalid key or iv length")
+                    .encrypt_padded_vec::<Pkcs7>(contents),
+                None,
+            ),
+            SymmetricCipher::Aes256Cbc => (
+                cbc::Encryptor::<aes::Aes256>::new_from_slices(key, nonce)
+                    .expect("invalid key or iv length")
+                    .encrypt_padded_vec::<Pkcs7>(contents),
+                None,
+            ),
+            SymmetricCipher::Aes256Gcm => {
+                let cipher = Aes256Gcm::new_from_slice(key).expect("invalid key length");
+                let mut buffer = contents.to_vec();
+                let tag = cipher
+                    .encrypt_in_place_detached(GenericArray::from_slice(nonce), b"", &mut buffer)
+                    .expect("AES-GCM encryption failed");
+                (buffer, Some(tag.to_vec()))
+            }
+            SymmetricCipher::ChaCha20Poly1305 => {
+                let cipher = ChaCha20Poly1305::new_from_slice(key).expect("invalid key length");
+                let mut buffer = contents.to_vec();
+                let tag = cipher
+                    .encrypt_in_place_detached(GenericArray::from_slice(nonce), b"", &mut buffer)
+                    .expect("ChaCha20-Poly1305 encryption failed");
+                (buffer, Some(tag.to_vec()))
             }
         }
+    }
 
-        // Find block type
-        for (_, &ch) in bytes.by_ref() {
-            match ch {
-                b'-' => (),
-                b'\n' => break,
-                _ => {
-                    if ch.is_ascii() {
-                        buf.push(ch.to_ascii_uppercase());
-                    } else {
-                        return Ok(None);
-                    }
-                }
-            }
-        }
-        if buf.is_empty() {
-            break;
-        }
+    fn content_encryption_algorithm(
+        self,
+        nonce: &[u8],
+    ) -> Result<AlgorithmIdentifier, EncryptMessageError> {
+        let (algorithm, parameters) = match self {
+            SymmetricCipher::Aes128Cbc => (AES128_CBC, encode_octet_string(nonce)?),
+            SymmetricCipher::Aes256Cbc => (AES256_CBC, encode_octet_string(nonce)?),
+            SymmetricCipher::ChaCha20Poly1305 => (CHACHA20_POLY1305, encode_octet_string(nonce)?),
+            SymmetricCipher::Aes256Gcm => (
+                AES256_GCM,
+                rasn::der::encode(&GcmParameters {
+                    nonce: OctetString::from_slice(nonce),
+                    icv_len: 16,
+                })
+                .map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to encode GCM parameters: {}", err))
+                })?,
+            ),
+        };
 
-        // Find type
-        let tag = std::str::from_utf8(&buf).unwrap();
-        if tag.contains("CERTIFICATE") {
-            if method.is_some_and(|m| m == EncryptionMethod::PGP) {
-                return Err("Cannot mix OpenPGP and S/MIME certificates".into());
-            } else {
-                method = Some(EncryptionMethod::SMIME);
-            }
-        } else if tag.contains("PGP") {
-            if method.is_some_and(|m| m == EncryptionMethod::SMIME) {
-                return Err("Cannot mix OpenPGP and S/MIME certificates".into());
-            } else {
-                method = Some(EncryptionMethod::PGP);
-            }
-        } else {
-            // Ignore block
-            let mut found_end = false;
-            for (_, &ch) in bytes.by_ref() {
-                if ch == b'-' {
-                    found_end = true;
-                } else if ch == b'\n' && found_end {
-                    break;
-                }
-            }
-            buf.clear();
-            continue;
-        }
+        Ok(AlgorithmIdentifier {
+            algorithm: algorithm.into(),
+            parameters: Some(parameters.into()),
+        })
+    }
 
-        // Collect base64
-        buf.clear();
-        let mut found_end = false;
-        let mut end_pos = 0;
-        for (pos, &ch) in bytes.by_ref() {
-            match ch {
-                b'-' => {
-                    found_end = true;
-                }
-                b'\n' => {
-                    if found_end {
-                        end_pos = pos;
-                        break;
-                    }
-                }
-                _ => {
-                    if !ch.is_ascii_whitespace() {
-                        buf.push(ch);
-                    }
-                }
-            }
-        }
-
-        // Decode base64
-        let cert = base64_decode(&buf)
-            .ok_or_else(|| Cow::from("Failed to decode base64 certificate."))?
-            .into_boxed_slice();
-        match method.unwrap() {
-            EncryptionMethod::PGP => match openpgp::Cert::from_bytes(bytes_) {
-                Ok(cert) => {
-                    if !has_pgp_keys(cert) {
-                        return Err("Could not find any suitable keys in OpenPGP public key".into());
-                    }
-                    certs.push(
-                        bytes_
-                            .get(start_pos..end_pos + 1)
-                            .unwrap_or_default()
+    fn key_encryption_algorithm(self) -> Result<AlgorithmIdentifier, EncryptMessageError> {
+        if self.is_aead() {
+            let sha256 = AlgorithmIdentifier {
+                algorithm: SHA256.into(),
+                parameters: Some(encode_null()?.into()),
+            };
+            let parameters = rasn::der::encode(&OaepParameters {
+                hash_algorithm: sha256.clone(),
+                mask_gen_algorithm: AlgorithmIdentifier {
+                    algorithm: MGF1.into(),
+                    parameters: Some(
+                        rasn::der::encode(&sha256)
+                            .map_err(|err| {
+                                EncryptMessageError::Error(format!(
+                                    "Failed to encode MGF1 parameters: {}",
+                                    err
+                                ))
+                            })?
                             .into(),
-                    );
-                }
-                Err(err) => {
-                    return Err(format!("Failed to decode OpenPGP public key: {err}").into());
-                }
-            },
-            EncryptionMethod::SMIME => {
-                if let Err(err) = rasn::der::decode::<rasn_pkix::Certificate>(&cert) {
-                    return Err(format!("Failed to decode X509 certificate: {err}").into());
-                }
-                certs.push(cert);
-            }
-        }
-        buf.clear();
-    }
+                    ),
+                },
+            })
+            .map_err(|err| {
+                EncryptMessageError::Error(format!("Failed to encode OAEP parameters: {}", err))
+            })?;
 
-    Ok(method.map(|method| EncryptionParams {
-        flags: method.flags(),
-        certs: certs.into_boxed_slice(),
-    }))
-}
-
-impl EncryptionMethod {
-    pub fn flags(&self) -> u64 {
-        match self {
-            EncryptionMethod::PGP => ENCRYPT_METHOD_PGP,
-            EncryptionMethod::SMIME => ENCRYPT_METHOD_SMIME,
+            Ok(AlgorithmIdentifier {
+                algorithm: RSAES_OAEP.into(),
+                parameters: Some(parameters.into()),
+            })
+        } else {
+            Ok(AlgorithmIdentifier {
+                algorithm: RSA.into(),
+                parameters: Some(encode_null()?.into()),
+            })
         }
     }
 }
 
-impl Algorithm {
-    pub fn flags(&self) -> u64 {
-        match self {
-            Algorithm::Aes128 => ENCRYPT_ALGO_AES128,
-            Algorithm::Aes256 => ENCRYPT_ALGO_AES256,
-        }
-    }
+#[derive(rasn::AsnType, rasn::Encode)]
+struct GcmParameters {
+    nonce: OctetString,
+    icv_len: u8,
 }
 
-impl Display for EncryptionMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EncryptionMethod::PGP => write!(f, "OpenPGP"),
-            EncryptionMethod::SMIME => write!(f, "S/MIME"),
-        }
-    }
+#[derive(rasn::AsnType, rasn::Encode)]
+struct OaepParameters {
+    #[rasn(tag(explicit(0)))]
+    hash_algorithm: AlgorithmIdentifier,
+    #[rasn(tag(explicit(1)))]
+    mask_gen_algorithm: AlgorithmIdentifier,
 }
 
-impl Display for Algorithm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Algorithm::Aes128 => write!(f, "AES-128"),
-            Algorithm::Aes256 => write!(f, "AES-256"),
-        }
-    }
+fn encode_octet_string(value: &[u8]) -> Result<Vec<u8>, EncryptMessageError> {
+    rasn::der::encode(&OctetString::from_slice(value))
+        .map_err(|err| EncryptMessageError::Error(format!("Failed to encode nonce: {}", err)))
+}
+
+fn encode_null() -> Result<Vec<u8>, EncryptMessageError> {
+    rasn::der::encode(&()).map_err(|err| {
+        EncryptMessageError::Error(format!("Failed to encode NULL parameters: {}", err))
+    })
 }

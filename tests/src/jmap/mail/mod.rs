@@ -5,11 +5,8 @@
  */
 
 pub mod acl;
-pub mod antispam;
 pub mod changes;
 pub mod copy;
-pub mod crypto;
-pub mod delivery;
 pub mod get;
 pub mod mailbox;
 pub mod parse;

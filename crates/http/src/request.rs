@@ -6,6 +6,7 @@
 
 use crate::{
     HttpSessionManager,
+    api::{ManagementApi, ToManageHttpResponse},
     auth::{
         authenticate::{Authenticator, HttpHeaders},
         oauth::{
@@ -13,22 +14,15 @@ use crate::{
             registration::ClientRegistrationHandler, token::TokenHandler,
         },
     },
-    autoconfig::Autoconfig,
     form::FormHandler,
-    management::{
-        ManagementApi, ToManageHttpResponse, UnauthorizedResponse, troubleshoot::TroubleshootApi,
-    },
 };
 use common::{
-    Inner, KV_ACME, Server,
-    auth::{AccessToken, oauth::GrantType},
-    core::BuildServer,
+    BuildServer, Inner, KV_ACME, Server,
     ipc::PushEvent,
-    listener::{SessionData, SessionManager, SessionStream},
-    manager::webadmin::Resource,
+    manager::application::Resource,
+    network::{SessionData, SessionManager, SessionStream},
 };
 use dav::{DavMethod, request::DavRequestHandler};
-use directory::Permission;
 use groupware::{DavResourceName, calendar::itip::ItipIngest};
 use http_proto::{
     DownloadResponse, HtmlResponse, HttpContext, HttpRequest, HttpResponse, HttpResponseBody,
@@ -50,11 +44,12 @@ use jmap::{
     websocket::upgrade::WebSocketUpgrade,
 };
 use jmap_proto::request::{Request, capability::Session};
+use percent_encoding::percent_decode_str;
+use registry::schema::enums::Permission;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use store::dispatch::lookup::KeyValue;
 use trc::SecurityEvent;
 use types::{blob::BlobId, id::Id};
-use utils::url_params::UrlParams;
 
 pub trait ParseHttp: Sync + Send {
     fn parse_http_request(
@@ -91,7 +86,25 @@ impl ParseHttp for Server {
                     ("", &Method::POST) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
+
+                        if let Some(content_type) = req.headers().get(CONTENT_TYPE) {
+                            let is_json = content_type
+                                .to_str()
+                                .ok()
+                                .map(|ct| {
+                                    ct.split_once(';')
+                                        .map_or(ct, |(m, _)| m)
+                                        .trim()
+                                        .eq_ignore_ascii_case("application/json")
+                                })
+                                .unwrap_or(false);
+                            if !is_json {
+                                return Err(trc::JmapEvent::NotJson
+                                    .into_err()
+                                    .details("The Content-Type header must be application/json."));
+                            }
+                        }
 
                         let bytes = fetch_body(
                             &mut req,
@@ -112,7 +125,7 @@ impl ParseHttp for Server {
                                     self.core.jmap.request_max_calls,
                                     self.core.jmap.request_max_size,
                                 )?,
-                                access_token,
+                                &access_token,
                                 &session,
                             )
                             .await
@@ -121,7 +134,7 @@ impl ParseHttp for Server {
                     ("download", &Method::GET) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         if let (Some(_), Some(blob_id), Some(name)) = (
                             path.next().and_then(|p| Id::from_str(p).ok()),
@@ -150,7 +163,7 @@ impl ParseHttp for Server {
                     ("upload", &Method::POST) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         if let Some(account_id) = path.next().and_then(|p| Id::from_str(p).ok()) {
                             return match fetch_body(
@@ -172,7 +185,7 @@ impl ParseHttp for Server {
                                             .and_then(|h| h.to_str().ok())
                                             .unwrap_or("application/octet-stream"),
                                         &bytes,
-                                        access_token,
+                                        &access_token,
                                     )
                                     .await?
                                     .into_http_response()),
@@ -183,14 +196,14 @@ impl ParseHttp for Server {
                     ("eventsource", &Method::GET) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         return self.handle_event_source(req, access_token).await;
                     }
                     ("ws", &Method::GET) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         return self
                             .upgrade_websocket_connection(req, access_token, session)
@@ -200,24 +213,24 @@ impl ParseHttp for Server {
                         return if req.headers().contains_key(header::AUTHORIZATION) {
                             // Authenticate request
                             let (_in_flight, access_token) =
-                                self.authenticate_headers(&req, &session, false).await?;
+                                self.authenticate_headers(&req, &session).await?;
 
                             self.handle_session_resource(
-                                ctx.resolve_response_url(self).await,
-                                access_token,
+                                self.core.network.http.url_https.to_string(),
+                                &access_token,
                             )
                             .await
                             .map(|s| s.into_http_response())
                         } else {
                             Ok(Session::new(
-                                ctx.resolve_response_url(self).await,
+                                &self.core.network.http.url_https,
                                 &self.core.jmap.capabilities,
                             )
                             .into_http_response())
                         };
                     }
                     (_, &Method::OPTIONS) => {
-                        return Ok(JsonProblemResponse(StatusCode::NO_CONTENT).into_http_response());
+                        return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
                     }
                     _ => (),
                 }
@@ -245,7 +258,7 @@ impl ParseHttp for Server {
                     (Some(resource), Some(method)) => {
                         // Authenticate request
                         let (_in_flight, access_token) =
-                            self.authenticate_headers(&req, &session, false).await?;
+                            self.authenticate_headers(&req, &session).await?;
 
                         self.handle_dav_request(req, access_token, &session, resource, method)
                             .await
@@ -274,24 +287,29 @@ impl ParseHttp for Server {
                 }
                 ("oauth-authorization-server", &Method::GET) => {
                     // Limit anonymous requests
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
-                    return self.handle_oauth_metadata(req, session).await;
+                    return self.handle_oauth_metadata().await;
+                }
+                ("oauth-protected-resource", &Method::GET) => {
+                    // Limit anonymous requests
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
+                        .await?;
+
+                    return self.handle_oauth_protected_resource().await;
                 }
                 ("openid-configuration", &Method::GET) => {
                     // Limit anonymous requests
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
-                    return self.handle_oidc_metadata(req, session).await;
+                    return self.handle_oidc_metadata(false).await;
                 }
                 ("acme-challenge", &Method::GET) if self.has_acme_http_providers() => {
                     if let Some(token) = path.next() {
                         return match self
-                            .core
-                            .storage
-                            .lookup
+                            .in_memory_store()
                             .key_get::<String>(KeyValue::<()>::build_key(KV_ACME, token))
                             .await?
                         {
@@ -303,48 +321,72 @@ impl ParseHttp for Server {
                 }
                 ("mta-sts.txt", &Method::GET) => {
                     // Limit anonymous requests
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
-                    return if let Some(policy) = self.build_mta_sts_policy() {
+                    return if let Some(policy) = &self.core.smtp.session.mta_sts_policy {
                         Ok(Resource::new("text/plain", policy.to_string().into_bytes())
                             .into_http_response())
                     } else {
                         Err(trc::ResourceEvent::NotFound.into_err())
                     };
                 }
+                ("user-agent-configuration.json", &Method::GET) => {
+                    // Limit anonymous requests
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
+                        .await?;
+                    return Ok(Resource::new(
+                        "application/json",
+                        self.get_pacc_for_domain(
+                            req.headers()
+                                .get(header::HOST)
+                                .and_then(|h| h.to_str().ok())
+                                .map(|h| h.rsplit_once(':').map_or(h, |(h, _)| h))
+                                .unwrap_or_default(),
+                        )
+                        .await?
+                        .into_bytes(),
+                    )
+                    .into_http_response()
+                    .with_cors_unrestricted());
+                }
                 ("mail-v1.xml", &Method::GET) => {
                     // Limit anonymous requests
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
-                    return self.handle_autoconfig_request(&req).await;
+                    return self
+                        .handle_autoconfig_request(req.uri().query())
+                        .await
+                        .map(|resource| resource.into_http_response());
                 }
-                ("autoconfig", &Method::GET) => {
+                ("autoconfig", &Method::GET)
                     if path.next().unwrap_or_default() == "mail"
-                        && path.next().unwrap_or_default() == "config-v1.1.xml"
-                    {
-                        // Limit anonymous requests
-                        self.is_http_anonymous_request_allowed(&session.remote_ip)
-                            .await?;
+                        && path.next().unwrap_or_default() == "config-v1.1.xml" =>
+                {
+                    // Limit anonymous requests
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
+                        .await?;
 
-                        return self.handle_autoconfig_request(&req).await;
-                    }
+                    return self
+                        .handle_autoconfig_request(req.uri().query())
+                        .await
+                        .map(|resource| resource.into_http_response().with_cors_unrestricted());
                 }
                 (_, &Method::OPTIONS) => {
-                    return Ok(JsonProblemResponse(StatusCode::NO_CONTENT).into_http_response());
+                    return Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_cors_unrestricted());
                 }
                 _ => (),
             },
             "auth" => match (path.next().unwrap_or_default(), req.method()) {
                 ("device", &Method::POST) => {
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
-                    return self.handle_device_auth(&mut req, session).await;
+                    return self.handle_device_auth(&mut req, &session).await;
                 }
                 ("token", &Method::POST) => {
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
                     return self.handle_token_request(&mut req, session).await;
@@ -352,7 +394,7 @@ impl ParseHttp for Server {
                 ("introspect", &Method::POST) => {
                     // Authenticate request
                     let (_in_flight, access_token) =
-                        self.authenticate_headers(&req, &session, false).await?;
+                        self.authenticate_headers(&req, &session).await?;
 
                     return self
                         .handle_token_introspect(&mut req, &access_token, session.session_id)
@@ -361,9 +403,11 @@ impl ParseHttp for Server {
                 ("userinfo", &Method::GET) => {
                     // Authenticate request
                     let (_in_flight, access_token) =
-                        self.authenticate_headers(&req, &session, false).await?;
+                        self.authenticate_headers(&req, &session).await?;
 
-                    return self.handle_userinfo_request(&access_token).await;
+                    return self
+                        .handle_userinfo_request(access_token.account_id())
+                        .await;
                 }
                 ("register", &Method::POST) => {
                     return self
@@ -372,112 +416,41 @@ impl ParseHttp for Server {
                 }
                 ("jwks.json", &Method::GET) => {
                     // Limit anonymous requests
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
                     return Ok(self.core.oauth.oidc_jwks.clone().into_http_response());
                 }
                 (_, &Method::OPTIONS) => {
-                    return Ok(JsonProblemResponse(StatusCode::NO_CONTENT).into_http_response());
+                    return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
                 }
                 _ => (),
             },
             "api" => {
                 // Allow CORS preflight requests
                 if req.method() == Method::OPTIONS {
-                    return Ok(JsonProblemResponse(StatusCode::NO_CONTENT).into_http_response());
+                    return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
                 }
 
-                // Authenticate user
-                match self.authenticate_headers(&req, &session, true).await {
-                    Ok((_, access_token)) => {
-                        return self
-                            .handle_api_manage_request(&mut req, access_token, &session)
-                            .await;
-                    }
-                    Err(err) => {
-                        if err.matches(trc::EventType::Auth(trc::AuthEvent::Failed)) {
-                            let params = UrlParams::new(req.uri().query());
-                            let path = req.uri().path().split('/').skip(2).collect::<Vec<_>>();
-
-                            let (grant_type, token) = match (
-                                path.first().copied(),
-                                path.get(1).copied(),
-                                params.get("token"),
-                            ) {
-                                // SPDX-SnippetBegin
-                                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                                // SPDX-License-Identifier: LicenseRef-SEL
-                                #[cfg(feature = "enterprise")]
-                                (Some("telemetry"), Some("traces"), Some(token))
-                                    if self.core.is_enterprise_edition() =>
-                                {
-                                    (GrantType::LiveTracing, token)
-                                }
-                                #[cfg(feature = "enterprise")]
-                                (Some("telemetry"), Some("metrics"), Some(token))
-                                    if self.core.is_enterprise_edition() =>
-                                {
-                                    (GrantType::LiveMetrics, token)
-                                }
-                                // SPDX-SnippetEnd
-                                (Some("troubleshoot"), _, Some(token)) => {
-                                    (GrantType::Troubleshoot, token)
-                                }
-                                _ => return Ok(HttpResponse::unauthorized(false)),
-                            };
-                            let token_info =
-                                self.validate_access_token(grant_type.into(), token).await?;
-
-                            return match grant_type {
-                                // SPDX-SnippetBegin
-                                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                                // SPDX-License-Identifier: LicenseRef-SEL
-                                #[cfg(feature = "enterprise")]
-                                GrantType::LiveTracing | GrantType::LiveMetrics => {
-                                    use crate::management::enterprise::telemetry::TelemetryApi;
-                                    self.handle_telemetry_api_request(
-                                        &req,
-                                        path,
-                                        &AccessToken::from_id(token_info.account_id)
-                                            .with_permission(Permission::MetricsLive)
-                                            .with_permission(Permission::TracingLive),
-                                    )
-                                    .await
-                                }
-                                // SPDX-SnippetEnd
-                                GrantType::Troubleshoot => {
-                                    self.handle_troubleshoot_api_request(
-                                        &req,
-                                        path,
-                                        &AccessToken::from_id(token_info.account_id)
-                                            .with_permission(Permission::Troubleshoot),
-                                        None,
-                                    )
-                                    .await
-                                }
-                                _ => unreachable!(),
-                            };
-                        }
-
-                        return Err(err);
-                    }
-                }
+                return self.handle_api_request(&mut req, &session).await;
             }
             "mail" => {
                 if req.method() == Method::GET
                     && path.next().unwrap_or_default() == "config-v1.1.xml"
                 {
                     // Limit anonymous requests
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
-                    return self.handle_autoconfig_request(&req).await;
+                    return self
+                        .handle_autoconfig_request(req.uri().query())
+                        .await
+                        .map(|resource| resource.into_http_response());
                 }
             }
             "calendar" => {
                 // Limit anonymous requests
-                self.is_http_anonymous_request_allowed(&session.remote_ip)
+                self.is_http_anonymous_request_allowed(session.remote_ip)
                     .await?;
 
                 if self.core.groupware.itip_http_rsvp_url.is_some()
@@ -504,27 +477,44 @@ impl ParseHttp for Server {
                         });
                 }
             }
-            "autodiscover" | "Autodiscover" => {
+            "autodiscover" | "Autodiscover" | "AutoDiscover" => {
+                let document_name = path.next().unwrap_or_default();
                 if req.method() == Method::POST
-                    && path
-                        .next()
-                        .unwrap_or_default()
-                        .eq_ignore_ascii_case("autodiscover.xml")
+                    && document_name.eq_ignore_ascii_case("autodiscover.xml")
                 {
                     // Limit anonymous requests
-                    self.is_http_anonymous_request_allowed(&session.remote_ip)
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
                         .await?;
 
                     return self
                         .handle_autodiscover_request(
                             fetch_body(&mut req, 8192, session.session_id).await,
                         )
-                        .await;
+                        .await
+                        .map(|resource| resource.into_http_response());
+                } else if document_name.eq_ignore_ascii_case("autodiscover.json") {
+                    // Limit anonymous requests
+                    self.is_http_anonymous_request_allowed(session.remote_ip)
+                        .await?;
+
+                    let path_email = path
+                        .map(|segment| percent_decode_str(segment).decode_utf8_lossy().into_owned())
+                        .find(|segment| segment.contains('@'));
+
+                    return self
+                        .handle_autodiscover_v2_request(req.uri().query(), path_email.as_deref())
+                        .await
+                        .map(|result| match result {
+                            Ok(resource) => resource.into_http_response(),
+                            Err(err) => HttpResponse::new(StatusCode::BAD_REQUEST)
+                                .with_content_type("application/json; charset=utf-8")
+                                .with_text_body(err),
+                        });
                 }
             }
             "robots.txt" => {
                 // Limit anonymous requests
-                self.is_http_anonymous_request_allowed(&session.remote_ip)
+                self.is_http_anonymous_request_allowed(session.remote_ip)
                     .await?;
 
                 return Ok(
@@ -534,7 +524,7 @@ impl ParseHttp for Server {
             }
             "healthz" => {
                 // Limit anonymous requests
-                self.is_http_anonymous_request_allowed(&session.remote_ip)
+                self.is_http_anonymous_request_allowed(session.remote_ip)
                     .await?;
 
                 match path.next().unwrap_or_default() {
@@ -584,7 +574,7 @@ impl ParseHttp for Server {
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
-            "logo.svg" if self.is_enterprise_edition() => {
+            "logo" if self.is_enterprise_edition() => {
                 match self
                     .logo_resource(
                         req.headers()
@@ -598,16 +588,12 @@ impl ParseHttp for Server {
                     Ok(Some(resource)) => {
                         return Ok(resource.into_http_response());
                     }
-                    Ok(None) => (),
+                    Ok(None) => {
+                        return Err(trc::ResourceEvent::NotFound.into_err());
+                    }
                     Err(err) => {
                         trc::error!(err.span_id(session.session_id));
                     }
-                }
-
-                let resource = self.inner.data.webadmin.get("logo.svg").await?;
-
-                if !resource.is_empty() {
-                    return Ok(resource.into_http_response());
                 }
             }
             // SPDX-SnippetEnd
@@ -615,7 +601,7 @@ impl ParseHttp for Server {
                 if let Some(form) = &self.core.network.contact_form {
                     match *req.method() {
                         Method::POST => {
-                            self.is_http_anonymous_request_allowed(&session.remote_ip)
+                            self.is_http_anonymous_request_allowed(session.remote_ip)
                                 .await?;
 
                             let form_data =
@@ -625,25 +611,46 @@ impl ParseHttp for Server {
                             return self.handle_contact_form(&session, form, form_data).await;
                         }
                         Method::OPTIONS => {
-                            return Ok(
-                                JsonProblemResponse(StatusCode::NO_CONTENT).into_http_response()
-                            );
+                            return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
                         }
                         _ => {}
                     }
                 }
             }
-            _ => {
-                let path = req.uri().path();
-                let resource = self
+            "login" | "device" => {
+                let page = include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../resources/html-templates/login.html.min"
+                ));
+
+                return Ok(HtmlResponse::new(page.to_string()).into_http_response());
+            }
+            external => {
+                if path.next().is_none() {
+                    if !external.is_empty() {
+                        return Ok(HttpResponse::redirect(format!("/{external}/")));
+                    } else if let Some(url) = &self.core.network.http.redirect_root {
+                        return Ok(HttpResponse::redirect(url.clone()));
+                    }
+                } else if let Some(resource) = self
                     .inner
                     .data
-                    .webadmin
-                    .get(path.strip_prefix('/').unwrap_or(path))
-                    .await?;
-
-                if !resource.is_empty() {
-                    return Ok(resource.into_http_response());
+                    .applications
+                    .serve(
+                        external,
+                        req.uri()
+                            .path()
+                            .get(external.len() + 2..)
+                            .unwrap_or_default(),
+                    )
+                    .await?
+                {
+                    let response = resource.resource.into_http_response();
+                    return Ok(if !resource.no_cache {
+                        response.with_immutable_cache()
+                    } else {
+                        response.with_no_cache()
+                    });
                 }
             }
         }
@@ -679,7 +686,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                     let server = inner.build_server();
 
                     // Obtain remote IP
-                    let remote_ip = if !server.core.jmap.http_use_forwarded {
+                    let remote_ip = if !server.core.network.http.use_forwarded {
                         trc::event!(
                             Http(trc::HttpEvent::RequestUrl),
                             SpanId = session.session_id,
@@ -724,22 +731,6 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                                 .and_then(|h| h.parse::<IpAddr>().ok())
                         })
                     {
-                        // Check if the forwarded IP has been blocked
-                        if server.is_ip_blocked(&forwarded_for) {
-                            trc::event!(
-                                Security(trc::SecurityEvent::IpBlocked),
-                                ListenerId = instance.id.clone(),
-                                RemoteIp = forwarded_for,
-                                SpanId = session.session_id,
-                            );
-
-                            return Ok::<_, hyper::Error>(
-                                JsonProblemResponse(StatusCode::FORBIDDEN)
-                                    .into_http_response()
-                                    .build(),
-                            );
-                        }
-
                         trc::event!(
                             Http(trc::HttpEvent::RequestUrl),
                             SpanId = session.session_id,
@@ -755,6 +746,22 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                         );
                         session.remote_ip
                     };
+
+                    // Check if the remote IP has been blocked
+                    if server.is_ip_blocked(remote_ip) {
+                        trc::event!(
+                            Security(trc::SecurityEvent::IpBlocked),
+                            ListenerId = instance.id.clone(),
+                            RemoteIp = remote_ip,
+                            SpanId = session.session_id,
+                        );
+
+                        return Ok::<_, hyper::Error>(
+                            JsonProblemResponse(StatusCode::FORBIDDEN)
+                                .into_http_response()
+                                .build(),
+                        );
+                    }
 
                     // Parse HTTP request
                     let response = match Box::pin(server.parse_http_request(
@@ -798,10 +805,10 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                     let mut response = response.build();
 
                     // Add custom headers
-                    if !server.core.jmap.http_headers.is_empty() {
+                    if !server.core.network.http.response_headers.is_empty() {
                         let headers = response.headers_mut();
 
-                        for (header, value) in &server.core.jmap.http_headers {
+                        for (header, value) in &server.core.network.http.response_headers {
                             headers.insert(header.clone(), value.clone());
                         }
                     }
@@ -815,7 +822,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
     {
         if http_err.is_parse() {
             let server = inner.build_server();
-            if !server.core.jmap.http_use_forwarded {
+            if !server.core.network.http.use_forwarded {
                 match server.is_scanner_fail2banned(session.remote_ip).await {
                     Ok(true) => {
                         trc::event!(

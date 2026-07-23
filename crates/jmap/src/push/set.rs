@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose};
+use base64::{
+    Engine, alphabet,
+    engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
+};
 use common::{Server, auth::AccessToken, ipc::PushEvent};
 use email::push::{Keys, PushSubscription, PushSubscriptions};
 use jmap_proto::{
@@ -12,11 +15,12 @@ use jmap_proto::{
     method::set::{SetRequest, SetResponse},
     object::push_subscription::{self, PushSubscriptionProperty, PushSubscriptionValue},
     references::resolve::ResolveCreatedReference,
-    request::IntoValid,
+    request::MaybeInvalid,
     types::date::UTCDate,
 };
 use jmap_tools::{Key, Map, Value};
 use rand::distr::Alphanumeric;
+use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
     Serialize, ValueKey,
@@ -24,11 +28,15 @@ use store::{
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, now},
 };
 use trc::{AddContext, ServerEvent};
-use types::{collection::Collection, field::PrincipalField};
+use types::{collection::Collection, field::PrincipalField, id::Id};
 use utils::map::bitmap::Bitmap;
 
 const EXPIRES_MAX: i64 = 7 * 24 * 3600; // 7 days
 const VERIFICATION_CODE_LEN: usize = 32;
+const URL_SAFE_INDIFFERENT: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::URL_SAFE,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
 
 pub trait PushSubscriptionSet: Sync + Send {
     fn push_subscription_set(
@@ -45,7 +53,7 @@ impl PushSubscriptionSet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<SetResponse<push_subscription::PushSubscription>> {
         // Load existing push subscriptions
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
         let subscriptions_archive = self
             .store()
             .get_value::<Archive<AlignedBytes>>(ValueKey::property(
@@ -75,14 +83,16 @@ impl PushSubscriptionSet for Server {
 
         // Prepare response
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
-        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
 
         // Process creates
         'create: for (id, object) in request.unwrap_create() {
             let mut push = PushSubscription::default();
 
             if subscriptions.subscriptions.len()
-                >= access_token.object_quota(Collection::PushSubscription) as usize
+                >= self.object_quota(account.object_quotas(), StorageQuota::MaxPushSubscriptions)
+                    as usize
             {
                 response.not_created.append(id, SetError::new(SetErrorType::OverQuota).with_description(
                     "There are too many subscriptions, please delete some before adding a new one.",
@@ -92,8 +102,8 @@ impl PushSubscriptionSet for Server {
 
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response
-                    .resolve_self_references(&mut value)
-                    .and_then(|_| validate_push_value(&property, value, &mut push, true))
+                    .resolve_self_references(&mut value, 0, false)
+                    .and_then(|_| validate_push_value(None, &property, value, &mut push, true))
                 {
                     response.not_created.append(id, err);
                     continue 'create;
@@ -151,7 +161,14 @@ impl PushSubscriptionSet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update().into_valid() {
+        'update: for (id, object) in request.unwrap_update() {
+            let id = match id {
+                MaybeInvalid::Value(id) => id,
+                invalid => {
+                    response.not_updated.append(invalid, SetError::not_found());
+                    continue 'update;
+                }
+            };
             // Make sure id won't be destroyed
             if will_destroy.contains(&id) {
                 response.not_updated.append(id, SetError::will_destroy());
@@ -171,8 +188,8 @@ impl PushSubscriptionSet for Server {
 
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response
-                    .resolve_self_references(&mut value)
-                    .and_then(|_| validate_push_value(&property, value, push, false))
+                    .resolve_self_references(&mut value, 0, false)
+                    .and_then(|_| validate_push_value(Some(id), &property, value, push, false))
                 {
                     response.not_updated.append(id, err);
                     continue 'update;
@@ -266,6 +283,7 @@ impl PushSubscriptionSet for Server {
 }
 
 fn validate_push_value(
+    expected_id: Option<Id>,
     property: &Key<PushSubscriptionProperty>,
     value: Value<'_, PushSubscriptionProperty, PushSubscriptionValue>,
     push: &mut PushSubscription,
@@ -293,12 +311,22 @@ fn validate_push_value(
                 value
                     .get(&Key::Property(PushSubscriptionProperty::Auth))
                     .and_then(|v| v.as_str())
-                    .and_then(|v| general_purpose::URL_SAFE.decode(v.as_ref()).ok()),
+                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_ref()).ok()),
                 value
                     .get(&Key::Property(PushSubscriptionProperty::P256dh))
                     .and_then(|v| v.as_str())
-                    .and_then(|v| general_purpose::URL_SAFE.decode(v.as_ref()).ok()),
+                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_ref()).ok()),
             ) {
+                if p256::PublicKey::from_sec1_bytes(&p256dh).is_err() {
+                    return Err(SetError::invalid_properties()
+                        .with_property(property.clone())
+                        .with_description("Invalid P-256 ECDH public key."));
+                }
+                if auth.len() != 16 {
+                    return Err(SetError::invalid_properties()
+                        .with_property(property.clone())
+                        .with_description("Invalid auth secret, expected 16 octets."));
+                }
                 push.keys = Some(Keys { auth, p256dh });
             } else {
                 return Err(SetError::invalid_properties()
@@ -347,6 +375,13 @@ fn validate_push_value(
             push.types = Bitmap::all();
         }
         (PushSubscriptionProperty::VerificationCode, Value::Null) => {}
+        (PushSubscriptionProperty::Id, value) => {
+            if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {
+                return Err(SetError::invalid_properties()
+                    .with_property(PushSubscriptionProperty::Id)
+                    .with_description("The id property is immutable."));
+            }
+        }
         (property, _) => {
             return Err(SetError::invalid_properties()
                 .with_property(property.clone())

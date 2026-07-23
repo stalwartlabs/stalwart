@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{AssertResult, ImapConnection, Type, resources_dir};
+use crate::utils::server::TestServer;
+use imap_proto::ResponseType;
 use std::{fs, io};
 
-use imap_proto::ResponseType;
-
-use crate::jmap::wait_for_index;
-
-use super::{AssertResult, IMAPTest, ImapConnection, Type, resources_dir};
-
-pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, handle: &IMAPTest) {
+pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, test: &TestServer) {
     println!("Running APPEND tests...");
 
     // Invalid APPEND commands
@@ -64,7 +61,7 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, h
         expected_uid += 1;
     }
 
-    wait_for_index(&handle.server).await;
+    test.wait_for_tasks().await;
 }
 
 pub async fn assert_append_message(

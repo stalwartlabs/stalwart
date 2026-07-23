@@ -4,16 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use mail_auth::{DkimResult, DmarcResult, IprevResult, SpfResult, dmarc::Policy};
 use std::borrow::Cow;
-
-use common::config::smtp::auth::{ArcSealer, DkimSigner};
-use mail_auth::{
-    ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, DmarcResult, IprevResult,
-    SpfResult, arc::ArcSet, dkim::Signature, dmarc::Policy,
-};
 
 pub mod auth;
 pub mod data;
+pub mod dkim;
 pub mod ehlo;
 pub mod hooks;
 pub mod mail;
@@ -28,49 +24,6 @@ pub mod vrfy;
 pub struct FilterResponse {
     pub message: Cow<'static, str>,
     pub disconnect: bool,
-}
-
-pub trait ArcSeal {
-    fn seal<'x>(
-        &self,
-        message: &'x AuthenticatedMessage,
-        results: &'x AuthenticationResults,
-        arc_output: &'x ArcOutput,
-    ) -> mail_auth::Result<ArcSet<'x>>;
-}
-
-impl ArcSeal for ArcSealer {
-    fn seal<'x>(
-        &self,
-        message: &'x AuthenticatedMessage,
-        results: &'x AuthenticationResults,
-        arc_output: &'x ArcOutput,
-    ) -> mail_auth::Result<ArcSet<'x>> {
-        match self {
-            ArcSealer::RsaSha256(sealer) => sealer.seal(message, results, arc_output),
-            ArcSealer::Ed25519Sha256(sealer) => sealer.seal(message, results, arc_output),
-        }
-    }
-}
-
-pub trait DkimSign {
-    fn sign(&self, message: &[u8]) -> mail_auth::Result<Signature>;
-    fn sign_chained(&self, message: &[&[u8]]) -> mail_auth::Result<Signature>;
-}
-
-impl DkimSign for DkimSigner {
-    fn sign(&self, message: &[u8]) -> mail_auth::Result<Signature> {
-        match self {
-            DkimSigner::RsaSha256(signer) => signer.sign(message),
-            DkimSigner::Ed25519Sha256(signer) => signer.sign(message),
-        }
-    }
-    fn sign_chained(&self, message: &[&[u8]]) -> mail_auth::Result<Signature> {
-        match self {
-            DkimSigner::RsaSha256(signer) => signer.sign_chained(message.iter().copied()),
-            DkimSigner::Ed25519Sha256(signer) => signer.sign_chained(message.iter().copied()),
-        }
-    }
 }
 
 pub trait AuthResult {

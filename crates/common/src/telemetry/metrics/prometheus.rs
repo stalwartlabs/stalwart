@@ -29,7 +29,7 @@ impl Server {
         // Add counters
         for counter in Collector::collect_counters(is_enterprise) {
             let mut metric = MetricFamily::default();
-            metric.set_name(metric_name(counter.id().name()));
+            metric.set_name(metric_name(counter.id().as_str()));
             metric.set_help(counter.id().description().into());
             metric.set_field_type(MetricType::COUNTER);
             metric.set_metric(vec![new_counter(counter.value())]);
@@ -39,7 +39,7 @@ impl Server {
         // Add gauges
         for gauge in Collector::collect_gauges(is_enterprise) {
             let mut metric = MetricFamily::default();
-            metric.set_name(metric_name(gauge.id().name()));
+            metric.set_name(metric_name(gauge.id().as_str()));
             metric.set_help(gauge.id().description().into());
             metric.set_field_type(MetricType::GAUGE);
             metric.set_metric(vec![new_gauge(gauge.get())]);
@@ -49,7 +49,7 @@ impl Server {
         // Add histograms
         for histogram in Collector::collect_histograms(is_enterprise) {
             let mut metric = MetricFamily::default();
-            metric.set_name(metric_name(histogram.id().name()));
+            metric.set_name(metric_name(histogram.id().as_str()));
             metric.set_help(histogram.id().description().into());
             metric.set_field_type(MetricType::HISTOGRAM);
             metric.set_metric(vec![new_histogram(histogram)]);

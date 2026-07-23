@@ -6,17 +6,15 @@
 
 use super::DocumentSet;
 use crate::{
-    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_BLOB_EXTRA, SUBSPACE_COUNTER,
-    SUBSPACE_INDEXES, SUBSPACE_LOGS, Store, U32_LEN, Value, ValueKey,
+    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_COUNTER, SUBSPACE_INDEXES,
+    SUBSPACE_LOGS, Store, U32_LEN, Value, ValueKey,
     write::{
-        AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, Operation, ReportClass, ValueClass,
-        ValueOp,
+        AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, Operation, ValueClass, ValueOp,
         key::{DeserializeBigEndian, KeySerializer},
-        now,
     },
 };
 use compact_str::ToCompactString;
-use std::{ops::Range, time::Instant};
+use std::time::Instant;
 use trc::{AddContext, StoreEvent};
 use types::collection::Collection;
 
@@ -36,11 +34,36 @@ impl Store {
             Self::MySQL(store) => store.get_value(key).await,
             #[cfg(feature = "rocks")]
             Self::RocksDb(store) => store.get_value(key).await,
+            Self::Ephemeral(store) => store.get_value(key).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
             Self::SQLReadReplica(store) => store.get_value(key).await,
+            // SPDX-SnippetEnd
+            Self::None => Err(trc::StoreEvent::NotConfigured.into()),
+        }
+        .caused_by(trc::location!())
+    }
+
+    pub async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
+        match self {
+            #[cfg(feature = "sqlite")]
+            Self::SQLite(store) => store.key_exists(key).await,
+            #[cfg(feature = "foundation")]
+            Self::FoundationDb(store) => store.key_exists(key).await,
+            #[cfg(feature = "postgres")]
+            Self::PostgreSQL(store) => store.key_exists(key).await,
+            #[cfg(feature = "mysql")]
+            Self::MySQL(store) => store.key_exists(key).await,
+            #[cfg(feature = "rocks")]
+            Self::RocksDb(store) => store.key_exists(key).await,
+            Self::Ephemeral(store) => store.key_exists(key).await,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            Self::SQLReadReplica(store) => store.key_exists(key).await,
             // SPDX-SnippetEnd
             Self::None => Err(trc::StoreEvent::NotConfigured.into()),
         }
@@ -64,6 +87,7 @@ impl Store {
             Self::MySQL(store) => store.iterate(params, cb).await,
             #[cfg(feature = "rocks")]
             Self::RocksDb(store) => store.iterate(params, cb).await,
+            Self::Ephemeral(store) => store.iterate(params, cb).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -97,6 +121,7 @@ impl Store {
             Self::MySQL(store) => store.get_counter(key).await,
             #[cfg(feature = "rocks")]
             Self::RocksDb(store) => store.get_counter(key).await,
+            Self::Ephemeral(store) => store.get_counter(key).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -150,6 +175,7 @@ impl Store {
             Self::MySQL(store) => store.write(batch).await,
             #[cfg(feature = "rocks")]
             Self::RocksDb(store) => store.write(batch).await,
+            Self::Ephemeral(store) => store.write(batch).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -189,36 +215,6 @@ impl Store {
     }
 
     pub async fn purge_store(&self) -> trc::Result<()> {
-        // Delete expired reports
-        let now = now();
-        self.delete_range(
-            ValueKey::from(ValueClass::Report(ReportClass::Dmarc { id: 0, expires: 0 })),
-            ValueKey::from(ValueClass::Report(ReportClass::Dmarc {
-                id: u64::MAX,
-                expires: now,
-            })),
-        )
-        .await
-        .caused_by(trc::location!())?;
-        self.delete_range(
-            ValueKey::from(ValueClass::Report(ReportClass::Tls { id: 0, expires: 0 })),
-            ValueKey::from(ValueClass::Report(ReportClass::Tls {
-                id: u64::MAX,
-                expires: now,
-            })),
-        )
-        .await
-        .caused_by(trc::location!())?;
-        self.delete_range(
-            ValueKey::from(ValueClass::Report(ReportClass::Arf { id: 0, expires: 0 })),
-            ValueKey::from(ValueClass::Report(ReportClass::Arf {
-                id: u64::MAX,
-                expires: now,
-            })),
-        )
-        .await
-        .caused_by(trc::location!())?;
-
         match self {
             #[cfg(feature = "sqlite")]
             Self::SQLite(store) => store.purge_store().await,
@@ -230,6 +226,7 @@ impl Store {
             Self::MySQL(store) => store.purge_store().await,
             #[cfg(feature = "rocks")]
             Self::RocksDb(store) => store.purge_store().await,
+            Self::Ephemeral(store) => store.purge_store().await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -253,6 +250,7 @@ impl Store {
             Self::MySQL(store) => store.delete_range(from, to).await,
             #[cfg(feature = "rocks")]
             Self::RocksDb(store) => store.delete_range(from, to).await,
+            Self::Ephemeral(store) => store.delete_range(from, to).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -344,12 +342,7 @@ impl Store {
     }
 
     pub async fn danger_destroy_account(&self, account_id: u32) -> trc::Result<()> {
-        for subspace in [
-            SUBSPACE_LOGS,
-            SUBSPACE_INDEXES,
-            SUBSPACE_COUNTER,
-            SUBSPACE_BLOB_EXTRA,
-        ] {
+        for subspace in [SUBSPACE_LOGS, SUBSPACE_INDEXES, SUBSPACE_COUNTER] {
             self.delete_range(
                 AnyKey {
                     subspace,
@@ -364,97 +357,58 @@ impl Store {
             .caused_by(trc::location!())?;
         }
 
-        for (from_class, to_class) in [
-            (ValueClass::Acl(account_id), ValueClass::Acl(account_id + 1)),
-            (ValueClass::Property(0), ValueClass::Property(0)),
-        ] {
-            self.delete_range(
-                ValueKey {
-                    account_id,
-                    collection: 0,
-                    document_id: 0,
-                    class: from_class,
-                },
-                ValueKey {
-                    account_id: account_id + 1,
-                    collection: 0,
-                    document_id: 0,
-                    class: to_class,
-                },
-            )
-            .await
-            .caused_by(trc::location!())?;
-        }
+        self.delete_range(
+            ValueKey {
+                account_id: 0,
+                collection: 0,
+                document_id: 0,
+                class: ValueClass::Acl(account_id),
+            },
+            ValueKey {
+                account_id: 0,
+                collection: 0,
+                document_id: 0,
+                class: ValueClass::Acl(account_id + 1),
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+
+        self.delete_range(
+            ValueKey {
+                account_id,
+                collection: 0,
+                document_id: 0,
+                class: ValueClass::Property(0),
+            },
+            ValueKey {
+                account_id: account_id + 1,
+                collection: 0,
+                document_id: 0,
+                class: ValueClass::Property(0),
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
 
         Ok(())
     }
 
-    pub async fn get_blob(&self, key: &[u8], range: Range<usize>) -> trc::Result<Option<Vec<u8>>> {
+    pub async fn create_tables(&self) -> trc::Result<()> {
         match self {
             #[cfg(feature = "sqlite")]
-            Self::SQLite(store) => store.get_blob(key, range).await,
-            #[cfg(feature = "foundation")]
-            Self::FoundationDb(store) => store.get_blob(key, range).await,
+            Self::SQLite(store) => store.create_tables(),
             #[cfg(feature = "postgres")]
-            Self::PostgreSQL(store) => store.get_blob(key, range).await,
+            Self::PostgreSQL(store) => store.create_storage_tables().await,
             #[cfg(feature = "mysql")]
-            Self::MySQL(store) => store.get_blob(key, range).await,
-            #[cfg(feature = "rocks")]
-            Self::RocksDb(store) => store.get_blob(key, range).await,
+            Self::MySQL(store) => store.create_storage_tables().await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-            Self::SQLReadReplica(store) => store.get_blob(key, range).await,
+            Store::SQLReadReplica(store) => Box::pin(store.primary_store().create_tables()).await,
             // SPDX-SnippetEnd
-            Self::None => Err(trc::StoreEvent::NotConfigured.into()),
+            _ => Ok(()),
         }
-        .caused_by(trc::location!())
-    }
-
-    pub async fn put_blob(&self, key: &[u8], data: &[u8]) -> trc::Result<()> {
-        match self {
-            #[cfg(feature = "sqlite")]
-            Self::SQLite(store) => store.put_blob(key, data).await,
-            #[cfg(feature = "foundation")]
-            Self::FoundationDb(store) => store.put_blob(key, data).await,
-            #[cfg(feature = "postgres")]
-            Self::PostgreSQL(store) => store.put_blob(key, data).await,
-            #[cfg(feature = "mysql")]
-            Self::MySQL(store) => store.put_blob(key, data).await,
-            #[cfg(feature = "rocks")]
-            Self::RocksDb(store) => store.put_blob(key, data).await,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-            Self::SQLReadReplica(store) => store.put_blob(key, data).await,
-            // SPDX-SnippetEnd
-            Self::None => Err(trc::StoreEvent::NotConfigured.into()),
-        }
-        .caused_by(trc::location!())
-    }
-
-    pub async fn delete_blob(&self, key: &[u8]) -> trc::Result<bool> {
-        match self {
-            #[cfg(feature = "sqlite")]
-            Self::SQLite(store) => store.delete_blob(key).await,
-            #[cfg(feature = "foundation")]
-            Self::FoundationDb(store) => store.delete_blob(key).await,
-            #[cfg(feature = "postgres")]
-            Self::PostgreSQL(store) => store.delete_blob(key).await,
-            #[cfg(feature = "mysql")]
-            Self::MySQL(store) => store.delete_blob(key).await,
-            #[cfg(feature = "rocks")]
-            Self::RocksDb(store) => store.delete_blob(key).await,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-            Self::SQLReadReplica(store) => store.delete_blob(key).await,
-            // SPDX-SnippetEnd
-            Self::None => Err(trc::StoreEvent::NotConfigured.into()),
-        }
-        .caused_by(trc::location!())
     }
 }

@@ -44,7 +44,11 @@ impl FileDeleteRequestHandler for Server {
             .filter(|r| !r.is_empty())
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::FileNode)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::FileNode,
+            )
             .await
             .caused_by(trc::location!())?;
 
@@ -90,7 +94,12 @@ impl FileDeleteRequestHandler for Server {
         .await?;
 
         DestroyArchive(sorted_ids)
-            .delete(self, access_token, account_id, full_delete_path.into())
+            .delete(
+                self,
+                access_token.account_tenant_ids(),
+                account_id,
+                full_delete_path.into(),
+            )
             .await?;
 
         Ok(HttpResponse::new(StatusCode::NO_CONTENT))

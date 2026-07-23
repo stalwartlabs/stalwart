@@ -44,6 +44,7 @@ use crate::{
         principal::Principal,
         push_subscription::PushSubscription,
         quota::Quota,
+        registry::Registry,
         share_notification::ShareNotification,
         sieve::Sieve,
         thread::Thread,
@@ -96,44 +97,46 @@ pub enum GetResponseMethod {
     CalendarEventNotification(CalendarEventNotificationGetResponse),
     ParticipantIdentity(GetResponse<ParticipantIdentity>),
     ShareNotification(GetResponse<ShareNotification>),
+    Registry(GetResponse<Registry>),
 }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(untagged)]
 pub enum SetResponseMethod {
-    Email(SetResponse<Email>),
-    Mailbox(SetResponse<Mailbox>),
-    Identity(SetResponse<Identity>),
-    EmailSubmission(SetResponse<EmailSubmission>),
-    PushSubscription(SetResponse<PushSubscription>),
-    Sieve(SetResponse<Sieve>),
-    VacationResponse(SetResponse<VacationResponse>),
-    AddressBook(SetResponse<AddressBook>),
-    ContactCard(SetResponse<ContactCard>),
-    FileNode(SetResponse<FileNode>),
-    ShareNotification(SetResponse<ShareNotification>),
-    Calendar(SetResponse<Calendar>),
-    CalendarEvent(SetResponse<CalendarEvent>),
-    CalendarEventNotification(SetResponse<CalendarEventNotification>),
-    ParticipantIdentity(SetResponse<ParticipantIdentity>),
+    Email(Box<SetResponse<Email>>),
+    Mailbox(Box<SetResponse<Mailbox>>),
+    Identity(Box<SetResponse<Identity>>),
+    EmailSubmission(Box<SetResponse<EmailSubmission>>),
+    PushSubscription(Box<SetResponse<PushSubscription>>),
+    Sieve(Box<SetResponse<Sieve>>),
+    VacationResponse(Box<SetResponse<VacationResponse>>),
+    AddressBook(Box<SetResponse<AddressBook>>),
+    ContactCard(Box<SetResponse<ContactCard>>),
+    FileNode(Box<SetResponse<FileNode>>),
+    ShareNotification(Box<SetResponse<ShareNotification>>),
+    Calendar(Box<SetResponse<Calendar>>),
+    CalendarEvent(Box<SetResponse<CalendarEvent>>),
+    CalendarEventNotification(Box<SetResponse<CalendarEventNotification>>),
+    ParticipantIdentity(Box<SetResponse<ParticipantIdentity>>),
+    Registry(Box<SetResponse<Registry>>),
 }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(untagged)]
 pub enum ChangesResponseMethod {
-    Email(ChangesResponse<Email>),
-    Mailbox(ChangesResponse<Mailbox>),
-    Thread(ChangesResponse<Thread>),
-    Identity(ChangesResponse<Identity>),
-    EmailSubmission(ChangesResponse<EmailSubmission>),
-    Quota(ChangesResponse<Quota>),
-    AddressBook(ChangesResponse<AddressBook>),
-    ContactCard(ChangesResponse<ContactCard>),
-    FileNode(ChangesResponse<FileNode>),
-    Calendar(ChangesResponse<Calendar>),
-    CalendarEvent(ChangesResponse<CalendarEvent>),
-    CalendarEventNotification(ChangesResponse<CalendarEventNotification>),
-    ShareNotification(ChangesResponse<ShareNotification>),
+    Email(Box<ChangesResponse<Email>>),
+    Mailbox(Box<ChangesResponse<Mailbox>>),
+    Thread(Box<ChangesResponse<Thread>>),
+    Identity(Box<ChangesResponse<Identity>>),
+    EmailSubmission(Box<ChangesResponse<EmailSubmission>>),
+    Quota(Box<ChangesResponse<Quota>>),
+    AddressBook(Box<ChangesResponse<AddressBook>>),
+    ContactCard(Box<ChangesResponse<ContactCard>>),
+    FileNode(Box<ChangesResponse<FileNode>>),
+    Calendar(Box<ChangesResponse<Calendar>>),
+    CalendarEvent(Box<ChangesResponse<CalendarEvent>>),
+    CalendarEventNotification(Box<ChangesResponse<CalendarEventNotification>>),
+    ShareNotification(Box<ChangesResponse<ShareNotification>>),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -142,6 +145,7 @@ pub enum CopyResponseMethod {
     Email(CopyResponse<Email>),
     ContactCard(CopyResponse<ContactCard>),
     CalendarEvent(CopyResponse<CalendarEvent>),
+    FileNode(CopyResponse<FileNode>),
     Blob(CopyBlobResponse),
 }
 
@@ -295,99 +299,111 @@ impl<'x> From<GetResponse<AddressBook>> for ResponseMethod<'x> {
     }
 }
 
+impl<'x> From<GetResponse<Registry>> for ResponseMethod<'x> {
+    fn from(value: GetResponse<Registry>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::Registry(value))
+    }
+}
+
 impl<'x> From<SetResponse<Email>> for ResponseMethod<'x> {
     fn from(value: SetResponse<Email>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::Email(value))
+        ResponseMethod::Set(SetResponseMethod::Email(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<Mailbox>> for ResponseMethod<'x> {
     fn from(value: SetResponse<Mailbox>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::Mailbox(value))
+        ResponseMethod::Set(SetResponseMethod::Mailbox(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<Identity>> for ResponseMethod<'x> {
     fn from(value: SetResponse<Identity>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::Identity(value))
+        ResponseMethod::Set(SetResponseMethod::Identity(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<EmailSubmission>> for ResponseMethod<'x> {
     fn from(value: SetResponse<EmailSubmission>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::EmailSubmission(value))
+        ResponseMethod::Set(SetResponseMethod::EmailSubmission(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<PushSubscription>> for ResponseMethod<'x> {
     fn from(value: SetResponse<PushSubscription>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::PushSubscription(value))
+        ResponseMethod::Set(SetResponseMethod::PushSubscription(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<Sieve>> for ResponseMethod<'x> {
     fn from(value: SetResponse<Sieve>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::Sieve(value))
+        ResponseMethod::Set(SetResponseMethod::Sieve(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<VacationResponse>> for ResponseMethod<'x> {
     fn from(value: SetResponse<VacationResponse>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::VacationResponse(value))
+        ResponseMethod::Set(SetResponseMethod::VacationResponse(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<AddressBook>> for ResponseMethod<'x> {
     fn from(value: SetResponse<AddressBook>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::AddressBook(value))
+        ResponseMethod::Set(SetResponseMethod::AddressBook(Box::new(value)))
     }
 }
 
 impl<'x> From<SetResponse<ContactCard>> for ResponseMethod<'x> {
     fn from(value: SetResponse<ContactCard>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::ContactCard(value))
+        ResponseMethod::Set(SetResponseMethod::ContactCard(Box::new(value)))
+    }
+}
+
+impl<'x> From<SetResponse<Registry>> for ResponseMethod<'x> {
+    fn from(value: SetResponse<Registry>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::Registry(Box::new(value)))
     }
 }
 
 impl<'x> From<ChangesResponse<Email>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<Email>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::Email(value))
+        ResponseMethod::Changes(ChangesResponseMethod::Email(Box::new(value)))
     }
 }
 
 impl<'x> From<ChangesResponse<Mailbox>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<Mailbox>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::Mailbox(value))
+        ResponseMethod::Changes(ChangesResponseMethod::Mailbox(Box::new(value)))
     }
 }
 
 impl<'x> From<ChangesResponse<Thread>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<Thread>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::Thread(value))
+        ResponseMethod::Changes(ChangesResponseMethod::Thread(Box::new(value)))
     }
 }
 
 impl<'x> From<ChangesResponse<Identity>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<Identity>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::Identity(value))
+        ResponseMethod::Changes(ChangesResponseMethod::Identity(Box::new(value)))
     }
 }
 
 impl<'x> From<ChangesResponse<EmailSubmission>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<EmailSubmission>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::EmailSubmission(value))
+        ResponseMethod::Changes(ChangesResponseMethod::EmailSubmission(Box::new(value)))
     }
 }
 
 impl<'x> From<ChangesResponse<Quota>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<Quota>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::Quota(value))
+        ResponseMethod::Changes(ChangesResponseMethod::Quota(Box::new(value)))
     }
 }
 
 impl<'x> From<ChangesResponse<AddressBook>> for ResponseMethod<'x> {
     fn from(value: ChangesResponse<AddressBook>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::AddressBook(value))
+        ResponseMethod::Changes(ChangesResponseMethod::AddressBook(Box::new(value)))
     }
 }
 
@@ -483,13 +499,13 @@ impl From<GetResponse<FileNode>> for ResponseMethod<'_> {
 
 impl From<SetResponse<FileNode>> for ResponseMethod<'_> {
     fn from(response: SetResponse<FileNode>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::FileNode(response))
+        ResponseMethod::Set(SetResponseMethod::FileNode(Box::new(response)))
     }
 }
 
 impl From<ChangesResponse<FileNode>> for ResponseMethod<'_> {
     fn from(response: ChangesResponse<FileNode>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::FileNode(response))
+        ResponseMethod::Changes(ChangesResponseMethod::FileNode(Box::new(response)))
     }
 }
 
@@ -507,31 +523,33 @@ impl From<GetResponse<Calendar>> for ResponseMethod<'_> {
 
 impl From<SetResponse<Calendar>> for ResponseMethod<'_> {
     fn from(response: SetResponse<Calendar>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::Calendar(response))
+        ResponseMethod::Set(SetResponseMethod::Calendar(Box::new(response)))
     }
 }
 
 impl From<ChangesResponse<CalendarEvent>> for ResponseMethod<'_> {
     fn from(response: ChangesResponse<CalendarEvent>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::CalendarEvent(response))
+        ResponseMethod::Changes(ChangesResponseMethod::CalendarEvent(Box::new(response)))
     }
 }
 
 impl From<ChangesResponse<CalendarEventNotification>> for ResponseMethod<'_> {
     fn from(response: ChangesResponse<CalendarEventNotification>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::CalendarEventNotification(response))
+        ResponseMethod::Changes(ChangesResponseMethod::CalendarEventNotification(Box::new(
+            response,
+        )))
     }
 }
 
 impl From<SetResponse<CalendarEvent>> for ResponseMethod<'_> {
     fn from(response: SetResponse<CalendarEvent>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::CalendarEvent(response))
+        ResponseMethod::Set(SetResponseMethod::CalendarEvent(Box::new(response)))
     }
 }
 
 impl From<SetResponse<ParticipantIdentity>> for ResponseMethod<'_> {
     fn from(response: SetResponse<ParticipantIdentity>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::ParticipantIdentity(response))
+        ResponseMethod::Set(SetResponseMethod::ParticipantIdentity(Box::new(response)))
     }
 }
 
@@ -543,13 +561,13 @@ impl From<GetResponse<ParticipantIdentity>> for ResponseMethod<'_> {
 
 impl From<ChangesResponse<ShareNotification>> for ResponseMethod<'_> {
     fn from(response: ChangesResponse<ShareNotification>) -> Self {
-        ResponseMethod::Changes(ChangesResponseMethod::ShareNotification(response))
+        ResponseMethod::Changes(ChangesResponseMethod::ShareNotification(Box::new(response)))
     }
 }
 
 impl From<SetResponse<ShareNotification>> for ResponseMethod<'_> {
     fn from(response: SetResponse<ShareNotification>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::ShareNotification(response))
+        ResponseMethod::Set(SetResponseMethod::ShareNotification(Box::new(response)))
     }
 }
 
@@ -577,6 +595,12 @@ impl From<CopyResponse<CalendarEvent>> for ResponseMethod<'_> {
     }
 }
 
+impl From<CopyResponse<FileNode>> for ResponseMethod<'_> {
+    fn from(value: CopyResponse<FileNode>) -> Self {
+        ResponseMethod::Copy(CopyResponseMethod::FileNode(value))
+    }
+}
+
 impl From<CalendarEventNotificationGetResponse> for ResponseMethod<'_> {
     fn from(value: CalendarEventNotificationGetResponse) -> Self {
         ResponseMethod::Get(GetResponseMethod::CalendarEventNotification(value))
@@ -585,6 +609,8 @@ impl From<CalendarEventNotificationGetResponse> for ResponseMethod<'_> {
 
 impl From<SetResponse<CalendarEventNotification>> for ResponseMethod<'_> {
     fn from(value: SetResponse<CalendarEventNotification>) -> Self {
-        ResponseMethod::Set(SetResponseMethod::CalendarEventNotification(value))
+        ResponseMethod::Set(SetResponseMethod::CalendarEventNotification(Box::new(
+            value,
+        )))
     }
 }

@@ -1,26 +1,28 @@
 [package]
 name = "tests"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [features]
 #default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "nats", "azure", "foundationdb"]
-default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "foundationdb"]
-#default = ["rocks", "foundationdb"]
-sqlite = ["store/sqlite"]
+#default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "foundationdb"]
+default = ["rocks", "sqlite"]
+sqlite = ["store/sqlite", "directory/sqlite"]
 foundationdb = ["store/foundation", "common/foundation"]
-postgres = ["store/postgres"]
-mysql = ["store/mysql"]
+postgres = ["store/postgres", "directory/postgres"]
+mysql = ["store/mysql", "directory/mysql"]
 rocks = ["store/rocks"]
 s3 = ["store/s3"]
-redis = ["store/redis"]
-nats = ["store/nats"]
+redis = ["store/redis", "coordinator/redis"]
+nats = ["coordinator/nats"]
+kafka = ["coordinator/kafka"]
 azure = ["store/azure"]
 
 [dev-dependencies]
 store = { path = "../crates/store", features = ["test_mode", "enterprise"] }
 nlp = { path = "../crates/nlp" }
 directory = { path = "../crates/directory", features = ["test_mode", "enterprise"] }
+coordinator = { path = "../crates/coordinator", features = ["test_mode", "enterprise"] }
 jmap = { path = "../crates/jmap", features = ["test_mode", "enterprise"] }
 jmap_proto = { path = "../crates/jmap-proto" }
 imap = { path = "../crates/imap", features = ["test_mode"] }
@@ -31,27 +33,27 @@ dav-proto = { path = "../crates/dav-proto", features = ["test_mode"] }
 calcard = { version = "0.3", features = ["rkyv"] }
 groupware = { path = "../crates/groupware", features = ["test_mode"] }
 http = { path = "../crates/http", features = ["test_mode", "enterprise"] }
-http_proto = { path = "../crates/http-proto" }
+http_proto = { path = "../crates/http-proto", features = ["test_mode"]  }
 services = { path = "../crates/services", features = ["test_mode", "enterprise"] }
 pop3 = { path = "../crates/pop3", features = ["test_mode"] }
 smtp = { path = "../crates/smtp", features = ["test_mode", "enterprise"] }
 common = { path = "../crates/common", features = ["test_mode", "enterprise"] }
+registry = { path = "../crates/registry" }
 email = { path = "../crates/email", features = ["test_mode", "enterprise"] }
 spam-filter = { path = "../crates/spam-filter", features = ["test_mode", "enterprise"] }
 migration = { path = "../crates/migration", features = ["test_mode", "enterprise"] }
 trc = { path = "../crates/trc", features = ["enterprise"] }
 managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterprise"] }
 smtp-proto = { version = "0.2" }
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
-mail-auth = { version = "0.7.1", features = ["test"] }
+mail-auth = { version = "0.11", features = ["test"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = "0.4.4"
 sieve-rs = { version = "0.7", features = ["rkyv"] } 
 utils = { path = "../crates/utils", features = ["test_mode"] }
-jmap-client = { version = "0.4", features = ["websockets", "debug", "async"] } 
+jmap-client = { version = "0.4", features = ["websockets", "debug", "async"] }
 tokio = { version = "1.47", features = ["full"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
+rustls = { version = "0.23.5", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 rustls-pemfile = "2.0"
 rustls-pki-types = { version = "1" }
 csv = "1.1"
@@ -59,7 +61,7 @@ rayon = { version = "1.5.1" }
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "multipart", "http2"]}
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "multipart", "http2", "form"]}
 bytes = "1.4.0"
 futures = "0.3"
 ece = "2.2"
@@ -72,12 +74,20 @@ serial_test = "3.0.0"
 num_cpus = "1.15.0"
 async-trait = "0.1.68"
 chrono = "0.4"
-ring = { version = "0.17" }
-biscuit = "0.7.0"
+aws-lc-rs = { version = "1" }
+biscuit = "0.8.0"
 form_urlencoded = "1.1.0"
 rkyv = { version = "0.8.10", features = ["little_endian"] }
 compact_str = "0.9.0"
-quick-xml = "0.38"
+quick-xml = "0.41"
+jmap-tools = { version = "0.1" }
+dns-update = { version = "0.5", features = ["test_provider"] }
+x509-parser = "0.18"
+rcgen = "0.14"
+sha2 = "0.11"
+time = "0.3"
+testcontainers = { version = "0.27", features = ["reusable-containers"] }
+rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"] }
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+[target.'cfg(not(any(target_env = "msvc", target_os = "freebsd")))'.dependencies]
 jemallocator = "0.5.0"

@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, JmapUtils};
 use jmap_proto::{object::principal::PrincipalProperty, request::method::MethodObject};
 use serde_json::json;
 
-pub async fn test(params: &mut JMAPTest) {
+use crate::utils::{jmap::JmapUtils, server::TestServer};
+
+pub async fn test(test: &TestServer) {
     println!("Running Principal get/query tests...");
-    let john = params.account("jdoe@example.com");
-    let jane = params.account("jane.smith@example.com");
-    let bill = params.account("bill@example.com");
-    let sales = params.account("sales@example.com");
+    let john = test.account("jdoe@example.com");
+    let jane = test.account("jane.smith@example.com");
+    let bill = test.account("bill@example.com");
+    let sales = test.account("sales@example.com");
 
     let john_id = john.id_string();
     let jane_id = jane.id_string();
@@ -22,13 +23,16 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Validate session object capabilities
     let response = john.jmap_session_object().await.into_inner();
+    let application_server_key =
+        response["capabilities"]["urn:ietf:params:jmap:webpush-vapid"]["applicationServerKey"]
+            .clone();
     response.assert_is_equal(json!({
       "capabilities": {
         "urn:ietf:params:jmap:core": {
-          "maxSizeUpload": 5000000,
+          "maxSizeUpload": 50000000,
           "maxConcurrentUpload": 4,
           "maxSizeRequest": 10000000,
-          "maxConcurrentRequests": 8,
+          "maxConcurrentRequests": 4,
           "maxCallsInRequest": 16,
           "maxObjectsInGet": 100000,
           "maxObjectsInSet": 100000,
@@ -53,6 +57,9 @@ pub async fn test(params: &mut JMAPTest) {
         },
         "urn:ietf:params:jmap:blob": {},
         "urn:ietf:params:jmap:quota": {},
+        "urn:ietf:params:jmap:webpush-vapid": {
+          "applicationServerKey": application_server_key
+        },
         "urn:ietf:params:jmap:websocket": {
           "url": "wss://127.0.0.1:8899/jmap/ws",
           "supportsPush": true
@@ -104,7 +111,7 @@ pub async fn test(params: &mut JMAPTest) {
             "urn:ietf:params:jmap:calendars": {
               "maxCalendarsPerEvent": null,
               "minDateTime": "0001-01-01T00:00:00Z",
-              "maxDateTime": "65534-12-31T23:59:59Z",
+              "maxDateTime": "9999-12-31T23:59:59Z",
               "maxExpandedQueryDuration": "P52W1D",
               "maxParticipantsPerEvent": 20,
               "mayCreateCalendar": true
@@ -113,7 +120,7 @@ pub async fn test(params: &mut JMAPTest) {
             "urn:ietf:params:jmap:websocket": {},
             "urn:ietf:params:jmap:sieve": {
               "maxSizeScriptName": 512,
-              "maxSizeScript": 1048576,
+              "maxSizeScript": 102400,
               "maxNumberScripts": 100,
               "maxNumberRedirects": 1,
               "sieveExtensions": [
@@ -194,9 +201,48 @@ pub async fn test(params: &mut JMAPTest) {
             "urn:ietf:params:jmap:filenode": {
               "maxFileNodeDepth": null,
               "maxSizeFileNodeName": 255,
-              "fileNodeQuerySortOptions": [],
-              "mayCreateTopLevelFileNode": true
-            }
+              "forbiddenNameChars": "/<>:\"\\|?*",
+              "forbiddenNodeNames": [
+                ".",
+                "..",
+                "CON",
+                "PRN",
+                "AUX",
+                "NUL",
+                "COM0",
+                "COM1",
+                "COM2",
+                "COM3",
+                "COM4",
+                "COM5",
+                "COM6",
+                "COM7",
+                "COM8",
+                "COM9",
+                "LPT0",
+                "LPT1",
+                "LPT2",
+                "LPT3",
+                "LPT4",
+                "LPT5",
+                "LPT6",
+                "LPT7",
+                "LPT8",
+                "LPT9"
+              ],
+              "fileNodeQuerySortOptions": [
+                "name",
+                "size",
+                "nodeType"
+              ],
+              "mayCreateTopLevelFileNode": true,
+              "caseInsensitiveNames": false,
+              "webTrashUrl": null,
+              "webUrlTemplate": null,
+              "webWriteUrlTemplate": null
+            },
+            "urn:ietf:params:jmap:mail:share": {},
+            "urn:stalwart:jmap": {}
           }
         }
       },
@@ -214,7 +260,9 @@ pub async fn test(params: &mut JMAPTest) {
         "urn:ietf:params:jmap:quota": john_id,
         "urn:ietf:params:jmap:principals": john_id,
         "urn:ietf:params:jmap:principals:availability": john_id,
-        "urn:ietf:params:jmap:filenode": john_id
+        "urn:ietf:params:jmap:filenode": john_id,
+        "urn:ietf:params:jmap:mail:share": john_id,
+        "urn:stalwart:jmap": john_id
       },
       "username": "jdoe@example.com",
       "apiUrl": "https://127.0.0.1:8899/jmap/",

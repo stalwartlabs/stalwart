@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 build = "build.rs"
 
@@ -10,31 +10,33 @@ nlp = { path = "../nlp" }
 store = { path = "../store" }
 trc = { path = "../trc" }
 directory = { path = "../directory" }
+coordinator = { path = "../coordinator" }
 types = { path = "../types" }
+registry = { path = "../registry" }
 jmap_proto = { path = "../jmap-proto" }
 imap_proto = { path = "../imap-proto" }
 sieve-rs = { version = "0.7", features = ["rkyv", "serde"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
 mail-builder = { version = "0.4" }
-mail-auth = { version = "0.7.1" }
-mail-send = { version = "0.5", default-features = false, features = ["cram-md5", "ring", "tls12"] }
+mail-auth = { version = "0.11", features = ["generate", "arc"] }
 smtp-proto = { version = "0.2", features = ["rkyv"] }
-dns-update = { version = "0.1.5" }
+dns-update = { version = "0.5" }
 calcard = { version = "0.3", features = ["rkyv"] }
 ahash = { version = "0.8.2", features = ["serde"] }
 parking_lot = "0.12.1"
 regex = "1.7.0"
 proxy-header = { version = "0.1.0", features = ["tokio"] }
 arc-swap = "1.6.0"
-rustls = { version = "0.23.5", default-features = false, features = ["std", "ring", "tls12"] }
+rustls = { version = "0.23.5", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 rustls-pemfile = "2.0"
 rustls-pki-types = { version = "1" }
+aws-lc-rs = { version = "1" }
 ring = { version = "0.17" }
 tokio = { version = "1.47", features = ["net", "macros"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
 futures = "0.3"
-rcgen = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2", "stream"]}
+rcgen = "0.14"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream"]}
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 base64 = "0.22"
@@ -42,14 +44,14 @@ x509-parser = "0.18"
 pem = "3.0"
 chrono = { version = "0.4", features = ["serde"] }
 hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
-opentelemetry = { version = "0.29" }
-opentelemetry_sdk = { version = "0.29" }
-opentelemetry-otlp = { version = "0.29", default-features = false, features = ["reqwest-client", "http-proto", "trace", "metrics", "logs", "internal-logs", "grpc-tonic", "tls-webpki-roots", "reqwest-rustls-webpki-roots"] }
-opentelemetry-semantic-conventions = { version = "0.29.0" }
+opentelemetry = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
+opentelemetry_sdk = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
+opentelemetry-otlp = { git = "https://github.com/stalwartlabs/opentelemetry-rust", default-features = false, features = ["reqwest-client", "http-proto", "trace", "metrics", "logs", "internal-logs", "grpc-tonic", "tls-aws-lc", "tls-roots", "reqwest-rustls"] }
+opentelemetry-semantic-conventions = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
 prometheus = { version = "0.14", default-features = false }
 imagesize = "0.14"
-sha1 = "0.10"
-sha2 = "0.10.6"
+sha1 = "0.11"
+sha2 = "0.11"
 md5 = "0.8.0"
 whatlang = "0.18"
 idna = "1.0"
@@ -58,22 +60,32 @@ unicode-security = "0.1.0"
 infer = "0.19"
 bincode = { version = "2.0", features = ["serde"] }
 hostname = "0.4.0"
-zip = "6.0"
+zip = "8.5"
 pwhash = "1.0.0"
 xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
 psl = "2"
 aes-gcm-siv = "0.11.1"
-biscuit = "0.7.0"
+biscuit = "0.8.0"
 rsa = "0.9.2"
-p256 = { version = "0.13", features = ["ecdh"] }
+p256 = { version = "0.13", features = ["ecdh", "ecdsa", "pkcs8", "pem"] }
 p384 = { version = "0.13", features = ["ecdh"] }
 num_cpus = "1.13.1"
 hashify = "0.2"
 rkyv = { version = "0.8.10", features = ["little_endian"] }
 indexmap = "2.7.1"
-tinyvec = "1.9.0"
+tinyvec = { version = "1.10.0", features = ["alloc"] }
 compact_str = { version = "0.9.0", features = ["rkyv", "serde"] }
-lz4_flex = { version = "0.12", features = ["frame"], default-features = false }
+lz4_flex = { version = "0.13", features = ["frame"], default-features = false }
+hickory-proto = "0.26"
+nohash-hasher = "0.2.0"
+quick_cache = "0.7"
+rasn = "0.28"
+rasn-cms = "0.28"
+rasn-pkix = "0.28"
+sequoia-openpgp = { version = "2.0", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
+zxcvbn = "3.1.0"
+pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
+quick-xml = "0.41"
 
 [target.'cfg(unix)'.dependencies]
 privdrop = "0.5.3"
@@ -81,6 +93,7 @@ libc = "0.2.126"
 
 [features]
 test_mode = []
+dev_mode = []
 enterprise = []
 foundation = []
 

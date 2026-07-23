@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::mail::delivery::SmtpConnection;
-
 use super::{AssertResult, ImapConnection, Type, append::assert_append_message};
+use crate::utils::{server::TestServer, smtp::SmtpConnection};
 use imap_proto::ResponseType;
 
-pub async fn test(mut imap_john: &mut ImapConnection, _imap_check: &mut ImapConnection) {
+pub async fn test(
+    mut imap_john: &mut ImapConnection,
+    _imap_check: &mut ImapConnection,
+    test: &TestServer,
+) {
     // Delivery to support account
     println!("Running ACL tests...");
-    let mut lmtp = SmtpConnection::connect_port(11201).await;
+    let mut lmtp = SmtpConnection::connect().await;
     lmtp.ingest(
         "bill@example.com",
         &["support@example.com"],
@@ -28,21 +31,8 @@ pub async fn test(mut imap_john: &mut ImapConnection, _imap_check: &mut ImapConn
     .await;
 
     // Connect to all test accounts
-    let mut imap_jane = ImapConnection::connect(b"_w ").await;
-    let mut imap_bill = ImapConnection::connect(b"_z ").await;
-    for (imap, secret) in [
-        (&mut imap_jane, "AGphbmUuc21pdGhAZXhhbXBsZS5jb20Ac2VjcmV0"),
-        (&mut imap_bill, "AGZvb2JhckBleGFtcGxlLmNvbQBzZWNyZXQ="),
-    ] {
-        imap.assert_read(Type::Untagged, ResponseType::Ok).await;
-        imap.send(&format!(
-            "AUTHENTICATE PLAIN {{{}+}}\r\n{}",
-            secret.len(),
-            secret
-        ))
-        .await;
-        imap.assert_read(Type::Tagged, ResponseType::Ok).await;
-    }
+    let mut imap_jane = test.account("jane.smith@example.com").imap_client().await;
+    let mut imap_bill = test.account("foobar@example.com").imap_client().await;
 
     // Jane should see the Support account
     imap_jane.send("LIST \"\" \"*\"").await;

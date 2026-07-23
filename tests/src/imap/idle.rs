@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::mail::delivery::SmtpConnection;
+use crate::utils::smtp::SmtpConnection;
 
 use super::{AssertResult, ImapConnection, Type};
 use imap_proto::ResponseType;
@@ -163,7 +163,7 @@ pub async fn test(
         .assert_contains("* 0 EXISTS");
 
     // Test SMTP delivery notifications
-    let mut lmtp = SmtpConnection::connect_port(if is_cluster_test { 17000 } else { 11201 }).await;
+    let mut lmtp = SmtpConnection::connect().await;
     lmtp.ingest(
         "bill@example.com",
         &["jdoe@example.com"],

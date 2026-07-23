@@ -24,9 +24,9 @@ pub(crate) fn fn_sort(mut v: Vec<Variable>) -> Variable {
     let is_asc = v[1].to_bool();
     let mut arr = v.remove(0).into_array();
     if is_asc {
-        arr.sort_unstable_by(|a, b| b.cmp(a));
-    } else {
         arr.sort_unstable();
+    } else {
+        arr.sort_unstable_by(|a, b| b.cmp(a));
     }
     arr.into()
 }

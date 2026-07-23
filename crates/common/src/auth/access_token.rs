@@ -4,470 +4,472 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{AccessToken, ResourceToken, TenantInfo, roles::RolePermissions};
+use super::AccessToken;
 use crate::{
     Server,
-    ipc::BroadcastEvent,
-    listener::limiter::{ConcurrencyLimiter, LimiterResult},
-};
-use ahash::AHashSet;
-use directory::{
-    Permission, Principal, PrincipalData, QueryParams, Type,
-    backend::internal::{
-        lookup::DirectoryStore,
-        manage::{ChangedPrincipals, ManageDirectory},
+    auth::{
+        AccessScope, AccessTo, AccessTokenInner, AccountTenantIds, Permissions, RECOVERY_ADMIN_ID,
+        permissions::{BuildPermissions, PermissionsListBuilder},
     },
+    network::limiter::{ConcurrencyLimiter, LimiterResult},
+};
+use ahash::AHasher;
+use registry::{
+    schema::{
+        enums::Permission,
+        structs::{self, Account, Roles, UserRoles},
+    },
+    types::EnumImpl,
 };
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
+    hash::{Hash, Hasher},
+    net::IpAddr,
     sync::Arc,
 };
-use store::{query::acl::AclQuery, rand};
-use trc::AddContext;
+use store::{query::acl::AclQuery, rand, write::now};
+use tinyvec::TinyVec;
+use trc::{AddContext, StoreEvent};
 use types::{acl::Acl, collection::Collection};
-use utils::map::{
-    bitmap::{Bitmap, BitmapItem},
-    vec_map::VecMap,
-};
-
-pub enum PrincipalOrId {
-    Principal(Principal),
-    Id(u32),
-}
+use utils::map::bitmap::{Bitmap, BitmapItem};
+use xxhash_rust::xxh3;
 
 impl Server {
-    async fn build_access_token_from_principal(
+    async fn build_access_token(
         &self,
-        principal: Principal,
+        account: Account,
+        account_id: u32,
         revision: u64,
-    ) -> trc::Result<AccessToken> {
-        let mut role_permissions = RolePermissions::default();
+        revision_account: u64,
+    ) -> trc::Result<AccessTokenInner> {
+        match account {
+            Account::User(account) => {
+                let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
+                let permissions = self
+                    .effective_permissions(
+                        &account.permissions,
+                        match &account.roles {
+                            UserRoles::User => {
+                                self.core.network.security.default_role_ids_user.as_slice()
+                            }
+                            UserRoles::Admin => {
+                                if tenant_id.is_none() {
+                                    self.core.network.security.default_role_ids_admin.as_slice()
+                                } else {
+                                    self.core
+                                        .network
+                                        .security
+                                        .default_role_ids_tenant
+                                        .as_slice()
+                                }
+                            }
+                            UserRoles::Custom(custom_roles) => custom_roles.role_ids.as_slice(),
+                        },
+                        tenant_id,
+                    )
+                    .await?;
 
-        // Extract data
-        let mut object_quota = self.core.jmap.max_objects;
-        let mut description = None;
-        let mut tenant_id = None;
-        let mut quota = None;
-        let mut locale = None;
-        let mut member_of = Vec::new();
-        let mut emails = Vec::new();
-        for data in principal.data {
-            match data {
-                PrincipalData::Tenant(v) => tenant_id = Some(v),
-                PrincipalData::MemberOf(v) => member_of.push(v),
-                PrincipalData::Role(v) => {
-                    role_permissions.union(self.get_role_permissions(v).await?.as_ref());
-                }
-                PrincipalData::Permission {
-                    permission_id,
-                    grant,
-                } => {
-                    if grant {
-                        role_permissions.enabled.set(permission_id as usize);
-                    } else {
-                        role_permissions.disabled.set(permission_id as usize);
-                    }
-                }
-                PrincipalData::DiskQuota(v) => quota = Some(v),
-                PrincipalData::ObjectQuota { quota, typ } => {
-                    object_quota[typ as usize] = quota;
-                }
-                PrincipalData::Description(v) => description = Some(v),
-                PrincipalData::PrimaryEmail(v) => {
-                    if emails.is_empty() {
-                        emails.push(v);
-                    } else {
-                        emails.insert(0, v);
-                    }
-                }
-                PrincipalData::EmailAlias(v) => {
-                    emails.push(v);
-                }
-                PrincipalData::Locale(v) => locale = Some(v),
-                _ => (),
-            }
-        }
-
-        // Apply principal permissions
-        let mut permissions = role_permissions.finalize();
-        let mut tenant = None;
-
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-
-        #[cfg(feature = "enterprise")]
-        {
-            use directory::{QueryParams, ROLE_USER};
-
-            if let Some(tenant_id) = tenant_id {
-                if self.is_enterprise_edition() {
-                    // Limit tenant permissions
-                    permissions.intersection(&self.get_role_permissions(tenant_id).await?.enabled);
-
-                    // Obtain tenant quota
-                    tenant = Some(TenantInfo {
-                        id: tenant_id,
-                        quota: self
-                            .store()
-                            .query(QueryParams::id(tenant_id).with_return_member_of(false))
-                            .await
-                            .caused_by(trc::location!())?
-                            .ok_or_else(|| {
-                                trc::SecurityEvent::Unauthorized
-                                    .into_err()
-                                    .details("Tenant not found")
-                                    .id(tenant_id)
-                                    .caused_by(trc::location!())
-                            })?
-                            .quota()
-                            .unwrap_or_default(),
-                    });
-                } else {
-                    // Enterprise edition downgrade, remove any tenant administrator permissions
-                    permissions.intersection(&self.get_role_permissions(ROLE_USER).await?.enabled);
-                }
-            }
-        }
-
-        // SPDX-SnippetEnd
-
-        // Build member of and e-mail addresses
-        for &group_id in &member_of {
-            if let Some(group) = self
-                .store()
-                .query(QueryParams::id(group_id).with_return_member_of(false))
-                .await
-                .caused_by(trc::location!())?
-                && group.typ == Type::Group
-            {
-                emails.extend(group.into_email_addresses());
-            }
-        }
-
-        // Build access token
-        let mut access_token = AccessToken {
-            primary_id: principal.id,
-            member_of,
-            access_to: VecMap::new(),
-            tenant,
-            name: principal.name,
-            description,
-            emails,
-            quota: quota.unwrap_or_default(),
-            locale,
-            permissions,
-            object_quota,
-            concurrent_imap_requests: self.core.imap.rate_concurrent.map(ConcurrencyLimiter::new),
-            concurrent_http_requests: self
-                .core
-                .jmap
-                .request_max_concurrent
-                .map(ConcurrencyLimiter::new),
-            concurrent_uploads: self
-                .core
-                .jmap
-                .upload_max_concurrent
-                .map(ConcurrencyLimiter::new),
-            obj_size: 0,
-            revision,
-        };
-
-        for grant_account_id in [access_token.primary_id]
-            .into_iter()
-            .chain(access_token.member_of.iter().copied())
-        {
-            for acl_item in self
-                .store()
-                .acl_query(AclQuery::HasAccess { grant_account_id })
-                .await
-                .caused_by(trc::location!())?
-            {
-                if !access_token.is_member(acl_item.to_account_id) {
-                    let acl = Bitmap::<Acl>::from(acl_item.permissions);
-                    let collection = acl_item.to_collection;
-                    if !collection.is_valid() {
-                        return Err(trc::StoreEvent::DataCorruption
-                            .ctx(trc::Key::Reason, "Corrupted collection found in ACL key.")
-                            .details(format!("{acl_item:?}"))
-                            .account_id(grant_account_id)
-                            .caused_by(trc::location!()));
-                    }
-
-                    let mut collections: Bitmap<Collection> = Bitmap::new();
-                    if acl.contains(Acl::Read) {
-                        collections.insert(collection);
-                    }
-                    if acl.contains(Acl::ReadItems)
-                        && let Some(child_col) = collection.child_collection()
+                let can_impersonate = permissions.enabled.get(Permission::Impersonate as usize)
+                    && !permissions.disabled.get(Permission::Impersonate as usize);
+                let member_of = account
+                    .member_group_ids
+                    .iter()
+                    .map(|m| m.id() as u32)
+                    .collect::<TinyVec<[u32; 3]>>();
+                let mut access_to: Vec<AccessTo> = Vec::new();
+                for grant_account_id in [account_id].into_iter().chain(member_of.iter().copied()) {
+                    for acl_item in self
+                        .store()
+                        .acl_query(AclQuery::HasAccess { grant_account_id })
+                        .await
+                        .caused_by(trc::location!())?
                     {
-                        collections.insert(child_col);
-                    }
+                        if acl_item.to_account_id != account_id
+                            && !member_of.contains(&acl_item.to_account_id)
+                            && !can_impersonate
+                        {
+                            let acl = Bitmap::<Acl>::from(acl_item.permissions);
+                            let collection = acl_item.to_collection;
+                            if !collection.is_valid() {
+                                return Err(trc::StoreEvent::DataCorruption
+                                    .ctx(trc::Key::Reason, "Corrupted collection found in ACL key.")
+                                    .details(format!("{acl_item:?}"))
+                                    .account_id(grant_account_id)
+                                    .caused_by(trc::location!()));
+                            }
 
-                    if !collections.is_empty() {
-                        access_token
-                            .access_to
-                            .get_mut_or_insert_with(acl_item.to_account_id, Bitmap::new)
-                            .union(&collections);
+                            let mut collections: Bitmap<Collection> = Bitmap::new();
+                            if acl.contains(Acl::Read) {
+                                collections.insert(collection);
+                            }
+                            if acl.contains(Acl::ReadItems)
+                                && let Some(child_col) = collection.child_collection()
+                            {
+                                collections.insert(child_col);
+                            }
+
+                            if !collections.is_empty() {
+                                if let Some(idx) = access_to
+                                    .iter()
+                                    .position(|a| a.account_id == acl_item.to_account_id)
+                                {
+                                    access_to[idx].collections.union(&collections);
+                                } else {
+                                    access_to.push(AccessTo {
+                                        account_id: acl_item.to_account_id,
+                                        collections,
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
+
+                let now = now();
+                let mut credential_version = 0;
+                let mut credential_scopes = Vec::with_capacity(account.credentials.len());
+
+                credential_scopes.push(AccessScope::new(permissions.finalize(), u32::MAX));
+
+                for credential in account.credentials {
+                    match credential {
+                        structs::Credential::Password(credential) => {
+                            credential_version = xxh3::xxh3_64(credential.secret.as_bytes()).max(1);
+
+                            if credential.expires_at.is_some() || !credential.allowed_ips.is_empty()
+                            {
+                                let credential_scope = &mut credential_scopes[0];
+                                credential_scope.expires_at = credential
+                                    .expires_at
+                                    .map(|v| v.timestamp() as u64)
+                                    .unwrap_or(u64::MAX);
+                                credential_scope.allowed_ips =
+                                    credential.allowed_ips.into_inner().into_boxed_slice();
+                            }
+                        }
+                        structs::Credential::ApiKey(credential)
+                        | structs::Credential::AppPassword(credential) => {
+                            let credential_id = credential.credential_id.document_id();
+                            let expires_at = credential
+                                .expires_at
+                                .map(|v| v.timestamp() as u64)
+                                .unwrap_or(u64::MAX);
+                            if expires_at > now {
+                                let permissions = &credential_scopes[0].permissions;
+                                let permissions = match credential.permissions {
+                                    structs::CredentialPermissions::Inherit => permissions.clone(),
+                                    structs::CredentialPermissions::Disable(list) => {
+                                        let mut permissions = permissions.clone();
+                                        permissions.clear_many(&Permissions::from_permission(
+                                            list.permissions.as_slice(),
+                                        ));
+                                        permissions
+                                    }
+                                    structs::CredentialPermissions::Replace(list) => {
+                                        let mut replace_permissions = Permissions::from_permission(
+                                            list.permissions.as_slice(),
+                                        );
+                                        replace_permissions.intersection(permissions);
+                                        replace_permissions
+                                    }
+                                };
+                                credential_scopes.push(AccessScope {
+                                    credential_id,
+                                    permissions,
+                                    expires_at,
+                                    allowed_ips: credential
+                                        .allowed_ips
+                                        .into_inner()
+                                        .into_boxed_slice(),
+                                })
+                            }
+                        }
+                    }
+                }
+
+                Ok(AccessTokenInner {
+                    concurrent_imap_requests: self
+                        .core
+                        .imap
+                        .rate_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_http_requests: self
+                        .core
+                        .jmap
+                        .request_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_uploads: self
+                        .core
+                        .jmap
+                        .upload_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    obj_size: 0,
+                    revision,
+                    revision_account,
+                    credential_version,
+                    account_id,
+                    tenant_id,
+                    member_of,
+                    access_to: access_to.into_boxed_slice(),
+                    scopes: []
+                        .into_iter()
+                        .chain(credential_scopes)
+                        .collect::<Box<[AccessScope]>>(),
+                }
+                .update_size())
+            }
+            Account::Group(account) => {
+                let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
+                let permissions = self
+                    .effective_permissions(
+                        &account.permissions,
+                        account.roles.role_ids().unwrap_or(
+                            self.core.network.security.default_role_ids_group.as_slice(),
+                        ),
+                        tenant_id,
+                    )
+                    .await?;
+
+                Ok(AccessTokenInner {
+                    concurrent_imap_requests: self
+                        .core
+                        .imap
+                        .rate_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_http_requests: self
+                        .core
+                        .jmap
+                        .request_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    concurrent_uploads: self
+                        .core
+                        .jmap
+                        .upload_max_concurrent
+                        .map(ConcurrencyLimiter::new),
+                    obj_size: 0,
+                    revision,
+                    revision_account,
+                    credential_version: 0,
+                    account_id,
+                    tenant_id,
+                    member_of: Default::default(),
+                    access_to: Default::default(),
+                    scopes: Box::new([AccessScope::new(permissions.finalize(), u32::MAX)]),
+                }
+                .update_size())
             }
         }
-
-        Ok(access_token.update_size())
     }
 
-    async fn build_access_token(&self, account_id: u32, revision: u64) -> trc::Result<AccessToken> {
-        let err = match self
-            .directory()
-            .query(QueryParams::id(account_id).with_return_member_of(true))
-            .await
-        {
-            Ok(Some(principal)) => {
-                return self
-                    .build_access_token_from_principal(principal, revision)
-                    .await;
-            }
-            Ok(None) => Err(trc::AuthEvent::Error
-                .into_err()
-                .details("Account not found.")
-                .caused_by(trc::location!())),
-            Err(err) => Err(err),
-        };
-
-        match &self.core.jmap.fallback_admin {
-            Some((_, secret)) if account_id == u32::MAX => {
-                self.build_access_token_from_principal(Principal::fallback_admin(secret), revision)
-                    .await
-            }
-            _ => err,
-        }
-    }
-
-    pub async fn get_access_token(
-        &self,
-        principal: impl Into<PrincipalOrId>,
-    ) -> trc::Result<Arc<AccessToken>> {
-        let principal = principal.into();
-
-        // Obtain current revision
-        let principal_id = principal.id();
-
+    pub async fn access_token(&self, account_id: u32) -> trc::Result<Arc<AccessTokenInner>> {
         match self
             .inner
             .cache
             .access_tokens
-            .get_value_or_guard_async(&principal_id)
+            .get_value_or_guard_async(&account_id)
             .await
         {
-            Ok(token) => Ok(token),
+            Ok(token) => {
+                trc::event!(
+                    Store(StoreEvent::CacheHit),
+                    Key = account_id,
+                    Collection = "accessToken",
+                );
+
+                Ok(token)
+            }
             Err(guard) => {
-                let revision = rand::random::<u64>();
-                let token: Arc<AccessToken> = match principal {
-                    PrincipalOrId::Principal(principal) => {
-                        self.build_access_token_from_principal(principal, revision)
-                            .await?
-                    }
-                    PrincipalOrId::Id(account_id) => {
-                        self.build_access_token(account_id, revision).await?
-                    }
-                }
-                .into();
+                trc::event!(
+                    Store(StoreEvent::CacheMiss),
+                    Key = account_id,
+                    Collection = "accessToken",
+                );
+
+                let token: Arc<AccessTokenInner> = if let Some(account) =
+                    self.registry().object::<Account>(account_id.into()).await?
+                {
+                    let revision = rand::random::<u64>();
+                    let revision_account = hash_account(&account);
+                    self.build_access_token(account, account_id, revision, revision_account)
+                        .await?
+                        .into()
+                } else if account_id == RECOVERY_ADMIN_ID {
+                    AccessTokenInner::new_admin().into()
+                } else {
+                    return Err(trc::SecurityEvent::Unauthorized
+                        .into_err()
+                        .details("Account not found")
+                        .account_id(account_id)
+                        .caused_by(trc::location!()));
+                };
+
                 let _ = guard.insert(token.clone());
                 Ok(token)
             }
         }
     }
 
-    pub async fn invalidate_principal_caches(&self, changed_principals: ChangedPrincipals) {
-        let mut nested_principals = Vec::new();
-        let mut changed_ids = AHashSet::new();
-        let mut changed_names = Vec::new();
+    pub(crate) async fn access_token_from_account(
+        &self,
+        account_id: u32,
+        account: Account,
+    ) -> trc::Result<Arc<AccessTokenInner>> {
+        let revision_account = hash_account(&account);
+        match self
+            .inner
+            .cache
+            .access_tokens
+            .get_value_or_guard_async(&account_id)
+            .await
+        {
+            Ok(token) => {
+                if token.revision_account == revision_account {
+                    trc::event!(
+                        Store(StoreEvent::CacheHit),
+                        Key = account_id,
+                        Collection = "accessToken",
+                    );
 
-        for (id, changed_principal) in changed_principals.iter() {
-            changed_ids.insert(*id);
-
-            if changed_principal.name_change {
-                self.inner.cache.files.remove(id);
-                self.inner.cache.contacts.remove(id);
-                self.inner.cache.events.remove(id);
-                self.inner.cache.scheduling.remove(id);
-                changed_names.push(*id);
-            }
-
-            if changed_principal.member_change {
-                if changed_principal.typ == Type::Tenant {
-                    match self
-                        .store()
-                        .list_principals(
-                            None,
-                            (*id).into(),
-                            &[Type::Individual, Type::Group, Type::Role, Type::ApiKey],
-                            false,
-                            0,
-                            0,
-                        )
-                        .await
-                    {
-                        Ok(principals) => {
-                            for principal in principals.items {
-                                changed_ids.insert(principal.id());
-                            }
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.details("Failed to list principals")
-                                    .caused_by(trc::location!())
-                                    .account_id(*id)
-                            );
-                        }
-                    }
+                    Ok(token)
                 } else {
-                    nested_principals.push(*id);
+                    // Token is stale, rebuild it
+                    trc::event!(
+                        Store(StoreEvent::CacheStale),
+                        Key = account_id,
+                        Collection = "accessToken",
+                    );
+
+                    debug_assert!(
+                        false,
+                        "Token is stale, invalidation should have been triggered"
+                    );
+                    let revision = rand::random::<u64>();
+                    let token: Arc<AccessTokenInner> = self
+                        .build_access_token(account, account_id, revision, revision_account)
+                        .await?
+                        .into();
+                    self.inner
+                        .cache
+                        .access_tokens
+                        .update(account_id, token.clone());
+                    Ok(token)
                 }
             }
-        }
+            Err(guard) => {
+                trc::event!(
+                    Store(StoreEvent::CacheMiss),
+                    Key = account_id,
+                    Collection = "accessToken",
+                );
 
-        if !nested_principals.is_empty() {
-            let mut ids = nested_principals.into_iter();
-            let mut ids_stack = vec![];
-
-            loop {
-                if let Some(id) = ids.next() {
-                    // Skip if already fetched
-                    if !changed_ids.insert(id) {
-                        continue;
-                    }
-
-                    // Obtain principal
-                    match self.store().get_members(id).await {
-                        Ok(members) => {
-                            ids_stack.push(ids);
-                            ids = members.into_iter();
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.details("Failed to obtain principal")
-                                    .caused_by(trc::location!())
-                                    .account_id(id)
-                            );
-                        }
-                    }
-                } else if let Some(prev_ids) = ids_stack.pop() {
-                    ids = prev_ids;
-                } else {
-                    break;
-                }
+                let revision = rand::random::<u64>();
+                let token: Arc<AccessTokenInner> = self
+                    .build_access_token(account, account_id, revision, revision_account)
+                    .await?
+                    .into();
+                let _ = guard.insert(token.clone());
+                Ok(token)
             }
-        }
-
-        // Invalidate access tokens in cluster
-        if !changed_ids.is_empty() {
-            let mut ids = Vec::with_capacity(changed_ids.len());
-            for id in changed_ids {
-                self.inner.cache.permissions.remove(&id);
-                self.inner.cache.access_tokens.remove(&id);
-                ids.push(id);
-            }
-            self.cluster_broadcast(BroadcastEvent::InvalidateAccessTokens(ids))
-                .await;
-        }
-
-        // Invalidate DAV caches
-        if !changed_names.is_empty() {
-            self.cluster_broadcast(BroadcastEvent::InvalidateGroupwareCache(changed_names))
-                .await;
-        }
-    }
-}
-
-impl From<u32> for PrincipalOrId {
-    fn from(id: u32) -> Self {
-        Self::Id(id)
-    }
-}
-
-impl From<Principal> for PrincipalOrId {
-    fn from(principal: Principal) -> Self {
-        Self::Principal(principal)
-    }
-}
-
-impl PrincipalOrId {
-    pub fn id(&self) -> u32 {
-        match self {
-            Self::Principal(principal) => principal.id(),
-            Self::Id(id) => *id,
         }
     }
 }
 
 impl AccessToken {
-    pub fn from_id(primary_id: u32) -> Self {
-        Self {
-            primary_id,
-            ..Default::default()
+    pub fn new(inner: Arc<AccessTokenInner>, remote_ip: IpAddr) -> trc::Result<Self> {
+        AccessToken {
+            scope_idx: 0,
+            inner,
+        }
+        .assert_is_valid(remote_ip)
+    }
+
+    pub fn new_maybe_invalid(inner: Arc<AccessTokenInner>) -> Self {
+        AccessToken {
+            scope_idx: 0,
+            inner,
         }
     }
 
-    pub fn with_access_to(self, access_to: VecMap<u32, Bitmap<Collection>>) -> Self {
-        Self { access_to, ..self }
+    pub fn new_scoped(
+        inner: Arc<AccessTokenInner>,
+        credential_id: u32,
+        remote_ip: IpAddr,
+    ) -> trc::Result<Self> {
+        inner
+            .scopes
+            .iter()
+            .position(|scope| scope.credential_id == credential_id)
+            .ok_or_else(|| {
+                trc::SecurityEvent::Unauthorized
+                    .into_err()
+                    .ctx(trc::Key::AccountId, inner.account_id)
+                    .ctx(trc::Key::Id, credential_id)
+                    .reason("Credential expired or removed.")
+            })
+            .map(|scope_idx| AccessToken { scope_idx, inner })
+            .and_then(|token| token.assert_is_valid(remote_ip))
     }
 
-    pub fn with_permission(mut self, permission: Permission) -> Self {
-        self.permissions.set(permission.id() as usize);
-        self
-    }
-
-    pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
-        self.tenant = tenant_id.map(|id| TenantInfo { id, quota: 0 });
-        self
+    pub fn renew(
+        inner: Arc<AccessTokenInner>,
+        credential_id: Option<u32>,
+        remote_ip: IpAddr,
+    ) -> trc::Result<Self> {
+        if let Some(credential_id) = credential_id {
+            Self::new_scoped(inner, credential_id, remote_ip)
+        } else {
+            AccessToken {
+                scope_idx: 0,
+                inner,
+            }
+            .assert_is_valid(remote_ip)
+        }
     }
 
     pub fn state(&self) -> u32 {
         // Hash state
-        let mut s = DefaultHasher::new();
-        self.member_of.hash(&mut s);
-        self.access_to.hash(&mut s);
+        let mut s = AHasher::default();
+        self.inner.member_of.hash(&mut s);
+        self.inner.access_to.hash(&mut s);
         s.finish() as u32
     }
 
     #[inline(always)]
-    pub fn primary_id(&self) -> u32 {
-        self.primary_id
+    pub fn account_id(&self) -> u32 {
+        self.inner.account_id
     }
 
     #[inline(always)]
     pub fn tenant_id(&self) -> Option<u32> {
-        self.tenant.as_ref().map(|t| t.id)
+        self.inner.tenant_id
     }
 
     pub fn secondary_ids(&self) -> impl Iterator<Item = &u32> {
-        self.member_of
+        self.inner
+            .member_of
             .iter()
-            .chain(self.access_to.iter().map(|(id, _)| id))
+            .chain(self.inner.access_to.iter().map(|a| &a.account_id))
     }
 
     pub fn member_ids(&self) -> impl Iterator<Item = u32> {
-        [self.primary_id]
+        [self.inner.account_id]
             .into_iter()
-            .chain(self.member_of.iter().copied())
+            .chain(self.inner.member_of.iter().copied())
     }
 
     pub fn all_ids(&self) -> impl Iterator<Item = u32> {
-        [self.primary_id]
+        [self.inner.account_id]
             .into_iter()
-            .chain(self.member_of.iter().copied())
-            .chain(self.access_to.iter().map(|(id, _)| *id))
+            .chain(self.inner.member_of.iter().copied())
+            .chain(self.inner.access_to.iter().map(|a| a.account_id))
     }
 
     pub fn all_ids_by_collection(&self, collection: Collection) -> impl Iterator<Item = u32> {
-        [self.primary_id]
+        [self.inner.account_id]
             .into_iter()
-            .chain(self.member_of.iter().copied())
-            .chain(self.access_to.iter().filter_map(move |(id, cols)| {
-                if cols.contains(collection) {
-                    Some(*id)
+            .chain(self.inner.member_of.iter().copied())
+            .chain(self.inner.access_to.iter().filter_map(move |a| {
+                if a.collections.contains(collection) {
+                    Some(a.account_id)
                 } else {
                     None
                 }
@@ -475,66 +477,203 @@ impl AccessToken {
     }
 
     pub fn is_member(&self, account_id: u32) -> bool {
-        self.primary_id == account_id
-            || self.member_of.contains(&account_id)
+        self.inner.account_id == account_id
+            || self.inner.member_of.contains(&account_id)
             || self.has_permission(Permission::Impersonate)
     }
 
-    pub fn is_primary_id(&self, account_id: u32) -> bool {
-        self.primary_id == account_id
+    pub fn is_account_id(&self, account_id: u32) -> bool {
+        self.inner.account_id == account_id
     }
 
     #[inline(always)]
     pub fn has_permission(&self, permission: Permission) -> bool {
-        self.permissions.get(permission.id() as usize)
+        self.inner
+            .scopes
+            .get(self.scope_idx)
+            .is_some_and(|scope| scope.permissions.get(permission as usize))
     }
 
-    pub fn assert_has_permission(&self, permission: Permission) -> trc::Result<bool> {
-        if self.has_permission(permission) {
-            Ok(true)
+    pub fn assert_is_valid(self, remote_ip: IpAddr) -> trc::Result<Self> {
+        if let Some(scope) = self.inner.scopes.get(self.scope_idx) {
+            let has_expired = scope.expires_at <= now();
+            let is_valid_ip = scope.allowed_ips.is_empty()
+                || scope
+                    .allowed_ips
+                    .iter()
+                    .any(|ip_mask| ip_mask.matches(&remote_ip));
+
+            let mut access_token = self;
+            if has_expired {
+                if access_token.scope_idx > 0 {
+                    return Err(trc::AuthEvent::CredentialExpired
+                        .into_err()
+                        .ctx(trc::Key::AccountId, access_token.inner.account_id)
+                        .reason("Credential expired."));
+                } else {
+                    trc::event!(
+                        Auth(trc::AuthEvent::CredentialExpired),
+                        AccountId = access_token.inner.account_id,
+                        Reason = "Main credential expired, downgrading permissions.",
+                    );
+                }
+
+                // Downgrade permissions to allow password change
+                let mut scopes = Vec::with_capacity(access_token.inner.scopes.len());
+                for (idx, scope) in access_token.inner.scopes.iter().enumerate() {
+                    if idx == 0 {
+                        let mut permissions = Permissions::new();
+
+                        for permission in [
+                            Permission::Authenticate,
+                            Permission::AuthenticateWithAlias,
+                            Permission::SysAccountPasswordGet,
+                            Permission::SysAccountPasswordUpdate,
+                            Permission::EmailReceive,
+                        ] {
+                            if scope.permissions.get(permission as usize) {
+                                permissions.set(permission as usize);
+                            }
+                        }
+
+                        scopes.push(AccessScope {
+                            permissions,
+                            credential_id: scope.credential_id,
+                            expires_at: u64::MAX,
+                            allowed_ips: scope.allowed_ips.clone(),
+                        });
+                    } else {
+                        scopes.push(scope.clone());
+                    }
+                }
+                let old_inner = &access_token.inner;
+                let inner = AccessTokenInner {
+                    scopes: scopes.into_boxed_slice(),
+                    account_id: old_inner.account_id,
+                    tenant_id: old_inner.tenant_id,
+                    member_of: old_inner.member_of.clone(),
+                    access_to: old_inner.access_to.clone(),
+                    concurrent_http_requests: old_inner.concurrent_http_requests.clone(),
+                    concurrent_imap_requests: old_inner.concurrent_imap_requests.clone(),
+                    concurrent_uploads: old_inner.concurrent_uploads.clone(),
+                    revision_account: old_inner.revision_account,
+                    revision: old_inner.revision,
+                    credential_version: old_inner.credential_version,
+                    obj_size: old_inner.obj_size,
+                };
+
+                access_token = AccessToken {
+                    scope_idx: access_token.scope_idx,
+                    inner: Arc::new(inner),
+                };
+            }
+
+            if is_valid_ip {
+                Ok(access_token)
+            } else {
+                Err(trc::SecurityEvent::IpUnauthorized
+                    .into_err()
+                    .ctx(trc::Key::AccountId, access_token.inner.account_id)
+                    .reason("IP address not allowed."))
+            }
         } else {
             Err(trc::SecurityEvent::Unauthorized
                 .into_err()
-                .details(permission.name()))
+                .ctx(trc::Key::AccountId, self.inner.account_id)
+                .reason("Credential not valid."))
+        }
+    }
+
+    #[inline(always)]
+    pub fn credential_id(&self) -> Option<u32> {
+        self.inner
+            .scopes
+            .get(self.scope_idx)
+            .map(|scope| scope.credential_id)
+    }
+
+    #[inline(always)]
+    pub fn revision(&self) -> u64 {
+        self.inner.revision
+    }
+
+    pub fn assert_has_permissions(self, permissions: &[Permission]) -> trc::Result<Self> {
+        for permission in permissions {
+            if !self.has_permission(*permission) {
+                return Err(trc::SecurityEvent::Unauthorized
+                    .into_err()
+                    .details(permission.as_str())
+                    .account_id(self.account_id()));
+            }
+        }
+
+        Ok(self)
+    }
+
+    pub fn assert_has_permission(self, permission: Permission) -> trc::Result<Self> {
+        if self.has_permission(permission) {
+            Ok(self)
+        } else {
+            Err(trc::SecurityEvent::Unauthorized
+                .into_err()
+                .details(permission.as_str())
+                .account_id(self.account_id()))
+        }
+    }
+
+    pub fn enforce_permission(&self, permission: Permission) -> trc::Result<()> {
+        if self.has_permission(permission) {
+            Ok(())
+        } else {
+            Err(trc::SecurityEvent::Unauthorized
+                .into_err()
+                .details(permission.as_str())
+                .account_id(self.account_id()))
         }
     }
 
     pub fn permissions(&self) -> Vec<Permission> {
-        const USIZE_BITS: usize = std::mem::size_of::<usize>() * 8;
-        const USIZE_MASK: u32 = USIZE_BITS as u32 - 1;
-        let mut permissions = Vec::new();
-
-        for (block_num, bytes) in self.permissions.inner().iter().enumerate() {
-            let mut bytes = *bytes;
-
-            while bytes != 0 {
-                let item = USIZE_MASK - bytes.leading_zeros();
-                bytes ^= 1 << item;
-                if let Some(permission) =
-                    Permission::from_id(((block_num * USIZE_BITS) + item as usize) as u32)
-                {
-                    permissions.push(permission);
-                }
-            }
+        if let Some(scope) = self.inner.scopes.get(self.scope_idx) {
+            scope.permissions.build_permissions_list()
+        } else {
+            vec![]
         }
-        permissions
     }
 
     #[inline(always)]
-    pub fn object_quota(&self, collection: Collection) -> u32 {
-        self.object_quota[collection as usize]
+    pub fn access_scope(&self) -> Option<&AccessScope> {
+        self.inner.scopes.get(self.scope_idx)
+    }
+
+    pub(crate) fn permissions_bits(&self) -> &Permissions {
+        &self
+            .inner
+            .scopes
+            .get(self.scope_idx)
+            .unwrap_or(&self.inner.scopes[0])
+            .permissions
+    }
+
+    pub fn account_permissions(&self) -> &Permissions {
+        &self.inner.scopes[0].permissions
     }
 
     pub fn is_shared(&self, account_id: u32) -> bool {
-        !self.is_member(account_id) && self.access_to.iter().any(|(id, _)| *id == account_id)
+        !self.is_member(account_id)
+            && self
+                .inner
+                .access_to
+                .iter()
+                .any(|a| a.account_id == account_id)
     }
 
     pub fn shared_accounts(&self, collection: Collection) -> impl Iterator<Item = &u32> {
-        self.member_of
+        self.inner
+            .member_of
             .iter()
-            .chain(self.access_to.iter().filter_map(move |(id, cols)| {
-                if cols.contains(collection) {
-                    id.into()
+            .chain(self.inner.access_to.iter().filter_map(move |a| {
+                if a.collections.contains(collection) {
+                    Some(&a.account_id)
                 } else {
                     None
                 }
@@ -544,49 +683,245 @@ impl AccessToken {
     pub fn has_access(&self, to_account_id: u32, to_collection: impl Into<Collection>) -> bool {
         let to_collection = to_collection.into();
         self.is_member(to_account_id)
-            || self.access_to.iter().any(|(id, collections)| {
-                *id == to_account_id && collections.contains(to_collection)
-            })
+            || self
+                .inner
+                .access_to
+                .iter()
+                .any(|a| a.account_id == to_account_id && a.collections.contains(to_collection))
     }
 
     pub fn has_account_access(&self, to_account_id: u32) -> bool {
-        self.is_member(to_account_id) || self.access_to.iter().any(|(id, _)| *id == to_account_id)
-    }
-
-    pub fn as_resource_token(&self) -> ResourceToken {
-        ResourceToken {
-            account_id: self.primary_id,
-            quota: self.quota,
-            tenant: self.tenant,
-        }
+        self.is_member(to_account_id)
+            || self
+                .inner
+                .access_to
+                .iter()
+                .any(|a| a.account_id == to_account_id)
     }
 
     pub fn is_http_request_allowed(&self) -> LimiterResult {
-        self.concurrent_http_requests
+        self.inner
+            .concurrent_http_requests
             .as_ref()
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
     }
 
+    pub fn concurrent_http_requests(&self) -> u64 {
+        self.inner
+            .concurrent_http_requests
+            .as_ref()
+            .map(|limiter| limiter.max_concurrent())
+            .unwrap_or(0)
+    }
+
     pub fn is_imap_request_allowed(&self) -> LimiterResult {
-        self.concurrent_imap_requests
+        self.inner
+            .concurrent_imap_requests
             .as_ref()
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
     }
 
     pub fn is_upload_allowed(&self) -> LimiterResult {
-        self.concurrent_uploads
+        self.inner
+            .concurrent_uploads
             .as_ref()
             .map_or(LimiterResult::Disabled, |limiter| limiter.is_allowed())
+    }
+
+    pub fn concurrent_uploads(&self) -> u64 {
+        self.inner
+            .concurrent_uploads
+            .as_ref()
+            .map(|limiter| limiter.max_concurrent())
+            .unwrap_or(0)
+    }
+
+    pub fn account_tenant_ids(&self) -> AccountTenantIds {
+        AccountTenantIds {
+            account_id: self.account_id(),
+            tenant_id: self.tenant_id(),
+        }
+    }
+
+    pub fn new_admin() -> AccessToken {
+        AccessToken {
+            scope_idx: 0,
+            inner: Arc::new(AccessTokenInner::new_admin()),
+        }
+    }
+
+    pub fn from_permissions(
+        account_id: u32,
+        set_permissions: impl IntoIterator<Item = Permission>,
+    ) -> AccessToken {
+        let mut permissions = Permissions::new();
+        for permission in set_permissions {
+            permissions.set(permission as usize);
+        }
+        AccessToken {
+            scope_idx: 0,
+            inner: Arc::new(AccessTokenInner {
+                account_id,
+                tenant_id: Default::default(),
+                member_of: Default::default(),
+                access_to: Default::default(),
+                scopes: Box::new([AccessScope::new(permissions, u32::MAX)]),
+                concurrent_http_requests: Default::default(),
+                concurrent_imap_requests: Default::default(),
+                concurrent_uploads: Default::default(),
+                revision: Default::default(),
+                revision_account: Default::default(),
+                credential_version: Default::default(),
+                obj_size: Default::default(),
+            }),
+        }
+    }
+
+    pub fn from_id_maybe_invalid(account_id: u32) -> Self {
+        AccessToken::new_maybe_invalid(Arc::new(AccessTokenInner::from_id(account_id)))
+    }
+}
+
+impl AccessTokenInner {
+    pub fn from_id(account_id: u32) -> Self {
+        Self {
+            account_id,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_tenant_id(mut self, tenant_id: Option<u32>) -> Self {
+        self.tenant_id = tenant_id;
+        self
     }
 
     pub fn update_size(mut self) -> Self {
         self.obj_size = (std::mem::size_of::<AccessToken>()
             + (self.member_of.len() * std::mem::size_of::<u32>())
             + (self.access_to.len() * (std::mem::size_of::<u32>() + std::mem::size_of::<u64>()))
-            + self.name.len()
-            + self.description.as_ref().map_or(0, |v| v.len())
-            + self.locale.as_ref().map_or(0, |v| v.len())
-            + self.emails.iter().map(|v| v.len()).sum::<usize>()) as u64;
+            + (self.scopes.len() * std::mem::size_of::<AccessScope>()))
+            as u64;
         self
+    }
+
+    pub fn new_admin() -> Self {
+        AccessTokenInner {
+            account_id: RECOVERY_ADMIN_ID,
+            tenant_id: Default::default(),
+            member_of: Default::default(),
+            access_to: Default::default(),
+            scopes: Box::new([AccessScope::new(Permissions::all(), u32::MAX)]),
+            concurrent_http_requests: Default::default(),
+            concurrent_imap_requests: Default::default(),
+            concurrent_uploads: Default::default(),
+            revision: Default::default(),
+            revision_account: Default::default(),
+            credential_version: Default::default(),
+            obj_size: Default::default(),
+        }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn revision_account(&self) -> u64 {
+        self.revision_account
+    }
+
+    pub fn credential_version(&self) -> u64 {
+        self.credential_version
+    }
+}
+
+impl AccessScope {
+    pub fn new(permissions: Permissions, credential_id: u32) -> Self {
+        Self {
+            permissions,
+            credential_id,
+            expires_at: u64::MAX,
+            allowed_ips: Default::default(),
+        }
+    }
+}
+
+fn hash_account(account: &Account) -> u64 {
+    let mut s = AHasher::default();
+
+    match account {
+        Account::User(account) => {
+            account.member_tenant_id.hash(&mut s);
+            match &account.roles {
+                UserRoles::User => {
+                    0u8.hash(&mut s);
+                }
+                UserRoles::Admin => {
+                    1u8.hash(&mut s);
+                }
+                UserRoles::Custom(custom_roles) => {
+                    2u8.hash(&mut s);
+                    custom_roles.role_ids.as_slice().hash(&mut s);
+                }
+            }
+            hash_permissions(&mut s, &account.permissions);
+            for credential in account
+                .credentials
+                .iter()
+                .filter_map(|credential| credential.as_secondary_credential())
+            {
+                credential.credential_id.hash(&mut s);
+                credential.expires_at.hash(&mut s);
+                hash_credential_permissions(&mut s, &credential.permissions);
+            }
+            for group_id in account.member_group_ids.iter() {
+                group_id.hash(&mut s);
+            }
+        }
+        Account::Group(account) => {
+            account.member_tenant_id.hash(&mut s);
+            match &account.roles {
+                Roles::Default => {}
+                Roles::Custom(custom_roles) => {
+                    custom_roles.role_ids.as_slice().hash(&mut s);
+                }
+            }
+            hash_permissions(&mut s, &account.permissions);
+        }
+    }
+
+    s.finish()
+}
+
+fn hash_permissions(hasher: &mut AHasher, permissions: &structs::Permissions) {
+    match permissions {
+        structs::Permissions::Inherit => {
+            0u8.hash(hasher);
+        }
+        structs::Permissions::Merge(permissions) => {
+            2u8.hash(hasher);
+            permissions.enabled_permissions.as_slice().hash(hasher);
+            permissions.disabled_permissions.as_slice().hash(hasher);
+        }
+        structs::Permissions::Replace(permissions) => {
+            3u8.hash(hasher);
+            permissions.enabled_permissions.as_slice().hash(hasher);
+            permissions.disabled_permissions.as_slice().hash(hasher);
+        }
+    }
+}
+
+fn hash_credential_permissions(hasher: &mut AHasher, permissions: &structs::CredentialPermissions) {
+    match permissions {
+        structs::CredentialPermissions::Inherit => {
+            0u8.hash(hasher);
+        }
+        structs::CredentialPermissions::Disable(permissions) => {
+            2u8.hash(hasher);
+            permissions.permissions.as_slice().hash(hasher);
+        }
+        structs::CredentialPermissions::Replace(permissions) => {
+            3u8.hash(hasher);
+            permissions.permissions.as_slice().hash(hasher);
+        }
     }
 }

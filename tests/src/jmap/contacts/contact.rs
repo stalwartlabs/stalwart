@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    jmap::{ChangeType, IntoJmapSet, JMAPTest, JmapUtils, wait_for_index},
-    webdav::DummyWebDavClient,
+use crate::utils::{
+    jmap::{ChangeType, IntoJmapSet, JmapUtils},
+    server::TestServer,
 };
 use ahash::AHashSet;
 use calcard::jscontact::JSContactProperty;
@@ -16,9 +16,9 @@ use jmap_proto::request::method::MethodObject;
 use serde_json::{Value, json};
 use types::{collection::SyncCollection, id::Id};
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Contact Card tests...");
-    let account = params.account("jdoe@example.com");
+    let account = test.account("jdoe@example.com");
 
     // Create test address books
     let response = account
@@ -84,6 +84,7 @@ pub async fn test(params: &mut JMAPTest) {
     let tmp_contact_id = response.created(3).id().to_string();
 
     // Destroy tmp contact
+    test.wait_for_tasks().await;
     assert_eq!(
         account
             .jmap_destroy(
@@ -336,8 +337,8 @@ pub async fn test(params: &mut JMAPTest) {
     }));
 
     // Query tests
-    wait_for_index(&params.server).await;
-    let email = if !params.server.search_store().is_mysql() {
+    test.wait_for_tasks().await;
+    let email = if !test.server.search_store().is_mysql() {
         "sarah.johnson@example.com"
     } else {
         "sarah.johnson@example"
@@ -369,6 +370,7 @@ pub async fn test(params: &mut JMAPTest) {
          [
           "Blob/upload",
           {
+           "accountId": account.id_string(),
            "create": {
             "vcard": {
              "data": [
@@ -389,6 +391,7 @@ END:VCARD"#
         [
           "ContactCard/parse",
           {
+           "accountId": account.id_string(),
            "blobIds": [
              "#vcard"
            ]
@@ -438,6 +441,7 @@ END:VCARD"#
         }));
 
     // Deletion tests
+    test.wait_for_tasks().await;
     assert_eq!(
         account
             .jmap_destroy(
@@ -455,19 +459,10 @@ END:VCARD"#
 
     // CardDAV compatibility tests
     let account_id = account.id().document_id();
-    let dav_client = DummyWebDavClient::new(
-        u32::MAX,
-        account.name(),
-        account.secret(),
-        account.emails()[0],
-    );
-    let resources = params
+    let dav_client = account.webdav_client();
+    let resources = test
         .server
-        .fetch_dav_resources(
-            &params.server.get_access_token(account_id).await.unwrap(),
-            account_id,
-            SyncCollection::AddressBook,
-        )
+        .fetch_dav_resources(account_id, account_id, SyncCollection::AddressBook)
         .await
         .unwrap();
     let path = format!(
@@ -495,8 +490,9 @@ END:VCARD"#
     assert_eq!(vcard, expected_vcard);
 
     // Clean up
+    test.wait_for_tasks().await;
     account.destroy_all_addressbooks().await;
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }
 
 fn test_jscontact_1() -> Value {

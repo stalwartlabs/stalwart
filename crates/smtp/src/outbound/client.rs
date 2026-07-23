@@ -5,13 +5,16 @@
  */
 
 use super::session::SessionParams;
-use crate::queue::{Error, ErrorDetails, HostResponse, MessageWrapper, Status};
-use mail_send::{Credentials, smtp::AssertReply};
+use crate::{
+    outbound::error::{AssertReply, ClientError, ClientResult},
+    queue::{Error, ErrorDetails, HostResponse, MessageWrapper, Status},
+};
+use base64::{Engine, engine::general_purpose};
+use directory::Credentials;
 use rustls::ClientConnection;
 use rustls_pki_types::ServerName;
 use smtp_proto::{
-    AUTH_CRAM_MD5, AUTH_DIGEST_MD5, AUTH_LOGIN, AUTH_OAUTHBEARER, AUTH_PLAIN, AUTH_XOAUTH2,
-    EXT_START_TLS, EhloResponse, Response,
+    AUTH_LOGIN, AUTH_OAUTHBEARER, AUTH_PLAIN, AUTH_XOAUTH2, EXT_START_TLS, EhloResponse, Response,
     response::{
         generate::BitToString,
         parser::{MAX_RESPONSE_LENGTH, ResponseReceiver},
@@ -35,20 +38,15 @@ pub struct SmtpClient<T: AsyncRead + AsyncWrite> {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
-    pub async fn authenticate<U>(
+    pub async fn authenticate(
         &mut self,
-        credentials: impl AsRef<Credentials<U>>,
+        credentials: &Credentials,
         capabilities: impl AsRef<EhloResponse<String>>,
-    ) -> mail_send::Result<&mut Self>
-    where
-        U: AsRef<str> + PartialEq + Eq + std::hash::Hash,
-    {
-        let credentials = credentials.as_ref();
+    ) -> ClientResult<&mut Self> {
         let capabilities = capabilities.as_ref();
         let mut available_mechanisms = match &credentials {
-            Credentials::Plain { .. } => AUTH_CRAM_MD5 | AUTH_DIGEST_MD5 | AUTH_LOGIN | AUTH_PLAIN,
-            Credentials::OAuthBearer { .. } => AUTH_OAUTHBEARER,
-            Credentials::XOauth2 { .. } => AUTH_XOAUTH2,
+            Credentials::Basic { .. } => AUTH_LOGIN | AUTH_PLAIN,
+            Credentials::Bearer { .. } => AUTH_OAUTHBEARER | AUTH_XOAUTH2,
         } & capabilities.auth_mechanisms;
 
         // Try authenticating from most secure to least secure
@@ -63,37 +61,34 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                     return Ok(self);
                 }
                 Err(err) => match err {
-                    mail_send::Error::UnexpectedReply(reply) => {
+                    ClientError::UnexpectedReply(reply) => {
                         has_failed = reply.code() == 535;
                         has_err = reply.into();
                     }
-                    mail_send::Error::UnsupportedAuthMechanism => (),
+                    ClientError::UnsupportedAuthMechanism => (),
                     _ => return Err(err),
                 },
             }
         }
 
         if let Some(has_err) = has_err {
-            Err(mail_send::Error::AuthenticationFailed(has_err))
+            Err(ClientError::AuthenticationFailed(has_err))
         } else {
-            Err(mail_send::Error::UnsupportedAuthMechanism)
+            Err(ClientError::UnsupportedAuthMechanism)
         }
     }
 
-    pub(crate) async fn auth<U>(
+    pub(crate) async fn auth(
         &mut self,
         mechanism: u64,
-        credentials: &Credentials<U>,
-    ) -> mail_send::Result<()>
-    where
-        U: AsRef<str> + PartialEq + Eq + std::hash::Hash,
-    {
+        credentials: &Credentials,
+    ) -> ClientResult<()> {
         let mut reply = if (mechanism & (AUTH_PLAIN | AUTH_XOAUTH2 | AUTH_OAUTHBEARER)) != 0 {
             self.cmd(
                 format!(
                     "AUTH {} {}\r\n",
                     mechanism.to_mechanism(),
-                    credentials.encode(mechanism, "")?,
+                    encode_credentials(credentials, mechanism, "")?,
                 )
                 .as_bytes(),
             )
@@ -108,8 +103,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                 334 => {
                     reply = self
                         .cmd(
-                            format!("{}\r\n", credentials.encode(mechanism, reply.message())?)
-                                .as_bytes(),
+                            format!(
+                                "{}\r\n",
+                                encode_credentials(credentials, mechanism, reply.message())?
+                            )
+                            .as_bytes(),
                         )
                         .await?;
                 }
@@ -117,12 +115,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                     return Ok(());
                 }
                 _ => {
-                    return Err(mail_send::Error::UnexpectedReply(reply));
+                    return Err(ClientError::UnexpectedReply(Box::new(reply)));
                 }
             }
         }
 
-        Err(mail_send::Error::UnexpectedReply(reply))
+        Err(ClientError::UnexpectedReply(Box::new(reply)))
     }
 
     pub async fn read_greeting(
@@ -160,20 +158,21 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
             .map_err(|err| Status::from_smtp_error(hostname, "", err))
     }
 
-    pub async fn write_chunks(&mut self, chunks: &[&[u8]]) -> Result<(), mail_send::Error> {
+    pub async fn write_chunks(&mut self, chunks: &[&[u8]]) -> Result<(), ClientError> {
         for chunk in chunks {
             self.stream
                 .write_all(chunk)
                 .await
-                .map_err(mail_send::Error::from)?;
+                .map_err(ClientError::from)?;
         }
-        self.stream.flush().await.map_err(mail_send::Error::from)
+        self.stream.flush().await.map_err(ClientError::from)
     }
 
     pub async fn send_message(
         &mut self,
         message: &MessageWrapper,
-        bdat_cmd: &Option<String>,
+        rcpt_headers: Option<&[u8]>,
+        bdat_cmd: &mut Option<String>,
         params: &SessionParams<'_>,
     ) -> Result<(), Status<HostResponse<Box<str>>, ErrorDetails>> {
         match params
@@ -185,6 +184,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
             Ok(Some(raw_message)) => {
                 tokio::time::timeout(params.conn_strategy.timeout_data, async {
                     if let Some(bdat_cmd) = bdat_cmd {
+                        *bdat_cmd = format!(
+                            "BDAT {} LAST\r\n",
+                            raw_message.len() + rcpt_headers.map(|h| h.len()).unwrap_or(0)
+                        );
+
                         trc::event!(
                             Delivery(DeliveryEvent::RawOutput),
                             SpanId = self.session_id,
@@ -192,8 +196,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                             Size = bdat_cmd.len()
                         );
 
-                        self.write_chunks(&[bdat_cmd.as_bytes(), &raw_message])
-                            .await
+                        let chunks = if let Some(rcpt_headers) = rcpt_headers {
+                            &[bdat_cmd.as_bytes(), rcpt_headers, &raw_message][..]
+                        } else {
+                            &[bdat_cmd.as_bytes(), &raw_message][..]
+                        };
+
+                        self.write_chunks(chunks).await
                     } else {
                         trc::event!(
                             Delivery(DeliveryEvent::RawOutput),
@@ -204,9 +213,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
 
                         self.write_chunks(&[b"DATA\r\n"]).await?;
                         self.read().await?.assert_code(354)?;
-                        self.write_message(&raw_message)
-                            .await
-                            .map_err(mail_send::Error::from)
+                        if let Some(rcpt_headers) = rcpt_headers
+                            && let Err(err) = self.write_chunks(&[rcpt_headers]).await
+                        {
+                            Err(err)
+                        } else {
+                            self.write_message(&raw_message)
+                                .await
+                                .map_err(ClientError::from)
+                        }
                     }
                 })
                 .await
@@ -291,7 +306,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         .await;
     }
 
-    pub async fn read_ehlo(&mut self) -> mail_send::Result<EhloResponse<String>> {
+    pub async fn read_ehlo(&mut self) -> ClientResult<EhloResponse<String>> {
         let mut buf = vec![0u8; 8192];
         let mut buf_concat = Vec::with_capacity(0);
 
@@ -299,7 +314,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
             let br = self.stream.read(&mut buf).await?;
 
             if br == 0 {
-                return Err(mail_send::Error::UnparseableReply);
+                return Err(ClientError::UnparseableReply);
             }
 
             trc::event!(
@@ -315,7 +330,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                 buf_concat.extend_from_slice(&buf[..br]);
                 buf_concat.iter()
             } else {
-                return Err(mail_send::Error::UnparseableReply);
+                return Err(ClientError::UnparseableReply);
             };
 
             match EhloResponse::parse(&mut iter) {
@@ -329,25 +344,25 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                     smtp_proto::Error::InvalidResponse { code } => {
                         match ResponseReceiver::from_code(code).parse(&mut iter) {
                             Ok(response) => {
-                                return Err(mail_send::Error::UnexpectedReply(response));
+                                return Err(ClientError::UnexpectedReply(Box::new(response)));
                             }
                             Err(smtp_proto::Error::NeedsMoreData { .. }) => {
                                 if buf_concat.is_empty() {
                                     buf_concat = buf[..br].to_vec();
                                 }
                             }
-                            Err(_) => return Err(mail_send::Error::UnparseableReply),
+                            Err(_) => return Err(ClientError::UnparseableReply),
                         }
                     }
                     _ => {
-                        return Err(mail_send::Error::UnparseableReply);
+                        return Err(ClientError::UnparseableReply);
                     }
                 },
             }
         }
     }
 
-    pub async fn read(&mut self) -> mail_send::Result<Response<String>> {
+    pub async fn read(&mut self) -> ClientResult<Response<String>> {
         let mut buf = vec![0u8; 8192];
         let mut parser = ResponseReceiver::default();
 
@@ -367,17 +382,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                     Err(err) => match err {
                         smtp_proto::Error::NeedsMoreData { .. } => (),
                         _ => {
-                            return Err(mail_send::Error::UnparseableReply);
+                            return Err(ClientError::UnparseableReply);
                         }
                     },
                 }
             } else {
-                return Err(mail_send::Error::UnparseableReply);
+                return Err(ClientError::UnparseableReply);
             }
         }
     }
 
-    pub async fn read_many(&mut self, num: usize) -> mail_send::Result<Vec<Response<Box<str>>>> {
+    pub async fn read_many(&mut self, num: usize) -> ClientResult<Vec<Response<Box<str>>>> {
         let mut buf = vec![0u8; 1024];
         let mut response = Vec::with_capacity(num);
         let mut parser = ResponseReceiver::default();
@@ -408,13 +423,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                         Err(err) => match err {
                             smtp_proto::Error::NeedsMoreData { .. } => break,
                             _ => {
-                                return Err(mail_send::Error::UnparseableReply);
+                                return Err(ClientError::UnparseableReply);
                             }
                         },
                     }
                 }
             } else {
-                return Err(mail_send::Error::UnparseableReply);
+                return Err(ClientError::UnparseableReply);
             }
         }
 
@@ -422,7 +437,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
     }
 
     /// Sends a command to the SMTP server and waits for a reply.
-    pub async fn cmd(&mut self, cmd: impl AsRef<[u8]>) -> mail_send::Result<Response<String>> {
+    pub async fn cmd(&mut self, cmd: impl AsRef<[u8]>) -> ClientResult<Response<String>> {
         tokio::time::timeout(self.timeout, async {
             let cmd = cmd.as_ref();
 
@@ -438,7 +453,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
             self.read().await
         })
         .await
-        .map_err(|_| mail_send::Error::Timeout)?
+        .map_err(|_| ClientError::Timeout)?
     }
 
     pub async fn write_message(&mut self, message: &[u8]) -> tokio::io::Result<()> {
@@ -485,7 +500,7 @@ impl SmtpClient<TcpStream> {
         mut self,
         tls_connector: &TlsConnector,
         hostname: &str,
-    ) -> mail_send::Result<SmtpClient<TlsStream<TcpStream>>> {
+    ) -> ClientResult<SmtpClient<TlsStream<TcpStream>>> {
         // Send STARTTLS command
         self.cmd(b"STARTTLS\r\n")
             .await?
@@ -498,13 +513,13 @@ impl SmtpClient<TcpStream> {
         self,
         tls_connector: &TlsConnector,
         hostname: &str,
-    ) -> mail_send::Result<SmtpClient<TlsStream<TcpStream>>> {
+    ) -> ClientResult<SmtpClient<TlsStream<TcpStream>>> {
         tokio::time::timeout(self.timeout, async {
             Ok(SmtpClient {
                 stream: tls_connector
                     .connect(
                         ServerName::try_from(hostname)
-                            .map_err(|_| mail_send::Error::InvalidTLSName)?
+                            .map_err(|_| ClientError::InvalidTLSName)?
                             .to_owned(),
                         self.stream,
                     )
@@ -513,13 +528,11 @@ impl SmtpClient<TcpStream> {
                         let kind = err.kind();
                         if let Some(inner) = err.into_inner() {
                             match inner.downcast::<rustls::Error>() {
-                                Ok(error) => mail_send::Error::Tls(error),
-                                Err(error) => {
-                                    mail_send::Error::Io(std::io::Error::new(kind, error))
-                                }
+                                Ok(error) => ClientError::Tls(error),
+                                Err(error) => ClientError::Io(std::io::Error::new(kind, error)),
                             }
                         } else {
-                            mail_send::Error::Io(std::io::Error::new(kind, "Unspecified"))
+                            ClientError::Io(std::io::Error::new(kind, "Unspecified"))
                         }
                     })?,
                 timeout: self.timeout,
@@ -527,7 +540,7 @@ impl SmtpClient<TcpStream> {
             })
         })
         .await
-        .map_err(|_| mail_send::Error::Timeout)?
+        .map_err(|_| ClientError::Timeout)?
     }
 }
 
@@ -537,7 +550,7 @@ impl SmtpClient<TcpStream> {
         remote_addr: SocketAddr,
         timeout: Duration,
         session_id: u64,
-    ) -> mail_send::Result<Self> {
+    ) -> ClientResult<Self> {
         tokio::time::timeout(timeout, async {
             Ok(SmtpClient {
                 stream: TcpStream::connect(remote_addr).await?,
@@ -546,7 +559,7 @@ impl SmtpClient<TcpStream> {
             })
         })
         .await
-        .map_err(|_| mail_send::Error::Timeout)?
+        .map_err(|_| ClientError::Timeout)?
     }
 
     /// Connects to a remote host address using the provided local IP
@@ -555,7 +568,7 @@ impl SmtpClient<TcpStream> {
         remote_addr: SocketAddr,
         timeout: Duration,
         session_id: u64,
-    ) -> mail_send::Result<Self> {
+    ) -> ClientResult<Self> {
         tokio::time::timeout(timeout, async {
             let socket = if local_ip.is_ipv4() {
                 TcpSocket::new_v4()?
@@ -571,7 +584,7 @@ impl SmtpClient<TcpStream> {
             })
         })
         .await
-        .map_err(|_| mail_send::Error::Timeout)?
+        .map_err(|_| ClientError::Timeout)?
     }
 
     pub async fn try_start_tls(
@@ -606,6 +619,59 @@ impl SmtpClient<TcpStream> {
     }
 }
 
+fn encode_credentials(
+    credentials: &Credentials,
+    mechanism: u64,
+    challenge: &str,
+) -> ClientResult<String> {
+    Ok(general_purpose::STANDARD.encode(
+        match (mechanism, credentials) {
+            (
+                AUTH_PLAIN,
+                Credentials::Basic {
+                    username, secret, ..
+                },
+            ) => {
+                format!("\u{0}{}\u{0}{}", username, secret)
+            }
+            (
+                AUTH_LOGIN,
+                Credentials::Basic {
+                    username, secret, ..
+                },
+            ) => {
+                let challenge = general_purpose::STANDARD.decode(challenge)?;
+
+                if b"user name"
+                    .eq_ignore_ascii_case(challenge.get(0..9).ok_or(ClientError::InvalidChallenge)?)
+                    || b"username".eq_ignore_ascii_case(
+                        // Because Google makes its own standards
+                        challenge.get(0..8).ok_or(ClientError::InvalidChallenge)?,
+                    )
+                {
+                    &username
+                } else if b"password"
+                    .eq_ignore_ascii_case(challenge.get(0..8).ok_or(ClientError::InvalidChallenge)?)
+                {
+                    &secret
+                } else {
+                    return Err(ClientError::InvalidChallenge);
+                }
+                .to_string()
+            }
+
+            (AUTH_XOAUTH2, Credentials::Bearer { token, username }) => format!(
+                "user={}\x01auth=Bearer {}\x01\x01",
+                username.as_deref().unwrap_or_default(),
+                token
+            ),
+            (AUTH_OAUTHBEARER, Credentials::Bearer { token, .. }) => token.to_string(),
+            _ => return Err(ClientError::UnsupportedAuthMechanism),
+        }
+        .as_bytes(),
+    ))
+}
+
 impl SmtpClient<TlsStream<TcpStream>> {
     pub fn tls_connection(&self) -> &ClientConnection {
         self.stream.get_ref().1
@@ -618,7 +684,7 @@ pub enum StartTlsResult {
         smtp_client: SmtpClient<TlsStream<TcpStream>>,
     },
     Error {
-        error: mail_send::Error,
+        error: ClientError,
     },
     Unavailable {
         response: Option<Response<Box<str>>>,
@@ -640,31 +706,33 @@ impl BoxResponse for Response<String> {
     }
 }
 
-pub(crate) fn from_mail_send_error(error: &mail_send::Error) -> trc::Error {
+pub(crate) fn from_mail_send_error(error: &ClientError) -> trc::Error {
     let event = trc::EventType::Smtp(trc::SmtpEvent::Error).into_err();
     match error {
-        mail_send::Error::Io(err) => event.details("I/O Error").reason(err),
-        mail_send::Error::Tls(err) => event.details("TLS Error").reason(err),
-        mail_send::Error::Base64(err) => event.details("Base64 Error").reason(err),
-        mail_send::Error::Auth(err) => event.details("SMTP Authentication Error").reason(err),
-        mail_send::Error::UnparseableReply => event.details("Unparseable SMTP Reply"),
-        mail_send::Error::UnexpectedReply(reply) => event
+        ClientError::Io(err) => event.details("I/O Error").reason(err),
+        ClientError::Tls(err) => event.details("TLS Error").reason(err),
+        ClientError::Base64(err) => event.details("Base64 Error").reason(err),
+        ClientError::InvalidChallenge => event
+            .details("SMTP Authentication Error")
+            .reason("Invalid Challenge"),
+        ClientError::UnparseableReply => event.details("Unparseable SMTP Reply"),
+        ClientError::UnexpectedReply(reply) => event
             .details("Unexpected SMTP Response")
             .ctx(trc::Key::Code, reply.code)
             .ctx(trc::Key::Reason, reply.message.clone()),
-        mail_send::Error::AuthenticationFailed(reply) => event
+        ClientError::AuthenticationFailed(reply) => event
             .details("SMTP Authentication Failed")
             .ctx(trc::Key::Code, reply.code)
             .ctx(trc::Key::Reason, reply.message.clone()),
-        mail_send::Error::InvalidTLSName => event.details("Invalid TLS Name"),
-        mail_send::Error::MissingCredentials => event.details("Missing Authentication Credentials"),
-        mail_send::Error::MissingMailFrom => event.details("Missing Message Sender"),
-        mail_send::Error::MissingRcptTo => event.details("Missing Message Recipients"),
-        mail_send::Error::UnsupportedAuthMechanism => {
+        ClientError::InvalidTLSName => event.details("Invalid TLS Name"),
+        ClientError::MissingCredentials => event.details("Missing Authentication Credentials"),
+        ClientError::MissingMailFrom => event.details("Missing Message Sender"),
+        ClientError::MissingRcptTo => event.details("Missing Message Recipients"),
+        ClientError::UnsupportedAuthMechanism => {
             event.details("Unsupported Authentication Mechanism")
         }
-        mail_send::Error::Timeout => event.details("Connection Timeout"),
-        mail_send::Error::MissingStartTls => event.details("STARTTLS not available"),
+        ClientError::Timeout => event.details("Connection Timeout"),
+        ClientError::MissingStartTls => event.details("STARTTLS not available"),
     }
 }
 

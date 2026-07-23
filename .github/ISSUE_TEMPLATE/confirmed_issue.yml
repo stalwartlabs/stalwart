@@ -1,40 +1,25 @@
-name: Confirmed Bug Report
-description: Only for issues that have been discussed and confirmed as bugs in GitHub Discussions.
+name: Bug Report (auto-closed)
+description: Issues opened here are automatically closed. Please report bugs at support.stalw.art instead.
 labels: ["bug"]
 title: "🪲: "
 body:
   - type: markdown
     attributes:
       value: |
-        > [!IMPORTANT]
-        > This template is **only** for issues that have already been discussed and confirmed as bugs in the [Discussions](https://github.com/stalwartlabs/stalwart/discussions) section.
+        > [!CAUTION]
+        > **Issues opened directly in this repository are automatically closed and locked.**
         >
-        > If you haven't had your issue confirmed yet, please [start a Discussion](https://github.com/stalwartlabs/stalwart/discussions/new?category=issue-triage) first.
-  - type: input
-    attributes:
-      label: Discussion Link
-      description: Provide the link to the Discussion where this issue was confirmed as a bug.
-      placeholder: https://github.com/stalwartlabs/stalwart/discussions/1234
-    validations:
-      required: true
-  - type: textarea
-    attributes:
-      label: Bug Summary
-      description: Brief summary of the confirmed bug.
-    validations:
-      required: true
-  - type: textarea
-    attributes:
-      label: Additional Information
-      description: |
-        Include any additional information not covered in the original Discussion, such as new findings, workarounds discovered, or updated reproduction steps.
-    validations:
-      required: false
+        > All bug reports must first be triaged at our support portal: **[support.stalw.art](https://support.stalw.art)**. If a maintainer confirms that your report is a genuine bug, they will create an Issue on your behalf; you do not need to (and should not) open one yourself.
+        >
+        > You can sign in to support.stalw.art with your existing GitHub account, so no separate registration is required.
+        >
+        > **What to do instead:**
+        > - Suspected bug, question, or feature request? Post it at [support.stalw.art](https://support.stalw.art).
+        >
+        > If you proceed and submit this form anyway, your issue will be closed automatically and a comment will be posted explaining this policy.
   - type: checkboxes
     attributes:
-      label: Confirmation
+      label: Acknowledgement
       options:
-        - label: This issue was discussed and confirmed as a bug in the linked Discussion.
-          required: true
-        - label: I have included the link to the Discussion above.
+        - label: I understand that this issue will be automatically closed and that I should post my report at [support.stalw.art](https://support.stalw.art) instead.
           required: true

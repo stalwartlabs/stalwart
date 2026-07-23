@@ -11,6 +11,7 @@ use crate::{U32_LEN, U64_LEN};
 pub enum AssertValue {
     U32(u32),
     U64(u64),
+    Hash(u64),
     Archive(ArchiveVersion),
     Some,
     None,
@@ -66,6 +67,7 @@ impl AssertValue {
             AssertValue::U64(v) => bytes
                 .get(bytes.len() - U64_LEN..)
                 .is_some_and(|b| b == v.to_be_bytes()),
+            AssertValue::Hash(v) => xxhash_rust::xxh3::xxh3_64(bytes) == *v,
             AssertValue::Archive(v) => match v {
                 ArchiveVersion::Versioned { hash, .. } => bytes
                     .get(bytes.len() - U32_LEN - U64_LEN - 1..bytes.len() - U64_LEN - 1)

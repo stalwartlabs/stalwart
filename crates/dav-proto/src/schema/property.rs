@@ -5,18 +5,18 @@
  */
 
 use super::{
+    Collation, Namespace,
     request::DavPropertyValue,
     response::{Ace, AclRestrictions, Href, List, Response, SupportedPrivilege},
-    Collation, Namespace,
 };
 use crate::{Depth, Timeout};
 use calcard::{
     icalendar::{ICalendar, ICalendarComponentType, ICalendarProperty},
-    vcard::{VCard, VCardProperty},
+    vcard::{VCard, VCardProperty, VCardVersion},
 };
 use types::{
-    dead_property::{DeadElementTag, DeadProperty},
     TimeRange,
+    dead_property::{DeadElementTag, DeadProperty},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +72,11 @@ pub enum CardDavProperty {
     SupportedAddressData,
     SupportedCollationSet,
     MaxResourceSize,
-    AddressData(Vec<CardDavPropertyName>),
+    AddressData {
+        properties: Vec<CardDavPropertyName>,
+        #[cfg_attr(test, serde(skip))]
+        version: Option<VCardVersion>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,7 +169,7 @@ pub enum DavValue {
     Href(List<Href>),
     Acl(List<Ace>),
     AclRestrictions(AclRestrictions),
-    Response(Response),
+    Response(Box<Response>),
     DeadProperty(DeadProperty),
     SupportedAddressData,
     SupportedCalendarData,

@@ -58,7 +58,11 @@ impl CardDeleteRequestHandler for Server {
             .filter(|r| !r.is_empty())
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await
             .caused_by(trc::location!())?;
 
@@ -118,7 +122,7 @@ impl CardDeleteRequestHandler for Server {
             DestroyArchive(book)
                 .delete_with_cards(
                     self,
-                    access_token,
+                    access_token.account_tenant_ids(),
                     account_id,
                     document_id,
                     resources
@@ -198,7 +202,7 @@ impl CardDeleteRequestHandler for Server {
                     .caused_by(trc::location!())?,
             )
             .delete(
-                access_token,
+                access_token.account_tenant_ids(),
                 account_id,
                 document_id,
                 addressbook_id,

@@ -7,11 +7,12 @@
 use super::client::SmtpClient;
 use crate::outbound::DeliveryResult;
 use crate::outbound::client::{BoxResponse, from_error_status, from_mail_send_error};
+use crate::outbound::error::ClientError;
 use crate::queue::{Error, MessageWrapper, Recipient, Status};
 use crate::queue::{ErrorDetails, HostResponse, UnexpectedResponse};
 use common::Server;
 use common::config::smtp::queue::ConnectionStrategy;
-use mail_send::Credentials;
+use directory::Credentials;
 use smtp_proto::{
     EXT_CHUNKING, EXT_DSN, EXT_REQUIRE_TLS, EXT_SIZE, EXT_SMTP_UTF8, EhloResponse, MAIL_REQUIRETLS,
     MAIL_RET_FULL, MAIL_RET_HDRS, MAIL_SMTPUTF8, RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE,
@@ -24,7 +25,7 @@ use trc::DeliveryEvent;
 pub struct SessionParams<'x> {
     pub server: &'x Server,
     pub hostname: &'x str,
-    pub credentials: Option<&'x Credentials<String>>,
+    pub credentials: Option<&'x Credentials>,
     pub capabilities: Option<EhloResponse<String>>,
     pub is_smtp: bool,
     pub local_hostname: &'x str,
@@ -37,6 +38,7 @@ impl MessageWrapper {
         &self,
         mut smtp_client: SmtpClient<T>,
         rcpt_idxs: Vec<usize>,
+        rcpt_headers: Option<&[u8]>,
         statuses: &mut Vec<DeliveryResult>,
         mut params: SessionParams<'_>,
     ) {
@@ -125,7 +127,7 @@ impl MessageWrapper {
             if r.is_positive_completion() {
                 Ok(r)
             } else {
-                Err(mail_send::Error::UnexpectedReply(r))
+                Err(ClientError::UnexpectedReply(Box::new(r)))
             }
         }) {
             Ok(response) => {
@@ -245,11 +247,12 @@ impl MessageWrapper {
         // Send message
         if !accepted_rcpts.is_empty() {
             let time = Instant::now();
-            let bdat_cmd = capabilities
-                .has_capability(EXT_CHUNKING)
-                .then(|| format!("BDAT {} LAST\r\n", self.message.size));
+            let mut bdat_cmd = capabilities.has_capability(EXT_CHUNKING).then(String::new);
 
-            if let Err(status) = smtp_client.send_message(self, &bdat_cmd, &params).await {
+            if let Err(status) = smtp_client
+                .send_message(self, rcpt_headers, &mut bdat_cmd, &params)
+                .await
+            {
                 trc::event!(
                     Delivery(DeliveryEvent::MessageRejected),
                     SpanId = params.session_id,
@@ -300,7 +303,7 @@ impl MessageWrapper {
                                 Status::from_smtp_error(
                                     params.hostname,
                                     bdat_cmd.as_deref().unwrap_or("DATA"),
-                                    mail_send::Error::UnexpectedReply(response),
+                                    ClientError::UnexpectedReply(Box::new(response)),
                                 ),
                                 rcpt_idxs,
                             ));

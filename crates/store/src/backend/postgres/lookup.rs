@@ -33,10 +33,7 @@ impl PostgresStore {
                 .await
                 .map_or_else(|e| Err(into_error(e)), |r| Ok(T::from_exec(r as usize))),
             QueryType::Exists => {
-                let rows = conn
-                    .query_raw(&s, params.into_iter())
-                    .await
-                    .map_err(into_error)?;
+                let rows = conn.query_raw(&s, params).await.map_err(into_error)?;
                 pin_mut!(rows);
                 rows.try_next()
                     .await

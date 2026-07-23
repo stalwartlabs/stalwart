@@ -60,14 +60,7 @@ impl PostgresStore {
                     let value_ref = format!("${}", values.len() + 1);
                     let (text_len, language) = if let SearchValue::Text { value, language } = value
                     {
-                        (
-                            value.len(),
-                            if self.languages.contains(language) {
-                                pg_lang(language).unwrap_or("simple")
-                            } else {
-                                "simple"
-                            },
-                        )
+                        (value.len(), pg_lang(language).unwrap_or("simple"))
                     } else {
                         (0, "simple")
                     };
@@ -194,9 +187,7 @@ impl PostgresStore {
                         query.push(' ');
 
                         let language = match &value {
-                            SearchValue::Text { language, .. }
-                                if self.languages.contains(language) =>
-                            {
+                            SearchValue::Text { language, .. } => {
                                 pg_lang(language).unwrap_or("simple")
                             }
                             _ => "simple",
@@ -441,7 +432,7 @@ fn pg_lang(lang: &Language) -> Option<&'static str> {
         Language::Japanese => None,
         Language::Hebrew => None,
         Language::Yiddish => Some("yiddish"),
-        Language::Polish => Some("polish"),
+        Language::Polish => None,
         Language::Amharic => None,
         Language::Javanese => None,
         Language::Korean => None,
@@ -452,7 +443,7 @@ fn pg_lang(lang: &Language) -> Option<&'static str> {
         Language::Turkish => Some("turkish"),
         Language::Dutch => Some("dutch"),
         Language::Hungarian => Some("hungarian"),
-        Language::Czech => Some("czech"),
+        Language::Czech => None,
         Language::Greek => Some("greek"),
         Language::Bulgarian => None,
         Language::Belarusian => None,

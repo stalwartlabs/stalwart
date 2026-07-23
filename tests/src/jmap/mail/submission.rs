@@ -5,8 +5,8 @@
  */
 
 use crate::{
-    jmap::{JMAPTest, mail::set::assert_email_properties},
-    smtp::DnsCache,
+    jmap::mail::set::assert_email_properties,
+    utils::{dns::DnsCache, server::TestServer},
 };
 use ahash::AHashMap;
 use jmap_client::{
@@ -58,12 +58,12 @@ pub struct MockSMTPSettings {
 }
 
 #[allow(clippy::disallowed_types)]
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running E-mail submissions tests...");
     // Start mock SMTP server
-    let server = params.server.clone();
-    let account = params.account("jdoe@example.com");
-    let client = account.client();
+    let server = test.server.clone();
+    let account = test.account("jdoe@example.com");
+    let client = account.jmap_client().await;
     let (mut smtp_rx, smtp_settings) = spawn_mock_smtp_server();
     server.ipv4_add(
         "localhost",
@@ -81,6 +81,30 @@ pub async fn test(params: &mut JMAPTest) {
         assert_eq!(identity.email().unwrap(), email);
         assert_eq!(identity.name().unwrap(), "John Doe");
     }
+
+    // Users should be allowed to create identities only
+    // using email addresses associated to their principal
+    let iid1 = client
+        .identity_create("John Doe", "jdoe@example.com")
+        .await
+        .unwrap()
+        .take_id();
+    let iid2 = client
+        .identity_create("John Doe (secondary)", "john.doe@example.com")
+        .await
+        .unwrap()
+        .take_id();
+    assert!(matches!(
+        client
+            .identity_create("John the Spammer", "spammy@mcspamface.com")
+            .await,
+        Err(jmap_client::Error::Set(SetError {
+            type_: SetErrorType::InvalidProperties,
+            ..
+        }))
+    ));
+    client.identity_destroy(&iid1).await.unwrap();
+    client.identity_destroy(&iid2).await.unwrap();
 
     // Create an identity without using a valid address should fail
     match client
@@ -434,7 +458,7 @@ pub async fn test(params: &mut JMAPTest) {
         .mailbox_id(&mailbox_id_2, true);
     request.send().await.unwrap().unwrap_method_responses();
 
-    assert_email_properties(client, &email_id, &[&mailbox_id_2], &["$draft"]).await;
+    assert_email_properties(&client, &email_id, &[&mailbox_id_2], &["$draft"]).await;
 
     // Verify onSuccessDestroyEmail action
     let mut request = client.build();
@@ -476,8 +500,8 @@ pub async fn test(params: &mut JMAPTest) {
             .await;
         client.email_submission_destroy(&id).await.unwrap();
     }
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.assert_is_empty().await;
 }
 
 pub fn spawn_mock_smtp_server() -> (mpsc::Receiver<MockMessage>, Arc<Mutex<MockSMTPSettings>>) {

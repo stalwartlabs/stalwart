@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken, sharing::notification::ShareNotification};
+use common::{Server, auth::AccountCache, sharing::notification::ShareNotification};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::{
@@ -63,7 +63,7 @@ impl ShareNotificationGet for Server {
         let mut min_id = u64::MAX;
         let mut max_id = 0u64;
 
-        let mut token_cache: AHashMap<u32, Arc<AccessToken>> = AHashMap::new();
+        let mut account_cache: AHashMap<u32, Arc<AccountCache>> = AHashMap::new();
 
         let mut ids = if let Some(ids) = request.ids.take() {
             let ids = ids.unwrap();
@@ -91,7 +91,7 @@ impl ShareNotificationGet for Server {
         if min_id == u64::MAX {
             min_id = SnowflakeIdGenerator::from_duration(
                 self.core
-                    .jmap
+                    .email
                     .share_notification_max_history
                     .unwrap_or(Duration::from_secs(30 * 86400)),
             )
@@ -146,24 +146,24 @@ impl ShareNotificationGet for Server {
             .caused_by(trc::location!())?;
 
         for (change_id, notification) in notifications {
-            let changed_by_token = if let Some(token) = token_cache.get(&notification.changed_by) {
-                token.clone()
-            } else {
-                let token = if let Ok(token) = self.get_access_token(notification.changed_by).await
-                {
-                    token
+            let changed_by_account =
+                if let Some(account) = account_cache.get(&notification.changed_by) {
+                    account.clone()
                 } else {
-                    Arc::new(AccessToken::from_id(notification.changed_by))
-                };
+                    let account = if let Ok(account) = self.account(notification.changed_by).await {
+                        account
+                    } else {
+                        continue;
+                    };
 
-                token_cache.insert(notification.changed_by, token.clone());
-                token
-            };
+                    account_cache.insert(notification.changed_by, account.clone());
+                    account
+                };
 
             response.list.push(build_share_notification(
                 change_id,
                 notification,
-                &changed_by_token,
+                &changed_by_account,
                 &properties,
             ));
         }
@@ -172,9 +172,9 @@ impl ShareNotificationGet for Server {
             response.state = Some(State::Initial);
         }
 
-        response
-            .not_found
-            .extend(ids.into_iter().map(Id::from).collect::<Vec<_>>());
+        for id in ids {
+            response.push_not_found(Id::from(id));
+        }
 
         Ok(response)
     }
@@ -183,7 +183,7 @@ impl ShareNotificationGet for Server {
 fn build_share_notification(
     id: u64,
     mut notification: ShareNotification,
-    changed_by: &AccessToken,
+    changed_by: &AccountCache,
     properties: &[ShareNotificationProperty],
 ) -> Value<'static, ShareNotificationProperty, ShareNotificationValue> {
     let mut result = Map::with_capacity(properties.len());
@@ -202,19 +202,15 @@ fn build_share_notification(
                     Key::Property(ShareNotificationProperty::ChangedByName),
                     Value::Str(
                         changed_by
-                            .description
-                            .as_deref()
-                            .unwrap_or(changed_by.name.as_str())
+                            .description()
+                            .unwrap_or(changed_by.name())
                             .to_string()
                             .into(),
                     ),
                 ),
                 (
                     Key::Property(ShareNotificationProperty::ChangedByEmail),
-                    changed_by
-                        .emails
-                        .first()
-                        .map_or(Value::Null, |email| Value::Str(email.to_string().into())),
+                    Value::Str(changed_by.name().to_string().into()),
                 ),
             ])),
             ShareNotificationProperty::ObjectType => DataType::try_from(notification.object_type)

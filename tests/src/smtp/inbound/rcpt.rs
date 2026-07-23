@@ -4,96 +4,129 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Duration;
-
-use common::Core;
-
-use smtp_proto::{RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_SUCCESS};
-use store::Stores;
-use utils::config::Config;
-
-use smtp::core::{Session, State};
-
-use crate::smtp::{
-    TempDir, TestSMTP,
-    session::{TestSession, VerifyResponse},
+use crate::{
+    smtp::session::{TestSession, VerifyResponse},
+    utils::server::TestServerBuilder,
 };
-
-const CONFIG: &str = r#"
-[storage]
-data = "rocksdb"
-lookup = "rocksdb"
-blob = "rocksdb"
-fts = "rocksdb"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/queue.db"
-
-[directory."local"]
-type = "memory"
-
-[[directory."local".principals]]
-name = "john"
-description = "John Doe"
-secret = "secret"
-email = "john@foobar.org"
-
-[[directory."local".principals]]
-name = "jane"
-description = "Jane Doe"
-secret = "p4ssw0rd"
-email = "jane@foobar.org"
-
-[[directory."local".principals]]
-name = "bill"
-description = "Bill Foobar"
-secret = "p4ssw0rd"
-email = "bill@foobar.org"
-
-[[directory."local".principals]]
-name = "mike"
-description = "Mike Foobar"
-secret = "p4ssw0rd"
-email = "mike@foobar.org"
-
-[session.rcpt]
-directory = "'local'"
-max-recipients = [{if = "remote_ip = '10.0.0.1'", then = 3},
-                {else = 5}]
-relay = [{if = "remote_ip = '10.0.0.1'", then = false},
-         {else = true}]
-
-[session.rcpt.errors]
-total = [{if = "remote_ip = '10.0.0.1'", then = 3},
-         {else = 100}]
-wait = [{if = "remote_ip = '10.0.0.1'", then = '5ms'},
-        {else = '1s'}]
-
-[session.extensions]
-dsn = [{if = "remote_ip = '10.0.0.1'", then = false},
-       {else = true}]
-
-[[queue.limiter.inbound]]
-match = "remote_ip = '10.0.0.1' && !is_empty(rcpt)"
-key = 'sender'
-rate = '2/1s'
-enable = true
-
-"#;
+use registry::{
+    schema::{
+        enums::MtaInboundThrottleKey,
+        structs::{
+            Expression, ExpressionMatch, MtaExtensions, MtaInboundThrottle, MtaStageRcpt, Rate,
+        },
+    },
+    types::{list::List, map::Map},
+};
+use smtp::core::State;
+use smtp_proto::{RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_SUCCESS};
+use std::time::Duration;
 
 #[tokio::test]
 async fn rcpt() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_rcpt_test")
+        .await
+        .with_http_listener(18999)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let tmp_dir = TempDir::new("smtp_rcpt_test", true);
-    let mut config = Config::new(tmp_dir.update_config(CONFIG)).unwrap();
-    let stores = Stores::parse_all(&mut config, false).await;
-    let core = Core::parse(&mut config, stores, Default::default()).await;
+    // Create test users
+    let admin = test.account("admin");
+    for (name, secret, description, aliases) in [
+        ("john@foobar.org", "12345 + extra safety", "John Doe", &[]),
+        ("jane@foobar.org", "abcde + extra safety", "Jane Smith", &[]),
+        (
+            "bill@foobar.org",
+            "p4ssw0rd + extra safety",
+            "Bill Foobar",
+            &[],
+        ),
+        (
+            "mike@foobar.org",
+            "p4ssw0rd + extra safety",
+            "Mike Foobar",
+            &[],
+        ),
+        (
+            "cornelius@straß6.de",
+            "p4ssw0rd + extra safety",
+            "Cornelius Strauss",
+            &[],
+        ),
+    ] {
+        admin
+            .create_user_account(name, secret, description, aliases, vec![])
+            .await;
+    }
+
+    // Add test settings
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(MtaStageRcpt {
+            allow_relaying: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "false".into(),
+                }]),
+                else_: "true".into(),
+            },
+            max_failures: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "3".into(),
+                }]),
+                else_: "100".into(),
+            },
+            max_recipients: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "3".into(),
+                }]),
+                else_: "5".into(),
+            },
+            wait_on_fail: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "5ms".into(),
+                }]),
+                else_: "1s".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaExtensions {
+            dsn: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "false".into(),
+                }]),
+                else_: "true".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaInboundThrottle {
+            description: "Test throttle".into(),
+            enable: true,
+            key: Map::new(vec![MtaInboundThrottleKey::Sender]),
+            match_: Expression {
+                else_: "remote_ip = '10.0.0.1' && !is_empty(rcpt)".into(),
+                ..Default::default()
+            },
+            rate: Rate {
+                count: 2,
+                period: 1000u64.into(),
+            },
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
 
     // RCPT without MAIL FROM
-    let mut session = Session::test(TestSMTP::from_core(core).server);
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.1".into();
     session.eval_session_params().await;
     session.ehlo("mx1.foobar.org").await;
@@ -162,4 +195,26 @@ async fn rcpt() {
     let rcpt = session.data.rcpt_to.last().unwrap();
     assert!((rcpt.flags & (RCPT_NOTIFY_DELAY | RCPT_NOTIFY_SUCCESS | RCPT_NOTIFY_FAILURE)) != 0);
     assert_eq!(rcpt.dsn_info.as_ref().unwrap(), "Jane.Doe@Foobar.org");
+
+    let mut session = test.new_mta_session();
+    session.data.remote_ip_str = "10.0.0.1".into();
+    session.eval_session_params().await;
+    session.ehlo("mx1.foobar.org").await;
+    session.mail_from("idn@example.net", "250").await;
+    session.rcpt_to("cornelius@straß6.de", "250").await;
+    session.rcpt_to("cornelius@xn--stra6-oqa.de", "250").await;
+    assert_eq!(session.data.rcpt_to.len(), 1);
+    let rcpt = session.data.rcpt_to.last().unwrap();
+    assert_eq!(rcpt.address_lcase, "cornelius@xn--stra6-oqa.de");
+    assert_eq!(rcpt.domain, "xn--stra6-oqa.de");
+
+    let mut session = test.new_mta_session();
+    session.data.remote_ip_str = "10.0.0.1".into();
+    session.eval_session_params().await;
+    session.ehlo("mx1.foobar.org").await;
+    session.mail_from("idn2@example.net", "250").await;
+    session.rcpt_to("nobody@straß6.de", "550 5.1.2").await;
+    session
+        .rcpt_to("nobody@xn--stra6-oqa.de", "550 5.1.2")
+        .await;
 }

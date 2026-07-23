@@ -11,9 +11,9 @@ use crate::analysis::url::SpamFilterAnalyzeUrl;
 use crate::modules::html::{A, ALT, HREF, HtmlToken, IMG, SRC, TITLE};
 use crate::{Email, SpamFilterContext, TextPart};
 use crate::{Hostname, SpamFilterInput};
-use common::config::spamfilter;
+use common::config::mailstore::spamfilter;
 use common::manager::{SPAM_CLASSIFIER_KEY, SPAM_TRAINER_KEY};
-use common::{Server, config::spamfilter::Location, ipc::BroadcastEvent};
+use common::{Server, config::mailstore::spamfilter::Location, ipc::BroadcastEvent};
 use mail_auth::DmarcResult;
 use mail_parser::{MessageParser, MimeHeaders};
 use nlp::classifier::feature::{
@@ -25,6 +25,9 @@ use nlp::classifier::reservoir::SampleReservoir;
 use nlp::classifier::train::{CcfhTrainer, FhTrainer};
 use nlp::tokenizers::types::TypesTokenizer;
 use nlp::tokenizers::{stream::WordStemTokenizer, types::TokenType};
+use registry::schema::prelude::{ObjectType, Property};
+use registry::schema::structs::SpamTrainingSample;
+use registry::types::EnumImpl;
 use std::time::Instant;
 use std::{
     borrow::Cow,
@@ -32,15 +35,17 @@ use std::{
     hash::{Hash, RandomState},
     sync::Arc,
 };
+use store::ahash::AHashSet;
 use store::rand::seq::SliceRandom;
-use store::write::{BlobLink, now};
+use store::write::{BlobLink, RegistryClass, now};
 use store::{
-    Deserialize, IterateParams, Serialize, U32_LEN, U64_LEN, ValueKey,
+    Deserialize, IterateParams, Serialize, ValueKey,
     write::{
         AlignedBytes, Archive, Archiver, BatchBuilder, BlobOp, ValueClass,
         key::DeserializeBigEndian,
     },
 };
+use store::{SerializeInfallible, U16_LEN};
 use tokio::sync::{mpsc, oneshot};
 use trc::{AddContext, SpamEvent};
 use types::blob_hash::BlobHash;
@@ -62,13 +67,26 @@ pub trait SpamClassifier {
     ) -> impl Future<Output = Tokens<'x>> + Send;
 }
 
-#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Clone, PartialEq, Eq, Debug)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    Clone,
+    PartialEq,
+    Eq,
+    Debug,
+    PartialOrd,
+    Ord,
+    Hash,
+)]
 pub struct TrainingSample {
     hash: BlobHash,
     account_id: u32,
 }
 
+#[derive(Debug)]
 struct TrainingTask {
+    id: u64,
     sample: TrainingSample,
     is_spam: bool,
     is_replay: bool,
@@ -79,7 +97,7 @@ struct TrainingTask {
 pub struct SpamTrainer {
     pub trainer: SpamTrainerClass,
     pub reservoir: SampleReservoir<TrainingSample>,
-    pub last_sample_expiry: u64,
+    pub last_id: u64,
 }
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug)]
@@ -135,7 +153,7 @@ impl SpamClassifier for Server {
                     )))),
                 },
                 reservoir: SampleReservoir::default(),
-                last_sample_expiry: 0,
+                last_id: 0,
             }
         };
 
@@ -168,77 +186,79 @@ impl SpamClassifier for Server {
 
         // Fetch blob hashes for samples
         let mut samples = Vec::new();
+        let mut duplicate_samples = Vec::new();
         let mut remove_entries = false;
-        let from_key = ValueKey {
-            account_id: 0,
-            collection: 0,
-            document_id: 0,
-            class: ValueClass::Blob(BlobOp::SpamSample {
-                hash: BlobHash::default(),
-                until: trainer.last_sample_expiry + 1,
-            }),
-        };
-        let to_key = ValueKey {
-            account_id: u32::MAX,
-            collection: u8::MAX,
-            document_id: u32::MAX,
-            class: ValueClass::Blob(BlobOp::SpamSample {
-                hash: BlobHash::new_max(),
-                until: u64::MAX,
-            }),
-        };
+        let object_id = ObjectType::SpamTrainingSample.to_id();
+        let from_key = ValueKey::from(ValueClass::Registry(RegistryClass::Item {
+            object_id,
+            item_id: trainer.last_id + 1,
+        }));
+        let to_key = ValueKey::from(ValueClass::Registry(RegistryClass::Item {
+            object_id,
+            item_id: u64::MAX,
+        }));
+        let mut seen_samples = AHashSet::new();
         let mut spam_count = 0;
         let mut ham_count = 0;
         self.store()
             .iterate(
-                IterateParams::new(from_key, to_key).ascending(),
+                IterateParams::new(from_key, to_key).descending(),
                 |key, value| {
-                    let until = key.deserialize_be_u64(1)?;
-                    let account_id = key.deserialize_be_u32(U64_LEN + 1)?;
-                    let hash = BlobHash::try_from_hash_slice(
-                        key.get(U64_LEN + U32_LEN + 1..).ok_or_else(|| {
-                            trc::Error::corrupted_key(key, value.into(), trc::location!())
-                        })?,
-                    )
-                    .unwrap();
-                    let (Some(is_spam), Some(hold)) = (value.first(), value.get(1)) else {
-                        return Err(trc::Error::corrupted_key(
-                            key,
-                            value.into(),
-                            trc::location!(),
-                        ));
+                    let id = key.deserialize_be_u64(U16_LEN)?;
+                    let sample = SpamTrainingSample::deserialize(value)?;
+
+                    let until = sample.expires_at.timestamp() as u64;
+                    let do_remove = sample.delete_after_use;
+                    let is_spam = sample.is_spam;
+                    let sample = TrainingSample {
+                        hash: sample.blob_id.hash,
+                        account_id: sample
+                            .account_id
+                            .map(|a| a.document_id())
+                            .unwrap_or(u32::MAX),
                     };
 
-                    let do_remove = *hold == 0;
-                    let is_spam = *is_spam == 1;
-                    let sample = TrainingSample { hash, account_id };
+                    if seen_samples.insert(sample.clone()) {
+                        // Add to reservoir
+                        if !do_remove {
+                            trainer.reservoir.update_reservoir(
+                                &sample,
+                                is_spam,
+                                config.reservoir_capacity,
+                            );
+                        } else {
+                            trainer.reservoir.update_counts(is_spam);
+                        }
 
-                    // Add to reservoir
-                    if !do_remove {
-                        trainer.reservoir.update_reservoir(
-                            &sample,
+                        samples.push(TrainingTask {
+                            id,
+                            sample,
                             is_spam,
-                            config.reservoir_capacity,
-                        );
+                            is_replay: false,
+                            remove: do_remove.then_some(until),
+                        });
+
+                        remove_entries |= do_remove;
+
+                        // Update trainer stats
+                        if is_spam {
+                            spam_count += 1;
+                        } else {
+                            ham_count += 1;
+                        }
                     } else {
-                        trainer.reservoir.update_counts(is_spam);
+                        duplicate_samples.push(TrainingTask {
+                            id,
+                            sample,
+                            is_spam,
+                            is_replay: false,
+                            remove: Some(until),
+                        });
+                        remove_entries = true;
                     }
 
-                    samples.push(TrainingTask {
-                        sample,
-                        is_spam,
-                        is_replay: false,
-                        remove: do_remove.then_some(until),
-                    });
-
-                    remove_entries |= do_remove;
-
-                    // Update trainer stats
-                    trainer.last_sample_expiry = until;
-                    if is_spam {
-                        spam_count += 1;
-                    } else {
-                        ham_count += 1;
+                    if trainer.last_id == 0 {
+                        trainer.last_id = id;
                     }
 
                     Ok(true)
@@ -254,7 +274,11 @@ impl SpamClassifier for Server {
                 Elapsed = started.elapsed()
             );
 
-            return Ok(());
+            return if duplicate_samples.is_empty() {
+                Ok(())
+            } else {
+                delete_samples(self, samples, duplicate_samples).await
+            };
         } else if (trainer.reservoir.ham.total_seen < config.min_ham_samples)
             || (trainer.reservoir.spam.total_seen < config.min_spam_samples)
         {
@@ -272,7 +296,11 @@ impl SpamClassifier for Server {
                 Elapsed = started.elapsed()
             );
 
-            return Ok(());
+            return if duplicate_samples.is_empty() {
+                Ok(())
+            } else {
+                delete_samples(self, samples, duplicate_samples).await
+            };
         }
 
         // Balance classes if needed
@@ -283,6 +311,7 @@ impl SpamClassifier for Server {
                     .reservoir
                     .replay_samples((spam_count - ham_count) as usize, false)
                     .map(|sample| TrainingTask {
+                        id: 0,
                         sample: sample.clone(),
                         is_spam: false,
                         is_replay: true,
@@ -296,6 +325,7 @@ impl SpamClassifier for Server {
                     .reservoir
                     .replay_samples((ham_count - spam_count) as usize, true)
                     .map(|sample| TrainingTask {
+                        id: 0,
                         sample: sample.clone(),
                         is_spam: true,
                         is_replay: true,
@@ -362,7 +392,20 @@ impl SpamClassifier for Server {
                 };
 
                 // Build features
-                let message = MessageParser::new().parse(&raw_message).unwrap_or_default();
+                let Some(message) = MessageParser::new().parse(&raw_message) else {
+                    if sample.is_replay {
+                        trainer
+                            .reservoir
+                            .remove_sample(&sample.sample, sample.is_spam);
+                    }
+                    trc::event!(
+                        Spam(SpamEvent::TrainSampleNotFound),
+                        Reason = "Failed to parse message",
+                        AccountId = account_id,
+                        BlobId = sample.sample.hash.to_hex(),
+                    );
+                    continue;
+                };
                 let mut ctx =
                     self.spam_filter_init(SpamFilterInput::from_message(&message, 0).train_mode());
                 self.spam_filter_analyze_domain(&mut ctx).await;
@@ -492,6 +535,7 @@ impl SpamClassifier for Server {
                 &Archiver::new(trainer)
                     .serialize()
                     .caused_by(trc::location!())?,
+                self.core.email.compression,
             )
             .await
             .caused_by(trc::location!())?;
@@ -499,6 +543,7 @@ impl SpamClassifier for Server {
             .put_blob(
                 SPAM_CLASSIFIER_KEY,
                 &classifier.serialize().caused_by(trc::location!())?,
+                self.core.email.compression,
             )
             .await
             .caused_by(trc::location!())?;
@@ -507,7 +552,7 @@ impl SpamClassifier for Server {
             .data
             .spam_classifier
             .store(Arc::new(classifier.inner));
-        self.cluster_broadcast(BroadcastEvent::ReloadSpamFilter)
+        self.cluster_broadcast(BroadcastEvent::reload(ObjectType::SpamClassifier))
             .await;
 
         trc::event!(
@@ -519,37 +564,10 @@ impl SpamClassifier for Server {
 
         // Remove samples marked for deletion
         if remove_entries {
-            let mut batch = BatchBuilder::new();
-            for sample in samples {
-                if let Some(until) = sample.remove {
-                    batch
-                        .with_account_id(sample.sample.account_id)
-                        .clear(BlobOp::Link {
-                            hash: sample.sample.hash.clone(),
-                            to: BlobLink::Temporary { until },
-                        })
-                        .clear(BlobOp::SpamSample {
-                            hash: sample.sample.hash,
-                            until,
-                        });
-                    if batch.is_large_batch() {
-                        self.store()
-                            .write(batch.build_all())
-                            .await
-                            .caused_by(trc::location!())?;
-                        batch = BatchBuilder::new();
-                    }
-                }
-            }
-            if !batch.is_empty() {
-                self.store()
-                    .write(batch.build_all())
-                    .await
-                    .caused_by(trc::location!())?;
-            }
+            delete_samples(self, samples, duplicate_samples).await
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     async fn spam_classify(&self, ctx: &mut SpamFilterContext<'_>) -> trc::Result<()> {
@@ -561,7 +579,8 @@ impl SpamClassifier for Server {
         let started = Instant::now();
         match classifier.as_ref() {
             spamfilter::SpamClassifier::FhClassifier { classifier, .. } => {
-                let mut classifier_confidence = Vec::with_capacity(ctx.input.env_rcpt_to.len());
+                let mut classifier_confidence =
+                    Vec::with_capacity(ctx.input.env_rcpt_rewritten_to.len());
                 let mut has_prediction = false;
                 let mut tokens = self.spam_build_tokens(ctx).await.0;
                 let feature_builder = classifier.feature_builder();
@@ -569,10 +588,9 @@ impl SpamClassifier for Server {
                     feature_builder.scale(&mut tokens);
                 }
 
-                for rcpt in &ctx.input.env_rcpt_to {
+                for rcpt in &ctx.input.env_rcpt_rewritten_to {
                     let prediction = if let Some(account_id) = self
-                        .directory()
-                        .email_to_id(rcpt)
+                        .account_id_from_email(rcpt, true)
                         .await
                         .caused_by(trc::location!())?
                     {
@@ -600,11 +618,12 @@ impl SpamClassifier for Server {
                         config.l2_normalize,
                     ));
                     ctx.result.classifier_confidence =
-                        vec![prediction.into(); ctx.input.env_rcpt_to.len()];
+                        vec![prediction.into(); ctx.input.env_rcpt_rewritten_to.len()];
                 }
             }
             spamfilter::SpamClassifier::CcfhClassifier { classifier, .. } => {
-                let mut classifier_confidence = Vec::with_capacity(ctx.input.env_rcpt_to.len());
+                let mut classifier_confidence =
+                    Vec::with_capacity(ctx.input.env_rcpt_rewritten_to.len());
                 let mut has_prediction = false;
                 let mut tokens = self.spam_build_tokens(ctx).await.0;
                 let feature_builder = classifier.feature_builder();
@@ -612,10 +631,9 @@ impl SpamClassifier for Server {
                     feature_builder.scale(&mut tokens);
                 }
 
-                for rcpt in &ctx.input.env_rcpt_to {
+                for rcpt in &ctx.input.env_rcpt_rewritten_to {
                     let prediction = if let Some(account_id) = self
-                        .directory()
-                        .email_to_id(rcpt)
+                        .account_id_from_email(rcpt, true)
                         .await
                         .caused_by(trc::location!())?
                     {
@@ -643,7 +661,7 @@ impl SpamClassifier for Server {
                         config.l2_normalize,
                     ));
                     ctx.result.classifier_confidence =
-                        vec![prediction.into(); ctx.input.env_rcpt_to.len()];
+                        vec![prediction.into(); ctx.input.env_rcpt_rewritten_to.len()];
                 }
             }
             spamfilter::SpamClassifier::Disabled => {
@@ -657,7 +675,7 @@ impl SpamClassifier for Server {
                 .result
                 .classifier_confidence
                 .iter()
-                .zip(ctx.input.env_rcpt_to.iter())
+                .zip(ctx.input.env_rcpt_rewritten_to.iter())
                 .map(|(v, rcpt)| trc::Value::Array(vec![
                     trc::Value::from(rcpt.to_string()),
                     trc::Value::from(*v)
@@ -856,6 +874,53 @@ impl SpamClassifier for Server {
 
         tokens
     }
+}
+
+async fn delete_samples(
+    server: &Server,
+    samples: Vec<TrainingTask>,
+    duplicate_samples: Vec<TrainingTask>,
+) -> trc::Result<()> {
+    let object_id = ObjectType::SpamTrainingSample.to_id();
+    let mut batch = BatchBuilder::new();
+    for sample in samples.into_iter().chain(duplicate_samples) {
+        if let Some(until) = sample.remove {
+            batch
+                .with_account_id(sample.sample.account_id)
+                .clear(BlobOp::Link {
+                    hash: sample.sample.hash,
+                    to: BlobLink::Temporary { until },
+                })
+                .clear(ValueClass::Registry(RegistryClass::Item {
+                    object_id,
+                    item_id: sample.id,
+                }))
+                .clear(ValueClass::Registry(RegistryClass::Index {
+                    index_id: Property::AccountId.to_id(),
+                    object_id,
+                    item_id: sample.id,
+                    key: (sample.sample.account_id as u64).serialize(),
+                }));
+
+            if batch.is_large_batch() {
+                server
+                    .store()
+                    .write(batch.build_all())
+                    .await
+                    .caused_by(trc::location!())?;
+                batch = BatchBuilder::new();
+                batch.with_account_id(sample.sample.account_id);
+            }
+        }
+    }
+    if !batch.is_empty() {
+        server
+            .store()
+            .write(batch.build_all())
+            .await
+            .caused_by(trc::location!())?;
+    }
+    Ok(())
 }
 
 struct FhTrainJob {

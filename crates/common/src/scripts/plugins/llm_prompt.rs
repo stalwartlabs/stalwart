@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
-use directory::Permission;
 use sieve::{FunctionMap, compiler::Number, runtime::Variable};
+use std::time::Instant;
 use trc::{AiEvent, SecurityEvent};
 
 use super::PluginContext;
@@ -36,13 +34,17 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
 
         if let Some(ai_api) = ctx.server.core.enterprise.as_ref().and_then(|e| {
             if ctx.access_token.is_none_or(|token| {
-                if token.has_permission(Permission::AiModelInteract) {
+                use registry::schema::enums::Permission;
+
+                if token.has_permission(Permission::InteractAi) {
                     true
                 } else {
+                    use registry::types::EnumImpl;
+
                     trc::event!(
                         Security(SecurityEvent::Unauthorized),
-                        AccountId = token.primary_id(),
-                        Details = Permission::AiModelInteract.name(),
+                        AccountId = token.account_id(),
+                        Details = Permission::InteractAi.as_str(),
                         SpanId = ctx.session_id,
                     );
                     false

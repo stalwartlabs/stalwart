@@ -11,7 +11,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Map, Value};
-use std::{future::Future, sync::Arc};
+use std::{borrow::Cow, future::Future};
 use trc::AddContext;
 use types::{id::Id, type_state::DataType};
 
@@ -29,7 +29,7 @@ impl QuotaGet for Server {
         mut request: GetRequest<Quota>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Quota>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             QuotaProperty::Id,
             QuotaProperty::ResourceType,
@@ -43,7 +43,8 @@ impl QuotaGet for Server {
             QuotaProperty::Types,
         ]);
         let account_id = request.account_id.document_id();
-        let quota_ids = if access_token.quota > 0 {
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
+        let quota_ids = if account.disk_quota() > 0 {
             vec![0u32]
         } else {
             vec![]
@@ -57,24 +58,20 @@ impl QuotaGet for Server {
             account_id: request.account_id.into(),
             state: State::Initial.into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
-        let access_token = if account_id == access_token.primary_id() {
-            AccessTokenRef::Borrowed(access_token)
+        let account = if account_id == access_token.account_id() {
+            Cow::Borrowed(&account)
         } else {
-            AccessTokenRef::Owned(
-                self.get_access_token(account_id)
-                    .await
-                    .caused_by(trc::location!())?,
-            )
+            Cow::Owned(self.account(account_id).await.caused_by(trc::location!())?)
         };
 
         for id in ids {
             // Obtain the sieve script object
             let document_id = id.document_id();
             if !quota_ids.contains(&document_id) {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             }
 
@@ -83,11 +80,13 @@ impl QuotaGet for Server {
                 let value = match property {
                     QuotaProperty::Id => Value::Element(id.into()),
                     QuotaProperty::ResourceType => "octets".to_string().into(),
-                    QuotaProperty::Used => (self.get_used_quota(account_id).await? as u64).into(),
-                    QuotaProperty::HardLimit => access_token.as_ref().quota.into(),
+                    QuotaProperty::Used => {
+                        (self.get_used_quota_account(account_id).await?.max(0) as u64).into()
+                    }
+                    QuotaProperty::HardLimit => account.as_ref().disk_quota().into(),
                     QuotaProperty::Scope => "account".to_string().into(),
-                    QuotaProperty::Name => access_token.as_ref().name.to_string().into(),
-                    QuotaProperty::Description => access_token
+                    QuotaProperty::Name => account.as_ref().name().to_string().into(),
+                    QuotaProperty::Description => account
                         .as_ref()
                         .description
                         .as_ref()
@@ -110,19 +109,5 @@ impl QuotaGet for Server {
         }
 
         Ok(response)
-    }
-}
-
-enum AccessTokenRef<'x> {
-    Owned(Arc<AccessToken>),
-    Borrowed(&'x AccessToken),
-}
-
-impl AccessTokenRef<'_> {
-    fn as_ref(&self) -> &AccessToken {
-        match self {
-            AccessTokenRef::Owned(token) => token,
-            AccessTokenRef::Borrowed(token) => token,
-        }
     }
 }

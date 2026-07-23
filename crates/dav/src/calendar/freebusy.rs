@@ -69,7 +69,11 @@ impl CalendarFreebusyRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
         let resource = resources
@@ -103,7 +107,7 @@ impl CalendarFreebusyRequestHandler for Server {
         // Obtain shared ids
         let shared_ids = if !access_token.is_member(account_id) {
             resources
-                .shared_containers(
+                .shared_items(
                     access_token,
                     [Acl::ReadItems, Acl::SchedulingReadFreeBusy],
                     false,
@@ -156,6 +160,8 @@ impl CalendarFreebusyRequestHandler for Server {
 
             let mut fb_entries: AHashMap<ICalendarFreeBusyType, Vec<(i64, i64)>> =
                 AHashMap::with_capacity(document_ids.len());
+            let max_instances = self.core.groupware.max_ical_instances;
+            let mut total_instances: usize = 0;
 
             for document_id in document_ids {
                 let Some(archive) = self
@@ -206,6 +212,11 @@ impl CalendarFreebusyRequestHandler for Server {
 
                 if events.is_empty() {
                     continue;
+                }
+
+                total_instances = total_instances.saturating_add(events.len());
+                if total_instances > max_instances {
+                    return Err(DavError::Code(StatusCode::PAYLOAD_TOO_LARGE));
                 }
 
                 for (component_id, component) in components {
@@ -308,7 +319,7 @@ impl CalendarFreebusyRequestHandler for Server {
 
 fn merge_intervals(mut intervals: Vec<(i64, i64)>) -> Vec<ICalendarValue> {
     if intervals.len() > 1 {
-        intervals.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        intervals.sort_unstable_by_key(|a| a.0);
 
         let mut unique_intervals = Vec::new();
         let mut start_time = intervals[0].0;

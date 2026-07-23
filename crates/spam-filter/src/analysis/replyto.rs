@@ -37,12 +37,10 @@ impl SpamFilterAnalyzeReplyTo for Server {
                     is_from_list = true;
                 }
 
-                HeaderName::Other(name) => {
-                    if !is_from_list {
-                        is_from_list = name.eq_ignore_ascii_case("X-To-Get-Off-This-List")
-                            || name.eq_ignore_ascii_case("X-List")
-                            || name.eq_ignore_ascii_case("Auto-Submitted");
-                    }
+                HeaderName::Other(name) if !is_from_list => {
+                    is_from_list = name.eq_ignore_ascii_case("X-To-Get-Off-This-List")
+                        || name.eq_ignore_ascii_case("X-List")
+                        || name.eq_ignore_ascii_case("Auto-Submitted");
                 }
                 _ => {}
             }
@@ -81,11 +79,11 @@ impl SpamFilterAnalyzeReplyTo for Server {
                             .any(|r| r.email == ctx.output.from.email)
                         || ctx
                             .output
-                            .env_to_addr
+                            .env_to_orig_addr
                             .iter()
                             .any(|r| r.domain_part.sld == ctx.output.from.email.domain_part.sld)
-                        || ctx.output.env_to_addr.len() == 1
-                            && ctx.output.env_to_addr.contains(&ctx.output.from.email))
+                        || ctx.output.env_to_orig_addr.len() == 1
+                            && ctx.output.env_to_orig_addr.contains(&ctx.output.from.email))
                     {
                         ctx.result.add_tag("SPOOF_REPLYTO");
                     }

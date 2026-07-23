@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{DavResponse, DummyWebDavClient, WebDavTest};
-use crate::webdav::GenerateTestDavResource;
+use crate::utils::{server::TestServer, webdav::GenerateTestDavResource};
+
 use ahash::AHashSet;
 use dav_proto::Depth;
 use groupware::DavResourceName;
 use hyper::StatusCode;
 
-pub async fn test(test: &WebDavTest) {
-    let client = test.client("john");
+pub async fn test(test: &TestServer) {
+    let client = test.account("john@example.com").webdav_client();
 
     for resource_type in [
         DavResourceName::File,
@@ -23,7 +23,7 @@ pub async fn test(test: &WebDavTest) {
             "Running REPORT sync-collection tests ({})...",
             resource_type.base_path()
         );
-        let user_base_path = format!("{}/john/", resource_type.base_path());
+        let user_base_path = format!("{}/john%40example.com/", resource_type.base_path());
 
         // Test 1: Initial sync
         let response = client
@@ -289,48 +289,4 @@ pub async fn test(test: &WebDavTest) {
 
     client.delete_default_containers().await;
     test.assert_is_empty().await;
-}
-
-impl DummyWebDavClient {
-    pub async fn sync_collection(
-        &self,
-        path: &str,
-        sync_token: &str,
-        depth: Depth,
-        limit: Option<usize>,
-        properties: impl IntoIterator<Item = &str>,
-    ) -> DavResponse {
-        let mut request = concat!(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-            "<D:sync-collection xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" xmlns:B=\"urn:ietf:params:xml:ns:carddav\">",
-            "<D:prop>"
-        )
-        .to_string();
-
-        for property in properties {
-            request.push_str(&format!("<{property}/>"));
-        }
-
-        request.push_str("</D:prop><D:sync-token>");
-        request.push_str(sync_token);
-        request.push_str("</D:sync-token><D:sync-level>");
-        request.push_str(match depth {
-            Depth::One => "1",
-            Depth::Infinity => "infinite",
-            _ => "0",
-        });
-        request.push_str("</D:sync-level>");
-
-        if let Some(limit) = limit {
-            request.push_str("<D:limit><D:nresults>");
-            request.push_str(&limit.to_string());
-            request.push_str("</D:nresults></D:limit>");
-        }
-
-        request.push_str("</D:sync-collection>");
-
-        self.request("REPORT", path, &request)
-            .await
-            .with_status(StatusCode::MULTI_STATUS)
-    }
 }

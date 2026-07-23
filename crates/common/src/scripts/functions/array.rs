@@ -26,9 +26,9 @@ pub fn fn_sort<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     let is_asc = v[1].to_bool();
     let mut arr = (*v[0].to_array()).clone();
     if is_asc {
-        arr.sort_unstable_by(|a, b| b.cmp(a));
-    } else {
         arr.sort_unstable();
+    } else {
+        arr.sort_unstable_by(|a, b| b.cmp(a));
     }
     arr.into()
 }
@@ -68,7 +68,7 @@ pub fn fn_cosine_similarity<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variabl
     let mut magnitude_a = 0;
     let mut magnitude_b = 0;
 
-    for (_word, count) in word_freq.iter() {
+    for count in word_freq.values() {
         dot_product += count[0] * count[1];
         magnitude_a += count[0] * count[0];
         magnitude_b += count[1] * count[1];
@@ -95,7 +95,7 @@ pub fn cosine_similarity(a: &[&str], b: &[&str]) -> f64 {
     let mut magnitude_a = 0;
     let mut magnitude_b = 0;
 
-    for (_word, count) in word_freq.iter() {
+    for count in word_freq.values() {
         dot_product += count[0] * count[1];
         magnitude_a += count[0] * count[0];
         magnitude_b += count[1] * count[1];

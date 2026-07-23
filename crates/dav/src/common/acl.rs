@@ -18,7 +18,6 @@ use dav_proto::{
         response::{Ace, BaseCondition, GrantDeny, Href, MultiStatus, Principal},
     },
 };
-use directory::{QueryParams, Type, backend::internal::manage::ManageDirectory};
 use groupware::RFC_3986;
 use groupware::{cache::GroupwareCache, calendar::Calendar, contact::AddressBook, file::FileNode};
 use http_proto::HttpResponse;
@@ -99,7 +98,7 @@ impl DavAclHandler for Server {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
         let resources = self
-            .fetch_dav_resources(access_token, account_id, collection.into())
+            .fetch_dav_resources(access_token.account_id(), account_id, collection.into())
             .await
             .caused_by(trc::location!())?;
         let resource = resource_
@@ -140,7 +139,9 @@ impl DavAclHandler for Server {
 
         if grants.len() != acls.len() || acls.iter().zip(grants.iter()).any(|(a, b)| a != b) {
             // Refresh ACLs
-            self.refresh_archived_acls(&grants, acls).await;
+            self.refresh_archived_acls(&grants, acls)
+                .await
+                .caused_by(trc::location!())?;
 
             let mut batch = BatchBuilder::new();
             match container {
@@ -151,7 +152,7 @@ impl DavAclHandler for Server {
                     new_calendar.acls = grants;
                     new_calendar
                         .update(
-                            access_token,
+                            access_token.account_tenant_ids(),
                             calendar,
                             account_id,
                             resource.document_id(),
@@ -166,7 +167,7 @@ impl DavAclHandler for Server {
                     new_book.acls = grants;
                     new_book
                         .update(
-                            access_token,
+                            access_token.account_tenant_ids(),
                             book,
                             account_id,
                             resource.document_id(),
@@ -180,10 +181,11 @@ impl DavAclHandler for Server {
                     new_node.acls = grants;
                     new_node
                         .update(
-                            access_token,
+                            access_token.account_tenant_ids(),
                             node,
                             account_id,
                             resource.document_id(),
+                            true,
                             &mut batch,
                         )
                         .caused_by(trc::location!())?;
@@ -255,7 +257,7 @@ impl DavAclHandler for Server {
 
         // Validate ACLs
         if !access_token.is_member(uri.account_id)
-            && !acls.effective_acl(access_token).contains(Acl::Read)
+            && !acls.effective_acl(access_token).contains(Acl::Share)
         {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
@@ -422,7 +424,7 @@ impl DavAclHandler for Server {
                 })?;
 
             // Verify that the principal is a valid principal
-            let principal = self
+            /*let principal = self
                 .directory()
                 .query(QueryParams::id(principal_id).with_return_member_of(false))
                 .await
@@ -438,7 +440,7 @@ impl DavAclHandler for Server {
                     StatusCode::FORBIDDEN,
                     BaseCondition::AllowedPrincipal,
                 )));
-            }
+            }*/
 
             grants.push(AclGrant {
                 account_id: principal_id,
@@ -473,17 +475,15 @@ impl DavAclHandler for Server {
                             )))
                         })
                 } else {
-                    let grant_account_name = self
-                        .store()
-                        .get_principal_name(grant_account_id)
+                    let grant_account = self
+                        .account(grant_account_id)
                         .await
-                        .caused_by(trc::location!())?
-                        .unwrap_or_else(|| format!("_{grant_account_id}"));
+                        .caused_by(trc::location!())?;
 
                     Principal::Href(Href(format!(
                         "{}/{}/",
                         DavResourceName::Principal.base_path(),
-                        percent_encoding::utf8_percent_encode(&grant_account_name, RFC_3986),
+                        percent_encoding::utf8_percent_encode(grant_account.name(), RFC_3986),
                     )))
                 };
 

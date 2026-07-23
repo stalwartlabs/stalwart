@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{AssertResult, ImapConnection, Type};
+use crate::utils::server::TestServer;
 use imap_proto::ResponseType;
 
-use crate::jmap::wait_for_index;
-
-use super::{AssertResult, IMAPTest, ImapConnection, Type};
-
-pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, handle: &IMAPTest) {
+pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, test: &TestServer) {
     println!("Running STORE tests...");
 
     // Select INBOX
@@ -60,7 +58,7 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, h
         .assert_contains("UIDNEXT 11");
 
     // Store using saved searches
-    wait_for_index(&handle.server).await;
+    test.wait_for_tasks().await;
     imap.send("SEARCH RETURN (SAVE) FROM nathaniel").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
     imap.send("UID STORE $ +FLAGS (\\Answered)").await;

@@ -80,6 +80,13 @@ impl<T: BitmapItem> Bitmap<T> {
         }
     }
 
+    pub fn remove_many(&mut self, items: impl IntoIterator<Item = T>) {
+        for item in items.into_iter() {
+            debug_assert!(item.is_valid());
+            self.bitmap &= !(1 << item.into());
+        }
+    }
+
     #[inline(always)]
     pub fn with_item(mut self, item: T) -> Self {
         self.insert(item);

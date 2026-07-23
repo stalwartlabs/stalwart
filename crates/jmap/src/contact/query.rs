@@ -9,8 +9,12 @@ use common::{Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
-    object::contact::{ContactCard, ContactCardComparator, ContactCardFilter},
+    object::{
+        addressbook::AddressBook,
+        contact::{ContactCard, ContactCardComparator, ContactCardFilter},
+    },
     request::MaybeInvalid,
+    types::state::State,
 };
 use store::{
     IterateParams, U32_LEN, U64_LEN, ValueKey,
@@ -32,6 +36,12 @@ pub trait ContactCardQuery: Sync + Send {
         request: QueryRequest<ContactCard>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
+
+    fn address_book_query(
+        &self,
+        request: QueryRequest<AddressBook>,
+        access_token: &AccessToken,
+    ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
 #[derive(Clone)]
@@ -50,7 +60,11 @@ impl ContactCardQuery for Server {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await?;
         let mut created_to_updated = Vec::new();
 
@@ -154,7 +168,7 @@ impl ContactCardQuery for Server {
                         filters.push(SearchFilter::has_text_detect(
                             ContactSearchField::Note,
                             value,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                     }
                     ContactCardFilter::HasMember(value) => {
@@ -203,7 +217,7 @@ impl ContactCardQuery for Server {
                         filters.push(SearchFilter::has_text_detect(
                             ContactSearchField::Note,
                             value,
-                            self.core.jmap.default_language,
+                            self.core.email.default_language,
                         ));
                         filters.push(SearchFilter::End);
                     }
@@ -276,7 +290,7 @@ impl ContactCardQuery for Server {
                 )),
                 ContactCardComparator::Updated => {
                     let mut updated = created_to_updated.clone();
-                    updated.sort_by(|a, b| a.updated.cmp(&b.updated));
+                    updated.sort_by_key(|a| a.updated);
                     Ok(SearchComparator::sorted_set(
                         updated
                             .iter()
@@ -311,6 +325,38 @@ impl ContactCardQuery for Server {
             results.len(),
             self.core.jmap.query_max_results,
             cache.get_state(false),
+            &request,
+        );
+
+        for document_id in results {
+            if !response.add(0, document_id) {
+                break;
+            }
+        }
+
+        response.build()
+    }
+
+    async fn address_book_query(
+        &self,
+        request: QueryRequest<AddressBook>,
+        access_token: &AccessToken,
+    ) -> trc::Result<QueryResponse> {
+        let account_id = request.account_id.document_id();
+        let cache = self
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
+            .await?;
+
+        let results = cache.document_ids(true).collect::<Vec<_>>();
+
+        let mut response = QueryResponseBuilder::new(
+            results.len() as usize,
+            self.core.jmap.query_max_results,
+            State::Initial,
             &request,
         );
 

@@ -40,7 +40,7 @@ pub struct ParseResponse<T: JmapObject> {
 
     #[serde(rename = "notFound")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub not_found: Vec<BlobId>,
+    pub not_found: Vec<MaybeInvalid<BlobId>>,
 }
 
 impl<'de, T: JmapObject> DeserializeArguments<'de> for ParseRequest<T> {
@@ -50,7 +50,7 @@ impl<'de, T: JmapObject> DeserializeArguments<'de> for ParseRequest<T> {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"blobIds" => {
                 self.blob_ids = map.next_value()?;

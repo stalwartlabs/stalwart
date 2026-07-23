@@ -60,6 +60,7 @@ pub enum State {
     Literal { non_sync: bool },
     LiteralSeek { size: u32, non_sync: bool },
     LiteralData { remaining: u32 },
+    LiteralDiscard { remaining: u32 },
 }
 
 pub struct Receiver<T: CommandParser> {
@@ -71,7 +72,7 @@ pub struct Receiver<T: CommandParser> {
     pub start_state: State,
 }
 
-const ARG_MAX_LEN: usize = 4096;
+const ARG_MAX_LEN: usize = 8000;
 
 struct ArgumentBuffer {
     buf: Vec<u8>,
@@ -269,7 +270,7 @@ impl<T: CommandParser> Receiver<T> {
                     }
                     _ => {
                         self.buf.push_checked(ch, ARG_MAX_LEN).map_err(|_| {
-                            self.error_reset("Argument exceeds maximum length of 4096 bytes.")
+                            self.error_reset("Argument exceeds maximum length of 8000 bytes.")
                         })?;
                         self.state = State::Argument { last_ch: ch };
                     }
@@ -315,15 +316,18 @@ impl<T: CommandParser> Receiver<T> {
                                 let size = self.buf.as_str().parse::<u32>().map_err(|_| {
                                     self.error_reset("Literal size is not a valid number.")
                                 })?;
-                                if self.current_request_size + size as usize > self.max_request_size
-                                {
+                                let oversize = self.current_request_size + size as usize
+                                    > self.max_request_size;
+                                if oversize && !non_sync {
                                     return Err(self.error_reset(format_compact!(
                                         "Literal exceeds the maximum request size of {} bytes.",
                                         self.max_request_size
                                     )));
                                 }
                                 self.state = State::LiteralSeek { size, non_sync };
-                                self.buf.resize_buffer(size as usize);
+                                if !oversize {
+                                    self.buf.resize_buffer(size as usize);
+                                }
                                 self.buf.clear();
                             } else {
                                 return Err(self.error_reset("Invalid empty literal."));
@@ -356,19 +360,38 @@ impl<T: CommandParser> Receiver<T> {
                 }
                 State::LiteralSeek { size, non_sync } => {
                     if ch == b'\n' {
-                        if size > 0 {
+                        if non_sync
+                            && self.current_request_size + size as usize > self.max_request_size
+                        {
+                            self.state = State::LiteralDiscard { remaining: size };
+                        } else if size > 0 {
                             self.state = State::LiteralData { remaining: size };
+                            if !non_sync {
+                                return Err(Error::NeedsLiteral { size });
+                            }
                         } else {
                             self.state = State::Argument { last_ch: b' ' };
                             self.push_token(Token::Nil)?;
-                        }
-                        if !non_sync {
-                            return Err(Error::NeedsLiteral { size });
+                            if !non_sync {
+                                return Err(Error::NeedsLiteral { size });
+                            }
                         }
                     } else if !ch.is_ascii_whitespace() {
                         return Err(
                             self.error_reset("Expected CRLF after literal, found an invalid char.")
                         );
+                    }
+                }
+                State::LiteralDiscard { remaining } => {
+                    if remaining > 1 {
+                        self.state = State::LiteralDiscard {
+                            remaining: remaining - 1,
+                        };
+                    } else {
+                        return Err(self.error_reset(format_compact!(
+                            "Literal exceeds the maximum request size of {} bytes.",
+                            self.max_request_size
+                        )));
                     }
                 }
                 State::LiteralData { remaining } => {
@@ -1101,6 +1124,50 @@ mod tests {
                 Err(Error::Error { .. }) => {}
                 result => panic!("Expecter error, got: {:?}", result),
             }
+        }
+    }
+
+    #[test]
+    fn receiver_discard_oversized_non_sync_literal() {
+        for frames in [
+            vec![
+                "a1 APPEND inbox (\\Draft) {40+}\r\n",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n",
+                "b2 NOOP\r\n",
+            ],
+            vec![
+                "a1 APPEND inbox (\\Draft) {40+}\r\nAAAAAAAAAAAAAAAAAAAA",
+                "AAAAAAAAAAAAAAAAAAAA\r\nb2 NOOP\r\n",
+            ],
+            vec![
+                "a1 APPEND inbox (\\Draft) {40+}\r\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\nb2 NOOP\r\n",
+            ],
+        ] {
+            let mut receiver = Receiver::<Command>::with_max_request_size(30);
+            let mut requests = Vec::new();
+            let mut errors = 0;
+            for frame in &frames {
+                let mut bytes = frame.as_bytes().iter();
+                loop {
+                    match receiver.parse(&mut bytes) {
+                        Ok(request) => requests.push(request),
+                        Err(Error::NeedsMoreData | Error::NeedsLiteral { .. }) => break,
+                        Err(Error::Error { .. }) => errors += 1,
+                    }
+                }
+            }
+
+            assert_eq!(errors, 1, "expected a single error for {:#?}", frames);
+            assert_eq!(
+                requests,
+                vec![Request {
+                    tag: "b2".into(),
+                    command: Command::Noop,
+                    tokens: vec![],
+                }],
+                "connection did not resync for {:#?}",
+                frames
+            );
         }
     }
 }

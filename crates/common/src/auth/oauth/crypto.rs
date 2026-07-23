@@ -4,45 +4,47 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use aes_gcm_siv::{AeadInPlace, Aes256GcmSiv, KeyInit, Nonce, aead::Aead};
+use aes_gcm_siv::{
+    Aes256GcmSiv, Key, KeyInit, Nonce,
+    aead::{Aead, Payload},
+};
 use store::blake3;
 
 pub struct SymmetricEncrypt {
     aes: Aes256GcmSiv,
 }
 
-//TODO: Remove allow deprecated when aes-gcm is updated
-#[allow(deprecated)]
 impl SymmetricEncrypt {
     pub const ENCRYPT_TAG_LEN: usize = 16;
     pub const NONCE_LEN: usize = 12;
 
     pub fn new(key: &[u8], context: &str) -> Self {
         SymmetricEncrypt {
-            aes: Aes256GcmSiv::new(
-                &sha1::digest::generic_array::GenericArray::clone_from_slice(
-                    &blake3::derive_key(context, key)[..],
-                ),
-            ),
+            aes: Aes256GcmSiv::new(Key::<Aes256GcmSiv>::from_slice(&blake3::derive_key(
+                context, key,
+            ))),
         }
     }
 
-    #[allow(clippy::ptr_arg)]
-    pub fn encrypt_in_place(&self, bytes: &mut Vec<u8>, nonce: &[u8]) -> Result<(), String> {
+    pub fn encrypt_with_aad(
+        &self,
+        bytes: &[u8],
+        nonce: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, String> {
         self.aes
-            .encrypt_in_place(Nonce::from_slice(nonce), b"", bytes)
+            .encrypt(Nonce::from_slice(nonce), Payload { msg: bytes, aad })
             .map_err(|e| e.to_string())
     }
 
-    pub fn encrypt(&self, bytes: &[u8], nonce: &[u8]) -> Result<Vec<u8>, String> {
+    pub fn decrypt_with_aad(
+        &self,
+        bytes: &[u8],
+        nonce: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, String> {
         self.aes
-            .encrypt(Nonce::from_slice(nonce), bytes)
-            .map_err(|e| e.to_string())
-    }
-
-    pub fn decrypt(&self, bytes: &[u8], nonce: &[u8]) -> Result<Vec<u8>, String> {
-        self.aes
-            .decrypt(Nonce::from_slice(nonce), bytes)
+            .decrypt(Nonce::from_slice(nonce), Payload { msg: bytes, aad })
             .map_err(|e| e.to_string())
     }
 }

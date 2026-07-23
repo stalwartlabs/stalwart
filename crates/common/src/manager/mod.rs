@@ -4,75 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use self::config::ConfigManager;
 use crate::USER_AGENT;
 use hyper::HeaderMap;
-use std::time::Duration;
+use mail_auth::flate2;
+use std::{
+    io::{BufReader, Read},
+    time::Duration,
+};
 use utils::HttpLimitResponse;
 
+pub mod application;
 pub mod backup;
 pub mod boot;
-pub mod config;
 pub mod console;
-pub mod reload;
+pub mod defaults;
 pub mod restore;
-pub mod webadmin;
 
-const DEFAULT_SPAMFILTER_URL: &str =
-    "https://github.com/stalwartlabs/spam-filter/releases/latest/download/spam-filter.toml";
-pub const WEBADMIN_KEY: &[u8] = "STALWART_WEBADMIN".as_bytes();
 pub const SPAM_TRAINER_KEY: &[u8] = "STALWART_SPAM_TRAIN_DATA.lz4".as_bytes();
 pub const SPAM_CLASSIFIER_KEY: &[u8] = "STALWART_SPAM_CLASSIFIER_MODEL.lz4".as_bytes();
-
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
-const DEFAULT_WEBADMIN_URL: &str =
-    "https://github.com/stalwartlabs/webadmin/releases/latest/download/webadmin.zip";
-// SPDX-SnippetEnd
-
-#[cfg(not(feature = "enterprise"))]
-const DEFAULT_WEBADMIN_URL: &str =
-    "https://github.com/stalwartlabs/webadmin/releases/latest/download/webadmin-oss.zip";
-
-impl ConfigManager {
-    pub async fn fetch_resource(&self, resource_id: &str) -> Result<Vec<u8>, String> {
-        if let Some(url) = self
-            .get(&format!("{resource_id}.resource"))
-            .await
-            .map_err(|err| {
-                format!("Failed to fetch configuration key '{resource_id}.resource': {err}",)
-            })?
-        {
-            fetch_resource(&url, None, Duration::from_secs(60), MAX_SIZE).await
-        } else {
-            match resource_id {
-                "spam-filter" => {
-                    fetch_resource(
-                        DEFAULT_SPAMFILTER_URL,
-                        None,
-                        Duration::from_secs(60),
-                        MAX_SIZE,
-                    )
-                    .await
-                }
-                "webadmin" => {
-                    fetch_resource(
-                        DEFAULT_WEBADMIN_URL,
-                        None,
-                        Duration::from_secs(60),
-                        MAX_SIZE,
-                    )
-                    .await
-                }
-                _ => Err(format!("Unknown resource: {resource_id}")),
-            }
-        }
-    }
-}
-
-const MAX_SIZE: usize = 100 * 1024 * 1024;
 
 pub async fn fetch_resource(
     url: &str,
@@ -112,6 +61,16 @@ pub async fn fetch_resource(
             ))
         }
     }
+    .and_then(|bytes| {
+        if url.ends_with(".gz") || url.ends_with(".gzip") {
+            BufReader::new(flate2::read::GzDecoder::new(&bytes[..]))
+                .bytes()
+                .collect::<Result<Vec<u8>, _>>()
+                .map_err(|err| format!("Failed to decompress {url}: {err}"))
+        } else {
+            Ok(bytes)
+        }
+    })
 }
 
 pub fn is_localhost_url(url: &str) -> bool {

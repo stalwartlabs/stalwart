@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::config::Config;
-use mail_auth::{MX, ResolverCache, Txt};
+use arcstr::ArcStr;
+use mail_auth::{DnssecStatus, MX, RecordSet, ResolverCache, Txt};
 use quick_cache::{
     Equivalent, Weighter,
     sync::{DefaultLifecycle, PlaceholderGuard},
@@ -19,11 +19,11 @@ use std::{
 };
 
 pub struct Cache<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight>(
-    quick_cache::sync::Cache<K, V, CacheItemWeighter>,
+    quick_cache::sync::Cache<K, V, CacheItemWeighter, ahash::RandomState>,
 );
 
 pub struct CacheWithTtl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight>(
-    quick_cache::sync::Cache<K, TtlEntry<V>, CacheItemWeighter>,
+    quick_cache::sync::Cache<K, TtlEntry<V>, CacheItemWeighter, ahash::RandomState>,
 );
 
 #[derive(Clone)]
@@ -33,27 +33,17 @@ pub struct TtlEntry<V: Clone + CacheItemWeight> {
 }
 
 impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
-    pub fn from_config(
-        config: &mut Config,
-        key: &str,
-        max_weight: u64,
-        estimated_weight: u64,
-    ) -> Self {
-        let weight_capacity = config
-            .property(("cache", key, "size"))
-            .unwrap_or(max_weight);
-        let estimated_items_capacity = config
-            .property(("cache", key, "capacity"))
-            .unwrap_or_else(|| weight_capacity as usize / estimated_weight as usize);
-
-        Self::new(estimated_items_capacity, weight_capacity)
+    pub fn new(weight: u64, estimated_weight: u64) -> Self {
+        Self::new_estimated(weight as usize / estimated_weight as usize, weight)
     }
 
-    pub fn new(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
-        Self(quick_cache::sync::Cache::with_weighter(
+    pub fn new_estimated(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
+        Self(quick_cache::sync::Cache::with(
             estimated_items_capacity,
             weight_capacity,
             CacheItemWeighter,
+            ahash::RandomState::default(),
+            DefaultLifecycle::default(),
         ))
     }
 
@@ -63,6 +53,14 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
         Q: Hash + Equivalent<K> + ?Sized,
     {
         self.0.get(key)
+    }
+
+    #[inline(always)]
+    pub fn peek<Q>(&self, key: &Q) -> Option<V>
+    where
+        Q: Hash + Equivalent<K> + ?Sized,
+    {
+        self.0.peek(key)
     }
 
     #[inline(always)]
@@ -85,6 +83,13 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     }
 
     #[inline(always)]
+    pub fn update(&self, key: K, value: V) {
+        if let Err((key, value)) = self.0.replace(key, value, true) {
+            self.0.insert(key, value);
+        }
+    }
+
+    #[inline(always)]
     pub fn remove<Q>(&self, key: &Q) -> Option<V>
     where
         Q: Hash + Equivalent<K> + ?Sized,
@@ -96,30 +101,25 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     pub fn clear(&self) {
         self.0.clear();
     }
+
+    #[inline(always)]
+    pub fn inner(&self) -> &quick_cache::sync::Cache<K, V, CacheItemWeighter, ahash::RandomState> {
+        &self.0
+    }
 }
 
 impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> CacheWithTtl<K, V> {
-    pub fn from_config(
-        config: &mut Config,
-        key: &str,
-        max_weight: u64,
-        estimated_weight: u64,
-    ) -> Self {
-        let weight_capacity = config
-            .property(("cache", key, "size"))
-            .unwrap_or(max_weight);
-        let estimated_items_capacity = config
-            .property(("cache", key, "capacity"))
-            .unwrap_or_else(|| weight_capacity as usize / estimated_weight as usize);
-
-        Self::new(estimated_items_capacity, weight_capacity)
+    pub fn new(weight: u64, estimated_weight: u64) -> Self {
+        Self::new_estimated(weight as usize / estimated_weight as usize, weight)
     }
 
-    pub fn new(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
-        Self(quick_cache::sync::Cache::with_weighter(
+    pub fn new_estimated(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
+        Self(quick_cache::sync::Cache::with(
             estimated_items_capacity,
             weight_capacity,
             CacheItemWeighter,
+            ahash::RandomState::default(),
+            DefaultLifecycle::default(),
         ))
     }
 
@@ -188,6 +188,11 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> CacheWithTtl<K,
     }
 
     #[inline(always)]
+    pub fn retain(&self, f: impl Fn(&K) -> bool) {
+        self.0.retain(|key, _| f(key));
+    }
+
+    #[inline(always)]
     pub fn clear(&self) {
         self.0.clear();
     }
@@ -239,51 +244,58 @@ impl CacheItemWeight for String {
     }
 }
 
+impl CacheItemWeight for Box<str> {
+    fn weight(&self) -> u64 {
+        self.len() as u64 + std::mem::size_of::<Box<str>>() as u64
+    }
+}
+
+impl<T: CacheItemWeight> CacheItemWeight for Box<[T]> {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<Box<[T]>>() as u64 + self.iter().map(|item| item.weight()).sum::<u64>()
+    }
+}
+
+impl<T: CacheItemWeight> CacheItemWeight for Arc<[T]> {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<Arc<[T]>>() as u64 + self.iter().map(|item| item.weight()).sum::<u64>()
+    }
+}
+
+impl<T: CacheItemWeight> CacheItemWeight for RecordSet<T> {
+    fn weight(&self) -> u64 {
+        self.rrset.weight() + std::mem::size_of::<DnssecStatus>() as u64
+    }
+}
+
 impl CacheItemWeight for u32 {
     fn weight(&self) -> u64 {
         std::mem::size_of::<u32>() as u64
     }
 }
 
-impl CacheItemWeight for Vec<IpAddr> {
+impl CacheItemWeight for IpAddr {
     fn weight(&self) -> u64 {
-        (self.len() * std::mem::size_of::<IpAddr>()) as u64
-            + std::mem::size_of::<Vec<IpAddr>>() as u64
+        std::mem::size_of::<Vec<IpAddr>>() as u64
     }
 }
 
-impl CacheItemWeight for Vec<Ipv4Addr> {
+impl CacheItemWeight for Ipv4Addr {
     fn weight(&self) -> u64 {
-        (self.len() * std::mem::size_of::<Ipv4Addr>()) as u64
-            + std::mem::size_of::<Vec<Ipv4Addr>>() as u64
+        std::mem::size_of::<Vec<Ipv4Addr>>() as u64
     }
 }
 
-impl CacheItemWeight for Vec<Ipv6Addr> {
+impl CacheItemWeight for Ipv6Addr {
     fn weight(&self) -> u64 {
-        (self.len() * std::mem::size_of::<Ipv6Addr>()) as u64
-            + std::mem::size_of::<Vec<Ipv6Addr>>() as u64
+        std::mem::size_of::<Vec<Ipv6Addr>>() as u64
     }
 }
 
-impl CacheItemWeight for Vec<MX> {
+impl CacheItemWeight for MX {
     fn weight(&self) -> u64 {
-        self.iter()
-            .map(|mx| {
-                mx.exchanges
-                    .iter()
-                    .map(|e| e.len() + std::mem::size_of::<MX>())
-                    .sum::<usize>()
-            })
-            .sum::<usize>() as u64
-            + std::mem::size_of::<Vec<MX>>() as u64
-    }
-}
-
-impl CacheItemWeight for Vec<String> {
-    fn weight(&self) -> u64 {
-        self.iter().map(|s| s.len()).sum::<usize>() as u64
-            + std::mem::size_of::<Vec<String>>() as u64
+        self.exchanges.iter().map(|e| e.len() as u64).sum::<u64>()
+            + std::mem::size_of::<MX>() as u64
     }
 }
 
@@ -293,15 +305,21 @@ impl CacheItemWeight for Txt {
     }
 }
 
-impl CacheItemWeight for IpAddr {
-    fn weight(&self) -> u64 {
-        std::mem::size_of::<IpAddr>() as u64
-    }
-}
-
 impl CacheItemWeight for bool {
     fn weight(&self) -> u64 {
         std::mem::size_of::<bool>() as u64
+    }
+}
+
+impl CacheItemWeight for ArcStr {
+    fn weight(&self) -> u64 {
+        self.len() as u64 + std::mem::size_of::<ArcStr>() as u64
+    }
+}
+
+impl CacheItemWeight for () {
+    fn weight(&self) -> u64 {
+        0
     }
 }
 

@@ -4,21 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::auth::sasl::sasl_decode_challenge_oauth;
+use super::{AssertResult, ImapConnection, Type};
+use directory::Credentials;
 use imap_proto::ResponseType;
 use mail_parser::decoders::base64::base64_decode;
-use mail_send::Credentials;
-
-use super::{AssertResult, ImapConnection, Type};
 
 pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
     println!("Running basic tests...");
 
     // Test OAuth Bearer decoding
-    assert!(
-        Credentials::OAuthBearer {
-            token: "vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg==".to_string()
-        } == sasl_decode_challenge_oauth(
+    assert_eq!(
+        Credentials::Bearer {
+            token: "vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg==".to_string(),
+            username: Some("user@example.com".to_string()),
+        },
+        Credentials::decode_sasl_challenge_oauth(
             &base64_decode(
                 concat!(
                     "bixhPXVzZXJAZXhhbXBsZS5jb20sAWhv",

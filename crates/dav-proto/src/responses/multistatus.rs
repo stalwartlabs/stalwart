@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
-use hyper::StatusCode;
-
 use crate::schema::{
+    Namespace, Namespaces,
     response::{
         Condition, Href, List, Location, MultiStatus, PropStat, Response, ResponseDescription,
         ResponseType, Status, SyncToken,
     },
-    Namespace, Namespaces,
 };
+use hyper::StatusCode;
+use std::fmt::Display;
 
 impl Display for MultiStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

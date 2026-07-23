@@ -1,0 +1,276 @@
+###############################################################################
+# Stalwart – Test Infrastructure
+# All services are ephemeral (no volumes = fresh on every restart)
+# Ports exposed on localhost; 80/443/8080 are remapped
+###############################################################################
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Init: generate shared self-signed TLS certificates
+  # ---------------------------------------------------------------------------
+  cert-init:
+    image: alpine/openssl:latest
+    volumes:
+      - certs:/certs
+      - ./scripts/gen-certs.sh:/gen-certs.sh:ro
+    entrypoint: [ "sh", "/gen-certs.sh" ]
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stalwart
+      POSTGRES_PASSWORD: stalwart
+      POSTGRES_DB: stalwart
+    ports:
+      - "127.0.0.1:5432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  # ---------------------------------------------------------------------------
+  # MySQL
+  # ---------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: stalwart
+      MYSQL_DATABASE: stalwart
+      MYSQL_USER: stalwart
+      MYSQL_PASSWORD: stalwart
+    ports:
+      - "127.0.0.1:3306:3306"
+    tmpfs:
+      - /var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+
+  # ---------------------------------------------------------------------------
+  # FoundationDB
+  # ---------------------------------------------------------------------------
+  foundationdb:
+    image: foundationdb/foundationdb:7.4.6
+    ports:
+      - "127.0.0.1:4500:4500"
+    environment:
+      FDB_NETWORKING_MODE: container
+    volumes:
+      - fdb-config:/var/fdb
+    tmpfs:
+      - /var/fdb/data
+      - /var/fdb/logs
+    healthcheck:
+      test: [ "CMD-SHELL", "fdbcli --exec 'status' --timeout 3 >/dev/null 2>&1" ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  fdb-init:
+    image: foundationdb/foundationdb:7.4.6
+    depends_on:
+      foundationdb:
+        condition: service_healthy
+    volumes:
+      - fdb-config:/var/fdb
+      - ./scripts/init-fdb.sh:/init-fdb.sh:ro
+    entrypoint: [ "bash", "/init-fdb.sh" ]
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --save "" --appendonly no
+
+  # ---------------------------------------------------------------------------
+  # OpenSearch (ElasticSearch-compatible)
+  # ---------------------------------------------------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms256m -Xmx256m"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+    ports:
+      - "127.0.0.1:9200:9200"
+    tmpfs:
+      - /usr/share/opensearch/data:uid=1000,gid=1000
+
+  # ---------------------------------------------------------------------------
+  # Meilisearch
+  # ---------------------------------------------------------------------------
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    environment:
+      MEILI_ENV: development
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_MASTER_KEY: stalwart-master-key
+    ports:
+      - "127.0.0.1:7700:7700"
+    tmpfs:
+      - /meili_data
+
+  # ---------------------------------------------------------------------------
+  # MinIO (S3-compatible)
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    command: server /data --console-address ":9001"
+    tmpfs:
+      - /data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    volumes:
+      - ./scripts/init-minio.sh:/init-minio.sh:ro
+    entrypoint: [ "bash", "/init-minio.sh" ]
+
+  # ---------------------------------------------------------------------------
+  # Keycloak (OIDC Provider)  –  port 9080 (moved from 8080)
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 9080
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:9080:9080"
+    volumes:
+      - ./keycloak/stalwart-realm.json:/opt/keycloak/data/import/stalwart-realm.json:ro
+      - certs:/certs:ro
+    command: >
+      start-dev --import-realm
+    tmpfs:
+      - /opt/keycloak/data:uid=1000,gid=1000
+
+  # ---------------------------------------------------------------------------
+  # OpenLDAP
+  # ---------------------------------------------------------------------------
+  openldap:
+    image: osixia/openldap:1.5.0
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+    environment:
+      LDAP_ORGANISATION: "Stalwart Test"
+      LDAP_DOMAIN: "stalwart.test"
+      LDAP_BASE_DN: "dc=stalwart,dc=test"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: "readonly"
+      LDAP_READONLY_USER_PASSWORD: "readonly"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "cert.pem"
+      LDAP_TLS_KEY_FILENAME: "key.pem"
+      LDAP_TLS_CA_CRT_FILENAME: "cert.pem"
+      LDAP_TLS_VERIFY_CLIENT: "never"
+    ports:
+      - "127.0.0.1:389:389"
+      - "127.0.0.1:636:636"
+    volumes:
+      - ./ldap/50-users.ldif:/seed/50-users.ldif:ro
+      - ./ldap/60-groups.ldif:/seed/60-groups.ldif:ro
+      - certs:/certs-shared:ro
+    entrypoint: [ "/bin/bash", "-c", "mkdir -p /container/service/slapd/assets/config/bootstrap/ldif/custom && cp /seed/*.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/ && cp /certs-shared/* /container/service/slapd/assets/certs/ 2>/dev/null; exec /container/tool/run" ]
+
+  # ---------------------------------------------------------------------------
+  # Pebble Challenge Test Server  –  port 8055 (management API)
+  # Provides controllable DNS, HTTP, and TLS-ALPN challenge responders.
+  # Use the management API to add/remove challenge responses before requesting
+  # certificates from Pebble.
+  # ---------------------------------------------------------------------------
+  pebble-challtestsrv:
+    build:
+      context: ./pebble
+      dockerfile: Dockerfile.challtestsrv
+    image: stalwart-pebble-challtestsrv:local
+    ports:
+      - "127.0.0.1:8055:8055"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Pebble (ACME server)  –  ports 14000 (directory) + 15000 (management)
+  # ---------------------------------------------------------------------------
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:latest
+    depends_on:
+      - pebble-challtestsrv
+    environment:
+      PEBBLE_VA_NOSLEEP: "1"
+      PEBBLE_WFE_NONCEREJECT: "0"
+    ports:
+      - "127.0.0.1:14000:14000"
+      - "127.0.0.1:15000:15000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./pebble/pebble-config.json:/test/config/pebble-config.json:ro
+    command: -config /test/config/pebble-config.json -dnsserver pebble-challtestsrv:8053
+
+  # ---------------------------------------------------------------------------
+  # PowerDNS (DNS with TLSA + RFC2136)  –  port 5300 (moved from 53)
+  # ---------------------------------------------------------------------------
+  powerdns:
+    image: powerdns/pdns-auth-49:latest
+    environment:
+      PDNS_AUTH_API_KEY: stalwart-api-key
+    ports:
+      - "127.0.0.1:5300:53/tcp"
+      - "127.0.0.1:5300:53/udp"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./powerdns/pdns.conf:/etc/powerdns/pdns.d/stalwart.conf:ro
+      - ./powerdns/init-zone.sh:/etc/powerdns/init-zone.sh:ro
+      - pdns-data:/var/lib/powerdns
+
+  powerdns-init:
+    image: powerdns/pdns-auth-49:latest
+    depends_on:
+      - powerdns
+    volumes:
+      - ./powerdns/entrypoint.sh:/init.sh:ro
+      - ./powerdns/init-zone.sh:/etc/powerdns/init-zone.sh:ro
+      - pdns-data:/var/lib/powerdns
+    entrypoint: [ "bash", "/init.sh" ]
+    network_mode: "service:powerdns"
+
+  # ---------------------------------------------------------------------------
+  # NATS (message queue, core mode)
+  # ---------------------------------------------------------------------------
+  nats:
+    image: nats:latest
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    command: "--addr 0.0.0.0 --port 4222 --http_port 8222"
+
+# =============================================================================
+# Shared volumes (ephemeral – docker compose down removes them)
+# =============================================================================
+volumes:
+  certs:
+    driver: local
+  fdb-config:
+    driver: local
+  pdns-data:
+    driver: local

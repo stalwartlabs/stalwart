@@ -4,25 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use utils::config::{Config, Rate};
-
 pub mod auth;
 pub mod queue;
 pub mod report;
 pub mod resolver;
 pub mod session;
-pub mod throttle;
-
-use crate::expr::{Expression, tokenizer::TokenMap};
 
 use self::{
     auth::MailAuthConfig, queue::QueueConfig, report::ReportConfig, resolver::Resolvers,
     session::SessionConfig,
 };
+use crate::{config::smtp::queue::RequireOptional, expr::Expression};
+use registry::{
+    schema::{properties::ObjectType, structs::Rate},
+    types::id::ObjectId,
+};
+use store::registry::bootstrap::Bootstrap;
 
-use super::*;
-
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct SmtpConfig {
     pub session: SessionConfig,
     pub queue: QueueConfig,
@@ -32,9 +31,9 @@ pub struct SmtpConfig {
 }
 
 #[derive(Debug, Default, Clone)]
-#[cfg_attr(feature = "test_mode", derive(PartialEq, Eq))]
+//#[cfg_attr(feature = "test_mode", derive(PartialEq, Eq))]
 pub struct QueueRateLimiter {
-    pub id: String,
+    pub id: ObjectId,
     pub expr: Expression,
     pub keys: u16,
     pub rate: Rate,
@@ -51,113 +50,34 @@ pub const THROTTLE_REMOTE_IP: u16 = 1 << 7;
 pub const THROTTLE_LOCAL_IP: u16 = 1 << 8;
 pub const THROTTLE_HELO_DOMAIN: u16 = 1 << 9;
 
-pub(crate) const RCPT_DOMAIN_VARS: &[u32; 1] = &[V_RECIPIENT_DOMAIN];
-
-pub(crate) const SMTP_EHLO_VARS: &[u32; 10] = &[
-    V_LISTENER,
-    V_REMOTE_IP,
-    V_REMOTE_PORT,
-    V_LOCAL_IP,
-    V_LOCAL_PORT,
-    V_PROTOCOL,
-    V_TLS,
-    V_HELO_DOMAIN,
-    V_ASN,
-    V_COUNTRY,
-];
-pub(crate) const SMTP_MAIL_FROM_VARS: &[u32; 12] = &[
-    V_LISTENER,
-    V_REMOTE_IP,
-    V_REMOTE_PORT,
-    V_LOCAL_IP,
-    V_LOCAL_PORT,
-    V_PROTOCOL,
-    V_TLS,
-    V_SENDER,
-    V_SENDER_DOMAIN,
-    V_AUTHENTICATED_AS,
-    V_ASN,
-    V_COUNTRY,
-];
-pub(crate) const SMTP_RCPT_TO_VARS: &[u32; 17] = &[
-    V_SENDER,
-    V_SENDER_DOMAIN,
-    V_RECIPIENTS,
-    V_RECIPIENT,
-    V_RECIPIENT_DOMAIN,
-    V_AUTHENTICATED_AS,
-    V_LISTENER,
-    V_REMOTE_IP,
-    V_REMOTE_PORT,
-    V_LOCAL_IP,
-    V_LOCAL_PORT,
-    V_PROTOCOL,
-    V_TLS,
-    V_PRIORITY,
-    V_HELO_DOMAIN,
-    V_ASN,
-    V_COUNTRY,
-];
-pub(crate) const SMTP_QUEUE_HOST_VARS: &[u32; 20] = &[
-    V_SENDER,
-    V_SENDER_DOMAIN,
-    V_RECIPIENT_DOMAIN,
-    V_RECIPIENT,
-    V_RECIPIENTS,
-    V_MX,
-    V_PRIORITY,
-    V_REMOTE_IP,
-    V_LOCAL_IP,
-    V_QUEUE_RETRY_NUM,
-    V_QUEUE_NOTIFY_NUM,
-    V_QUEUE_EXPIRES_IN,
-    V_QUEUE_LAST_STATUS,
-    V_QUEUE_LAST_ERROR,
-    V_QUEUE_NAME,
-    V_QUEUE_AGE,
-    V_RECEIVED_FROM_IP,
-    V_RECEIVED_VIA_PORT,
-    V_SOURCE,
-    V_SIZE,
-];
-pub(crate) const SMTP_QUEUE_RCPT_VARS: &[u32; 17] = &[
-    V_RECIPIENT,
-    V_RECIPIENT_DOMAIN,
-    V_RECIPIENTS,
-    V_SENDER,
-    V_SENDER_DOMAIN,
-    V_PRIORITY,
-    V_QUEUE_RETRY_NUM,
-    V_QUEUE_NOTIFY_NUM,
-    V_QUEUE_EXPIRES_IN,
-    V_QUEUE_LAST_STATUS,
-    V_QUEUE_LAST_ERROR,
-    V_QUEUE_NAME,
-    V_QUEUE_AGE,
-    V_RECEIVED_FROM_IP,
-    V_RECEIVED_VIA_PORT,
-    V_SOURCE,
-    V_SIZE,
-];
-pub(crate) const SMTP_QUEUE_SENDER_VARS: &[u32; 8] = &[
-    V_SENDER,
-    V_SENDER_DOMAIN,
-    V_PRIORITY,
-    V_QUEUE_RETRY_NUM,
-    V_QUEUE_NOTIFY_NUM,
-    V_QUEUE_EXPIRES_IN,
-    V_QUEUE_LAST_STATUS,
-    V_QUEUE_LAST_ERROR,
-];
-
 impl SmtpConfig {
-    pub async fn parse(config: &mut Config) -> Self {
-        Self {
-            session: SessionConfig::parse(config),
-            queue: QueueConfig::parse(config),
-            resolvers: Resolvers::parse(config).await,
-            mail_auth: MailAuthConfig::parse(config),
-            report: ReportConfig::parse(config),
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let config = Self {
+            session: SessionConfig::parse(bp).await,
+            queue: QueueConfig::parse(bp).await,
+            resolvers: Resolvers::parse(bp).await,
+            mail_auth: MailAuthConfig::parse(bp).await,
+            report: ReportConfig::parse(bp).await,
+        };
+
+        if !config.resolvers.dnssec_available
+            && (config.queue.tls_strategy.is_empty()
+                || config
+                    .queue
+                    .tls_strategy
+                    .values()
+                    .any(|t| !matches!(t.dane, RequireOptional::Disable)))
+        {
+            bp.build_warning(
+                ObjectType::DnsResolver.singleton(),
+                concat!(
+                    "The configured DNS resolver cannot validate DNSSEC. ",
+                    "DANE has been disabled to avoid deferring mail. ",
+                    "Ensure the resolver is DNSSEC-capable and reachable over TCP."
+                ),
+            );
         }
+
+        config
     }
 }

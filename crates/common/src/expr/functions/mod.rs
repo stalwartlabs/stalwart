@@ -5,6 +5,7 @@
  */
 
 use super::{StringCow, Variable};
+use registry::schema::enums::ExpressionVariable;
 
 pub mod array;
 pub mod asynch;
@@ -13,7 +14,7 @@ pub mod misc;
 pub mod text;
 
 pub trait ResolveVariable: Sync + Send {
-    fn resolve_variable(&self, variable: u32) -> Variable<'_>;
+    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_>;
     fn resolve_global(&self, variable: &str) -> Variable<'_>;
 }
 
@@ -48,6 +49,7 @@ pub(crate) const FUNCTIONS: &[(&str, fn(Vec<Variable>) -> Variable, u32)] = &[
     ("is_ip_addr", misc::fn_is_ip_addr, 1),
     ("is_ipv4_addr", misc::fn_is_ipv4_addr, 1),
     ("is_ipv6_addr", misc::fn_is_ipv6_addr, 1),
+    ("is_ip_in_cidr", misc::fn_is_ip_in_cidr, 2),
     ("ip_reverse_name", misc::fn_ip_reverse_name, 1),
     ("trim", text::fn_trim, 1),
     ("trim_end", text::fn_trim_end, 1),
@@ -92,8 +94,8 @@ pub const F_SQL_QUERY: u32 = 7;
 pub const F_DNS_QUERY: u32 = 8;
 
 pub const ASYNC_FUNCTIONS: &[(&str, u32, u32)] = &[
-    ("is_local_domain", F_IS_LOCAL_DOMAIN, 2),
-    ("is_local_address", F_IS_LOCAL_ADDRESS, 2),
+    ("is_local_domain", F_IS_LOCAL_DOMAIN, 1),
+    ("is_local_address", F_IS_LOCAL_ADDRESS, 1),
     ("key_get", F_KEY_GET, 2),
     ("key_exists", F_KEY_EXISTS, 2),
     ("key_set", F_KEY_SET, 3),
@@ -102,3 +104,15 @@ pub const ASYNC_FUNCTIONS: &[(&str, u32, u32)] = &[
     ("dns_query", F_DNS_QUERY, 2),
     ("sql_query", F_SQL_QUERY, 3),
 ];
+
+pub struct EmptyResolver;
+
+impl ResolveVariable for EmptyResolver {
+    fn resolve_variable(&self, _: ExpressionVariable) -> Variable<'_> {
+        Variable::Integer(0)
+    }
+
+    fn resolve_global(&self, _: &str) -> Variable<'_> {
+        Variable::Integer(0)
+    }
+}

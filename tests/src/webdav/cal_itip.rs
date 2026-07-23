@@ -142,12 +142,12 @@ pub fn test() {
                             last_itip = Some(itip_update(
                                 &mut ical,
                                 entry.get_mut(),
-                                &[account.to_string()],
+                                std::slice::from_ref(account),
                             ));
                             entry.insert(ical);
                         }
                         Entry::Vacant(entry) => {
-                            last_itip = Some(itip_create(&mut ical, &[account.to_string()]));
+                            last_itip = Some(itip_create(&mut ical, std::slice::from_ref(account)));
                             entry.insert(ical);
                         }
                     }
@@ -247,7 +247,7 @@ pub fn test() {
                                 for rcpt in &message.to {
                                     let result = match itip_snapshot(
                                         &message.message,
-                                        &[rcpt.to_string()],
+                                        std::slice::from_ref(rcpt),
                                         false,
                                     ) {
                                         Ok(itip_snapshots) => {
@@ -260,7 +260,7 @@ pub fn test() {
                                                     let ical = entry.get_mut();
                                                     let snapshots = itip_snapshot(
                                                         ical,
-                                                        &[rcpt.to_string()],
+                                                        std::slice::from_ref(rcpt),
                                                         false,
                                                     )
                                                     .expect("Failed to create iTIP snapshot");

@@ -7,23 +7,22 @@
 use super::{ImapContext, ToModSeq};
 use crate::core::{ImapId, SavedSearch, SelectedMailbox, Session, SessionData};
 use ahash::AHashMap;
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::metadata::MessageData,
+    message::{delete::EmailDeletion, metadata::MessageData},
 };
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
     parser::parse_sequence_set,
     receiver::{Request, Token},
 };
-use std::{sync::Arc, time::Instant};
-use store::{
-    SerializeInfallible,
-    roaring::RoaringBitmap,
-    write::{BatchBuilder, SearchIndex, TaskEpoch, TaskQueueClass, ValueClass},
+use registry::schema::{
+    enums::{IndexDocumentType, Permission},
+    structs::{Task, TaskIndexDocument, TaskStatus},
 };
+use std::{sync::Arc, time::Instant};
+use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -135,7 +134,12 @@ impl<T: SessionStream> SessionData<T> {
 
         // Delete ids
         let mut batch = BatchBuilder::new();
-        self.email_untag_or_delete(account_id, mailbox.id.mailbox_id, &deleted_ids, &mut batch)
+        let (fully_deleted, thread_ids) = self
+            .email_untag_or_delete(account_id, mailbox.id.mailbox_id, &deleted_ids, &mut batch)
+            .await
+            .caused_by(trc::location!())?;
+        self.server
+            .log_emptied_threads(account_id, &mut batch, thread_ids, &fully_deleted)
             .await
             .caused_by(trc::location!())?;
 
@@ -166,11 +170,13 @@ impl<T: SessionStream> SessionData<T> {
         mailbox_id: u32,
         deleted_ids: &RoaringBitmap,
         batch: &mut BatchBuilder,
-    ) -> trc::Result<()> {
+    ) -> trc::Result<(RoaringBitmap, RoaringBitmap)> {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email);
 
+        let mut fully_deleted = RoaringBitmap::new();
+        let mut thread_ids = RoaringBitmap::new();
         self.server
             .archives(
                 account_id,
@@ -191,21 +197,21 @@ impl<T: SessionStream> SessionData<T> {
 
                         if metadata.inner.mailboxes.len() == 1 {
                             // Delete message
+                            fully_deleted.insert(document_id);
+                            thread_ids.insert(metadata.inner.thread_id.to_native());
                             batch
                                 .custom(
                                     ObjectIndexBuilder::<_, ()>::new()
-                                        .with_access_token(&self.access_token)
+                                        .with_changed_by(self.access_token.account_tenant_ids())
                                         .with_current(metadata),
                                 )
                                 .caused_by(trc::location!())?
-                                .set(
-                                    ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                                        index: SearchIndex::Email,
-                                        due: TaskEpoch::now(),
-                                        is_insert: false,
-                                    }),
-                                    0u64.serialize(),
-                                )
+                                .schedule_task(Task::UnindexDocument(TaskIndexDocument {
+                                    account_id: account_id.into(),
+                                    document_id: document_id.into(),
+                                    document_type: IndexDocumentType::Email,
+                                    status: TaskStatus::now(),
+                                }))
                                 .commit_point();
                         } else {
                             // Untag message from this mailbox and remove Deleted flag
@@ -231,6 +237,6 @@ impl<T: SessionStream> SessionData<T> {
             .await
             .caused_by(trc::location!())?;
 
-        Ok(())
+        Ok((fully_deleted, thread_ids))
     }
 }

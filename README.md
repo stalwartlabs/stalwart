@@ -47,8 +47,9 @@ Key features:
     - [POP3](https://datatracker.ietf.org/doc/html/rfc1939) server.
     - [STLS](https://datatracker.ietf.org/doc/html/rfc2595) and [SASL](https://datatracker.ietf.org/doc/html/rfc5034) support as well as other [extensions](https://datatracker.ietf.org/doc/html/rfc2449).
   - SMTP:
-    * SMTP server with built-in [DMARC](https://datatracker.ietf.org/doc/html/rfc7489), [DKIM](https://datatracker.ietf.org/doc/html/rfc6376), [SPF](https://datatracker.ietf.org/doc/html/rfc7208) and [ARC](https://datatracker.ietf.org/doc/html/rfc8617) support for message authentication.
+    * SMTP server with built-in [DMARC](https://datatracker.ietf.org/doc/html/rfc7489), [DKIMv2](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/), [DKIMv1](https://datatracker.ietf.org/doc/html/rfc6376), [SPF](https://datatracker.ietf.org/doc/html/rfc7208) and [ARC](https://datatracker.ietf.org/doc/html/rfc8617) support for message authentication.
     * Strong transport security through [DANE](https://datatracker.ietf.org/doc/html/rfc6698), [MTA-STS](https://datatracker.ietf.org/doc/html/rfc8461) and [SMTP TLS](https://datatracker.ietf.org/doc/html/rfc8460) reporting.
+    * Automated DKIM key rotation and management.
     * Inbound throttling and filtering with granular configuration rules, sieve scripting, MTA hooks and milter integration.
     * Distributed virtual queues with delayed delivery, priority delivery, quotas, routing rules and throttling support.
     * Envelope rewriting and message modification.
@@ -81,12 +82,13 @@ Key features:
   - Full-text search available in 17 languages using the built-in search engine or via **Meilisearch**, **ElasticSearch**, **OpenSearch**, **PostgreSQL** or **mySQL** backends.
   - Sieve scripting language with support for all [registered extensions](https://www.iana.org/assignments/sieve-extensions/sieve-extensions.xhtml).
   - Email aliases, mailing lists, subaddressing and catch-all addresses support.
+  - Automated DNS management.
   - Automatic account configuration and discovery with [autoconfig](https://www.ietf.org/id/draft-bucksch-autoconfig-02.html) and [autodiscover](https://learn.microsoft.com/en-us/exchange/architecture/client-access/autodiscover?view=exchserver-2019). 
   - Multi-tenancy support with domain and tenant isolation.
   - Disk quotas per user and tenant.
 - **Secure and robust**:
   - Encryption at rest with **S/MIME** or **OpenPGP**.
-  - Automatic TLS certificate provisioning with [ACME](https://datatracker.ietf.org/doc/html/rfc8555) using `TLS-ALPN-01`, `DNS-01` or `HTTP-01` challenges.
+  - Automatic TLS certificate provisioning with [ACME](https://datatracker.ietf.org/doc/html/rfc8555) using `TLS-ALPN-01`, `DNS-01`, `DNS-PERSIST-01` or `HTTP-01` challenges.
   - Automated blocking of IP addresses that attack, abuse or scan the server for exploits.
   - Rate limiting.
   - Security audited (read the [report](https://stalw.art/blog/security-audit)).
@@ -122,7 +124,7 @@ Key features:
 
 ## Screenshots
 
-<img src="./img/screencast-setup.gif">
+<img src="./img/demo.gif">
 
 ## Presentation
 
@@ -132,7 +134,7 @@ Key features:
 
 Install Stalwart on your server by following the instructions for your platform:
 
-- [Linux / MacOS](https://stalw.art/docs/install/platform/linux)
+- [Linux / MacOS / FreeBSD](https://stalw.art/docs/install/platform/linux)
 - [Windows](https://stalw.art/docs/install/platform/windows)
 - [Docker](https://stalw.art/docs/install/platform/docker)
 
@@ -140,8 +142,13 @@ All documentation is available at [stalw.art/docs](https://stalw.art/docs/instal
 
 ## Support
 
-If you are having problems running Stalwart, you found a bug or just have a question, do not hesitate to reach us on [GitHub Discussions](https://github.com/stalwartlabs/stalwart/discussions), [Reddit](https://www.reddit.com/r/stalwartlabs) or [Discord](https://discord.com/servers/stalwart-923615863037390889).
-Additionally you may purchase an [Enterprise License](https://stalw.art/enterprise) to obtain priority support from Stalwart Labs LLC.
+If you are having problems running Stalwart, found a bug, or just have a question, please head to the [Stalwart Support Portal](https://support.stalw.art) at [support.stalw.art](https://support.stalw.art). 
+Additionally, you may purchase an [Enterprise License](https://stalw.art/enterprise) to obtain priority support from Stalwart Labs LLC, including response-time commitments and a private Priority Support area on the portal.
+
+## Contributing
+
+We welcome contributions, but to keep the project maintainable there are a few things to know before opening a pull request. Because of the high volume of low-quality, AI-generated submissions, pull requests are limited to a list of vouched contributors; to be added, post at [support.stalw.art](https://support.stalw.art) describing the change you would like to submit, together with a link to the proposed change. At this stage only bug fixes and translations are accepted, and new features are not, unless they involve just a few lines of code.
+For the full guidelines, please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Roadmap
 
@@ -155,12 +162,6 @@ Of course, development doesn’t stop there. The community has contributed hundr
 
 Your support is crucial in helping us continue to improve the project, add new features, and maintain the highest level of quality. By [becoming a sponsor](https://opencollective.com/stalwart), you help fund the development and future of Stalwart. As a thank-you, sponsors who contribute $5 per month or more will automatically receive a [Enterprise edition](https://stalw.art/enterprise/) license. And, sponsors who contribute $30 per month or more, also have access to [Premium Support](https://stalw.art/support) from Stalwart Labs.
 
-These are some of our open-source sponsors:
-
-<!-- sponsors --><a href="https://github.com/kbjr"><img src="https:&#x2F;&#x2F;github.com&#x2F;kbjr.png" width="60px" alt="User avatar: James Brumond" /></a><a href="https://github.com/MailRoute"><img src="https:&#x2F;&#x2F;github.com&#x2F;MailRoute.png" width="60px" alt="User avatar: MailRoute, Inc." /></a><a href="https://github.com/starsong-consulting"><img src="https:&#x2F;&#x2F;github.com&#x2F;starsong-consulting.png" width="60px" alt="User avatar: Starsong GmbH" /></a><a href="https://github.com/mingfu-design"><img src="https:&#x2F;&#x2F;github.com&#x2F;mingfu-design.png" width="60px" alt="User avatar: Ming Fu Design Ltd. 明孚設計有限公司" /></a><a href="https://github.com/tamwuff"><img src="https:&#x2F;&#x2F;github.com&#x2F;tamwuff.png" width="60px" alt="User avatar: Tamino" /></a><a href="https://github.com/panascais"><img src="https:&#x2F;&#x2F;github.com&#x2F;panascais.png" width="60px" alt="User avatar: panascais" /></a><a href="https://github.com/JanAxelJonsson"><img src="https:&#x2F;&#x2F;github.com&#x2F;JanAxelJonsson.png" width="60px" alt="User avatar: Jan Jonsson" /></a><a href="https://github.com/veyacloud"><img src="https:&#x2F;&#x2F;github.com&#x2F;veyacloud.png" width="60px" alt="User avatar: Veya Cloud" /></a><!-- sponsors -->
-
-<br/>If you would like to support our work, please consider [becoming a sponsor](https://opencollective.com/stalwart).
-
 ## Funding
 
 Part of the development of this project was funded through:
@@ -172,10 +173,10 @@ If you find the project useful you can help by [becoming a sponsor](https://open
 
 ## License
 
-This project is dual-licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0; as published by the Free Software Foundation) and the **Stalwart Enterprise License v1 (SELv1)**:
+This project is dual-licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0; as published by the Free Software Foundation) and the **Stalwart Enterprise License v2 (SELv2)**:
 
 - The [GNU Affero General Public License v3.0](./LICENSES/AGPL-3.0-only.txt) is a free software license that ensures your freedom to use, modify, and distribute the software, with the condition that any modified versions of the software must also be distributed under the same license. 
-- The [Stalwart Enterprise License v1 (SELv1)](./LICENSES/LicenseRef-SEL.txt) is a proprietary license designed for commercial use. It offers additional features and greater flexibility for businesses that do not wish to comply with the AGPL-3.0 license requirements. 
+- The [Stalwart Enterprise License v2 (SELv2)](./LICENSES/LicenseRef-SEL.txt) is a proprietary license designed for commercial use. It offers additional features and greater flexibility for businesses that do not wish to comply with the AGPL-3.0 license requirements. 
 
 Each file in this project contains a license notice at the top, indicating the applicable license(s). The license notice follows the [REUSE guidelines](https://reuse.software/) to ensure clarity and consistency. The full text of each license is available in the [LICENSES](./LICENSES/) directory.
 

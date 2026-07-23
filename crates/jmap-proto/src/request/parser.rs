@@ -10,8 +10,7 @@ use super::{
 };
 use crate::request::{
     CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
-    QueryRequestMethod, SetRequestMethod,
-    deserialize::{DeserializeArguments, deserialize_request},
+    QueryRequestMethod, SetRequestMethod, deserialize::DeserializeArguments,
 };
 use serde::{
     Deserialize, Deserializer,
@@ -32,7 +31,8 @@ impl<'x> Request<'x> {
                 }
                 Err(err) => Err(trc::JmapEvent::NotRequest
                     .into_err()
-                    .details(err.to_string())),
+                    .reason(err.to_string())
+                    .details(String::from_utf8_lossy(json).into_owned())),
             }
         } else {
             Err(trc::LimitEvent::SizeRequest.into_err())
@@ -248,6 +248,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Get, MethodObject::Registry(_)) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Get(GetRequestMethod::Registry(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Set, MethodObject::Email) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Email(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -357,6 +364,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Set, MethodObject::Registry(_)) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::Registry(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Query, MethodObject::Email) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Email(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -399,6 +413,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Query, MethodObject::Calendar) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Calendar(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Query, MethodObject::CalendarEvent) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::CalendarEvent(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -417,6 +438,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     }
                 }
             }
+            (MethodFunction::Query, MethodObject::AddressBook) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::AddressBook(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Query, MethodObject::ContactCard) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::ContactCard(value)),
                 Err(err) => RequestMethod::invalid(err),
@@ -435,6 +463,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                 Ok(Some(value)) => {
                     RequestMethod::Query(QueryRequestMethod::ShareNotification(value))
                 }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Query, MethodObject::Registry(_)) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Query(QueryRequestMethod::Registry(value)),
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));
@@ -469,15 +504,6 @@ impl<'de> Visitor<'de> for CallVisitor {
                     }
                 }
             }
-            (MethodFunction::QueryChanges, MethodObject::SieveScript) => match seq.next_element() {
-                Ok(Some(value)) => {
-                    RequestMethod::QueryChanges(QueryChangesRequestMethod::Sieve(value))
-                }
-                Err(err) => RequestMethod::invalid(err),
-                Ok(None) => {
-                    return Err(de::Error::invalid_length(1, &self));
-                }
-            },
             (MethodFunction::QueryChanges, MethodObject::Principal) => match seq.next_element() {
                 Ok(Some(value)) => {
                     RequestMethod::QueryChanges(QueryChangesRequestMethod::Principal(value))
@@ -581,6 +607,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Copy, MethodObject::FileNode) => match seq.next_element() {
+                Ok(Some(value)) => RequestMethod::Copy(CopyRequestMethod::FileNode(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Lookup, MethodObject::Blob) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::LookupBlob(value),
                 Err(err) => RequestMethod::invalid(err),
@@ -679,7 +712,45 @@ impl<'de> Deserialize<'de> for Request<'de> {
     where
         D: Deserializer<'de>,
     {
-        deserialize_request(deserializer)
+        struct RequestVisitor;
+
+        impl<'de> Visitor<'de> for RequestVisitor {
+            type Value = Request<'de>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a JMAP request object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut target = Request::default();
+                let mut has_using = false;
+                let mut has_method_calls = false;
+
+                while let Some(key) = map.next_key::<&str>()? {
+                    match key {
+                        "using" => has_using = true,
+                        "methodCalls" => has_method_calls = true,
+                        _ => {}
+                    }
+                    target
+                        .deserialize_argument(key, &mut map)
+                        .map_err(de::Error::custom)?;
+                }
+
+                if !has_using || !has_method_calls {
+                    return Err(de::Error::custom(
+                        "Request is missing the \"using\" or \"methodCalls\" property.",
+                    ));
+                }
+
+                Ok(target)
+            }
+        }
+
+        deserializer.deserialize_map(RequestVisitor)
     }
 }
 

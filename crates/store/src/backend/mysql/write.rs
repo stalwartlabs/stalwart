@@ -7,6 +7,7 @@
 use super::{MysqlStore, into_error};
 use crate::{
     IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
+    SUBSPACE_REGISTRY_IDX,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
         ValueClass, ValueOp,
@@ -126,47 +127,56 @@ impl MysqlStore {
                 }
                 Operation::Value { class, op } => {
                     let key = class.serialize(account_id, collection, document_id, 0);
-                    let table = char::from(class.subspace(collection));
+                    let subspace = class.subspace(collection);
+                    let table = char::from(subspace);
 
                     match op {
                         ValueOp::Set(value) => {
-                            let exists = asserted_values.get(&key);
-                            let s = if let Some(exists) = exists {
-                                if *exists {
-                                    trx.prep(format!("UPDATE {} SET v = :v WHERE k = :k", table))
+                            if subspace != SUBSPACE_REGISTRY_IDX {
+                                let exists = asserted_values.get(&key);
+                                let s = if let Some(exists) = exists {
+                                    if *exists {
+                                        trx.prep(format!(
+                                            "UPDATE {} SET v = :v WHERE k = :k",
+                                            table
+                                        ))
                                         .await?
+                                    } else {
+                                        trx.prep(format!(
+                                            "INSERT INTO {} (k, v) VALUES (:k, :v)",
+                                            table
+                                        ))
+                                        .await?
+                                    }
                                 } else {
-                                    trx.prep(format!(
-                                        "INSERT INTO {} (k, v) VALUES (:k, :v)",
-                                        table
-                                    ))
-                                    .await?
-                                }
-                            } else {
-                                trx
+                                    trx
                             .prep(
                                 format!("INSERT INTO {} (k, v) VALUES (:k, :v) ON DUPLICATE KEY UPDATE v = VALUES(v)", table),
                             )
                             .await?
-                            };
+                                };
 
-                            match trx
-                                .exec_drop(&s, params! {"k" => key, "v" => &*value})
-                                .await
-                            {
-                                Ok(_) => {
-                                    if trx.affected_rows() == 0 {
+                                match trx
+                                    .exec_drop(&s, params! {"k" => key, "v" => &*value})
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        if trx.affected_rows() == 0 {
+                                            trx.rollback().await?;
+                                            return Err(trc::StoreEvent::AssertValueFailed
+                                                .into_err()
+                                                .caused_by(trc::location!())
+                                                .into());
+                                        }
+                                    }
+                                    Err(err) => {
                                         trx.rollback().await?;
-                                        return Err(trc::StoreEvent::AssertValueFailed
-                                            .into_err()
-                                            .caused_by(trc::location!())
-                                            .into());
+                                        return Err(err.into());
                                     }
                                 }
-                                Err(err) => {
-                                    trx.rollback().await?;
-                                    return Err(err.into());
-                                }
+                            } else {
+                                let s = trx.prep("INSERT IGNORE INTO b (k) VALUES (?)").await?;
+                                trx.exec_drop(&s, (key,)).await?;
                             }
                         }
                         ValueOp::SetFnc(set_op) => {
@@ -256,7 +266,6 @@ impl MysqlStore {
                                 _ => (),
                             }
                         }
-
                         ValueOp::AtomicAdd(by) => {
                             if *by >= 0 {
                                 let s = trx

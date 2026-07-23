@@ -16,8 +16,9 @@ impl SqliteStore {
         key: &[u8],
         range: Range<usize>,
     ) -> trc::Result<Option<Vec<u8>>> {
-        let conn = self.conn_pool.get().map_err(into_error)?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             let mut result = conn
                 .prepare_cached("SELECT v FROM t WHERE k = ?")
                 .map_err(into_error)?;
@@ -42,8 +43,9 @@ impl SqliteStore {
     }
 
     pub(crate) async fn put_blob(&self, key: &[u8], data: &[u8]) -> trc::Result<()> {
-        let conn = self.conn_pool.get().map_err(into_error)?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             conn.prepare_cached("INSERT OR REPLACE INTO t (k, v) VALUES (?, ?)")
                 .map_err(into_error)?
                 .execute([key, data])
@@ -54,8 +56,9 @@ impl SqliteStore {
     }
 
     pub(crate) async fn delete_blob(&self, key: &[u8]) -> trc::Result<bool> {
-        let conn = self.conn_pool.get().map_err(into_error)?;
+        let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
+            let conn = manager.get().map_err(into_error)?;
             conn.prepare_cached("DELETE FROM t WHERE k = ?")
                 .map_err(into_error)?
                 .execute([key])

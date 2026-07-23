@@ -52,7 +52,7 @@ impl<'de> DeserializeArguments<'de> for ChangesRequest {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"sinceState" => {
                 self.since_state = map.next_value()?;

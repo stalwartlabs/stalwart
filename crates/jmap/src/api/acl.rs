@@ -5,12 +5,13 @@
  */
 
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
-use directory::backend::internal::manage::ManageDirectory;
 use jmap_proto::{
     error::set::SetError,
     object::{JmapRight, JmapSharedObject},
 };
 use jmap_tools::{JsonPointerIter, Key, Map, Property, Value};
+use registry::schema::prelude::ObjectType;
+use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use types::{
     acl::{Acl, AclGrant},
     id::Id,
@@ -79,6 +80,12 @@ impl JmapRights {
             .document_id();
 
         if let Some(right) = path.next() {
+            if path.next().is_some() {
+                return Err(SetError::invalid_properties()
+                    .with_property(T::SHARE_WITH_PROPERTY)
+                    .with_description("Invalid path for ACL patch."));
+            }
+
             let is_set = match value {
                 Value::Bool(is_set) => is_set,
                 Value::Null => false,
@@ -109,7 +116,7 @@ impl JmapRights {
                 if is_set {
                     acl_item.grants.insert_many(acl);
                 } else {
-                    acl_item.grants.insert_many(acl);
+                    acl_item.grants.remove_many(acl);
                     if acl_item.grants.is_empty() {
                         grants.retain(|item| item.account_id != account_id);
                     }
@@ -240,8 +247,8 @@ impl JmapAcl for Server {
         }
 
         let principal_ids = self
-            .store()
-            .principal_ids(None, None)
+            .registry()
+            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Account))
             .await
             .unwrap_or_default();
 

@@ -7,6 +7,7 @@
 use super::{PostgresStore, into_error};
 use crate::{
     IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
+    SUBSPACE_REGISTRY_IDX,
     backend::postgres::into_pool_error,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
@@ -130,40 +131,50 @@ impl PostgresStore {
                 }
                 Operation::Value { class, op } => {
                     let key = class.serialize(account_id, collection, document_id, 0);
-                    let table = char::from(class.subspace(collection));
+                    let subspace = class.subspace(collection);
+                    let table = char::from(subspace);
 
                     match op {
                         ValueOp::Set(value) => {
-                            let s = if let Some(exists) = asserted_values.get(&key) {
-                                if *exists {
-                                    trx.prepare_cached(&format!(
-                                        "UPDATE {} SET v = $2 WHERE k = $1",
-                                        table
-                                    ))
-                                    .await?
+                            if subspace != SUBSPACE_REGISTRY_IDX {
+                                let s = if let Some(exists) = asserted_values.get(&key) {
+                                    if *exists {
+                                        trx.prepare_cached(&format!(
+                                            "UPDATE {} SET v = $2 WHERE k = $1",
+                                            table
+                                        ))
+                                        .await?
+                                    } else {
+                                        trx.prepare_cached(&format!(
+                                            "INSERT INTO {} (k, v) VALUES ($1, $2)",
+                                            table
+                                        ))
+                                        .await?
+                                    }
                                 } else {
                                     trx.prepare_cached(&format!(
-                                        "INSERT INTO {} (k, v) VALUES ($1, $2)",
+                                        concat!(
+                                            "INSERT INTO {} (k, v) VALUES ($1, $2) ",
+                                            "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v"
+                                        ),
                                         table
                                     ))
                                     .await?
+                                };
+
+                                if trx.execute(&s, &[&key, &(*value)]).await? == 0 {
+                                    return Err(trc::StoreEvent::AssertValueFailed
+                                        .into_err()
+                                        .caused_by(trc::location!())
+                                        .into());
                                 }
                             } else {
-                                trx.prepare_cached(&format!(
-                                    concat!(
-                                        "INSERT INTO {} (k, v) VALUES ($1, $2) ",
-                                        "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v"
-                                    ),
-                                    table
-                                ))
-                                .await?
-                            };
-
-                            if trx.execute(&s, &[&key, &(*value)]).await? == 0 {
-                                return Err(trc::StoreEvent::AssertValueFailed
-                                    .into_err()
-                                    .caused_by(trc::location!())
-                                    .into());
+                                let s = trx
+                                    .prepare_cached(
+                                        "INSERT INTO b (k) VALUES ($1) ON CONFLICT (k) DO NOTHING",
+                                    )
+                                    .await?;
+                                trx.execute(&s, &[&key]).await?;
                             }
                         }
                         ValueOp::SetFnc(set_op) => {

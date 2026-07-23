@@ -55,7 +55,7 @@ impl<'de> DeserializeArguments<'de> for GetAvailabilityRequest {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"utcStart" => {
                 self.utc_start = map.next_value()?;

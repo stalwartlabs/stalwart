@@ -7,20 +7,20 @@
 use super::*;
 use crate::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::metadata::MessageData,
+    message::{delete::EmailDeletion, metadata::MessageData},
 };
 use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
 };
-use store::{
-    SerializeInfallible,
-    roaring::RoaringBitmap,
-    write::{BatchBuilder, SearchIndex, TaskEpoch, TaskQueueClass, ValueClass},
+use registry::schema::{
+    enums::IndexDocumentType,
+    structs::{Task, TaskIndexDocument, TaskStatus},
 };
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive},
 };
+use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -88,6 +88,8 @@ impl MailboxDestroy for Server {
                 // If the message is in multiple mailboxes, untag it from the current mailbox,
                 // otherwise delete it.
 
+                let mut deleted_ids = RoaringBitmap::new();
+                let mut thread_ids = RoaringBitmap::new();
                 self.archives(
                     account_id,
                     Collection::Email,
@@ -114,23 +116,23 @@ impl MailboxDestroy for Server {
                                     (mailbox.mailbox_id.to_native(), mailbox.uid.to_native()),
                                 );
                             }
+                            deleted_ids.insert(message_id);
+                            thread_ids.insert(prev_message_data.inner.thread_id.to_native());
                             batch
                                 .with_collection(Collection::Email)
                                 .with_document(message_id)
                                 .custom(
                                     ObjectIndexBuilder::<_, ()>::new()
-                                        .with_access_token(access_token)
+                                        .with_changed_by(access_token.account_tenant_ids())
                                         .with_current(prev_message_data),
                                 )
                                 .caused_by(trc::location!())?
-                                .set(
-                                    ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                                        index: SearchIndex::Email,
-                                        due: TaskEpoch::now(),
-                                        is_insert: false,
-                                    }),
-                                    0u64.serialize(),
-                                )
+                                .schedule_task(Task::UnindexDocument(TaskIndexDocument {
+                                    account_id: account_id.into(),
+                                    document_id: message_id.into(),
+                                    document_type: IndexDocumentType::Email,
+                                    status: TaskStatus::now(),
+                                }))
                                 .commit_point();
                         } else {
                             let new_message_data = MessageData {
@@ -157,7 +159,7 @@ impl MailboxDestroy for Server {
                                 .with_document(message_id)
                                 .custom(
                                     ObjectIndexBuilder::new()
-                                        .with_access_token(access_token)
+                                        .with_changed_by(access_token.account_tenant_ids())
                                         .with_changes(new_message_data)
                                         .with_current(prev_message_data),
                                 )
@@ -170,6 +172,10 @@ impl MailboxDestroy for Server {
                 )
                 .await
                 .caused_by(trc::location!())?;
+
+                self.log_emptied_threads(account_id, &mut batch, thread_ids, &deleted_ids)
+                    .await
+                    .caused_by(trc::location!())?;
             } else {
                 return Ok(Err(MailboxDestroyError::HasEmails));
             }

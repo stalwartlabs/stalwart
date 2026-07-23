@@ -5,6 +5,7 @@
  */
 
 use crate::calendar_event::{CalendarSyntheticId, assert_is_unique_uid};
+use crate::changes::state::JmapCacheState;
 use calcard::{
     common::timezone::Tz,
     icalendar::{
@@ -15,8 +16,10 @@ use calcard::{
     jscalendar::{JSCalendar, JSCalendarDateTime, JSCalendarProperty, JSCalendarValue},
 };
 use chrono::DateTime;
-use common::{DavName, DavResources, Server, auth::AccessToken};
-use directory::Permission;
+use common::{
+    DavName, DavResources, Server,
+    auth::{AccessToken, AccountInfo},
+};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
@@ -32,10 +35,11 @@ use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
     object::calendar_event,
-    request::IntoValid,
+    request::MaybeInvalid,
     types::state::State,
 };
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Map, Value};
+use registry::schema::enums::Permission;
 use std::{borrow::Cow, str::FromStr};
 use store::{
     ValueKey,
@@ -47,7 +51,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     blob::BlobId,
-    collection::{Collection, SyncCollection},
+    collection::{Collection, SyncCollection, VanishedCollection},
     id::Id,
 };
 
@@ -66,6 +70,7 @@ pub trait CalendarEventSet: Sync + Send {
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,
+        account_info: &AccountInfo,
         send_scheduling_messages: bool,
         can_add_calendars: &Option<RoaringBitmap>,
         js_calendar_event: JSCalendar<'_, Id, BlobId>,
@@ -82,10 +87,19 @@ impl CalendarEventSet for Server {
     ) -> trc::Result<SetResponse<calendar_event::CalendarEvent>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
-        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let account_info = self
+            .scheduling_account_info(access_token.account_id(), account_id)
+            .await
+            .caused_by(trc::location!())?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(cache.assert_state(false, &request.if_in_state)?);
+        let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
 
         // Obtain calendarIds
         let (can_add_calendars, can_delete_calendars, can_modify_calendars) =
@@ -115,6 +129,7 @@ impl CalendarEventSet for Server {
                     &mut batch,
                     access_token,
                     account_id,
+                    &account_info,
                     send_scheduling_messages,
                     &can_add_calendars,
                     JSCalendar::default(),
@@ -133,7 +148,14 @@ impl CalendarEventSet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update().into_valid() {
+        'update: for (id, object) in request.unwrap_update() {
+            let id = match id {
+                MaybeInvalid::Value(id) => id,
+                invalid => {
+                    response.not_updated.append(invalid, SetError::not_found());
+                    continue 'update;
+                }
+            };
             // Make sure id won't be destroyed
             if will_destroy.contains(&id) {
                 response.not_updated.append(id, SetError::will_destroy());
@@ -176,6 +198,7 @@ impl CalendarEventSet for Server {
             // Process changes
             if let Err(err) = update_calendar_event(
                 access_token,
+                Some(id),
                 object,
                 &mut new_calendar_event,
                 &mut js_calendar_group,
@@ -303,7 +326,7 @@ impl CalendarEventSet for Server {
             let mut itip_messages = None;
             if send_scheduling_messages
                 && self.core.groupware.itip_enabled
-                && !access_token.emails.is_empty()
+                && !account_info.addresses().is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
                 && new_calendar_event.data.event_range_end() > now
             {
@@ -314,13 +337,10 @@ impl CalendarEventSet for Server {
                     itip_update(
                         &mut new_calendar_event.data.event,
                         &old_ical,
-                        access_token.emails.as_slice(),
+                        account_info.addresses(),
                     )
                 } else {
-                    itip_create(
-                        &mut new_calendar_event.data.event,
-                        access_token.emails.as_slice(),
-                    )
+                    itip_create(&mut new_calendar_event.data.event, account_info.addresses())
                 };
 
                 match result {
@@ -382,10 +402,7 @@ impl CalendarEventSet for Server {
                 .saturating_sub(u32::from(calendar_event.inner.size) as u64);
             if extra_bytes > 0 {
                 match self
-                    .has_available_quota(
-                        &self.get_resource_token(access_token, account_id).await?,
-                        extra_bytes,
-                    )
+                    .has_available_quota(account_info.account(), extra_bytes)
                     .await
                 {
                     Ok(_) => {}
@@ -400,7 +417,7 @@ impl CalendarEventSet for Server {
             // Update record
             new_calendar_event
                 .update(
-                    access_token,
+                    access_token.account_tenant_ids(),
                     calendar_event,
                     account_id,
                     document_id,
@@ -479,13 +496,17 @@ impl CalendarEventSet for Server {
             // Delete event
             DestroyArchive(calendar_event)
                 .delete_all(
-                    access_token,
+                    &account_info,
                     account_id,
                     document_id,
                     send_scheduling_messages,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
+
+            for path in cache.format_resource_paths_by_id(document_id) {
+                batch.log_vanished_item(VanishedCollection::Calendar, path);
+            }
 
             response.destroyed.push(id);
         }
@@ -511,6 +532,7 @@ impl CalendarEventSet for Server {
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,
+        account_info: &AccountInfo,
         send_scheduling_messages: bool,
         can_add_calendars: &Option<RoaringBitmap>,
         mut js_calendar_group: JSCalendar<'_, Id, BlobId>,
@@ -520,6 +542,7 @@ impl CalendarEventSet for Server {
         let mut event = CalendarEvent::default();
         let use_default_alerts = match update_calendar_event(
             access_token,
+            None,
             updates,
             &mut event,
             &mut js_calendar_group,
@@ -617,11 +640,11 @@ impl CalendarEventSet for Server {
         let mut itip_messages = None;
         if send_scheduling_messages
             && self.core.groupware.itip_enabled
-            && !access_token.emails.is_empty()
+            && !account_info.addresses().is_empty()
             && access_token.has_permission(Permission::CalendarSchedulingSend)
             && event.data.event_range_end() > now() as i64
         {
-            match itip_create(&mut event.data.event, access_token.emails.as_slice()) {
+            match itip_create(&mut event.data.event, account_info.addresses()) {
                 Ok(messages) => {
                     if messages.iter().map(|r| r.to.len()).sum::<usize>()
                         < self.core.groupware.itip_outbound_max_recipients
@@ -649,10 +672,7 @@ impl CalendarEventSet for Server {
 
         // Validate quota
         match self
-            .has_available_quota(
-                &self.get_resource_token(access_token, account_id).await?,
-                size as u64,
-            )
+            .has_available_quota(account_info.account(), size as u64)
             .await
         {
             Ok(_) => {}
@@ -670,7 +690,7 @@ impl CalendarEventSet for Server {
             .caused_by(trc::location!())?;
         event
             .insert(
-                access_token,
+                access_token.account_tenant_ids(),
                 account_id,
                 document_id,
                 next_email_alarm,
@@ -688,6 +708,7 @@ impl CalendarEventSet for Server {
 
 fn update_calendar_event<'x>(
     _access_token: &AccessToken,
+    expected_id: Option<Id>,
     updates: Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
     event: &mut CalendarEvent,
     js_calendar_group: &mut JSCalendar<'x, Id, BlobId>,
@@ -780,16 +801,24 @@ fn update_calendar_event<'x>(
                 }
                 entries = js_calendar_event.as_object_mut().unwrap();
             }
+            (JSCalendarProperty::Id, value) => {
+                if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {
+                    return Err(SetError::invalid_properties()
+                        .with_property(JSCalendarProperty::Id)
+                        .with_description("This property is immutable."));
+                }
+            }
             (
-                property @ (JSCalendarProperty::Id
-                | JSCalendarProperty::BaseEventId
+                property @ (JSCalendarProperty::BaseEventId
                 | JSCalendarProperty::IsOrigin
                 | JSCalendarProperty::Method),
-                _,
+                value,
             ) => {
-                return Err(SetError::invalid_properties()
-                    .with_property(property)
-                    .with_description("This property is immutable."));
+                if entries.get(&Key::Property(property.clone())) != Some(&value) {
+                    return Err(SetError::invalid_properties()
+                        .with_property(property)
+                        .with_description("This property is immutable."));
+                }
             }
             (
                 property @ (JSCalendarProperty::IsDraft

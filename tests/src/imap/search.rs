@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::utils::server::TestServer;
+
 use super::{AssertResult, ImapConnection, Type};
-use crate::imap::IMAPTest;
 use imap_proto::ResponseType;
 
-pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection, handle: &IMAPTest) {
+pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection, test: &TestServer) {
     println!("Running SEARCH tests...");
 
     // Searches without selecting a mailbox should fail.
@@ -54,6 +55,17 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection, ha
 
     imap_check
         .send("UID SEARCH TEXT coffee FROM vandelay SUBJECT exporting SENTON 20-Nov-2021")
+        .await;
+    imap_check
+        .assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_equals("* SEARCH 10");
+
+    imap_check
+        .send(concat!(
+            "UID SEARCH CHARSET UTF-8 TEXT {75+}\r\n",
+            "ℌ𝔢𝔩𝔭 𝔪𝔢 𝔢𝔵𝔭𝔬𝔯𝔱 𝔪𝔶 𝔟𝔬𝔬𝔨"
+        ))
         .await;
     imap_check
         .assert_read(Type::Tagged, ResponseType::Ok)
@@ -119,7 +131,7 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection, ha
         .await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains(if !handle.server.search_store().is_mysql() {
+        .assert_contains(if !test.server.search_store().is_mysql() {
             "COUNT 10 ALL 6,4:5,1,10,3,7:8,2,9"
         } else {
             "COUNT 10 ALL 9,3,7:8,2,6,4:5,1,10"

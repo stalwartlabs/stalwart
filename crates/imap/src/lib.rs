@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+#![warn(clippy::large_futures)]
+
 use std::sync::LazyLock;
 
 use imap_proto::{ResponseCode, StatusResponse, protocol::capability::Capability};

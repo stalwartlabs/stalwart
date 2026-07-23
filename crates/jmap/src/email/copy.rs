@@ -88,28 +88,17 @@ impl JmapEmailCopy for Server {
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
 
-        // Obtain quota
-        let resource_token = self.get_resource_token(access_token, account_id).await?;
-
         'create: for (id, create) in request.create.into_valid() {
-            let from_message_id = id.document_id();
-            if !from_message_ids.contains(from_message_id) {
-                response.not_created.append(
-                    id,
-                    SetError::not_found().with_description(format!(
-                        "Item {} not found in account {}.",
-                        id, response.from_account_id
-                    )),
-                );
-                continue;
-            }
-
+            let mut from_message_id = None;
             let mut mailboxes = Vec::new();
             let mut keywords = Vec::new();
             let mut received_at = None;
 
             for (property, value) in create.into_expanded_object() {
                 match (property, value) {
+                    (Key::Property(EmailProperty::Id), Value::Element(EmailValue::Id(src))) => {
+                        from_message_id = Some(src.document_id());
+                    }
                     (Key::Property(EmailProperty::MailboxIds), Value::Object(ids)) => {
                         mailboxes = ids
                             .into_expanded_boolean_set()
@@ -166,6 +155,26 @@ impl JmapEmailCopy for Server {
                 }
             }
 
+            let Some(from_message_id) = from_message_id else {
+                response.not_created.append(
+                    id,
+                    SetError::invalid_properties()
+                        .with_property(EmailProperty::Id)
+                        .with_description("Missing or invalid \"id\" property."),
+                );
+                continue 'create;
+            };
+            if !from_message_ids.contains(from_message_id) {
+                response.not_created.append(
+                    id,
+                    SetError::not_found().with_description(format!(
+                        "Item {} not found in account {}.",
+                        id, response.from_account_id
+                    )),
+                );
+                continue 'create;
+            }
+
             // Make sure message belongs to at least one mailbox
             if mailboxes.is_empty() {
                 response.not_created.append(
@@ -203,7 +212,7 @@ impl JmapEmailCopy for Server {
                 .copy_message(
                     from_account_id,
                     from_message_id,
-                    &resource_token,
+                    account_id,
                     mailboxes,
                     keywords,
                     received_at.map(|dt| dt.timestamp() as u64),
@@ -244,14 +253,14 @@ impl JmapEmailCopy for Server {
             *next_call = Call {
                 id: String::new(),
                 name: MethodName::new(MethodObject::Email, MethodFunction::Set),
-                method: RequestMethod::Set(SetRequestMethod::Email(SetRequest {
+                method: RequestMethod::Set(SetRequestMethod::Email(Box::new(SetRequest {
                     account_id: request.from_account_id,
                     if_in_state: request.destroy_from_if_in_state,
                     create: None,
                     update: None,
                     destroy: MaybeResultReference::Value(destroy_ids).into(),
                     arguments: Default::default(),
-                })),
+                }))),
             }
             .into();
         }

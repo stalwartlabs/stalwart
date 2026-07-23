@@ -12,7 +12,7 @@ use common::{
 };
 
 use mail_parser::Message;
-use sieve::{Envelope, runtime::Variable};
+use sieve::{Envelope, SpamStatus, runtime::Variable};
 
 pub mod envelope;
 pub mod event_loop;
@@ -39,8 +39,9 @@ pub struct ScriptParameters<'x> {
     from_addr: String,
     from_name: String,
     return_path: String,
-    sign: Vec<String>,
+    sign_domain: Option<String>,
     access_token: Option<&'x AccessToken>,
+    spam_status: Option<SpamStatus>,
     session_id: u64,
 }
 
@@ -54,8 +55,9 @@ impl<'x> ScriptParameters<'x> {
             from_addr: Default::default(),
             from_name: Default::default(),
             return_path: Default::default(),
-            sign: Default::default(),
+            sign_domain: Default::default(),
             access_token: None,
+            spam_status: None,
             session_id: Default::default(),
         }
     }
@@ -75,12 +77,9 @@ impl<'x> ScriptParameters<'x> {
                 *variable = value;
             }
         }
-        if let Some(value) = server
+        self.sign_domain = server
             .eval_if(&server.core.sieve.sign, vars, session_id)
-            .await
-        {
-            self.sign = value;
-        }
+            .await;
         self
     }
 
@@ -94,6 +93,13 @@ impl<'x> ScriptParameters<'x> {
     pub fn with_auth_headers(self, headers: &'x [u8]) -> Self {
         Self {
             headers: headers.into(),
+            ..self
+        }
+    }
+
+    pub fn with_spam_status(self, status: SpamStatus) -> Self {
+        Self {
+            spam_status: status.into(),
             ..self
         }
     }

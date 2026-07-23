@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+#![warn(clippy::large_futures)]
+
 pub mod analysis;
 pub mod modules;
 
 use analysis::ElementLocation;
 use analysis::url::UrlParts;
-use mail_auth::{ArcOutput, DkimOutput, DmarcResult, IprevOutput, SpfOutput, dmarc::Policy};
+use mail_auth::{
+    ArcOutput, DkimOutput, DmarcResult, IprevOutput, SpfOutput, dkim2::Dkim2Output, dmarc::Policy,
+};
 use mail_parser::Message;
 use modules::html::HtmlToken;
 use nlp::tokenizers::types::TokenType;
@@ -28,6 +32,7 @@ pub struct SpamFilterInput<'x> {
     pub spf_ehlo_result: Option<&'x SpfOutput>,
     pub spf_mail_from_result: Option<&'x SpfOutput>,
     pub dkim_result: &'x [DkimOutput<'x>],
+    pub dkim2_result: Option<&'x Dkim2Output<'x>>,
     pub dmarc_result: Option<&'x DmarcResult>,
     pub dmarc_policy: Option<&'x Policy>,
     pub iprev_result: Option<&'x IprevOutput>,
@@ -45,7 +50,8 @@ pub struct SpamFilterInput<'x> {
     // Envelope
     pub env_from: &'x str,
     pub env_from_flags: u64,
-    pub env_rcpt_to: Vec<&'x str>,
+    pub env_rcpt_orig_to: Vec<&'x str>,
+    pub env_rcpt_rewritten_to: Vec<&'x str>,
 
     pub is_train: bool,
     pub is_test: bool,
@@ -57,7 +63,8 @@ pub struct SpamFilterOutput<'x> {
 
     pub env_from_addr: Email,
     pub env_from_postmaster: bool,
-    pub env_to_addr: HashSet<Email>,
+    pub env_to_orig_addr: HashSet<Email>,
+    pub env_to_rewritten_addr: HashSet<Email>,
     pub from: Recipient,
     pub recipients_to: Vec<Recipient>,
     pub recipients_cc: Vec<Recipient>,
@@ -143,6 +150,7 @@ impl<'x> SpamFilterInput<'x> {
             spf_ehlo_result: None,
             spf_mail_from_result: None,
             dkim_result: &[],
+            dkim2_result: None,
             dmarc_result: None,
             dmarc_policy: None,
             iprev_result: None,
@@ -154,7 +162,8 @@ impl<'x> SpamFilterInput<'x> {
             is_tls: true,
             env_from: "",
             env_from_flags: 0,
-            env_rcpt_to: vec![],
+            env_rcpt_rewritten_to: vec![],
+            env_rcpt_orig_to: vec![],
             is_test: false,
             is_train: false,
         }

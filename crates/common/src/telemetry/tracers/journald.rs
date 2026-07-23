@@ -44,7 +44,7 @@ impl Subscriber {
         let mut seen_keys = AHashSet::new();
         for (key, value) in &event.keys {
             if seen_keys.insert(*key) {
-                put_field_length_encoded(&mut buf, key.name(), |buf| {
+                put_field_length_encoded(&mut buf, key.as_str(), |buf| {
                     write!(buf, "{value}").unwrap()
                 });
             }

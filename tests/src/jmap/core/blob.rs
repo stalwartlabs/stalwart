@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{jmap::JMAPTest, store::cleanup::store_blob_expire_all};
+use crate::utils::server::TestServer;
 use email::mailbox::INBOX_ID;
 use serde_json::{Value, json};
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running blob tests...");
-    let server = params.server.clone();
-    let account = params.account("jdoe@example.com");
-    store_blob_expire_all(&server.core.storage.data).await;
+    let account = test.account("jdoe@example.com");
+    test.blob_expire_all().await;
 
     // Blob/set simple test
     let response = account.jmap_method_call("Blob/upload", json!({
+             "accountId": account.id_string(),
              "create": {
               "abc": {
                "data" : [
@@ -53,6 +53,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_call(
             "Blob/upload",
             json!({
+             "accountId": account.id_string(),
              "create": {
               "abc": {
                "data" : [
@@ -74,6 +75,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_calls(json!([[
             "Blob/get",
             {
+              "accountId": account.id_string(),
               "ids" : [
                 blob_id
               ],
@@ -88,6 +90,7 @@ pub async fn test(params: &mut JMAPTest) {
           [
             "Blob/get",
             {
+              "accountId": account.id_string(),
               "ids" : [
                 blob_id
               ],
@@ -139,7 +142,7 @@ pub async fn test(params: &mut JMAPTest) {
         );
     }
 
-    store_blob_expire_all(&server.core.storage.data).await;
+    test.blob_expire_all().await;
 
     // Blob/upload Complex Example
     let response = account
@@ -147,6 +150,7 @@ pub async fn test(params: &mut JMAPTest) {
          [
           "Blob/upload",
           {
+           "accountId": account.id_string(),
            "create": {
             "b4": {
              "data": [
@@ -162,6 +166,7 @@ pub async fn test(params: &mut JMAPTest) {
         [
           "Blob/upload",
           {
+           "accountId": account.id_string(),
            "create": {
              "cat": {
                "data": [
@@ -193,6 +198,7 @@ pub async fn test(params: &mut JMAPTest) {
         [
           "Blob/get",
           {
+           "accountId": account.id_string(),
            "properties": [
              "data:asText",
              "size"
@@ -226,13 +232,14 @@ pub async fn test(params: &mut JMAPTest) {
             "Pointer {pointer:?} Response: {response:?}",
         );
     }
-    store_blob_expire_all(&server.core.storage.data).await;
+    test.blob_expire_all().await;
 
     // Blob/get Example with Range and Encoding Errors
     let response = account.jmap_method_calls(json!([
             [
               "Blob/upload",
               {
+                "accountId": account.id_string(),
                 "create": {
                   "b1": {
                     "data": [
@@ -256,6 +263,7 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
+                "accountId": account.id_string(),
                 "ids": [
                   "#b1",
                   "#b2"
@@ -266,6 +274,7 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
+                "accountId": account.id_string(),
                 "ids": [
                   "#b1",
                   "#b2"
@@ -280,6 +289,7 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
+                "accountId": account.id_string(),
                 "ids": [
                   "#b1",
                   "#b2"
@@ -294,6 +304,7 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
+                "accountId": account.id_string(),
                 "offset": 0,
                 "length": 5,
                 "ids": [
@@ -306,6 +317,7 @@ pub async fn test(params: &mut JMAPTest) {
             [
               "Blob/get",
               {
+                "accountId": account.id_string(),
                 "offset": 20,
                 "length": 100,
                 "ids": [
@@ -353,10 +365,10 @@ pub async fn test(params: &mut JMAPTest) {
             "Pointer {pointer:?} Response: {response:?}",
         );
     }
-    store_blob_expire_all(&server.core.storage.data).await;
+    test.blob_expire_all().await;
 
     // Blob/lookup
-    let client = account.client();
+    let client = account.jmap_client().await;
     let blob_id = client
         .email_import(
             concat!(
@@ -381,6 +393,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_call(
             "Blob/lookup",
             json!({
+              "accountId": account.id_string(),
               "typeNames": [
                 "Mailbox",
                 "Thread",
@@ -411,6 +424,6 @@ pub async fn test(params: &mut JMAPTest) {
     }
 
     // Remove test data
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.assert_is_empty().await;
 }

@@ -8,11 +8,12 @@ use super::{Action, Error, Macros, Modification};
 use crate::{
     core::{Session, SessionAddress, SessionData},
     inbound::{FilterResponse, milter::MilterClient},
+    queue::QueueId,
 };
 use common::{
     DAEMON_NAME,
     config::smtp::session::{Milter, Stage},
-    listener::SessionStream,
+    network::SessionStream,
 };
 use mail_auth::AuthenticatedMessage;
 use smtp_proto::{IntoString, request::parser::Rfc5321Parser};
@@ -31,6 +32,7 @@ impl<T: SessionStream> Session<T> {
         &self,
         stage: Stage,
         message: Option<&AuthenticatedMessage<'_>>,
+        queue_id: Option<QueueId>,
     ) -> Result<Vec<Modification>, FilterResponse> {
         let milters = &self.server.core.smtp.session.milters;
         if milters.is_empty() {
@@ -88,6 +90,7 @@ impl<T: SessionStream> Session<T> {
                             Action::Accept | Action::Continue => unreachable!(),
                         }),
                         SpanId = self.data.session_id,
+                        QueueId = queue_id,
                         Id = milter.id.to_string(),
                         Elapsed = time.elapsed(),
                     );
@@ -194,7 +197,7 @@ impl<T: SessionStream> Session<T> {
             .as_ref()
             .and_then(|ip_rev| ip_rev.ptr.as_ref())
             .and_then(|ptrs| ptrs.first())
-            .map(|s| s.as_str());
+            .map(|s| s.as_ref());
         client
             .connection(
                 client_ptr.unwrap_or(self.data.helo_domain.as_str()),

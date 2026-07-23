@@ -10,13 +10,19 @@ use super::{
 };
 use crate::{
     SerializeInfallible, U32_LEN,
-    write::{LogCollection, MergeFnc, MergeOperation, Params, SetFnc, SetOperation},
+    write::{
+        LogCollection, MergeFnc, MergeOperation, Params, SetFnc, SetOperation, TaskQueueClass,
+    },
+};
+use registry::{
+    schema::structs::Task,
+    types::{EnumImpl, ObjectImpl},
 };
 use types::{
     collection::{Collection, SyncCollection, VanishedCollection},
     field::FieldType,
 };
-use utils::map::vec_map::VecMap;
+use utils::{map::vec_map::VecMap, snowflake::SnowflakeIdGenerator};
 
 impl BatchBuilder {
     pub fn new() -> Self {
@@ -390,6 +396,13 @@ impl BatchBuilder {
     }
 
     pub fn any_op(&mut self, op: Operation) -> &mut Self {
+        if let Operation::Value { class, op } = &op {
+            self.batch_size += class.serialized_size();
+            if let ValueOp::Set(value) = op {
+                self.batch_size += value.len();
+            }
+        }
+
         self.ops.push(op);
         self.batch_ops += 1;
         self
@@ -458,6 +471,31 @@ impl BatchBuilder {
 
     pub fn is_empty(&self) -> bool {
         self.batch_ops == 0
+    }
+
+    pub fn schedule_task(&mut self, task: Task) -> &mut Self {
+        let due = task.due_timestamp();
+        let class = task.object_type().to_id();
+        let task = task.to_pickled_vec();
+        let id = SnowflakeIdGenerator::global_id().unwrap_or_default();
+
+        self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), task)
+            .set(
+                ValueClass::TaskQueue(TaskQueueClass::Due { id, due }),
+                class.serialize(),
+            )
+    }
+
+    pub fn schedule_task_with_id(&mut self, id: u64, task: Task) -> &mut Self {
+        let due = task.due_timestamp();
+        let class = task.object_type().to_id();
+        let task = task.to_pickled_vec();
+
+        self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), task)
+            .set(
+                ValueClass::TaskQueue(TaskQueueClass::Due { id, due }),
+                class.serialize(),
+            )
     }
 }
 

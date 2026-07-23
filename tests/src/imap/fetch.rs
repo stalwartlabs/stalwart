@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use imap_proto::ResponseType;
-
 use super::{AssertResult, ImapConnection, Type};
+use imap_proto::ResponseType;
 
 pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
     println!("Running FETCH tests...");
@@ -20,7 +19,7 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
 
     // Fetch all properties available from JMAP
     imap.send(concat!(
-        "FETCH 10 (FLAGS INTERNALDATE PREVIEW EMAILID THREADID ",
+        "FETCH 10 (FLAGS INTERNALDATE PREVIEW OBJECTID ",
         "RFC822.SIZE UID ENVELOPE BODYSTRUCTURE)"
     ))
     .await;
@@ -30,8 +29,9 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
         .assert_contains("RFC822.SIZE 1457")
         .assert_contains("UID 10")
         .assert_contains("INTERNALDATE")
-        .assert_contains("THREADID (")
-        .assert_contains("EMAILID (")
+        .assert_contains("OBJECTID (")
+        .assert_contains("EMAILID ")
+        .assert_contains("THREADID ")
         .assert_contains("but then I thought, why not do both?")
         .assert_contains(concat!(
             "ENVELOPE (\"Sat, 20 Nov 2021 14:22:01 -0800\" ",
@@ -72,18 +72,22 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
     .await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains("BINARY[1] {175}")
+        .assert_contains("BINARY[1] ~{175}")
         .assert_contains("BINARY.SIZE[1] 175")
         .assert_contains("BODY[1.TEXT] {239}")
         .assert_contains("BODY[2.1.HEADER] {88}")
-        .assert_contains("BINARY[2.1] {101}")
+        .assert_contains("BINARY[2.1] ~{108}")
         .assert_contains("BODY[MIME] {54}")
         .assert_contains("BODY[HEADER.FIELDS (FROM)]<10> {8}")
         .assert_contains("&ldquo;exporting&rdquo;")
         .assert_contains("PGh0bWw+PHA+")
         .assert_contains("Content-Transfer-Encoding: quoted-printable")
-        .assert_contains("ℌ𝔢𝔩𝔭 𝔪𝔢 𝔢𝔵𝔭𝔬𝔯𝔱 𝔪𝔶 𝔟𝔬𝔬𝔨")
         .assert_contains("Vandelay");
+    let fraktur_utf16_le: Vec<u8> = "ℌ𝔢𝔩𝔭 𝔪𝔢 𝔢𝔵𝔭𝔬𝔯𝔱 𝔪𝔶 𝔟𝔬𝔬𝔨"
+        .encode_utf16()
+        .flat_map(|c| c.to_le_bytes())
+        .collect();
+    imap.assert_last_contains_bytes(&fraktur_utf16_le);
 
     // We are in EXAMINE mode, fetching body should not set \Seen
     imap.send("UID FETCH 10 (FLAGS)").await;
@@ -100,7 +104,7 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
         .await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains("BINARY[1] {175}")
+        .assert_contains("BINARY[1] ~{175}")
         .assert_contains("BINARY.SIZE[1] 175")
         .assert_contains("BODY[1.TEXT] {239}");
 

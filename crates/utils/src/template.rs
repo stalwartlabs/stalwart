@@ -178,10 +178,8 @@ impl<T: FromStr + Eq + Hash + std::fmt::Debug> Template<T> {
                                     TemplateItem::If {
                                         variable,
                                         block_end: start_pos,
-                                    } => {
-                                        if !entry.contains_key(variable) {
-                                            slice = self.items[*start_pos..*block_end].iter();
-                                        }
+                                    } if !entry.contains_key(variable) => {
+                                        slice = self.items[*start_pos..*block_end].iter();
                                     }
                                     _ => {}
                                 }

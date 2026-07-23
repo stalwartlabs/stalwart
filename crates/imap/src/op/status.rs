@@ -10,15 +10,18 @@ use crate::{
     op::ImapContext,
     spawn_op,
 };
-use common::listener::SessionStream;
-use directory::Permission;
+use common::network::SessionStream;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     parser::PushUnique,
-    protocol::status::{Status, StatusItem, StatusItemType},
+    protocol::{
+        ObjectId,
+        status::{Status, StatusItem, StatusItemType},
+    },
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use trc::AddContext;
 use types::{id::Id, keyword::Keyword};
@@ -29,13 +32,32 @@ impl<T: SessionStream> Session<T> {
         self.assert_has_permission(Permission::ImapStatus)?;
 
         let is_utf8 = self.is_utf8;
+
+        // Parse requests and activate OBJECTID+ if the OBJECTID attribute is requested
+        let mut parsed = Vec::with_capacity(requests.len());
+        let mut activate = false;
+        for request in requests {
+            match request.parse_status(is_utf8) {
+                Ok(arguments) => {
+                    if arguments.items.contains(&Status::ObjectId) {
+                        activate = true;
+                    }
+                    parsed.push(Ok(arguments));
+                }
+                Err(err) => parsed.push(Err(err)),
+            }
+        }
+        if activate && let Some(enabled) = self.activate_objectid() {
+            self.write_bytes(enabled).await?;
+        }
+
         let data = self.state.session_data();
 
         spawn_op!(data, {
             let mut did_sync = false;
 
-            for request in requests.into_iter() {
-                match request.parse_status(is_utf8) {
+            for request in parsed {
+                match request {
                     Ok(arguments) => {
                         let op_start = Instant::now();
                         if !did_sync {
@@ -89,11 +111,11 @@ impl<T: SessionStream> SessionData<T> {
             mailbox
         } else {
             // Some IMAP clients will try to get the status of a mailbox with the NoSelect flag
-            return if mailbox_name == self.server.core.jmap.shared_folder
+            return if mailbox_name == self.server.core.email.shared_folder
                 || mailbox_name
                     .split_once('/')
                     .is_some_and(|(base_name, path)| {
-                        base_name == self.server.core.jmap.shared_folder && !path.contains('/')
+                        base_name == self.server.core.email.shared_folder && !path.contains('/')
                     })
             {
                 Ok(StatusItem {
@@ -114,7 +136,9 @@ impl<T: SessionStream> SessionData<T> {
                                     Status::UidNext | Status::UidValidity => {
                                         StatusItemType::Number(1)
                                     }
-                                    Status::MailboxId => StatusItemType::String("none".into()),
+                                    Status::ObjectId => {
+                                        StatusItemType::ObjectId(ObjectId::default())
+                                    }
                                 },
                             )
                         })
@@ -184,13 +208,14 @@ impl<T: SessionStream> SessionData<T> {
                                 StatusItemType::Number(account.last_change_id.to_modseq()),
                             ));
                         }
-                        Status::MailboxId => {
+                        Status::ObjectId => {
                             items_response.push((
                                 *item,
-                                StatusItemType::String(
-                                    Id::from_parts(mailbox.account_id, mailbox.mailbox_id)
-                                        .to_string(),
-                                ),
+                                StatusItemType::ObjectId(ObjectId {
+                                    mailbox_id: Some(Id::from(mailbox.mailbox_id)),
+                                    account_id: Some(Id::from(mailbox.account_id)),
+                                    ..Default::default()
+                                }),
                             ));
                         }
                         Status::Recent => {

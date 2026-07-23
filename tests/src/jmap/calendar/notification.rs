@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{IntoJmapSet, JMAPTest, JmapUtils, wait_for_index};
+use crate::utils::{
+    jmap::{IntoJmapSet, JmapUtils},
+    server::TestServer,
+};
 use calcard::jscalendar::JSCalendarProperty;
 use jmap_proto::{
     object::calendar_event_notification::CalendarEventNotificationProperty,
@@ -15,11 +18,11 @@ use serde_json::{Value, json};
 use store::write::now;
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Calendar Event Notification tests...");
-    let john = params.account("jdoe@example.com");
-    let jane = params.account("jane.smith@example.com");
-    let bill = params.account("bill@example.com");
+    let john = test.account("jdoe@example.com");
+    let jane = test.account("jane.smith@example.com");
+    let bill = test.account("bill@example.com");
 
     let john_id = john.id_string().to_string();
     let jane_id = jane.id_string().to_string();
@@ -73,7 +76,7 @@ pub async fn test(params: &mut JMAPTest) {
     let john_event_id = response.created(0).id().to_string();
 
     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-    wait_for_index(&params.server).await;
+    test.wait_for_tasks().await;
 
     // Verify Jane and Bill received the share notification
     let mut jane_event_id = String::new();
@@ -386,9 +389,9 @@ pub async fn test(params: &mut JMAPTest) {
     for client in [john, jane, bill] {
         client.destroy_all_calendars().await;
         client.destroy_all_event_notifications().await;
-        params.destroy_all_mailboxes(client).await;
+        test.destroy_all_mailboxes(client).await;
     }
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }
 
 fn test_event() -> Value {

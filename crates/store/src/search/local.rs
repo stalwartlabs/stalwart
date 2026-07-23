@@ -199,16 +199,17 @@ impl QueryResults {
             results.sort_by(|a, b| {
                 for comparator in &comparators {
                     let (a, b, is_ascending) = match comparator {
-                        SearchComparator::DocumentSet { set, ascending } => (
-                            !set.contains(*a) as u32,
-                            !set.contains(*b) as u32,
-                            *ascending,
-                        ),
-                        SearchComparator::SortedSet { set, ascending } => (
-                            *set.get(a).unwrap_or(&u32::MAX),
-                            *set.get(b).unwrap_or(&u32::MAX),
-                            *ascending,
-                        ),
+                        SearchComparator::DocumentSet { set, ascending } => {
+                            (set.contains(*a) as u32, set.contains(*b) as u32, *ascending)
+                        }
+                        SearchComparator::SortedSet { set, ascending } => {
+                            let missing = if *ascending { u32::MAX } else { 0 };
+                            (
+                                *set.get(a).unwrap_or(&missing),
+                                *set.get(b).unwrap_or(&missing),
+                                *ascending,
+                            )
+                        }
                         SearchComparator::Field { .. } => continue,
                     };
 

@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, JmapUtils};
+use crate::utils::{jmap::JmapUtils, server::TestServer};
 use jmap_proto::{
     object::{file_node::FileNodeProperty, share_notification::ShareNotificationProperty},
     request::method::MethodObject,
 };
 use serde_json::json;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running File Storage ACL tests...");
-    let john = params.account("jdoe@example.com");
-    let jane = params.account("jane.smith@example.com");
+    let john = test.account("jdoe@example.com");
+    let jane = test.account("jane.smith@example.com");
     let john_id = john.id_string().to_string();
     let jane_id = jane.id_string().to_string();
 
@@ -48,7 +48,10 @@ pub async fn test(params: &mut JMAPTest) {
         "name": "Test #1",
         "myRights": {
           "mayRead": true,
-          "mayWrite": true,
+          "mayAddChildren": true,
+          "mayRename": true,
+          "mayDelete": true,
+          "mayModifyContent": true,
           "mayShare": true
         },
         "shareWith": {}
@@ -113,7 +116,10 @@ pub async fn test(params: &mut JMAPTest) {
         "shareWith": {
             &jane_id : {
                 "mayRead": true,
-                "mayWrite": false,
+                "mayAddChildren": false,
+                "mayRename": false,
+                "mayDelete": false,
+                "mayModifyContent": false,
                 "mayShare": false
             }
         }
@@ -137,7 +143,10 @@ pub async fn test(params: &mut JMAPTest) {
         "name": "Test #1",
         "myRights": {
             "mayRead": true,
-            "mayWrite": false,
+            "mayAddChildren": false,
+            "mayRename": false,
+            "mayDelete": false,
+            "mayModifyContent": false,
             "mayShare": false
         }
         }));
@@ -178,12 +187,18 @@ pub async fn test(params: &mut JMAPTest) {
           "objectId": &john_folder_id,
           "oldRights": {
             "mayRead": false,
-            "mayWrite": false,
+            "mayAddChildren": false,
+            "mayRename": false,
+            "mayDelete": false,
+            "mayModifyContent": false,
             "mayShare": false
           },
           "newRights": {
             "mayRead": true,
-            "mayWrite": false,
+            "mayAddChildren": false,
+            "mayRename": false,
+            "mayDelete": false,
+            "mayModifyContent": false,
             "mayShare": false
           },
           "name": null
@@ -221,7 +236,10 @@ pub async fn test(params: &mut JMAPTest) {
         [(
             &john_folder_id,
             json!({
-                format!("shareWith/{jane_id}/mayWrite"): true,
+                format!("shareWith/{jane_id}/mayAddChildren"): true,
+                format!("shareWith/{jane_id}/mayRename"): true,
+                format!("shareWith/{jane_id}/mayDelete"): true,
+                format!("shareWith/{jane_id}/mayModifyContent"): true,
             }),
         )],
         Vec::<(&str, &str)>::new(),
@@ -245,7 +263,10 @@ pub async fn test(params: &mut JMAPTest) {
         "name": "Test #1",
         "myRights": {
             "mayRead": true,
-            "mayWrite": true,
+            "mayAddChildren": true,
+            "mayRename": true,
+            "mayDelete": true,
+            "mayModifyContent": true,
             "mayShare": false
         }
         }));
@@ -286,12 +307,18 @@ pub async fn test(params: &mut JMAPTest) {
           "objectId": &john_folder_id,
           "oldRights": {
             "mayRead": true,
-            "mayWrite": false,
+            "mayAddChildren": false,
+            "mayRename": false,
+            "mayDelete": false,
+            "mayModifyContent": false,
             "mayShare": false
           },
           "newRights": {
             "mayRead": true,
-            "mayWrite": true,
+            "mayAddChildren": true,
+            "mayRename": true,
+            "mayDelete": true,
+            "mayModifyContent": true,
             "mayShare": false
           },
           "name": null
@@ -419,12 +446,18 @@ pub async fn test(params: &mut JMAPTest) {
           "objectId": &john_folder_id,
           "oldRights": {
             "mayRead": true,
-            "mayWrite": true,
+            "mayAddChildren": true,
+            "mayRename": true,
+            "mayDelete": true,
+            "mayModifyContent": true,
             "mayShare": false
           },
           "newRights": {
             "mayRead": false,
-            "mayWrite": false,
+            "mayAddChildren": false,
+            "mayRename": false,
+            "mayDelete": false,
+            "mayModifyContent": false,
             "mayShare": false
           },
           "name": null
@@ -437,7 +470,10 @@ pub async fn test(params: &mut JMAPTest) {
             &john_folder_id,
             json!({
                 format!("shareWith/{jane_id}/mayRead"): true,
-                format!("shareWith/{jane_id}/mayWrite"): true,
+                format!("shareWith/{jane_id}/mayAddChildren"): true,
+                format!("shareWith/{jane_id}/mayRename"): true,
+                format!("shareWith/{jane_id}/mayDelete"): true,
+                format!("shareWith/{jane_id}/mayModifyContent"): true,
             }),
         )],
         Vec::<(&str, &str)>::new(),
@@ -445,7 +481,87 @@ pub async fn test(params: &mut JMAPTest) {
     .await
     .updated(&john_folder_id);
 
-    // Verify Jane can delete the folder
+    // FileNode/copy: Jane copies a node from her own account into John's shared folder
+    let jane_folder_id = jane
+        .jmap_create(
+            MethodObject::FileNode,
+            [json!({"name": "jane-src"})],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    let copied = jane
+        .jmap_copy(
+            jane,
+            john,
+            MethodObject::FileNode,
+            [(
+                &jane_folder_id,
+                json!({ "parentId": &john_folder_id, "name": "copied-here" }),
+            )],
+            false,
+        )
+        .await;
+    let copied_id = copied.copied(&jane_folder_id).id().to_string();
+    assert_ne!(copied_id, jane_folder_id);
+    jane.jmap_get_account(
+        john,
+        MethodObject::FileNode,
+        [
+            FileNodeProperty::Id,
+            FileNodeProperty::Name,
+            FileNodeProperty::ParentId,
+        ],
+        [copied_id.as_str()],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({
+            "id": &copied_id,
+            "name": "copied-here",
+            "parentId": &john_folder_id,
+        }));
+    // Original still exists in Jane's account (onSuccessDestroyOriginal=false)
+    jane.jmap_get(
+        MethodObject::FileNode,
+        [FileNodeProperty::Id],
+        [jane_folder_id.as_str()],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({ "id": &jane_folder_id }));
+
+    // onExists=rename on copy: colliding into John's folder again must echo the new name
+    let renamed_copy = jane
+        .jmap_method_calls(json!([[
+            "FileNode/copy",
+            {
+                "fromAccountId": jane.id_string(),
+                "accountId": john.id_string(),
+                "onExists": "rename",
+                "create": {
+                    &jane_folder_id: { "parentId": &john_folder_id, "name": "copied-here" }
+                }
+            },
+            "0"
+        ]]))
+        .await;
+    let renamed_entry = renamed_copy.copied(&jane_folder_id);
+    let renamed_copy_id = renamed_entry.id().to_string();
+    assert_eq!(renamed_entry.text_field("name"), "copied-here (2)");
+
+    jane.jmap_destroy(
+        MethodObject::FileNode,
+        [&jane_folder_id],
+        Vec::<(&str, &str)>::new(),
+    )
+    .await
+    .destroyed()
+    .for_each(drop);
+
+    // Verify Jane can delete the folder (and the node copied into it)
     assert_eq!(
         jane.jmap_destroy_account(
             john,
@@ -455,10 +571,16 @@ pub async fn test(params: &mut JMAPTest) {
         )
         .await
         .destroyed()
-        .collect::<Vec<_>>(),
-        [john_folder_id.as_str()]
+        .collect::<std::collections::HashSet<_>>(),
+        [
+            john_folder_id.as_str(),
+            copied_id.as_str(),
+            renamed_copy_id.as_str()
+        ]
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>()
     );
 
     // Destroy all mailboxes
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }

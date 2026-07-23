@@ -5,10 +5,10 @@
  */
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
+use registry::schema::enums::{Permission, StorageQuota};
 use sieve::compiler::ErrorType;
 use std::time::Instant;
 use store::{
@@ -47,9 +47,10 @@ impl<T: SessionStream> Session<T> {
 
         // Check quota
         let access_token = self.state.access_token();
-        let account_id = access_token.primary_id();
+        let account_id = access_token.account_id();
+        let account = self.server.account(account_id).await?;
         self.server
-            .has_available_quota(&access_token.as_resource_token(), script_bytes.len() as u64)
+            .has_available_quota(&account, script_bytes.len() as u64)
             .await
             .caused_by(trc::location!())?;
 
@@ -59,7 +60,10 @@ impl<T: SessionStream> Session<T> {
             .await
             .caused_by(trc::location!())?
             .len()
-            > access_token.object_quota(Collection::SieveScript) as u64
+            >= self
+                .server
+                .object_quota(account.object_quotas(), StorageQuota::MaxSieveScripts)
+                as u64
         {
             return Err(trc::ManageSieveEvent::Error
                 .into_err()
@@ -142,7 +146,7 @@ impl<T: SessionStream> Session<T> {
                                 .with_blob_hash(blob_hash.clone()),
                         )
                         .with_current(script)
-                        .with_access_token(access_token),
+                        .with_changed_by(account.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?
                 .clear(blob_hold);
@@ -185,7 +189,7 @@ impl<T: SessionStream> Session<T> {
                             SieveScript::new(name.clone(), blob_hash.clone())
                                 .with_size(script_size as u32),
                         )
-                        .with_access_token(access_token),
+                        .with_changed_by(account.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?
                 .clear(blob_hold);
@@ -212,7 +216,7 @@ impl<T: SessionStream> Session<T> {
             Err(trc::ManageSieveEvent::Error
                 .into_err()
                 .details("Script name cannot be empty."))
-        } else if name.len() > self.server.core.jmap.sieve_max_script_name {
+        } else if name.len() > self.server.core.email.sieve_max_script_name {
             Err(trc::ManageSieveEvent::Error
                 .into_err()
                 .details("Script name is too long."))

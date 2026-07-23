@@ -9,6 +9,7 @@ use ahash::AHashSet;
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use std::{cmp::Ordering, fmt::Display};
+use types::id::Id;
 use types::keyword::{ArchivedKeyword, Keyword};
 use utils::chained_bytes::SliceRange;
 
@@ -38,6 +39,49 @@ pub mod thread;
 pub enum ProtocolVersion {
     Rev1,
     Rev2,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObjectId {
+    pub mailbox_id: Option<Id>,
+    pub account_id: Option<Id>,
+    pub email_id: Option<Id>,
+    pub thread_id: Option<Id>,
+}
+
+impl ObjectId {
+    pub fn is_empty(&self) -> bool {
+        self.mailbox_id.is_none()
+            && self.account_id.is_none()
+            && self.email_id.is_none()
+            && self.thread_id.is_none()
+    }
+
+    pub fn serialize_kvpairs(&self, buf: &mut Vec<u8>) {
+        buf.push(b'(');
+        let mut first = true;
+        for (key, value) in [
+            (&b"ACCOUNTID "[..], &self.account_id),
+            (&b"MAILBOXID "[..], &self.mailbox_id),
+            (&b"EMAILID "[..], &self.email_id),
+            (&b"THREADID "[..], &self.thread_id),
+        ] {
+            if let Some(value) = value {
+                if !first {
+                    buf.push(b' ');
+                }
+                first = false;
+                buf.extend_from_slice(key);
+                buf.extend_from_slice(value.to_string().as_bytes());
+            }
+        }
+        buf.push(b')');
+    }
+
+    pub fn serialize(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(b"OBJECTID ");
+        self.serialize_kvpairs(buf);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,11 +208,7 @@ pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
 }
 
 pub fn quoted_or_literal_string(buf: &mut Vec<u8>, text: &str) {
-    if text
-        .as_bytes()
-        .iter()
-        .any(|ch| [b'\\', b'"', b'\r', b'\n'].contains(ch))
-    {
+    if text.as_bytes().iter().any(|ch| b"\\\"\r\n".contains(ch)) {
         literal_string(buf, text.as_bytes())
     } else {
         buf.push(b'"');
@@ -480,10 +520,8 @@ impl ResponseCode {
                 serialize_sequence(buf, ids);
                 return;
             }
-            ResponseCode::MailboxId { mailbox_id } => {
-                buf.extend_from_slice(b"MAILBOXID (");
-                buf.extend_from_slice(mailbox_id.as_bytes());
-                buf.push(b')');
+            ResponseCode::ObjectId(object_id) => {
+                object_id.serialize(buf);
                 return;
             }
             ResponseCode::HighestModseq { modseq } => {
@@ -532,7 +570,7 @@ impl ResponseCode {
             ResponseCode::Unavailable => "UNAVAILABLE",
             ResponseCode::UnknownCte => "UNKNOWN-CTE",
             ResponseCode::Modified { .. } => "MODIFIED",
-            ResponseCode::MailboxId { .. } => "MAILBOXID",
+            ResponseCode::ObjectId { .. } => "OBJECTID",
             ResponseCode::HighestModseq { .. } => "HIGHESTMODSEQ",
             ResponseCode::UseAttr => "USEATTR",
         }
@@ -726,6 +764,7 @@ impl Display for Command {
             Command::Id => write!(f, "ID"),
             Command::GetQuota => write!(f, "GETQUOTA"),
             Command::GetQuotaRoot => write!(f, "GETQUOTAROOT"),
+            Command::GetJmapAccess => write!(f, "GETJMAPACCESS"),
         }
     }
 }
@@ -733,6 +772,50 @@ impl Display for Command {
 #[cfg(test)]
 mod tests {
     use crate::parser::parse_sequence_set;
+    use crate::protocol::ObjectId;
+    use types::id::Id;
+
+    #[test]
+    fn serialize_objectid_compound() {
+        // Empty compound
+        let mut buf = Vec::new();
+        ObjectId::default().serialize(&mut buf);
+        assert_eq!(String::from_utf8(buf).unwrap(), "OBJECTID ()");
+
+        // Mailbox context: MAILBOXID + ACCOUNTID
+        let mut buf = Vec::new();
+        ObjectId {
+            mailbox_id: Some(Id::from(1u32)),
+            account_id: Some(Id::from(2u32)),
+            ..Default::default()
+        }
+        .serialize(&mut buf);
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            format!(
+                "OBJECTID (ACCOUNTID {} MAILBOXID {})",
+                Id::from(2u32),
+                Id::from(1u32)
+            )
+        );
+
+        // Message context: EMAILID + THREADID only
+        let mut buf = Vec::new();
+        ObjectId {
+            email_id: Some(Id::from_parts(3, 4)),
+            thread_id: Some(Id::from(3u32)),
+            ..Default::default()
+        }
+        .serialize(&mut buf);
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            format!(
+                "OBJECTID (EMAILID {} THREADID {})",
+                Id::from_parts(3, 4),
+                Id::from(3u32)
+            )
+        );
+    }
 
     #[test]
     fn sequence_set_contains() {

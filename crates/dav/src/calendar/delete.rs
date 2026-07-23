@@ -14,7 +14,6 @@ use crate::{
 };
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use dav_proto::RequestHeaders;
-use directory::Permission;
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
@@ -22,6 +21,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::Permission;
 use store::write::{BatchBuilder, ValueClass};
 use store::{
     ValueKey,
@@ -59,7 +59,11 @@ impl CalendarDeleteRequestHandler for Server {
             .filter(|r| !r.is_empty())
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         let resources = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .caused_by(trc::location!())?;
 
@@ -68,16 +72,19 @@ impl CalendarDeleteRequestHandler for Server {
             .by_path(delete_path)
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
         let document_id = delete_resource.document_id();
+        let account_info = self
+            .scheduling_account_info(access_token.account_id(), account_id)
+            .await?;
         let send_itip = self.core.groupware.itip_enabled
             && !headers.no_schedule_reply
-            && !access_token.emails.is_empty()
+            && !account_info.addresses().is_empty()
             && access_token.has_permission(Permission::CalendarSchedulingSend);
 
         // Fetch entry
         let mut batch = BatchBuilder::new();
         if delete_resource.is_container() {
             // Deleting the default calendar is not allowed
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(any(feature = "dev_mode", feature = "test_mode")))]
             if self
                 .core
                 .groupware
@@ -138,7 +145,7 @@ impl CalendarDeleteRequestHandler for Server {
             DestroyArchive(calendar)
                 .delete_with_events(
                     self,
-                    access_token,
+                    &account_info,
                     account_id,
                     document_id,
                     resources
@@ -222,7 +229,7 @@ impl CalendarDeleteRequestHandler for Server {
             // Delete event
             DestroyArchive(event)
                 .delete(
-                    access_token,
+                    &account_info,
                     account_id,
                     document_id,
                     calendar_id,

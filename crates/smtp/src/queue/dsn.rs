@@ -9,8 +9,9 @@ use super::{
     Error, ErrorDetails, HostResponse, Message, MessageSource, QueueEnvelope, RCPT_DSN_SENT,
     Recipient, Status,
 };
+use crate::inbound::dkim::DkimSign;
+use crate::queue::spool::QueueParams;
 use crate::queue::{MessageWrapper, UnexpectedResponse};
-use crate::reporting::SmtpReporting;
 use common::Server;
 use mail_builder::MessageBuilder;
 use mail_builder::headers::HeaderType;
@@ -39,22 +40,21 @@ impl SendDsn for Server {
             if let Some(dsn) = message.build_dsn(self).await {
                 let mut dsn_message = self.new_message("", message.span_id);
                 dsn_message
-                    .add_recipient(message.message.return_path.as_ref(), self)
-                    .await;
-
-                // Sign message
-                let signature = self
-                    .sign_message(message, &self.core.smtp.queue.dsn.sign, &dsn)
+                    .expand_and_add_recipient(message.message.return_path.as_ref(), self)
                     .await;
 
                 // Queue DSN
+                let dkim_signers = self
+                    .eval_signers(
+                        &self.core.smtp.queue.dsn.sign,
+                        &message.message,
+                        message.span_id,
+                    )
+                    .await;
                 dsn_message
                     .queue(
-                        signature.as_deref(),
-                        &dsn,
-                        message.span_id,
-                        self,
-                        MessageSource::Dsn,
+                        QueueParams::new(&dsn, message.span_id, self, MessageSource::Dsn)
+                            .with_dkim_signers(dkim_signers),
                     )
                     .await;
             }
@@ -62,6 +62,9 @@ impl SendDsn for Server {
             // Handle double bounce
             message.handle_double_bounce();
         }
+
+        // Update next DSN notify times
+        message.update_next_dsn(self).await;
     }
 
     async fn log_dsn(&self, message: &MessageWrapper) {
@@ -186,7 +189,6 @@ impl MessageWrapper {
             dsn.push_str("\r\n");
         }
 
-        // Build text response
         let txt_len = txt_success.len() + txt_delay.len() + txt_failed.len();
         if txt_len == 0 {
             return None;
@@ -248,44 +250,6 @@ impl MessageWrapper {
             }
             txt.push_str(&txt_failed);
             txt.push_str("\r\n");
-        }
-
-        // Update next delay notification time
-        if has_delay {
-            let mut changes = Vec::new();
-            for (rcpt_idx, rcpt) in self.message.recipients.iter().enumerate() {
-                if matches!(
-                    &rcpt.status,
-                    Status::TemporaryFailure(_) | Status::Scheduled
-                ) && rcpt.notify.due <= now
-                {
-                    let envelope = QueueEnvelope::new(&self.message, rcpt);
-
-                    let queue_id = server
-                        .eval_if::<String, _>(
-                            &server.core.smtp.queue.queue,
-                            &envelope,
-                            self.span_id,
-                        )
-                        .await
-                        .unwrap_or_else(|| "default".to_string());
-                    let queue = server.get_queue_or_default(&queue_id, self.span_id);
-
-                    if let Some(next_notify) =
-                        queue.notify.get((rcpt.notify.inner + 1) as usize).copied()
-                    {
-                        changes.push((rcpt_idx, 1, now + next_notify));
-                    } else {
-                        changes.push((rcpt_idx, 0, u64::MAX));
-                    }
-                }
-            }
-
-            for (rcpt_idx, inner, due) in changes {
-                let rcpt = &mut self.message.recipients[rcpt_idx];
-                rcpt.notify.inner += inner;
-                rcpt.notify.due = due;
-            }
         }
 
         // Obtain hostname and sender addresses
@@ -391,6 +355,40 @@ impl MessageWrapper {
             .write_to_vec()
             .unwrap_or_default()
             .into()
+    }
+
+    pub async fn update_next_dsn(&mut self, server: &Server) {
+        let now = now();
+        let mut notify_changes = Vec::new();
+        for (rcpt_idx, rcpt) in self.message.recipients.iter().enumerate() {
+            if matches!(
+                &rcpt.status,
+                Status::TemporaryFailure(_) | Status::Scheduled
+            ) && rcpt.notify.due <= now
+            {
+                let envelope = QueueEnvelope::new(&self.message, rcpt);
+
+                let queue_id = server
+                    .eval_if::<String, _>(&server.core.smtp.queue.queue, &envelope, self.span_id)
+                    .await
+                    .unwrap_or_else(|| "default".to_string());
+                let queue = server.get_queue_or_default(&queue_id, self.span_id);
+
+                if let Some(next_notify) =
+                    queue.notify.get((rcpt.notify.inner + 1) as usize).copied()
+                {
+                    notify_changes.push((rcpt_idx, 1, now + next_notify));
+                } else {
+                    notify_changes.push((rcpt_idx, 0, u64::MAX));
+                }
+            }
+        }
+
+        for (rcpt_idx, inner, due) in notify_changes {
+            let rcpt = &mut self.message.recipients[rcpt_idx];
+            rcpt.notify.inner += inner;
+            rcpt.notify.due = due;
+        }
     }
 
     fn handle_double_bounce(&mut self) {

@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    inbound::DkimSign,
-    queue::{MessageSource, quota::HasQueueQuota, spool::SmtpSpool},
+use crate::queue::{
+    MessageSource,
+    quota::HasQueueQuota,
+    spool::{QueueParams, SmtpSpool},
 };
 use common::{Server, config::smtp::queue::QueueExpiry, scripts::plugins::PluginContext};
-use mail_auth::common::headers::HeaderWriter;
 use mail_parser::{Encoding, Message, MessagePart, PartType};
 use sieve::{
     Event, Input, MatchAs, Recipient, Sieve,
@@ -19,7 +19,7 @@ use smtp_proto::{
     MAIL_BY_TRACE, MAIL_RET_FULL, MAIL_RET_HDRS, RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE,
     RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS,
 };
-use std::{borrow::Cow, future::Future, sync::Arc, time::Instant};
+use std::{future::Future, sync::Arc, time::Instant};
 use trc::SieveEvent;
 
 use super::{ScriptModification, ScriptParameters, ScriptResult};
@@ -63,6 +63,9 @@ impl RunScript for Server {
             .with_envelope_list(params.envelope)
             .with_user_address(&params.from_addr)
             .with_user_full_name(&params.from_name);
+        if let Some(spam_status) = params.spam_status {
+            instance.set_spam_status(spam_status);
+        }
         let mut input = Input::script("__script", script);
         let mut messages: Vec<Vec<u8>> = Vec::new();
         let session_id = params.session_id;
@@ -98,7 +101,7 @@ impl RunScript for Server {
                     } => {
                         input = false.into();
                         'outer: for list in lists {
-                            if let Some(store) = self.core.storage.lookups.get(&list) {
+                            if let Some(store) = self.get_lookup_store(&list) {
                                 for value in &values {
                                     if let Ok(true) = store
                                         .key_exists(if !matches!(match_as, MatchAs::Lowercase) {
@@ -161,11 +164,11 @@ impl RunScript for Server {
                         let mut message = self.new_message(params.return_path.as_str(), session_id);
                         match recipient {
                             Recipient::Address(rcpt) => {
-                                message.add_recipient(rcpt, self).await;
+                                message.expand_and_add_recipient(rcpt, self).await;
                             }
                             Recipient::Group(rcpt_list) => {
                                 for rcpt in rcpt_list {
-                                    message.add_recipient(rcpt, self).await;
+                                    message.expand_and_add_recipient(rcpt, self).await;
                                 }
                             }
                             Recipient::List(list) => {
@@ -274,46 +277,35 @@ impl RunScript for Server {
                             instance.message().raw_message().into()
                         };
                         if let Some(raw_message) = raw_message.filter(|m| !m.is_empty()) {
-                            let headers = if !params.sign.is_empty() {
-                                let mut headers = Vec::new();
+                            if let Some(metadata) = self.has_quota(&mut message).await {
+                                let dkim_signers = if let Some(sign_domain) = &params.sign_domain {
+                                    match self.dkim_signers(sign_domain).await {
+                                        Ok(signers) => signers,
+                                        Err(err) => {
+                                            trc::error!(
+                                                err.details("Failed to obtain DKIM signers")
+                                                    .caused_by(trc::location!())
+                                            );
 
-                                for dkim in &params.sign {
-                                    if let Some(dkim) = self.get_dkim_signer(dkim, session_id) {
-                                        match dkim.sign(raw_message) {
-                                            Ok(signature) => {
-                                                signature.write_header(&mut headers);
-                                            }
-                                            Err(err) => {
-                                                trc::error!(
-                                                    trc::Error::from(err)
-                                                        .span_id(session_id)
-                                                        .caused_by(trc::location!())
-                                                        .details("DKIM sign failed")
-                                                );
-                                            }
+                                            None
                                         }
                                     }
-                                }
+                                } else {
+                                    None
+                                };
 
-                                if is_forward {
-                                    headers.extend_from_slice(params.headers.unwrap_or_default());
-                                }
-
-                                Some(Cow::Owned(headers))
-                            } else if is_forward {
-                                params.headers.map(Cow::Borrowed)
-                            } else {
-                                None
-                            };
-
-                            if self.has_quota(&mut message).await {
                                 message
                                     .queue(
-                                        headers.as_deref(),
-                                        raw_message,
-                                        session_id,
-                                        self,
-                                        MessageSource::Autogenerated,
+                                        QueueParams::new(
+                                            raw_message,
+                                            session_id,
+                                            self,
+                                            MessageSource::Autogenerated,
+                                        )
+                                        .with_dkim_signers(dkim_signers)
+                                        .with_raw_headers_opt(params.headers.filter(|_| is_forward))
+                                        .with_original_raw_message(instance.message().raw_message())
+                                        .with_metadata(metadata),
                                     )
                                     .await;
                             } else {

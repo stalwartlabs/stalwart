@@ -5,11 +5,16 @@
  */
 
 use common::auth::AccessToken;
-use directory::Permission;
-use jmap_proto::request::{
-    CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
-    QueryRequestMethod, RequestMethod, SetRequestMethod, method::MethodObject,
+use jmap_proto::{
+    method::set::SetRequest,
+    object::JmapObject,
+    request::{
+        CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
+        QueryRequestMethod, RequestMethod, SetRequestMethod, method::MethodObject,
+        reference::MaybeResultReference,
+    },
 };
+use registry::schema::enums::Permission;
 use types::{collection::Collection, id::Id};
 
 pub trait JmapAuthorization {
@@ -80,26 +85,135 @@ impl JmapAuthorization for AccessToken {
                 }
                 GetRequestMethod::ParticipantIdentity(_) => Permission::JmapParticipantIdentityGet,
                 GetRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationGet,
-            },
-            RequestMethod::Set(m) => match &m {
-                SetRequestMethod::Email(_) => Permission::JmapEmailSet,
-                SetRequestMethod::Mailbox(_) => Permission::JmapMailboxSet,
-                SetRequestMethod::Identity(_) => Permission::JmapIdentitySet,
-                SetRequestMethod::EmailSubmission(_) => Permission::JmapEmailSubmissionSet,
-                SetRequestMethod::PushSubscription(_) => Permission::JmapPushSubscriptionSet,
-                SetRequestMethod::Sieve(_) => Permission::JmapSieveScriptSet,
-                SetRequestMethod::VacationResponse(_) => Permission::JmapVacationResponseSet,
-                SetRequestMethod::AddressBook(_) => Permission::JmapAddressBookSet,
-                SetRequestMethod::ContactCard(_) => Permission::JmapContactCardSet,
-                SetRequestMethod::FileNode(_) => Permission::JmapFileNodeSet,
-                SetRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationSet,
-                SetRequestMethod::Calendar(_) => Permission::JmapCalendarSet,
-                SetRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventSet,
-                SetRequestMethod::CalendarEventNotification(_) => {
-                    Permission::JmapCalendarEventNotificationSet
+                GetRequestMethod::Registry(_) => {
+                    let MethodObject::Registry(object_type) = object else {
+                        unreachable!()
+                    };
+                    object_type.get_permission()
                 }
-                SetRequestMethod::ParticipantIdentity(_) => Permission::JmapParticipantIdentitySet,
             },
+            RequestMethod::Set(m) => {
+                return match &m {
+                    SetRequestMethod::Email(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapEmailCreate,
+                        Permission::JmapEmailUpdate,
+                        Permission::JmapEmailDestroy,
+                    ),
+                    SetRequestMethod::Mailbox(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapMailboxCreate,
+                        Permission::JmapMailboxUpdate,
+                        Permission::JmapMailboxDestroy,
+                    ),
+                    SetRequestMethod::Identity(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapIdentityCreate,
+                        Permission::JmapIdentityUpdate,
+                        Permission::JmapIdentityDestroy,
+                    ),
+                    SetRequestMethod::EmailSubmission(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapEmailSubmissionCreate,
+                        Permission::JmapEmailSubmissionUpdate,
+                        Permission::JmapEmailSubmissionDestroy,
+                    ),
+                    SetRequestMethod::PushSubscription(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapPushSubscriptionCreate,
+                        Permission::JmapPushSubscriptionUpdate,
+                        Permission::JmapPushSubscriptionDestroy,
+                    ),
+                    SetRequestMethod::Sieve(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapSieveScriptCreate,
+                        Permission::JmapSieveScriptUpdate,
+                        Permission::JmapSieveScriptDestroy,
+                    ),
+                    SetRequestMethod::VacationResponse(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapVacationResponseCreate,
+                        Permission::JmapVacationResponseUpdate,
+                        Permission::JmapVacationResponseDestroy,
+                    ),
+                    SetRequestMethod::AddressBook(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapAddressBookCreate,
+                        Permission::JmapAddressBookUpdate,
+                        Permission::JmapAddressBookDestroy,
+                    ),
+                    SetRequestMethod::ContactCard(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapContactCardCreate,
+                        Permission::JmapContactCardUpdate,
+                        Permission::JmapContactCardDestroy,
+                    ),
+                    SetRequestMethod::FileNode(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapFileNodeCreate,
+                        Permission::JmapFileNodeUpdate,
+                        Permission::JmapFileNodeDestroy,
+                    ),
+                    SetRequestMethod::ShareNotification(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapShareNotificationCreate,
+                        Permission::JmapShareNotificationUpdate,
+                        Permission::JmapShareNotificationDestroy,
+                    ),
+                    SetRequestMethod::Calendar(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapCalendarCreate,
+                        Permission::JmapCalendarUpdate,
+                        Permission::JmapCalendarDestroy,
+                    ),
+                    SetRequestMethod::CalendarEvent(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapCalendarEventCreate,
+                        Permission::JmapCalendarEventUpdate,
+                        Permission::JmapCalendarEventDestroy,
+                    ),
+                    SetRequestMethod::CalendarEventNotification(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapCalendarEventNotificationCreate,
+                        Permission::JmapCalendarEventNotificationUpdate,
+                        Permission::JmapCalendarEventNotificationDestroy,
+                    ),
+                    SetRequestMethod::ParticipantIdentity(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapParticipantIdentityCreate,
+                        Permission::JmapParticipantIdentityUpdate,
+                        Permission::JmapParticipantIdentityDestroy,
+                    ),
+                    SetRequestMethod::Registry(s) => {
+                        let MethodObject::Registry(object_type) = object else {
+                            unreachable!()
+                        };
+                        let set_permissions = object_type.set_permission();
+                        validate_set(
+                            s,
+                            self,
+                            set_permissions[0],
+                            set_permissions[1],
+                            set_permissions[2],
+                        )
+                    }
+                };
+            }
             RequestMethod::Changes(_) => match object {
                 MethodObject::Email => Permission::JmapEmailChanges,
                 MethodObject::Mailbox => Permission::JmapMailboxChanges,
@@ -117,19 +231,21 @@ impl JmapAuthorization for AccessToken {
                 MethodObject::ParticipantIdentity => Permission::JmapParticipantIdentityChanges,
                 MethodObject::ShareNotification => Permission::JmapShareNotificationChanges,
                 MethodObject::Principal => Permission::JmapPrincipalChanges,
+                MethodObject::AddressBook => Permission::JmapAddressBookChanges,
                 MethodObject::Core
                 | MethodObject::Blob
                 | MethodObject::PushSubscription
                 | MethodObject::SearchSnippet
                 | MethodObject::VacationResponse
                 | MethodObject::SieveScript
-                | MethodObject::AddressBook => Permission::JmapEmailChanges,
+                | MethodObject::Registry(_) => Permission::JmapEmailChanges,
             },
             RequestMethod::Copy(m) => match &m {
                 CopyRequestMethod::Email(_) => Permission::JmapEmailCopy,
                 CopyRequestMethod::Blob(_) => Permission::JmapBlobCopy,
                 CopyRequestMethod::ContactCard(_) => Permission::JmapContactCardCopy,
                 CopyRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventCopy,
+                CopyRequestMethod::FileNode(_) => Permission::JmapFileNodeCopy,
             },
             RequestMethod::ImportEmail(_) => Permission::JmapEmailImport,
             RequestMethod::Parse(m) => match &m {
@@ -143,7 +259,6 @@ impl JmapAuthorization for AccessToken {
                 QueryChangesRequestMethod::EmailSubmission(_) => {
                     Permission::JmapEmailSubmissionQueryChanges
                 }
-                QueryChangesRequestMethod::Sieve(_) => Permission::JmapSieveScriptQueryChanges,
                 QueryChangesRequestMethod::Principal(_) => Permission::JmapPrincipalQueryChanges,
                 QueryChangesRequestMethod::Quota(_) => Permission::JmapQuotaQueryChanges,
                 QueryChangesRequestMethod::ContactCard(_) => {
@@ -167,19 +282,27 @@ impl JmapAuthorization for AccessToken {
                 QueryRequestMethod::Sieve(_) => Permission::JmapSieveScriptQuery,
                 QueryRequestMethod::Principal(_) => Permission::JmapPrincipalQuery,
                 QueryRequestMethod::Quota(_) => Permission::JmapQuotaQuery,
+                QueryRequestMethod::AddressBook(_) => Permission::JmapAddressBookGet,
                 QueryRequestMethod::ContactCard(_) => Permission::JmapContactCardQuery,
                 QueryRequestMethod::FileNode(_) => Permission::JmapFileNodeQuery,
+                QueryRequestMethod::Calendar(_) => Permission::JmapCalendarGet,
                 QueryRequestMethod::CalendarEvent(_) => Permission::JmapCalendarEventQuery,
                 QueryRequestMethod::CalendarEventNotification(_) => {
                     Permission::JmapCalendarEventNotificationQuery
                 }
                 QueryRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationQuery,
+                QueryRequestMethod::Registry(_) => {
+                    let MethodObject::Registry(object_type) = object else {
+                        unreachable!()
+                    };
+                    object_type.query_permission()
+                }
             },
-            RequestMethod::SearchSnippet(_) => Permission::JmapSearchSnippet,
+            RequestMethod::SearchSnippet(_) => Permission::JmapSearchSnippetGet,
             RequestMethod::ValidateScript(_) => Permission::JmapSieveScriptValidate,
             RequestMethod::LookupBlob(_) => Permission::JmapBlobLookup,
             RequestMethod::UploadBlob(_) => Permission::JmapBlobUpload,
-            RequestMethod::Echo(_) => Permission::JmapEcho,
+            RequestMethod::Echo(_) => Permission::JmapCoreEcho,
             RequestMethod::Error(_) => return Ok(()),
         };
 
@@ -190,5 +313,44 @@ impl JmapAuthorization for AccessToken {
                 .into_err()
                 .details("You are not authorized to perform this action"))
         }
+    }
+}
+
+fn validate_set<T: JmapObject>(
+    set: &SetRequest<'_, T>,
+    access_token: &AccessToken,
+    create_permission: Permission,
+    update_permission: Permission,
+    destroy_permission: Permission,
+) -> trc::Result<()> {
+    let can_create = access_token.has_permission(create_permission);
+    let can_update = access_token.has_permission(update_permission);
+    let can_destroy = access_token.has_permission(destroy_permission);
+
+    if can_create && can_update && can_destroy {
+        Ok(())
+    } else if !can_create && !can_update && !can_destroy {
+        Err(trc::JmapEvent::Forbidden
+            .into_err()
+            .details("You are not authorized to create, update or destroy objects of this type"))
+    } else if !can_create && set.create.as_ref().is_some_and(|objs| !objs.is_empty()) {
+        Err(trc::JmapEvent::Forbidden
+            .into_err()
+            .details("You are not authorized to create objects of this type"))
+    } else if !can_update && set.update.as_ref().is_some_and(|objs| !objs.is_empty()) {
+        Err(trc::JmapEvent::Forbidden
+            .into_err()
+            .details("You are not authorized to update objects of this type"))
+    } else if !can_destroy
+        && set.destroy.as_ref().is_some_and(|objs| match objs {
+            MaybeResultReference::Value(v) => !v.is_empty(),
+            MaybeResultReference::Reference(_) => true,
+        })
+    {
+        Err(trc::JmapEvent::Forbidden
+            .into_err()
+            .details("You are not authorized to destroy objects of this type"))
+    } else {
+        Ok(())
     }
 }

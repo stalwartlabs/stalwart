@@ -84,7 +84,7 @@ impl Status {
             "DELETED" => Self::Deleted,
             "SIZE" => Self::Size,
             "HIGHESTMODSEQ" => Self::HighestModSeq,
-            "MAILBOXID" => Self::MailboxId,
+            "OBJECTID" => Self::ObjectId,
             "RECENT" => Self::Recent,
             "DELETED-STORAGE" => Self::DeletedStorage
         )
@@ -106,21 +106,45 @@ mod tests {
     fn parse_status() {
         let mut receiver = Receiver::new();
 
-        assert_eq!(
-            receiver
-                .parse(
-                    &mut "A042 STATUS blurdybloop (UIDNEXT MESSAGES)\r\n"
-                        .as_bytes()
-                        .iter()
-                )
-                .unwrap()
-                .parse_status(true)
-                .unwrap(),
-            status::Arguments {
-                tag: "A042".into(),
-                mailbox_name: "blurdybloop".into(),
-                items: vec![status::Status::UidNext, status::Status::Messages],
-            }
-        );
+        for (command, arguments) in [
+            (
+                "A042 STATUS blurdybloop (UIDNEXT MESSAGES)\r\n",
+                status::Arguments {
+                    tag: "A042".into(),
+                    mailbox_name: "blurdybloop".into(),
+                    items: vec![status::Status::UidNext, status::Status::Messages],
+                },
+            ),
+            (
+                "A043 STATUS foo (OBJECTID)\r\n",
+                status::Arguments {
+                    tag: "A043".into(),
+                    mailbox_name: "foo".into(),
+                    items: vec![status::Status::ObjectId],
+                },
+            ),
+            (
+                "A044 STATUS foo (MESSAGES OBJECTID UIDVALIDITY)\r\n",
+                status::Arguments {
+                    tag: "A044".into(),
+                    mailbox_name: "foo".into(),
+                    items: vec![
+                        status::Status::Messages,
+                        status::Status::ObjectId,
+                        status::Status::UidValidity,
+                    ],
+                },
+            ),
+        ] {
+            assert_eq!(
+                receiver
+                    .parse(&mut command.as_bytes().iter())
+                    .unwrap()
+                    .parse_status(true)
+                    .unwrap(),
+                arguments,
+                "Failed to parse {command}"
+            );
+        }
     }
 }

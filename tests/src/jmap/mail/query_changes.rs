@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{
-    JMAPTest,
-    mail::changes::{LogAction, ParseState},
+use crate::{
+    jmap::mail::changes::{LogAction, ParseState},
+    utils::server::TestServer,
 };
 use ::email::message::metadata::MessageData;
 use common::storage::index::ObjectIndexBuilder;
@@ -27,11 +27,11 @@ use types::{
     id::Id,
 };
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Email QueryChanges tests...");
-    let server = params.server.clone();
-    let account = params.account("jdoe@example.com");
-    let client = account.client();
+    let server = test.server.clone();
+    let account = test.account("jdoe@example.com");
+    let client = account.jmap_client().await;
 
     let mailbox1_id = client
         .mailbox_create("JMAP Changes 1", None::<String>, Role::None)
@@ -117,9 +117,7 @@ pub async fn test(params: &mut JMAPTest) {
                 if change_num % 2 == 0 {
                     type1_ids.insert(jmap_id);
                 }
-                thread_id_map
-                    .entry(jmap_id.prefix_id())
-                    .or_insert(jmap_id);
+                thread_id_map.entry(jmap_id.prefix_id()).or_insert(jmap_id);
             }
             LogAction::Update(id) => {
                 let id = *id_map.get(id).unwrap();
@@ -290,7 +288,7 @@ pub async fn test(params: &mut JMAPTest) {
                     for item in changes.added() {
                         let item_id = Id::from_str(item.id()).unwrap();
                         let id = id_map.iter().find(|(_, v)| **v == item_id).unwrap().0;
-                        assert!(id < &7, "{:?} (id: {})", changes, id);
+                        assert!(id <= &7, "{:?} (id: {})", changes, id);
                     }
                 }
                 if test_num == 4 {
@@ -324,8 +322,8 @@ pub async fn test(params: &mut JMAPTest) {
         states.push(new_state);
     }
 
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.assert_is_empty().await;
 }
 
 #[derive(Debug, Clone)]

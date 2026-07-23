@@ -4,18 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{FdbStore, MAX_VALUE_SIZE, ReadVersion, into_error};
+use super::{
+    FdbStore, MAX_READ_VERSION_AGE, MAX_VALUE_SIZE, REFRESH_READ_VERSION_AFTER, into_error,
+};
 use crate::{
     Deserialize, IterateParams, Key, ValueKey, WITH_SUBSPACE,
     backend::deserialize_i64_le,
-    write::{ValueClass, key::KeySerializer},
+    write::{MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, ValueClass, key::KeySerializer},
 };
 use foundationdb::{
-    KeySelector, RangeOption, Transaction,
+    FdbError, KeySelector, RangeOption, Transaction,
     future::FdbSlice,
     options::{self},
 };
 use futures::TryStreamExt;
+use std::time::Instant;
 
 #[allow(dead_code)]
 pub(crate) enum ChunkedValue {
@@ -35,12 +38,46 @@ impl FdbStore {
         U: Deserialize,
     {
         let key = key.serialize(WITH_SUBSPACE);
-        let trx = self.read_trx().await?;
+        let mut retry_count = 0;
+        let start = Instant::now();
 
-        match read_chunked_value(&key, &trx, true).await? {
-            ChunkedValue::Single(bytes) => U::deserialize(&bytes).map(Some),
-            ChunkedValue::Chunked { bytes, .. } => U::deserialize_owned(bytes).map(Some),
-            ChunkedValue::None => Ok(None),
+        loop {
+            let trx = self.read_trx().await?;
+
+            match read_chunked_value(&key, &trx, true).await {
+                Ok(ChunkedValue::Single(bytes)) => {
+                    return U::deserialize_with_key(key.get(1..).unwrap_or_default(), &bytes)
+                        .map(Some);
+                }
+                Ok(ChunkedValue::Chunked { bytes, .. }) => {
+                    return U::deserialize_owned_with_key(key.get(1..).unwrap_or_default(), bytes)
+                        .map(Some);
+                }
+                Ok(ChunkedValue::None) => return Ok(None),
+                Err(err) => {
+                    self.on_read_error(trx, err, &mut retry_count, start)
+                        .await?;
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
+        let key = key.serialize(WITH_SUBSPACE);
+        let mut retry_count = 0;
+        let start = Instant::now();
+
+        loop {
+            let trx = self.read_trx().await?;
+
+            match read_chunked_value(&key, &trx, true).await {
+                Ok(ChunkedValue::Single(_) | ChunkedValue::Chunked { .. }) => return Ok(true),
+                Ok(ChunkedValue::None) => return Ok(false),
+                Err(err) => {
+                    self.on_read_error(trx, err, &mut retry_count, start)
+                        .await?;
+                }
+            }
         }
     }
 
@@ -51,6 +88,8 @@ impl FdbStore {
     ) -> trc::Result<()> {
         let begin = params.begin.serialize(WITH_SUBSPACE);
         let end = params.end.serialize(WITH_SUBSPACE);
+        let mut retry_count = 0;
+        let start = Instant::now();
 
         if !params.first {
             let mut last_key = vec![];
@@ -130,10 +169,24 @@ impl FdbStore {
                             break 'outer;
                         }
                         Err(e) => {
+                            drop(values);
                             if e.code() == 1007 && !last_key_.is_empty() {
                                 // Transaction is too old to perform reads or be committed
-                                drop(values);
                                 last_key = last_key_;
+                                continue 'outer;
+                            } else if e.is_retryable()
+                                && retry_count < MAX_COMMIT_ATTEMPTS
+                                && start.elapsed() < MAX_COMMIT_TIME
+                            {
+                                // Transient error such as a cached read version ahead of lagging
+                                // storage servers (code 1009); resume from the last key read,
+                                // refresh the read version and back off before retrying.
+                                if !last_key_.is_empty() {
+                                    last_key = last_key_;
+                                }
+                                self.version.expire();
+                                trx.on_error(e).await.map_err(into_error)?;
+                                retry_count += 1;
                                 continue 'outer;
                             } else {
                                 return Err(into_error(e));
@@ -143,20 +196,30 @@ impl FdbStore {
                 }
             }
         } else {
-            let trx = self.read_trx().await?;
-            let mut values = trx.get_ranges_keyvalues(
-                RangeOption {
-                    begin: KeySelector::first_greater_or_equal(&begin),
-                    end: KeySelector::first_greater_than(&end),
-                    mode: options::StreamingMode::Small,
-                    reverse: !params.ascending,
-                    ..Default::default()
-                },
-                true,
-            );
+            loop {
+                let trx = self.read_trx().await?;
+                let mut values = trx.get_ranges_keyvalues(
+                    RangeOption {
+                        begin: KeySelector::first_greater_or_equal(&begin),
+                        end: KeySelector::first_greater_than(&end),
+                        mode: options::StreamingMode::Small,
+                        reverse: !params.ascending,
+                        ..Default::default()
+                    },
+                    true,
+                );
 
-            if let Some(value) = values.try_next().await.map_err(into_error)? {
-                cb(value.key().get(1..).unwrap_or_default(), value.value())?;
+                match values.try_next().await {
+                    Ok(Some(value)) => {
+                        cb(value.key().get(1..).unwrap_or_default(), value.value())?;
+                        break;
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        drop(values);
+                        self.on_read_error(trx, e, &mut retry_count, start).await?;
+                    }
+                }
             }
         }
 
@@ -168,31 +231,61 @@ impl FdbStore {
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,
     ) -> trc::Result<i64> {
         let key = key.into().serialize(WITH_SUBSPACE);
-        if let Some(bytes) = self
-            .read_trx()
-            .await?
-            .get(&key, true)
-            .await
-            .map_err(into_error)?
+        let mut retry_count = 0;
+        let start = Instant::now();
+
+        loop {
+            let trx = self.read_trx().await?;
+            match trx.get(&key, true).await {
+                Ok(Some(bytes)) => return deserialize_i64_le(&key, &bytes),
+                Ok(None) => return Ok(0),
+                Err(e) => {
+                    self.on_read_error(trx, e, &mut retry_count, start).await?;
+                }
+            }
+        }
+    }
+
+    async fn on_read_error(
+        &self,
+        trx: Transaction,
+        err: FdbError,
+        retry_count: &mut u32,
+        start: Instant,
+    ) -> trc::Result<()> {
+        if err.is_retryable()
+            && *retry_count < MAX_COMMIT_ATTEMPTS
+            && start.elapsed() < MAX_COMMIT_TIME
         {
-            deserialize_i64_le(&key, &bytes)
+            // The cached read version may be ahead of lagging storage servers under heavy write
+            // load (code 1009); expire it so the retry obtains a fresh read version, then let
+            // FoundationDB back off before retrying.
+            self.version.expire();
+            trx.on_error(err).await.map_err(into_error)?;
+            *retry_count += 1;
+            Ok(())
         } else {
-            Ok(0)
+            Err(into_error(err))
         }
     }
 
     pub(crate) async fn read_trx(&self) -> trc::Result<Transaction> {
-        let (is_expired, mut read_version) = {
-            let version = self.version.lock();
-            (version.is_expired(), version.version)
-        };
         let trx = self.db.create_trx().map_err(into_error)?;
+        let version = self.version.current();
+        let age = self.version.age();
 
-        if is_expired {
-            read_version = trx.get_read_version().await.map_err(into_error)?;
-            *self.version.lock() = ReadVersion::new(read_version);
+        if version != 0 && age < MAX_READ_VERSION_AGE.as_nanos() as u64 {
+            if age >= REFRESH_READ_VERSION_AFTER.as_nanos() as u64
+                && let Some(_guard) = self.version.try_begin_refresh()
+            {
+                let read_version = trx.get_read_version().await.map_err(into_error)?;
+                self.version.refreshed(read_version);
+            } else {
+                trx.set_read_version(version);
+            }
         } else {
-            trx.set_read_version(read_version);
+            let read_version = trx.get_read_version().await.map_err(into_error)?;
+            self.version.refreshed(read_version);
         }
 
         Ok(trx)
@@ -203,8 +296,8 @@ pub(crate) async fn read_chunked_value(
     key: &[u8],
     trx: &Transaction,
     snapshot: bool,
-) -> trc::Result<ChunkedValue> {
-    if let Some(bytes) = trx.get(key, snapshot).await.map_err(into_error)? {
+) -> Result<ChunkedValue, FdbError> {
+    if let Some(bytes) = trx.get(key, snapshot).await? {
         if bytes.len() < MAX_VALUE_SIZE {
             Ok(ChunkedValue::Single(bytes))
         } else {
@@ -215,7 +308,7 @@ pub(crate) async fn read_chunked_value(
                 .write(0u8)
                 .finalize();
 
-            while let Some(bytes) = trx.get(&key, snapshot).await.map_err(into_error)? {
+            while let Some(bytes) = trx.get(&key, snapshot).await? {
                 value.extend_from_slice(&bytes);
                 *key.last_mut().unwrap() += 1;
             }

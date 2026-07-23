@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{directory::internal::TestInternalDirectory, jmap::JMAPTest};
+use crate::utils::server::TestServer;
 use ::email::mailbox::{INBOX_ID, TRASH_ID};
 use jmap_client::{
     core::{
@@ -15,27 +15,29 @@ use jmap_client::{
     mailbox::{self, Role},
     principal::ACL,
 };
+use registry::schema::prelude::ObjectType;
+use serde_json::json;
 use std::fmt::Debug;
 use store::ahash::AHashMap;
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running ACL tests...");
-    let server = params.server.clone();
 
     // Create a group and three test accounts
     let inbox_id = Id::new(INBOX_ID as u64).to_string();
     let trash_id = Id::new(TRASH_ID as u64).to_string();
 
-    let john = params.account("jdoe@example.com");
-    let jane = params.account("jane.smith@example.com");
-    let bill = params.account("bill@example.com");
-    let sales = params.account("sales@example.com");
+    let admin = test.account("admin@example.com");
+    let john = test.account("jdoe@example.com");
+    let jane = test.account("jane.smith@example.com");
+    let bill = test.account("bill@example.com");
+    let sales = test.account("sales@example.com");
 
     // Authenticate all accounts
-    let mut john_client = john.client_owned().await;
-    let mut jane_client = jane.client_owned().await;
-    let mut bill_client = bill.client_owned().await;
+    let mut john_client = john.jmap_client().await;
+    let mut jane_client = jane.jmap_client().await;
+    let mut bill_client = bill.jmap_client().await;
 
     // Insert two emails in each account
     let mut email_ids = AHashMap::default();
@@ -43,11 +45,7 @@ pub async fn test(params: &mut JMAPTest) {
         (&mut john_client, john.id(), "john"),
         (&mut jane_client, jane.id(), "jane"),
         (&mut bill_client, bill.id(), "bill"),
-        (
-            &mut params.account("admin").client_owned().await,
-            sales.id(),
-            "sales",
-        ),
+        (&mut admin.jmap_client().await, sales.id(), "sales"),
     ] {
         let user_name = client.session().username().to_string();
         let mut ids = Vec::with_capacity(2);
@@ -183,6 +181,25 @@ pub async fn test(params: &mut JMAPTest) {
             .await
             .unwrap()
             .is_none()
+    );
+
+    // Email/changes must not leak ids of emails in folders John cannot read
+    let jane_inbox_email = email_ids.get("jane").unwrap().first().unwrap().clone();
+    let jane_trash_email = email_ids.get("jane").unwrap().last().unwrap().clone();
+    let changed_ids = john_client
+        .set_default_account_id(jane.id_string())
+        .email_changes("n", None)
+        .await
+        .unwrap()
+        .created()
+        .to_vec();
+    assert!(
+        changed_ids.contains(&jane_inbox_email),
+        "Email/changes should report the shared Inbox email"
+    );
+    assert!(
+        !changed_ids.contains(&jane_trash_email),
+        "Email/changes leaked the id of a non-shared Trash email"
     );
 
     // John should only be able to copy blobs he has access to
@@ -593,15 +610,15 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Add John and Jane to the Sales group
+    let sales_id = test.account("sales@example.com").id();
     for name in ["jdoe@example.com", "jane.smith@example.com"] {
-        server
-            .invalidate_principal_caches(
-                server
-                    .core
-                    .storage
-                    .data
-                    .add_to_group(name, "sales@example.com")
-                    .await,
+        admin
+            .registry_update_object(
+                ObjectType::Account,
+                test.account(name).id(),
+                json!({
+                    "memberGroupIds": { sales_id: true },
+                }),
             )
             .await;
     }
@@ -697,16 +714,16 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Remove John from the sales group
-    server
-        .invalidate_principal_caches(
-            server
-                .core
-                .storage
-                .data
-                .remove_from_group("jdoe@example.com", "sales@example.com")
-                .await,
+    admin
+        .registry_update_object(
+            ObjectType::Account,
+            test.account("jdoe@example.com").id(),
+            json!({
+                "memberGroupIds": { sales_id: false },
+            }),
         )
         .await;
+
     assert_forbidden(
         john_client
             .set_default_account_id(sales.id_string())
@@ -715,10 +732,12 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Destroy test account data
-    for id in [john, bill, jane, sales] {
-        params.destroy_all_mailboxes(id).await;
+    for account in [john, bill, jane, sales] {
+        admin
+            .destroy_all_mailboxes_for_account(account.id().document_id())
+            .await;
     }
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }
 
 pub fn assert_forbidden<T: Debug>(result: Result<T, jmap_client::Error>) {

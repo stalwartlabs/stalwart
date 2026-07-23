@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::utils::{
+    jmap::{ChangeType, JmapUtils},
+    server::TestServer,
+};
 use jmap_proto::{object::addressbook::AddressBookProperty, request::method::MethodObject};
 use serde_json::json;
 
-use crate::jmap::{ChangeType, JMAPTest, JmapUtils};
-
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running AddressBook tests...");
-    let account = params.account("jdoe@example.com");
+    let account = test.account("jdoe@example.com");
 
     // Make sure the default address book exists
     let response = account
@@ -37,7 +39,7 @@ pub async fn test(params: &mut JMAPTest) {
             "name": "Stalwart Address Book (jdoe@example.com)",
             "description": (),
             "sortOrder": 0,
-            "isSubscribed": false,
+            "isSubscribed": true,
             "isDefault": true,
             "id": default_addressbook_id,
         })
@@ -147,7 +149,7 @@ pub async fn test(params: &mut JMAPTest) {
                 "name": "Stalwart Address Book (jdoe@example.com)",
                 "description": (),
                 "sortOrder": 0,
-                "isSubscribed": false,
+                "isSubscribed": true,
                 "isDefault": false,
                 "id": default_addressbook_id,
             })
@@ -210,5 +212,5 @@ pub async fn test(params: &mut JMAPTest) {
 
     // Destroy all mailboxes
     account.destroy_all_addressbooks().await;
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }

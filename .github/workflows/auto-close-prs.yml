@@ -1,0 +1,131 @@
+name: Auto-close PRs from non-allowed authors
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  auto-close:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/allowed-pr-authors.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Close PRs from non-allowed authors
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let allowedAuthors = [];
+            try {
+              allowedAuthors = fs.readFileSync('.github/allowed-pr-authors.txt', 'utf8')
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => line && !line.startsWith('#'))
+                .map(line => line.toLowerCase());
+            } catch (err) {
+              core.warning(`Could not read allowed-pr-authors.txt: ${err.message}`);
+            }
+
+            const pr = context.payload.pull_request;
+            const author = (pr.user && pr.user.login) || '';
+            const login = author.toLowerCase();
+
+            if (author.endsWith('[bot]')) {
+              core.info(`PR #${pr.number} opened by bot '${author}'. Skipping.`);
+              return;
+            }
+
+            if (allowedAuthors.includes(login)) {
+              core.info(`PR #${pr.number} opened by allowed author '${author}'. Skipping.`);
+              return;
+            }
+
+            const actor = (context.payload.sender && context.payload.sender.login) || '';
+
+            const isCollaborator = async (username) => {
+              if (!username) {
+                return false;
+              }
+              try {
+                const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username,
+                });
+                return perm.permission === 'admin' || perm.permission === 'write';
+              } catch (err) {
+                core.info(`Could not resolve collaborator permission for '${username}': ${err.message}`);
+                return false;
+              }
+            };
+
+            if (await isCollaborator(author)) {
+              core.info(`PR #${pr.number} author '${author}' is a collaborator. Skipping.`);
+              return;
+            }
+
+            if (actor.toLowerCase() !== login && await isCollaborator(actor)) {
+              core.info(`PR #${pr.number} action triggered by collaborator '${actor}'. Skipping.`);
+              return;
+            }
+
+            const contributingUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/blob/HEAD/CONTRIBUTING.md`;
+
+            const haystack = `${pr.title || ''}\n${pr.body || ''}`;
+            const aiPatterns = [
+              /[—―]/,
+            ];
+            const looksAiGenerated = aiPatterns.some(re => re.test(haystack));
+
+            const aiMessage = [
+              `Hi @${author}, thanks for your interest in contributing.`,
+              ``,
+              `This pull request is being **automatically closed and locked**. The description contains strong indicators of AI-generated content, and this project does not accept AI-generated code or unsolicited machine-authored contributions.`,
+              ``,
+              `Please read [CONTRIBUTING.md](${contributingUrl}) to learn what kinds of contributions are currently accepted. If this is a genuine hand-written change that fits those guidelines, please open a discussion at **[support.stalw.art](https://support.stalw.art)** before submitting.`,
+            ].join('\n');
+
+            const standardMessage = [
+              `Hi @${author}, thanks for taking the time to open this pull request.`,
+              ``,
+              `This PR is being **automatically closed** because it was submitted by an author who is not on the list of approved contributors. This policy helps us keep review capacity focused and filter out unsolicited or low-quality contributions.`,
+              ``,
+              `Please read [CONTRIBUTING.md](${contributingUrl}) to learn what kinds of contributions are currently accepted. If your change fits those guidelines, please first discuss it at our support portal: **[support.stalw.art](https://support.stalw.art)**. You can sign in with your existing GitHub account.`,
+              ``,
+              `Thank you for understanding.`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: looksAiGenerated ? aiMessage : standardMessage,
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              state: 'closed',
+            });
+
+            if (looksAiGenerated) {
+              try {
+                await github.rest.issues.lock({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  lock_reason: 'spam',
+                });
+              } catch (err) {
+                core.warning(`Could not lock PR #${pr.number}: ${err.message}`);
+              }
+            }

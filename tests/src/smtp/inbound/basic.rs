@@ -4,20 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Core;
-use smtp::core::Session;
-
-use crate::smtp::{
-    TestSMTP,
-    session::{TestSession, VerifyResponse},
+use crate::{
+    smtp::session::{TestSession, VerifyResponse},
+    utils::server::TestServerBuilder,
 };
 
 #[tokio::test]
 async fn basic_commands() {
-    // Enable logging
-    crate::enable_logging();
+    let test = TestServerBuilder::new("smtp_basic_test")
+        .await
+        .with_http_listener(19002)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let mut session = Session::test(TestSMTP::from_core(Core::default()).server);
+    let mut session = test.new_mta_session();
 
     // STARTTLS should be available on clear text connections
     session.stream.tls = false;

@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
-use common::{
-    core::BuildServer,
-    listener::{SessionData, SessionManager, SessionResult, SessionStream},
-};
-use tokio_rustls::server::TlsStream;
-
 use crate::{
     Pop3SessionManager, SERVER_GREETING, Session, State,
     protocol::{
@@ -19,8 +11,13 @@ use crate::{
         response::{Response, SerializeResponse},
     },
 };
-
+use common::{
+    BuildServer,
+    network::{SessionData, SessionManager, SessionResult, SessionStream},
+};
+use std::borrow::Cow;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_rustls::server::TlsStream;
 
 impl SessionManager for Pop3SessionManager {
     #[allow(clippy::manual_async_fn)]

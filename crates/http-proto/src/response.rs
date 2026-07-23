@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::manager::webadmin::Resource;
+use common::manager::application::Resource;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     StatusCode,
@@ -25,6 +25,15 @@ impl HttpResponse {
             builder: hyper::Response::builder().status(status),
             body: HttpResponseBody::Empty,
         }
+    }
+
+    pub fn redirect(location: String) -> Self {
+        let mut response = HttpResponse::new(StatusCode::FOUND);
+        response.builder = response
+            .builder
+            .status(StatusCode::FOUND)
+            .header(header::LOCATION, location);
+        response
     }
 
     pub fn with_content_type<V>(mut self, content_type: V) -> Self
@@ -154,12 +163,34 @@ impl HttpResponse {
         self
     }
 
+    pub fn with_immutable_cache(mut self) -> Self {
+        self.builder = self
+            .builder
+            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
+        self
+    }
+
     pub fn with_location<V>(mut self, location: V) -> Self
     where
         V: TryInto<HeaderValue>,
         <V as TryInto<HeaderValue>>::Error: Into<hyper::http::Error>,
     {
         self.builder = self.builder.header(header::LOCATION, location);
+        self
+    }
+
+    pub fn with_cors_unrestricted(mut self) -> Self {
+        self.builder = self
+            .builder
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                "Authorization, Content-Type, Accept, X-Requested-With",
+            )
+            .header(
+                header::ACCESS_CONTROL_ALLOW_METHODS,
+                "POST, GET, PATCH, PUT, DELETE, HEAD, OPTIONS",
+            );
         self
     }
 

@@ -12,8 +12,11 @@ use jmap_proto::{
     object::sieve::{Sieve, SieveProperty, SieveValue},
 };
 use jmap_tools::{Map, Value};
-use store::{ValueKey, write::{AlignedBytes, Archive}};
 use std::future::Future;
+use store::{
+    ValueKey,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId, BlobSection},
@@ -33,7 +36,7 @@ impl SieveScriptGet for Server {
         &self,
         mut request: GetRequest<Sieve>,
     ) -> trc::Result<GetResponse<Sieve>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             SieveProperty::Id,
             SieveProperty::Name,
@@ -60,7 +63,7 @@ impl SieveScriptGet for Server {
                 .await?
                 .into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
         let active_script_id = self.sieve_script_get_active_id(account_id).await?;
 
@@ -68,7 +71,7 @@ impl SieveScriptGet for Server {
             // Obtain the sieve script object
             let document_id = id.document_id();
             if !script_ids.contains(document_id) {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             }
             let sieve_ = if let Some(sieve) = self
@@ -82,7 +85,7 @@ impl SieveScriptGet for Server {
             {
                 sieve
             } else {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             };
             let sieve = sieve_

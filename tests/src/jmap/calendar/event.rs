@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    jmap::{ChangeType, IntoJmapSet, JMAPTest, JmapUtils, wait_for_index},
-    webdav::DummyWebDavClient,
+use crate::utils::{
+    jmap::{ChangeType, IntoJmapSet, JmapUtils},
+    server::TestServer,
 };
 use ahash::AHashSet;
 use calcard::jscalendar::JSCalendarProperty;
@@ -16,9 +16,9 @@ use jmap_proto::request::method::MethodObject;
 use serde_json::{Value, json};
 use types::{collection::SyncCollection, id::Id};
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Calendar Event tests...");
-    let account = params.account("jdoe@example.com");
+    let account = test.account("jdoe@example.com");
 
     // Create test calendars
     let response = account
@@ -101,6 +101,7 @@ pub async fn test(params: &mut JMAPTest) {
     let event_4_id = response.created(3).id().to_string();
 
     // Destroy tmp event
+    test.wait_for_tasks().await;
     assert_eq!(
         account
             .jmap_destroy(
@@ -216,6 +217,7 @@ pub async fn test(params: &mut JMAPTest) {
         .jmap_method_calls(json!([[
             "CalendarEvent/get",
             {
+                "accountId": account.id_string(),
                 "properties": ["id", "title", "recurrenceOverrides", "participants"],
                 "ids": [&event_2_id, &event_3_id],
                 "recurrenceOverridesBefore": "2006-01-07T00:00:00Z",
@@ -452,7 +454,7 @@ pub async fn test(params: &mut JMAPTest) {
     }));
 
     // Query tests
-    wait_for_index(&params.server).await;
+    test.wait_for_tasks().await;
     assert_eq!(
         account
             .jmap_query(
@@ -576,6 +578,7 @@ pub async fn test(params: &mut JMAPTest) {
          [
           "Blob/upload",
           {
+           "accountId": account.id_string(),
            "create": {
             "ical": {
              "data": [
@@ -608,6 +611,7 @@ END:VCALENDAR
         [
           "CalendarEvent/parse",
           {
+           "accountId": account.id_string(),
            "blobIds": [
              "#ical"
            ]
@@ -657,6 +661,7 @@ END:VCALENDAR
 ]));
 
     // Deletion tests
+    test.wait_for_tasks().await;
     assert_eq!(
         account
             .jmap_destroy(
@@ -674,19 +679,10 @@ END:VCALENDAR
 
     // CardDAV compatibility tests
     let account_id = account.id().document_id();
-    let dav_client = DummyWebDavClient::new(
-        u32::MAX,
-        account.name(),
-        account.secret(),
-        account.emails()[0],
-    );
-    let resources = params
+    let dav_client = account.webdav_client();
+    let resources = test
         .server
-        .fetch_dav_resources(
-            &params.server.get_access_token(account_id).await.unwrap(),
-            account_id,
-            SyncCollection::Calendar,
-        )
+        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
         .await
         .unwrap();
     let path = format!(
@@ -715,8 +711,9 @@ END:VCALENDAR
     assert_eq!(ical, expected_ical);
 
     // Clean up
+    test.wait_for_tasks().await;
     account.destroy_all_calendars().await;
-    params.assert_is_empty().await;
+    test.assert_is_empty().await;
 }
 
 pub fn test_jscalendar_1() -> Value {

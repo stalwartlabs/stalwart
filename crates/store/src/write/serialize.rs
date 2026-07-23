@@ -563,12 +563,6 @@ impl Deserialize for u32 {
     }
 }
 
-impl Deserialize for () {
-    fn deserialize(_bytes: &[u8]) -> trc::Result<Self> {
-        Ok(())
-    }
-}
-
 impl<T> From<Value<'static>> for Archive<T> {
     fn from(_: Value<'static>) -> Self {
         unimplemented!()

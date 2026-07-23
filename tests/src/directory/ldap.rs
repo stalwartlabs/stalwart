@@ -4,276 +4,167 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Debug;
-
-use directory::{
-    QueryParams, ROLE_USER, Type,
-    backend::{RcptType, internal::manage::ManageDirectory},
-};
-use mail_send::Credentials;
-
-use crate::directory::{
-    DirectoryTest, IntoTestPrincipal, TestPrincipal, map_account_id, map_account_ids,
+use directory::{Account, Credentials, Group, Recipient, backend::ldap::LdapDirectory};
+use registry::{
+    schema::structs::{self, SecretKeyOptional, SecretKeyValue},
+    types::map::Map,
 };
 
-#[tokio::test]
-async fn ldap_directory() {
-    // Enable logging
-    crate::enable_logging();
+pub async fn test() {
+    println!("Running LDAP directory tests...");
+    crate::utils::containers::ensure_openldap().await;
+    let mut config = ldap_test_directory();
 
-    // Obtain directory handle
-    let mut config = DirectoryTest::new("sqlite".into()).await;
-    let handle = config.directories.directories.remove("ldap").unwrap();
-    let base_store = config.stores.stores.get("sqlite").unwrap();
-    let core = config.server;
-
-    // Test authentication
-    for (auth_type, handle) in [
-        ("Default", handle.clone()),
-        (
-            "Bind template",
-            config
-                .directories
-                .directories
-                .remove("ldap-bind-template")
-                .unwrap(),
-        ),
-        (
-            "Bind lookup",
-            config
-                .directories
-                .directories
-                .remove("ldap-bind-lookup")
-                .unwrap(),
-        ),
-    ] {
-        println!("Testing {auth_type} LDAP authentication...");
-        assert_eq!(
-            handle
-                .query(
-                    QueryParams::credentials(&Credentials::Plain {
-                        username: "john".into(),
-                        secret: "12345".into()
-                    })
-                    .with_return_member_of(true)
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .into_test()
-                .into_sorted(),
-            TestPrincipal {
-                id: base_store.get_principal_id("john").await.unwrap().unwrap(),
-                name: "john".into(),
-                description: Some("John Doe".into()),
-                secrets: vec!["12345".into()],
-                typ: Type::Individual,
-                member_of: map_account_ids(base_store, vec!["sales"])
-                    .await
-                    .into_iter()
-                    .map(|v| v.to_string())
-                    .collect(),
-                emails: vec!["john@example.org".into(), "john.doe@example.org".into()],
-                roles: vec![ROLE_USER.to_string()],
-                ..Default::default()
-            }
-            .into_sorted()
-        );
-        assert_eq!(
-            handle
-                .query(
-                    QueryParams::credentials(&Credentials::Plain {
-                        username: "bill".into(),
-                        secret: "password".into()
-                    })
-                    .with_return_member_of(true)
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .into_test()
-                .into_sorted(),
-            TestPrincipal {
-                id: base_store.get_principal_id("bill").await.unwrap().unwrap(),
-                name: "bill".into(),
-                description: Some("Bill Foobar".into()),
-                secrets: vec![
-                    "$2y$05$bvIG6Nmid91Mu9RcmmWZfO5HJIMCT8riNW0hEp8f6/FuA2/mHZFpe".into()
-                ],
-                typ: Type::Individual,
-                quota: 500000,
-                emails: vec!["bill@example.org".into(),],
-                roles: vec![ROLE_USER.to_string()],
-                ..Default::default()
-            }
-            .into_sorted()
-        );
-        assert!(
-            handle
-                .query(
-                    QueryParams::credentials(&Credentials::Plain {
-                        username: "bill".into(),
-                        secret: "invalid".into()
-                    })
-                    .with_return_member_of(true)
-                )
-                .await
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    // Get user by name
+    // Test bind authentication
+    let ldap = LdapDirectory::open(config.clone()).await.unwrap();
     assert_eq!(
-        handle
-            .query(QueryParams::name("jane").with_return_member_of(true))
-            .await
-            .unwrap()
-            .unwrap()
-            .into_test()
-            .into_sorted(),
-        TestPrincipal {
-            id: base_store.get_principal_id("jane").await.unwrap().unwrap(),
-            name: "jane".into(),
-            description: Some("Jane Doe".into()),
-            typ: Type::Individual,
-            secrets: vec!["abcde".into()],
-            member_of: map_account_ids(base_store, vec!["sales", "support"])
-                .await
-                .into_iter()
-                .map(|v| v.to_string())
-                .collect(),
-            emails: vec!["jane@example.org".into(),],
-            roles: vec![ROLE_USER.to_string()],
-            ..Default::default()
-        }
-        .into_sorted()
-    );
-
-    // Get group by name
-    assert_eq!(
-        handle
-            .query(QueryParams::name("sales").with_return_member_of(true))
-            .await
-            .unwrap()
-            .unwrap()
-            .into_test(),
-        TestPrincipal {
-            id: base_store.get_principal_id("sales").await.unwrap().unwrap(),
-            name: "sales".into(),
-            description: Some("sales".into()),
-            typ: Type::Group,
-            roles: vec![ROLE_USER.to_string()],
-            ..Default::default()
+        ldap.authenticate(&Credentials::Basic {
+            username: "john.doe@example.org".into(),
+            secret: "this is John's LDAP password".into(),
+            mfa_token: None,
+        })
+        .await
+        .unwrap(),
+        Account {
+            email: "john.doe@example.org".into(),
+            email_aliases: vec!["john@example.org".into()],
+            secret: Some("$app$8958830913002348890$".into()),
+            groups: Some(vec!["sales@example.org".into()]),
+            description: Some("John Doe".into()),
         }
     );
-
-    // Ids by email
     assert_eq!(
-        core.email_to_id(&handle, "jane@example.org", 0)
-            .await
-            .unwrap(),
-        Some(map_account_id(base_store, "jane").await),
+        ldap.authenticate(&Credentials::Basic {
+            username: "jane.smith@example.org".into(),
+            secret: "this is Jane's LDAP password".into(),
+            mfa_token: None,
+        })
+        .await
+        .unwrap(),
+        Account {
+            email: "jane.smith@example.org".into(),
+            email_aliases: vec![],
+            secret: Some("$app$4096614298472586996$".into()),
+            groups: Some(vec![
+                "sales@example.org".into(),
+                "corporate@example.org".into()
+            ]),
+            description: Some("Jane Smith".into()),
+        }
     );
-    assert_eq!(
-        core.email_to_id(&handle, "jane+alias@example.org", 0)
-            .await
-            .unwrap(),
-        Some(map_account_id(base_store, "jane").await),
-    );
-    assert_eq!(
-        core.email_to_id(&handle, "unknown@example.org", 0)
-            .await
-            .unwrap(),
-        None,
-    );
-    assert_eq!(
-        core.email_to_id(&handle, "anything@catchall.org", 0)
-            .await
-            .unwrap(),
-        Some(map_account_id(base_store, "robert").await)
-    );
-
-    // Domain validation
-    assert!(handle.is_local_domain("example.org").await.unwrap());
-    assert!(!handle.is_local_domain("other.org").await.unwrap());
-
-    // RCPT TO
-    assert_eq!(
-        core.rcpt(&handle, "jane@example.org", 0).await.unwrap(),
-        RcptType::Mailbox
-    );
-    assert_eq!(
-        core.rcpt(&handle, "info@example.org", 0).await.unwrap(),
-        RcptType::Mailbox
-    );
-    assert_eq!(
-        core.rcpt(&handle, "jane+alias@example.org", 0)
-            .await
-            .unwrap(),
-        RcptType::Mailbox
-    );
-    assert_eq!(
-        core.rcpt(&handle, "info+alias@example.org", 0)
-            .await
-            .unwrap(),
-        RcptType::Mailbox
-    );
-    assert_eq!(
-        core.rcpt(&handle, "random_user@catchall.org", 0)
-            .await
-            .unwrap(),
-        RcptType::Mailbox
-    );
-    assert_eq!(
-        core.rcpt(&handle, "invalid@example.org", 0).await.unwrap(),
-        RcptType::Invalid
+    assert!(
+        ldap.authenticate(&Credentials::Basic {
+            username: "jane.smith@example.org".into(),
+            secret: "this is a wrong LDAP password".into(),
+            mfa_token: None,
+        })
+        .await
+        .is_err()
     );
 
-    // VRFY
-    compare_sorted(
-        core.vrfy(&handle, "jane", 0).await.unwrap(),
-        vec!["jane@example.org".into()],
+    // Test direct authentication (without bind)
+    config.attr_secret = Map::new(vec!["userPassword".to_string()]);
+    config.attr_secret_changed = Map::new(vec![]);
+    config.bind_authentication = false;
+    let ldap = LdapDirectory::open(config.clone()).await.unwrap();
+    assert_eq!(
+        ldap.authenticate(&Credentials::Basic {
+            username: "john.doe@example.org".into(),
+            secret: "this is John's LDAP password".into(),
+            mfa_token: None,
+        })
+        .await
+        .unwrap(),
+        Account {
+            email: "john.doe@example.org".into(),
+            email_aliases: vec!["john@example.org".into()],
+            secret: Some("this is John's LDAP password".into()),
+            groups: Some(vec!["sales@example.org".into()]),
+            description: Some("John Doe".into()),
+        }
     );
-    compare_sorted(
-        core.vrfy(&handle, "john", 0).await.unwrap(),
-        vec!["john@example.org".into(), "john.doe@example.org".into()],
-    );
-    compare_sorted(
-        core.vrfy(&handle, "jane+alias@example", 0).await.unwrap(),
-        vec!["jane@example.org".into()],
-    );
-    compare_sorted(
-        core.vrfy(&handle, "info", 0).await.unwrap(),
-        Vec::<String>::new(),
-    );
-    compare_sorted(
-        core.vrfy(&handle, "invalid", 0).await.unwrap(),
-        Vec::<String>::new(),
+    assert!(
+        ldap.authenticate(&Credentials::Basic {
+            username: "john.doe@example.org".into(),
+            secret: "this is a wrong LDAP password".into(),
+            mfa_token: None,
+        })
+        .await
+        .is_err()
     );
 
-    // EXPN
-    // Now handled by the internal directory
-    /*compare_sorted(
-        core.expn(&handle, "info@example.org", 0).await.unwrap(),
-        vec![
-            "bill@example.org".into(),
-            "jane@example.org".into(),
-            "john@example.org".into(),
-        ],
+    // Test recipient lookup
+    assert_eq!(
+        ldap.recipient("john.doe@example.org").await.unwrap(),
+        Recipient::Account(Account {
+            email: "john.doe@example.org".into(),
+            email_aliases: vec!["john@example.org".into()],
+            secret: Some("this is John's LDAP password".into()),
+            groups: Some(vec!["sales@example.org".into()]),
+            description: Some("John Doe".into())
+        })
     );
-    compare_sorted(
-        core.expn(&handle, "john@example.org", 0).await.unwrap(),
-        Vec::<String>::new(),
-    );*/
+    assert_eq!(
+        ldap.recipient("jane.smith@example.org").await.unwrap(),
+        Recipient::Account(Account {
+            email: "jane.smith@example.org".into(),
+            email_aliases: vec![],
+            secret: Some("this is Jane's LDAP password".into()),
+            groups: Some(vec![
+                "sales@example.org".into(),
+                "corporate@example.org".into()
+            ]),
+            description: Some("Jane Smith".into())
+        })
+    );
+    assert_eq!(
+        ldap.recipient("sales@example.org").await.unwrap(),
+        Recipient::Group(Group {
+            email: "sales@example.org".into(),
+            email_aliases: vec![],
+            description: Some("sales".into())
+        })
+    );
+    assert_eq!(
+        ldap.recipient("corporate@example.org").await.unwrap(),
+        Recipient::Group(Group {
+            email: "corporate@example.org".into(),
+            email_aliases: vec!["everyone@example.org".into()],
+            description: Some("corporate".into())
+        })
+    );
+    assert_eq!(
+        ldap.recipient("nonexistent@example.org").await.unwrap(),
+        Recipient::Invalid
+    );
 }
 
-fn compare_sorted<T: Eq + Debug>(v1: Vec<T>, v2: Vec<T>) {
-    for val in v1.iter() {
-        assert!(v2.contains(val), "{v1:?} != {v2:?}");
-    }
-
-    for val in v2.iter() {
-        assert!(v1.contains(val), "{v1:?} != {v2:?}");
+pub fn ldap_test_directory() -> structs::LdapDirectory {
+    structs::LdapDirectory {
+        url: "ldap://localhost".into(),
+        use_tls: false,
+        attr_class: Map::new(vec!["objectClass".to_string()]),
+        attr_description: Map::new(vec!["cn".to_string()]),
+        attr_email: Map::new(vec!["mail".to_string()]),
+        attr_email_alias: Map::new(vec!["mailAlias".to_string()]),
+        attr_member_of: Map::new(vec!["memberOf".to_string()]),
+        attr_secret: Map::new(vec![]),
+        attr_secret_changed: Map::new(vec!["shadowLastChange".to_string()]),
+        base_dn: "dc=stalwart,dc=test".into(),
+        bind_dn: "cn=admin,dc=stalwart,dc=test".to_string().into(),
+        bind_secret: SecretKeyOptional::Value(SecretKeyValue {
+            secret: "admin".into(),
+        }),
+        filter_member_of: "(&(objectClass=groupOfNames)(member=?))".to_string().into(),
+        filter_login: "(&(objectClass=inetOrgPerson)(mail=?))".into(),
+        filter_mailbox: concat!(
+            "(|(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))",
+            "(&(objectClass=groupOfNames)(|(mail=?)(mailAlias=?))))"
+        )
+        .into(),
+        group_class: "groupOfNames".into(),
+        bind_authentication: true,
+        description: "Test LDAP directory".into(),
+        ..Default::default()
     }
 }

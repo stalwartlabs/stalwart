@@ -35,7 +35,7 @@ impl ShareNotificationQuery for Server {
         let account_id = request.account_id.document_id();
         let mut from_change_id = SnowflakeIdGenerator::from_duration(
             self.core
-                .jmap
+                .email
                 .share_notification_max_history
                 .unwrap_or(Duration::from_secs(30 * 86400)),
         )

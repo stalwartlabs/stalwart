@@ -4,55 +4,80 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::utils::server::TestServerBuilder;
+use registry::{
+    schema::{
+        enums::MtaInboundThrottleKey,
+        structs::{Expression, MtaInboundThrottle, Rate},
+    },
+    types::map::Map,
+};
+use smtp::core::SessionAddress;
 use std::time::Duration;
-
-use crate::smtp::{TempDir, TestSMTP, session::TestSession};
-use common::Core;
-use smtp::core::{Session, SessionAddress};
-use store::Stores;
-use utils::config::Config;
-
-const CONFIG: &str = r#"
-[storage]
-data = "rocksdb"
-lookup = "rocksdb"
-blob = "rocksdb"
-fts = "rocksdb"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/data.db"
-
-[[queue.limiter.inbound]]
-match = "remote_ip = '10.0.0.1'"
-key = 'remote_ip'
-rate = '2/1s'
-enable = true
-
-[[queue.limiter.inbound]]
-key = 'sender'
-rate = '2/1s'
-enable = true
-
-[[queue.limiter.inbound]]
-key = ['remote_ip', 'rcpt']
-rate = '2/1s'
-enable = true
-
-"#;
 
 #[tokio::test]
 async fn throttle_inbound() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_inbound_throttle_test")
+        .await
+        .with_http_listener(19009)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    let tmp_dir = TempDir::new("smtp_inbound_throttle", true);
-    let mut config = Config::new(tmp_dir.update_config(CONFIG)).unwrap();
-    let stores = Stores::parse_all(&mut config, false).await;
-    let core = Core::parse(&mut config, stores, Default::default()).await;
+    // Add test settings
+    let admin = test.account("admin");
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(MtaInboundThrottle {
+            description: "Test throttle".into(),
+            enable: true,
+            key: Map::new(vec![MtaInboundThrottleKey::RemoteIp]),
+            match_: Expression {
+                else_: "remote_ip = '10.0.0.1'".into(),
+                ..Default::default()
+            },
+            rate: Rate {
+                count: 2,
+                period: 1000u64.into(),
+            },
+        })
+        .await;
+
+    admin
+        .registry_create_object(MtaInboundThrottle {
+            description: "Test throttle".into(),
+            enable: true,
+            key: Map::new(vec![MtaInboundThrottleKey::Sender]),
+            rate: Rate {
+                count: 2,
+                period: 1000u64.into(),
+            },
+            ..Default::default()
+        })
+        .await;
+
+    admin
+        .registry_create_object(MtaInboundThrottle {
+            enable: true,
+            key: Map::new(vec![
+                MtaInboundThrottleKey::RemoteIp,
+                MtaInboundThrottleKey::Rcpt,
+            ]),
+            rate: Rate {
+                count: 2,
+                period: 1000u64.into(),
+            },
+            description: "Test throttle".into(),
+            ..Default::default()
+        })
+        .await;
+
+    admin.reload_settings().await;
+    test.reload_core();
 
     // Test connection rate limit
-    let mut session = Session::test(TestSMTP::from_core(core).server);
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.1".into();
     assert!(session.is_allowed().await, "Rate limiter too strict.");
     assert!(session.is_allowed().await, "Rate limiter too strict.");

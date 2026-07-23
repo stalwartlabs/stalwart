@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{assert_is_empty, mail::mailbox::destroy_all_mailboxes_no_wait, wait_for_index};
-use common::Server;
-use directory::backend::internal::manage::ManageDirectory;
+use crate::utils::server::{DestroyAllMailboxes, TestServer, TestServerBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::metadata::MessageData,
@@ -17,6 +15,7 @@ use jmap_client::{
     core::set::{SetErrorType, SetObject},
     mailbox::{self, Mailbox, Role},
 };
+use registry::schema::prelude::ObjectType;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use store::{
     ValueKey,
@@ -29,22 +28,33 @@ use types::{collection::Collection, id::Id};
 const TEST_USER_ID: u32 = 1;
 const NUM_PASSES: usize = 1;
 
-pub async fn test(server: Server, mut client: Client) {
-    println!("Running cluster concurrency stress tests...");
-    server
-        .core
-        .storage
-        .data
-        .get_or_create_principal_id("john", directory::Type::Individual)
+#[tokio::test(flavor = "multi_thread")]
+pub async fn stress_tests() {
+    println!("Running concurrency stress tests...");
+
+    let mut test = TestServerBuilder::new("stress_tests")
         .await
-        .unwrap();
-    client.set_default_account_id(Id::from(TEST_USER_ID).to_string());
-    let client = Arc::new(client);
-    email_tests(server.clone(), client.clone()).await;
-    mailbox_tests(server.clone(), client.clone()).await;
+        .with_default_listeners()
+        .await
+        .build()
+        .await;
+    let admin = test.create_admin_account("admin@example.com").await;
+    admin
+        .registry_destroy_all(ObjectType::MtaConnectionStrategy)
+        .await;
+    admin
+        .registry_destroy_all(ObjectType::MtaInboundThrottle)
+        .await;
+    test.insert_account(admin);
+
+    email_tests(&test).await;
+    mailbox_tests(&test).await;
 }
 
-async fn email_tests(server: Server, client: Arc<Client>) {
+async fn email_tests(test: &TestServer) {
+    let server = &test.server;
+    let client = Arc::new(test.account("admin@example.com").jmap_client().await);
+
     for pass in 0..NUM_PASSES {
         println!(
             "----------------- EMAIL STRESS TEST {} -----------------",
@@ -265,13 +275,15 @@ async fn email_tests(server: Server, client: Arc<Client>) {
             }
         }
 
-        wait_for_index(&server).await;
-        destroy_all_mailboxes_no_wait(&client).await;
-        assert_is_empty(&server).await;
+        test.wait_for_tasks().await;
+        client.destroy_all_mailboxes().await;
+        test.assert_is_empty().await;
     }
 }
 
-async fn mailbox_tests(server: Server, client: Arc<Client>) {
+async fn mailbox_tests(test: &TestServer) {
+    let client = Arc::new(test.account("admin@example.com").jmap_client().await);
+
     let mailboxes = Arc::new(vec![
         "test/test1/test2/test3".to_string(),
         "test1/test2/test3".to_string(),
@@ -345,7 +357,7 @@ async fn mailbox_tests(server: Server, client: Arc<Client>) {
 
     join_all(futures).await;
 
-    wait_for_index(&server).await;
+    test.wait_for_tasks().await;
     for mailbox_id in client
         .mailbox_query(None::<mailbox::query::Filter>, None::<Vec<_>>)
         .await
@@ -362,7 +374,7 @@ async fn mailbox_tests(server: Server, client: Arc<Client>) {
     {
         let _ = client.mailbox_destroy(&mailbox_id, true).await;
     }
-    assert_is_empty(&server).await;
+    test.assert_is_empty().await;
 }
 
 async fn create_mailbox(client: &Client, mailbox: &str) -> Vec<String> {

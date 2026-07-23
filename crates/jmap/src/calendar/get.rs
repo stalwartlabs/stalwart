@@ -19,7 +19,11 @@ use jmap_proto::{
     object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
 };
 use jmap_tools::{Key, Map, Value};
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive, ValueClass}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive, ValueClass},
+};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
@@ -41,7 +45,7 @@ impl CalendarGet for Server {
         mut request: GetRequest<calendar::Calendar>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<calendar::Calendar>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             CalendarProperty::Id,
             CalendarProperty::Name,
@@ -55,7 +59,11 @@ impl CalendarGet for Server {
         ]);
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
             .await?;
         let is_owner = access_token.is_member(account_id);
         let calendar_ids = if is_owner {
@@ -94,14 +102,14 @@ impl CalendarGet for Server {
             account_id: request.account_id.into(),
             state: cache.get_state(true).into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
         for id in ids {
             // Obtain the calendar object
             let document_id = id.document_id();
             if !calendar_ids.contains(document_id) {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             }
             let _calendar = if let Some(calendar) = self
@@ -115,7 +123,7 @@ impl CalendarGet for Server {
             {
                 calendar
             } else {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             };
             let calendar = _calendar

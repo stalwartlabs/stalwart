@@ -11,7 +11,6 @@ use types::id::Id;
 #[derive(Debug, Clone, Default)]
 pub struct SearchSnippet;
 
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SearchSnippetProperty {
     EmailId,

@@ -4,33 +4,48 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+#![warn(clippy::large_futures)]
+
 pub mod backend;
-pub mod config;
+pub mod build;
 pub mod dispatch;
 pub mod query;
+pub mod registry;
 pub mod search;
 pub mod write;
 
+use ::registry::schema::enums::CompressionAlgo;
 pub use ahash;
 pub use blake3;
 pub use parking_lot;
 pub use rand;
 pub use rkyv;
 pub use roaring;
+use utils::snowflake::SnowflakeIdGenerator;
 pub use xxhash_rust;
 
-use ahash::AHashMap;
-use backend::{fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
-use std::{borrow::Cow, sync::Arc};
-use utils::config::cron::SimpleCron;
-use write::ValueClass;
-
 use crate::backend::{elastic::ElasticSearchStore, meili::MeiliSearchStore};
+use ahash::AHashMap;
+use backend::{ephemeral::EphemeralStore, fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
+use write::ValueClass;
 
 pub trait Deserialize: Sized + Sync + Send {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self>;
+
+    #[inline(always)]
     fn deserialize_owned(bytes: Vec<u8>) -> trc::Result<Self> {
         Self::deserialize(&bytes)
+    }
+
+    #[inline(always)]
+    fn deserialize_with_key(_: &[u8], bytes: &[u8]) -> trc::Result<Self> {
+        Self::deserialize(bytes)
+    }
+
+    #[inline(always)]
+    fn deserialize_owned_with_key(key: &[u8], bytes: Vec<u8>) -> trc::Result<Self> {
+        Self::deserialize_with_key(key, &bytes)
     }
 }
 
@@ -86,10 +101,8 @@ pub const U32_LEN: usize = std::mem::size_of::<u32>();
 pub const U16_LEN: usize = std::mem::size_of::<u16>();
 
 pub const SUBSPACE_ACL: u8 = b'a';
-pub const SUBSPACE_DIRECTORY: u8 = b'd';
 pub const SUBSPACE_TASK_QUEUE: u8 = b'f';
 pub const SUBSPACE_INDEXES: u8 = b'i';
-pub const SUBSPACE_BLOB_EXTRA: u8 = b'j';
 pub const SUBSPACE_BLOB_LINK: u8 = b'k';
 pub const SUBSPACE_BLOBS: u8 = b't';
 pub const SUBSPACE_LOGS: u8 = b'l';
@@ -97,7 +110,10 @@ pub const SUBSPACE_COUNTER: u8 = b'n';
 pub const SUBSPACE_IN_MEMORY_VALUE: u8 = b'm';
 pub const SUBSPACE_IN_MEMORY_COUNTER: u8 = b'y';
 pub const SUBSPACE_PROPERTY: u8 = b'p';
-pub const SUBSPACE_SETTINGS: u8 = b's';
+pub const SUBSPACE_REGISTRY: u8 = b's';
+pub const SUBSPACE_REGISTRY_IDX: u8 = b'b';
+pub const SUBSPACE_REGISTRY_PK: u8 = b'g';
+pub const SUBSPACE_DIRECTORY: u8 = b'd';
 pub const SUBSPACE_QUEUE_MESSAGE: u8 = b'e';
 pub const SUBSPACE_QUEUE_EVENT: u8 = b'q';
 pub const SUBSPACE_QUOTA: u8 = b'u';
@@ -106,13 +122,12 @@ pub const SUBSPACE_REPORT_IN: u8 = b'r';
 pub const SUBSPACE_TELEMETRY_SPAN: u8 = b'o';
 pub const SUBSPACE_TELEMETRY_METRIC: u8 = b'x';
 pub const SUBSPACE_SEARCH_INDEX: u8 = b'z';
+pub const SUBSPACE_DELETED_ITEMS: u8 = b'j';
+pub const SUBSPACE_SPAM_SAMPLES: u8 = b'w';
 
 // TODO: Remove in v1.0
-pub const LEGACY_SUBSPACE_BITMAP_ID: u8 = b'b';
-pub const LEGACY_SUBSPACE_BITMAP_TAG: u8 = b'c';
 pub const LEGACY_SUBSPACE_BITMAP_TEXT: u8 = b'v';
-pub const LEGACY_SUBSPACE_FTS_INDEX: u8 = b'g';
-pub const LEGACY_SUBSPACE_TELEMETRY_INDEX: u8 = b'w';
+pub const LEGACY_SUBSPACE_BITMAP_TAG: u8 = b'c';
 
 #[derive(Clone)]
 pub struct IterateParams<T: Key> {
@@ -124,13 +139,8 @@ pub struct IterateParams<T: Key> {
 }
 
 #[derive(Clone, Default)]
-pub struct Stores {
-    pub stores: AHashMap<String, Store>,
-    pub blob_stores: AHashMap<String, BlobStore>,
-    pub search_stores: AHashMap<String, SearchStore>,
-    pub in_memory_stores: AHashMap<String, InMemoryStore>,
-    pub pubsub_stores: AHashMap<String, PubSubStore>,
-    pub purge_schedules: Vec<PurgeSchedule>,
+pub struct LookupStores {
+    pub stores: AHashMap<Box<str>, InMemoryStore>,
 }
 
 #[derive(Clone, Default)]
@@ -145,6 +155,7 @@ pub enum Store {
     MySQL(Arc<backend::mysql::MysqlStore>),
     #[cfg(feature = "rocks")]
     RocksDb(Arc<backend::rocksdb::RocksDbStore>),
+    Ephemeral(Arc<EphemeralStore>),
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
@@ -156,19 +167,7 @@ pub enum Store {
 }
 
 #[derive(Clone)]
-pub struct BlobStore {
-    pub backend: BlobBackend,
-    pub compression: CompressionAlgo,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum CompressionAlgo {
-    None,
-    Lz4,
-}
-
-#[derive(Clone)]
-pub enum BlobBackend {
+pub enum BlobStore {
     Store(Store),
     Fs(Arc<FsStore>),
     #[cfg(feature = "s3")]
@@ -205,18 +204,21 @@ pub enum InMemoryStore {
     // SPDX-SnippetEnd
 }
 
-#[derive(Clone, Default)]
-pub enum PubSubStore {
-    #[cfg(feature = "redis")]
-    Redis(Arc<backend::redis::RedisStore>),
-    #[cfg(feature = "nats")]
-    Nats(Arc<backend::nats::NatsPubSub>),
-    #[cfg(feature = "zenoh")]
-    Zenoh(Arc<backend::zenoh::ZenohPubSub>),
-    #[cfg(feature = "kafka")]
-    Kafka(Arc<backend::kafka::KafkaPubSub>),
-    #[default]
-    None,
+#[derive(Clone)]
+pub struct RegistryStore(pub(crate) Arc<RegistryStoreInner>);
+
+#[derive(Clone)]
+pub struct RegistryStoreInner {
+    pub(crate) local_path: PathBuf,
+    pub(crate) store: Store,
+    pub(crate) node_id: u16,
+    pub(crate) env_recovery_mode: bool,
+    pub(crate) env_recovery_admin: Option<(String, String)>,
+    pub(crate) env_cluster_role: Option<String>,
+    pub(crate) env_push_shard_id: u32,
+    pub(crate) env_hostname: String,
+    pub(crate) env_public_url: Option<String>,
+    pub(crate) id_generator: SnowflakeIdGenerator,
 }
 
 #[cfg(feature = "sqlite")]
@@ -254,32 +256,9 @@ impl From<backend::rocksdb::RocksDbStore> for Store {
     }
 }
 
-impl From<FsStore> for BlobStore {
-    fn from(store: FsStore) -> Self {
-        BlobStore {
-            backend: BlobBackend::Fs(Arc::new(store)),
-            compression: CompressionAlgo::None,
-        }
-    }
-}
-
-#[cfg(feature = "s3")]
-impl From<backend::s3::S3Store> for BlobStore {
-    fn from(store: backend::s3::S3Store) -> Self {
-        BlobStore {
-            backend: BlobBackend::S3(Arc::new(store)),
-            compression: CompressionAlgo::None,
-        }
-    }
-}
-
-#[cfg(feature = "azure")]
-impl From<backend::azure::AzureStore> for BlobStore {
-    fn from(store: backend::azure::AzureStore) -> Self {
-        BlobStore {
-            backend: BlobBackend::Azure(Arc::new(store)),
-            compression: CompressionAlgo::None,
-        }
+impl From<EphemeralStore> for Store {
+    fn from(store: EphemeralStore) -> Self {
+        Self::Ephemeral(Arc::new(store))
     }
 }
 
@@ -308,16 +287,13 @@ impl From<Store> for SearchStore {
     }
 }
 
-impl From<Store> for BlobStore {
+impl From<Store> for InMemoryStore {
     fn from(store: Store) -> Self {
-        BlobStore {
-            backend: BlobBackend::Store(store),
-            compression: CompressionAlgo::None,
-        }
+        Self::Store(store)
     }
 }
 
-impl From<Store> for InMemoryStore {
+impl From<Store> for BlobStore {
     fn from(store: Store) -> Self {
         Self::Store(store)
     }
@@ -325,10 +301,7 @@ impl From<Store> for InMemoryStore {
 
 impl Default for BlobStore {
     fn default() -> Self {
-        Self {
-            backend: BlobBackend::Store(Store::None),
-            compression: CompressionAlgo::None,
-        }
+        Self::Store(Store::None)
     }
 }
 
@@ -342,20 +315,6 @@ impl Default for SearchStore {
     fn default() -> Self {
         Self::Store(Store::None)
     }
-}
-
-#[derive(Clone)]
-pub enum PurgeStore {
-    Data(Store),
-    Blobs { store: Store, blob_store: BlobStore },
-    Lookup(InMemoryStore),
-}
-
-#[derive(Clone)]
-pub struct PurgeSchedule {
-    pub cron: SimpleCron,
-    pub store_id: String,
-    pub store: PurgeStore,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -689,6 +648,31 @@ impl Store {
     }
 
     #[inline(always)]
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub fn is_same(&self, other: &Store) -> bool {
+        match (self, other) {
+            #[cfg(feature = "sqlite")]
+            (Store::SQLite(a), Store::SQLite(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "foundation")]
+            (Store::FoundationDb(a), Store::FoundationDb(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "postgres")]
+            (Store::PostgreSQL(a), Store::PostgreSQL(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "mysql")]
+            (Store::MySQL(a), Store::MySQL(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "rocks")]
+            (Store::RocksDb(a), Store::RocksDb(b)) => Arc::ptr_eq(a, b),
+            (Store::Ephemeral(a), Store::Ephemeral(b)) => Arc::ptr_eq(a, b),
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            (Store::SQLReadReplica(a), Store::SQLReadReplica(b)) => Arc::ptr_eq(a, b),
+            (Store::None, Store::None) => true,
+            _ => false,
+        }
+    }
+
+    #[inline(always)]
     pub fn is_sql(&self) -> bool {
         match self {
             #[cfg(feature = "sqlite")]
@@ -727,11 +711,25 @@ impl Store {
         }
     }
 
+    #[inline(always)]
+    pub fn is_ephemeral(&self) -> bool {
+        matches!(self, Self::Ephemeral(_))
+    }
+
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
-    pub fn is_enterprise_store(&self) -> bool {
+    pub fn downgrade_store(self) -> Self {
+        match self {
+            #[cfg(any(feature = "postgres", feature = "mysql"))]
+            Store::SQLReadReplica(store) => store.primary_store().clone(),
+            other => other,
+        }
+    }
+
+    #[cfg(feature = "enterprise")]
+    pub fn is_enterprise(&self) -> bool {
         match self {
             #[cfg(any(feature = "postgres", feature = "mysql"))]
             Store::SQLReadReplica(_) => true,
@@ -739,11 +737,6 @@ impl Store {
         }
     }
     // SPDX-SnippetEnd
-
-    #[cfg(not(feature = "enterprise"))]
-    pub fn is_enterprise_store(&self) -> bool {
-        false
-    }
 }
 
 impl std::fmt::Debug for Store {
@@ -759,6 +752,7 @@ impl std::fmt::Debug for Store {
             Self::MySQL(_) => f.debug_tuple("MySQL").finish(),
             #[cfg(feature = "rocks")]
             Self::RocksDb(_) => f.debug_tuple("RocksDb").finish(),
+            Self::Ephemeral(_) => f.debug_tuple("Ephemeral").finish(),
 
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -790,22 +784,5 @@ impl From<Value<'_>> for trc::Value {
 impl From<Value<'static>> for () {
     fn from(_: Value<'static>) -> Self {
         unreachable!()
-    }
-}
-
-impl Stores {
-    pub fn disable_enterprise_only(&mut self) {
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
-        {
-            #[cfg(any(feature = "postgres", feature = "mysql"))]
-            self.stores
-                .retain(|_, store| !matches!(store, Store::SQLReadReplica(_)));
-            self.blob_stores
-                .retain(|_, store| !matches!(store.backend, BlobBackend::Sharded(_)));
-        }
-        // SPDX-SnippetEnd
     }
 }

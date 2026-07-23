@@ -17,7 +17,7 @@ use jmap_proto::{
         search_snippet::{GetSearchSnippetRequest, GetSearchSnippetResponse, SearchSnippet},
     },
     object::email::EmailFilter,
-    request::IntoValid,
+    request::MaybeInvalid,
 };
 use mail_parser::decoders::html::html_to_text;
 use nlp::language::{Language, search_snippet::generate_snippet, stemmer::Stemmer};
@@ -49,7 +49,7 @@ impl EmailSearchSnippet for Server {
         let mut include_term = true;
         let mut terms = vec![];
         let mut is_exact = false;
-        let mut language = self.core.jmap.default_language;
+        let mut language = self.core.email.default_language;
 
         for cond in request.filter {
             match cond {
@@ -60,7 +60,7 @@ impl EmailSearchSnippet for Server {
                         && include_term
                     {
                         let (text, language_) =
-                            Language::detect(text, self.core.jmap.default_language);
+                            Language::detect(text, self.core.email.default_language);
                         language = language_;
                         if (text.starts_with('"') && text.ends_with('"'))
                             || (text.starts_with('\'') && text.ends_with('\''))
@@ -108,14 +108,22 @@ impl EmailSearchSnippet for Server {
         let mut response = GetSearchSnippetResponse {
             account_id: request.account_id,
             list: Vec::with_capacity(email_ids.len()),
-            not_found: vec![],
+            not_found: None,
         };
+        let mut not_found = Vec::new();
 
         if email_ids.len() > self.core.jmap.snippet_max_results {
             return Err(trc::JmapEvent::RequestTooLarge.into_err());
         }
 
-        for email_id in email_ids.into_valid() {
+        for email_id in email_ids {
+            let email_id = match email_id {
+                MaybeInvalid::Value(email_id) => email_id,
+                invalid => {
+                    not_found.push(invalid);
+                    continue;
+                }
+            };
             let document_id = email_id.document_id();
             let mut snippet = SearchSnippet {
                 email_id,
@@ -123,7 +131,7 @@ impl EmailSearchSnippet for Server {
                 preview: None,
             };
             if !document_ids.contains(document_id) {
-                response.not_found.push(email_id);
+                not_found.push(MaybeInvalid::Value(email_id));
                 continue;
             } else if terms.is_empty() {
                 response.list.push(snippet);
@@ -141,7 +149,7 @@ impl EmailSearchSnippet for Server {
             {
                 Some(metadata) => metadata,
                 None => {
-                    response.not_found.push(email_id);
+                    not_found.push(MaybeInvalid::Value(email_id));
                     continue;
                 }
             };
@@ -178,7 +186,7 @@ impl EmailSearchSnippet for Server {
                     CausedBy = trc::location!(),
                 );
 
-                response.not_found.push(email_id);
+                not_found.push(MaybeInvalid::Value(email_id));
                 continue;
             };
             let raw_message = ChainedBytes::new(metadata.raw_headers.as_ref()).with_last(
@@ -244,6 +252,10 @@ impl EmailSearchSnippet for Server {
             //}
 
             response.list.push(snippet);
+        }
+
+        if !not_found.is_empty() {
+            response.not_found = Some(not_found);
         }
 
         Ok(response)

@@ -4,106 +4,169 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use core::panic;
-use std::{fmt::Write, fs, path::PathBuf};
-
 use crate::{
-    AssertConfig, enable_logging,
     smtp::{
-        TempDir, TestSMTP,
-        inbound::{TestMessage, TestQueueEvent, sign::SIGNATURES},
+        inbound::{TestMessage, TestQueueEvent},
         session::{TestSession, VerifyResponse},
     },
+    utils::server::TestServerBuilder,
 };
-use common::Core;
-
-use smtp::{
-    core::Session,
-    scripts::{ScriptResult, event_loop::RunScript},
+use core::panic;
+use registry::schema::structs::{
+    CertificateManagement, DkimManagement, DnsManagement, Domain, Expression, LookupStore,
+    MtaStageConnect, MtaStageData, MtaStageEhlo, MtaStageMail, MtaStageRcpt,
+    SieveSystemInterpreter, SieveSystemScript, SqliteStore, StoreLookup,
 };
-use store::Stores;
-use utils::config::Config;
-
-const CONFIG: &str = r#"
-[storage]
-data = "sql"
-lookup = "sql"
-blob = "sql"
-fts = "sql"
-directory = "local"
-
-[store."sql"]
-type = "sqlite"
-path = "{TMP}/smtp_sieve.db"
-
-[store."sql".pool]
-max-connections = 10
-min-connections = 0
-idle-timeout = "5m"
-
-[spam-filter]
-enable = false
-
-[sieve.trusted]
-from-name = "'Sieve Daemon'"
-from-addr = "'sieve@foobar.org'"
-return-path = "''"
-hostname = "mx.foobar.org"
-sign = "['rsa']"
-
-[sieve.trusted.limits]
-redirects = 3
-out-messages = 5
-received-headers = 50
-cpu = 10000
-nested-includes = 5
-duplicate-expiry = "7d"
-
-[session.connect]
-script = "'stage_connect'"
-greeting = "'mx.example.org at your service'"
-
-[session.ehlo]
-script = "'stage_ehlo'"
-
-[session.mail]
-script = "'stage_mail'"
-
-[session.rcpt]
-script = "'stage_rcpt'"
-relay = true
-
-[session.data]
-script = "'stage_data'"
-
-[session.data.add-headers]
-received = true
-received-spf = true
-auth-results = true
-message-id = true
-date = true
-return-path = false
-
-[directory."local"]
-type = "memory"
-
-[[directory."local".principals]]
-name = "john"
-description = "John Doe"
-secret = "secret"
-email = ["john@localdomain.org", "jdoe@localdomain.org", "john.doe@localdomain.org"]
-email-list = ["info@localdomain.org"]
-member-of = ["sales"]
-
-"#;
+use smtp::scripts::{ScriptResult, event_loop::RunScript};
+use std::{fs, path::PathBuf};
 
 #[tokio::test]
 async fn sieve_scripts() {
-    // Enable logging
-    enable_logging();
+    let mut test = TestServerBuilder::new("smtp_sieve_test")
+        .await
+        .with_http_listener(19008)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+
+    // Create test data
+    let admin = test.account("admin");
+    let domain_id = admin
+        .registry_create_object(Domain {
+            name: "foobar.org".into(),
+            certificate_management: CertificateManagement::Manual,
+            dns_management: DnsManagement::Manual,
+            dkim_management: DkimManagement::Manual,
+            allow_relaying: true,
+            ..Default::default()
+        })
+        .await;
+    admin.create_dkim_signatures(domain_id).await;
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(SieveSystemInterpreter {
+            default_from_address: Expression {
+                else_: "'sieve@foobar.org'".into(),
+                ..Default::default()
+            },
+
+            default_from_name: Expression {
+                else_: "'Sieve Daemon'".into(),
+                ..Default::default()
+            },
+            default_return_path: Expression {
+                else_: "''".into(),
+                ..Default::default()
+            },
+            message_id_hostname: Some("'mx.foobar.org'".into()),
+            dkim_sign_domain: Expression {
+                else_: "'foobar.org'".into(),
+                ..Default::default()
+            },
+            duplicate_expiry: (86_400u64 * 100 * 7).into(),
+            max_cpu_cycles: 10000,
+            max_nested_includes: 5,
+            max_out_messages: 5,
+            max_received_headers: 50,
+            max_redirects: 3,
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(StoreLookup {
+            namespace: "sql".into(),
+            store: LookupStore::Sqlite(SqliteStore {
+                path: format!("{}/smtp_sieve.db", test.tmp_dir()),
+                pool_max_connections: 10,
+                pool_workers: None,
+            }),
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageConnect {
+            script: Expression {
+                else_: "'stage_connect'".into(),
+                ..Default::default()
+            },
+            smtp_greeting: Expression {
+                else_: "'mx.example.org at your service'".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageEhlo {
+            script: Expression {
+                else_: "'stage_ehlo'".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageMail {
+            script: Expression {
+                else_: "'stage_mail'".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageRcpt {
+            script: Expression {
+                else_: "'stage_rcpt'".into(),
+                ..Default::default()
+            },
+            allow_relaying: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageData {
+            script: Expression {
+                else_: "'stage_data'".into(),
+                ..Default::default()
+            },
+            add_date_header: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            add_message_id_header: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            add_received_header: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            add_received_spf_header: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            add_auth_results_header: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            add_return_path_header: Expression {
+                else_: "false".into(),
+                ..Default::default()
+            },
+            enable_spam_filter: Expression {
+                else_: "false".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
 
     // Add test scripts
-    let mut config = CONFIG.to_string() + SIGNATURES;
     for entry in fs::read_dir(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
@@ -113,33 +176,29 @@ async fn sieve_scripts() {
     .unwrap()
     {
         let entry = entry.unwrap();
-        writeln!(
-            &mut config,
-            "[sieve.trusted.scripts.{}]\ncontents = \"%{{file:{}}}%\"",
-            entry
-                .file_name()
-                .to_str()
-                .unwrap()
-                .split_once('.')
-                .unwrap()
-                .0,
-            entry.path().to_str().unwrap()
-        )
-        .unwrap();
+        admin
+            .registry_create_object(SieveSystemScript {
+                contents: fs::read_to_string(entry.path()).unwrap(),
+                description: None,
+                is_active: true,
+                name: entry
+                    .file_name()
+                    .to_str()
+                    .unwrap()
+                    .split_once('.')
+                    .unwrap()
+                    .0
+                    .to_string(),
+            })
+            .await;
     }
-
-    // Prepare config
-    let tmp_dir = TempDir::new("smtp_sieve_test", true);
-    let mut config = Config::new(tmp_dir.update_config(config)).unwrap();
-    config.resolve_all_macros().await;
-    let stores = Stores::parse_all(&mut config, false).await;
-    let core = Core::parse(&mut config, stores, Default::default()).await;
-    config.assert_no_errors();
+    admin.reload_settings().await;
+    admin.reload_lookup_stores().await;
+    test.reload_core();
+    test.expect_reload_settings().await;
 
     // Build session
-    let test = TestSMTP::from_core(core);
-    let mut qr = test.queue_receiver;
-    let mut session = Session::test(test.server.clone());
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.88".parse().unwrap();
     session.data.remote_ip = session.data.remote_ip_str.parse().unwrap();
     assert!(!session.init_conn().await);
@@ -208,13 +267,13 @@ async fn sieve_scripts() {
     // Expect a modified message
     session.data("test:multipart", "250").await;
 
-    qr.expect_message()
+    test.expect_message()
         .await
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
         .assert_contains("X-Part-Number: 5")
         .assert_contains("THIS IS A PIECE OF HTML TEXT");
-    qr.assert_no_events();
+    test.assert_no_events();
 
     // Expect rejection for bill@foobar.net
     session
@@ -225,8 +284,8 @@ async fn sieve_scripts() {
             "503 5.5.3 Bill cannot receive messages",
         )
         .await;
-    qr.assert_no_events();
-    qr.clear_queue(&test.server).await;
+    test.assert_no_events();
+    test.clear_queue().await;
 
     // Expect message delivery plus a notification
     session
@@ -237,9 +296,9 @@ async fn sieve_scripts() {
             "250",
         )
         .await;
-    qr.read_event().await.assert_refresh();
-    qr.read_event().await.assert_refresh();
-    let messages = qr.read_queued_messages().await;
+    test.read_event().await.assert_refresh();
+    test.read_event().await.assert_refresh();
+    let messages = test.read_queued_messages().await;
     assert_eq!(messages.len(), 2);
     let mut messages = messages.into_iter();
     let notification = messages.next().unwrap();
@@ -254,9 +313,9 @@ async fn sieve_scripts() {
         "jane@example.org"
     );
     notification
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
-        .assert_contains("DKIM-Signature: v=1; a=rsa-sha256; s=rsa; d=example.com;")
+        .assert_contains("DKIM-Signature: v=1; a=rsa-sha256; s=rsa; d=foobar.org;")
         .assert_contains("From: \"Sieve Daemon\" <sieve@foobar.org>")
         .assert_contains("To: <john@example.net>")
         .assert_contains("Cc: <jane@example.org>")
@@ -266,14 +325,14 @@ async fn sieve_scripts() {
     messages
         .next()
         .unwrap()
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
         .assert_contains("One Two Three Four")
         .assert_contains("multi-part message in MIME format")
         .assert_not_contains("X-Part-Number: 5")
         .assert_not_contains("THIS IS A PIECE OF HTML TEXT");
-    qr.assert_no_events();
-    qr.clear_queue(&test.server).await;
+    test.assert_no_events();
+    test.clear_queue().await;
 
     // Expect a modified message delivery plus a notification
     session
@@ -284,18 +343,18 @@ async fn sieve_scripts() {
             "250",
         )
         .await;
-    qr.read_event().await.assert_refresh();
-    qr.read_event().await.assert_refresh();
-    let messages = qr.read_queued_messages().await;
+    test.read_event().await.assert_refresh();
+    test.read_event().await.assert_refresh();
+    let messages = test.read_queued_messages().await;
     assert_eq!(messages.len(), 2);
     let mut messages = messages.into_iter();
 
     messages
         .next()
         .unwrap()
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
-        .assert_contains("DKIM-Signature: v=1; a=rsa-sha256; s=rsa; d=example.com;")
+        .assert_contains("DKIM-Signature: v=1; a=rsa-sha256; s=rsa; d=foobar.org;")
         .assert_contains("From: \"Sieve Daemon\" <sieve@foobar.org>")
         .assert_contains("To: <john@example.net>")
         .assert_contains("Cc: <jane@example.org>")
@@ -305,12 +364,12 @@ async fn sieve_scripts() {
     messages
         .next()
         .unwrap()
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
         .assert_contains("X-Part-Number: 5")
         .assert_contains("THIS IS A PIECE OF HTML TEXT")
         .assert_not_contains("X-My-Header: true");
-    qr.clear_queue(&test.server).await;
+    test.clear_queue().await;
 
     // Expect a modified redirected message
     session
@@ -322,7 +381,7 @@ async fn sieve_scripts() {
         )
         .await;
 
-    let redirect = qr.expect_message().await;
+    let redirect = test.expect_message().await;
     assert_eq!(redirect.message.return_path.as_ref(), "");
     assert_eq!(redirect.message.recipients.len(), 1);
     assert_eq!(
@@ -330,7 +389,7 @@ async fn sieve_scripts() {
         "redirect@here.email"
     );
     redirect
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
         .assert_contains("From: no-reply@my.domain")
         .assert_contains("To: Suzie Q <suzie@shopping.example.net>")
@@ -338,7 +397,7 @@ async fn sieve_scripts() {
         .assert_contains("Message-ID: <20030712040037.46341.5F8J@football.example.com>")
         .assert_contains("Received: ")
         .assert_not_contains("From: Joe SixPack <joe@football.example.com>");
-    qr.assert_no_events();
+    test.assert_no_events();
 
     // Expect an intact redirected message
     session
@@ -350,7 +409,7 @@ async fn sieve_scripts() {
         )
         .await;
 
-    let redirect = qr.expect_message().await;
+    let redirect = test.expect_message().await;
     assert_eq!(redirect.message.return_path.as_ref(), "");
     assert_eq!(redirect.message.recipients.len(), 1);
     assert_eq!(
@@ -358,7 +417,7 @@ async fn sieve_scripts() {
         "redirect@somewhere.email"
     );
     redirect
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
         .assert_not_contains("From: no-reply@my.domain")
         .assert_contains("To: Suzie Q <suzie@shopping.example.net>")
@@ -367,5 +426,5 @@ async fn sieve_scripts() {
         .assert_contains("From: Joe SixPack <joe@football.example.com>")
         .assert_contains("Received: ")
         .assert_contains("Authentication-Results: ");
-    qr.assert_no_events();
+    test.assert_no_events();
 }

@@ -138,9 +138,12 @@ pub fn test() {
                                             sections: sections.clone(),
                                             offset: None,
                                             contents: match contents {
-                                                BodyContents::Bytes(_) => {
-                                                    BodyContents::Text("[binary content]".into())
-                                                }
+                                                BodyContents::Bytes(bytes) => BodyContents::Text(
+                                                    std::str::from_utf8(bytes.as_ref())
+                                                        .unwrap_or("[binary content]")
+                                                        .to_string()
+                                                        .into(),
+                                                ),
                                                 text => text,
                                             },
                                         }

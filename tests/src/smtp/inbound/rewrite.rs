@@ -4,77 +4,129 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Core;
+use crate::{smtp::session::TestSession, utils::server::TestServerBuilder};
+use registry::{
+    schema::structs::{
+        Expression, ExpressionMatch, MtaStageMail, MtaStageRcpt, SieveSystemInterpreter,
+        SieveSystemScript,
+    },
+    types::list::List,
+};
 
-use smtp::core::Session;
-use utils::config::Config;
-
-use crate::smtp::{TestSMTP, session::TestSession};
-
-const CONFIG: &str = r#"
-[session.mail]
-rewrite = [ { if = "ends_with(sender_domain, '.foobar.net') & matches('^([^.]+)@([^.]+)\.(.+)$', sender)", then = "$1 + '+' + $2 + '@' + $3"},
-            { else = false } ]
-script = [ { if = "sender_domain = 'foobar.org'", then = "'mail'" }, 
-            { else = false } ]
-
-[session.rcpt]
-rewrite = [ { if = "rcpt_domain = 'foobar.net' & matches('^([^.]+)\\.([^.]+)@(.+)$', rcpt)", then = "$1 + '+' + $2 + '@' + $3"},
-            { else = false } ]
-script = [ { if = "rcpt_domain = 'foobar.org'", then = "'rcpt'" }, 
-            { else = false } ]
-relay = true
-
-[sieve.trusted]
-from-name = "Sieve Daemon"
-from-addr = "sieve@foobar.org"
-return-path = ""
-hostname = "mx.foobar.org"
-
-[sieve.trusted.limits]
-redirects = 3
-out-messages = 5
-received-headers = 50
-cpu = 10000
-nested-includes = 5
-duplicate-expiry = "7d"
-
-[sieve.trusted.scripts."mail"]
-contents = '''
-require ["variables", "envelope"];
-
+const MAIL_SCRIPT: &str = r#"require ["variables", "envelope"];
 if allof( envelope :domain :is "from" "foobar.org", 
           envelope :localpart :contains "from" "admin" ) {
      set "envelope.from" "MAILER-DAEMON@foobar.org";
 }
-
-'''
-
-[sieve.trusted.scripts."rcpt"]
-contents = '''
-require ["variables", "envelope", "regex"];
-
+"#;
+const MAIL_RCPT: &str = r#"require ["variables", "envelope", "regex"];
 if allof( envelope :localpart :contains "to" ".",
           envelope :regex "to" "(.+)@(.+)$") {
     set :replace "." "" "to" "${1}";
     set "envelope.to" "${to}@${2}";
 }
-
-'''
-
 "#;
 
-#[tokio::test]
-async fn address_rewrite() {
-    // Enable logging
-    crate::enable_logging();
+#[tokio::test(flavor = "multi_thread")]
+pub async fn address_rewrite() {
+    let mut test = TestServerBuilder::new("smtp_rewrite_test")
+        .await
+        .with_http_listener(19007)
+        .await
+        .disable_services()
+        .build()
+        .await;
 
-    // Prepare config
-    let mut config = Config::new(CONFIG).unwrap();
-    let core = Core::parse(&mut config, Default::default(), Default::default()).await;
+    // Add test settings
+    let admin = test.account("admin");
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(MtaStageMail {
+            rewrite: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: concat!(
+                        "ends_with(sender_domain, '.foobar.net') & ",
+                        "matches('^([^.]+)@([^.]+)\\.(.+)$', sender)"
+                    )
+                    .into(),
+                    then: "$1 + '+' + $2 + '@' + $3".into(),
+                }]),
+                else_: "false".into(),
+            },
+            script: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "sender_domain = 'foobar.org'".into(),
+                    then: "'mail'".into(),
+                }]),
+                else_: "false".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageRcpt {
+            rewrite: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "rcpt_domain = 'foobar.net' & matches('^([^.]+)\\.([^.]+)@(.+)$', rcpt)"
+                        .into(),
+                    then: "$1 + '+' + $2 + '@' + $3".into(),
+                }]),
+                else_: "false".into(),
+            },
+            script: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "rcpt_domain = 'foobar.org'".into(),
+                    then: "'rcpt'".into(),
+                }]),
+                else_: "false".into(),
+            },
+            allow_relaying: Expression {
+                else_: "true".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(SieveSystemInterpreter {
+            default_from_address: Expression {
+                else_: "'sieve@foobar.org'".into(),
+                ..Default::default()
+            },
+
+            default_from_name: Expression {
+                else_: "'Sieve Daemon'".into(),
+                ..Default::default()
+            },
+            default_return_path: Expression {
+                else_: "''".into(),
+                ..Default::default()
+            },
+            message_id_hostname: Some("'mx.foobar.org'".into()),
+            duplicate_expiry: (86_400u64 * 100 * 7).into(),
+            max_cpu_cycles: 10000,
+            max_nested_includes: 5,
+            max_out_messages: 5,
+            max_received_headers: 50,
+            max_redirects: 3,
+            ..Default::default()
+        })
+        .await;
+    for (name, contents) in [("mail", MAIL_SCRIPT), ("rcpt", MAIL_RCPT)] {
+        admin
+            .registry_create_object(SieveSystemScript {
+                name: name.to_string(),
+                contents: contents.to_string(),
+                is_active: true,
+                ..Default::default()
+            })
+            .await;
+    }
+    admin.reload_settings().await;
+    test.reload_core();
 
     // Init session
-    let mut session = Session::test(TestSMTP::from_core(core).server);
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.1".into();
     session.eval_session_params().await;
     session.ehlo("mx.doe.org").await;

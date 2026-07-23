@@ -9,9 +9,9 @@ use crate::{
     core::{Session, SessionData},
     spawn_op,
 };
-use common::{listener::SessionStream, storage::index::ObjectIndexBuilder};
-use directory::Permission;
+use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use imap_proto::{Command, ResponseCode, StatusResponse, receiver::Request};
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,

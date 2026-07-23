@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use async_trait::async_trait;
+use super::LdapConnectionManager;
 use deadpool::managed;
 use ldap3::{Ldap, LdapConnAsync, LdapError, exop::WhoAmI};
 
-use super::LdapConnectionManager;
-
-#[async_trait]
 impl managed::Manager for LdapConnectionManager {
     type Type = Ldap;
     type Error = LdapError;

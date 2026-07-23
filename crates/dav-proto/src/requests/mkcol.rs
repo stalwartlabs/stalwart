@@ -5,8 +5,8 @@
  */
 
 use crate::{
-    parser::{tokenizer::Tokenizer, DavParser, Token},
-    schema::{request::MkCol, Element, NamedElement, Namespace},
+    parser::{DavParser, Token, tokenizer::Tokenizer},
+    schema::{Element, NamedElement, Namespace, request::MkCol},
 };
 
 impl DavParser for MkCol {

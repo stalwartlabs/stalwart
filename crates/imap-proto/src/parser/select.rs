@@ -5,10 +5,15 @@
  */
 
 use compact_str::{CompactString, ToCompactString, format_compact};
+use std::str::FromStr;
+use types::id::Id;
 
 use crate::{
     Command,
-    protocol::select::{self, QResync},
+    protocol::{
+        ObjectId,
+        select::{self, QResync},
+    },
     receiver::{Request, Token, bad},
     utf7::utf7_maybe_decode,
 };
@@ -33,6 +38,7 @@ impl Request<Command> {
             // CONDSTORE parameters
             let mut condstore = false;
             let mut qresync = None;
+            let mut objectid = None;
             match tokens.next() {
                 Some(Token::ParenthesisOpen) => {
                     while let Some(token) = tokens.next() {
@@ -154,6 +160,48 @@ impl Request<Command> {
                                 }
                                 .into();
                             }
+                            Token::Argument(param) if param.eq_ignore_ascii_case(b"OBJECTID") => {
+                                let mut oid = ObjectId::default();
+                                if matches!(tokens.peek(), Some(Token::ParenthesisOpen)) {
+                                    tokens.next();
+                                    while let Some(token) = tokens.next() {
+                                        match token {
+                                            Token::ParenthesisClose => break,
+                                            Token::Argument(key) => {
+                                                let value = tokens
+                                                    .next()
+                                                    .ok_or_else(|| {
+                                                        bad(
+                                                            self.tag.to_compact_string(),
+                                                            "Expected value after OBJECTID key.",
+                                                        )
+                                                    })?
+                                                    .unwrap_bytes();
+                                                let id = std::str::from_utf8(&value)
+                                                    .ok()
+                                                    .and_then(|v| Id::from_str(v).ok());
+                                                hashify::fnc_map_ignore_case!(key.as_slice(),
+                                                    "MAILBOXID" => { oid.mailbox_id = id; },
+                                                    "ACCOUNTID" => { oid.account_id = id; },
+                                                    "EMAILID" => { oid.email_id = id; },
+                                                    "THREADID" => { oid.thread_id = id; },
+                                                    _ => {}
+                                                );
+                                            }
+                                            _ => {
+                                                return Err(bad(
+                                                    CompactString::from_string_buffer(self.tag),
+                                                    format_compact!(
+                                                        "Unexpected value '{}'.",
+                                                        token
+                                                    ),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                                objectid = Some(oid);
+                            }
                             Token::ParenthesisClose => {
                                 break;
                             }
@@ -180,6 +228,7 @@ impl Request<Command> {
                 tag: self.tag,
                 condstore,
                 qresync,
+                objectid,
             })
         } else {
             Err(self.into_error("Missing mailbox name."))
@@ -191,11 +240,101 @@ impl Request<Command> {
 mod tests {
     use crate::{
         protocol::{
-            Sequence,
+            ObjectId, Sequence,
             select::{self, QResync},
         },
         receiver::Receiver,
     };
+    use std::str::FromStr;
+    use types::id::Id;
+
+    #[test]
+    fn parse_select_objectid() {
+        let mut receiver = Receiver::new();
+
+        for (command, arguments) in [
+            (
+                "A1 SELECT \"foo\" (OBJECTID)\r\n",
+                select::Arguments {
+                    mailbox_name: "foo".into(),
+                    tag: "A1".into(),
+                    condstore: false,
+                    qresync: None,
+                    objectid: Some(ObjectId::default()),
+                },
+            ),
+            (
+                "A2 SELECT \"foo\" (OBJECTID (MAILBOXID abc ACCOUNTID xyz))\r\n",
+                select::Arguments {
+                    mailbox_name: "foo".into(),
+                    tag: "A2".into(),
+                    condstore: false,
+                    qresync: None,
+                    objectid: Some(ObjectId {
+                        mailbox_id: Some(Id::from_str("abc").unwrap()),
+                        account_id: Some(Id::from_str("xyz").unwrap()),
+                        ..Default::default()
+                    }),
+                },
+            ),
+            (
+                "A3 EXAMINE \"foo\" (OBJECTID (MAILBOXID abc))\r\n",
+                select::Arguments {
+                    mailbox_name: "foo".into(),
+                    tag: "A3".into(),
+                    condstore: false,
+                    qresync: None,
+                    objectid: Some(ObjectId {
+                        mailbox_id: Some(Id::from_str("abc").unwrap()),
+                        ..Default::default()
+                    }),
+                },
+            ),
+            (
+                "A4 SELECT \"foo\" (CONDSTORE OBJECTID)\r\n",
+                select::Arguments {
+                    mailbox_name: "foo".into(),
+                    tag: "A4".into(),
+                    condstore: true,
+                    qresync: None,
+                    objectid: Some(ObjectId::default()),
+                },
+            ),
+            (
+                "A5 SELECT \"foo\" (OBJECTID (FOOBAR baz MAILBOXID abc))\r\n",
+                select::Arguments {
+                    mailbox_name: "foo".into(),
+                    tag: "A5".into(),
+                    condstore: false,
+                    qresync: None,
+                    objectid: Some(ObjectId {
+                        mailbox_id: Some(Id::from_str("abc").unwrap()),
+                        ..Default::default()
+                    }),
+                },
+            ),
+            (
+                "A6 SELECT \"foo\" (OBJECTID (MAILBOXID 456))\r\n",
+                select::Arguments {
+                    mailbox_name: "foo".into(),
+                    tag: "A6".into(),
+                    condstore: false,
+                    qresync: None,
+                    objectid: Some(ObjectId::default()),
+                },
+            ),
+        ] {
+            assert_eq!(
+                receiver
+                    .parse(&mut command.as_bytes().iter())
+                    .unwrap()
+                    .parse_select(true)
+                    .unwrap(),
+                arguments,
+                "Failed to parse {command}"
+            );
+        }
+    }
 
     #[test]
     fn parse_select() {
@@ -209,6 +348,7 @@ mod tests {
                     tag: "A142".into(),
                     condstore: false,
                     qresync: None,
+                    objectid: None,
                 },
             ),
             (
@@ -218,6 +358,7 @@ mod tests {
                     tag: "A142".into(),
                     condstore: false,
                     qresync: None,
+                    objectid: None,
                 },
             ),
             (
@@ -227,6 +368,7 @@ mod tests {
                     tag: "A142".into(),
                     condstore: true,
                     qresync: None,
+                    objectid: None,
                 },
             ),
             (
@@ -245,6 +387,7 @@ mod tests {
                         seq_match: None,
                     }
                     .into(),
+                    objectid: None,
                 },
             ),
             (
@@ -274,6 +417,7 @@ mod tests {
                         seq_match: None,
                     }
                     .into(),
+                    objectid: None,
                 },
             ),
             (
@@ -326,6 +470,7 @@ mod tests {
                         )),
                     }
                     .into(),
+                    objectid: None,
                 },
             ),
             (
@@ -341,6 +486,7 @@ mod tests {
                         seq_match: None,
                     }
                     .into(),
+                    objectid: None,
                 },
             ),
         ] {

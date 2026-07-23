@@ -4,25 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{
-    auth::{
-        AuthRequest,
-        sasl::{sasl_decode_challenge_oauth, sasl_decode_challenge_plain},
-    },
-    listener::SessionStream,
-};
-
-use directory::Permission;
-use mail_parser::decoders::base64::base64_decode;
-use mail_send::Credentials;
-use smtp_proto::{AUTH_LOGIN, AUTH_OAUTHBEARER, AUTH_PLAIN, AUTH_XOAUTH2, IntoString};
-use trc::{AuthEvent, SmtpEvent};
-
 use crate::core::Session;
+use common::{auth::AuthRequest, network::SessionStream};
+use directory::Credentials;
+use mail_parser::decoders::base64::base64_decode;
+use registry::schema::enums::Permission;
+use smtp_proto::{AUTH_LOGIN, AUTH_OAUTHBEARER, AUTH_PLAIN, AUTH_XOAUTH2, IntoString};
+use trc::AuthEvent;
 
 pub struct SaslToken {
     mechanism: u64,
-    credentials: Credentials<String>,
+    credentials: Credentials,
 }
 
 impl SaslToken {
@@ -30,15 +22,17 @@ impl SaslToken {
         match mechanism {
             AUTH_PLAIN | AUTH_LOGIN => SaslToken {
                 mechanism,
-                credentials: Credentials::Plain {
+                credentials: Credentials::Basic {
                     username: String::new(),
                     secret: String::new(),
+                    mfa_token: None,
                 },
             }
             .into(),
             AUTH_OAUTHBEARER | AUTH_XOAUTH2 => SaslToken {
                 mechanism,
-                credentials: Credentials::OAuthBearer {
+                credentials: Credentials::Bearer {
+                    username: None,
                     token: String::new(),
                 },
             }
@@ -57,37 +51,52 @@ impl<T: SessionStream> Session<T> {
         if response.is_empty() {
             match (token.mechanism, &token.credentials) {
                 (AUTH_PLAIN | AUTH_XOAUTH2 | AUTH_OAUTHBEARER, _) => {
-                    self.write(b"334 Go ahead.\r\n").await?;
+                    self.write(b"334 \r\n").await?;
                     return Ok(true);
                 }
-                (AUTH_LOGIN, Credentials::Plain { username, secret }) => {
-                    if username.is_empty() && secret.is_empty() {
-                        self.write(b"334 VXNlcm5hbWU6\r\n").await?;
-                        return Ok(true);
-                    }
+                (
+                    AUTH_LOGIN,
+                    Credentials::Basic {
+                        username, secret, ..
+                    },
+                ) if username.is_empty() && secret.is_empty() => {
+                    self.write(b"334 VXNlcm5hbWU6\r\n").await?;
+                    return Ok(true);
                 }
                 _ => (),
             }
         } else if let Some(response) = base64_decode(response) {
             match (token.mechanism, &mut token.credentials) {
                 (AUTH_PLAIN, _) => {
-                    if let Some(credentials) = sasl_decode_challenge_plain(&response) {
+                    if let Some(credentials) = Credentials::decode_sasl_challenge_plain(&response) {
                         return self.authenticate(credentials).await;
                     }
                 }
-                (AUTH_LOGIN, Credentials::Plain { username, secret }) => {
+                (
+                    AUTH_LOGIN,
+                    Credentials::Basic {
+                        username, secret, ..
+                    },
+                ) => {
                     return if username.is_empty() {
                         *username = response.into_string();
                         self.write(b"334 UGFzc3dvcmQ6\r\n").await?;
                         Ok(true)
                     } else {
                         *secret = response.into_string();
-                        self.authenticate(std::mem::take(&mut token.credentials))
-                            .await
+                        self.authenticate(std::mem::replace(
+                            &mut token.credentials,
+                            Credentials::Basic {
+                                username: String::new(),
+                                secret: String::new(),
+                                mfa_token: None,
+                            },
+                        ))
+                        .await
                     };
                 }
                 (AUTH_OAUTHBEARER | AUTH_XOAUTH2, _) => {
-                    if let Some(credentials) = sasl_decode_challenge_oauth(&response) {
+                    if let Some(credentials) = Credentials::decode_sasl_challenge_oauth(&response) {
                         return self.authenticate(credentials).await;
                     }
                 }
@@ -98,79 +107,75 @@ impl<T: SessionStream> Session<T> {
         self.auth_error(b"500 5.5.6 Invalid challenge.\r\n").await
     }
 
-    pub async fn authenticate(&mut self, credentials: Credentials<String>) -> Result<bool, ()> {
-        if let Some(directory) = &self.params.auth_directory {
-            // Authenticate
-            let result = self
-                .server
-                .authenticate(
-                    &AuthRequest::from_credentials(
-                        credentials,
-                        self.data.session_id,
-                        self.data.remote_ip,
-                    )
-                    .with_directory(directory),
-                )
-                .await
-                .and_then(|access_token| {
-                    access_token
-                        .assert_has_permission(Permission::EmailSend)
-                        .map(|_| access_token)
-                });
+    pub async fn authenticate(&mut self, credentials: Credentials) -> Result<bool, ()> {
+        // Authenticate
+        let result = self
+            .server
+            .authenticate(&AuthRequest::from_credentials(
+                credentials,
+                self.data.session_id,
+                self.data.remote_ip,
+            ))
+            .await
+            .and_then(|access_token| access_token.assert_has_permission(Permission::EmailSend));
 
-            match result {
-                Ok(access_token) => {
-                    self.data.authenticated_as = access_token.into();
-                    self.eval_post_auth_params().await;
-                    self.write(b"235 2.7.0 Authentication succeeded.\r\n")
-                        .await?;
-                    return Ok(false);
-                }
-                Err(err) => {
-                    let reason = *err.as_ref();
+        let result = match result {
+            Ok(access_token) => self.server.account_info(access_token.account_id()).await,
+            Err(err) => Err(err),
+        };
 
-                    trc::error!(err.span_id(self.data.session_id));
+        match result {
+            Ok(account_info) => {
+                self.data.authenticated_as = account_info.into();
+                self.eval_post_auth_params().await;
+                self.write(b"235 2.7.0 Authentication succeeded.\r\n")
+                    .await?;
+                return Ok(false);
+            }
+            Err(err) => {
+                let reason = *err.as_ref();
 
-                    match reason {
-                        trc::EventType::Auth(trc::AuthEvent::Failed) => {
-                            return self
-                                .auth_error(b"535 5.7.8 Authentication credentials invalid.\r\n")
-                                .await;
-                        }
-                        trc::EventType::Auth(trc::AuthEvent::TokenExpired) => {
-                            return self.auth_error(b"535 5.7.8 OAuth token expired.\r\n").await;
-                        }
-                        trc::EventType::Auth(trc::AuthEvent::MissingTotp) => {
-                            return self
-                            .auth_error(
-                                b"334 5.7.8 Missing TOTP token, try with 'secret$totp_code'.\r\n",
-                            )
+                trc::error!(err.span_id(self.data.session_id));
+
+                match reason {
+                    trc::EventType::Auth(trc::AuthEvent::Failed) => {
+                        return self
+                            .auth_error(b"535 5.7.8 Authentication credentials invalid.\r\n")
                             .await;
-                        }
-                        trc::EventType::Security(trc::SecurityEvent::Unauthorized) => {
-                            self.write(
+                    }
+                    trc::EventType::Auth(trc::AuthEvent::TokenExpired) => {
+                        return self.auth_error(b"535 5.7.8 OAuth token expired.\r\n").await;
+                    }
+                    trc::EventType::Auth(trc::AuthEvent::MfaRequired) => {
+                        return self
+                            .auth_error(
                                 concat!(
-                                    "550 5.7.1 Your account is not authorized ",
-                                    "to use this service.\r\n"
+                                    "334 5.7.8 This account requires multi-factor authentication. ",
+                                    "Alternatively, you can use an app password if your account has one.\r\n"
                                 )
                                 .as_bytes(),
                             )
-                            .await?;
-                            return Ok(false);
-                        }
-                        trc::EventType::Security(_) => {
-                            return Err(());
-                        }
-                        _ => (),
+                            .await;
                     }
+                    trc::EventType::Security(trc::SecurityEvent::Unauthorized) => {
+                        self.write(
+                            concat!(
+                                "550 5.7.1 Your account is not authorized ",
+                                "to use this service.\r\n"
+                            )
+                            .as_bytes(),
+                        )
+                        .await?;
+                        return Ok(false);
+                    }
+                    trc::EventType::Security(_) => {
+                        return Err(());
+                    }
+                    _ => (),
                 }
             }
-        } else {
-            trc::event!(
-                Smtp(SmtpEvent::MissingAuthDirectory),
-                SpanId = self.data.session_id,
-            );
         }
+
         self.write(b"454 4.7.0 Temporary authentication failure\r\n")
             .await?;
 
@@ -196,13 +201,10 @@ impl<T: SessionStream> Session<T> {
     }
 
     pub fn authenticated_as(&self) -> Option<&str> {
-        self.data.authenticated_as.as_ref().map(|token| {
-            if !token.name.is_empty() {
-                token.name.as_str()
-            } else {
-                "unavailable"
-            }
-        })
+        self.data
+            .authenticated_as
+            .as_ref()
+            .map(|authenticated_as| authenticated_as.name())
     }
 
     pub fn is_authenticated(&self) -> bool {
@@ -210,10 +212,6 @@ impl<T: SessionStream> Session<T> {
     }
 
     pub fn authenticated_emails(&self) -> &[String] {
-        self.data
-            .authenticated_as
-            .as_ref()
-            .map(|token| token.emails.as_slice())
-            .unwrap_or_default()
+        self.data.authenticated_as.as_ref().unwrap().addresses()
     }
 }

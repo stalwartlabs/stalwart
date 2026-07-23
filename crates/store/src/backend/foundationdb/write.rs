@@ -5,14 +5,14 @@
  */
 
 use super::{
-    FdbStore, MAX_VALUE_SIZE, ReadVersion, into_error,
+    FdbStore, MAX_VALUE_SIZE, into_error,
     read::{ChunkedValue, read_chunked_value},
 };
 use crate::{
     backend::deserialize_i64_le,
     write::{
-        AssignedIds, Batch, DirectoryClass, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult,
-        Operation, TaskQueueClass, TelemetryClass, ValueClass, ValueOp, key::KeySerializer,
+        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
+        RegistryClass, TaskQueueClass, TelemetryClass, ValueClass, ValueOp, key::KeySerializer,
     },
     *,
 };
@@ -102,6 +102,7 @@ impl FdbStore {
                                 let (merge_result, is_chunked) =
                                     match read_chunked_value(&key, &trx, false)
                                         .await
+                                        .map_err(into_error)
                                         .caused_by(trc::location!())?
                                     {
                                         ChunkedValue::Single(slice) => (
@@ -150,7 +151,6 @@ impl FdbStore {
                                     MergeResult::Skip => (),
                                 }
                             }
-
                             ValueOp::AtomicAdd(by) => {
                                 trx.atomic_op(&key, &by.to_le_bytes()[..], MutationType::Add);
                             }
@@ -168,8 +168,7 @@ impl FdbStore {
                             ValueOp::Clear => {
                                 if matches!(
                                     key[0],
-                                    SUBSPACE_DIRECTORY
-                                        | SUBSPACE_TASK_QUEUE
+                                    SUBSPACE_TASK_QUEUE
                                         | SUBSPACE_IN_MEMORY_VALUE
                                         | SUBSPACE_PROPERTY
                                         | SUBSPACE_QUEUE_MESSAGE
@@ -182,16 +181,13 @@ impl FdbStore {
                                     class,
                                     ValueClass::Property(_)
                                         | ValueClass::Queue(_)
-                                        | ValueClass::Report(_)
-                                        | ValueClass::Directory(DirectoryClass::Principal(_))
+                                        | ValueClass::Registry(RegistryClass::Item { .. })
                                         | ValueClass::ShareNotification { .. }
                                         | ValueClass::Telemetry(TelemetryClass::Metric { .. })
-                                        | ValueClass::TaskQueue(TaskQueueClass::SendImip {
-                                            is_payload: true,
-                                            ..
-                                        })
+                                        | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
                                         | ValueClass::InMemory(_)
                                 ) {
+                                    // Clear range for potentially chunked values to avoid leaving orphaned chunks
                                     trx.clear_range(
                                         &key,
                                         &KeySerializer::new(key.len() + 1)
@@ -275,10 +271,7 @@ impl FdbStore {
         match trx.commit().await {
             Ok(result) => {
                 let commit_version = result.committed_version().map_err(into_error)?;
-                let mut version = self.version.lock();
-                if commit_version > version.version {
-                    *version = ReadVersion::new(commit_version);
-                }
+                self.version.raise_floor(commit_version);
                 Ok(true)
             }
             Err(err) => {

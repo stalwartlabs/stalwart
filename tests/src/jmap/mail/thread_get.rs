@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, wait_for_index};
+use crate::utils::server::TestServer;
 use jmap_client::mailbox::Role;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Email Thread tests...");
-    let account = params.account("jdoe@example.com");
-    let client = account.client();
+    let account = test.account("jdoe@example.com");
+    let client = account.jmap_client().await;
 
     let mailbox_id = client
         .mailbox_create("JMAP Get", None::<String>, Role::None)
@@ -35,7 +35,7 @@ pub async fn test(params: &mut JMAPTest) {
         expected_result[num - 1] = email.take_id();
     }
 
-    wait_for_index(&params.server).await;
+    test.wait_for_tasks().await;
 
     assert_eq!(
         client
@@ -47,6 +47,6 @@ pub async fn test(params: &mut JMAPTest) {
         expected_result
     );
 
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.assert_is_empty().await;
 }

@@ -128,6 +128,10 @@ impl ToBodyPart for Vec<MessagePart<'_>> {
                 subparts.push(values);
 
                 if let Some(multipart) = multipart {
+                    if parts_stack.len() == 10_000 {
+                        debug_assert!(false, "Too much nesting in message metadata");
+                        return Value::Null;
+                    }
                     let multipart = multipart.clone();
                     parts_stack.push((
                         parts,
@@ -258,6 +262,10 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
                 subparts.push(values);
 
                 if let Some(multipart) = multipart {
+                    if parts_stack.len() == 10_000 {
+                        debug_assert!(false, "Too much nesting in message metadata");
+                        return Value::Null;
+                    }
                     let multipart = multipart
                         .iter()
                         .map(|id| u16::from(id) as u32)

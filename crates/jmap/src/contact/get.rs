@@ -14,7 +14,11 @@ use jmap_proto::{
     request::reference::MaybeResultReference,
 };
 use jmap_tools::{Map, Value};
-use store::{ValueKey, roaring::RoaringBitmap, write::{AlignedBytes, Archive}};
+use store::{
+    ValueKey,
+    roaring::RoaringBitmap,
+    write::{AlignedBytes, Archive},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -37,7 +41,7 @@ impl ContactCardGet for Server {
         mut request: GetRequest<contact::ContactCard>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<contact::ContactCard>> {
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let return_all_properties = request
             .properties
             .as_ref()
@@ -46,7 +50,11 @@ impl ContactCardGet for Server {
             request.unwrap_properties(&[JSContactProperty::Id, JSContactProperty::AddressBookIds]);
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(access_token, account_id, SyncCollection::AddressBook)
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
             .await?;
         let contact_ids = if access_token.is_member(account_id) {
             cache.document_ids(false).collect::<RoaringBitmap>()
@@ -66,7 +74,7 @@ impl ContactCardGet for Server {
             account_id: request.account_id.into(),
             state: cache.get_state(false).into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
         let mut return_id = return_all_properties;
         let mut return_address_book_ids = return_all_properties;
@@ -93,7 +101,7 @@ impl ContactCardGet for Server {
             // Obtain the contact object
             let document_id = id.document_id();
             if !contact_ids.contains(document_id) {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             }
 
@@ -108,7 +116,7 @@ impl ContactCardGet for Server {
             {
                 contact
             } else {
-                response.not_found.push(id);
+                response.push_not_found(id);
                 continue;
             };
 

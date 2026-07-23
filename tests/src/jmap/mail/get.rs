@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, replace_blob_ids};
+use crate::{jmap::replace_blob_ids, utils::server::TestServer};
 use ::email::mailbox::INBOX_ID;
 use jmap_client::email::{self, Header, HeaderForm, import::EmailImportResponse};
 use mail_parser::HeaderName;
+use registry::schema::prelude::ObjectType;
 use std::{fs, path::PathBuf};
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Email Get tests...");
 
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -20,8 +21,8 @@ pub async fn test(params: &mut JMAPTest) {
     test_dir.push("email_get");
 
     let mailbox_id = Id::from(INBOX_ID).to_string();
-    let account = params.account("jdoe@example.com");
-    let client = account.client();
+    let account = test.account("jdoe@example.com");
+    let client = account.jmap_client().await;
 
     for file_name in fs::read_dir(&test_dir).unwrap() {
         let mut file_name = file_name.as_ref().unwrap().path();
@@ -165,8 +166,11 @@ pub async fn test(params: &mut JMAPTest) {
         }
     }
 
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.account("admin@example.com")
+        .registry_destroy_all(ObjectType::SpamTrainingSample)
+        .await;
+    test.assert_is_empty().await;
 }
 
 pub fn all_headers() -> Vec<email::Property> {

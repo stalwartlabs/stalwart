@@ -13,7 +13,7 @@ use common::{Server, auth::AccessToken};
 use jmap_proto::{
     method::parse::{ParseRequest, ParseResponse},
     object::calendar_event::CalendarEvent,
-    request::IntoValid,
+    request::{IntoValid, MaybeInvalid},
 };
 use jmap_tools::{Key, Value};
 use types::{blob::BlobId, id::Id};
@@ -54,7 +54,7 @@ impl CalendarEventParse for Server {
             let raw_vcard = match self.blob_download(&blob_id, access_token).await? {
                 Some(raw_vcard) => raw_vcard,
                 None => {
-                    response.not_found.push(blob_id);
+                    response.not_found.push(MaybeInvalid::Value(blob_id));
                     continue;
                 }
             };

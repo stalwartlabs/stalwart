@@ -5,18 +5,18 @@
  */
 
 use super::{
+    Collation, MatchType,
     property::{DavProperty, DavValue, LockScope, LockType},
     response::Ace,
-    Collation, MatchType,
 };
-use crate::Depth;
+use crate::{Condition, Depth};
 use calcard::{
     icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardProperty},
 };
 use types::{
-    dead_property::{ArchivedDeadProperty, ArchivedDeadPropertyTag, DeadElementTag, DeadProperty},
     TimeRange,
+    dead_property::{ArchivedDeadProperty, ArchivedDeadPropertyTag, DeadElementTag, DeadProperty},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -281,6 +281,15 @@ impl DavDeadProperty for ArchivedDeadProperty {
                     }
                 }
             }
+        }
+    }
+}
+
+impl Condition<'_> {
+    pub fn is_none_match(&self) -> bool {
+        match self {
+            Condition::ETag { is_not, .. } | Condition::Exists { is_not } => *is_not,
+            Condition::StateToken { .. } => false,
         }
     }
 }

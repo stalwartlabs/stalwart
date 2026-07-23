@@ -66,11 +66,11 @@ pub struct SetResponse<T: JmapObject> {
 
     #[serde(rename = "notUpdated")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_updated: VecMap<Id, SetError<T::Property>>,
+    pub not_updated: VecMap<MaybeInvalid<Id>, SetError<T::Property>>,
 
     #[serde(rename = "notDestroyed")]
     #[serde(skip_serializing_if = "VecMap::is_empty")]
-    pub not_destroyed: VecMap<Id, SetError<T::Property>>,
+    pub not_destroyed: VecMap<MaybeInvalid<Id>, SetError<T::Property>>,
 }
 
 impl<'de, T: JmapObject> DeserializeArguments<'de> for SetRequest<'de, T> {
@@ -80,7 +80,7 @@ impl<'de, T: JmapObject> DeserializeArguments<'de> for SetRequest<'de, T> {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"ifInState" => {
                 self.if_in_state = map.next_value()?;
@@ -209,6 +209,17 @@ impl<T: JmapObject> SetResponse<T> {
         self.old_state = Some(state.clone());
         self.new_state = Some(state);
         self
+    }
+
+    pub fn collect_will_destroy(&mut self, ids: Vec<MaybeInvalid<Id>>) -> Vec<Id> {
+        let mut will_destroy = Vec::with_capacity(ids.len());
+        for id in ids {
+            match id {
+                MaybeInvalid::Value(id) => will_destroy.push(id),
+                invalid => self.not_destroyed.append(invalid, SetError::not_found()),
+            }
+        }
+        will_destroy
     }
 
     pub fn created(&mut self, id: String, document_id: impl Into<T::Id>) {

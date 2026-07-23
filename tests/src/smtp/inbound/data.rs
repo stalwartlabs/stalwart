@@ -4,120 +4,190 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Core;
-use store::Stores;
-use utils::config::Config;
-
 use crate::{
-    AssertConfig,
     smtp::{
-        TempDir, TestSMTP,
         inbound::TestMessage,
         session::{TestSession, VerifyResponse, load_test_message},
     },
-    store::cleanup::store_assert_is_empty,
+    utils::server::TestServerBuilder,
 };
-use smtp::core::Session;
-
-const CONFIG: &str = r#"
-[storage]
-data = "rocksdb"
-lookup = "rocksdb"
-blob = "rocksdb"
-fts = "rocksdb"
-directory = "local"
-
-[store."rocksdb"]
-type = "rocksdb"
-path = "{TMP}/queue.db"
-
-[spam-filter]
-enable = false
-
-[directory."local"]
-type = "memory"
-
-[[directory."local".principals]]
-name = "john"
-description = "John Doe"
-secret = "secret"
-email = ["john@foobar.org", "jdoe@example.org", "john.doe@example.org"]
-
-[[directory."local".principals]]
-name = "jane"
-description = "Jane Doe"
-secret = "p4ssw0rd"
-email = "jane@domain.net"
-
-[[directory."local".principals]]
-name = "bill"
-description = "Bill Foobar"
-secret = "p4ssw0rd"
-email = "bill@foobar.org"
-
-[[directory."local".principals]]
-name = "mike"
-description = "Mike Foobar"
-secret = "p4ssw0rd"
-email = "mike@test.com"
-
-[session.rcpt]
-directory = "'local'"
-
-[session.data.limits]
-messages = [{if = "remote_ip = '10.0.0.1'", then = 1},
-            {else = 100}]
-received-headers = 3
-
-[session.data.add-headers]
-received = [{if = "remote_ip = '10.0.0.3'", then = true},
-            {else = false}]
-received-spf =  [{if = "remote_ip = '10.0.0.3'", then = true},
-            {else = false}]
-auth-results =  [{if = "remote_ip = '10.0.0.3'", then = true},
-            {else = false}]
-message-id =  [{if = "remote_ip = '10.0.0.3'", then = true},
-               {else = false}]
-date = [{if = "remote_ip = '10.0.0.3'", then = true},
-        {else = false}]
-return-path =  [{if = "remote_ip = '10.0.0.3'", then = true},
-            {else = false}]
-
-[[queue.quota]]
-match = "sender = 'john@doe.org'"
-key = ['sender']
-messages = 1
-
-[[queue.quota]]
-match = "rcpt_domain = 'foobar.org'"
-key = ['rcpt_domain']
-size = 450
-enable = true
-
-[[queue.quota]]
-match = "rcpt = 'jane@domain.net'"
-key = ['rcpt']
-size = 450
-enable = true
-
-"#;
+use registry::{
+    schema::{
+        enums::MtaQueueQuotaKey,
+        prelude::ObjectType,
+        structs::{
+            Expression, ExpressionMatch, MtaQueueQuota, MtaStageData, SenderAuth, SpamSettings,
+        },
+    },
+    types::{list::List, map::Map},
+};
 
 #[tokio::test]
 async fn data() {
-    // Enable logging
-    crate::enable_logging();
+    let mut test = TestServerBuilder::new("smtp_data_test")
+        .await
+        .with_http_listener(19004)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
 
-    // Create temp dir for queue
-    let tmp_dir = TempDir::new("smtp_data_test", true);
-    let mut config = Config::new(tmp_dir.update_config(CONFIG)).unwrap();
-    let stores = Stores::parse_all(&mut config, false).await;
-    let core = Core::parse(&mut config, stores, Default::default()).await;
-    config.assert_no_errors();
+    // Create test users
+    let admin = test.account("admin");
+    for (name, secret, description, aliases) in [
+        ("john@foobar.org", "12345 + extra safety", "John Doe", &[]),
+        ("jane@domain.net", "abcde + extra safety", "Jane Smith", &[]),
+        (
+            "bill@foobar.org",
+            "p4ssw0rd + extra safety",
+            "Bill Foobar",
+            &[],
+        ),
+        (
+            "mike@test.com",
+            "p4ssw0rd + extra safety",
+            "Mike Foobar",
+            &[],
+        ),
+    ] {
+        admin
+            .create_user_account(name, secret, description, aliases, vec![])
+            .await;
+    }
+
+    // Add test settings
+    admin.mta_no_auth().await;
+    admin
+        .registry_create_object(SpamSettings {
+            enable: false,
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(SenderAuth {
+            dmarc_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            reverse_ip_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            spf_ehlo_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            spf_from_verify: Expression {
+                else_: "relaxed".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaStageData {
+            add_auth_results_header: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.3'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            add_date_header: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.3'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            add_message_id_header: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.3'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            add_received_header: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.3'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            add_received_spf_header: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.3'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            add_return_path_header: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.3'".into(),
+                    then: "true".into(),
+                }]),
+                else_: "false".into(),
+            },
+            max_messages: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "remote_ip = '10.0.0.1'".into(),
+                    then: "1".into(),
+                }]),
+                else_: "100".into(),
+            },
+            max_received_headers: Expression {
+                else_: "3".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaQueueQuota {
+            description: None,
+            enable: true,
+            key: Map::new(vec![MtaQueueQuotaKey::Sender]),
+            match_: Expression {
+                else_: "sender = 'john@doe.org'".into(),
+                ..Default::default()
+            },
+            messages: Some(1),
+            size: None,
+        })
+        .await;
+    admin
+        .registry_create_object(MtaQueueQuota {
+            description: None,
+            enable: true,
+            key: Map::new(vec![MtaQueueQuotaKey::RcptDomain]),
+            match_: Expression {
+                else_: "rcpt_domain = 'foobar.org'".into(),
+                ..Default::default()
+            },
+            messages: None,
+            size: Some(450),
+        })
+        .await;
+    admin
+        .registry_create_object(MtaQueueQuota {
+            description: None,
+            enable: true,
+            key: Map::new(vec![MtaQueueQuotaKey::Rcpt]),
+            match_: Expression {
+                else_: "rcpt = 'jane@domain.net'".into(),
+                ..Default::default()
+            },
+            messages: None,
+            size: Some(450),
+        })
+        .await;
+    admin.reload_settings().await;
+    test.reload_core();
+    test.expect_reload_settings().await;
 
     // Test queue message builder
-    let test = TestSMTP::from_core(core);
-    let mut qr = test.queue_receiver;
-    let mut session = Session::test(test.server.clone());
+    let mut session = test.new_mta_session();
     session.data.remote_ip_str = "10.0.0.1".into();
     session.eval_session_params().await;
     session.test_builder().await;
@@ -147,8 +217,8 @@ async fn data() {
         .send_message("john@test.org", &["mike@test.com"], "test:no_msgid", "250")
         .await;
     assert_eq!(
-        qr.expect_message().await.read_message(&qr).await,
-        load_test_message("no_msgid", "messages")
+        test.expect_message().await.read_message(&test).await,
+        format!("{}\r\n", load_test_message("no_msgid", "messages"))
     );
 
     // Maximum one message per session is allowed for 10.0.0.1
@@ -164,9 +234,9 @@ async fn data() {
     session
         .send_message("bill@doe.org", &["mike@test.com"], "test:no_msgid", "250")
         .await;
-    qr.expect_message()
+    test.expect_message()
         .await
-        .read_lines(&qr)
+        .read_lines(&test)
         .await
         .assert_contains("From: ")
         .assert_contains("To: ")
@@ -194,7 +264,7 @@ async fn data() {
         .await;
 
     // Release quota
-    qr.clear_queue(&test.server).await;
+    test.clear_queue().await;
 
     // Only 1500 bytes are allowed in the queue to domain foobar.org
     session
@@ -233,6 +303,11 @@ async fn data() {
         .await;
 
     // Make sure store is empty
-    qr.clear_queue(&test.server).await;
-    store_assert_is_empty(test.server.store(), test.server.blob_store().clone(), false).await;
+    test.clear_queue().await;
+    let admin = test.account("admin");
+    admin.registry_destroy_all(ObjectType::MtaQueueQuota).await;
+    admin
+        .registry_destroy_all(ObjectType::MtaInboundThrottle)
+        .await;
+    test.assert_is_empty().await;
 }

@@ -4,72 +4,69 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::smtp::{
-    TestSMTP,
-    queue::{QueuedEvents, build_rcpt},
+use crate::{
+    smtp::queue::{build_rcpt, new_message},
+    utils::server::TestServerBuilder,
 };
 use common::config::smtp::queue::QueueName;
-use smtp::queue::{
-    Error, ErrorDetails, Message, MessageWrapper, Recipient, Status, spool::SmtpSpool,
-};
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    time::Duration,
-};
+use smtp::queue::{Error, ErrorDetails, Message, Recipient, Status, spool::SmtpSpool};
+use std::time::Duration;
 use store::write::now;
-
-const CONFIG: &str = r#"
-[session.ehlo]
-reject-non-fqdn = false
-
-[session.rcpt]
-relay = true
-"#;
 
 #[tokio::test]
 async fn queue_due() {
-    // Enable logging
-    crate::enable_logging();
+    let mut local = TestServerBuilder::new("smtp_queue_manager")
+        .await
+        .with_http_listener(19040)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
 
-    let local = TestSMTP::new("smtp_queue_due_test", CONFIG).await;
-    let core = local.build_smtp();
-    let qr = &local.queue_receiver;
+    let local_admin = local.account("admin");
+    local_admin.mta_allow_relaying().await;
+    local_admin.mta_allow_non_fqdn().await;
+    local_admin.reload_settings().await;
+    local.reload_core();
+    local.expect_reload_settings().await;
 
     let mut message = new_message(0);
     message.message.recipients.push(build_rcpt("c", 3, 8, 9));
-    message.save_changes(&core, 0.into()).await;
+    message.save_changes(&local.server, 0.into()).await;
 
     let mut message = new_message(1);
     message.message.recipients.push(build_rcpt("b", 2, 6, 7));
-    message.save_changes(&core, 0.into()).await;
+    message.save_changes(&local.server, 0.into()).await;
 
     let mut message = new_message(2);
     message.message.recipients.push(build_rcpt("a", 1, 4, 5));
-    message.save_changes(&core, 0.into()).await;
+    message.save_changes(&local.server, 0.into()).await;
 
     for domain in vec!["a", "b", "c"].into_iter() {
         let now = now();
-        let queued = core.all_queued_messages().await;
+        let queued = local.all_queued_messages().await;
         if queued.messages.is_empty() {
             let wake_up = queued.next_refresh - now;
             assert_eq!(wake_up, 1);
             std::thread::sleep(Duration::from_secs(wake_up));
         }
 
-        for queue_event in core.all_queued_messages().await.messages {
-            if let Some(message) = core
+        for queue_event in local.all_queued_messages().await.messages {
+            if let Some(message) = local
+                .server
                 .read_message(queue_event.queue_id, QueueName::default())
                 .await
             {
                 message.message.rcpt(domain);
-                message.remove(&core, queue_event.due.into()).await;
+                message.remove(&local.server, queue_event.due.into()).await;
             } else {
                 panic!("Message not found");
             }
         }
     }
 
-    qr.assert_queue_is_empty().await;
+    local.assert_queue_is_empty().await;
 }
 
 #[test]
@@ -159,28 +156,6 @@ fn delivery_events() {
         details: Error::ConcurrencyLimited,
     });
     assert!(message.next_event(None).is_none());
-}
-
-pub fn new_message(queue_id: u64) -> MessageWrapper {
-    MessageWrapper {
-        queue_id,
-        span_id: 0,
-        queue_name: QueueName::default(),
-        is_multi_queue: false,
-        message: Message {
-            size: 0,
-            created: now(),
-            return_path: "sender@foobar.org".into(),
-            recipients: vec![],
-            flags: 0,
-            env_id: None,
-            priority: 0,
-            quota_keys: Default::default(),
-            blob_hash: Default::default(),
-            received_from_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            received_via_port: 0,
-        },
-    }
 }
 
 fn next_event_after(message: &Message, queue: Option<QueueName>, instant: u64) -> Option<u64> {

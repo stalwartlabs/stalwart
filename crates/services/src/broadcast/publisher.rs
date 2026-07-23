@@ -13,13 +13,13 @@ use trc::ClusterEvent;
 use super::{BROADCAST_TOPIC, BroadcastBatch};
 
 pub fn spawn_broadcast_publisher(inner: Arc<Inner>, mut event_rx: mpsc::Receiver<BroadcastEvent>) {
-    let (pubsub, this_node_id) = {
+    let (coordinator, this_node_id) = {
         let _core = inner.shared_core.load();
-        let pubsub = inner.shared_core.load().storage.pubsub.clone();
-        if pubsub.is_none() {
+        let coordinator = inner.shared_core.load().storage.coordinator.clone();
+        if coordinator.is_none() {
             return;
         }
-        (pubsub, _core.network.node_id as u16)
+        (coordinator, _core.network.node_id as u16)
     };
 
     tokio::spawn(async move {
@@ -36,7 +36,7 @@ pub fn spawn_broadcast_publisher(inner: Arc<Inner>, mut event_rx: mpsc::Receiver
                 }
             }
 
-            match pubsub
+            match coordinator
                 .publish(BROADCAST_TOPIC, batch.serialize(this_node_id))
                 .await
             {

@@ -4,18 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+#![warn(clippy::large_futures)]
+
 use broadcast::publisher::spawn_broadcast_publisher;
 use common::{
-    Inner,
+    BuildServer, Inner,
     manager::boot::{BootManager, IpcReceivers},
 };
-use housekeeper::spawn_housekeeper;
 use state_manager::manager::spawn_push_router;
 use std::sync::Arc;
-use task_manager::spawn_task_manager;
+
+use crate::task_manager::{manager::spawn_task_manager, scheduler::spawn_task_scheduler};
 
 pub mod broadcast;
-pub mod housekeeper;
 pub mod state_manager;
 pub mod task_manager;
 
@@ -29,40 +30,37 @@ pub trait SpawnServices {
 
 impl StartServices for BootManager {
     async fn start_services(&mut self) {
+        let server = self.inner.build_server();
         // Unpack webadmin
-        if let Err(err) = self
-            .inner
+        self.inner
             .data
-            .webadmin
-            .unpack(&self.inner.shared_core.load().storage.blob)
-            .await
-        {
-            trc::event!(
-                Resource(trc::ResourceEvent::Error),
-                Reason = err,
-                Details = "Failed to unpack webadmin bundle"
-            );
-        }
+            .applications
+            .unpack_all(&server, false)
+            .await;
 
-        self.ipc_rxs.spawn_services(self.inner.clone());
+        if !server.registry().is_recovery_mode() {
+            self.ipc_rxs.spawn_services(self.inner.clone());
+        }
     }
 }
 
 impl SpawnServices for IpcReceivers {
     fn spawn_services(&mut self, inner: Arc<Inner>) {
-        // Spawn push manager
-        spawn_push_router(inner.clone(), self.push_rx.take().unwrap());
+        if !inner.shared_core.load().storage.registry.is_recovery_mode() {
+            // Spawn push manager
+            spawn_push_router(inner.clone(), self.push_rx.take().unwrap());
 
-        // Spawn housekeeper
-        spawn_housekeeper(inner.clone(), self.housekeeper_rx.take().unwrap());
-
-        // Spawn broadcast publisher
-        if let Some(event_rx) = self.broadcast_rx.take() {
             // Spawn broadcast publisher
-            spawn_broadcast_publisher(inner.clone(), event_rx);
-        }
+            if let Some(event_rx) = self.broadcast_rx.take() {
+                // Spawn broadcast publisher
+                spawn_broadcast_publisher(inner.clone(), event_rx);
+            }
 
-        // Spawn task manager
-        spawn_task_manager(inner);
+            // Spawn task manager
+            spawn_task_manager(inner.clone());
+
+            // Spawn task scheduler
+            spawn_task_scheduler(inner);
+        }
     }
 }

@@ -13,7 +13,7 @@ use crate::{
     modules::html::{A, HREF, HtmlToken},
 };
 use common::Server;
-use common::config::spamfilter::{Element, IpResolver, Location};
+use common::config::mailstore::spamfilter::{Element, IpResolver, Location};
 use common::scripts::IsMixedCharset;
 use common::scripts::functions::unicode::CharUtils;
 use hyper::{Uri, header::LOCATION};

@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::Server;
-use directory::{
-    Type,
-    backend::internal::{PrincipalField, manage::ChangedPrincipals},
-};
+use crate::{Server, cache::invalidate::CacheInvalidationBuilder, ipc::CacheInvalidation};
 use types::acl::{AclGrant, ArchivedAclGrant};
 
 impl Server {
-    pub async fn refresh_acls(&self, acl_changes: &[AclGrant], current: Option<&[AclGrant]>) {
-        let mut changed_principals = ChangedPrincipals::new();
+    pub async fn refresh_acls(
+        &self,
+        acl_changes: &[AclGrant],
+        current: Option<&[AclGrant]>,
+    ) -> trc::Result<()> {
+        let mut changed_principals = CacheInvalidationBuilder::default();
         if let Some(acl_current) = current {
             for current_item in acl_current {
                 let mut invalidate = true;
@@ -24,11 +24,8 @@ impl Server {
                     }
                 }
                 if invalidate {
-                    changed_principals.add_change(
-                        current_item.account_id,
-                        Type::Individual,
-                        PrincipalField::EnabledPermissions,
-                    );
+                    changed_principals
+                        .invalidate(CacheInvalidation::AccessToken(current_item.account_id));
                 }
             }
 
@@ -41,32 +38,26 @@ impl Server {
                     }
                 }
                 if invalidate {
-                    changed_principals.add_change(
-                        change_item.account_id,
-                        Type::Individual,
-                        PrincipalField::EnabledPermissions,
-                    );
+                    changed_principals
+                        .invalidate(CacheInvalidation::AccessToken(change_item.account_id));
                 }
             }
         } else {
             for value in acl_changes {
-                changed_principals.add_change(
-                    value.account_id,
-                    Type::Individual,
-                    PrincipalField::EnabledPermissions,
-                );
+                changed_principals.invalidate(CacheInvalidation::AccessToken(value.account_id));
             }
         }
 
-        self.invalidate_principal_caches(changed_principals).await;
+        self.invalidate_caches(changed_principals).await
     }
 
     pub async fn refresh_archived_acls(
         &self,
         acl_changes: &[AclGrant],
         acl_current: &[ArchivedAclGrant],
-    ) {
-        let mut changed_principals = ChangedPrincipals::new();
+    ) -> trc::Result<()> {
+        let mut changed_principals = CacheInvalidationBuilder::default();
+
         for current_item in acl_current.iter() {
             let mut invalidate = true;
             for change_item in acl_changes {
@@ -76,11 +67,9 @@ impl Server {
                 }
             }
             if invalidate {
-                changed_principals.add_change(
+                changed_principals.invalidate(CacheInvalidation::AccessToken(
                     current_item.account_id.to_native(),
-                    Type::Individual,
-                    PrincipalField::EnabledPermissions,
-                );
+                ));
             }
         }
 
@@ -93,14 +82,11 @@ impl Server {
                 }
             }
             if invalidate {
-                changed_principals.add_change(
-                    change_item.account_id,
-                    Type::Individual,
-                    PrincipalField::EnabledPermissions,
-                );
+                changed_principals
+                    .invalidate(CacheInvalidation::AccessToken(change_item.account_id));
             }
         }
 
-        self.invalidate_principal_caches(changed_principals).await;
+        self.invalidate_caches(changed_principals).await
     }
 }

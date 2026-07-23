@@ -7,7 +7,7 @@
 use crate::{
     blob::download::BlobDownload, changes::state::JmapCacheState, email::ingested_into_object,
 };
-use common::{Server, auth::AccessToken};
+use common::{Server, auth::AccessToken, ipc::PushNotification};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::JUNK_ID,
@@ -21,9 +21,14 @@ use jmap_proto::{
     request::MaybeInvalid,
     types::state::State,
 };
-use mail_parser::MessageParser;
+use mail_parser::{HeaderName, MessageParser};
 use std::future::Future;
-use types::{acl::Acl, id::Id, keyword::Keyword};
+use types::{
+    acl::Acl,
+    id::Id,
+    keyword::Keyword,
+    type_state::{DataType, StateChange},
+};
 use utils::map::vec_map::VecMap;
 
 pub trait EmailImport: Sync + Send {
@@ -53,18 +58,20 @@ impl EmailImport for Server {
         };
 
         // Obtain import access token
-        let import_access_token = if account_id != access_token.primary_id() {
+        let import_access_token = if account_id != access_token.account_id() {
             #[cfg(feature = "test_mode")]
             {
-                std::sync::Arc::new(AccessToken::from_id(account_id)).into()
+                AccessToken::from_id_maybe_invalid(account_id).into()
             }
 
             #[cfg(not(feature = "test_mode"))]
             {
+                use common::auth::BuildAccessToken;
                 use trc::AddContext;
-                self.get_access_token(account_id)
+                self.access_token(account_id)
                     .await
                     .caused_by(trc::location!())?
+                    .build()
                     .into()
             }
         } else {
@@ -79,6 +86,7 @@ impl EmailImport for Server {
             not_created: VecMap::new(),
         };
 
+        let mut last_change_id = None;
         'outer: for (id, email) in request.emails {
             // Validate mailboxIds
             let mailbox_ids = email
@@ -144,12 +152,27 @@ impl EmailImport for Server {
             };
 
             // Import message
+            let parsed = MessageParser::new().parse(&raw_message);
+            let is_valid_message = parsed.as_ref().is_some_and(|message| {
+                message
+                    .headers()
+                    .iter()
+                    .any(|header| !matches!(header.name, HeaderName::Other(_)))
+            });
+            if !is_valid_message {
+                response.not_created.append(
+                    id,
+                    SetError::new(SetErrorType::InvalidEmail)
+                        .with_description("Blob does not contain a valid RFC 5322 message."),
+                );
+                continue;
+            }
             match self
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
-                    message: MessageParser::new().parse(&raw_message),
+                    message: parsed,
                     blob_hash: Some(&blob_id.hash),
-                    access_token: import_access_token.as_deref().unwrap_or(access_token),
+                    access_token: import_access_token.as_ref().unwrap_or(access_token),
                     source: IngestSource::Jmap {
                         train_classifier: email
                             .keywords
@@ -165,6 +188,7 @@ impl EmailImport for Server {
                 .await
             {
                 Ok(email) => {
+                    last_change_id = Some(email.change_id);
                     response
                         .created
                         .append(id, ingested_into_object(email).into());
@@ -195,7 +219,16 @@ impl EmailImport for Server {
         }
 
         // Update state
-        if !response.created.is_empty() {
+        if let Some(change_id) = last_change_id {
+            self.broadcast_push_notification(PushNotification::StateChange(
+                StateChange::new(account_id)
+                    .with_change_id(change_id)
+                    .with_change(DataType::Email)
+                    .with_change(DataType::Mailbox)
+                    .with_change(DataType::Thread),
+            ))
+            .await;
+
             response.new_state = self.get_cached_messages(account_id).await?.get_state(false);
         }
 

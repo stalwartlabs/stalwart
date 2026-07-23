@@ -5,30 +5,32 @@
  */
 
 use crate::participant_identity::get::ParticipantIdentityGet;
-use common::{Server, auth::AccessToken};
-use directory::QueryParams;
-use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
+use common::Server;
+use groupware::{
+    calendar::{ParticipantIdentities, ParticipantIdentity},
+    strip_mailto_scheme,
+};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
     object::participant_identity::{self, ParticipantIdentityProperty, ParticipantIdentityValue},
-    request::{IntoValid, reference::MaybeIdReference},
+    request::{MaybeInvalid, reference::MaybeIdReference},
 };
 use jmap_tools::{Key, Value};
+use registry::schema::prelude::StorageQuota;
 use store::{
     Serialize,
     ahash::AHashSet,
     write::{Archiver, BatchBuilder},
 };
 use trc::AddContext;
-use types::{collection::Collection, field::PrincipalField};
+use types::{collection::Collection, field::PrincipalField, id::Id};
 use utils::sanitize_email;
 
 pub trait ParticipantIdentitySet: Sync + Send {
     fn participant_identity_set(
         &self,
         request: SetRequest<'_, participant_identity::ParticipantIdentity>,
-        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<participant_identity::ParticipantIdentity>>> + Send;
 }
 
@@ -36,11 +38,10 @@ impl ParticipantIdentitySet for Server {
     async fn participant_identity_set(
         &self,
         mut request: SetRequest<'_, participant_identity::ParticipantIdentity>,
-        access_token: &AccessToken,
     ) -> trc::Result<SetResponse<participant_identity::ParticipantIdentity>> {
         let account_id = request.account_id.document_id();
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
-        let will_destroy = request.unwrap_destroy().into_valid().collect::<Vec<_>>();
+        let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let (identity_archive, mut identities) =
             match self.participant_identity_get_or_create(account_id).await? {
                 Some(archive) => {
@@ -53,20 +54,25 @@ impl ParticipantIdentitySet for Server {
                 None => (None, ParticipantIdentities::default()),
             };
 
+        let account_info = self
+            .account_info(account_id)
+            .await
+            .caused_by(trc::location!())?;
+
         // Obtain allowed emails
-        let allowed_emails = self
-            .directory()
-            .query(QueryParams::id(account_id).with_return_member_of(false))
-            .await?
-            .map(|p| p.into_email_addresses().collect::<AHashSet<_>>())
-            .unwrap_or_default();
+        let allowed_emails = account_info
+            .addresses()
+            .iter()
+            .map(|v| v.as_str())
+            .collect::<AHashSet<_>>();
 
         // Process creates
         let mut has_changes = false;
         'create: for (id, object) in request.unwrap_create() {
             let mut identity = ParticipantIdentity::default();
 
-            if let Err(err) = validate_identity_value(object, &mut identity, &allowed_emails) {
+            if let Err(err) = validate_identity_value(None, object, &mut identity, &allowed_emails)
+            {
                 response.not_created.append(id, err);
                 continue 'create;
             }
@@ -87,7 +93,10 @@ impl ParticipantIdentitySet for Server {
 
             // Validate quota
             if identities.identities.len()
-                >= access_token.object_quota(Collection::Identity) as usize
+                >= self.object_quota(
+                    account_info.object_quotas(),
+                    StorageQuota::MaxParticipantIdentities,
+                ) as usize
             {
                 response.not_created.append(
                     id,
@@ -121,7 +130,14 @@ impl ParticipantIdentitySet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update().into_valid() {
+        'update: for (id, object) in request.unwrap_update() {
+            let id = match id {
+                MaybeInvalid::Value(id) => id,
+                invalid => {
+                    response.not_updated.append(invalid, SetError::not_found());
+                    continue 'update;
+                }
+            };
             // Make sure id won't be destroyed
             if will_destroy.contains(&id) {
                 response.not_updated.append(id, SetError::will_destroy());
@@ -137,7 +153,7 @@ impl ParticipantIdentitySet for Server {
                 continue 'update;
             };
 
-            if let Err(err) = validate_identity_value(object, identity, &allowed_emails) {
+            if let Err(err) = validate_identity_value(Some(id), object, identity, &allowed_emails) {
                 response.not_updated.append(id, err);
                 continue 'update;
             }
@@ -195,9 +211,10 @@ impl ParticipantIdentitySet for Server {
 }
 
 fn validate_identity_value(
+    expected_id: Option<Id>,
     update: Value<'_, ParticipantIdentityProperty, ParticipantIdentityValue>,
     identity: &mut ParticipantIdentity,
-    allowed_emails: &AHashSet<String>,
+    allowed_emails: &AHashSet<&str>,
 ) -> Result<(), SetError<ParticipantIdentityProperty>> {
     for (property, value) in update.into_expanded_object() {
         let Key::Property(property) = property else {
@@ -212,11 +229,7 @@ fn validate_identity_value(
             }
             (ParticipantIdentityProperty::CalendarAddress, Value::Str(value)) => {
                 if identity.calendar_address != value {
-                    let email = if let Some(email) = value.strip_prefix("mailto:") {
-                        sanitize_email(email)
-                    } else {
-                        sanitize_email(&value)
-                    };
+                    let email = sanitize_email(strip_mailto_scheme(&value));
 
                     if let Some(email) = email {
                         if allowed_emails.iter().any(|e| e == &email) {
@@ -233,6 +246,13 @@ fn validate_identity_value(
                             .with_property(ParticipantIdentityProperty::CalendarAddress)
                             .with_description("Invalid or missing calendar address.".to_string()));
                     }
+                }
+            }
+            (ParticipantIdentityProperty::Id, value) => {
+                if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {
+                    return Err(SetError::invalid_properties()
+                        .with_property(ParticipantIdentityProperty::Id)
+                        .with_description("The id property is immutable."));
                 }
             }
             (property, _) => {

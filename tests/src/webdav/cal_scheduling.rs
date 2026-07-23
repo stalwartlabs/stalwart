@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::WebDavTest;
 use crate::{
-    jmap::mail::mailbox::destroy_all_mailboxes_for_account,
-    webdav::{DummyWebDavClient, prop::ALL_DAV_PROPERTIES},
+    utils::{server::TestServer, webdav::DummyWebDavClient},
+    webdav::prop::ALL_DAV_PROPERTIES,
 };
+
 use calcard::{
     common::timezone::Tz,
     icalendar::{
@@ -16,14 +16,11 @@ use calcard::{
         ICalendarProperty, ICalendarRecurrenceRule, ICalendarWeekday,
     },
 };
-use common::{Server, auth::AccessToken};
 use dav_proto::schema::property::{CalDavProperty, DavProperty, WebDavProperty};
 use email::cache::MessageCacheFetch;
 use groupware::{
     cache::GroupwareCache,
-    scheduling::{
-        ArchivedItipSummary, ItipField, ItipParticipant, ItipSummary, ItipTime, ItipValue,
-    },
+    scheduling::{ItipField, ItipParticipant, ItipSummary, ItipTime, ItipValue},
 };
 use hyper::StatusCode;
 use mail_parser::{DateTime, MessageParser};
@@ -32,23 +29,30 @@ use std::str::FromStr;
 use store::write::now;
 use types::collection::SyncCollection;
 
-pub async fn test(test: &WebDavTest) {
+pub async fn test(test: &TestServer) {
     println!("Running calendar scheduling tests...");
-    let bill_client = test.client("bill");
-    let jane_client = test.client("jane");
-    let john_client = test.client("john");
+    let bill = test.account("bill@example.com");
+    let jane = test.account("jane@example.com");
+    let john = test.account("john@example.com");
+    let bill_client = bill.webdav_client();
+    let jane_client = jane.webdav_client();
+    let john_client = john.webdav_client();
 
     // Validate hierarchy of scheduling resources
     let response = jane_client
-        .propfind_with_headers("/dav/itip/jane/", ALL_DAV_PROPERTIES, [("depth", "1")])
+        .propfind_with_headers(
+            "/dav/itip/jane%40example.com/",
+            ALL_DAV_PROPERTIES,
+            [("depth", "1")],
+        )
         .await;
     let properties = response
         .with_hrefs([
-            "/dav/itip/jane/",
-            "/dav/itip/jane/inbox/",
-            "/dav/itip/jane/outbox/",
+            "/dav/itip/jane%40example.com/",
+            "/dav/itip/jane%40example.com/inbox/",
+            "/dav/itip/jane%40example.com/outbox/",
         ])
-        .properties("/dav/itip/jane/inbox/");
+        .properties("/dav/itip/jane%40example.com/inbox/");
 
     // Validate schedule inbox properties
     properties
@@ -58,7 +62,7 @@ pub async fn test(test: &WebDavTest) {
         .get(DavProperty::CalDav(
             CalDavProperty::ScheduleDefaultCalendarURL,
         ))
-        .with_values(["D:href:/dav/cal/jane/default/"])
+        .with_values(["D:href:/dav/cal/jane%40example.com/default/"])
         .with_status(StatusCode::OK);
     properties
         .get(DavProperty::WebDav(WebDavProperty::SupportedPrivilegeSet))
@@ -103,7 +107,7 @@ pub async fn test(test: &WebDavTest) {
         ]);
 
     // Validate schedule outbox properties
-    let properties = response.properties("/dav/itip/jane/outbox/");
+    let properties = response.properties("/dav/itip/jane%40example.com/outbox/");
     properties
         .get(DavProperty::WebDav(WebDavProperty::ResourceType))
         .with_values(["D:collection", "A:schedule-outbox"]);
@@ -166,7 +170,7 @@ pub async fn test(test: &WebDavTest) {
     john_client
         .request_with_headers(
             "PUT",
-            "/dav/cal/john/default/itip.ics",
+            "/dav/cal/john%40example.com/default/itip.ics",
             [("content-type", "text/calendar; charset=utf-8")],
             &test_itip,
         )
@@ -176,28 +180,27 @@ pub async fn test(test: &WebDavTest) {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     // Check that the invitation was received by Bill and Mike
-    for client in [bill_client, jane_client] {
+    for client in [&bill_client, &jane_client] {
         let messages = test
             .server
             .get_cached_messages(client.account_id)
             .await
             .unwrap();
         assert_eq!(messages.emails.items.len(), 1);
-        let access_token = test
-            .server
-            .get_access_token(client.account_id)
-            .await
-            .unwrap();
         let events = test
             .server
-            .fetch_dav_resources(&access_token, client.account_id, SyncCollection::Calendar)
+            .fetch_dav_resources(
+                client.account_id,
+                client.account_id,
+                SyncCollection::Calendar,
+            )
             .await
             .unwrap();
         assert_eq!(events.resources.len(), 2);
         let events = test
             .server
             .fetch_dav_resources(
-                &access_token,
+                client.account_id,
                 client.account_id,
                 SyncCollection::CalendarEventNotification,
             )
@@ -207,7 +210,7 @@ pub async fn test(test: &WebDavTest) {
     }
 
     // Validate iTIP
-    let itips = fetch_and_remove_itips(jane_client).await;
+    let itips = jane_client.fetch_and_remove_itips().await;
     assert_eq!(itips.len(), 1);
     let itip = itips.first().unwrap();
     assert!(
@@ -216,7 +219,7 @@ pub async fn test(test: &WebDavTest) {
     );
 
     // Fetch added calendar entry
-    let cals = fetch_icals(jane_client).await;
+    let cals = jane_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
 
@@ -254,14 +257,14 @@ pub async fn test(test: &WebDavTest) {
 
     // Make sure that the schedule has not changed
     assert_eq!(
-        fetch_icals(jane_client).await[0].schedule_tag,
+        jane_client.fetch_icals().await[0].schedule_tag,
         cal.schedule_tag
     );
 
     // Check that John received the RSVP
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    test.wait_for_index().await;
-    let itips = fetch_and_remove_itips(john_client).await;
+    test.wait_for_tasks().await;
+    let itips = john_client.fetch_and_remove_itips().await;
     assert_eq!(itips.len(), 1);
     assert!(
         itips[0].contains("METHOD:REPLY")
@@ -269,7 +272,7 @@ pub async fn test(test: &WebDavTest) {
         "failed for itip: {}",
         itips[0]
     );
-    let cals = fetch_icals(john_client).await;
+    let cals = john_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     assert!(
         cals[0]
@@ -292,7 +295,7 @@ pub async fn test(test: &WebDavTest) {
         .with_status(StatusCode::NO_CONTENT);
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert_eq!(
-        fetch_and_remove_itips(john_client).await,
+        john_client.fetch_and_remove_itips().await,
         Vec::<String>::new()
     );
 
@@ -302,7 +305,7 @@ pub async fn test(test: &WebDavTest) {
         .await
         .with_status(StatusCode::NO_CONTENT);
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let itips = fetch_and_remove_itips(john_client).await;
+    let itips = john_client.fetch_and_remove_itips().await;
     assert_eq!(itips.len(), 1);
     assert!(
         itips[0].contains("METHOD:REPLY")
@@ -310,7 +313,7 @@ pub async fn test(test: &WebDavTest) {
         "failed for itip: {}",
         itips[0]
     );
-    let cals = fetch_icals(john_client).await;
+    let cals = john_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
@@ -360,7 +363,7 @@ pub async fn test(test: &WebDavTest) {
         response.contains("Lunch") && response.contains("RSVP has been recorded"),
         "failed for response: {response}"
     );
-    let cals = fetch_icals(john_client).await;
+    let cals = john_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
@@ -386,7 +389,7 @@ pub async fn test(test: &WebDavTest) {
     let response = john_client
         .request_with_headers(
             "POST",
-            "/dav/itip/john/outbox/",
+            "/dav/itip/john%40example.com/outbox/",
             [("content-type", "text/calendar; charset=utf-8")],
             &test_outbox,
         )
@@ -444,15 +447,15 @@ pub async fn test(test: &WebDavTest) {
 
     // Make sure that the schedule has changed
     assert_ne!(
-        fetch_icals(john_client).await[0].schedule_tag,
+        john_client.fetch_icals().await[0].schedule_tag,
         cal.schedule_tag
     );
     let main_event_href = cal.href;
 
     // Check that Bill received the update
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    test.wait_for_index().await;
-    let mut itips = fetch_and_remove_itips(bill_client).await;
+    test.wait_for_tasks().await;
+    let mut itips = bill_client.fetch_and_remove_itips().await;
     itips.sort_unstable_by(|a, _| {
         if a.contains("Lunch") {
             std::cmp::Ordering::Less
@@ -471,7 +474,7 @@ pub async fn test(test: &WebDavTest) {
         "failed for itip: {}",
         itips[1]
     );
-    let cals = fetch_icals(bill_client).await;
+    let cals = bill_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
@@ -482,7 +485,7 @@ pub async fn test(test: &WebDavTest) {
     );
     let attendee_href = cal.href;
     assert_eq!(
-        fetch_and_remove_itips(jane_client).await,
+        jane_client.fetch_and_remove_itips().await,
         Vec::<String>::new()
     );
 
@@ -492,14 +495,14 @@ pub async fn test(test: &WebDavTest) {
         .await
         .with_status(StatusCode::NO_CONTENT);
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let itips = fetch_and_remove_itips(bill_client).await;
+    let itips = bill_client.fetch_and_remove_itips().await;
     assert_eq!(itips.len(), 1);
     assert!(
         itips[0].contains("METHOD:CANCEL") && itips[0].contains("STATUS:CANCELLED"),
         "failed for itip: {}",
         itips[0]
     );
-    let cals = fetch_icals(bill_client).await;
+    let cals = bill_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
@@ -508,7 +511,7 @@ pub async fn test(test: &WebDavTest) {
         cal.ical
     );
     assert_eq!(
-        fetch_and_remove_itips(jane_client).await,
+        jane_client.fetch_and_remove_itips().await,
         Vec::<String>::new()
     );
 
@@ -519,40 +522,43 @@ pub async fn test(test: &WebDavTest) {
         .with_status(StatusCode::NO_CONTENT);
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert_eq!(
-        fetch_and_remove_itips(john_client).await,
+        john_client.fetch_and_remove_itips().await,
         Vec::<String>::new()
     );
 
     for client in [bill_client, jane_client, john_client] {
         client.delete_default_containers().await;
-        destroy_all_mailboxes_for_account(client.account_id).await;
+    }
+    for account in [bill, jane, john] {
+        test.destroy_all_mailboxes(account).await;
     }
 
     test.assert_is_empty().await;
 }
 
-async fn fetch_and_remove_itips(client: &DummyWebDavClient) -> Vec<String> {
-    let inbox_href = format!("/dav/itip/{}/inbox/", client.name);
-    let response = client
-        .propfind_with_headers(&inbox_href, ALL_DAV_PROPERTIES, [("depth", "1")])
-        .await;
-    let mut itips = vec![];
+impl DummyWebDavClient {
+    async fn fetch_and_remove_itips(&self) -> Vec<String> {
+        let inbox_href = format!("/dav/itip/{}/inbox/", self.name.replace('@', "%40"));
+        let response = self
+            .propfind_with_headers(&inbox_href, ALL_DAV_PROPERTIES, [("depth", "1")])
+            .await;
+        let mut itips = vec![];
 
-    for href in response.hrefs.keys().filter(|&href| href != &inbox_href) {
-        let itip = client
-            .request("GET", href, "")
-            .await
-            .with_status(StatusCode::OK)
-            .body
-            .expect("Missing body");
-        client
-            .request("DELETE", href, "")
-            .await
-            .with_status(StatusCode::NO_CONTENT);
-        itips.push(itip);
+        for href in response.hrefs.keys().filter(|&href| href != &inbox_href) {
+            let itip = self
+                .request("GET", href, "")
+                .await
+                .with_status(StatusCode::OK)
+                .body
+                .expect("Missing body");
+            self.request("DELETE", href, "")
+                .await
+                .with_status(StatusCode::NO_CONTENT);
+            itips.push(itip);
+        }
+
+        itips
     }
-
-    itips
 }
 
 #[derive(Debug)]
@@ -562,42 +568,46 @@ struct CalEntry {
     schedule_tag: String,
 }
 
-async fn fetch_icals(client: &DummyWebDavClient) -> Vec<CalEntry> {
-    let cal_inbox = format!("/dav/cal/{}/default/", client.name);
-    let response = client
-        .propfind_with_headers(&cal_inbox, ALL_DAV_PROPERTIES, [("depth", "1")])
-        .await;
-    let mut cals = vec![];
+impl DummyWebDavClient {
+    async fn fetch_icals(&self) -> Vec<CalEntry> {
+        let cal_inbox = format!("/dav/cal/{}/default/", self.name.replace('@', "%40"));
+        let response = self
+            .propfind_with_headers(&cal_inbox, ALL_DAV_PROPERTIES, [("depth", "1")])
+            .await;
+        let mut cals = vec![];
 
-    for href in response.hrefs.keys().filter(|&href| href != &cal_inbox) {
-        let ical = client
-            .request("GET", href, "")
-            .await
-            .with_status(StatusCode::OK)
-            .body
-            .expect("Missing body");
-        let properties = response.properties(href);
+        for href in response.hrefs.keys().filter(|&href| href != &cal_inbox) {
+            let ical = self
+                .request("GET", href, "")
+                .await
+                .with_status(StatusCode::OK)
+                .body
+                .expect("Missing body");
+            let properties = response.properties(href);
 
-        assert!(
-            !ical.contains("METHOD:"),
-            "iTIP method found in calendar entry: {ical}"
-        );
+            assert!(
+                !ical.contains("METHOD:"),
+                "iTIP method found in calendar entry: {ical}"
+            );
 
-        cals.push(CalEntry {
-            href: href.to_string(),
-            ical,
-            schedule_tag: properties
-                .get(DavProperty::CalDav(CalDavProperty::ScheduleTag))
-                .value()
-                .to_string(),
-        });
+            cals.push(CalEntry {
+                href: href.to_string(),
+                ical,
+                schedule_tag: properties
+                    .get(DavProperty::CalDav(CalDavProperty::ScheduleTag))
+                    .value()
+                    .to_string(),
+            });
+        }
+
+        cals
     }
-
-    cals
 }
 
-pub async fn test_build_itip_templates(server: &Server) {
-    let dummy_access_token = AccessToken::from_id(0);
+pub async fn test_build_itip_templates(test: &TestServer) {
+    let account = test.account("john@example.com");
+    let account_id = account.id().document_id();
+    let account_info = test.server.account_info(account_id).await.unwrap();
 
     for (idx, summary) in [
         ItipSummary::Invite(vec![
@@ -786,19 +796,14 @@ pub async fn test_build_itip_templates(server: &Server) {
     .into_iter()
     .enumerate()
     {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&summary)
-            .unwrap()
-            .to_vec();
-        let summary = rkyv::access::<ArchivedItipSummary, rkyv::rancor::Error>(&bytes).unwrap();
-
         let html = build_itip_template(
-            server,
-            &dummy_access_token,
-            0,
+            &test.server,
+            &account_info,
+            account_id,
             1,
             "john.doe@example.org",
             "jane.smith@example.net",
-            summary,
+            &summary,
             "124",
         )
         .await;

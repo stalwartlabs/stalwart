@@ -5,7 +5,6 @@
  */
 
 use common::{Server, auth::AccessToken};
-use directory::{Permission, QueryParams, Type, backend::internal::manage::ManageDirectory};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::principal::{Principal, PrincipalProperty, PrincipalType, PrincipalValue},
@@ -13,8 +12,9 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Key, Map, Value};
+use registry::schema::prelude::{ObjectType, Permission};
 use std::future::Future;
-use store::roaring::RoaringBitmap;
+use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use trc::AddContext;
 
 pub trait PrincipalGet: Sync + Send {
@@ -32,14 +32,14 @@ impl PrincipalGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Principal>> {
         if !self.core.groupware.allow_directory_query
-            && !access_token.has_permission(Permission::IndividualList)
+            && !access_token.has_permission(Permission::JmapPrincipalGet)
         {
             return Err(trc::JmapEvent::Forbidden
                 .into_err()
                 .details("The administrator has disabled directory queries.".to_string()));
         }
 
-        let ids = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
             PrincipalProperty::Id,
             PrincipalProperty::Type,
@@ -50,26 +50,12 @@ impl PrincipalGet for Server {
 
         // Return all principals
         let principal_ids = self
-            .store()
-            .list_principals(
-                None,
-                access_token.tenant_id(),
-                &[
-                    Type::Individual,
-                    Type::Group,
-                    Type::Resource,
-                    Type::Location,
-                ],
-                false,
-                0,
-                0,
+            .registry()
+            .query::<RoaringBitmap>(
+                RegistryQuery::new(ObjectType::Account).with_tenant(access_token.tenant_id()),
             )
             .await
-            .caused_by(trc::location!())?
-            .items
-            .into_iter()
-            .map(|p| p.id())
-            .collect::<RoaringBitmap>();
+            .caused_by(trc::location!())?;
 
         let ids = if let Some(ids) = ids {
             ids
@@ -84,37 +70,30 @@ impl PrincipalGet for Server {
             account_id: request.account_id.into(),
             state: State::Initial.into(),
             list: Vec::with_capacity(ids.len()),
-            not_found: vec![],
+            not_found: not_found_ids,
         };
 
         for id in ids {
             // Obtain the principal
             let document_id = id.document_id();
-            let principal = if principal_ids.contains(document_id)
-                && let Some(principal) = self
-                    .core
-                    .storage
-                    .directory
-                    .query(QueryParams::id(document_id).with_return_member_of(false))
-                    .await?
-            {
-                principal
-            } else {
-                response.not_found.push(id);
+            if !principal_ids.contains(document_id) {
+                response.push_not_found(id);
                 continue;
             };
+            let principal = self
+                .account(document_id)
+                .await
+                .caused_by(trc::location!())?;
 
             let mut result = Map::with_capacity(properties.len());
             for property in &properties {
                 let value = match property {
                     PrincipalProperty::Id => Value::Element(PrincipalValue::Id(id)),
                     PrincipalProperty::Type => {
-                        Value::Element(PrincipalValue::Type(match principal.typ() {
-                            Type::Individual => PrincipalType::Individual,
-                            Type::Group => PrincipalType::Group,
-                            Type::Resource => PrincipalType::Resource,
-                            Type::Location => PrincipalType::Location,
-                            _ => PrincipalType::Other,
+                        Value::Element(PrincipalValue::Type(if principal.is_user_account() {
+                            PrincipalType::Individual
+                        } else {
+                            PrincipalType::Group
                         }))
                     }
                     PrincipalProperty::Name => Value::Str(principal.name().to_string().into()),
@@ -122,10 +101,7 @@ impl PrincipalGet for Server {
                         .description()
                         .map(|v| Value::Str(v.to_string().into()))
                         .unwrap_or(Value::Null),
-                    PrincipalProperty::Email => principal
-                        .primary_email()
-                        .map(|email| Value::Str(email.to_string().into()))
-                        .unwrap_or(Value::Null),
+                    PrincipalProperty::Email => Value::Str(principal.name().to_string().into()),
                     PrincipalProperty::Accounts => Value::Object(Map::from(vec![(
                         Key::Property(PrincipalProperty::IdValue(id)),
                         Value::Object(Map::from_iter(
@@ -173,11 +149,7 @@ impl PrincipalGet for Server {
                                         (
                                             Key::Borrowed("calendarAddress"),
                                             Value::Str(
-                                                principal
-                                                    .primary_email()
-                                                    .map(|email| format!("mailto:{}", email))
-                                                    .unwrap_or_default()
-                                                    .into(),
+                                                format!("mailto:{}", principal.name()).into(),
                                             ),
                                         ),
                                     ])),

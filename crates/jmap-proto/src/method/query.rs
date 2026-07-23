@@ -87,7 +87,7 @@ impl<'de, T: JmapObject> DeserializeArguments<'de> for QueryRequest<T> {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"filter" => {
                 self.filter = map.next_value::<FilterWrapper<T::Filter>>()?.0;
@@ -102,7 +102,9 @@ impl<'de, T: JmapObject> DeserializeArguments<'de> for QueryRequest<T> {
                 self.position = map.next_value()?;
             },
             b"anchor" => {
-                self.anchor = map.next_value()?;
+                self.anchor = map
+                    .next_value::<Option<crate::request::MaybeInvalid<Id>>>()?
+                    .map(|anchor| anchor.try_unwrap().unwrap_or(Id::from(u64::MAX)));
             },
             b"anchorOffset" => {
                 self.anchor_offset = map.next_value()?;
@@ -195,6 +197,20 @@ where
                 write!(formatter, "a filter object")
             }
 
+            fn visit_unit<E>(self) -> Result<(), E>
+            where
+                E: de::Error,
+            {
+                Ok(())
+            }
+
+            fn visit_none<E>(self) -> Result<(), E>
+            where
+                E: de::Error,
+            {
+                Ok(())
+            }
+
             fn visit_map<V>(self, mut map: V) -> Result<(), V::Error>
             where
                 V: MapAccess<'de>,
@@ -261,7 +277,7 @@ where
             }
         }
 
-        deserializer.deserialize_map(FilterVisitor(self.0))
+        deserializer.deserialize_any(FilterVisitor(self.0))
     }
 }
 

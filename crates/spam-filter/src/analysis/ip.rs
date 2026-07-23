@@ -8,7 +8,7 @@ use super::ElementLocation;
 use crate::{IpParts, SpamFilterContext, TextPart, modules::dnsbl::check_dnsbl};
 use common::{
     Server,
-    config::spamfilter::{Element, IpResolver, Location},
+    config::mailstore::spamfilter::{Element, IpResolver, Location},
 };
 use mail_auth::IprevResult;
 use mail_parser::{HeaderName, HeaderValue, Host};
@@ -37,7 +37,7 @@ impl SpamFilterAnalyzeIp for Server {
             {
                 if let Some(ip) = received.from_ip()
                     && !ip.is_loopback()
-                    && !self.is_ip_allowed(&ip)
+                    && !self.is_ip_allowed(ip)
                 {
                     ips.insert(ElementLocation::new(ip, Location::HeaderReceived));
                 }
@@ -47,7 +47,7 @@ impl SpamFilterAnalyzeIp for Server {
                 {
                     if let Host::IpAddr(ip) = host
                         && !ip.is_loopback()
-                        && !self.is_ip_allowed(ip)
+                        && !self.is_ip_allowed(*ip)
                     {
                         ips.insert(ElementLocation::new(*ip, Location::HeaderReceived));
                     }
@@ -89,10 +89,10 @@ impl SpamFilterAnalyzeIp for Server {
             if ip.element.is_loopback()
                 || ip.element.is_multicast()
                 || ip.element.is_unspecified()
-                || self.is_ip_allowed(&ip.element)
+                || self.is_ip_allowed(ip.element)
             {
                 continue;
-            } else if self.is_ip_blocked(&ip.element) {
+            } else if self.is_ip_blocked(ip.element) {
                 ctx.result.add_tag("IP_BLOCKED");
                 continue;
             }

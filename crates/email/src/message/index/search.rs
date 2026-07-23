@@ -8,7 +8,8 @@ use crate::message::{
     index::{MAX_MESSAGE_PARTS, extractors::VisitTextArchived},
     metadata::{
         ArchivedMessageMetadata, ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue,
-        ArchivedMetadataPartType, DecodedPartContent, MESSAGE_RECEIVED_MASK, MetadataHeaderName,
+        ArchivedMetadataPartType, DecodedPartContent, MESSAGE_HAS_ATTACHMENT,
+        MESSAGE_RECEIVED_MASK, MetadataHeaderName,
     },
 };
 use mail_parser::{DateTime, decoders::html::html_to_text, parsers::fields::thread::thread_name};
@@ -192,19 +193,14 @@ impl ArchivedMessageMetadata {
                                         });
                                     }
                                     _ => {
-                                        if (matches!(
-                                            header.value,
-                                            ArchivedMetadataHeaderValue::ContentType(_)
-                                        ) || matches!(
-                                            header.name,
-                                            ArchivedMetadataHeaderName::Received
-                                        )) && let Some(header) =
+                                        if let Some(raw_value) =
                                             raw_message.get(header.value_range())
                                         {
-                                            let header = std::str::from_utf8(header.as_ref())
+                                            let raw_value = std::str::from_utf8(raw_value.as_ref())
                                                 .unwrap_or_default();
 
-                                            for word in WordTokenizer::new(header, MAX_TOKEN_LENGTH)
+                                            for word in
+                                                WordTokenizer::new(raw_value, MAX_TOKEN_LENGTH)
                                             {
                                                 if !value.is_empty() {
                                                     value.push(' ');
@@ -339,10 +335,10 @@ impl ArchivedMessageMetadata {
         #[cfg(feature = "test_mode")]
         document.set_unknown_language(default_language);
 
-        let has_attachment =
-            document.has_field(&(SearchField::Email(EmailSearchField::Attachment)));
-
-        document.index_bool(EmailSearchField::HasAttachment, has_attachment);
+        document.index_bool(
+            EmailSearchField::HasAttachment,
+            self.rcvd_attach.to_native() & MESSAGE_HAS_ATTACHMENT != 0,
+        );
         document
     }
 }

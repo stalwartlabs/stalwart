@@ -4,25 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::Duration};
-
-use ahash::AHashMap;
+use crate::expr::{
+    self,
+    if_block::{BootstrapExprExt, IfBlock},
+};
 use mail_auth::{
-    common::crypto::{Algorithm, Ed25519Key, HashAlgorithm, RsaKey, Sha256, SigningKey},
+    common::crypto::{Ed25519Key, HashAlgorithm, RsaKey, Sha256, SigningKey},
     dkim::{Canonicalization, Done},
+    dkim2::{Dkim2Signer, Done as Dkim2Done, Flag},
 };
 use mail_parser::decoders::base64::base64_decode;
-use utils::config::{
-    Config,
-    utils::{AsKey, ParseValue},
+use registry::{
+    schema::{
+        enums::{self, Dkim2Flag, ExpressionConstant},
+        prelude::ObjectType,
+        structs::{Dkim1Signature, DkimSignature, SenderAuth},
+    },
+    types::{ObjectImpl, map::Map},
 };
-
-use crate::{
-    config::CONNECTION_VARS,
-    expr::{self, Constant, ConstantValue, if_block::IfBlock, tokenizer::TokenMap},
-};
-
-use super::*;
+use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
+use store::registry::bootstrap::Bootstrap;
+use utils::cache::CacheItemWeight;
 
 #[derive(Clone)]
 pub struct MailAuthConfig {
@@ -31,20 +33,6 @@ pub struct MailAuthConfig {
     pub spf: SpfAuthConfig,
     pub dmarc: DmarcAuthConfig,
     pub iprev: IpRevAuthConfig,
-    pub signatures: AHashMap<String, Arc<ArcSwap<LazySignature>>>,
-}
-
-#[allow(clippy::large_enum_variant)]
-pub enum LazySignature {
-    Resolved(ResolvedSignature),
-    Pending(Config),
-    Failed,
-}
-
-#[derive(Clone)]
-pub struct ResolvedSignature {
-    pub signer: Arc<DkimSigner>,
-    pub sealer: Arc<ArcSealer>,
 }
 
 #[derive(Clone)]
@@ -57,7 +45,7 @@ pub struct DkimAuthConfig {
 #[derive(Clone)]
 pub struct ArcAuthConfig {
     pub verify: IfBlock,
-    pub seal: IfBlock,
+    //pub seal: IfBlock,
 }
 
 #[derive(Clone)]
@@ -84,229 +72,185 @@ pub enum VerifyStrategy {
     Disable,
 }
 
-#[derive(Debug, Clone)]
-pub struct DkimCanonicalization {
-    pub headers: Canonicalization,
-    pub body: Canonicalization,
-}
-
-pub enum DkimSigner {
+pub enum Dkim1Signer {
     RsaSha256(mail_auth::dkim::DkimSigner<RsaKey<Sha256>, Done>),
     Ed25519Sha256(mail_auth::dkim::DkimSigner<Ed25519Key, Done>),
 }
 
-pub enum ArcSealer {
-    RsaSha256(mail_auth::arc::ArcSealer<RsaKey<Sha256>, Done>),
-    Ed25519Sha256(mail_auth::arc::ArcSealer<Ed25519Key, Done>),
-}
-
-impl Default for MailAuthConfig {
-    fn default() -> Self {
-        Self {
-            dkim: DkimAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>("auth.dkim.verify", [], "relaxed"),
-                sign: IfBlock::new::<()>(
-                    "auth.dkim.sign",
-                    [(
-                        "is_local_domain('*', sender_domain)",
-                        "['rsa-' + sender_domain, 'ed25519-' + sender_domain]",
-                    )],
-                    "false",
-                ),
-                strict: true,
-            },
-            arc: ArcAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>("auth.arc.verify", [], "relaxed"),
-                seal: IfBlock::new::<()>(
-                    "auth.arc.seal",
-                    [],
-                    "'rsa-' + config_get('report.domain')",
-                ),
-            },
-            spf: SpfAuthConfig {
-                verify_ehlo: IfBlock::new::<VerifyStrategy>(
-                    "auth.spf.verify.ehlo",
-                    [("local_port == 25", "relaxed")],
-                    #[cfg(not(feature = "test_mode"))]
-                    "disable",
-                    #[cfg(feature = "test_mode")]
-                    "relaxed",
-                ),
-                verify_mail_from: IfBlock::new::<VerifyStrategy>(
-                    "auth.spf.verify.mail-from",
-                    [("local_port == 25", "relaxed")],
-                    #[cfg(not(feature = "test_mode"))]
-                    "disable",
-                    #[cfg(feature = "test_mode")]
-                    "relaxed",
-                ),
-            },
-            dmarc: DmarcAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>(
-                    "auth.dmarc.verify",
-                    [("local_port == 25", "relaxed")],
-                    #[cfg(not(feature = "test_mode"))]
-                    "disable",
-                    #[cfg(feature = "test_mode")]
-                    "relaxed",
-                ),
-            },
-            iprev: IpRevAuthConfig {
-                verify: IfBlock::new::<VerifyStrategy>(
-                    "auth.iprev.verify",
-                    [("local_port == 25", "relaxed")],
-                    #[cfg(not(feature = "test_mode"))]
-                    "disable",
-                    #[cfg(feature = "test_mode")]
-                    "relaxed",
-                ),
-            },
-            signatures: Default::default(),
-        }
-    }
+#[derive(Default)]
+pub struct DkimSigners {
+    pub dkim1: Vec<Dkim1Signer>,
+    pub dkim2: Option<Dkim2Signer<Dkim2Done>>,
 }
 
 impl MailAuthConfig {
-    pub fn parse(config: &mut Config) -> Self {
-        let rcpt_vars = TokenMap::default()
-            .with_variables(SMTP_RCPT_TO_VARS)
-            .with_constants::<VerifyStrategy>();
-        let conn_vars = TokenMap::default()
-            .with_variables(CONNECTION_VARS)
-            .with_constants::<VerifyStrategy>();
-        let mut mail_auth = Self::default();
+    pub async fn parse(bp: &mut Bootstrap) -> Self {
+        let auth = bp.setting_infallible::<SenderAuth>().await;
 
-        for (value, key, token_map) in [
-            (&mut mail_auth.dkim.verify, "auth.dkim.verify", &rcpt_vars),
-            (&mut mail_auth.dkim.sign, "auth.dkim.sign", &rcpt_vars),
-            (&mut mail_auth.arc.verify, "auth.arc.verify", &rcpt_vars),
-            (&mut mail_auth.arc.seal, "auth.arc.seal", &rcpt_vars),
-            (
-                &mut mail_auth.spf.verify_ehlo,
-                "auth.spf.verify.ehlo",
-                &conn_vars,
-            ),
-            (
-                &mut mail_auth.spf.verify_mail_from,
-                "auth.spf.verify.mail-from",
-                &conn_vars,
-            ),
-            (&mut mail_auth.dmarc.verify, "auth.dmarc.verify", &rcpt_vars),
-            (&mut mail_auth.iprev.verify, "auth.iprev.verify", &conn_vars),
-        ] {
-            if let Some(if_block) = IfBlock::try_parse(config, key, token_map) {
-                *value = if_block;
+        MailAuthConfig {
+            dkim: DkimAuthConfig {
+                verify: bp
+                    .compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_dkim_verify()),
+                sign: bp.compile_expr(
+                    ObjectType::SenderAuth.singleton(),
+                    &auth.ctx_dkim_sign_domain(),
+                ),
+                strict: auth.dkim_strict,
+            },
+            arc: ArcAuthConfig {
+                verify: bp.compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_arc_verify()),
+                //seal: bp.compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_arc_seal_domain()),
+            },
+            spf: SpfAuthConfig {
+                verify_ehlo: bp.compile_expr(
+                    ObjectType::SenderAuth.singleton(),
+                    &auth.ctx_spf_ehlo_verify(),
+                ),
+                verify_mail_from: bp.compile_expr(
+                    ObjectType::SenderAuth.singleton(),
+                    &auth.ctx_spf_from_verify(),
+                ),
+            },
+            dmarc: DmarcAuthConfig {
+                verify: bp
+                    .compile_expr(ObjectType::SenderAuth.singleton(), &auth.ctx_dmarc_verify()),
+            },
+            iprev: IpRevAuthConfig {
+                verify: bp.compile_expr(
+                    ObjectType::SenderAuth.singleton(),
+                    &auth.ctx_reverse_ip_verify(),
+                ),
+            },
+        }
+    }
+}
+
+impl DkimSigners {
+    pub async fn insert(&mut self, domain: String, signature: DkimSignature) -> trc::Result<()> {
+        let mut errors = vec![];
+        if !signature.validate(&mut errors) {
+            return Err(trc::DkimEvent::BuildError
+                .reason("DKIM signature validation failed")
+                .details(
+                    errors
+                        .into_iter()
+                        .map(|v| trc::Value::from(v.to_string()))
+                        .collect::<Vec<_>>(),
+                ));
+        }
+
+        match signature {
+            DkimSignature::Dkim1Ed25519Sha256(signature) => {
+                let private_key = signature
+                    .private_key
+                    .secret()
+                    .await
+                    .map_err(|err| trc::DkimEvent::BuildError.reason(err))?;
+                let private_key = simple_pem_parse(&private_key).ok_or_else(|| {
+                    trc::DkimEvent::BuildError
+                        .reason("Failed to parse ED25519 private key PEM")
+                        .details("Invalid PEM format")
+                })?;
+                let key =
+                    Ed25519Key::from_pkcs8_maybe_unchecked_der(&private_key).map_err(|err| {
+                        trc::DkimEvent::BuildError
+                            .reason(err)
+                            .details("Failed to build ED25519 key")
+                    })?;
+
+                self.dkim1
+                    .push(Dkim1Signer::Ed25519Sha256(build_dkim1_signer(
+                        domain, signature, key,
+                    )));
+            }
+            DkimSignature::Dkim1RsaSha256(signature) => {
+                let private_key = signature
+                    .private_key
+                    .secret()
+                    .await
+                    .map_err(|err| trc::DkimEvent::BuildError.reason(err))?;
+                let key = rsa_key_parse(private_key.as_bytes())?;
+
+                self.dkim1.push(Dkim1Signer::RsaSha256(build_dkim1_signer(
+                    domain, signature, key,
+                )));
+            }
+            DkimSignature::Dkim2Ed25519Sha256(signature) => {
+                let private_key = signature
+                    .private_key
+                    .secret()
+                    .await
+                    .map_err(|err| trc::DkimEvent::BuildError.reason(err))?;
+                let private_key = simple_pem_parse(&private_key).ok_or_else(|| {
+                    trc::DkimEvent::BuildError
+                        .reason("Failed to parse ED25519 private key PEM")
+                        .details("Invalid PEM format")
+                })?;
+                let key =
+                    Ed25519Key::from_pkcs8_maybe_unchecked_der(&private_key).map_err(|err| {
+                        trc::DkimEvent::BuildError
+                            .reason(err)
+                            .details("Failed to build ED25519 key")
+                    })?;
+
+                self.dkim2 = Some(match self.dkim2.take() {
+                    None => Dkim2Signer::from_key(key)
+                        .domain(domain)
+                        .selector(signature.selector)
+                        .flags(map_dkim2_flags(signature.flags)),
+                    Some(signer) => signer
+                        .additional_key(key, signature.selector)
+                        .flags(map_dkim2_flags(signature.flags)),
+                });
+            }
+            DkimSignature::Dkim2RsaSha256(signature) => {
+                let private_key = signature
+                    .private_key
+                    .secret()
+                    .await
+                    .map_err(|err| trc::DkimEvent::BuildError.reason(err))?;
+                let key = rsa_key_parse(private_key.as_bytes())?;
+
+                self.dkim2 = Some(match self.dkim2.take() {
+                    None => Dkim2Signer::from_key(key)
+                        .domain(domain)
+                        .selector(signature.selector)
+                        .flags(map_dkim2_flags(signature.flags)),
+                    Some(signer) => signer
+                        .additional_key(key, signature.selector)
+                        .flags(map_dkim2_flags(signature.flags)),
+                });
             }
         }
-        mail_auth.dkim.strict = config
-            .property_or_default("auth.dkim.strict", "true")
-            .unwrap_or(true);
 
-        // Parse signatures
-        let mut signatures: AHashMap<&str, Config> = AHashMap::new();
-        let mut current_id = None;
-        for (k, v) in config.keys.iter() {
-            if let Some(prefix) = k.strip_prefix("signature.") {
-                if let Some(id) = prefix.strip_suffix(".algorithm") {
-                    current_id = Some(id);
-                }
-                #[allow(clippy::unwrap_or_default)]
-                if let Some(current_id) = current_id {
-                    signatures
-                        .entry(current_id)
-                        .or_insert_with(Config::default)
-                        .keys
-                        .insert(k.to_string(), v.to_string());
-                }
-            } else if !signatures.is_empty() {
-                break;
-            }
-        }
-        mail_auth.signatures = signatures
-            .into_iter()
-            .map(|(id, config)| {
-                (
-                    id.to_string(),
-                    Arc::new(ArcSwap::from_pointee(LazySignature::Pending(config))),
-                )
+        Ok(())
+    }
+}
+
+fn map_dkim2_flags(flags: Map<enums::Dkim2Flag>) -> impl Iterator<Item = Flag> {
+    flags.into_inner().into_iter().map(|flag| match flag {
+        Dkim2Flag::Donotmodify => Flag::DoNotModify,
+        Dkim2Flag::Donotexplode => Flag::DoNotExplode,
+        Dkim2Flag::Feedback => Flag::Feedback,
+    })
+}
+
+pub fn rsa_key_parse(private_key: &[u8]) -> trc::Result<RsaKey<Sha256>> {
+    PrivatePkcs1KeyDer::from_pem_slice(private_key)
+        .map(PrivateKeyDer::Pkcs1)
+        .or_else(|_| PrivatePkcs8KeyDer::from_pem_slice(private_key).map(PrivateKeyDer::Pkcs8))
+        .map_err(|err| {
+            trc::DkimEvent::BuildError
+                .reason(err)
+                .details("Failed to build RSA key")
+        })
+        .and_then(|key| {
+            RsaKey::<Sha256>::from_key_der(key).map_err(|err| {
+                trc::DkimEvent::BuildError
+                    .reason(err)
+                    .details("Failed to build RSA key")
             })
-            .collect();
-
-        mail_auth
-    }
-}
-
-pub fn build_signature(config: &mut Config, id: &str) -> Option<(DkimSigner, ArcSealer)> {
-    match config.property_require::<Algorithm>(("signature", id, "algorithm"))? {
-        Algorithm::RsaSha256 => {
-            let pk = config
-                .value_require(("signature", id, "private-key"))?
-                .trim()
-                .to_string();
-            let key = RsaKey::<Sha256>::from_rsa_pem(&pk)
-                .or_else(|_| RsaKey::<Sha256>::from_pkcs8_pem(&pk))
-                .map_err(|err| {
-                    config.new_build_error(
-                        ("signature", id, "private-key"),
-                        format!("Failed to build RSA key: {err}",),
-                    )
-                })
-                .ok()?;
-            let key_clone = RsaKey::<Sha256>::from_rsa_pem(&pk)
-                .or_else(|_| RsaKey::<Sha256>::from_pkcs8_pem(&pk))
-                .map_err(|err| {
-                    config.new_build_error(
-                        ("signature", id, "private-key"),
-                        format!("Failed to build RSA key: {err}",),
-                    )
-                })
-                .ok()?;
-            let (signer, sealer) = parse_signature(config, id, key_clone, key)?;
-            (DkimSigner::RsaSha256(signer), ArcSealer::RsaSha256(sealer)).into()
-        }
-        Algorithm::Ed25519Sha256 => {
-            let private_key = parse_pem(config, ("signature", id, "private-key"))?;
-            let key = Ed25519Key::from_pkcs8_maybe_unchecked_der(&private_key)
-                .map_err(|err| {
-                    config.new_build_error(
-                        ("signature", id),
-                        format!("Failed to build ED25519 key for signature {id:?}: {err}"),
-                    )
-                })
-                .ok()?;
-            let key_clone = Ed25519Key::from_pkcs8_maybe_unchecked_der(&private_key)
-                .map_err(|err| {
-                    config.new_build_error(
-                        ("signature", id),
-                        format!("Failed to build ED25519 key for signature {id:?}: {err}"),
-                    )
-                })
-                .ok()?;
-
-            let (signer, sealer) = parse_signature(config, id, key_clone, key)?;
-            (
-                DkimSigner::Ed25519Sha256(signer),
-                ArcSealer::Ed25519Sha256(sealer),
-            )
-                .into()
-        }
-        Algorithm::RsaSha1 => {
-            config.new_build_error(
-                ("signature", id),
-                format!("Could not build signature {id:?}: SHA1 signatures are deprecated.",),
-            );
-            None
-        }
-    }
-}
-
-fn parse_pem(config: &mut Config, key: impl AsKey) -> Option<Vec<u8>> {
-    if let Some(der) = simple_pem_parse(config.value_require(key.clone())?) {
-        Some(der)
-    } else {
-        config.new_build_error(key, "Failed to base64 decode key.");
-        None
-    }
+        })
 }
 
 pub fn simple_pem_parse(contents: &str) -> Option<Vec<u8>> {
@@ -338,88 +282,59 @@ pub fn simple_pem_parse(contents: &str) -> Option<Vec<u8>> {
     base64_decode(&base64)
 }
 
-fn parse_signature<T: SigningKey, U: SigningKey<Hasher = Sha256>>(
-    config: &mut Config,
-    id: &str,
-    key_dkim: T,
-    key_arc: U,
-) -> Option<(
-    mail_auth::dkim::DkimSigner<T, Done>,
-    mail_auth::arc::ArcSealer<U, Done>,
-)> {
-    let domain = config
-        .value_require(("signature", id, "domain"))?
-        .to_string();
-    let selector = config
-        .value_require(("signature", id, "selector"))?
-        .to_string();
-    let mut headers = config
-        .values(("signature", id, "headers"))
-        .filter_map(|(_, v)| {
-            if !v.is_empty() {
-                v.to_string().into()
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    if headers.is_empty() {
-        headers = vec![
-            "From".to_string(),
-            "To".to_string(),
-            "Date".to_string(),
-            "Subject".to_string(),
-            "Message-ID".to_string(),
-        ];
-    }
-
-    let mut signer = mail_auth::dkim::DkimSigner::from_key(key_dkim)
-        .domain(&domain)
-        .selector(&selector)
-        .headers(headers.clone());
-    if !headers
-        .iter()
-        .any(|h| h.eq_ignore_ascii_case("DKIM-Signature"))
-    {
-        headers.push("DKIM-Signature".to_string());
-    }
-    let mut sealer = mail_auth::arc::ArcSealer::from_key(key_arc)
+fn build_dkim1_signer<T: SigningKey>(
+    domain: String,
+    signature: Dkim1Signature,
+    key: T,
+) -> mail_auth::dkim::DkimSigner<T, Done> {
+    let mut signer = mail_auth::dkim::DkimSigner::from_key(key)
         .domain(domain)
-        .selector(selector)
-        .headers(headers);
+        .selector(signature.selector)
+        .headers(signature.headers)
+        .reporting(signature.report);
 
-    if let Some(c) = config.property::<DkimCanonicalization>(("signature", id, "canonicalization"))
-    {
-        signer = signer
-            .body_canonicalization(c.body)
-            .header_canonicalization(c.headers);
-        sealer = sealer
-            .body_canonicalization(c.body)
-            .header_canonicalization(c.headers);
+    match signature.canonicalization {
+        enums::DkimCanonicalization::RelaxedRelaxed => {
+            signer = signer
+                .body_canonicalization(Canonicalization::Relaxed)
+                .header_canonicalization(Canonicalization::Relaxed);
+        }
+        enums::DkimCanonicalization::SimpleSimple => {
+            signer = signer
+                .body_canonicalization(Canonicalization::Simple)
+                .header_canonicalization(Canonicalization::Simple);
+        }
+        enums::DkimCanonicalization::RelaxedSimple => {
+            signer = signer
+                .body_canonicalization(Canonicalization::Simple)
+                .header_canonicalization(Canonicalization::Relaxed);
+        }
+        enums::DkimCanonicalization::SimpleRelaxed => {
+            signer = signer
+                .body_canonicalization(Canonicalization::Relaxed)
+                .header_canonicalization(Canonicalization::Simple);
+        }
     }
 
-    if let Some(c) = config.property::<Duration>(("signature", id, "expire")) {
-        signer = signer.expiration(c.as_secs());
-        sealer = sealer.expiration(c.as_secs());
+    if let Some(expire) = signature.expire {
+        signer = signer.expiration(expire.into_inner().as_secs());
     }
 
-    if let Some(true) = config.property::<bool>(("signature", id, "report")) {
-        signer = signer.reporting(true);
-    }
-
-    if let Some(auid) = config.property::<String>(("signature", id, "auid")) {
+    if let Some(auid) = signature.auid {
         signer = signer.agent_user_identifier(auid);
     }
 
-    if let Some(atps) = config.property::<String>(("signature", id, "third-party")) {
+    if let Some(atps) = signature.third_party {
         signer = signer.atps(atps);
     }
 
-    if let Some(atpsh) = config.property::<HashAlgorithm>(("signature", id, "third-party-algo")) {
-        signer = signer.atpsh(atpsh);
+    if let Some(atpsh) = signature.third_party_hash {
+        signer = signer.atpsh(match atpsh {
+            enums::DkimHash::Sha256 => HashAlgorithm::Sha256,
+            enums::DkimHash::Sha1 => HashAlgorithm::Sha1,
+        });
     }
-
-    Some((signer, sealer))
+    signer
 }
 
 impl<'x> TryFrom<expr::Variable<'x>> for VerifyStrategy {
@@ -427,24 +342,14 @@ impl<'x> TryFrom<expr::Variable<'x>> for VerifyStrategy {
 
     fn try_from(value: expr::Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            expr::Variable::Integer(c) => match c {
-                2 => Ok(VerifyStrategy::Relaxed),
-                3 => Ok(VerifyStrategy::Strict),
-                4 => Ok(VerifyStrategy::Disable),
+            expr::Variable::Constant(c) => match c {
+                ExpressionConstant::Relaxed => Ok(VerifyStrategy::Relaxed),
+                ExpressionConstant::Strict => Ok(VerifyStrategy::Strict),
+                ExpressionConstant::Disable => Ok(VerifyStrategy::Disable),
                 _ => Err(()),
             },
             _ => Err(()),
         }
-    }
-}
-
-impl From<VerifyStrategy> for Constant {
-    fn from(value: VerifyStrategy) -> Self {
-        Constant::Integer(match value {
-            VerifyStrategy::Relaxed => 2,
-            VerifyStrategy::Strict => 3,
-            VerifyStrategy::Disable => 4,
-        })
     }
 }
 
@@ -460,51 +365,16 @@ impl VerifyStrategy {
     }
 }
 
-impl ParseValue for VerifyStrategy {
-    fn parse_value(value: &str) -> Result<Self, String> {
-        match value {
-            "relaxed" => Ok(VerifyStrategy::Relaxed),
-            "strict" => Ok(VerifyStrategy::Strict),
-            "disable" | "disabled" | "never" | "none" => Ok(VerifyStrategy::Disable),
-            _ => Err(format!("Invalid value {:?}.", value)),
-        }
+impl CacheItemWeight for Dkim1Signer {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<Self>() as u64
     }
 }
 
-impl ConstantValue for VerifyStrategy {
-    fn add_constants(token_map: &mut TokenMap) {
-        token_map
-            .add_constant("relaxed", VerifyStrategy::Relaxed)
-            .add_constant("strict", VerifyStrategy::Strict)
-            .add_constant("disable", VerifyStrategy::Disable)
-            .add_constant("disabled", VerifyStrategy::Disable)
-            .add_constant("never", VerifyStrategy::Disable)
-            .add_constant("none", VerifyStrategy::Disable);
-    }
-}
-
-impl ParseValue for DkimCanonicalization {
-    fn parse_value(value: &str) -> Result<Self, String> {
-        if let Some((headers, body)) = value.split_once('/') {
-            Ok(DkimCanonicalization {
-                headers: Canonicalization::parse_value(headers.trim())?,
-                body: Canonicalization::parse_value(body.trim())?,
-            })
-        } else {
-            let c = Canonicalization::parse_value(value)?;
-            Ok(DkimCanonicalization {
-                headers: c,
-                body: c,
-            })
-        }
-    }
-}
-
-impl Default for DkimCanonicalization {
-    fn default() -> Self {
-        Self {
-            headers: Canonicalization::Relaxed,
-            body: Canonicalization::Relaxed,
-        }
+impl CacheItemWeight for DkimSigners {
+    fn weight(&self) -> u64 {
+        (std::mem::size_of::<Self>()
+            + self.dkim1.len() * std::mem::size_of::<Dkim1Signer>()
+            + std::mem::size_of::<Dkim2Signer<Dkim2Done>>()) as u64
     }
 }

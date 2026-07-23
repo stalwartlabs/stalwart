@@ -8,11 +8,11 @@ use hyper::StatusCode;
 
 use crate::webdav::{TEST_FILE_1, TEST_ICAL_1, TEST_VCARD_1, TEST_VTIMEZONE_1};
 
-use super::{DavResponse, DummyWebDavClient, WebDavTest};
+use crate::utils::server::TestServer;
 
-pub async fn test(test: &WebDavTest) {
+pub async fn test(test: &TestServer) {
     println!("Running MKCOL tests...");
-    let client = test.client("john");
+    let client = test.account("john@example.com").webdav_client();
 
     // Creating collections in root elements is not allowed
     for path in [
@@ -29,9 +29,9 @@ pub async fn test(test: &WebDavTest) {
 
     // Create collections using MKCOL (empty body)
     for path in [
-        "/dav/file/john/my-files",
-        "/dav/card/john/my-cards",
-        "/dav/cal/john/my-events",
+        "/dav/file/john%40example.com/my-files",
+        "/dav/card/john%40example.com/my-cards",
+        "/dav/cal/john%40example.com/my-events",
     ] {
         client
             .request("MKCOL", path, "")
@@ -41,9 +41,18 @@ pub async fn test(test: &WebDavTest) {
 
     // Create resources under the newly created collections
     for (path, content) in [
-        ("/dav/file/john/my-files/file1.txt", TEST_FILE_1),
-        ("/dav/card/john/my-cards/card1.vcf", TEST_VCARD_1),
-        ("/dav/cal/john/my-events/event1.ics", TEST_ICAL_1),
+        (
+            "/dav/file/john%40example.com/my-files/file1.txt",
+            TEST_FILE_1,
+        ),
+        (
+            "/dav/card/john%40example.com/my-cards/card1.vcf",
+            TEST_VCARD_1,
+        ),
+        (
+            "/dav/cal/john%40example.com/my-events/event1.ics",
+            TEST_ICAL_1,
+        ),
     ] {
         client
             .request("PUT", path, content)
@@ -53,12 +62,12 @@ pub async fn test(test: &WebDavTest) {
 
     // Creating a collection on a mapped resource should fail
     for path in [
-        "/dav/file/john/my-files",
-        "/dav/card/john/my-cards",
-        "/dav/cal/john/my-events",
-        "/dav/file/john/my-files/file1.txt",
-        "/dav/card/john/my-cards/card1.vcf",
-        "/dav/cal/john/my-events/event1.ics",
+        "/dav/file/john%40example.com/my-files",
+        "/dav/card/john%40example.com/my-cards",
+        "/dav/cal/john%40example.com/my-events",
+        "/dav/file/john%40example.com/my-files/file1.txt",
+        "/dav/card/john%40example.com/my-cards/card1.vcf",
+        "/dav/cal/john%40example.com/my-events/event1.ics",
     ] {
         client
             .request("MKCOL", path, "")
@@ -68,13 +77,16 @@ pub async fn test(test: &WebDavTest) {
 
     // Creating a sub-collections is allowed in FileDAV but in CalDAV and CardDAV
     for (path, expected_status) in [
-        ("/dav/file/john/my-files/my-sub-files", StatusCode::CREATED),
         (
-            "/dav/card/john/my-cards/my-sub-cards",
+            "/dav/file/john%40example.com/my-files/my-sub-files",
+            StatusCode::CREATED,
+        ),
+        (
+            "/dav/card/john%40example.com/my-cards/my-sub-cards",
             StatusCode::METHOD_NOT_ALLOWED,
         ),
         (
-            "/dav/cal/john/my-events/my-sub-events",
+            "/dav/cal/john%40example.com/my-events/my-sub-events",
             StatusCode::METHOD_NOT_ALLOWED,
         ),
     ] {
@@ -86,9 +98,15 @@ pub async fn test(test: &WebDavTest) {
 
     // Extended MKCOL with an unsupported resource types should fail
     for (path, resource_type) in [
-        ("/dav/file/john/my-named-files", "B:addressbook"),
-        ("/dav/card/john/my-named-cards", "A:calendar"),
-        ("/dav/cal/john/my-named-events", "B:addressbook"),
+        (
+            "/dav/file/john%40example.com/my-named-files",
+            "B:addressbook",
+        ),
+        ("/dav/card/john%40example.com/my-named-cards", "A:calendar"),
+        (
+            "/dav/cal/john%40example.com/my-named-events",
+            "B:addressbook",
+        ),
     ] {
         client
             .mkcol("MKCOL", path, ["D:collection", resource_type], [])
@@ -104,12 +122,12 @@ pub async fn test(test: &WebDavTest) {
     // Create using extended MKCOL
     for (path, expected_properties, resource_types) in [
         (
-            "/dav/file/john/my-named-files/",
+            "/dav/file/john%40example.com/my-named-files/",
             [("D:displayname", "Named Files")].as_slice(),
             ["D:collection"].as_slice(),
         ),
         (
-            "/dav/card/john/my-named-cards/",
+            "/dav/card/john%40example.com/my-named-cards/",
             [
                 ("D:displayname", "Named Cards"),
                 ("B:addressbook-description", "Some amazing contacts"),
@@ -118,7 +136,7 @@ pub async fn test(test: &WebDavTest) {
             ["D:collection", "B:addressbook"].as_slice(),
         ),
         (
-            "/dav/cal/john/my-named-events/",
+            "/dav/cal/john%40example.com/my-named-events/",
             [
                 ("D:displayname", "Named Events"),
                 ("A:calendar-description", "Some amazing events"),
@@ -166,7 +184,7 @@ pub async fn test(test: &WebDavTest) {
     client
         .mkcol(
             "MKCALENDAR",
-            "/dav/cal/john/my-named-events2",
+            "/dav/cal/john%40example.com/my-named-events2",
             [],
             [
                 ("D:displayname", "Named Events 2"),
@@ -183,7 +201,7 @@ pub async fn test(test: &WebDavTest) {
     client
         .mkcol(
             "MKCALENDAR",
-            "/dav/cal/john/my-named-events3",
+            "/dav/cal/john%40example.com/my-named-events3",
             [],
             [
                 ("D:displayname", "Named Events 3"),
@@ -203,11 +221,11 @@ pub async fn test(test: &WebDavTest) {
     // Check the properties of the created calendars
     client
         .propfind(
-            "/dav/cal/john/my-named-events2/",
+            "/dav/cal/john%40example.com/my-named-events2/",
             ["A:supported-calendar-component-set"],
         )
         .await
-        .properties("/dav/cal/john/my-named-events2/")
+        .properties("/dav/cal/john%40example.com/my-named-events2/")
         .get("A:supported-calendar-component-set")
         .with_status(StatusCode::OK)
         .with_values([
@@ -227,25 +245,25 @@ pub async fn test(test: &WebDavTest) {
         ]);
     client
         .propfind(
-            "/dav/cal/john/my-named-events3/",
+            "/dav/cal/john%40example.com/my-named-events3/",
             ["A:supported-calendar-component-set"],
         )
         .await
-        .properties("/dav/cal/john/my-named-events3/")
+        .properties("/dav/cal/john%40example.com/my-named-events3/")
         .get("A:supported-calendar-component-set")
         .with_status(StatusCode::OK)
         .with_values(["A:comp.[name]:VEVENT", "A:comp.[name]:VTODO"]);
 
     // Delete everything
     for path in [
-        "/dav/file/john/my-files",
-        "/dav/card/john/my-cards",
-        "/dav/cal/john/my-events",
-        "/dav/file/john/my-named-files",
-        "/dav/card/john/my-named-cards",
-        "/dav/cal/john/my-named-events",
-        "/dav/cal/john/my-named-events2",
-        "/dav/cal/john/my-named-events3",
+        "/dav/file/john%40example.com/my-files",
+        "/dav/card/john%40example.com/my-cards",
+        "/dav/cal/john%40example.com/my-events",
+        "/dav/file/john%40example.com/my-named-files",
+        "/dav/card/john%40example.com/my-named-cards",
+        "/dav/cal/john%40example.com/my-named-events",
+        "/dav/cal/john%40example.com/my-named-events2",
+        "/dav/cal/john%40example.com/my-named-events3",
     ] {
         client
             .request("DELETE", path, "")
@@ -254,45 +272,4 @@ pub async fn test(test: &WebDavTest) {
     }
     client.delete_default_containers().await;
     test.assert_is_empty().await;
-}
-
-impl DummyWebDavClient {
-    pub async fn mkcol(
-        &self,
-        method: &str,
-        path: &str,
-        resource_types: impl IntoIterator<Item = &str>,
-        properties: impl IntoIterator<Item = (&str, &str)>,
-    ) -> DavResponse {
-        let mut request = concat!(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-            "<D:mkcol xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" xmlns:B=\"urn:ietf:params:xml:ns:carddav\">",
-            "<D:set><D:prop>"
-        )
-        .to_string();
-
-        let mut has_resource_type = false;
-        for (idx, resource_type) in resource_types.into_iter().enumerate() {
-            if idx == 0 {
-                request.push_str("<D:resourcetype>");
-            }
-            request.push_str(&format!("<{resource_type}/>"));
-            has_resource_type = true;
-        }
-
-        if has_resource_type {
-            request.push_str("</D:resourcetype>");
-        }
-
-        for (key, value) in properties {
-            request.push_str(&format!("<{key}>{value}</{key}>"));
-        }
-        request.push_str("</D:prop></D:set></D:mkcol>");
-
-        if method == "MKCALENDAR" {
-            request = request.replace("D:mkcol", "A:mkcalendar");
-        }
-
-        self.request(method, path, &request).await
-    }
 }

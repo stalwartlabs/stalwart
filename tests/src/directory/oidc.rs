@@ -8,128 +8,206 @@
  *
  */
 
-use crate::{
-    directory::DirectoryTest,
-    http_server::{HttpMessage, spawn_mock_http_server},
-};
-use base64::{Engine, engine::general_purpose};
-use directory::QueryParams;
-use http_proto::{JsonProblemResponse, JsonResponse, ToHttpResponse};
-use hyper::{Method, StatusCode};
-use mail_send::Credentials;
-use serde_json::json;
-use std::sync::Arc;
-use trc::{AuthEvent, EventType};
+use directory::{Account, Credentials, Directory, backend::oidc::OpenIdDirectory};
+use registry::{schema::structs, types::map::Map};
 
-static TEST_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ";
+pub async fn test() {
+    println!("Running OIDC directory tests...");
+    crate::utils::containers::ensure_keycloak().await;
+    let config = structs::OidcDirectory {
+        description: "Test OIDC directory".to_string(),
+        issuer_url: "http://localhost:9080/realms/stalwart".to_string(),
+        claim_username: "preferred_username".to_string(),
+        claim_name: Some("name".to_string()),
+        claim_groups: Some("groups".to_string()),
+        username_domain: None,
+        require_audience: Some("stalwart".to_string()),
+        require_scopes: Map::new(vec![
+            "email".to_string(),
+            "profile".to_string(),
+            "openid".to_string(),
+        ]),
+        member_tenant_id: None,
+    };
+    let mut oidc = OpenIdDirectory::open(config.clone()).await.unwrap();
+    let token = get_token("john.doe@example.org", "this is an OIDC password").await;
 
-#[tokio::test]
-async fn oidc_directory() {
-    // Obtain directory handle
-    let mut config = DirectoryTest::new("rocksdb".into()).await;
-
-    // Spawn mock OIDC server
-    let _tx = spawn_mock_http_server(Arc::new(|req: HttpMessage| {
-        let success_response = JsonResponse::new(json!({
-            "email": "john@example.org",
-            "preferred_username": "jdoe",
-            "name": "John Doe",
-        }))
-        .into_http_response();
-
-        match (req.method.clone(), req.uri.path().split('/').nth(1)) {
-            (Method::GET, Some("userinfo")) => match req.headers.get("authorization") {
-                Some(auth) if auth == &format!("Bearer {TEST_TOKEN}") => success_response,
-                Some(_) => JsonProblemResponse(StatusCode::UNAUTHORIZED).into_http_response(),
-                None => panic!("Missing Authorization header: {req:#?}"),
-            },
-            (Method::POST, Some("introspect-none")) => {
-                assert!(req.headers.get("authorization").is_none());
-                if req.get_url_encoded("token").as_deref() == Some(TEST_TOKEN) {
-                    success_response
-                } else {
-                    JsonProblemResponse(StatusCode::UNAUTHORIZED).into_http_response()
-                }
-            }
-            (Method::POST, Some("introspect-user-token")) => match req.headers.get("authorization")
-            {
-                Some(auth)
-                    if auth == &format!("Bearer {TEST_TOKEN}")
-                        && req.get_url_encoded("token").as_deref() == Some(TEST_TOKEN) =>
-                {
-                    success_response
-                }
-                Some(_) => JsonProblemResponse(StatusCode::UNAUTHORIZED).into_http_response(),
-                None => panic!("Missing Authorization header: {req:#?}"),
-            },
-            (Method::POST, Some("introspect-token")) => match req.headers.get("authorization") {
-                Some(auth)
-                    if auth == "Bearer token_of_gratitude"
-                        && req.get_url_encoded("token").as_deref() == Some(TEST_TOKEN) =>
-                {
-                    success_response
-                }
-                Some(_) => JsonProblemResponse(StatusCode::UNAUTHORIZED).into_http_response(),
-                None => panic!("Missing Authorization header: {req:#?}"),
-            },
-            (Method::POST, Some("introspect-basic")) => match req.headers.get("authorization") {
-                Some(auth)
-                    if auth
-                        == &format!(
-                            "Basic {}",
-                            general_purpose::STANDARD.encode("myuser:mypass".as_bytes())
-                        )
-                        && req.get_url_encoded("token").as_deref() == Some(TEST_TOKEN) =>
-                {
-                    success_response
-                }
-                Some(_) => JsonProblemResponse(StatusCode::UNAUTHORIZED).into_http_response(),
-                None => panic!("Missing Authorization header: {req:#?}"),
-            },
-            _ => panic!("Unexpected request: {:?}", req),
+    // Test the userinfo endpoint
+    assert_eq!(
+        oidc.authenticate(&Credentials::Bearer {
+            username: None,
+            token: format!(".{token}"), // Prefix with '.' to force userinfo in test mode
+        })
+        .await
+        .unwrap(),
+        Account {
+            email: "john.doe@example.org".to_string(),
+            email_aliases: vec![],
+            secret: None,
+            groups: Some(vec!["sales@example.org".to_string()]),
+            description: Some("John Doe".to_string())
         }
-    }))
+    );
+
+    // Make sure the userinfo endpoint is not being used
+    if let Directory::OpenId(directory) = &mut oidc {
+        directory.discovery.document.userinfo_endpoint = "http://invalid".to_string();
+    }
+
+    // JWT authentication should still work without the userinfo endpoint
+    assert_eq!(
+        oidc.authenticate(&Credentials::Bearer {
+            username: None,
+            token: token.clone(),
+        })
+        .await
+        .unwrap(),
+        Account {
+            email: "john.doe@example.org".to_string(),
+            email_aliases: vec![],
+            secret: None,
+            groups: Some(vec!["sales@example.org".to_string()]),
+            description: Some("John Doe".to_string())
+        }
+    );
+
+    // Test ODIC userinfo fallback
+    let mut config_userinfo_fallback = config.clone();
+    config_userinfo_fallback.claim_username = "email".to_string();
+    config_userinfo_fallback.require_scopes = Map::new(vec!["openid".to_string()]);
+
+    let token_openid_only = get_token_for_client(
+        "stalwart-fallback",
+        "stalwart-fallback-secret",
+        "john.doe@example.org",
+        "this is an OIDC password",
+        "openid",
+    )
     .await;
 
-    for test in [
-        "oidc-userinfo",
-        "oidc-introspect-none",
-        "oidc-introspect-user-token",
-        "oidc-introspect-token",
-        "oidc-introspect-basic",
-    ] {
-        println!("Running OIDC test {test:?}...");
-        let directory = config.directories.directories.remove(test).unwrap();
-
-        // Test an invalid token
-        let err = directory
-            .query(
-                QueryParams::credentials(&Credentials::OAuthBearer {
-                    token: "invalid_or_expired_token".to_string(),
-                })
-                .with_return_member_of(false),
-            )
+    let mut oidc_broken_userinfo = OpenIdDirectory::open(config_userinfo_fallback.clone())
+        .await
+        .unwrap();
+    if let Directory::OpenId(directory) = &mut oidc_broken_userinfo {
+        directory.discovery.document.userinfo_endpoint = "http://invalid".to_string();
+    }
+    assert!(
+        oidc_broken_userinfo
+            .authenticate(&Credentials::Bearer {
+                username: None,
+                token: token_openid_only.clone(),
+            })
             .await
-            .unwrap_err();
-        assert!(
-            err.matches(EventType::Auth(AuthEvent::Failed)),
-            "Unexpected error: {:?}",
-            err
-        );
+            .is_err()
+    );
+    let oidc_userinfo_fallback = OpenIdDirectory::open(config_userinfo_fallback)
+        .await
+        .unwrap();
+    assert_eq!(
+        oidc_userinfo_fallback
+            .authenticate(&Credentials::Bearer {
+                username: None,
+                token: token_openid_only,
+            })
+            .await
+            .unwrap(),
+        Account {
+            email: "john.doe@example.org".to_string(),
+            email_aliases: vec![],
+            secret: None,
+            groups: Some(vec!["sales@example.org".to_string()]),
+            description: None,
+        }
+    );
 
-        // Test a valid token
-        let principal = directory
-            .query(
-                QueryParams::credentials(&Credentials::OAuthBearer {
-                    token: TEST_TOKEN.to_string(),
-                })
-                .with_return_member_of(false),
-            )
+    // Not matching the required audience should fail
+    let mut config_wrong_audience = config.clone();
+    config_wrong_audience.require_audience = Some("wrong_audience".to_string());
+    assert!(
+        OpenIdDirectory::open(config_wrong_audience)
             .await
             .unwrap()
-            .unwrap();
-        assert_eq!(principal.name(), "jdoe");
-        assert_eq!(principal.email_addresses().next(), Some("john@example.org"));
-        assert_eq!(principal.description(), Some("John Doe"));
-    }
+            .authenticate(&Credentials::Bearer {
+                username: None,
+                token: token.clone(),
+            })
+            .await
+            .is_err()
+    );
+
+    // Not having the required scopes should fail
+    let mut config_wrong_scopes = config.clone();
+    config_wrong_scopes.require_scopes = Map::new(vec![
+        "email".to_string(),
+        "profile".to_string(),
+        "openid".to_string(),
+        "missing_scope".to_string(),
+    ]);
+    assert!(
+        OpenIdDirectory::open(config_wrong_scopes)
+            .await
+            .unwrap()
+            .authenticate(&Credentials::Bearer {
+                username: None,
+                token,
+            })
+            .await
+            .is_err()
+    );
+
+    // Test authorization endpoint retrieval
+    assert_eq!(
+        oidc.oidc_discovery_document()
+            .as_ref()
+            .map(|oidc| oidc.document.authorization_endpoint.as_str()),
+        Some("http://localhost:9080/realms/stalwart/protocol/openid-connect/auth")
+    );
+}
+
+async fn get_token(username: &str, password: &str) -> String {
+    get_token_for_client(
+        "stalwart",
+        "stalwart-secret",
+        username,
+        password,
+        "openid email profile",
+    )
+    .await
+}
+
+async fn get_token_for_client(
+    client_id: &str,
+    client_secret: &str,
+    username: &str,
+    password: &str,
+    scope: &str,
+) -> String {
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post("http://localhost:9080/realms/stalwart/protocol/openid-connect/token")
+        .form(&[
+            ("grant_type", "password"),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+            ("username", username),
+            ("password", password),
+            ("scope", scope),
+        ])
+        .send()
+        .await
+        .expect("Failed to send token request");
+
+    let body = response
+        .text()
+        .await
+        .expect("Failed to read token response");
+
+    let json: serde_json::Value =
+        serde_json::from_str(&body).expect("Failed to parse token response");
+
+    json["access_token"]
+        .as_str()
+        .expect("No access_token in response")
+        .to_string()
 }

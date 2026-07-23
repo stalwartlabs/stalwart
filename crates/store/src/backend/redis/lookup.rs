@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use redis::AsyncCommands;
-
-use crate::Deserialize;
-
 use super::{RedisPool, RedisStore, into_error};
+use crate::Deserialize;
+use redis::AsyncCommands;
 
 impl RedisStore {
     pub async fn key_set(&self, key: &[u8], value: &[u8], expires: Option<u64>) -> trc::Result<()> {
@@ -23,6 +21,15 @@ impl RedisStore {
                 .await
             }
             RedisPool::Cluster(pool) => {
+                self.key_set_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    key,
+                    value,
+                    expires,
+                )
+                .await
+            }
+            RedisPool::Sentinel(pool) => {
                 self.key_set_(
                     pool.get().await.map_err(into_error)?.as_mut(),
                     key,
@@ -54,6 +61,15 @@ impl RedisStore {
                 )
                 .await
             }
+            RedisPool::Sentinel(pool) => {
+                self.key_incr_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    key,
+                    value,
+                    expires,
+                )
+                .await
+            }
         }
     }
 
@@ -67,6 +83,10 @@ impl RedisStore {
                 self.key_delete_(pool.get().await.map_err(into_error)?.as_mut(), key)
                     .await
             }
+            RedisPool::Sentinel(pool) => {
+                self.key_delete_(pool.get().await.map_err(into_error)?.as_mut(), key)
+                    .await
+            }
         }
     }
 
@@ -77,6 +97,10 @@ impl RedisStore {
                     .await
             }
             RedisPool::Cluster(pool) => {
+                self.key_delete_prefix_(pool.get().await.map_err(into_error)?.as_mut(), prefix)
+                    .await
+            }
+            RedisPool::Sentinel(pool) => {
                 self.key_delete_prefix_(pool.get().await.map_err(into_error)?.as_mut(), prefix)
                     .await
             }
@@ -96,6 +120,10 @@ impl RedisStore {
                 self.key_get_(pool.get().await.map_err(into_error)?.as_mut(), key)
                     .await
             }
+            RedisPool::Sentinel(pool) => {
+                self.key_get_(pool.get().await.map_err(into_error)?.as_mut(), key)
+                    .await
+            }
         }
     }
 
@@ -109,6 +137,10 @@ impl RedisStore {
                 self.counter_get_(pool.get().await.map_err(into_error)?.as_mut(), key)
                     .await
             }
+            RedisPool::Sentinel(pool) => {
+                self.counter_get_(pool.get().await.map_err(into_error)?.as_mut(), key)
+                    .await
+            }
         }
     }
 
@@ -119,6 +151,10 @@ impl RedisStore {
                     .await
             }
             RedisPool::Cluster(pool) => {
+                self.key_exists_(pool.get().await.map_err(into_error)?.as_mut(), key)
+                    .await
+            }
+            RedisPool::Sentinel(pool) => {
                 self.key_exists_(pool.get().await.map_err(into_error)?.as_mut(), key)
                     .await
             }

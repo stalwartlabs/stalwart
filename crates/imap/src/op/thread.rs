@@ -9,8 +9,7 @@ use crate::{
     spawn_op,
 };
 use ahash::AHashMap;
-use common::listener::SessionStream;
-use directory::Permission;
+use common::network::SessionStream;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, StatusResponse,
@@ -20,6 +19,7 @@ use imap_proto::{
     },
     receiver::Request,
 };
+use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use trc::AddContext;
 

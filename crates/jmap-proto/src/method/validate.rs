@@ -35,7 +35,7 @@ impl<'de> DeserializeArguments<'de> for ValidateSieveScriptRequest {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"accountId" => {
-                self.account_id = map.next_value()?;
+                self.account_id = crate::request::deserialize_account_id(map)?;
             },
             b"blobId" => {
                 self.blob_id = map.next_value()?;

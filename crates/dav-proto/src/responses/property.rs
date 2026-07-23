@@ -8,6 +8,7 @@ use super::{XmlCdataEscape, XmlEscape};
 use crate::{
     responses::DeadPropertyFormat,
     schema::{
+        Namespace, Namespaces,
         property::{
             ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue,
             LockDiscovery, LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType,
@@ -15,13 +16,12 @@ use crate::{
         },
         request::DavPropertyValue,
         response::{Ace, AclRestrictions, Href, List, PropResponse, SupportedPrivilege},
-        Namespace, Namespaces,
     },
 };
 use calcard::icalendar::ICalendarComponentType;
 use mail_parser::{
-    parsers::fields::date::{DOW, MONTH},
     DateTime,
+    parsers::fields::date::{DOW, MONTH},
 };
 use std::fmt::Display;
 use types::dead_property::DeadProperty;
@@ -59,7 +59,7 @@ impl Display for Rfc1123DateTime {
         let dt = DateTime::from_timestamp(self.0);
         write!(
             f,
-            "{}, {} {} {:04} {:02}:{:02}:{:02} GMT",
+            "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
             DOW[dt.day_of_week() as usize],
             dt.day,
             MONTH
@@ -181,7 +181,7 @@ impl DavProperty {
                     CardDavProperty::SupportedAddressData => "B:supported-address-data",
                     CardDavProperty::SupportedCollationSet => "B:supported-collation-set",
                     CardDavProperty::MaxResourceSize => "B:max-resource-size",
-                    CardDavProperty::AddressData(_) => "B:address-data",
+                    CardDavProperty::AddressData { .. } => "B:address-data",
                 },
                 DavProperty::CalDav(prop) => match prop {
                     CalDavProperty::CalendarDescription => "A:calendar-description",
@@ -217,7 +217,7 @@ impl DavProperty {
                     PrincipalProperty::ScheduleOutboxURL => "A:schedule-outbox-URL",
                 },
                 DavProperty::DeadProperty(dead) => {
-                    return (dead.name.as_str(), dead.attrs.as_deref())
+                    return (dead.name.as_str(), dead.attrs.as_deref());
                 }
             },
             None,

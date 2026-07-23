@@ -4,22 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
+use super::{ImapSessionManager, Session, State};
+use crate::{GREETING_WITH_TLS, GREETING_WITHOUT_TLS};
 use common::{
-    core::BuildServer,
-    listener::{SessionData, SessionManager, SessionResult, SessionStream, stream::NullIo},
+    BuildServer,
+    network::{SessionData, SessionManager, SessionResult, SessionStream, stream::NullIo},
 };
 use imap_proto::{
     protocol::{ProtocolVersion, SerializeResponse},
     receiver::Receiver,
 };
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::server::TlsStream;
-
-use crate::{GREETING_WITH_TLS, GREETING_WITHOUT_TLS};
-
-use super::{ImapSessionManager, Session, State};
 
 impl SessionManager for ImapSessionManager {
     #[allow(clippy::manual_async_fn)]
@@ -150,6 +147,7 @@ impl<T: SessionStream> Session<T> {
             is_condstore: false,
             is_qresync: false,
             is_utf8: false,
+            is_objectid: false,
             server,
             instance: session.instance,
             session_id: session.session_id,
@@ -207,6 +205,7 @@ impl<T: SessionStream> Session<T> {
             is_condstore: self.is_condstore,
             is_qresync: self.is_qresync,
             is_utf8: self.is_utf8,
+            is_objectid: self.is_objectid,
             session_id: self.session_id,
             in_flight: self.in_flight,
             remote_addr: self.remote_addr,
@@ -217,6 +216,15 @@ impl<T: SessionStream> Session<T> {
 }
 
 impl<T: SessionStream> Session<T> {
+    pub fn activate_objectid(&mut self) -> Option<&'static [u8]> {
+        if self.is_objectid {
+            None
+        } else {
+            self.is_objectid = true;
+            Some(b"* ENABLED OBJECTID+\r\n")
+        }
+    }
+
     pub async fn write_bytes(&self, bytes: impl AsRef<[u8]>) -> trc::Result<()> {
         let bytes = bytes.as_ref();
 

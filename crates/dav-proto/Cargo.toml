@@ -1,13 +1,13 @@
 [package]
 name = "dav-proto"
-version = "0.15.4"
+version = "0.16.15"
 edition = "2024"
 
 [dependencies]
 trc = { path = "../trc" }
 types = { path = "../types" }
 hashify = "0.2.6"
-quick-xml = { version = "0.38" }
+quick-xml = "0.41"
 calcard = { version = "0.3", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
 hyper = "1.6.0"

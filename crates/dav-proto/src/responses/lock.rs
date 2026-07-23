@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt::Display;
-
-use types::dead_property::DeadProperty;
-
 use crate::{
+    Depth, Timeout,
     responses::DeadPropertyFormat,
     schema::{
         property::{ActiveLock, LockDiscovery, LockEntry, LockScope, LockType, SupportedLock},
         request::LockInfo,
         response::{Href, List},
     },
-    Depth, Timeout,
 };
+use std::fmt::Display;
+use types::dead_property::DeadProperty;
 
 impl Display for SupportedLock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

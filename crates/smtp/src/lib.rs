@@ -37,10 +37,13 @@ impl StartQueueManager for BootManager {
 
 impl SpawnQueueManager for IpcReceivers {
     fn spawn_queue_manager(&mut self, inner: Arc<Inner>) {
-        // Spawn queue manager
-        self.queue_rx.take().unwrap().spawn(inner.clone());
+        let core = inner.shared_core.load();
+        if !core.storage.registry.is_recovery_mode() && core.network.roles.outbound_mta {
+            // Spawn queue manager
+            self.queue_rx.take().unwrap().spawn(inner.clone());
 
-        // Spawn report manager
-        self.report_rx.take().unwrap().spawn(inner);
+            // Spawn report manager
+            self.report_rx.take().unwrap().spawn(inner);
+        }
     }
 }

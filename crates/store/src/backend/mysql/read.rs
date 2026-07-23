@@ -23,16 +23,32 @@ impl MysqlStore {
             .await
             .map_err(into_error)?;
         let key = key.serialize(0);
-        conn.exec_first::<Vec<u8>, _, _>(&s, (key,))
+        conn.exec_first::<Vec<u8>, _, _>(&s, (&key,))
             .await
             .map_err(into_error)
             .and_then(|r| {
                 if let Some(r) = r {
-                    Ok(Some(U::deserialize_owned(r)?))
+                    Ok(Some(U::deserialize_owned_with_key(&key, r)?))
                 } else {
                     Ok(None)
                 }
             })
+    }
+
+    pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
+        let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
+        let s = conn
+            .prep(format!(
+                "SELECT 1 FROM {} WHERE k = ?",
+                char::from(key.subspace())
+            ))
+            .await
+            .map_err(into_error)?;
+        let key = key.serialize(0);
+        conn.exec_first::<u8, _, _>(&s, (&key,))
+            .await
+            .map_err(into_error)
+            .map(|r| r.is_some())
     }
 
     pub(crate) async fn iterate<T: Key>(

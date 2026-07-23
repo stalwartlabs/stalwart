@@ -4,316 +4,307 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Server, listener::limiter::ConcurrencyLimiter};
-use directory::{
-    Directory, FALLBACK_ADMIN_ID, Permission, Permissions, Principal, QueryParams, Type,
-    backend::internal::lookup::DirectoryStore, core::secret::verify_secret_hash,
+use crate::{
+    expr::if_block::IfBlock,
+    network::limiter::ConcurrencyLimiter,
+    storage::{ObjectQuota, TenantQuota},
 };
-use mail_send::Credentials;
-use oauth::GrantType;
-use std::{net::IpAddr, sync::Arc};
+use directory::Credentials;
+use quick_cache::Equivalent;
+use registry::{
+    schema::enums::{Locale, Permission},
+    types::{EnumImpl, ipmask::IpAddrOrMask},
+};
+use std::{
+    hash::{Hash, Hasher},
+    net::IpAddr,
+    sync::Arc,
+};
+use tinyvec::TinyVec;
+use trc::ipc::bitset::Bitset;
 use types::collection::Collection;
-use utils::{
-    cache::CacheItemWeight,
-    map::{bitmap::Bitmap, vec_map::VecMap},
-};
+use utils::{cache::CacheItemWeight, map::bitmap::Bitmap};
 
 pub mod access_token;
+pub mod authentication;
+pub mod credential;
 pub mod oauth;
+pub mod permissions;
 pub mod rate_limit;
-pub mod roles;
-pub mod sasl;
 
-#[derive(Debug, Default)]
-pub struct AccessToken {
-    pub primary_id: u32,
-    pub member_of: Vec<u32>,
-    pub access_to: VecMap<u32, Bitmap<Collection>>,
-    pub name: String,
-    pub description: Option<String>,
-    pub locale: Option<String>,
-    pub emails: Vec<String>,
-    pub quota: u64,
-    pub object_quota: [u32; Collection::MAX],
-    pub permissions: Permissions,
-    pub tenant: Option<TenantInfo>,
-    pub concurrent_http_requests: Option<ConcurrencyLimiter>,
-    pub concurrent_imap_requests: Option<ConcurrencyLimiter>,
-    pub concurrent_uploads: Option<ConcurrencyLimiter>,
-    pub revision: u64,
-    pub obj_size: u64,
+pub const RECOVERY_ADMIN_ID: u32 = u32::MAX;
+const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
+pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct EmailAddress {
+    pub local_part: Box<str>,
+    pub domain_id: u32,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct TenantInfo {
+#[derive(Debug, PartialEq, Eq)]
+pub struct EmailAddressRef<'x> {
+    local_part: &'x str,
+    domain_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmailCache {
+    Account(u32),
+    MailingList(u32),
+    DisabledAccountAddress(u32),
+    DisabledListAddress(u32),
+}
+
+#[derive(Debug, Clone)]
+pub struct DomainCache {
+    pub names: Box<[Box<str>]>,
     pub id: u32,
-    pub quota: u64,
+    pub id_directory: Option<u32>,
+    pub id_tenant: Option<u32>,
+    pub catch_all: Option<Box<str>>,
+    pub sub_addressing_custom: Option<Box<IfBlock>>,
+    pub flags: u8,
+}
+
+pub const DOMAIN_FLAG_RELAY: u8 = 1;
+pub const DOMAIN_FLAG_SUB_ADDRESSING: u8 = 1 << 1;
+
+#[derive(Debug, Clone, Default)]
+pub struct AccountCache {
+    pub name: Box<str>,
+    pub id: u32,
+    pub addresses: Box<[EmailAddress]>,
+    pub id_tenant: Option<u32>,
+    pub id_member_of: TinyVec<[u32; 3]>,
+    pub quota_disk: u64,
+    pub quota_objects: Option<Box<ObjectQuota>>,
+    pub description: Option<Box<str>>,
+    pub encryption_key: Option<EncryptionKeys>,
+    pub locale: Locale,
+    pub flags: u64,
+}
+
+pub type EncryptionKeys = Box<[Box<[u8]>]>;
+
+pub const ACCOUNT_IS_USER: u64 = 1;
+pub const ACCOUNT_FLAG_ENCRYPT_TRAIN_SPAM_FILTER: u64 = 1 << 1;
+pub const ACCOUNT_FLAG_ENCRYPT_METHOD_SMIME: u64 = 1 << 2;
+pub const ACCOUNT_FLAG_ENCRYPT_METHOD_PGP: u64 = 1 << 3;
+pub const ACCOUNT_FLAG_ENCRYPT_ALGO_AES256: u64 = 1 << 4;
+pub const ACCOUNT_FLAG_ENCRYPT_ALGO_AES128: u64 = 1 << 5;
+pub const ACCOUNT_FLAG_ENCRYPT_APPEND: u64 = 1 << 6;
+pub const ACCOUNT_FLAG_ENCRYPT_ALGO_AES256_GCM: u64 = 1 << 7;
+pub const ACCOUNT_FLAG_ENCRYPT_ALGO_CHACHA20_POLY1305: u64 = 1 << 8;
+
+#[derive(Debug, Clone)]
+pub struct RoleCache {
+    pub id_roles: TinyVec<[u32; 3]>,
+    pub permissions: PermissionsGroup,
+}
+
+#[derive(Debug, Clone)]
+pub struct MailingListCache {
+    pub addresses: Box<[EmailAddress]>,
+    pub recipients: Arc<[Box<str>]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TenantCache {
+    pub id_roles: TinyVec<[u32; 3]>,
+    pub quota_disk: u64,
+    pub quota_objects: Option<Box<TenantQuota>>,
+    pub permissions: Option<Box<PermissionsGroup>>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ResourceToken {
+pub struct PermissionsGroup {
+    pub enabled: Permissions,
+    pub disabled: Permissions,
+    pub merge: bool,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct AccessToken {
+    scope_idx: usize,
+    inner: Arc<AccessTokenInner>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct AccessTokenInner {
+    pub(crate) account_id: u32,
+    pub(crate) tenant_id: Option<u32>,
+    pub(crate) member_of: TinyVec<[u32; 3]>,
+    pub(crate) access_to: Box<[AccessTo]>,
+    pub(crate) scopes: Box<[AccessScope]>,
+    pub(crate) concurrent_http_requests: Option<ConcurrencyLimiter>,
+    pub(crate) concurrent_imap_requests: Option<ConcurrencyLimiter>,
+    pub(crate) concurrent_uploads: Option<ConcurrencyLimiter>,
+    pub(crate) revision_account: u64,
+    pub(crate) revision: u64,
+    pub(crate) credential_version: u64,
+    pub(crate) obj_size: u64,
+}
+
+#[derive(Debug, Default, Hash, Clone)]
+pub struct AccessScope {
+    pub permissions: Permissions,
+    pub credential_id: u32,
+    pub expires_at: u64,
+    pub allowed_ips: Box<[IpAddrOrMask]>,
+}
+
+#[derive(Debug, Default, Hash, PartialEq, Eq, Clone)]
+pub(crate) struct AccessTo {
     pub account_id: u32,
-    pub quota: u64,
-    pub tenant: Option<TenantInfo>,
+    pub collections: Bitmap<Collection>,
 }
 
-pub struct AuthRequest<'x> {
-    credentials: Credentials<String>,
-    session_id: u64,
-    remote_ip: IpAddr,
-    return_member_of: bool,
-    allow_api_access: bool,
-    directory: Option<&'x Directory>,
+#[derive(Clone)]
+pub struct AccountInfo {
+    pub account_id: u32,
+    pub account: Arc<AccountCache>,
+    pub addresses: Vec<String>,
 }
 
-impl Server {
-    pub async fn authenticate(&self, req: &AuthRequest<'_>) -> trc::Result<Arc<AccessToken>> {
-        // Resolve directory
-        let directory = req.directory.unwrap_or(&self.core.storage.directory);
-
-        // Validate credentials
-        match &req.credentials {
-            Credentials::OAuthBearer { token } if !directory.has_bearer_token_support() => {
-                match self
-                    .validate_access_token(GrantType::AccessToken.into(), token)
-                    .await
-                {
-                    Ok(token_into) => self.get_access_token(token_into.account_id).await,
-                    Err(err) => Err(err),
-                }
-            }
-            _ => match self.authenticate_credentials(req, directory).await {
-                Ok(principal) => self.get_access_token(principal).await,
-                Err(err) => Err(err),
-            },
-        }
-        .and_then(|token| {
-            token
-                .assert_has_permission(Permission::Authenticate)
-                .map(|_| token)
-        })
-    }
-
-    async fn authenticate_credentials(
-        &self,
-        req: &AuthRequest<'_>,
-        directory: &Directory,
-    ) -> trc::Result<Principal> {
-        // First try to authenticate the user against the default directory
-        let result = match directory
-            .query(
-                QueryParams::credentials(&req.credentials)
-                    .with_return_member_of(req.return_member_of),
-            )
-            .await
-        {
-            Ok(Some(principal)) => {
-                trc::event!(
-                    Auth(trc::AuthEvent::Success),
-                    AccountName = principal.name().to_string(),
-                    AccountId = principal.id(),
-                    SpanId = req.session_id,
-                );
-
-                return Ok(principal);
-            }
-            Ok(None) => Ok(()),
-            Err(err) => {
-                if err.matches(trc::EventType::Auth(trc::AuthEvent::MissingTotp)) {
-                    return Err(err);
-                } else {
-                    Err(err)
-                }
-            }
-        };
-
-        match &req.credentials {
-            Credentials::Plain { username, secret } => {
-                // Then check if the credentials match the fallback admin or master user
-                match (&self.core.jmap.fallback_admin, &self.core.jmap.master_user) {
-                    (Some((fallback_admin, fallback_pass)), _) if username == fallback_admin => {
-                        if verify_secret_hash(fallback_pass, secret).await? {
-                            trc::event!(
-                                Auth(trc::AuthEvent::Success),
-                                AccountName = username.clone(),
-                                SpanId = req.session_id,
-                            );
-
-                            return Ok(Principal::fallback_admin(fallback_pass));
-                        }
-                    }
-                    (_, Some((master_user, master_pass))) if username.ends_with(master_user) => {
-                        if verify_secret_hash(master_pass, secret).await? {
-                            let username = username.strip_suffix(master_user).unwrap();
-                            let username = username.strip_suffix('%').unwrap_or(username);
-
-                            if let Some(principal) = directory
-                                .query(
-                                    QueryParams::name(username)
-                                        .with_return_member_of(req.return_member_of),
-                                )
-                                .await?
-                            {
-                                trc::event!(
-                                    Auth(trc::AuthEvent::Success),
-                                    AccountName = username.to_string(),
-                                    SpanId = req.session_id,
-                                    AccountId = principal.id(),
-                                    Type = principal.typ().description(),
-                                );
-
-                                return Ok(principal);
-                            }
-                        }
-                    }
-                    _ => {
-                        // Validate API credentials
-                        if req.allow_api_access
-                            && let Ok(Some(principal)) = self
-                                .store()
-                                .query(
-                                    QueryParams::credentials(&req.credentials)
-                                        .with_return_member_of(req.return_member_of),
-                                )
-                                .await
-                            && principal.typ == Type::ApiKey
-                        {
-                            trc::event!(
-                                Auth(trc::AuthEvent::Success),
-                                AccountName = principal.name().to_string(),
-                                AccountId = principal.id(),
-                                SpanId = req.session_id,
-                            );
-
-                            return Ok(principal);
-                        }
-                    }
-                }
-            }
-            Credentials::OAuthBearer { token } if directory.has_bearer_token_support() => {
-                // Check for bearer tokens issued locally
-                if let Ok(token_info) = self
-                    .validate_access_token(GrantType::AccessToken.into(), token)
-                    .await
-                {
-                    let principal = if token_info.account_id != FALLBACK_ADMIN_ID {
-                        directory
-                            .query(
-                                QueryParams::id(token_info.account_id)
-                                    .with_return_member_of(req.return_member_of),
-                            )
-                            .await
-                            .unwrap_or_default()
-                    } else if let Some((_, fallback_pass)) = &self.core.jmap.fallback_admin {
-                        Principal::fallback_admin(fallback_pass).into()
-                    } else {
-                        None
-                    };
-                    if let Some(principal) = principal {
-                        trc::event!(
-                            Auth(trc::AuthEvent::Success),
-                            AccountName = principal.name().to_string(),
-                            AccountId = principal.id(),
-                            SpanId = req.session_id,
-                        );
-
-                        return Ok(principal);
-                    }
-                }
-            }
-            _ => (),
-        };
-
-        if let Err(err) = result {
-            Err(err)
-        } else if self.has_auth_fail2ban() {
-            let login = req.credentials.login();
-            if self.is_auth_fail2banned(req.remote_ip, login).await? {
-                Err(trc::SecurityEvent::AuthenticationBan
-                    .into_err()
-                    .ctx(trc::Key::RemoteIp, req.remote_ip)
-                    .ctx_opt(trc::Key::AccountName, login.map(|s| s.to_string())))
-            } else {
-                Err(trc::AuthEvent::Failed
-                    .ctx(trc::Key::RemoteIp, req.remote_ip)
-                    .ctx_opt(trc::Key::AccountName, login.map(|s| s.to_string())))
-            }
-        } else {
-            Err(trc::AuthEvent::Failed
-                .ctx(trc::Key::RemoteIp, req.remote_ip)
-                .ctx_opt(
-                    trc::Key::AccountName,
-                    req.credentials.login().map(|s| s.to_string()),
-                ))
-        }
-    }
+#[derive(Clone, Copy)]
+pub struct AccountTenantIds {
+    pub account_id: u32,
+    pub tenant_id: Option<u32>,
 }
 
-impl<'x> AuthRequest<'x> {
-    pub fn from_credentials(
-        credentials: Credentials<String>,
-        session_id: u64,
-        remote_ip: IpAddr,
-    ) -> Self {
-        Self {
-            credentials,
-            session_id,
-            remote_ip,
-            return_member_of: true,
-            directory: None,
-            allow_api_access: false,
-        }
-    }
-
-    pub fn from_plain(
-        user: impl Into<String>,
-        pass: impl Into<String>,
-        session_id: u64,
-        remote_ip: IpAddr,
-    ) -> Self {
-        Self::from_credentials(
-            Credentials::Plain {
-                username: user.into(),
-                secret: pass.into(),
-            },
-            session_id,
-            remote_ip,
-        )
-    }
-
-    pub fn without_members(mut self) -> Self {
-        self.return_member_of = false;
-        self
-    }
-
-    pub fn with_directory(mut self, directory: &'x Directory) -> Self {
-        self.directory = Some(directory);
-        self
-    }
-
-    pub fn with_api_access(mut self, allow_api_access: bool) -> Self {
-        self.allow_api_access = allow_api_access;
-        self
-    }
+pub struct AuthRequest {
+    pub credentials: Credentials,
+    pub session_id: u64,
+    pub remote_ip: IpAddr,
 }
 
-impl CacheItemWeight for AccessToken {
+impl CacheItemWeight for AccessTokenInner {
     fn weight(&self) -> u64 {
         self.obj_size
     }
 }
 
-pub(crate) trait CredentialsUsername {
-    fn login(&self) -> Option<&str>;
+impl CacheItemWeight for EmailAddress {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<EmailAddress>() as u64 + self.local_part.len() as u64
+    }
 }
 
-impl CredentialsUsername for Credentials<String> {
-    fn login(&self) -> Option<&str> {
-        match self {
-            Credentials::Plain { username, .. } | Credentials::XOauth2 { username, .. } => {
-                username.as_str().into()
-            }
-            Credentials::OAuthBearer { .. } => None,
+impl CacheItemWeight for EmailCache {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<EmailCache>() as u64
+    }
+}
+
+impl CacheItemWeight for DomainCache {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<DomainCache>() as u64
+            + self.names.iter().map(|s| s.len() as u64).sum::<u64>()
+            + self.catch_all.as_ref().map_or(0, |s| s.len() as u64)
+            + self
+                .sub_addressing_custom
+                .as_ref()
+                .map_or(0, |s| s.weight())
+    }
+}
+
+impl Equivalent<EmailAddress> for EmailAddressRef<'_> {
+    fn equivalent(&self, key: &EmailAddress) -> bool {
+        self.local_part == &*key.local_part && self.domain_id == key.domain_id
+    }
+}
+
+impl Hash for EmailAddress {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.local_part.as_ref().hash(state);
+        self.domain_id.hash(state);
+    }
+}
+
+impl Hash for EmailAddressRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.local_part.hash(state);
+        self.domain_id.hash(state);
+    }
+}
+
+impl CacheItemWeight for AccountCache {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<AccountCache>() as u64
+            + self
+                .addresses
+                .iter()
+                .map(|s| s.local_part.len() as u64 + std::mem::size_of::<EmailAddress>() as u64)
+                .sum::<u64>()
+            + self.description.as_ref().map_or(0, |s| s.len() as u64)
+    }
+}
+
+impl CacheItemWeight for RoleCache {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<RoleCache>() as u64
+    }
+}
+
+impl CacheItemWeight for MailingListCache {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<MailingListCache>() as u64
+            + self
+                .addresses
+                .iter()
+                .map(|s| s.local_part.len() as u64 + std::mem::size_of::<EmailAddress>() as u64)
+                .sum::<u64>()
+            + self.recipients.iter().map(|s| s.len() as u64).sum::<u64>()
+    }
+}
+
+impl CacheItemWeight for TenantCache {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<TenantCache>() as u64
+            + self.permissions.as_ref().map_or(0, |p| p.weight())
+    }
+}
+
+impl CacheItemWeight for PermissionsGroup {
+    fn weight(&self) -> u64 {
+        std::mem::size_of::<PermissionsGroup>() as u64
+    }
+}
+
+pub trait BuildAccessToken {
+    fn build(self) -> AccessToken;
+}
+
+impl BuildAccessToken for Arc<AccessTokenInner> {
+    fn build(self) -> AccessToken {
+        AccessToken {
+            scope_idx: 0,
+            inner: self,
         }
+    }
+}
+
+impl EmailAddress {
+    pub fn new(local_part: impl Into<Box<str>>, domain_id: u32) -> Self {
+        Self {
+            local_part: local_part.into(),
+            domain_id,
+        }
+    }
+}
+
+impl<'x> EmailAddressRef<'x> {
+    pub fn new(local_part: &'x str, domain_id: u32) -> Self {
+        Self {
+            local_part,
+            domain_id,
+        }
+    }
+}
+
+impl DomainCache {
+    pub fn name(&self) -> &str {
+        self.names.first().map(|s| s.as_ref()).unwrap_or_default()
     }
 }

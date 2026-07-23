@@ -1,0 +1,54 @@
+dn: ou=users,dc=stalwart,dc=test
+objectClass: organizationalUnit
+ou: users
+
+dn: uid=john.doe,ou=users,dc=stalwart,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+objectClass: extensibleObject
+uid: john.doe
+cn: John Doe
+sn: Doe
+givenName: John
+mail: john.doe@example.org
+mailAlias: john@example.org
+userPassword: this is John's LDAP password
+shadowLastChange: 19723
+uidNumber: 10001
+gidNumber: 10001
+homeDirectory: /home/john.doe
+loginShell: /bin/bash
+
+dn: uid=jane.smith,ou=users,dc=stalwart,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: jane.smith
+cn: Jane Smith
+sn: Smith
+givenName: Jane
+mail: jane.smith@example.org
+userPassword: this is Jane's LDAP password
+shadowLastChange: 19724
+uidNumber: 10002
+gidNumber: 10002
+homeDirectory: /home/jane.smith
+loginShell: /bin/bash
+
+dn: uid=bill.foobar,ou=users,dc=stalwart,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+objectClass: extensibleObject
+uid: bill.foobar
+cn: Bill Foobar
+sn: Foobar
+givenName: Bill
+mail: bill.foobar@example.org
+mailAlias: bill@example.org
+userPassword: this is Bill's LDAP password
+uidNumber: 10003
+gidNumber: 10003
+homeDirectory: /home/bill.foobar
+loginShell: /bin/bash

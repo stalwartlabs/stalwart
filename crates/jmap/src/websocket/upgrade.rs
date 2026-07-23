@@ -4,25 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
+use super::stream::WebSocketHandler;
 use common::{Server, auth::AccessToken};
+use http_proto::*;
 use hyper::StatusCode;
 use hyper_util::rt::TokioIo;
+use std::future::Future;
 use tokio_tungstenite::WebSocketStream;
 use trc::JmapEvent;
 use tungstenite::{handshake::derive_accept_key, protocol::Role};
-
-use http_proto::*;
-use std::future::Future;
-
-use super::stream::WebSocketHandler;
 
 pub trait WebSocketUpgrade: Sync + Send {
     fn upgrade_websocket_connection(
         &self,
         req: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: HttpSessionData,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
 }
@@ -31,18 +27,22 @@ impl WebSocketUpgrade for Server {
     async fn upgrade_websocket_connection(
         &self,
         req: HttpRequest,
-        access_token: Arc<AccessToken>,
+        access_token: AccessToken,
         session: HttpSessionData,
     ) -> trc::Result<HttpResponse> {
         let headers = req.headers();
-        if headers
-            .get(hyper::header::CONNECTION)
-            .and_then(|h| h.to_str().ok())
-            != Some("Upgrade")
-            || headers
-                .get(hyper::header::UPGRADE)
+        let header_has_token = |name: hyper::header::HeaderName, token: &str| {
+            headers
+                .get(name)
                 .and_then(|h| h.to_str().ok())
-                != Some("websocket")
+                .is_some_and(|value| {
+                    value
+                        .split(',')
+                        .any(|part| part.trim().eq_ignore_ascii_case(token))
+                })
+        };
+        if !header_has_token(hyper::header::CONNECTION, "Upgrade")
+            || !header_has_token(hyper::header::UPGRADE, "websocket")
         {
             return Err(trc::ResourceEvent::BadParameters
                 .into_err()

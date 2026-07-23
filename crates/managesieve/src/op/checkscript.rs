@@ -6,9 +6,9 @@
 
 use std::time::Instant;
 
-use common::listener::SessionStream;
-use directory::Permission;
+use common::network::SessionStream;
 use imap_proto::receiver::Request;
+use registry::schema::enums::Permission;
 
 use crate::core::{Command, Session, StatusResponse};
 

@@ -6,7 +6,7 @@
 
 use super::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard};
 use crate::DestroyArchive;
-use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
+use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
 use store::{
     ValueKey,
     write::{AlignedBytes, Archive, BatchBuilder, now},
@@ -17,7 +17,7 @@ use types::collection::{Collection, VanishedCollection};
 impl ContactCard {
     pub fn update<'x>(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         card: Archive<&ArchivedContactCard>,
         account_id: u32,
         document_id: u32,
@@ -37,18 +37,18 @@ impl ContactCard {
                 ObjectIndexBuilder::new()
                     .with_current(card)
                     .with_changes(new_card)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
 
-    pub fn insert<'x>(
+    pub fn insert(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
         // Build card
         let mut card = self;
         let now = now() as i64;
@@ -63,20 +63,20 @@ impl ContactCard {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(card)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
 }
 
 impl AddressBook {
-    pub fn insert<'x>(
+    pub fn insert(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
         // Build address book
         let mut book = self;
         let now = now() as i64;
@@ -91,14 +91,14 @@ impl AddressBook {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(book)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
 
     pub fn update<'x>(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         book: Archive<&ArchivedAddressBook>,
         account_id: u32,
         document_id: u32,
@@ -117,7 +117,7 @@ impl AddressBook {
                 ObjectIndexBuilder::new()
                     .with_current(book)
                     .with_changes(new_book)
-                    .with_access_token(access_token),
+                    .with_changed_by(changed_by),
             )
             .map(|b| b.commit_point())
     }
@@ -128,7 +128,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
     pub async fn delete_with_cards(
         self,
         server: &Server,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         children_ids: Vec<u32>,
@@ -153,7 +153,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
                         .caused_by(trc::location!())?,
                 )
                 .delete(
-                    access_token,
+                    changed_by,
                     account_id,
                     document_id,
                     addressbook_id,
@@ -163,12 +163,12 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
             }
         }
 
-        self.delete(access_token, account_id, document_id, delete_path, batch)
+        self.delete(changed_by, account_id, document_id, delete_path, batch)
     }
 
     pub fn delete(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         delete_path: Option<String>,
@@ -182,7 +182,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
             .with_document(document_id)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_access_token(access_token)
+                    .with_changed_by(changed_by)
                     .with_current(book),
             )
             .caused_by(trc::location!())?;
@@ -200,7 +200,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
 impl DestroyArchive<Archive<&ArchivedContactCard>> {
     pub fn delete(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         addressbook_id: u32,
@@ -228,7 +228,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
                     .with_document(document_id)
                     .custom(
                         ObjectIndexBuilder::new()
-                            .with_access_token(access_token)
+                            .with_changed_by(changed_by)
                             .with_current(card)
                             .with_changes(new_card),
                     )
@@ -239,7 +239,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
                     .with_document(document_id)
                     .custom(
                         ObjectIndexBuilder::<_, ()>::new()
-                            .with_access_token(access_token)
+                            .with_changed_by(changed_by)
                             .with_current(card),
                     )
                     .caused_by(trc::location!())?;
@@ -257,7 +257,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
 
     pub fn delete_all(
         self,
-        access_token: &AccessToken,
+        changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         batch: &mut BatchBuilder,
@@ -268,7 +268,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
             .with_document(document_id)
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
-                    .with_access_token(access_token)
+                    .with_changed_by(changed_by)
                     .with_current(self.0),
             )
             .caused_by(trc::location!())

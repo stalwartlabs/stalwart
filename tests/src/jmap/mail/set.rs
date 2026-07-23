@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::jmap::{JMAPTest, find_values, replace_blob_ids, replace_boundaries, replace_values};
+use crate::{
+    jmap::{find_values, replace_blob_ids, replace_boundaries, replace_values},
+    utils::server::TestServer,
+};
 use ::email::mailbox::INBOX_ID;
 use ahash::AHashSet;
 use jmap_client::{
@@ -14,20 +17,24 @@ use jmap_client::{
     email::{self, Email},
     mailbox::Role,
 };
+use registry::schema::prelude::ObjectType;
 use std::{fs, path::PathBuf};
 use types::id::Id;
 
-pub async fn test(params: &mut JMAPTest) {
+pub async fn test(test: &TestServer) {
     println!("Running Email Set tests...");
-    let account = params.account("jdoe@example.com");
-    let client = account.client();
+    let account = test.account("jdoe@example.com");
+    let client = account.jmap_client().await;
     let mailbox_id = Id::from(INBOX_ID).to_string();
 
-    create(client, &mailbox_id).await;
-    update(client, &mailbox_id).await;
+    create(&client, &mailbox_id).await;
+    update(&client, &mailbox_id).await;
 
-    params.destroy_all_mailboxes(account).await;
-    params.assert_is_empty().await;
+    test.destroy_all_mailboxes(account).await;
+    test.account("admin@example.com")
+        .registry_destroy_all(ObjectType::SpamTrainingSample)
+        .await;
+    test.assert_is_empty().await;
 }
 
 async fn create(client: &Client, mailbox_id: &str) {

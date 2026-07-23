@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{AssertResult, ImapConnection, Type};
 use imap_proto::ResponseType;
 
-use super::{AssertResult, ImapConnection, Type};
-
-pub async fn test(_imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
+pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
     println!("Running COPY/MOVE tests...");
 
     // Check status
@@ -152,4 +151,27 @@ pub async fn test(_imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
         .assert_contains("\"Burrata al Tartufo\" (UIDNEXT 5 MESSAGES 0 UNSEEN 0 SIZE 0)")
         .assert_contains("\"Scamorza Affumicata\" (UIDNEXT 9 MESSAGES 4 UNSEEN 4 SIZE 5851)")
         .assert_contains("\"INBOX\" (UIDNEXT 11 MESSAGES 10 UNSEEN 10 SIZE 12193)");
+
+    imap_check.send("SELECT \"Burrata al Tartufo\"").await;
+    imap_check.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    imap.send("SELECT \"Scamorza Affumicata\"").await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+    imap.send("UID MOVE 5 \"Burrata al Tartufo\"").await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_contains("COPYUID");
+
+    imap_check.send("UID FETCH 1:* (UID)").await;
+    imap_check
+        .assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_contains("UID 5");
+
+    imap.send("SELECT \"Burrata al Tartufo\"").await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+    imap.send("UID MOVE 5 \"Scamorza Affumicata\"").await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_contains("COPYUID");
 }

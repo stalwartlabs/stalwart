@@ -1,0 +1,22 @@
+[package]
+name = "registry"
+version = "0.16.15"
+edition = "2024"
+
+[dependencies]
+utils = { path =  "../utils" }
+trc = { path = "../trc" }
+types = { path = "../types" }
+serde = { version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+hashify = "0.2.7"
+ahash = { version = "0.8" }
+jmap-tools = { version = "0.1" }
+xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
+mail-auth = { version = "0.11" }
+tokio = { version = "1.47", features = ["fs"] }
+lz4_flex = { version = "0.13", default-features = false }
+
+[features]
+test_mode = []
+enterprise = []

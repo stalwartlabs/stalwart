@@ -4,25 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::task_manager::TaskResult;
 use calcard::{
     common::timezone::Tz,
     icalendar::{
-        ArchivedICalendarDay, ArchivedICalendarFrequency, ArchivedICalendarMonth,
-        ArchivedICalendarParticipationStatus, ArchivedICalendarRecurrenceRule,
-        ArchivedICalendarWeekday, ICalendarParticipationStatus, ICalendarProperty,
+        ICalendarDay, ICalendarFrequency, ICalendarMonth, ICalendarParticipationStatus,
+        ICalendarProperty, ICalendarRecurrenceRule, ICalendarWeekday,
     },
 };
 use chrono::{DateTime, Locale};
 use common::{
     DEFAULT_LOGO_BASE64, Server,
-    auth::AccessToken,
+    auth::AccountInfo,
     config::groupware::CalendarTemplateVariable,
     i18n,
-    listener::{ServerInstance, stream::NullIo},
+    network::{ServerInstance, stream::NullIo},
 };
 use groupware::{
     calendar::itip::ItipIngest,
-    scheduling::{ArchivedItipSummary, ArchivedItipValue, ItipMessages},
+    scheduling::{ItipSummary, ItipValue},
 };
 use mail_builder::{
     MessageBuilder,
@@ -30,46 +30,39 @@ use mail_builder::{
     mime::{BodyPart, MimePart},
 };
 use mail_parser::decoders::html::html_to_text;
+use registry::{schema::structs::TaskCalendarItipMessage, types::EnumImpl};
 use smtp::core::{Session, SessionData};
 use smtp_proto::{MailFrom, RcptTo};
 use std::{str::FromStr, sync::Arc, time::Duration};
-use store::{
-    ValueKey,
-    ahash::AHashMap,
-    rkyv::rend::{i16_le, i32_le},
-    write::{AlignedBytes, Archive, TaskEpoch, TaskQueueClass, ValueClass, now},
-};
+use store::{ahash::AHashMap, write::now};
 use trc::AddContext;
 use utils::template::{Variable, Variables};
 
-pub trait SendImipTask: Sync + Send {
+pub(crate) trait SendImipTask: Sync + Send {
     fn send_imip(
         &self,
-        account_id: u32,
-        document_id: u32,
-        due: TaskEpoch,
+        task: &TaskCalendarItipMessage,
         server_instance: Arc<ServerInstance>,
-    ) -> impl Future<Output = bool> + Send;
+    ) -> impl Future<Output = TaskResult> + Send;
 }
 
 impl SendImipTask for Server {
     async fn send_imip(
         &self,
-        account_id: u32,
-        document_id: u32,
-        due: TaskEpoch,
+        task: &TaskCalendarItipMessage,
         server_instance: Arc<ServerInstance>,
-    ) -> bool {
-        match send_imip(self, account_id, document_id, due, server_instance).await {
+    ) -> TaskResult {
+        match send_imip(self, task, server_instance).await {
             Ok(result) => result,
             Err(err) => {
+                let result = TaskResult::temporary(err.to_string());
                 trc::error!(
-                    err.account_id(account_id)
-                        .document_id(document_id)
+                    err.account_id(task.account_id.document_id())
+                        .document_id(task.document_id.document_id())
                         .caused_by(trc::location!())
-                        .details("Failed to process alarm")
+                        .details("Failed to send iMIP message")
                 );
-                false
+                result
             }
         }
     }
@@ -77,48 +70,17 @@ impl SendImipTask for Server {
 
 async fn send_imip(
     server: &Server,
-    account_id: u32,
-    document_id: u32,
-    due: TaskEpoch,
+    imip: &TaskCalendarItipMessage,
     server_instance: Arc<ServerInstance>,
-) -> trc::Result<bool> {
-    // Obtain access token
-    let access_token = server
-        .get_access_token(account_id)
-        .await
-        .caused_by(trc::location!())?;
-
+) -> trc::Result<TaskResult> {
     // Obtain iMIP payload
-    let Some(archive) = server
-        .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey {
-            account_id,
-            collection: 0,
-            document_id,
-            class: ValueClass::TaskQueue(TaskQueueClass::SendImip {
-                due,
-                is_payload: true,
-            }),
-        })
-        .await
-        .caused_by(trc::location!())?
-    else {
-        trc::event!(
-            Calendar(trc::CalendarEvent::ItipMessageError),
-            AccountId = account_id,
-            DocumentId = document_id,
-            Reason = "Missing iMIP payload",
-        );
-        return Ok(true);
-    };
-
-    let imip = archive
-        .unarchive::<ItipMessages>()
-        .caused_by(trc::location!())?;
+    let account_id = imip.account_id.document_id();
+    let document_id = imip.document_id.document_id();
 
     let sender_domain = imip
         .messages
-        .first()
+        .iter()
+        .next()
         .and_then(|msg| msg.from.rsplit('@').next())
         .unwrap_or("localhost");
 
@@ -149,17 +111,59 @@ async fn send_imip(
     .inline()
     .cid(&logo_cid);
 
+    let account_info = server
+        .account_info(account_id)
+        .await
+        .caused_by(trc::location!())?;
+
     for itip_message in imip.messages.iter() {
+        let Ok(summary) = serde_json::from_str::<ItipSummary>(&itip_message.summary) else {
+            return Ok(TaskResult::permanent(
+                "Failed to parse iMIP message summary.",
+            ));
+        };
+
+        let organizer_info = match server
+            .account_id_from_email(itip_message.from.as_str(), true)
+            .await
+        {
+            Ok(Some(sender_id)) if sender_id != account_id => {
+                match server.account_info(sender_id).await {
+                    Ok(info) => Some(info),
+                    Err(err) => {
+                        trc::error!(
+                            err.account_id(account_id)
+                                .document_id(document_id)
+                                .caused_by(trc::location!())
+                                .details("Failed to load organizer account for iMIP sender")
+                        );
+                        None
+                    }
+                }
+            }
+            Ok(_) => None,
+            Err(err) => {
+                trc::error!(
+                    err.account_id(account_id)
+                        .document_id(document_id)
+                        .caused_by(trc::location!())
+                        .details("Failed to resolve organizer account for iMIP sender")
+                );
+                None
+            }
+        };
+        let sender_info = organizer_info.as_ref().unwrap_or(&account_info);
+
         for recipient in itip_message.to.iter() {
             // Build template
             let tpl = build_itip_template(
                 server,
-                &access_token,
+                &account_info,
                 account_id,
                 document_id,
                 itip_message.from.as_str(),
                 recipient.as_str(),
-                &itip_message.summary,
+                &summary,
                 &logo_cid,
             )
             .await;
@@ -168,10 +172,7 @@ async fn send_imip(
             // Build message
             let message = MessageBuilder::new()
                 .from((
-                    access_token
-                        .description
-                        .as_deref()
-                        .unwrap_or(access_token.name.as_str()),
+                    sender_info.description().unwrap_or(sender_info.name()),
                     itip_message.from.as_str(),
                 ))
                 .to(recipient.as_str())
@@ -205,9 +206,9 @@ async fn send_imip(
                         ),
                         MimePart::new(
                             ContentType::new("text/calendar")
-                                .attribute("method", itip_message.summary.method())
+                                .attribute("method", summary.method())
                                 .attribute("charset", "utf-8"),
-                            BodyPart::Text(itip_message.message.as_str().into()),
+                            BodyPart::Text(itip_message.i_calendar_data.as_str().into()),
                         )
                         .attachment("event.ics"),
                     ]),
@@ -218,14 +219,14 @@ async fn send_imip(
             // Send message
             let server_ = server.clone();
             let server_instance = server_instance.clone();
-            let access_token = access_token.clone();
+            let sender_info = sender_info.clone();
             let from = itip_message.from.to_string();
             let to = recipient.to_string();
             tokio::spawn(async move {
                 let mut session = Session::<NullIo>::local(
                     server_,
                     server_instance,
-                    SessionData::local(access_token, None, vec![], vec![], 0),
+                    SessionData::local(sender_info, None, vec![], vec![], 0),
                 );
 
                 // MAIL FROM
@@ -301,7 +302,7 @@ async fn send_imip(
         }
     }
 
-    Ok(true)
+    Ok(TaskResult::Success(vec![]))
 }
 
 pub struct Details {
@@ -312,12 +313,12 @@ pub struct Details {
 #[allow(clippy::too_many_arguments)]
 pub async fn build_itip_template(
     server: &Server,
-    access_token: &AccessToken,
+    account_info: &AccountInfo,
     account_id: u32,
     document_id: u32,
     from: &str,
     to: &str,
-    summary: &ArchivedItipSummary,
+    summary: &ItipSummary,
     logo_cid: &str,
 ) -> Details {
     // SPDX-SnippetBegin
@@ -333,22 +334,18 @@ pub async fn build_itip_template(
     // SPDX-SnippetEnd
     #[cfg(not(feature = "enterprise"))]
     let template = &server.core.groupware.itip_template;
-    let locale = i18n::locale_or_default(access_token.locale.as_deref().unwrap_or("en"));
-    let chrono_locale = access_token
-        .locale
-        .as_deref()
-        .and_then(|locale| Locale::from_str(locale).ok())
-        .unwrap_or(Locale::en_US);
+    let locale = i18n::locale_or_default(account_info.locale().as_str());
+    let chrono_locale = Locale::from_str(account_info.locale().as_str()).unwrap_or(Locale::en_US);
 
     let mut variables = Variables::new();
     let mut subject;
     let (fields, old_fields) = match summary {
-        ArchivedItipSummary::Invite(fields) => {
+        ItipSummary::Invite(fields) => {
             subject = format!("{}: ", locale.calendar_invitation);
 
             (fields, None)
         }
-        ArchivedItipSummary::Update {
+        ItipSummary::Update {
             current, previous, ..
         } => {
             subject = format!("{}: ", locale.calendar_updated_invitation);
@@ -359,7 +356,7 @@ pub async fn build_itip_template(
             variables.insert_single(CalendarTemplateVariable::Color, "info".to_string());
             (current, Some(previous))
         }
-        ArchivedItipSummary::Cancel(fields) => {
+        ItipSummary::Cancel(fields) => {
             subject = format!("{}: ", locale.calendar_cancelled);
             variables.insert_single(
                 CalendarTemplateVariable::Header,
@@ -368,9 +365,9 @@ pub async fn build_itip_template(
             variables.insert_single(CalendarTemplateVariable::Color, "danger".to_string());
             (fields, None)
         }
-        ArchivedItipSummary::Rsvp { part_stat, current } => {
+        ItipSummary::Rsvp { part_stat, current } => {
             let (color, value) = match part_stat {
-                ArchivedICalendarParticipationStatus::Accepted => {
+                ICalendarParticipationStatus::Accepted => {
                     subject = format!("{}: ", locale.calendar_accepted);
 
                     (
@@ -378,21 +375,21 @@ pub async fn build_itip_template(
                         locale.calendar_participant_accepted.replace("$name", from),
                     )
                 }
-                ArchivedICalendarParticipationStatus::Declined => {
+                ICalendarParticipationStatus::Declined => {
                     subject = format!("{}: ", locale.calendar_declined);
                     (
                         "danger",
                         locale.calendar_participant_declined.replace("$name", from),
                     )
                 }
-                ArchivedICalendarParticipationStatus::Tentative => {
+                ICalendarParticipationStatus::Tentative => {
                     subject = format!("{}: ", locale.calendar_tentative);
                     (
                         "warning",
                         locale.calendar_participant_tentative.replace("$name", from),
                     )
                 }
-                ArchivedICalendarParticipationStatus::Delegated => {
+                ICalendarParticipationStatus::Delegated => {
                     subject = format!("{}: ", locale.calendar_delegated);
                     (
                         "warning",
@@ -486,7 +483,7 @@ pub async fn build_itip_template(
     if let Some(guests) = fields
         .iter()
         .find(|e| e.name == ICalendarProperty::Attendee)
-        && let ArchivedItipValue::Participants(guests) = &guests.value
+        && let ItipValue::Participants(guests) = &guests.value
     {
         variables.insert_single(
             CalendarTemplateVariable::AttendeesTitle,
@@ -505,12 +502,7 @@ pub async fn build_itip_template(
                                 locale.calendar_organizer.to_string()
                             }
                         } else {
-                            guest
-                                .name
-                                .as_ref()
-                                .map(|n| n.as_str())
-                                .unwrap_or_default()
-                                .to_string()
+                            guest.name.as_deref().unwrap_or_default().to_string()
                         },
                     ),
                     (CalendarTemplateVariable::Value, guest.email.to_string()),
@@ -520,10 +512,10 @@ pub async fn build_itip_template(
     }
 
     // Add RSVP buttons
-    if matches!(
-        summary,
-        ArchivedItipSummary::Invite(_) | ArchivedItipSummary::Update { .. }
-    ) && let Some(rsvp_url) = server.http_rsvp_url(account_id, document_id, to).await
+    if matches!(summary, ItipSummary::Invite(_) | ItipSummary::Update { .. })
+        && let Some(rsvp_url) = server
+            .http_rsvp_url(account_id, account_info.name(), document_id, to)
+            .await
     {
         variables.insert_single(
             CalendarTemplateVariable::Rsvp,
@@ -571,8 +563,7 @@ pub async fn build_itip_template(
                 CalendarTemplateVariable::Key,
                 locale.calendar_imip_footer_2.to_string(),
             )],
-        ]
-        .into_iter(),
+        ],
     );
 
     Details {
@@ -581,16 +572,16 @@ pub async fn build_itip_template(
     }
 }
 
-fn format_field(value: &ArchivedItipValue, template: &str, chrono_locale: Locale) -> String {
+fn format_field(value: &ItipValue, template: &str, chrono_locale: Locale) -> String {
     match value {
-        ArchivedItipValue::Text(text) => text.to_string(),
-        ArchivedItipValue::Time(time) => {
+        ItipValue::Text(text) => text.to_string(),
+        ItipValue::Time(time) => {
             use chrono::TimeZone;
-            let tz = Tz::from_id(time.tz_id.to_native()).unwrap_or(Tz::UTC);
+            let tz = Tz::from_id(time.tz_id).unwrap_or(Tz::UTC);
             format!(
                 "{} ({})",
                 tz.from_utc_datetime(
-                    &DateTime::from_timestamp(time.start.to_native(), 0)
+                    &DateTime::from_timestamp(time.start, 0)
                         .unwrap_or_default()
                         .naive_local()
                 )
@@ -598,8 +589,8 @@ fn format_field(value: &ArchivedItipValue, template: &str, chrono_locale: Locale
                 tz.name().unwrap_or_default()
             )
         }
-        ArchivedItipValue::Rrule(rrule) => RecurrenceFormatter.format(rrule),
-        ArchivedItipValue::Participants(_) => String::new(), // Handled separately
+        ItipValue::Rrule(rrule) => RecurrenceFormatter.format(rrule),
+        ItipValue::Participants(_) => String::new(), // Handled separately
     }
 }
 
@@ -607,14 +598,11 @@ fn format_field(value: &ArchivedItipValue, template: &str, chrono_locale: Locale
 pub struct RecurrenceFormatter;
 
 impl RecurrenceFormatter {
-    pub fn format(&self, rule: &ArchivedICalendarRecurrenceRule) -> String {
+    pub fn format(&self, rule: &ICalendarRecurrenceRule) -> String {
         let mut parts = Vec::new();
 
         // Format frequency and interval
-        let freq_part = self.format_frequency(
-            &rule.freq,
-            rule.interval.as_ref().map(|i| i.to_native()).unwrap_or(1),
-        );
+        let freq_part = self.format_frequency(&rule.freq, rule.interval.unwrap_or(1));
         parts.push(freq_part);
 
         // Format day constraints
@@ -664,15 +652,15 @@ impl RecurrenceFormatter {
         parts.join(" ")
     }
 
-    fn format_frequency(&self, freq: &ArchivedICalendarFrequency, interval: u16) -> String {
+    fn format_frequency(&self, freq: &ICalendarFrequency, interval: u16) -> String {
         let (singular, plural) = match freq {
-            ArchivedICalendarFrequency::Daily => ("day", "days"),
-            ArchivedICalendarFrequency::Weekly => ("week", "weeks"),
-            ArchivedICalendarFrequency::Monthly => ("month", "months"),
-            ArchivedICalendarFrequency::Yearly => ("year", "years"),
-            ArchivedICalendarFrequency::Hourly => ("hour", "hours"),
-            ArchivedICalendarFrequency::Minutely => ("minute", "minutes"),
-            ArchivedICalendarFrequency::Secondly => ("second", "seconds"),
+            ICalendarFrequency::Daily => ("day", "days"),
+            ICalendarFrequency::Weekly => ("week", "weeks"),
+            ICalendarFrequency::Monthly => ("month", "months"),
+            ICalendarFrequency::Yearly => ("year", "years"),
+            ICalendarFrequency::Hourly => ("hour", "hours"),
+            ICalendarFrequency::Minutely => ("minute", "minutes"),
+            ICalendarFrequency::Secondly => ("second", "seconds"),
         };
 
         if interval == 1 {
@@ -682,24 +670,24 @@ impl RecurrenceFormatter {
         }
     }
 
-    fn format_by_day(&self, days: &[ArchivedICalendarDay]) -> String {
+    fn format_by_day(&self, days: &[ICalendarDay]) -> String {
         let day_names: Vec<String> = days.iter().map(|day| self.format_day(day)).collect();
 
         format!("on {}", self.format_list(&day_names))
     }
 
-    fn format_day(&self, day: &ArchivedICalendarDay) -> String {
+    fn format_day(&self, day: &ICalendarDay) -> String {
         let day_name = match day.weekday {
-            ArchivedICalendarWeekday::Monday => "Monday",
-            ArchivedICalendarWeekday::Tuesday => "Tuesday",
-            ArchivedICalendarWeekday::Wednesday => "Wednesday",
-            ArchivedICalendarWeekday::Thursday => "Thursday",
-            ArchivedICalendarWeekday::Friday => "Friday",
-            ArchivedICalendarWeekday::Saturday => "Saturday",
-            ArchivedICalendarWeekday::Sunday => "Sunday",
+            ICalendarWeekday::Monday => "Monday",
+            ICalendarWeekday::Tuesday => "Tuesday",
+            ICalendarWeekday::Wednesday => "Wednesday",
+            ICalendarWeekday::Thursday => "Thursday",
+            ICalendarWeekday::Friday => "Friday",
+            ICalendarWeekday::Saturday => "Saturday",
+            ICalendarWeekday::Sunday => "Sunday",
         };
 
-        if let Some(occurrence) = day.ordwk.as_ref().map(|o| o.to_native()) {
+        if let Some(occurrence) = day.ordwk {
             if occurrence > 0 {
                 format!("the {} {}", self.ordinal(occurrence as u32), day_name)
             } else {
@@ -766,7 +754,7 @@ impl RecurrenceFormatter {
         format!("on the {}", self.format_list(&day_strings))
     }
 
-    fn format_months(&self, months: &[ArchivedICalendarMonth]) -> String {
+    fn format_months(&self, months: &[ICalendarMonth]) -> String {
         let month_names: Vec<String> = months
             .iter()
             .map(|month| self.month_name(month.month()))
@@ -775,7 +763,7 @@ impl RecurrenceFormatter {
         format!("in {}", self.format_list(&month_names))
     }
 
-    fn format_year_days(&self, days: &[i16_le]) -> String {
+    fn format_year_days(&self, days: &[i16]) -> String {
         let day_strings: Vec<String> = days
             .iter()
             .map(|&day| {
@@ -805,12 +793,12 @@ impl RecurrenceFormatter {
         format!("in {}", self.format_list(&week_strings))
     }
 
-    fn format_set_positions(&self, positions: &[i32_le]) -> String {
+    fn format_set_positions(&self, positions: &[i32]) -> String {
         let pos_strings: Vec<String> = positions
             .iter()
             .map(|&pos| {
                 if pos > 0 {
-                    self.ordinal(pos.to_native() as u32)
+                    self.ordinal(pos as u32)
                 } else {
                     format!("{} from the end", self.ordinal((-pos) as u32))
                 }

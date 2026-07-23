@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{auth::AccessToken, sharing::notification::ShareNotification};
+use crate::{auth::AccountTenantIds, sharing::notification::ShareNotification};
+use registry::schema::{
+    enums::IndexDocumentType,
+    structs::{Task, TaskIndexDocument, TaskStatus},
+};
 use rkyv::{
     option::ArchivedOption,
     primitive::{ArchivedU32, ArchivedU64},
@@ -14,8 +18,8 @@ use std::{borrow::Cow, fmt::Debug};
 use store::{
     Serialize, SerializeInfallible,
     write::{
-        Archive, Archiver, BatchBuilder, BlobLink, BlobOp, DirectoryClass, IntoOperations, Params,
-        SearchIndex, TaskEpoch, TaskQueueClass, ValueClass,
+        Archive, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations, Params, SearchIndex,
+        ValueClass,
     },
 };
 use types::{
@@ -299,9 +303,9 @@ impl<C: IndexableObject, N: IndexableAndSerializableObject> ObjectIndexBuilder<C
         self.current.as_ref()
     }
 
-    pub fn with_access_token(mut self, access_token: &AccessToken) -> Self {
-        self.tenant_id = access_token.tenant.as_ref().map(|t| t.id);
-        self.changed_by = access_token.primary_id();
+    pub fn with_changed_by(mut self, ids: AccountTenantIds) -> Self {
+        self.tenant_id = ids.tenant_id;
+        self.changed_by = ids.account_id;
         self
     }
 
@@ -418,14 +422,23 @@ fn build_index(
             }
         }
         IndexValue::SearchIndex { index, .. } => {
-            batch.set(
-                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                    due: TaskEpoch::now().with_random_sequence_id(),
-                    index,
-                    is_insert: set,
-                }),
-                vec![],
-            );
+            let task = TaskIndexDocument {
+                account_id: batch.last_account_id().unwrap().into(),
+                document_id: batch.last_document_id().unwrap().into(),
+                document_type: match index {
+                    SearchIndex::Email => IndexDocumentType::Email,
+                    SearchIndex::Calendar => IndexDocumentType::Calendar,
+                    SearchIndex::Contacts => IndexDocumentType::Contacts,
+                    SearchIndex::File => IndexDocumentType::File,
+                    SearchIndex::Tracing | SearchIndex::InMemory => unreachable!(),
+                },
+                status: TaskStatus::now(),
+            };
+            batch.schedule_task(if set {
+                Task::IndexDocument(task)
+            } else {
+                Task::UnindexDocument(task)
+            });
         }
         IndexValue::Property { field, value } => {
             if !value.is_none() {
@@ -456,11 +469,7 @@ fn build_index(
             let object_account_id = batch.last_account_id().unwrap_or_default();
             let object_type = batch.last_collection().unwrap_or(Collection::None);
             let object_id = batch.last_document_id().unwrap_or_default();
-            let notification_id = SnowflakeIdGenerator::from_sequence_and_node_id(
-                object_type as u64 ^ object_account_id as u64,
-                None,
-            )
-            .unwrap_or_default();
+            let notification_id = SnowflakeIdGenerator::global_id().unwrap_or_default();
 
             for item in value.as_ref() {
                 if set {
@@ -499,12 +508,10 @@ fn build_index(
         IndexValue::Quota { used } => {
             let value = if set { used as i64 } else { -(used as i64) };
 
-            if let Some(account_id) = batch.last_account_id() {
-                batch.add(DirectoryClass::UsedQuota(account_id), value);
-            }
+            batch.add(ValueClass::Quota, value);
 
             if let Some(tenant_id) = tenant_id {
-                batch.add(DirectoryClass::UsedQuota(tenant_id), value);
+                batch.add(ValueClass::TenantQuota(tenant_id), value);
             }
         }
         IndexValue::LogItem {
@@ -561,14 +568,18 @@ fn merge_index(
             }
         }
         (IndexValue::SearchIndex { index, .. }, IndexValue::SearchIndex { .. }) => {
-            batch.set(
-                ValueClass::TaskQueue(TaskQueueClass::UpdateIndex {
-                    due: TaskEpoch::now().with_random_sequence_id(),
-                    index,
-                    is_insert: true,
-                }),
-                vec![],
-            );
+            batch.schedule_task(Task::IndexDocument(TaskIndexDocument {
+                account_id: batch.last_account_id().unwrap().into(),
+                document_id: batch.last_document_id().unwrap().into(),
+                document_type: match index {
+                    SearchIndex::Email => IndexDocumentType::Email,
+                    SearchIndex::Calendar => IndexDocumentType::Calendar,
+                    SearchIndex::Contacts => IndexDocumentType::Contacts,
+                    SearchIndex::File => IndexDocumentType::File,
+                    SearchIndex::Tracing | SearchIndex::InMemory => unreachable!(),
+                },
+                status: TaskStatus::now(),
+            }));
         }
         (
             IndexValue::Property {
@@ -616,11 +627,7 @@ fn merge_index(
             let object_account_id = batch.last_account_id().unwrap_or_default();
             let object_type = batch.last_collection().unwrap_or(Collection::None);
             let object_id = batch.last_document_id().unwrap_or_default();
-            let notification_id = SnowflakeIdGenerator::from_sequence_and_node_id(
-                object_type as u64 ^ object_account_id as u64,
-                None,
-            )
-            .unwrap_or_default();
+            let notification_id = SnowflakeIdGenerator::global_id().unwrap_or_default();
 
             match (has_old_acl, has_new_acl) {
                 (true, true) => {
@@ -722,12 +729,10 @@ fn merge_index(
         }
         (IndexValue::Quota { used: old_used }, IndexValue::Quota { used: new_used }) => {
             let value = new_used as i64 - old_used as i64;
-            if let Some(account_id) = batch.last_account_id() {
-                batch.add(DirectoryClass::UsedQuota(account_id), value);
-            }
+            batch.add(ValueClass::Quota, value);
 
             if let Some(tenant_id) = tenant_id {
-                batch.add(DirectoryClass::UsedQuota(tenant_id), value);
+                batch.add(ValueClass::TenantQuota(tenant_id), value);
             }
         }
         (

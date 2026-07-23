@@ -8,9 +8,12 @@ use super::{
     ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarPreferences, ArchivedDefaultAlert,
     ArchivedTimezone, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert, Timezone,
 };
-use crate::calendar::{
-    ArchivedCalendarEventNotification, ArchivedChangedBy, ArchivedEventPreferences,
-    CalendarEventNotification, ChangedBy, EventPreferences,
+use crate::{
+    calendar::{
+        ArchivedCalendarEventNotification, ArchivedChangedBy, ArchivedEventPreferences,
+        CalendarEventNotification, ChangedBy, EventPreferences,
+    },
+    strip_mailto_scheme,
 };
 use ahash::AHashSet;
 use calcard::icalendar::{
@@ -463,7 +466,7 @@ impl ArchivedCalendarEvent {
                             _ => None,
                         }))
                     {
-                        let value = value.strip_prefix("mailto:").unwrap_or(value).trim();
+                        let value = strip_mailto_scheme(value);
                         let lang = if is_lang {
                             detector.detect(value, MIN_LANGUAGE_SCORE);
                             Language::Unknown

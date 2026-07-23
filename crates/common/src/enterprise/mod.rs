@@ -12,33 +12,33 @@ pub mod alerts;
 pub mod config;
 pub mod license;
 pub mod llm;
-pub mod undelete;
+pub mod masked;
 
-use ahash::{AHashMap, AHashSet};
-use directory::{
-    QueryParams, Type,
-    backend::internal::{lookup::DirectoryStore, manage::ManageDirectory},
+use crate::{
+    Core, LogoCache, Server, USER_AGENT, config::groupware::CalendarTemplateVariable,
+    expr::Expression, manager::application::Resource,
 };
+use ahash::{AHashMap, AHashSet};
 use license::LicenseKey;
 use llm::AiApiConfig;
 use mail_parser::DateTime;
-use std::{sync::Arc, time::Duration};
-use store::Store;
-use trc::{AddContext, EventType, MetricType};
-use utils::{HttpLimitResponse, config::cron::SimpleCron, template::Template};
-
-use crate::{
-    Core, Server, config::groupware::CalendarTemplateVariable, expr::Expression,
-    manager::webadmin::Resource,
+use registry::{
+    schema::structs::{Domain, Tenant},
+    types::id::ObjectId,
 };
+use std::{sync::Arc, time::Duration};
+use trc::{AddContext, MetricType};
+use utils::{HttpLimitResponse, cron::SimpleCron, template::Template};
 
 #[derive(Clone)]
 pub struct Enterprise {
     pub license: LicenseKey,
     pub logo_url: Option<String>,
-    pub undelete: Option<Undelete>,
-    pub trace_store: Option<TraceStore>,
-    pub metrics_store: Option<MetricStore>,
+    pub deleted_items_retention: Option<Duration>,
+    pub deleted_accounts_retention: Option<Duration>,
+    pub trace_retention: Option<Duration>,
+    pub metrics_retention: Option<Duration>,
+    pub metrics_interval: SimpleCron,
     pub metrics_alerts: Vec<MetricAlert>,
     pub ai_apis: AHashMap<String, Arc<AiApiConfig>>,
     pub spam_filter_llm: Option<SpamFilterLlmConfig>,
@@ -60,27 +60,9 @@ pub struct SpamFilterLlmConfig {
     pub confidence: AHashSet<String>,
 }
 
-#[derive(Clone)]
-pub struct Undelete {
-    pub retention: Duration,
-}
-
-#[derive(Clone)]
-pub struct TraceStore {
-    pub retention: Option<Duration>,
-    pub store: Store,
-}
-
-#[derive(Clone)]
-pub struct MetricStore {
-    pub retention: Option<Duration>,
-    pub store: Store,
-    pub interval: SimpleCron,
-}
-
 #[derive(Clone, Debug)]
 pub struct MetricAlert {
-    pub id: String,
+    pub id: ObjectId,
     pub condition: Expression,
     pub method: Vec<AlertMethod>,
 }
@@ -106,7 +88,6 @@ pub struct AlertContent(pub Vec<AlertContentToken>);
 pub enum AlertContentToken {
     Text(String),
     Metric(MetricType),
-    Event(EventType),
 }
 
 impl Core {
@@ -155,13 +136,9 @@ impl Server {
 
     pub async fn can_create_account(&self) -> trc::Result<bool> {
         if let Some(enterprise) = &self.core.enterprise {
-            let total_accounts = self
-                .store()
-                .count_principals(None, Type::Individual.into(), None)
-                .await
-                .caused_by(trc::location!())?;
+            let total_accounts = self.total_accounts().await.caused_by(trc::location!())?;
 
-            if total_accounts + 1 > enterprise.license.accounts as u64 {
+            if total_accounts + 1 > enterprise.license.accounts as usize {
                 trc::event!(
                     Server(trc::ServerEvent::Licensing),
                     Details = "Account creation not possible: license key account limit reached",
@@ -180,88 +157,101 @@ impl Server {
     pub async fn logo_resource(&self, domain: &str) -> trc::Result<Option<Resource<Vec<u8>>>> {
         const MAX_IMAGE_SIZE: usize = 1024 * 1024;
 
-        if self.is_enterprise_edition() {
-            let domain = psl::domain_str(domain).unwrap_or(domain);
-            let logo = { self.inner.data.logos.lock().get(domain).cloned() };
+        if !self.is_enterprise_edition() {
+            return Ok(None);
+        }
 
-            if let Some(logo) = logo {
-                Ok(logo)
-            } else {
-                // Try fetching the logo for the domain
-                let logo_url = if let Some(mut principal) = self
-                    .store()
-                    .query(QueryParams::name(domain).with_return_member_of(false))
-                    .await
-                    .caused_by(trc::location!())?
-                    .filter(|p| p.typ() == Type::Domain)
-                {
-                    if let Some(logo) = principal.picture_mut().filter(|l| l.starts_with("http")) {
-                        std::mem::take(logo).into()
-                    } else if let Some(tenant_id) = principal.tenant() {
-                        if let Some(logo) = self
-                            .store()
-                            .query(QueryParams::id(tenant_id).with_return_member_of(false))
-                            .await
-                            .caused_by(trc::location!())?
-                            .and_then(|mut p| p.picture_mut().map(std::mem::take))
-                            .filter(|l| l.starts_with("http"))
-                        {
-                            logo.clone().into()
-                        } else {
-                            self.default_logo_url()
-                        }
-                    } else {
-                        self.default_logo_url()
-                    }
-                } else {
-                    self.default_logo_url()
-                };
+        let mut domain = psl::domain_str(domain).unwrap_or(domain);
+        let logo_cache = { self.inner.data.logos.lock().get(domain).cloned() };
+        if let Some(logo) = logo_cache {
+            return Ok(logo.data);
+        }
 
-                let mut logo = None;
-                if let Some(logo_url) = logo_url {
-                    let response = reqwest::get(logo_url.as_str()).await.map_err(|err| {
-                        trc::ResourceEvent::DownloadExternal
-                            .into_err()
-                            .details("Failed to download logo")
-                            .reason(err)
-                    })?;
+        let mut logo_url = None;
+        let mut domain_id = u32::MAX;
+        let mut tenant_id = None;
+        if let Some((d_id, t_id)) = self.domain(domain).await?.map(|d| (d.id, d.id_tenant))
+            && let Some(domain_record) = self.registry().object::<Domain>(d_id.into()).await?
+        {
+            logo_url = domain_record.logo;
+            domain_id = d_id;
+            tenant_id = t_id;
 
-                    let content_type = response
-                        .headers()
-                        .get(reqwest::header::CONTENT_TYPE)
-                        .and_then(|ct| ct.to_str().ok())
-                        .unwrap_or("image/svg+xml")
-                        .to_string();
-
-                    let contents = response
-                        .bytes_with_limit(MAX_IMAGE_SIZE)
-                        .await
-                        .map_err(|err| {
-                            trc::ResourceEvent::DownloadExternal
-                                .into_err()
-                                .details("Failed to download logo")
-                                .reason(err)
-                        })?
-                        .ok_or_else(|| {
-                            trc::ResourceEvent::DownloadExternal
-                                .into_err()
-                                .details("Download exceeded maximum size")
-                        })?;
-
-                    logo = Resource::new(content_type, contents).into();
-                }
-
-                self.inner
-                    .data
-                    .logos
-                    .lock()
-                    .insert(domain.to_string(), logo.clone());
-
-                Ok(logo)
+            if logo_url.is_none()
+                && let Some(tenant_id) = tenant_id
+            {
+                logo_url = self
+                    .registry()
+                    .object::<Tenant>(tenant_id.into())
+                    .await?
+                    .and_then(|t| t.logo);
             }
         } else {
-            Ok(None)
+            domain = "*";
         }
+
+        // Try fetching the default logo
+        if logo_url.is_none()
+            && let Some(default_logo_url) = self.default_logo_url()
+        {
+            let logo = { self.inner.data.logos.lock().get("*").cloned() };
+            if let Some(logo) = logo {
+                return Ok(logo.data);
+            }
+            logo_url = Some(default_logo_url);
+        }
+
+        let mut logo = None;
+        if let Some(logo_url) = logo_url {
+            let response = reqwest::Client::builder()
+                .user_agent(USER_AGENT)
+                .build()
+                .unwrap()
+                .get(logo_url.as_str())
+                .send()
+                .await
+                .map_err(|err| {
+                    trc::ResourceEvent::DownloadExternal
+                        .into_err()
+                        .details("Failed to download logo")
+                        .reason(err)
+                })?;
+
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|ct| ct.to_str().ok())
+                .unwrap_or("image/svg+xml")
+                .to_string();
+
+            let contents = response
+                .bytes_with_limit(MAX_IMAGE_SIZE)
+                .await
+                .map_err(|err| {
+                    trc::ResourceEvent::DownloadExternal
+                        .into_err()
+                        .details("Failed to download logo")
+                        .reason(err)
+                })?
+                .ok_or_else(|| {
+                    trc::ResourceEvent::DownloadExternal
+                        .into_err()
+                        .details("Download exceeded maximum size")
+                })?;
+
+            logo = Resource::new(content_type, contents).into();
+        }
+
+        self.inner.data.logos.lock().insert(
+            domain.into(),
+            LogoCache {
+                domain_id,
+                tenant_id,
+                data: logo.clone(),
+            },
+        );
+
+        Ok(logo)
     }
 
     fn default_logo_url(&self) -> Option<String> {

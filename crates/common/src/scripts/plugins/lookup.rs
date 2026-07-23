@@ -22,13 +22,13 @@ pub fn register_set(plugin_id: u32, fnc_map: &mut FunctionMap) {
 }
 
 pub fn register_local_domain(plugin_id: u32, fnc_map: &mut FunctionMap) {
-    fnc_map.set_external_function("is_local_domain", plugin_id, 2);
+    fnc_map.set_external_function("is_local_domain", plugin_id, 1);
 }
 
 pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
     let store = match &ctx.arguments[0] {
-        Variable::String(v) if !v.is_empty() => ctx.server.core.storage.lookups.get(v.as_ref()),
-        _ => Some(&ctx.server.core.storage.lookup),
+        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_str()),
+        _ => Some(ctx.server.core.storage.memory.clone()),
     }
     .ok_or_else(|| {
         trc::SieveEvent::RuntimeError
@@ -53,8 +53,8 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
 
 pub async fn exec_get(ctx: PluginContext<'_>) -> trc::Result<Variable> {
     match &ctx.arguments[0] {
-        Variable::String(v) if !v.is_empty() => ctx.server.core.storage.lookups.get(v.as_ref()),
-        _ => Some(&ctx.server.core.storage.lookup),
+        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_str()),
+        _ => Some(ctx.server.core.storage.memory.clone()),
     }
     .ok_or_else(|| {
         trc::SieveEvent::RuntimeError
@@ -74,8 +74,8 @@ pub async fn exec_set(ctx: PluginContext<'_>) -> trc::Result<Variable> {
     };
 
     match &ctx.arguments[0] {
-        Variable::String(v) if !v.is_empty() => ctx.server.core.storage.lookups.get(v.as_ref()),
-        _ => Some(&ctx.server.core.storage.lookup),
+        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_str()),
+        _ => Some(ctx.server.core.storage.memory.clone()),
     }
     .ok_or_else(|| {
         trc::SieveEvent::RuntimeError
@@ -99,26 +99,16 @@ pub async fn exec_set(ctx: PluginContext<'_>) -> trc::Result<Variable> {
 }
 
 pub async fn exec_local_domain(ctx: PluginContext<'_>) -> trc::Result<Variable> {
-    let domain = ctx.arguments[1].to_string();
+    let domain = ctx.arguments[0].to_string();
 
     if !domain.is_empty() {
-        return match &ctx.arguments[0] {
-            Variable::String(v) if !v.is_empty() => {
-                ctx.server.core.storage.directories.get(v.as_ref())
-            }
-            _ => Some(&ctx.server.core.storage.directory),
-        }
-        .ok_or_else(|| {
-            trc::SieveEvent::RuntimeError
-                .ctx(trc::Key::Id, ctx.arguments[0].to_string().into_owned())
-                .details("Unknown directory")
-        })?
-        .is_local_domain(domain.as_ref())
-        .await
-        .map(Into::into);
+        ctx.server
+            .domain(domain.as_ref())
+            .await
+            .map(|result| Variable::from(result.is_some()))
+    } else {
+        Ok(Variable::default())
     }
-
-    Ok(Variable::default())
 }
 
 #[derive(Debug, PartialEq, Eq)]

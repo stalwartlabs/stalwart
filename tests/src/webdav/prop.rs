@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{DavResponse, DummyWebDavClient, WebDavTest};
-use crate::webdav::{GenerateTestDavResource, TEST_ICAL_2, TEST_VTIMEZONE_1};
-use ahash::{AHashMap, AHashSet};
+use crate::utils::server::TestServer;
+use crate::utils::webdav::GenerateTestDavResource;
+use crate::webdav::{TEST_ICAL_2, TEST_VTIMEZONE_1};
 use dav_proto::schema::property::{
     CalDavProperty, CardDavProperty, DavProperty, PrincipalProperty, WebDavProperty,
 };
@@ -14,8 +14,8 @@ use groupware::DavResourceName;
 use hyper::StatusCode;
 use types::dead_property::DeadElementTag;
 
-pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
-    let client = test.client("jane");
+pub async fn test(test: &TestServer, assisted_discovery: bool) {
+    let client = test.account("jane@example.com").webdav_client();
 
     for resource_type in [
         DavResourceName::File,
@@ -26,8 +26,8 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
             "Running PROPFIND/PROPPATCH tests ({})...",
             resource_type.base_path()
         );
-        let user_base_path = format!("{}/jane", resource_type.base_path());
-        let group_base_path = format!("{}/support", resource_type.base_path());
+        let user_base_path = format!("{}/jane%40example.com", resource_type.base_path());
+        let group_base_path = format!("{}/support%40example.com", resource_type.base_path());
 
         // Create a new test container and file
         let test_base_path = format!("{user_base_path}/PropFind_Folder/");
@@ -208,14 +208,18 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
                 ]);
             properties
                 .get(DavProperty::WebDav(WebDavProperty::CurrentUserPrincipal))
-                .with_values([
-                    format!("D:href:{}/jane/", DavResourceName::Principal.base_path()).as_str(),
-                ]);
+                .with_values([format!(
+                    "D:href:{}/jane%40example.com/",
+                    DavResourceName::Principal.base_path()
+                )
+                .as_str()]);
             properties
                 .get(DavProperty::WebDav(WebDavProperty::Owner))
-                .with_values([
-                    format!("D:href:{}/jane/", DavResourceName::Principal.base_path()).as_str(),
-                ]);
+                .with_values([format!(
+                    "D:href:{}/jane%40example.com/",
+                    DavResourceName::Principal.base_path()
+                )
+                .as_str()]);
             properties
                 .get(DavProperty::WebDav(WebDavProperty::SupportedPrivilegeSet))
                 .is_not_empty();
@@ -440,7 +444,7 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
             ] {
                 properties.get(prop).with_some_values([
                     format!(
-                        "D:response.D:href:{}/jane/",
+                        "D:response.D:href:{}/jane%40example.com/",
                         DavResourceName::Principal.base_path(),
                     )
                     .as_str(),
@@ -702,500 +706,10 @@ pub async fn test(test: &WebDavTest, assisted_discovery: bool) {
     }
 
     client.delete_default_containers().await;
-    client.delete_default_containers_by_account("support").await;
+    client
+        .delete_default_containers_by_account("support@example.com")
+        .await;
     test.assert_is_empty().await;
-}
-
-#[derive(Debug)]
-pub struct DavMultiStatus {
-    pub response: DavResponse,
-    pub hrefs: AHashMap<String, DavProperties>,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct DavItem {
-    #[serde(serialize_with = "serialize_status_code")]
-    pub status: StatusCode,
-    pub values: AHashMap<String, Vec<String>>,
-    pub error: Vec<String>,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct DavProperties {
-    #[serde(skip)]
-    status: StatusCode,
-    props: Vec<DavItem>,
-}
-
-impl DavMultiStatus {
-    pub fn properties(&self, href: &str) -> DavPropertyResult<'_> {
-        DavPropertyResult {
-            response: &self.response,
-            properties: self.hrefs.get(href).unwrap_or_else(|| {
-                self.response.dump_response();
-                panic!(
-                    "No properties found for href: {href} in {}",
-                    serde_json::to_string_pretty(&self.hrefs).unwrap()
-                )
-            }),
-        }
-    }
-
-    pub fn with_hrefs<'x>(&self, expect_hrefs: impl IntoIterator<Item = &'x str>) -> &Self {
-        let expect_hrefs: AHashSet<_> = expect_hrefs.into_iter().collect();
-        let hrefs: AHashSet<_> = self.hrefs.keys().map(|s| s.as_str()).collect();
-        if hrefs != expect_hrefs {
-            self.response.dump_response();
-            panic!("Expected hrefs {expect_hrefs:?}, but got {hrefs:?}",);
-        }
-        self
-    }
-}
-
-pub struct DavPropertyResult<'x> {
-    pub response: &'x DavResponse,
-    pub properties: &'x DavProperties,
-}
-
-pub struct DavQueryResult<'x> {
-    pub response: &'x DavResponse,
-    pub prop: &'x DavItem,
-    pub values: &'x [String],
-}
-
-impl DavPropertyResult<'_> {
-    pub fn get(&self, name: impl AsRef<str>) -> DavQueryResult<'_> {
-        let name = name.as_ref();
-        self.properties
-            .props
-            .iter()
-            .find_map(|prop| {
-                prop.values.get(name).map(|values| DavQueryResult {
-                    response: self.response,
-                    prop,
-                    values,
-                })
-            })
-            .unwrap_or_else(|| {
-                self.response.dump_response();
-                panic!(
-                    "No property found for name: {name} in {}",
-                    serde_json::to_string_pretty(&self.properties.props).unwrap()
-                )
-            })
-    }
-
-    pub fn with_status(&self, status: StatusCode) -> &Self {
-        if self.properties.status != status {
-            self.response.dump_response();
-            panic!(
-                "Expected status {status}, but got {}",
-                self.properties.status
-            );
-        }
-        self
-    }
-
-    pub fn is_defined(&self, name: impl AsRef<str>) -> &Self {
-        if self
-            .properties
-            .props
-            .iter()
-            .any(|prop| prop.values.contains_key(name.as_ref()))
-        {
-            self
-        } else {
-            self.response.dump_response();
-            panic!("Expected property {} to be defined", name.as_ref());
-        }
-    }
-
-    pub fn is_undefined(&self, name: impl AsRef<str>) -> &Self {
-        if self
-            .properties
-            .props
-            .iter()
-            .any(|prop| prop.values.contains_key(name.as_ref()))
-        {
-            self.response.dump_response();
-            panic!("Expected property {} to be undefined", name.as_ref());
-        }
-        self
-    }
-
-    pub fn calendar_data(&self) -> DavQueryResult<'_> {
-        self.get(DavProperty::CalDav(CalDavProperty::CalendarData(
-            Default::default(),
-        )))
-    }
-}
-
-impl<'x> DavQueryResult<'x> {
-    pub fn with_values(&self, expected_values: impl IntoIterator<Item = &'x str>) -> &Self {
-        let expected_values = AHashSet::from_iter(expected_values);
-        let values = self
-            .values
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<AHashSet<_>>();
-
-        if values != expected_values {
-            self.response.dump_response();
-            assert_eq!(values, expected_values,);
-        }
-        self
-    }
-
-    pub fn with_some_values(&self, expected_values: impl IntoIterator<Item = &'x str>) -> &Self {
-        let values = self
-            .values
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<AHashSet<_>>();
-
-        for expected_value in expected_values {
-            if !values.contains(expected_value) {
-                self.response.dump_response();
-                panic!("Expected at least one of {expected_value:?} values, but got {values:?}",);
-            }
-        }
-
-        self
-    }
-
-    pub fn with_any_values(&self, expected_values: impl IntoIterator<Item = &'x str>) -> &Self {
-        let values = self
-            .values
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<AHashSet<_>>();
-        let expected_values = AHashSet::from_iter(expected_values);
-
-        if values.is_disjoint(&expected_values) {
-            self.response.dump_response();
-            panic!("Expected at least one of {expected_values:?} values, but got {values:?}",);
-        }
-
-        self
-    }
-
-    pub fn without_values(&self, expected_values: impl IntoIterator<Item = &'x str>) -> &Self {
-        let expected_values = AHashSet::from_iter(expected_values);
-        let values = self
-            .values
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<AHashSet<_>>();
-
-        if !expected_values.is_disjoint(&values) {
-            self.response.dump_response();
-            panic!("Expected no {expected_values:?} values, but got {values:?}",);
-        }
-        self
-    }
-
-    pub fn is_not_empty(&self) -> &Self {
-        if self.values.is_empty() || self.values.iter().all(|s| s.is_empty()) {
-            self.response.dump_response();
-            panic!("Expected non-empty values, but got {:?}", self.values);
-        }
-        self
-    }
-
-    pub fn value(&self) -> &str {
-        if let Some(value) = self.values.iter().find(|s| !s.is_empty()) {
-            value
-        } else {
-            self.response.dump_response();
-            panic!("Expected a value, but got {:?}", self.values);
-        }
-    }
-
-    pub fn with_status(&self, status: StatusCode) -> &Self {
-        if self.prop.status != status {
-            self.response.dump_response();
-            panic!("Expected status {status}, but got {}", self.prop.status);
-        }
-        self
-    }
-
-    pub fn with_description(&self, description: &str) -> &Self {
-        if self.prop.description.as_deref() != Some(description) {
-            self.response.dump_response();
-            panic!(
-                "Expected description {description}, but got {:?}",
-                self.prop.description
-            );
-        }
-        self
-    }
-    pub fn with_error(&self, error: &str) -> &Self {
-        if !self.prop.error.contains(&error.to_string()) {
-            self.response.dump_response();
-            panic!("Expected error {error}, but got {:?}", self.prop.error);
-        }
-        self
-    }
-}
-
-impl DavResponse {
-    pub fn into_propfind_response(mut self, prop_prefix: Option<&str>) -> DavMultiStatus {
-        if let Some(prop_prefix) = prop_prefix {
-            for (key, _) in self.xml.iter_mut() {
-                if let Some(suffix) = key.strip_prefix(prop_prefix) {
-                    *key = format!("D:multistatus.D:response{suffix}");
-                }
-            }
-            self.xml.push((
-                "D:multistatus.D:response.D:href".to_string(),
-                "".to_string(),
-            ));
-        }
-
-        let mut result = DavMultiStatus {
-            response: self,
-            hrefs: AHashMap::new(),
-        };
-        let mut href = None;
-        let mut href_status = StatusCode::OK;
-        let mut props = Vec::new();
-        let mut prop = DavItem::default();
-
-        for (key, value) in &result.response.xml {
-            match key.as_str() {
-                "D:multistatus.D:response.D:href" => {
-                    if let Some(href) = href.take() {
-                        if !prop.is_empty() {
-                            props.push(std::mem::take(&mut prop));
-                        }
-                        result.hrefs.insert(
-                            href,
-                            DavProperties {
-                                status: href_status,
-                                props: std::mem::take(&mut props),
-                            },
-                        );
-                        href_status = StatusCode::OK;
-                    }
-                    href = Some(value.to_string());
-                }
-                "D:multistatus.D:response.D:status" => {
-                    href_status = value
-                        .split_ascii_whitespace()
-                        .nth(1)
-                        .unwrap_or_default()
-                        .parse()
-                        .unwrap();
-                }
-                "D:multistatus.D:response.D:propstat.D:status" => {
-                    prop.status = value
-                        .split_ascii_whitespace()
-                        .nth(1)
-                        .unwrap_or_default()
-                        .parse()
-                        .unwrap();
-                }
-                "D:multistatus.D:response.D:propstat.D:responsedescription" => {
-                    prop.description = Some(value.to_string());
-                }
-                _ => {
-                    if let Some(prop_name) =
-                        key.strip_prefix("D:multistatus.D:response.D:propstat.D:prop.")
-                    {
-                        if prop.status != StatusCode::PROXY_AUTHENTICATION_REQUIRED {
-                            props.push(std::mem::take(&mut prop));
-                        }
-
-                        let (prop_name, prop_value) =
-                            if let Some((prop_name, prop_sub_name)) = prop_name.split_once('.') {
-                                if value.is_empty() {
-                                    (prop_name, prop_sub_name.to_string())
-                                } else {
-                                    (prop_name, format!("{}:{}", prop_sub_name, value))
-                                }
-                            } else {
-                                (prop_name, value.to_string())
-                            };
-                        prop.values
-                            .entry(prop_name.to_string())
-                            .or_default()
-                            .push(prop_value);
-                    }
-                }
-            }
-        }
-
-        if let Some(href) = href.take() {
-            if !prop.is_empty() {
-                props.push(prop);
-            }
-            result.hrefs.insert(
-                href,
-                DavProperties {
-                    status: href_status,
-                    props,
-                },
-            );
-        }
-
-        result
-    }
-}
-
-impl DummyWebDavClient {
-    pub async fn patch_and_check<T>(
-        &self,
-        path: &str,
-        properties: impl IntoIterator<Item = (T, &str)>,
-    ) where
-        T: AsRef<str> + Clone,
-    {
-        let mut expect_set = Vec::new();
-        let mut expect_remove = Vec::new();
-
-        for (key, value) in properties {
-            if !value.is_empty() {
-                expect_set.push((key, value));
-            } else {
-                expect_remove.push(key);
-            }
-        }
-
-        let response = self
-            .proppatch(
-                path,
-                expect_set.iter().cloned(),
-                expect_remove.iter().cloned(),
-                [],
-            )
-            .await
-            .with_status(StatusCode::MULTI_STATUS)
-            .into_propfind_response(None);
-        let patch_prop = response.properties(path);
-        for (key, _) in &expect_set {
-            patch_prop.get(key.as_ref()).with_status(StatusCode::OK);
-        }
-        for key in &expect_remove {
-            patch_prop
-                .get(key.as_ref())
-                .with_status(StatusCode::NO_CONTENT);
-        }
-
-        let response = self
-            .propfind(
-                path,
-                expect_set
-                    .iter()
-                    .map(|(k, _)| k)
-                    .chain(expect_remove.iter()),
-            )
-            .await;
-        let prop = response.properties(path);
-
-        for (key, value) in expect_set {
-            prop.get(key.as_ref())
-                .with_values([value])
-                .with_status(StatusCode::OK);
-        }
-
-        for key in expect_remove {
-            prop.get(key.as_ref()).with_status(StatusCode::NOT_FOUND);
-        }
-    }
-
-    pub async fn propfind<I, T>(&self, path: &str, properties: I) -> DavMultiStatus
-    where
-        I: IntoIterator<Item = T>,
-        T: AsRef<str>,
-    {
-        self.propfind_with_headers(path, properties, []).await
-    }
-
-    pub async fn propfind_with_headers<I, T>(
-        &self,
-        path: &str,
-        properties: I,
-        headers: impl IntoIterator<Item = (&'static str, &str)>,
-    ) -> DavMultiStatus
-    where
-        I: IntoIterator<Item = T>,
-        T: AsRef<str>,
-    {
-        let mut request = concat!(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-            "<D:propfind xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" ",
-            "xmlns:B=\"urn:ietf:params:xml:ns:carddav\" xmlns:C=\"http://calendarserver.org/ns/\">",
-            "<D:prop>"
-        )
-        .to_string();
-
-        for property in properties {
-            request.push_str(&format!("<{}/>", property.as_ref()));
-        }
-
-        request.push_str("</D:prop></D:propfind>");
-
-        self.request_with_headers("PROPFIND", path, headers, &request)
-            .await
-            .with_status(StatusCode::MULTI_STATUS)
-            .into_propfind_response(None)
-    }
-
-    pub async fn proppatch<T>(
-        &self,
-        path: &str,
-        set: impl IntoIterator<Item = (T, &str)>,
-        clear: impl IntoIterator<Item = T>,
-        headers: impl IntoIterator<Item = (&'static str, &str)>,
-    ) -> DavResponse
-    where
-        T: AsRef<str>,
-    {
-        let mut request = concat!(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-            "<D:propertyupdate xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" ",
-            "xmlns:B=\"urn:ietf:params:xml:ns:carddav\" xmlns:C=\"http://calendarserver.org/ns/\">",
-            "<D:remove><D:prop>"
-        )
-        .to_string();
-
-        for property in clear {
-            request.push_str(&format!("<{}/>", property.as_ref()));
-        }
-
-        request.push_str("</D:prop></D:remove><D:set><D:prop>");
-
-        for (key, value) in set {
-            let key = key.as_ref();
-            request.push_str(&format!("<{key}>{value}</{key}>"));
-        }
-
-        request.push_str("</D:prop></D:set></D:propertyupdate>");
-
-        self.request_with_headers("PROPPATCH", path, headers, &request)
-            .await
-    }
-}
-
-impl DavItem {
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-            && self.status == StatusCode::PROXY_AUTHENTICATION_REQUIRED
-            && self.error.is_empty()
-            && self.description.is_none()
-    }
-}
-
-impl Default for DavItem {
-    fn default() -> Self {
-        DavItem {
-            status: StatusCode::PROXY_AUTHENTICATION_REQUIRED,
-            values: AHashMap::new(),
-            error: Vec::new(),
-            description: None,
-        }
-    }
 }
 
 const EXPAND_REPORT_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -1268,10 +782,3 @@ pub const ALL_DAV_PROPERTIES: &[DavProperty] = &[
     DavProperty::Principal(PrincipalProperty::ScheduleInboxURL),
     DavProperty::Principal(PrincipalProperty::ScheduleOutboxURL),
 ];
-
-fn serialize_status_code<S>(status_code: &StatusCode, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&status_code.to_string())
-}

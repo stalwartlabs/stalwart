@@ -4,42 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{HttpContext, HttpRequest, HttpSessionData};
 use common::{
     Server,
     expr::{functions::ResolveVariable, *},
 };
 use compact_str::{ToCompactString, format_compact};
 use hyper::StatusCode;
-
-use crate::{HttpContext, HttpRequest, HttpSessionData};
+use registry::schema::enums::ExpressionVariable;
 
 impl<'x> HttpContext<'x> {
     pub fn new(session: &'x HttpSessionData, req: &'x HttpRequest) -> Self {
         Self { session, req }
     }
 
-    pub async fn resolve_response_url(&self, server: &Server) -> String {
-        server
-            .eval_if(
-                &server.core.network.http_response_url,
-                self,
-                self.session.session_id,
-            )
-            .await
-            .unwrap_or_else(|| {
-                format!(
-                    "http{}://{}:{}",
-                    if self.session.is_tls { "s" } else { "" },
-                    self.session.local_ip,
-                    self.session.local_port
-                )
-            })
-    }
-
     pub async fn has_endpoint_access(&self, server: &Server) -> StatusCode {
         server
             .eval_if(
-                &server.core.network.http_allowed_endpoint,
+                &server.core.network.http.allowed_endpoint,
                 self,
                 self.session.session_id,
             )
@@ -49,19 +31,21 @@ impl<'x> HttpContext<'x> {
 }
 
 impl ResolveVariable for HttpContext<'_> {
-    fn resolve_variable(&self, variable: u32) -> Variable<'_> {
+    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
         match variable {
-            V_REMOTE_IP => self.session.remote_ip.to_compact_string().into(),
-            V_REMOTE_PORT => self.session.remote_port.into(),
-            V_LOCAL_IP => self.session.local_ip.to_compact_string().into(),
-            V_LOCAL_PORT => self.session.local_port.into(),
-            V_TLS => self.session.is_tls.into(),
-            V_PROTOCOL => if self.session.is_tls { "https" } else { "http" }.into(),
-            V_LISTENER => self.session.instance.id.as_str().into(),
-            V_URL => self.req.uri().to_compact_string().into(),
-            V_URL_PATH => self.req.uri().path().into(),
-            V_METHOD => self.req.method().as_str().into(),
-            V_HEADERS => self
+            ExpressionVariable::RemoteIp => self.session.remote_ip.to_compact_string().into(),
+            ExpressionVariable::RemotePort => self.session.remote_port.into(),
+            ExpressionVariable::LocalIp => self.session.local_ip.to_compact_string().into(),
+            ExpressionVariable::LocalPort => self.session.local_port.into(),
+            ExpressionVariable::IsTls => self.session.is_tls.into(),
+            ExpressionVariable::Protocol => {
+                if self.session.is_tls { "https" } else { "http" }.into()
+            }
+            ExpressionVariable::Listener => self.session.instance.id.as_str().into(),
+            ExpressionVariable::Url => self.req.uri().to_compact_string().into(),
+            ExpressionVariable::Path => self.req.uri().path().into(),
+            ExpressionVariable::Method => self.req.method().as_str().into(),
+            ExpressionVariable::Headers => self
                 .req
                 .headers()
                 .iter()

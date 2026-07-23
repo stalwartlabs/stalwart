@@ -342,16 +342,15 @@ impl SpamFilterAnalyzeMime for Server {
                         ctx.result.add_tag("SIGNED_PGP");
                         is_attachment = false;
                     }
-                    "octet-stream" => {
+                    "octet-stream"
                         if !is_encrypted
                             && !has_content_id
                             && cd.is_none_or(|cd| {
                                 !cd.c_type.eq_ignore_ascii_case("attachment")
                                     && !cd.has_attribute("filename")
-                            })
-                        {
-                            ctx.result.add_tag("CTYPE_MISSING_DISPOSITION");
-                        }
+                            }) =>
+                    {
+                        ctx.result.add_tag("CTYPE_MISSING_DISPOSITION");
                     }
                     _ => (),
                 },

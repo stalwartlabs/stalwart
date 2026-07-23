@@ -1,17 +1,17 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report an Issue
-    url: https://github.com/stalwartlabs/stalwart/discussions/new?category=issue-triage
-    about: Report a potential bug. Confirmed bugs will be converted to Issues.
+    url: https://support.stalw.art
+    about: Report a potential bug at support.stalw.art. Confirmed bugs will be converted to Issues. Sign in with your GitHub account.
   - name: Questions & Support
-    url: https://github.com/stalwartlabs/stalwart/discussions/new?category=q-a
-    about: Get help with configuration, troubleshooting, or general questions.
+    url: https://support.stalw.art
+    about: Get help with configuration, troubleshooting, or general questions at support.stalw.art. Sign in with your GitHub account.
   - name: Feature Requests
-    url: https://github.com/stalwartlabs/stalwart/discussions/new?category=feature-requests-and-ideas
-    about: Suggest new features or improvements.
+    url: https://support.stalw.art
+    about: Suggest new features or improvements at support.stalw.art. Sign in with your GitHub account.
   - name: Join Stalwart's Reddit
     url: https://www.reddit.com/r/stalwartlabs
-    about: Join our subreddit for help, discussions and release announcements.
+    about: Join our subreddit for community discussions and release announcements.
   - name: Join Stalwart's Discord
     url: https://discord.com/servers/stalwart-923615863037390889
-    about: Join our Discord server for help, discussions and release announcements.
+    about: Join our Discord server for community chat and release announcements.

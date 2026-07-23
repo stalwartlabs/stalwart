@@ -247,16 +247,14 @@ pub fn html_to_tokens(input: &str) -> Vec<HtmlToken> {
                                     }
                                 }
                             }
-                            b' ' | b'\t' | b'\r' | b'\n' => {
-                                if shift != 0 {
-                                    if tag == 0 {
-                                        tag = key;
-                                    } else {
-                                        attributes.push((key, None));
-                                    }
-                                    key = 0;
-                                    shift = 0;
+                            b' ' | b'\t' | b'\r' | b'\n' if shift != 0 => {
+                                if tag == 0 {
+                                    tag = key;
+                                } else {
+                                    attributes.push((key, None));
                                 }
+                                key = 0;
+                                shift = 0;
                             }
                             _ => {}
                         }
