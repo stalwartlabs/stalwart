@@ -560,6 +560,26 @@ impl CalendarEventSet for Server {
             )));
         };
 
+        // RFC 8984 requires every JSCalendar object to have a uid. If the client
+        // did not provide one on create, generate it server-side. Without this,
+        // the stored iCalendar object has no UID line, which breaks CalDAV
+        // interoperability and causes itip_create() to fail with
+        // ItipError::MissingUid, silently skipping all scheduling messages.
+        if ical.uids().next().is_none() {
+            let uid = uuid::Uuid::new_v4().to_string();
+            for component in ical.components.iter_mut() {
+                if matches!(
+                    component.component_type,
+                    ICalendarComponentType::VEvent | ICalendarComponentType::VTodo
+                ) {
+                    component.entries.push(
+                        ICalendarEntry::new(ICalendarProperty::Uid)
+                            .with_value(uid.clone()),
+                    );
+                }
+            }
+        }
+
         // Verify that the calendar ids valid
         let default_alert_comp_id = ical.components.len();
         for name in &event.names {

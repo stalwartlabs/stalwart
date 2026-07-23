@@ -20,6 +20,7 @@ email = { path = "../email" }
 groupware = { path = "../groupware" }
 registry = { path = "../registry" }
 calcard = { version = "0.3" }
+uuid = { version = "1.24", features = ["v4"] }
 smtp-proto = { version = "0.2" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = { version = "0.4" }

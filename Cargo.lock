@@ -3888,6 +3888,7 @@ dependencies = [
  "tungstenite",
  "types",
  "utils",
+ "uuid",
 ]
 
 [[package]]
