@@ -424,12 +424,12 @@ EOF
 
 create_service_macos() {
     local _bin="$1" _config="$2" _env="$3" _user="$4"
-    local _plist="/Library/LaunchDaemons/stalwart.plist"
+    local _plist="/Library/LaunchDaemons/stalwart.mail.plist"
 
-    # Remove any legacy LaunchAgent from a prior install
-    if [ -f /Library/LaunchAgents/stalwart.mail.plist ]; then
-        launchctl unload /Library/LaunchAgents/stalwart.mail.plist 2>/dev/null || true
-        rm -f /Library/LaunchAgents/stalwart.mail.plist
+    # Remove any legacy LaunchDaemons from a prior install
+    if [ -f "$_plist" ]; then
+        launchctl bootout system/ "$_plist" 2>/dev/null || true
+        rm -f "$_plist"
     fi
 
     # launchd has no EnvironmentFile equivalent — wrap with sh to source the env file
@@ -462,9 +462,8 @@ create_service_macos() {
 EOF
     chmod 0644 "$_plist"
     chown root:wheel "$_plist"
-    launchctl bootout system "$_plist" 2>/dev/null || true
-    launchctl bootstrap system "$_plist"
-    launchctl enable system/stalwart
+    launchctl bootout system/ "$_plist" 2>/dev/null || true
+    launchctl bootstrap system/ "$_plist"
 }
 
 create_service_freebsd() {
