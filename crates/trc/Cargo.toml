@@ -7,7 +7,7 @@ edition = "2024"
 event_macro = { path = "./event-macro" }
 mail-auth = { version = "0.11", features = ["arc"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
-base64 = "0.22.1"
+base64 = "0.23.0"
 serde = "1.0"
 serde_json = "1.0.120"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"]}

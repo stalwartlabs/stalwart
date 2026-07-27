@@ -18,7 +18,7 @@ ahash = { version = "0.8", features = ["serde"] }
 chrono = "0.4"
 rand = "0.9.0"
 aws-lc-rs = { version = "1" }
-base64 = "0.22"
+base64 = "0.23"
 serde_json = "1.0"
 rcgen = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream"]}

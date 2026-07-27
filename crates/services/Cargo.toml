@@ -32,7 +32,7 @@ p256 = { version = "0.13", features = ["ecdh"] }
 hkdf = "0.13"
 sha2 = "0.11"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"]}
-base64 = "0.22"
+base64 = "0.23"
 compact_str = "0.9.0"
 dns-update = { version = "0.5" }
 

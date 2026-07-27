@@ -581,6 +581,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1270,7 +1276,7 @@ dependencies = [
  "ahash",
  "arc-swap",
  "aws-lc-rs",
- "base64 0.22.1",
+ "base64 0.23.0",
  "bincode 2.0.1",
  "biscuit",
  "calcard",
@@ -2047,7 +2053,7 @@ version = "0.16.15"
 dependencies = [
  "ahash",
  "argon2",
- "base64 0.22.1",
+ "base64 0.23.0",
  "compact_str",
  "deadpool 0.13.0",
  "futures",
@@ -3193,7 +3199,7 @@ name = "http"
 version = "0.16.15"
 dependencies = [
  "async-stream",
- "base64 0.22.1",
+ "base64 0.23.0",
  "chrono",
  "common",
  "compact_str",
@@ -3842,7 +3848,7 @@ dependencies = [
  "aes-gcm",
  "aes-gcm-siv",
  "async-stream",
- "base64 0.22.1",
+ "base64 0.23.0",
  "calcard",
  "chrono",
  "common",
@@ -4569,7 +4575,7 @@ checksum = "c797b9d6bb23aab2fc369c65f871be49214f5c759af65bde26ffaaa2b646b492"
 name = "migration"
 version = "0.16.15"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.0",
  "common",
  "compact_str",
  "directory",
@@ -7084,7 +7090,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "argon2",
- "base64 0.22.1",
+ "base64 0.21.7",
  "block-padding 0.3.3",
  "blowfish 0.9.1",
  "buffered-reader",
@@ -7323,7 +7329,7 @@ version = "0.16.15"
 dependencies = [
  "aes-gcm",
  "aes-gcm-siv",
- "base64 0.22.1",
+ "base64 0.23.0",
  "calcard",
  "chrono",
  "common",
@@ -7638,7 +7644,7 @@ name = "smtp"
 version = "0.16.15"
 dependencies = [
  "ahash",
- "base64 0.22.1",
+ "base64 0.23.0",
  "blake3",
  "chrono",
  "common",
@@ -8146,7 +8152,7 @@ dependencies = [
  "ahash",
  "async-trait",
  "aws-lc-rs",
- "base64 0.22.1",
+ "base64 0.23.0",
  "biscuit",
  "bytes",
  "calcard",
@@ -8712,7 +8718,7 @@ name = "trc"
 version = "0.16.15"
 dependencies = [
  "ahash",
- "base64 0.22.1",
+ "base64 0.23.0",
  "compact_str",
  "event_macro",
  "hashify",
@@ -9005,7 +9011,7 @@ dependencies = [
  "ahash",
  "arcstr",
  "aws-lc-rs",
- "base64 0.22.1",
+ "base64 0.23.0",
  "blake3",
  "chrono",
  "compact_str",
