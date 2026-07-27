@@ -49,7 +49,7 @@ opentelemetry_sdk = { git = "https://github.com/stalwartlabs/opentelemetry-rust"
 opentelemetry-otlp = { git = "https://github.com/stalwartlabs/opentelemetry-rust", default-features = false, features = ["reqwest-client", "http-proto", "trace", "metrics", "logs", "internal-logs", "grpc-tonic", "tls-aws-lc", "tls-roots", "reqwest-rustls"] }
 opentelemetry-semantic-conventions = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
 prometheus = { version = "0.14", default-features = false }
-imagesize = "0.14"
+imagesize = "0.15"
 sha1 = "0.11"
 sha2 = "0.11"
 md5 = "0.8.0"
