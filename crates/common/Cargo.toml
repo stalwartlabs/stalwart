@@ -57,7 +57,7 @@ whatlang = "0.18"
 idna = "1.0"
 decancer = "3.0.1"
 unicode-security = "0.1.0"
-infer = "0.19"
+infer = "0.22"
 bincode = { version = "2.0", features = ["serde"] }
 hostname = "0.4.0"
 zip = "8.5"

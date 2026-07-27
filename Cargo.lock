@@ -1091,13 +1091,13 @@ dependencies = [
 
 [[package]]
 name = "cfb"
-version = "0.7.3"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d38f2da7a0a2c4ccf0065be06397cc26a81f4e528be095826eee9d4adbb8c60f"
+checksum = "a347dcabdae9c31b0825fd6a8bed285ec9c2acb89c47827126d52fa4f59cece3"
 dependencies = [
- "byteorder",
  "fnv",
  "uuid",
+ "web-time",
 ]
 
 [[package]]
@@ -1289,7 +1289,7 @@ dependencies = [
  "imagesize",
  "imap_proto",
  "indexmap 2.14.0",
- "infer 0.19.0",
+ "infer 0.22.0",
  "jmap_proto",
  "libc",
  "lz4_flex 0.13.1",
@@ -3701,9 +3701,9 @@ checksum = "64e9829a50b42bb782c1df523f78d332fe371b10c661e78b7a3c34b0198e9fac"
 
 [[package]]
 name = "infer"
-version = "0.19.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a588916bfdfd92e71cacef98a63d9b1f0d74d6599980d11894290e7ddefffcf7"
+checksum = "f4200d433cbd5178df7797c9c2e75b348b728e39631cf14520d1e2fc424201f4"
 dependencies = [
  "cfb",
 ]
@@ -7744,7 +7744,7 @@ dependencies = [
  "decancer",
  "hyper",
  "idna",
- "infer 0.19.0",
+ "infer 0.22.0",
  "mail-auth",
  "mail-builder",
  "mail-parser",
