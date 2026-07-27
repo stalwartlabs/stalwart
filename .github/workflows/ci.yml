@@ -329,7 +329,7 @@ jobs:
         uses: actions/checkout@v6.0.2
 
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.10
         with:
           disable_annotations: true
 
@@ -360,7 +360,7 @@ jobs:
         uses: actions/checkout@v6.0.2
 
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.10
         with:
           disable_annotations: true
 
