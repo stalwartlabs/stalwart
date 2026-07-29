@@ -15,7 +15,7 @@ use crate::{
 use registry::schema::structs;
 use reqwest::{Error, Response, Url};
 use serde_json::{Value, json};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 impl MeiliSearchStore {
     pub async fn open(config: structs::MeilisearchStore) -> Result<SearchStore, String> {
@@ -34,22 +34,16 @@ impl MeiliSearchStore {
         let ms = Self {
             client,
             url: config.url,
-            task_poll_interval: Duration::from_millis(500),
-            task_poll_retries: 120,
-            task_fail_on_timeout: true,
+            task_poll_interval: config.poll_interval.into_inner(),
+            task_poll_retries: config.max_retries as usize,
+            task_fail_on_timeout: config.fail_on_timeout,
         };
 
         if let Err(err) = ms.create_indexes().await {
             return Err(format!("Failed to create indexes: {err}"));
         }
 
-        Ok(SearchStore::MeiliSearch(Arc::new(MeiliSearchStore {
-            client: ms.client,
-            url: ms.url,
-            task_poll_interval: config.poll_interval.into_inner(),
-            task_poll_retries: config.max_retries as usize,
-            task_fail_on_timeout: config.fail_on_timeout,
-        })))
+        Ok(SearchStore::MeiliSearch(Arc::new(ms)))
     }
 
     pub async fn create_indexes(&self) -> trc::Result<()> {
