@@ -6,6 +6,7 @@
 
 pub mod client;
 pub mod message;
+pub mod proto;
 
 use ahash::AHashMap;
 

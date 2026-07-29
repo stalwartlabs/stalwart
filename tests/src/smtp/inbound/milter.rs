@@ -22,6 +22,7 @@ use hyper::{body, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use mail_auth::AuthenticatedMessage;
 use mail_parser::MessageParser;
+use prost::Message as _;
 use registry::{
     schema::{
         enums::{self, MtaStage},
@@ -34,7 +35,7 @@ use serde::Deserialize;
 use smtp::{
     core::SessionData,
     inbound::{
-        hooks::{self, Request, SmtpResponse},
+        hooks::{self, Request, SmtpResponse, proto},
         milter::{
             Action, Command, Macros, MilterClient, Modification, Options, Response,
             receiver::{FrameResult, Receiver},
@@ -204,9 +205,29 @@ async fn milter_session() {
 
 #[tokio::test]
 async fn mta_hook_session() {
-    let mut test = TestServerBuilder::new("smtp_mta_hook_test")
+    run_mta_hook_session("smtp_mta_hook_test", 19015, 9333, None).await;
+}
+
+#[tokio::test]
+async fn mta_hook_session_protobuf() {
+    run_mta_hook_session(
+        "smtp_mta_hook_protobuf_test",
+        19016,
+        9334,
+        Some("application/protobuf"),
+    )
+    .await;
+}
+
+async fn run_mta_hook_session(
+    test_name: &str,
+    http_port: u16,
+    hook_port: u16,
+    content_type: Option<&str>,
+) {
+    let mut test = TestServerBuilder::new(test_name)
         .await
-        .with_http_listener(19015)
+        .with_http_listener(http_port)
         .await
         .disable_services()
         .capture_queue()
@@ -231,8 +252,12 @@ async fn mta_hook_session() {
                 else_: "true".into(),
                 ..Default::default()
             },
-            url: "http://127.0.0.1:9333".into(),
+            url: format!("http://127.0.0.1:{hook_port}"),
             stages: Map::new(vec![MtaStage::Data]),
+            http_headers: content_type
+                .into_iter()
+                .map(|content_type| ("Content-Type".to_string(), content_type.to_string()))
+                .collect(),
             ..Default::default()
         })
         .await;
@@ -240,7 +265,7 @@ async fn mta_hook_session() {
     test.reload_core();
     test.expect_reload_settings().await;
 
-    let _rx = spawn_mock_mta_hook_server();
+    let _rx = spawn_mock_mta_hook_server(hook_port);
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Build session
@@ -770,7 +795,7 @@ async fn accept_milter(
     }
 }
 
-pub fn spawn_mock_mta_hook_server() -> watch::Sender<bool> {
+pub fn spawn_mock_mta_hook_server(port: u16) -> watch::Sender<bool> {
     let (tx, rx) = watch::channel(true);
     let tests = Arc::new(
         serde_json::from_str::<Vec<HeaderTest>>(
@@ -787,10 +812,10 @@ pub fn spawn_mock_mta_hook_server() -> watch::Sender<bool> {
     );
 
     tokio::spawn(async move {
-        let listener = TcpListener::bind("127.0.0.1:9333")
+        let listener = TcpListener::bind(("127.0.0.1", port))
             .await
             .unwrap_or_else(|e| {
-                panic!("Failed to bind mock Milter server to 127.0.0.1:9333: {e}");
+                panic!("Failed to bind mock Milter server to 127.0.0.1:{port}: {e}");
             });
         let mut rx_ = rx.clone();
         //println!("Mock jMilter server listening on port 9333");
@@ -808,13 +833,34 @@ pub fn spawn_mock_mta_hook_server() -> watch::Sender<bool> {
                                     let tests = tests.clone();
 
                                     async move {
+                                        let is_protobuf = req
+                                            .headers()
+                                            .get(hyper::header::CONTENT_TYPE)
+                                            .is_some_and(|value| value.as_bytes() == b"application/protobuf");
+                                        let body = fetch_body(&mut req, 1024 * 1024, 0).await.unwrap();
 
-                                        let request = serde_json::from_slice::<Request>(&fetch_body(&mut req, 1024 * 1024,0).await.unwrap())
-                                        .unwrap();
+                                        let request = if is_protobuf {
+                                            proto::Request::decode(body.as_slice())
+                                                .unwrap()
+                                                .try_into()
+                                                .unwrap()
+                                        } else {
+                                            serde_json::from_slice::<Request>(&body).unwrap()
+                                        };
                                         let response = handle_mta_hook(request, tests);
 
                                         Ok::<_, hyper::Error>(
-                                            Resource::new("application/json", serde_json::to_string(&response).unwrap().into_bytes())
+                                            if is_protobuf {
+                                                Resource::new(
+                                                    "application/protobuf",
+                                                    proto::Response::from(response).encode_to_vec(),
+                                                )
+                                            } else {
+                                                Resource::new(
+                                                    "application/json",
+                                                    serde_json::to_string(&response).unwrap().into_bytes(),
+                                                )
+                                            }
                                             .into_http_response().build(),
                                         )
                                     }

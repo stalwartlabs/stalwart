@@ -1,0 +1,169 @@
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+//
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
+
+syntax = "proto3";
+
+package stalwart.mta_hook.v1;
+
+message Request {
+  Context context = 1;
+  optional Envelope envelope = 2;
+  optional Message message = 3;
+}
+
+message Context {
+  Stage stage = 1;
+  Client client = 2;
+  optional Sasl sasl = 3;
+  optional Tls tls = 4;
+  Server server = 5;
+  optional Queue queue = 6;
+  Protocol protocol = 7;
+}
+
+enum Stage {
+  STAGE_UNSPECIFIED = 0;
+  STAGE_CONNECT = 1;
+  STAGE_EHLO = 2;
+  STAGE_AUTH = 3;
+  STAGE_MAIL = 4;
+  STAGE_RCPT = 5;
+  STAGE_DATA = 6;
+}
+
+message Client {
+  string ip = 1;
+  uint32 port = 2;
+  optional string ptr = 3;
+  optional string helo = 4;
+  uint32 active_connections = 5;
+}
+
+message Sasl {
+  string login = 1;
+  optional string method = 2;
+}
+
+message Tls {
+  string version = 1;
+  string cipher = 2;
+  optional uint32 cipher_bits = 3;
+  optional string cert_issuer = 4;
+  optional string cert_subject = 5;
+}
+
+message Server {
+  optional string name = 1;
+  uint32 port = 2;
+  optional string ip = 3;
+}
+
+message Queue {
+  string id = 1;
+}
+
+message Protocol {
+  uint32 version = 1;
+}
+
+message Address {
+  string address = 1;
+  map<string, string> parameters = 2;
+}
+
+message Envelope {
+  Address from = 1;
+  repeated Address to = 2;
+}
+
+message Header {
+  string name = 1;
+  string value = 2;
+}
+
+message Message {
+  repeated Header headers = 1;
+  repeated Header server_headers = 2;
+  string contents = 3;
+  uint64 size = 4;
+}
+
+message Response {
+  Action action = 1;
+  optional SmtpResponse response = 2;
+  repeated Modification modifications = 3;
+}
+
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  ACTION_ACCEPT = 1;
+  ACTION_DISCARD = 2;
+  ACTION_REJECT = 3;
+  ACTION_QUARANTINE = 4;
+}
+
+message SmtpResponse {
+  optional uint32 status = 1;
+  optional string enhanced_status = 2;
+  optional string message = 3;
+  bool disconnect = 4;
+}
+
+message Modification {
+  oneof kind {
+    ChangeFrom change_from = 1;
+    AddRecipient add_recipient = 2;
+    DeleteRecipient delete_recipient = 3;
+    ReplaceContents replace_contents = 4;
+    AddHeader add_header = 5;
+    InsertHeader insert_header = 6;
+    ChangeHeader change_header = 7;
+    DeleteHeader delete_header = 8;
+  }
+}
+
+message Parameter {
+  string key = 1;
+  optional string value = 2;
+}
+
+message ChangeFrom {
+  string value = 1;
+  repeated Parameter parameters = 2;
+}
+
+message AddRecipient {
+  string value = 1;
+  repeated Parameter parameters = 2;
+}
+
+message DeleteRecipient {
+  string value = 1;
+}
+
+message ReplaceContents {
+  string value = 1;
+}
+
+message AddHeader {
+  string name = 1;
+  string value = 2;
+}
+
+message InsertHeader {
+  uint32 index = 1;
+  string name = 2;
+  string value = 3;
+}
+
+message ChangeHeader {
+  uint32 index = 1;
+  string name = 2;
+  string value = 3;
+}
+
+message DeleteHeader {
+  uint32 index = 1;
+  string name = 2;
+}
