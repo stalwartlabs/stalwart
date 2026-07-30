@@ -343,6 +343,11 @@ impl Server {
                     self.get_default_directory()
                 };
 
+                // Fall back to the bearer directory when the account directory cannot validate tokens
+                let directory = directory
+                    .filter(|directory| directory.has_bearer_token_support())
+                    .or_else(|| self.get_bearer_directory());
+
                 // Try external directory authentication first if supported, then fallback to internal OAuth.
                 let mut external_error = None;
                 if let Some(directory) = directory

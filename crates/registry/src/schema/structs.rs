@@ -460,6 +460,8 @@ pub struct AsnResource {
 pub struct Authentication {
     #[serde(rename = "directoryId")]
     pub directory_id: Option<Id>,
+    #[serde(rename = "bearerDirectoryId")]
+    pub bearer_directory_id: Option<Id>,
     #[serde(rename = "defaultUserRoleIds")]
     pub default_user_role_ids: Map<Id>,
     #[serde(rename = "defaultGroupRoleIds")]

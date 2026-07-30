@@ -13,7 +13,7 @@ use registry::{
         enums::{AccountType, Locale, Permission, StorageQuota},
         prelude::{Object, ObjectType, Property},
         structs::{
-            Account, CertificateManagement, Credential, CredentialPermissions,
+            Account, Authentication, CertificateManagement, Credential, CredentialPermissions,
             CredentialPermissionsList, CustomRoles, DkimManagement, DnsManagement, Domain,
             EmailAlias, EncryptionAtRest, EncryptionSettings, GroupAccount, MailingList,
             PasswordCredential, Permissions, PermissionsList, PublicKey, SecondaryCredential,
@@ -129,6 +129,33 @@ pub async fn test(test: &TestServer) {
     assert_eq!(
         script,
         SieveUserScript::unpickle(&mut PickledStream::new(&script_pickle).unwrap()).unwrap()
+    );
+
+    // Pickle version-compat test: a version 0 Authentication (no bearerDirectoryId)
+    // must still unpickle after the version 1 field addition
+    let auth = Authentication {
+        directory_id: Some(1234u64.into()),
+        bearer_directory_id: Some(5678u64.into()),
+        ..Default::default()
+    };
+    let auth_pickle = auth.to_pickled_vec();
+    assert_eq!(
+        auth,
+        Authentication::unpickle(&mut PickledStream::new(&auth_pickle).unwrap()).unwrap()
+    );
+    let mut auth_v0 = Authentication {
+        directory_id: Some(1234u64.into()),
+        ..Default::default()
+    }
+    .to_pickled_vec();
+    *auth_v0.first_mut().unwrap() = 0;
+    auth_v0.pop();
+    assert_eq!(
+        Authentication {
+            directory_id: Some(1234u64.into()),
+            ..Default::default()
+        },
+        Authentication::unpickle(&mut PickledStream::new(&auth_v0).unwrap()).unwrap()
     );
 
     // Create a domain and a group

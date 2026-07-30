@@ -54,9 +54,36 @@ impl Directories {
         } else {
             None
         };
+        let bearer_directory = if let Some(directory_id) = auth.bearer_directory_id {
+            match directories.get(&(directory_id.id() as u32)) {
+                Some(bearer_directory) if bearer_directory.has_bearer_token_support() => {
+                    bearer_directory.clone().into()
+                }
+                Some(_) => {
+                    bp.build_error(
+                        ObjectType::Authentication.singleton(),
+                        format!(
+                            "Bearer directory with ID {} does not support bearer tokens",
+                            directory_id
+                        ),
+                    );
+                    None
+                }
+                None => {
+                    bp.build_error(
+                        ObjectType::Authentication.singleton(),
+                        format!("Bearer directory with ID {} not found", directory_id),
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         Directories {
             default_directory,
+            bearer_directory,
             directories,
         }
     }

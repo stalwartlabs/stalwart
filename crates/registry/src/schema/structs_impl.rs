@@ -3282,7 +3282,7 @@ impl RegistryJsonPropertyPatch for AsnResource {
 
 impl ObjectImpl for Authentication {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Authentication;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -3290,6 +3290,11 @@ impl ObjectImpl for Authentication {
         if let Some(value) = &self.directory_id {
             if !value.is_valid() {
                 errors.push(ValidationError::required(Property::DirectoryId));
+            }
+        }
+        if let Some(value) = &self.bearer_directory_id {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::BearerDirectoryId));
             }
         }
         let value = &self.default_user_role_ids;
@@ -3348,6 +3353,7 @@ impl ObjectImpl for Authentication {
 
     fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
         i.foreign_key(ObjectType::Directory, self.directory_id, None);
+        i.foreign_key(ObjectType::Directory, self.bearer_directory_id, None);
         for id in self.default_user_role_ids.iter() {
             i.foreign_key(ObjectType::Role, Some(*id), None);
         }
@@ -3377,6 +3383,7 @@ impl Pickle for Authentication {
         self.password_default_expiry.pickle(out);
         self.max_app_passwords.pickle(out);
         self.max_api_keys.pickle(out);
+        self.bearer_directory_id.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -3393,6 +3400,11 @@ impl Pickle for Authentication {
         this.password_default_expiry = Pickle::unpickle(stream)?;
         this.max_app_passwords = Pickle::unpickle(stream)?;
         this.max_api_keys = Pickle::unpickle(stream)?;
+        this.bearer_directory_id = if stream.version() >= 1 {
+            Pickle::unpickle(stream)?
+        } else {
+            None
+        };
         Some(this)
     }
 }
@@ -3401,6 +3413,7 @@ impl Default for Authentication {
     fn default() -> Self {
         Self {
             directory_id: Default::default(),
+            bearer_directory_id: Default::default(),
             default_user_role_ids: Default::default(),
             default_group_role_ids: Default::default(),
             default_tenant_role_ids: Default::default(),
@@ -3418,8 +3431,12 @@ impl Default for Authentication {
 
 impl IntoValue for Authentication {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(14);
+        let mut map = jmap_tools::Map::with_capacity(15);
         map.insert_unchecked(Property::DirectoryId, self.directory_id.into_value());
+        map.insert_unchecked(
+            Property::BearerDirectoryId,
+            self.bearer_directory_id.into_value(),
+        );
         map.insert_unchecked(
             Property::DefaultUserRoleIds,
             self.default_user_role_ids.into_value(),
@@ -3473,6 +3490,7 @@ impl RegistryJsonPropertyPatch for Authentication {
     ) -> PatchResult<'x> {
         match pointer.next_property() {
             Some(Property::DirectoryId) => self.directory_id.patch(pointer, value),
+            Some(Property::BearerDirectoryId) => self.bearer_directory_id.patch(pointer, value),
             Some(Property::DefaultUserRoleIds) => self.default_user_role_ids.patch(pointer, value),
             Some(Property::DefaultGroupRoleIds) => {
                 self.default_group_role_ids.patch(pointer, value)

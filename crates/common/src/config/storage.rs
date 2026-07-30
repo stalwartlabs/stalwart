@@ -25,6 +25,7 @@ pub struct Storage {
     pub tracing: Store,
     pub coordinator: Coordinator,
     pub directory: Option<Arc<Directory>>,
+    pub bearer_directory: Option<Arc<Directory>>,
     pub directories: IdMap<Directory>,
 }
 
@@ -51,6 +52,7 @@ impl Storage {
             tracing: Store::build_tracing(bp).await.unwrap_or_default(),
             metrics: Store::build_metrics(bp).await.unwrap_or_default(),
             directory: directory.default_directory,
+            bearer_directory: directory.bearer_directory,
             directories: directory.directories,
         }
     }

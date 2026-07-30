@@ -345,6 +345,7 @@ pub enum Property {
     AutoUpdateFrequency = 53,
     BaseDn = 463,
     BaseUrl = 882,
+    BearerDirectoryId = 924,
     BearerToken = 403,
     Beta = 389,
     Bind = 589,

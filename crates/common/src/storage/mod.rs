@@ -79,6 +79,11 @@ impl Server {
     }
 
     #[inline(always)]
+    pub fn get_bearer_directory(&self) -> Option<&Arc<Directory>> {
+        self.core.storage.bearer_directory.as_ref()
+    }
+
+    #[inline(always)]
     pub fn get_lookup_store(&self, name: &str) -> Option<InMemoryStore> {
         if !name.is_empty() && name != "*" {
             self.inner.data.lookup_stores.load().get(name).cloned()

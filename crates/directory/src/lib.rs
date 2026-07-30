@@ -61,6 +61,7 @@ pub struct Group {
 #[derive(Clone, Debug)]
 pub struct Directories {
     pub default_directory: Option<Arc<Directory>>,
+    pub bearer_directory: Option<Arc<Directory>>,
     pub directories: HashMap<u32, Arc<Directory>, nohash_hasher::BuildNoHashHasher<u32>>,
 }
 

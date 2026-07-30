@@ -109,6 +109,7 @@ impl Server {
                     memory: storage.memory.clone(),
                     coordinator: storage.coordinator.clone(),
                     directory: directory.default_directory,
+                    bearer_directory: directory.bearer_directory,
                     directories: directory.directories,
                 };
 
