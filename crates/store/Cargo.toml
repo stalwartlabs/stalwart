@@ -14,7 +14,7 @@ foundationdb = { version = "0.11", features = ["embedded-fdb-include", "fdb-7_4"
 rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"], optional = true }
 reqwest_s3 = { package = "reqwest", version = "0.12", default-features = false, features = ["rustls-tls-native-roots"], optional = true }
-azure_core = { version = "0.21.0", optional = true }
+azure_core = { version = "1.1.0", optional = true }
 azure_storage = { version = "0.21.0", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"], optional = true }
 azure_storage_blobs = { version = "0.21.0", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream"]}
