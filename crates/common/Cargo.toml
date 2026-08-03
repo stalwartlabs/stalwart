@@ -41,7 +41,7 @@ serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 base64 = "0.22"
 x509-parser = "0.18"
-pem = "3.0"
+pem = "4.0"
 chrono = { version = "0.4", features = ["serde"] }
 hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
 opentelemetry = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
