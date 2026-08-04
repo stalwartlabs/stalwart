@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Free disk space (heavy ARM targets)
         if: contains(matrix.target, 'arm')
@@ -326,7 +326,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.10
@@ -357,7 +357,7 @@ jobs:
           - target: x86_64-apple-darwin
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.10
@@ -405,7 +405,7 @@ jobs:
           #   arch: aarch64
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Build in FreeBSD VM
         uses: vmactions/freebsd-vm@v1
@@ -459,7 +459,7 @@ jobs:
       # Must run before artifacts are downloaded — checkout cleans the workspace.
       - name: Checkout (for CHANGELOG)
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Download Artifacts
         uses: actions/download-artifact@v8
