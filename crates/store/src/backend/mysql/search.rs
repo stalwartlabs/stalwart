@@ -261,7 +261,7 @@ fn build_filter(query: &mut String, filters: &[SearchFilter]) -> Vec<Value> {
                 }
 
                 operator_stack.push((operator, is_first));
-                operator = &SearchFilter::And;
+                operator = &SearchFilter::Or;
                 is_first = true;
                 query.push_str("NOT (");
             }

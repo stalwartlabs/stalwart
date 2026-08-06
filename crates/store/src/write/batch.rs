@@ -11,7 +11,7 @@ use super::{
 use crate::{
     SerializeInfallible, U32_LEN,
     write::{
-        LogCollection, MergeFnc, MergeOperation, Params, SetFnc, SetOperation, TaskQueueClass,
+        AssignedIds, LogCollection, MergeOperation, MergeResult, SetOperation, TaskQueueClass,
     },
 };
 use registry::{
@@ -37,6 +37,7 @@ impl BatchBuilder {
             batch_ops: 0,
             has_assertions: false,
             commit_points: Vec::new(),
+            last_archive_hash: None,
         }
     }
 
@@ -158,26 +159,35 @@ impl BatchBuilder {
     pub fn set_fnc(
         &mut self,
         class: impl Into<ValueClass>,
-        params: Params,
-        fnc: SetFnc,
+        fnc: impl Fn(&AssignedIds) -> trc::Result<Vec<u8>> + Send + Sync + 'static,
     ) -> &mut Self {
+        let class = class.into();
+        self.batch_size += class.serialized_size();
         self.ops.push(Operation::Value {
-            class: class.into(),
-            op: ValueOp::SetFnc(SetOperation { fnc, params }),
+            class,
+            op: ValueOp::SetFnc(SetOperation(Box::new(fnc))),
         });
+        self.batch_ops += 1;
         self
     }
 
     pub fn merge_fnc(
         &mut self,
         class: impl Into<ValueClass>,
-        params: Params,
-        fnc: MergeFnc,
+        fnc: impl Fn(&AssignedIds, Option<&[u8]>) -> trc::Result<MergeResult> + Send + Sync + 'static,
     ) -> &mut Self {
+        let class = class.into();
+        self.batch_size += class.serialized_size();
         self.ops.push(Operation::Value {
-            class: class.into(),
-            op: ValueOp::MergeFnc(MergeOperation { fnc, params }),
+            class,
+            op: ValueOp::MergeFnc(MergeOperation(Box::new(fnc))),
         });
+        self.batch_ops += 1;
+        self
+    }
+
+    pub fn set_archive_hash(&mut self, hash: Option<u32>) -> &mut Self {
+        self.last_archive_hash = hash;
         self
     }
 
@@ -374,18 +384,25 @@ impl BatchBuilder {
         }
     }
 
+    #[inline]
     pub fn commit_point(&mut self) -> &mut Self {
         if self.is_large_batch() {
-            self.serialize_changes();
-            self.commit_points.push(self.ops.len());
-            self.batch_ops = 0;
-            self.batch_size = 0;
-            if let Some(account_id) = self.current_account_id {
-                self.ops.push(Operation::AccountId { account_id });
-            }
-            if let Some(collection) = self.current_collection {
-                self.ops.push(Operation::Collection { collection });
-            }
+            self.add_commit_point()
+        } else {
+            self
+        }
+    }
+
+    pub fn add_commit_point(&mut self) -> &mut Self {
+        self.serialize_changes();
+        self.commit_points.push(self.ops.len());
+        self.batch_ops = 0;
+        self.batch_size = 0;
+        if let Some(account_id) = self.current_account_id {
+            self.ops.push(Operation::AccountId { account_id });
+        }
+        if let Some(collection) = self.current_collection {
+            self.ops.push(Operation::Collection { collection });
         }
         self
     }
@@ -423,6 +440,10 @@ impl BatchBuilder {
 
     pub fn last_document_id(&self) -> Option<u32> {
         self.current_document_id
+    }
+
+    pub fn last_archive_hash(&self) -> Option<u32> {
+        self.last_archive_hash
     }
 
     pub fn commit_points(&mut self) -> CommitPointIterator {

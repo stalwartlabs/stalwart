@@ -11,10 +11,7 @@ use crate::{
 use common::storage::index::{
     CurrentObject, IndexItem, IndexValue, IndexableObject, SerializableObject,
 };
-use store::{
-    Serialize, U64_LEN,
-    write::{BatchBuilder, Params, assert::AssertValue, now},
-};
+use store::write::{BatchBuilder, assert::AssertValue, now};
 use types::{
     blob_hash::BlobHash,
     collection::SyncCollection,
@@ -44,21 +41,9 @@ impl CurrentObject for MessageData {
 
 impl SerializableObject for MessageData {
     fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()> {
-        let bytes = self.serialize()?;
-
-        batch.set_fnc(
-            Field::ARCHIVE,
-            Params::with_capacity(2).with_bytes(bytes),
-            |params, ids| {
-                let change_id = ids.current_change_id()?;
-                let data = params.bytes(0);
-
-                let mut bytes = Vec::with_capacity(data.len());
-                bytes.extend_from_slice(&data[..data.len() - U64_LEN]);
-                bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
-                Ok(bytes)
-            },
-        );
+        batch.set_fnc(Field::ARCHIVE, move |ids| {
+            self.serialize_with_change_id(ids.current_change_id()?)
+        });
         Ok(())
     }
 }

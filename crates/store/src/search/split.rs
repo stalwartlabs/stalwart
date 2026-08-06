@@ -49,7 +49,7 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
             }
             SearchFilter::DocumentSet(docs) => match document_sets.entry(op_stack.len()) {
                 Entry::Occupied(mut entry) => {
-                    if matches!(op_stack.last(), Some(SearchFilter::Or)) {
+                    if matches!(op_stack.last(), Some(SearchFilter::Or | SearchFilter::Not)) {
                         entry.get_mut().bitor_assign(&docs);
                     } else {
                         entry.get_mut().bitand_assign(&docs);
@@ -118,8 +118,10 @@ pub(crate) fn split_filters(filters_in: Vec<SearchFilter>) -> Option<Vec<SplitFi
             op: Ordering::Equal,
             value: account_id,
         }];
-        let add_or =
-            matches!(split.last(), Some(SplitFilter::Internal(SearchFilter::Or))) && j > i + 1;
+        let add_or = matches!(
+            split.last(),
+            Some(SplitFilter::Internal(SearchFilter::Or | SearchFilter::Not))
+        ) && j > i + 1;
         if add_or {
             external_filters.push(SearchFilter::Or);
         }
@@ -589,6 +591,48 @@ mod tests {
                     SplitFilter::Internal(doc_set(&[2])),
                     SplitFilter::Internal(SearchFilter::End),
                     SplitFilter::Internal(doc_set(&[1])),
+                ],
+            ),
+            // Test 21: NOT group with two operators and a document set inside
+            (
+                "NOT(op, op, doc_set) wraps external operators in OR",
+                vec![
+                    account_id(42),
+                    SearchFilter::Not,
+                    other_op("a"),
+                    other_op("b"),
+                    doc_set(&[1, 2]),
+                    SearchFilter::End,
+                ],
+                vec![
+                    SplitFilter::Internal(SearchFilter::Not),
+                    SplitFilter::External(vec![
+                        account_id(42),
+                        SearchFilter::Or,
+                        other_op("a"),
+                        other_op("b"),
+                        SearchFilter::End,
+                    ]),
+                    SplitFilter::Internal(doc_set(&[1, 2])),
+                    SplitFilter::Internal(SearchFilter::End),
+                ],
+            ),
+            // Test 22: NOT group with two document sets merges them with OR
+            (
+                "NOT(doc_set, doc_set) merges with OR",
+                vec![
+                    account_id(42),
+                    other_op("x"),
+                    SearchFilter::Not,
+                    doc_set(&[1, 2]),
+                    doc_set(&[2, 3]),
+                    SearchFilter::End,
+                ],
+                vec![
+                    SplitFilter::Internal(SearchFilter::Not),
+                    SplitFilter::Internal(doc_set(&[1, 2, 3])),
+                    SplitFilter::Internal(SearchFilter::End),
+                    SplitFilter::External(vec![account_id(42), other_op("x")]),
                 ],
             ),
         ];

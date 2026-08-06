@@ -180,7 +180,7 @@ impl MysqlStore {
                             }
                         }
                         ValueOp::SetFnc(set_op) => {
-                            let value = (set_op.fnc)(&set_op.params, &result)?;
+                            let value = (set_op.0)(&result)?;
                             let exists = asserted_values.get(&key);
                             let s = if let Some(exists) = exists {
                                 if *exists {
@@ -225,12 +225,12 @@ impl MysqlStore {
                                 .exec_first::<Vec<u8>, _, _>(&s, (&key,))
                                 .await?
                                 .map(|bytes| {
-                                    (merge_op.fnc)(&merge_op.params, &result, Some(bytes.as_ref()))
+                                    (merge_op.0)(&result, Some(bytes.as_ref()))
                                         .map(|v| (true, v))
                                         .map_err(CommitError::from)
                                 })
                                 .unwrap_or_else(|| {
-                                    (merge_op.fnc)(&merge_op.params, &result, None)
+                                    (merge_op.0)(&result, None)
                                         .map(|v| (false, v))
                                         .map_err(CommitError::from)
                                 })?;

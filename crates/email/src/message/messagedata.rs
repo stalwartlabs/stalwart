@@ -239,6 +239,12 @@ impl MessageData {
 
 impl Serialize for MessageData {
     fn serialize(&self) -> trc::Result<Vec<u8>> {
+        self.serialize_with_change_id(self.change_id)
+    }
+}
+
+impl MessageData {
+    pub fn serialize_with_change_id(&self, change_id: u64) -> trc::Result<Vec<u8>> {
         let mut out = Vec::with_capacity(
             std::mem::size_of::<MessageData>()
                 + (std::mem::size_of::<MessageUid>() * self.mailboxes.len().saturating_sub(2))
@@ -267,7 +273,7 @@ impl Serialize for MessageData {
             out.extend_from_slice(s.as_bytes());
         }
 
-        out.extend_from_slice(&self.change_id.to_be_bytes());
+        out.extend_from_slice(&change_id.to_be_bytes());
 
         Ok(out)
     }

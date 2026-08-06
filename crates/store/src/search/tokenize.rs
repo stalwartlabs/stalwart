@@ -56,24 +56,15 @@ pub(crate) fn tokenize<'x>(
     }
 }
 
-pub(crate) fn tokenize_query<'x>(text: &'x str, language: Language) -> Vec<QueryToken<'x>> {
-    let mut tokens = Vec::new();
-    tokenize(text, language, |token| {
-        tokens.push(token);
-        true
-    });
-    tokens
-}
-
-pub(crate) fn stem_term(stem: &str) -> CheekyHash {
-    let mut buf = String::with_capacity(stem.len() + 1);
+pub(crate) fn stem_term(stem: &str, buf: &mut String) -> CheekyHash {
+    buf.clear();
     buf.push_str(stem);
     buf.push('*');
     CheekyHash::new(buf.as_bytes())
 }
 
-pub(crate) fn key_value_term(key: &str, value: &str) -> CheekyHash {
-    let mut buf = String::with_capacity(key.len() + value.len() + 1);
+pub(crate) fn key_value_term(key: &str, value: &str, buf: &mut String) -> CheekyHash {
+    buf.clear();
     buf.push_str(key);
     buf.push(' ');
     buf.push_str(value);
@@ -81,5 +72,16 @@ pub(crate) fn key_value_term(key: &str, value: &str) -> CheekyHash {
 }
 
 pub(crate) fn integer_term(value: u64) -> CheekyHash {
-    CheekyHash::new(value.to_be_bytes())
+    CheekyHash::new(&value.to_be_bytes()[std::cmp::min(7, value.leading_zeros() as usize / 8)..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_boolean_terms_match_integer_terms() {
+        assert_eq!(integer_term(0), CheekyHash::new([0u8]));
+        assert_eq!(integer_term(1), CheekyHash::new([1u8]));
+    }
 }

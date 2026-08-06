@@ -8,6 +8,7 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use std::env;
 use std::io::{self, Write};
+use store::write::serialize::RawValue;
 use store::write::{AnyClass, AnyKey, BatchBuilder, ValueClass};
 use store::{Deserialize, IterateParams, SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX, Store};
 
@@ -305,12 +306,4 @@ fn print_help() {
     println!("  exit/quit");
     println!("Note: Keys and values can be prefixed with 'base64:' for base64 encoding");
     println!("      or use escaped hex values (e.g., \\x41 for 'A')");
-}
-
-struct RawValue(Vec<u8>);
-
-impl Deserialize for RawValue {
-    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
-        Ok(RawValue(bytes.to_vec()))
-    }
 }

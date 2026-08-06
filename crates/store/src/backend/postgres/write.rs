@@ -178,7 +178,7 @@ impl PostgresStore {
                             }
                         }
                         ValueOp::SetFnc(set_op) => {
-                            let value = (set_op.fnc)(&set_op.params, &result)?;
+                            let value = (set_op.0)(&result)?;
 
                             let s = if let Some(exists) = asserted_values.get(&key) {
                                 if *exists {
@@ -226,13 +226,13 @@ impl PostgresStore {
                                     row.try_get::<_, &[u8]>(0)
                                         .map_err(CommitError::from)
                                         .and_then(|v| {
-                                            (merge_op.fnc)(&merge_op.params, &result, Some(v))
+                                            (merge_op.0)(&result, Some(v))
                                                 .map(|v| (true, v))
                                                 .map_err(CommitError::from)
                                         })
                                 })
                                 .unwrap_or_else(|| {
-                                    (merge_op.fnc)(&merge_op.params, &result, None)
+                                    (merge_op.0)(&result, None)
                                         .map(|v| (false, v))
                                         .map_err(CommitError::from)
                                 })?;

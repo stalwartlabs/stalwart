@@ -25,16 +25,8 @@ const ACCOUNT_DUP: u32 = 6;
 const ACCOUNT_CHUNKS: u32 = 8;
 const ACCOUNT_LARGE: u32 = 9;
 const ACCOUNT_MIXED: u32 = 11;
-
-const ALL_ACCOUNTS: &[u32] = &[
-    ACCOUNT,
-    ACCOUNT_OTHER,
-    ACCOUNT_CONTACTS,
-    ACCOUNT_DUP,
-    ACCOUNT_CHUNKS,
-    ACCOUNT_LARGE,
-    ACCOUNT_MIXED,
-];
+const ACCOUNT_PHRASE: u32 = 12;
+const ACCOUNT_BLOCKS: u32 = 13;
 
 struct EmailDoc {
     id: u32,
@@ -158,17 +150,9 @@ async fn refresh(store: &SearchStore) {
         ] {
             store.refresh_index(index).await.unwrap();
         }
+    } else if store.is_mysql() {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     }
-}
-
-async fn maintain(store: &Store) {
-    for account_id in ALL_ACCOUNTS {
-        store
-            .maintain_account_search_index(*account_id)
-            .await
-            .unwrap();
-    }
-    store.maintain_global_search_index().await.unwrap();
 }
 
 fn full_mask() -> RoaringBitmap {
@@ -253,41 +237,42 @@ pub async fn test(test: &TestServer) {
     println!("Running filter tests...");
     test_filters(&store, &caps).await;
 
+    if caps.phrase {
+        println!("Running phrase position tests...");
+        test_phrase_positions(&store).await;
+    }
+
     if caps.internal {
         let internal_store = store.internal_fts().unwrap().clone();
 
-        println!("Running internal-only tests (WAL state)...");
+        println!("Running internal-only tests...");
         test_internal_features(&store).await;
-
-        println!("Running compaction cycle...");
-        maintain(&internal_store).await;
         verify_account_regions_empty(&internal_store, ACCOUNT_LARGE).await;
 
-        println!("Re-running filter tests (compacted state)...");
-        test_filters(&store, &caps).await;
-        test_internal_features(&store).await;
+        println!("Running incremental indexing tests...");
+        test_incremental(&store, &caps).await;
 
-        println!("Running incremental indexing tests (mixed state)...");
-        test_incremental(&store, &internal_store, &caps).await;
-
-        println!("Running chunk boundary tests...");
-        test_chunk_boundaries(&store, &internal_store).await;
+        println!("Running bulk unindex tests...");
+        test_bulk_unindex(&store, &internal_store).await;
     }
 
     println!("Running in-memory sort tests...");
     test_sort(&store).await;
 
     println!("Running update tests...");
-    test_update(&store, &caps).await;
+    test_update(&store).await;
 
     println!("Running duplicate batch tests...");
-    test_duplicate_batch(&store, &caps).await;
+    test_duplicate_batch(&store).await;
 
     println!("Running unindex tests...");
-    test_unindex(&store, &caps).await;
+    test_unindex(&store).await;
 
-    println!("Running hashed term tombstone tests...");
-    test_hashed_tombstone(&store, &caps).await;
+    println!("Running term block tests...");
+    test_term_blocks(&store).await;
+
+    println!("Running hashed term unindex tests...");
+    test_hashed_term_unindex(&store).await;
 
     println!("Running account wipe tests...");
     test_account_wipe(&store).await;
@@ -568,6 +553,112 @@ async fn test_filters(store: &SearchStore, caps: &Caps) {
         assert_query(
             store,
             vec![
+                SearchFilter::Not,
+                SearchFilter::has_keyword(EmailSearchField::From, "doesnotexist"),
+                SearchFilter::End,
+            ],
+            mask.clone(),
+            &mask.iter().collect::<Vec<_>>(),
+            "not of missing keyword matches all",
+        )
+        .await;
+
+        assert_query(
+            store,
+            vec![
+                SearchFilter::And,
+                SearchFilter::has_keyword(EmailSearchField::From, "alicecorp"),
+                SearchFilter::Not,
+                SearchFilter::has_keyword(EmailSearchField::From, "doesnotexist"),
+                SearchFilter::End,
+                SearchFilter::End,
+            ],
+            mask.clone(),
+            &[0, 2],
+            "and with nested not of missing keyword",
+        )
+        .await;
+
+        assert_query(
+            store,
+            vec![
+                SearchFilter::Not,
+                SearchFilter::has_keyword(EmailSearchField::From, "alicecorp"),
+                SearchFilter::has_keyword(EmailSearchField::From, "frankair"),
+                SearchFilter::End,
+            ],
+            mask.clone(),
+            &mask
+                .iter()
+                .filter(|id| ![0u32, 2, 3].contains(id))
+                .collect::<Vec<_>>(),
+            "not group excludes any matching child",
+        )
+        .await;
+
+        assert_query(
+            store,
+            vec![
+                SearchFilter::And,
+                SearchFilter::Not,
+                SearchFilter::has_keyword(EmailSearchField::From, "alicecorp"),
+                SearchFilter::End,
+                SearchFilter::has_keyword(EmailSearchField::From, "carolshop"),
+                SearchFilter::End,
+            ],
+            mask.clone(),
+            &[1, 4],
+            "not nested inside and",
+        )
+        .await;
+
+        assert_query(
+            store,
+            vec![
+                SearchFilter::Not,
+                SearchFilter::has_keyword(EmailSearchField::From, "alicecorp"),
+                SearchFilter::End,
+            ],
+            RoaringBitmap::from_iter([0u32, 1]),
+            &[1],
+            "not respects a restricted mask",
+        )
+        .await;
+
+        assert_query(
+            store,
+            vec![
+                SearchFilter::And,
+                SearchFilter::has_keyword(EmailSearchField::From, "doesnotexist"),
+                SearchFilter::Not,
+                SearchFilter::has_keyword(EmailSearchField::From, "alicecorp"),
+                SearchFilter::End,
+                SearchFilter::End,
+            ],
+            mask.clone(),
+            &[],
+            "empty and leg skips across a not group",
+        )
+        .await;
+
+        assert_query(
+            store,
+            vec![
+                SearchFilter::is_in_set(RoaringBitmap::from_iter([0u32, 1, 2, 3, 4])),
+                SearchFilter::Not,
+                SearchFilter::has_keyword(EmailSearchField::From, "alicecorp"),
+                SearchFilter::has_keyword(EmailSearchField::From, "frankair"),
+                SearchFilter::End,
+            ],
+            mask.clone(),
+            &[1, 4],
+            "split not group keeps de morgan semantics",
+        )
+        .await;
+
+        assert_query(
+            store,
+            vec![
                 SearchFilter::Or,
                 SearchFilter::And,
                 SearchFilter::has_keyword(EmailSearchField::From, "nobody"),
@@ -621,6 +712,30 @@ async fn test_filters(store: &SearchStore, caps: &Caps) {
         "no matches",
     )
     .await;
+
+    assert_query(
+        store,
+        vec![SearchFilter::And, SearchFilter::End],
+        mask.clone(),
+        &mask.iter().collect::<Vec<_>>(),
+        "empty and group returns the mask",
+    )
+    .await;
+
+    assert!(
+        store
+            .query_account(
+                SearchQuery::new(SearchIndex::Email)
+                    .with_filter(SearchFilter::has_keyword(
+                        EmailSearchField::From,
+                        "alicecorp",
+                    ))
+                    .with_mask(mask.clone()),
+            )
+            .await
+            .is_err(),
+        "queries without an account id filter are rejected"
+    );
 
     let results = store
         .query_account(
@@ -698,6 +813,93 @@ async fn test_filters(store: &SearchStore, caps: &Caps) {
     }
 }
 
+async fn test_phrase_positions(store: &SearchStore) {
+    let mask = RoaringBitmap::from_iter([0u32]);
+    let mut document = IndexDocument::new(SearchIndex::Email)
+        .with_account_id(ACCOUNT_PHRASE)
+        .with_document_id(0);
+    document.index_text(
+        EmailSearchField::Body,
+        "alpha alpha alpha omega",
+        Language::English,
+    );
+    store.index(vec![document]).await.unwrap();
+    refresh(store).await;
+
+    for (phrase, expected, context) in [
+        (
+            "\"alpha alpha omega\"",
+            vec![0u32],
+            "phrase with overlapping restart",
+        ),
+        ("\"alpha alpha alpha\"", vec![0], "repeated word phrase"),
+        ("\"alpha omega\"", vec![0], "phrase tail"),
+        ("\"omega alpha\"", vec![], "phrase reversed"),
+        (
+            "\"alpha alpha alpha alpha\"",
+            vec![],
+            "phrase exceeds repetitions",
+        ),
+    ] {
+        if (store.is_meilisearch() || store.is_mysql()) && context == "phrase exceeds repetitions"
+        {
+            continue;
+        }
+        let results = store
+            .query_account(
+                SearchQuery::new(SearchIndex::Email)
+                    .with_account_id(ACCOUNT_PHRASE)
+                    .with_filter(SearchFilter::has_english_text(
+                        EmailSearchField::Body,
+                        phrase,
+                    ))
+                    .with_mask(mask.clone()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(results, expected, "unexpected results for {context}");
+    }
+
+    let mut documents = Vec::new();
+    let mut bulk_mask = RoaringBitmap::from_iter([0u32]);
+    let mut expected = vec![0u32];
+    for n in 1u32..=24 {
+        let id = if n % 2 == 0 { n } else { (1 << 16) | n };
+        bulk_mask.insert(id);
+        let body = if n % 3 == 0 {
+            expected.push(id);
+            "alpha omega tail"
+        } else {
+            "alpha filler omega"
+        };
+        let mut document = IndexDocument::new(SearchIndex::Email)
+            .with_account_id(ACCOUNT_PHRASE)
+            .with_document_id(id);
+        document.index_text(EmailSearchField::Body, body, Language::English);
+        documents.push(document);
+    }
+    expected.sort_unstable();
+    store.index(documents).await.unwrap();
+    refresh(store).await;
+
+    let results = store
+        .query_account(
+            SearchQuery::new(SearchIndex::Email)
+                .with_account_id(ACCOUNT_PHRASE)
+                .with_filter(SearchFilter::has_english_text(
+                    EmailSearchField::Body,
+                    "\"alpha omega\"",
+                ))
+                .with_mask(bulk_mask),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        results, expected,
+        "phrase verification across fetch chunks and id blocks"
+    );
+}
+
 async fn test_internal_features(store: &SearchStore) {
     let mask = full_mask();
 
@@ -736,6 +938,18 @@ async fn test_internal_features(store: &SearchStore) {
         mask.clone(),
         &[],
         "prefix longer than 16 bytes cannot match",
+    )
+    .await;
+
+    assert_query(
+        store,
+        vec![SearchFilter::text_prefix(
+            EmailSearchField::Body,
+            "internationaliz",
+        )],
+        mask.clone(),
+        &[],
+        "prefix cannot match hashed terms",
     )
     .await;
 
@@ -803,7 +1017,7 @@ async fn test_internal_features(store: &SearchStore) {
     .await;
 }
 
-async fn test_incremental(store: &SearchStore, internal_store: &Store, caps: &Caps) {
+async fn test_incremental(store: &SearchStore, caps: &Caps) {
     let mut mask = full_mask();
     mask.insert(20);
 
@@ -821,7 +1035,8 @@ async fn test_incremental(store: &SearchStore, internal_store: &Store, caps: &Ca
         Language::English,
     );
     document.index_text(EmailSearchField::From, "alicecorp", Language::None);
-    document.index_unsigned(EmailSearchField::_ReceivedAt, 2020u64);
+    document.index_unsigned(EmailSearchField::To, 2020u64);
+    document.index_bool(EmailSearchField::Cc, true);
     store.index(vec![document]).await.unwrap();
 
     assert_query(
@@ -832,7 +1047,7 @@ async fn test_incremental(store: &SearchStore, internal_store: &Store, caps: &Ca
         )],
         mask.clone(),
         &[0, 20],
-        "mixed chunk and wal state",
+        "incrementally added document",
     )
     .await;
     assert_query(
@@ -843,7 +1058,23 @@ async fn test_incremental(store: &SearchStore, internal_store: &Store, caps: &Ca
         )],
         mask.clone(),
         &[0, 20],
-        "mixed state prefix",
+        "incrementally added document prefix",
+    )
+    .await;
+    assert_query(
+        store,
+        vec![SearchFilter::integer_eq(EmailSearchField::To, 2020u64)],
+        mask.clone(),
+        &[20],
+        "unsigned integer roundtrip",
+    )
+    .await;
+    assert_query(
+        store,
+        vec![SearchFilter::integer_eq(EmailSearchField::Cc, 1u64)],
+        mask.clone(),
+        &[20],
+        "boolean roundtrip",
     )
     .await;
 
@@ -860,21 +1091,7 @@ async fn test_incremental(store: &SearchStore, internal_store: &Store, caps: &Ca
         )],
         mask.clone(),
         &[0],
-        "tombstone hides document before compaction",
-    )
-    .await;
-
-    maintain(internal_store).await;
-
-    assert_query(
-        store,
-        vec![SearchFilter::has_english_text(
-            EmailSearchField::Subject,
-            "quarterly",
-        )],
-        mask.clone(),
-        &[0],
-        "tombstone folded at compaction",
+        "document hidden after unindex",
     )
     .await;
 
@@ -921,14 +1138,66 @@ async fn test_sort(store: &SearchStore) {
                         true,
                     ),
                 ])
-                .with_mask(mask),
+                .with_mask(mask.clone()),
         )
         .await
         .unwrap();
     assert_eq!(results, vec![1, 3, 0, 2, 4], "document set then sorted set");
+
+    let sparse_ranks = AHashMap::from_iter([(0u32, 1u32), (1, 0)]);
+    let results = store
+        .query_account(
+            SearchQuery::new(SearchIndex::Email)
+                .with_account_id(ACCOUNT)
+                .with_filter(SearchFilter::is_in_set(mask.clone()))
+                .with_comparator(SearchComparator::sorted_set(sparse_ranks.clone(), true))
+                .with_mask(mask.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        results,
+        vec![1, 0, 2, 3, 4],
+        "missing ids sort last ascending"
+    );
+
+    let results = store
+        .query_account(
+            SearchQuery::new(SearchIndex::Email)
+                .with_account_id(ACCOUNT)
+                .with_filter(SearchFilter::is_in_set(mask.clone()))
+                .with_comparator(SearchComparator::sorted_set(sparse_ranks, false))
+                .with_mask(mask.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        results,
+        vec![0, 1, 2, 3, 4],
+        "missing ids sort last descending"
+    );
+
+    let results = store
+        .query_account(
+            SearchQuery::new(SearchIndex::Email)
+                .with_account_id(ACCOUNT)
+                .with_filter(SearchFilter::is_in_set(mask.clone()))
+                .with_comparator(SearchComparator::set(
+                    RoaringBitmap::from_iter([1u32, 3]),
+                    true,
+                ))
+                .with_mask(mask.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        results,
+        vec![0, 2, 4, 1, 3],
+        "document set comparator ascending"
+    );
 }
 
-async fn test_update(store: &SearchStore, caps: &Caps) {
+async fn test_update(store: &SearchStore) {
     let mask = RoaringBitmap::from_iter([0u32]);
 
     let mut document = IndexDocument::new(SearchIndex::Contacts)
@@ -968,24 +1237,9 @@ async fn test_update(store: &SearchStore, caps: &Caps) {
         vec![0],
         "new contact terms visible after update"
     );
-
-    if caps.internal {
-        let internal_store = store.internal_fts().unwrap();
-        maintain(internal_store).await;
-        assert_eq!(
-            store.query_account(query_name("john")).await.unwrap(),
-            Vec::<u32>::new(),
-            "old contact terms removed after compaction"
-        );
-        assert_eq!(
-            store.query_account(query_name("jane")).await.unwrap(),
-            vec![0],
-            "new contact terms visible after compaction"
-        );
-    }
 }
 
-async fn test_unindex(store: &SearchStore, caps: &Caps) {
+async fn test_unindex(store: &SearchStore) {
     let mask = full_mask();
 
     assert_query(
@@ -1022,21 +1276,207 @@ async fn test_unindex(store: &SearchStore, caps: &Caps) {
     )
     .await;
 
-    if caps.internal {
-        let internal_store = store.internal_fts().unwrap();
-        maintain(internal_store).await;
-        assert_query(
-            store,
-            vec![SearchFilter::has_keyword(
-                EmailSearchField::From,
-                "fillerco",
-            )],
-            mask.clone(),
-            &FILLER_IDS.filter(|id| *id > 8).collect::<Vec<_>>(),
-            "fillers after unindex and compaction",
-        )
-        .await;
+    let mut query = SearchQuery::new(SearchIndex::Email)
+        .with_account_id(ACCOUNT)
+        .with_filter(SearchFilter::Or);
+    for id in [9u32, 9, 500] {
+        query = query.with_filter(SearchFilter::integer_eq(SearchField::DocumentId, id));
     }
+    query = query.with_filter(SearchFilter::End);
+    store.unindex(query).await.unwrap();
+    refresh(store).await;
+
+    assert_query(
+        store,
+        vec![SearchFilter::has_keyword(
+            EmailSearchField::From,
+            "fillerco",
+        )],
+        mask.clone(),
+        &FILLER_IDS.filter(|id| *id > 9).collect::<Vec<_>>(),
+        "duplicate and unknown ids are tolerated",
+    )
+    .await;
+
+    store
+        .unindex(
+            SearchQuery::new(SearchIndex::Email)
+                .with_filter(SearchFilter::Or)
+                .with_filter(SearchFilter::And)
+                .with_account_id(ACCOUNT)
+                .with_filter(SearchFilter::Or)
+                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 10u32))
+                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 11u32))
+                .with_filter(SearchFilter::End)
+                .with_filter(SearchFilter::End)
+                .with_filter(SearchFilter::And)
+                .with_account_id(ACCOUNT_DUP)
+                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 0u32))
+                .with_filter(SearchFilter::End)
+                .with_filter(SearchFilter::End),
+        )
+        .await
+        .unwrap();
+    refresh(store).await;
+
+    assert_query(
+        store,
+        vec![SearchFilter::has_keyword(
+            EmailSearchField::From,
+            "fillerco",
+        )],
+        mask.clone(),
+        &FILLER_IDS.filter(|id| *id > 11).collect::<Vec<_>>(),
+        "multi account unindex removes own documents",
+    )
+    .await;
+
+    let results = store
+        .query_account(
+            SearchQuery::new(SearchIndex::Email)
+                .with_account_id(ACCOUNT_DUP)
+                .with_filter(SearchFilter::has_english_text(
+                    EmailSearchField::Subject,
+                    "finalword",
+                ))
+                .with_mask(RoaringBitmap::from_iter([0u32])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        results,
+        Vec::<u32>::new(),
+        "multi account unindex removes other account documents"
+    );
+
+    if store.internal_fts().is_some() {
+        assert!(
+            store
+                .unindex(
+                    SearchQuery::new(SearchIndex::Email)
+                        .with_account_id(ACCOUNT)
+                        .with_filter(SearchFilter::has_keyword(EmailSearchField::From, "x")),
+                )
+                .await
+                .is_err(),
+            "unsupported unindex filters are rejected"
+        );
+    }
+}
+
+async fn test_term_blocks(store: &SearchStore) {
+    let ids = [1u32, 0xFFFF, 0x10000, (2 << 16) | 3, (1 << 24) | 1];
+    let mask = RoaringBitmap::from_iter(ids);
+
+    let mut documents = Vec::new();
+    for id in ids {
+        let mut document = IndexDocument::new(SearchIndex::Email)
+            .with_account_id(ACCOUNT_BLOCKS)
+            .with_document_id(id);
+        document.index_text(
+            EmailSearchField::Subject,
+            &format!("blockterm entry{id}"),
+            Language::English,
+        );
+        if id == 1 {
+            document.index_text(
+                EmailSearchField::Subject,
+                "abcdefghijklmnop",
+                Language::None,
+            );
+        }
+        documents.push(document);
+    }
+    store.index(documents).await.unwrap();
+    refresh(store).await;
+
+    let query = |filter: SearchFilter| {
+        SearchQuery::new(SearchIndex::Email)
+            .with_account_id(ACCOUNT_BLOCKS)
+            .with_filter(filter)
+            .with_mask(mask.clone())
+    };
+
+    let results = store
+        .query_account(query(SearchFilter::has_english_text(
+            EmailSearchField::Subject,
+            "blockterm",
+        )))
+        .await
+        .unwrap();
+    assert_eq!(results, ids.to_vec(), "term spans document id blocks");
+
+    let results = store
+        .query_account(query(SearchFilter::text_prefix(
+            EmailSearchField::Subject,
+            "blockte",
+        )))
+        .await
+        .unwrap();
+    assert_eq!(results, ids.to_vec(), "prefix spans document id blocks");
+
+    for (prefix, context) in [
+        (
+            "abcdefghijklmnop",
+            "sixteen byte prefix matches verbatim term",
+        ),
+        ("abcdefghijklmno", "prefix of sixteen byte verbatim term"),
+    ] {
+        let results = store
+            .query_account(query(SearchFilter::text_prefix(
+                EmailSearchField::Subject,
+                prefix,
+            )))
+            .await
+            .unwrap();
+        assert_eq!(results, vec![1], "unexpected results for {context}");
+    }
+
+    store
+        .unindex(
+            SearchQuery::new(SearchIndex::Email)
+                .with_account_id(ACCOUNT_BLOCKS)
+                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, ids[4])),
+        )
+        .await
+        .unwrap();
+    refresh(store).await;
+
+    let results = store
+        .query_account(query(SearchFilter::has_english_text(
+            EmailSearchField::Subject,
+            "blockterm",
+        )))
+        .await
+        .unwrap();
+    assert_eq!(
+        results,
+        ids[..4].to_vec(),
+        "removing an aliased block entry keeps its block neighbors"
+    );
+
+    store
+        .unindex(
+            SearchQuery::new(SearchIndex::Email)
+                .with_account_id(ACCOUNT_BLOCKS)
+                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, ids[1])),
+        )
+        .await
+        .unwrap();
+    refresh(store).await;
+
+    let results = store
+        .query_account(query(SearchFilter::has_english_text(
+            EmailSearchField::Subject,
+            "blockterm",
+        )))
+        .await
+        .unwrap();
+    assert_eq!(
+        results,
+        vec![ids[0], ids[2], ids[3]],
+        "removing a block boundary entry keeps the adjacent block"
+    );
 }
 
 async fn search_region_key_count(store: &Store, typ: u8, account_id: u32) -> u64 {
@@ -1072,11 +1512,7 @@ async fn search_region_key_count(store: &Store, typ: u8, account_id: u32) -> u64
 
 async fn verify_account_regions_empty(store: &Store, account_id: u32) {
     use store::write::SearchIndexClass;
-    for typ in [
-        SearchIndexClass::TYPE_WAL,
-        SearchIndexClass::TYPE_TERM,
-        SearchIndexClass::TYPE_DOCUMENT,
-    ] {
+    for typ in [SearchIndexClass::TYPE_TERM, SearchIndexClass::TYPE_DOCUMENT] {
         assert_eq!(
             search_region_key_count(store, typ, account_id).await,
             0,
@@ -1115,7 +1551,7 @@ async fn global_region_key_count(store: &Store, typ: u8) -> u64 {
     count
 }
 
-async fn test_duplicate_batch(store: &SearchStore, caps: &Caps) {
+async fn test_duplicate_batch(store: &SearchStore) {
     let mask = RoaringBitmap::from_iter([0u32]);
 
     let mut first = IndexDocument::new(SearchIndex::Email)
@@ -1196,14 +1632,9 @@ async fn test_duplicate_batch(store: &SearchStore, caps: &Caps) {
     };
 
     verify().await;
-    if caps.internal {
-        let internal_store = store.internal_fts().unwrap();
-        maintain(internal_store).await;
-        verify().await;
-    }
 }
 
-async fn test_hashed_tombstone(store: &SearchStore, caps: &Caps) {
+async fn test_hashed_term_unindex(store: &SearchStore) {
     let mask = full_mask();
 
     assert_query(
@@ -1236,31 +1667,16 @@ async fn test_hashed_tombstone(store: &SearchStore, caps: &Caps) {
         )],
         mask.clone(),
         &[],
-        "hashed term tombstoned before compaction",
+        "hashed term removed after unindex",
     )
     .await;
-
-    if caps.internal {
-        let internal_store = store.internal_fts().unwrap();
-        maintain(internal_store).await;
-        assert_query(
-            store,
-            vec![SearchFilter::has_english_text(
-                EmailSearchField::Body,
-                "internationalization",
-            )],
-            mask.clone(),
-            &[],
-            "hashed term tombstone folded at compaction",
-        )
-        .await;
-    }
 }
 
-async fn test_chunk_boundaries(store: &SearchStore, internal_store: &Store) {
+async fn test_bulk_unindex(store: &SearchStore, internal_store: &Store) {
     use store::write::SearchIndexClass;
 
     let total = 1200u32;
+    let unique_terms = total as u64 + 1;
     let mask = RoaringBitmap::from_iter(0..total);
     for chunk_start in (0..total).step_by(200) {
         let mut documents = Vec::new();
@@ -1275,8 +1691,6 @@ async fn test_chunk_boundaries(store: &SearchStore, internal_store: &Store) {
         }
         store.index(documents).await.unwrap();
     }
-
-    maintain(internal_store).await;
 
     let query_chunkterm = || {
         SearchQuery::new(SearchIndex::Email)
@@ -1298,10 +1712,7 @@ async fn test_chunk_boundaries(store: &SearchStore, internal_store: &Store) {
 
     let keys_before =
         search_region_key_count(internal_store, SearchIndexClass::TYPE_TERM, ACCOUNT_CHUNKS).await;
-    assert!(
-        keys_before > total as u64,
-        "expected multiple chunks per term"
-    );
+    assert_eq!(keys_before, unique_terms, "expected one key per term");
 
     let mut unindex = SearchQuery::new(SearchIndex::Email)
         .with_account_id(ACCOUNT_CHUNKS)
@@ -1319,20 +1730,7 @@ async fn test_chunk_boundaries(store: &SearchStore, internal_store: &Store) {
         .unwrap()
         .into_iter()
         .collect::<RoaringBitmap>();
-    assert_eq!(
-        results, expected,
-        "tombstones hide deleted range before compaction"
-    );
-
-    maintain(internal_store).await;
-
-    let results = store
-        .query_account(query_chunkterm())
-        .await
-        .unwrap()
-        .into_iter()
-        .collect::<RoaringBitmap>();
-    assert_eq!(results, expected, "no resurrection after compaction");
+    assert_eq!(results, expected, "deleted range is hidden");
 
     for id in [0u32, 399, 800, 1199] {
         let results = store
@@ -1352,9 +1750,10 @@ async fn test_chunk_boundaries(store: &SearchStore, internal_store: &Store) {
 
     let keys_after =
         search_region_key_count(internal_store, SearchIndexClass::TYPE_TERM, ACCOUNT_CHUNKS).await;
-    assert!(
-        keys_after < keys_before,
-        "stale chunk boundaries were not cleared ({keys_before} -> {keys_after})"
+    assert_eq!(
+        keys_after,
+        unique_terms - 400,
+        "term keys of unindexed documents were not removed"
     );
 }
 
@@ -1460,14 +1859,25 @@ async fn test_large_document(store: &SearchStore, caps: &Caps) {
 async fn test_global(store: &SearchStore, caps: &Caps) {
     use store::search::TracingSearchField;
 
+    const BUCKET: u64 = 1 << 48;
+    const ID1: u64 = 1;
+    const ID2: u64 = 2;
+    const ID0: u64 = BUCKET - 1;
+    const ID3: u64 = BUCKET | 3;
+    const ID4: u64 = BUCKET | 4;
+    const ID5: u64 = (2 * BUCKET) | 5;
+    const ID6: u64 = (2 * BUCKET) | 6;
+    const ID7: u64 = (2 * BUCKET) | 7;
+
     let mut documents = Vec::new();
     for (id, queue_id, event_type, keywords) in [
-        (1u64, 1000u64, 1u64, "init start"),
-        (2, 1000, 2, "init complete"),
-        (3, 1001, 1, "process start"),
-        (4, 1001, 2, "process complete"),
-        (5, 1002, 1, "cleanup start"),
-        (6, 1002, 2, "cleanup complete"),
+        (ID1, 1000u64, 1u64, "init start"),
+        (ID2, 1000, 2, "init complete"),
+        (ID0, 1000, 1, "edge start"),
+        (ID3, 1001, 1, "process start"),
+        (ID4, 1001, 2, "process complete"),
+        (ID5, 1002, 1, "cleanup start"),
+        (ID6, 1002, 2, "cleanup complete"),
     ] {
         let mut document = IndexDocument::new(SearchIndex::Tracing).with_id(id);
         document.index_unsigned(TracingSearchField::QueueId, queue_id);
@@ -1492,16 +1902,21 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         assert_eq!(results, expected, "unexpected results for {context}");
     };
 
-    assert_global(query_all(), vec![1, 2, 3, 4, 5, 6], "all ids").await;
+    assert_global(
+        query_all(),
+        vec![ID1, ID2, ID0, ID3, ID4, ID5, ID6],
+        "all ids",
+    )
+    .await;
     assert_global(
         SearchQuery::new(SearchIndex::Tracing)
-            .with_filter(SearchFilter::integer_gt(SearchField::Id, 2u64))
-            .with_filter(SearchFilter::integer_lt(SearchField::Id, 6u64))
+            .with_filter(SearchFilter::integer_gt(SearchField::Id, ID2))
+            .with_filter(SearchFilter::integer_lt(SearchField::Id, ID6))
             .with_filter(SearchFilter::has_keyword(
                 TracingSearchField::Keywords,
                 "start",
             )),
-        vec![3, 5],
+        vec![ID0, ID3, ID5],
         "id window with keyword",
     )
     .await;
@@ -1510,7 +1925,7 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
             TracingSearchField::QueueId,
             1001u64,
         )),
-        vec![3, 4],
+        vec![ID3, ID4],
         "queue id",
     )
     .await;
@@ -1519,10 +1934,81 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
             TracingSearchField::EventType,
             1u64,
         )),
-        vec![1, 3, 5],
+        vec![ID1, ID0, ID3, ID5],
         "event type",
     )
     .await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing).with_filters(vec![
+            SearchFilter::Or,
+            SearchFilter::integer_eq(TracingSearchField::QueueId, 1000u64),
+            SearchFilter::integer_eq(TracingSearchField::QueueId, 1002u64),
+            SearchFilter::End,
+        ]),
+        vec![ID1, ID2, ID0, ID5, ID6],
+        "global or",
+    )
+    .await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing).with_filters(vec![
+            SearchFilter::Or,
+            SearchFilter::integer_eq(TracingSearchField::QueueId, 1000u64),
+            SearchFilter::integer_eq(TracingSearchField::QueueId, 1001u64),
+            SearchFilter::End,
+            SearchFilter::has_keyword(TracingSearchField::Keywords, "start"),
+        ]),
+        vec![ID1, ID0, ID3],
+        "global or intersected with keyword",
+    )
+    .await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing)
+            .with_filter(SearchFilter::integer_eq(SearchField::Id, ID4)),
+        vec![ID4],
+        "id equals fast path",
+    )
+    .await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing)
+            .with_filter(SearchFilter::integer_gt(SearchField::Id, ID4))
+            .with_filter(SearchFilter::integer_lt(SearchField::Id, ID4)),
+        vec![],
+        "empty id window",
+    )
+    .await;
+    if caps.internal {
+        for (filters, context) in [
+            (
+                vec![
+                    SearchFilter::Not,
+                    SearchFilter::has_keyword(TracingSearchField::Keywords, "start"),
+                    SearchFilter::End,
+                ],
+                "not is unsupported",
+            ),
+            (
+                vec![SearchFilter::is_in_set(RoaringBitmap::from_iter([1u32]))],
+                "document sets are unsupported",
+            ),
+            (
+                vec![
+                    SearchFilter::Or,
+                    SearchFilter::has_keyword(TracingSearchField::Keywords, "start"),
+                    SearchFilter::integer_gt(SearchField::Id, 0u64),
+                    SearchFilter::End,
+                ],
+                "id filters inside or are unsupported",
+            ),
+        ] {
+            assert!(
+                store
+                    .query_global(SearchQuery::new(SearchIndex::Tracing).with_filters(filters))
+                    .await
+                    .is_err(),
+                "expected error for {context}"
+            );
+        }
+    }
     assert_global(
         SearchQuery::new(SearchIndex::Tracing)
             .with_filter(SearchFilter::integer_eq(
@@ -1533,7 +2019,7 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
                 TracingSearchField::Keywords,
                 "complete",
             )),
-        vec![2],
+        vec![ID2],
         "queue id with keyword",
     )
     .await;
@@ -1543,22 +2029,35 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
                 TracingSearchField::Keywords,
                 "proc*",
             )),
-            vec![3, 4],
+            vec![ID3, ID4],
             "keyword prefix",
         )
         .await;
     }
 
+    if caps.internal {
+        assert!(
+            store
+                .unindex(
+                    SearchQuery::new(SearchIndex::Tracing)
+                        .with_filter(SearchFilter::integer_lt(SearchField::Id, 3u64)),
+                )
+                .await
+                .is_err(),
+            "purge cutoff within the first bucket must be rejected"
+        );
+    }
+
     store
         .unindex(
             SearchQuery::new(SearchIndex::Tracing)
-                .with_filter(SearchFilter::integer_lt(SearchField::Id, 3u64)),
+                .with_filter(SearchFilter::integer_lt(SearchField::Id, ID3)),
         )
         .await
         .unwrap();
     refresh(store).await;
 
-    assert_global(query_all(), vec![3, 4, 5, 6], "all ids after purge").await;
+    assert_global(query_all(), vec![ID3, ID4, ID5, ID6], "all ids after purge").await;
     assert_global(
         SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
             TracingSearchField::Keywords,
@@ -1568,45 +2067,57 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         "purged keywords are hidden",
     )
     .await;
-
-    if caps.internal {
-        use store::write::SearchIndexClass;
-        let internal_store = store.internal_fts().unwrap();
-        maintain(internal_store).await;
-
-        assert_global(query_all(), vec![3, 4, 5, 6], "all ids after compaction").await;
-        assert_global(
-            SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
-                TracingSearchField::Keywords,
-                "init",
-            )),
-            vec![],
-            "purged keywords are swept",
-        )
-        .await;
-        assert_global(
-            SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
+            TracingSearchField::Keywords,
+            "start",
+        )),
+        vec![ID3, ID5],
+        "surviving keywords after purge",
+    )
+    .await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
+            TracingSearchField::Keywords,
+            "edge",
+        )),
+        vec![],
+        "document at the top of a purged bucket is swept",
+    )
+    .await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing)
+            .with_filter(SearchFilter::integer_gt(SearchField::Id, ID3))
+            .with_filter(SearchFilter::has_keyword(
                 TracingSearchField::Keywords,
                 "start",
             )),
-            vec![3, 5],
-            "surviving keywords after compaction",
+        vec![ID5],
+        "id window clamps term results",
+    )
+    .await;
+
+    store
+        .unindex(
+            SearchQuery::new(SearchIndex::Tracing)
+                .with_filter(SearchFilter::integer_lt(SearchField::Id, 2 * BUCKET)),
         )
-        .await;
+        .await
+        .unwrap();
+    refresh(store).await;
 
-        assert_eq!(
-            global_region_key_count(internal_store, SearchIndexClass::TYPE_GLOBAL_WAL).await,
-            0,
-            "global wal folded"
-        );
-        assert_eq!(
-            global_region_key_count(internal_store, SearchIndexClass::TYPE_GLOBAL_DOCUMENT).await,
-            4,
-            "purged document rows removed"
-        );
-    }
+    assert_global(query_all(), vec![ID5, ID6], "all ids after boundary purge").await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
+            TracingSearchField::Keywords,
+            "process",
+        )),
+        vec![],
+        "boundary purge sweeps the full bucket below the cutoff",
+    )
+    .await;
 
-    let mut document = IndexDocument::new(SearchIndex::Tracing).with_id(7u64);
+    let mut document = IndexDocument::new(SearchIndex::Tracing).with_id(ID7);
     document.index_unsigned(TracingSearchField::QueueId, 1003u64);
     document.index_unsigned(TracingSearchField::EventType, 1u64);
     document.index_text(
@@ -1617,13 +2128,13 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
     store.index(vec![document]).await.unwrap();
     refresh(store).await;
 
-    assert_global(query_all(), vec![3, 4, 5, 6, 7], "id added after purge").await;
+    assert_global(query_all(), vec![ID5, ID6, ID7], "id added after purge").await;
     assert_global(
         SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
             TracingSearchField::Keywords,
             "start",
         )),
-        vec![3, 5, 7],
+        vec![ID5, ID7],
         "keyword added after purge",
     )
     .await;
@@ -1643,10 +2154,9 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         use store::write::SearchIndexClass;
         let internal_store = store.internal_fts().unwrap();
         for typ in [
-            SearchIndexClass::TYPE_GLOBAL_WAL,
-            SearchIndexClass::TYPE_GLOBAL_TERM,
-            SearchIndexClass::TYPE_GLOBAL_DOCUMENT,
-            SearchIndexClass::TYPE_GLOBAL_META,
+            SearchIndexClass::TYPE_TERM,
+            SearchIndexClass::TYPE_DOCUMENT,
+            SearchIndexClass::TYPE_DOCUMENT_ID,
         ] {
             assert_eq!(
                 global_region_key_count(internal_store, typ).await,
@@ -1664,6 +2174,13 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         "mixedbatch email",
         Language::English,
     );
+    let mut stale_document = IndexDocument::new(SearchIndex::Tracing).with_id(10u64);
+    stale_document.index_unsigned(TracingSearchField::EventType, 4u64);
+    stale_document.index_text(
+        TracingSearchField::Keywords,
+        "stalefirst trace",
+        Language::None,
+    );
     let mut global_document = IndexDocument::new(SearchIndex::Tracing).with_id(10u64);
     global_document.index_unsigned(TracingSearchField::EventType, 5u64);
     global_document.index_text(
@@ -1672,7 +2189,7 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         Language::None,
     );
     store
-        .index(vec![account_document, global_document])
+        .index(vec![account_document, stale_document, global_document])
         .await
         .unwrap();
     refresh(store).await;
@@ -1684,6 +2201,15 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         )),
         vec![10],
         "global document from mixed batch",
+    )
+    .await;
+    assert_global(
+        SearchQuery::new(SearchIndex::Tracing).with_filter(SearchFilter::has_keyword(
+            TracingSearchField::Keywords,
+            "stalefirst",
+        )),
+        vec![],
+        "duplicate global document in one batch is replaced",
     )
     .await;
     let results = store

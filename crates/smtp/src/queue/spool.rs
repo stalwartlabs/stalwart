@@ -33,14 +33,11 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::SystemTime;
 use store::write::key::DeserializeBigEndian;
-use store::write::serialize::rkyv_deserialize;
 use store::write::{
-    AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, MergeResult, Params,
-    QueueClass, RegistryClass, ValueClass, now,
+    AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, MergeResult, QueueClass,
+    RegistryClass, ValueClass, now,
 };
-use store::{
-    Deserialize, IterateParams, Serialize, SerializeInfallible, U32_LEN, U64_LEN, ValueKey,
-};
+use store::{Deserialize, IterateParams, Serialize, SerializeInfallible, U64_LEN, ValueKey};
 use trc::{AddContext, ServerEvent, SpamEvent};
 use types::blob::BlobId;
 use types::blob_hash::BlobHash;
@@ -683,56 +680,36 @@ impl MessageWrapper {
             );
         }
 
-        let message_bytes = match Archiver::new(self.message).serialize() {
-            Ok(data) => data,
-            Err(err) => {
-                trc::error!(
-                    err.details("Failed to serialize message.")
-                        .span_id(self.span_id)
-                        .caused_by(trc::location!())
-                );
-                return false;
-            }
-        };
         if self.is_multi_queue {
+            let queue_id = self.queue_id;
+            let queue_name = self.queue_name;
+            let new_message = self.message;
+
             batch.merge_fnc(
-                ValueClass::Queue(QueueClass::Message(self.queue_id)),
-                Params::with_capacity(3)
-                    .with_u64(self.queue_id)
-                    .with_bytes(self.queue_name.into_inner().to_vec())
-                    .with_bytes(message_bytes),
-                |params, _, bytes| {
+                ValueClass::Queue(QueueClass::Message(queue_id)),
+                move |_, bytes| {
                     let mut cur_message = <Archive<AlignedBytes> as Deserialize>::deserialize(
                         bytes.ok_or_else(|| {
                             trc::StoreEvent::NotFound
                                 .into_err()
                                 .details("Message no longer exists.")
                                 .caused_by(trc::location!())
-                                .ctx(trc::Key::QueueId, params.u64(0))
+                                .ctx(trc::Key::QueueId, queue_id)
                         })?,
                     )
                     .and_then(|archive| archive.deserialize::<Message>())
                     .caused_by(trc::location!())?;
 
-                    let new_message_ =
-                        <Archive<AlignedBytes> as Deserialize>::deserialize(params.bytes(2))
-                            .caused_by(trc::location!())?;
-                    let new_message = new_message_
-                        .unarchive::<Message>()
-                        .caused_by(trc::location!())?;
-
-                    if cur_message.blob_hash.as_slice() == new_message.blob_hash.0.as_slice()
+                    if cur_message.blob_hash.as_slice() == new_message.blob_hash.as_slice()
                         && cur_message.recipients.len() == new_message.recipients.len()
                     {
-                        let queue_name = params.bytes(1);
                         for (rcpt_idx, rcpt) in new_message
                             .recipients
                             .iter()
                             .enumerate()
-                            .filter(|(_, rcpt)| rcpt.queue.as_slice() == queue_name)
+                            .filter(|(_, rcpt)| rcpt.queue == queue_name)
                         {
-                            cur_message.recipients[rcpt_idx] =
-                                rkyv_deserialize(rcpt).caused_by(trc::location!())?;
+                            cur_message.recipients[rcpt_idx] = rcpt.clone();
                         }
 
                         Archiver::new(cur_message)
@@ -744,11 +721,23 @@ impl MessageWrapper {
                             .into_err()
                             .details("Message blob hash or recipient count mismatch.")
                             .caused_by(trc::location!())
-                            .ctx(trc::Key::QueueId, params.u64(0)))
+                            .ctx(trc::Key::QueueId, queue_id))
                     }
                 },
             );
         } else {
+            let message_bytes = match Archiver::new(self.message).serialize() {
+                Ok(data) => data,
+                Err(err) => {
+                    trc::error!(
+                        err.details("Failed to serialize message.")
+                            .span_id(self.span_id)
+                            .caused_by(trc::location!())
+                    );
+                    return false;
+                }
+            };
+
             batch.set(
                 ValueClass::Queue(QueueClass::Message(self.queue_id)),
                 message_bytes,
@@ -854,60 +843,33 @@ impl MessageWrapper {
             );
         }
 
-        let message_bytes = match Archiver::new(self.message).serialize() {
-            Ok(data) => data,
-            Err(err) => {
-                trc::error!(
-                    err.details("Failed to serialize message.")
-                        .span_id(self.span_id)
-                        .caused_by(trc::location!())
-                );
-                return false;
-            }
-        };
-
-        let mut modified_bytes = Vec::with_capacity(modified_rcpts.len() * U32_LEN);
-        for idx in modified_rcpts {
-            modified_bytes.extend_from_slice(&(idx as u32).to_be_bytes());
-        }
+        let queue_id = self.queue_id;
+        let new_message = self.message;
 
         batch.merge_fnc(
-            ValueClass::Queue(QueueClass::Message(self.queue_id)),
-            Params::with_capacity(3)
-                .with_u64(self.queue_id)
-                .with_bytes(modified_bytes)
-                .with_bytes(message_bytes),
-            |params, _, bytes| {
+            ValueClass::Queue(QueueClass::Message(queue_id)),
+            move |_, bytes| {
                 let mut cur_message = <Archive<AlignedBytes> as Deserialize>::deserialize(
                     bytes.ok_or_else(|| {
                         trc::StoreEvent::NotFound
                             .into_err()
                             .details("Message no longer exists.")
                             .caused_by(trc::location!())
-                            .ctx(trc::Key::QueueId, params.u64(0))
+                            .ctx(trc::Key::QueueId, queue_id)
                     })?,
                 )
                 .and_then(|archive| archive.deserialize::<Message>())
                 .caused_by(trc::location!())?;
 
-                let new_message_ =
-                    <Archive<AlignedBytes> as Deserialize>::deserialize(params.bytes(2))
-                        .caused_by(trc::location!())?;
-                let new_message = new_message_
-                    .unarchive::<Message>()
-                    .caused_by(trc::location!())?;
-
-                if cur_message.blob_hash.as_slice() == new_message.blob_hash.0.as_slice()
+                if cur_message.blob_hash.as_slice() == new_message.blob_hash.as_slice()
                     && cur_message.recipients.len() == new_message.recipients.len()
                 {
-                    cur_message.priority = new_message.priority.to_native();
-                    cur_message.env_id = new_message.env_id.as_ref().map(|v| v.as_ref().into());
+                    cur_message.priority = new_message.priority;
+                    cur_message.env_id = new_message.env_id.clone();
 
-                    for idx in params.bytes(1).chunks_exact(U32_LEN) {
-                        let rcpt_idx = u32::from_be_bytes(idx.try_into().unwrap()) as usize;
+                    for &rcpt_idx in &modified_rcpts {
                         if let Some(rcpt) = new_message.recipients.get(rcpt_idx) {
-                            cur_message.recipients[rcpt_idx] =
-                                rkyv_deserialize(rcpt).caused_by(trc::location!())?;
+                            cur_message.recipients[rcpt_idx] = rcpt.clone();
                         }
                     }
 
@@ -920,7 +882,7 @@ impl MessageWrapper {
                         .into_err()
                         .details("Message blob hash or recipient count mismatch.")
                         .caused_by(trc::location!())
-                        .ctx(trc::Key::QueueId, params.u64(0)))
+                        .ctx(trc::Key::QueueId, queue_id))
                 }
             },
         );

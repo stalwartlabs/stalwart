@@ -17,10 +17,7 @@ use store::{
     IterateParams, Key, U32_LEN, ValueKey,
     ahash::AHashMap,
     rand::Rng,
-    write::{
-        BatchBuilder, IndexPropertyClass, MergeResult, Params, ValueClass,
-        key::DeserializeBigEndian,
-    },
+    write::{BatchBuilder, IndexPropertyClass, MergeResult, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;
 use types::{
@@ -197,13 +194,7 @@ async fn merge_threads(
                                 property: EmailField::Threading.into(),
                                 hash: thread_hash,
                             }),
-                            Params::with_capacity(3)
-                                .with_u64(thread_id as u64)
-                                .with_u64(group_thread_id as u64),
-                            |params, _, bytes| {
-                                let new_thread_id = params.u64(0) as u32;
-                                let old_thread_id = params.u64(1) as u32;
-
+                            move |_, bytes| {
                                 let mut thread_index = bytes
                                     .filter(|v| v.len() > U32_LEN)
                                     .ok_or_else(|| {
@@ -214,7 +205,7 @@ async fn merge_threads(
                                     })?
                                     .to_vec();
 
-                                if thread_index.as_slice().deserialize_be_u32(0)? != old_thread_id {
+                                if thread_index.as_slice().deserialize_be_u32(0)? != group_thread_id {
                                     return Err(
                                         trc::StoreEvent::AssertValueFailed
                                             .into_err()
@@ -223,7 +214,7 @@ async fn merge_threads(
                                     );
                                 }
 
-                                thread_index[0..U32_LEN].copy_from_slice(&new_thread_id.to_be_bytes());
+                                thread_index[0..U32_LEN].copy_from_slice(&thread_id.to_be_bytes());
 
                                 Ok(MergeResult::Update(thread_index))
                             },

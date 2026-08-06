@@ -17,7 +17,7 @@ use std::cmp::Ordering;
 use trc::AddContext;
 
 impl SearchStore {
-    pub async fn query_account(&self, query: SearchQuery) -> trc::Result<Vec<u32>> {
+    pub async fn query_account(&self, mut query: SearchQuery) -> trc::Result<Vec<u32>> {
         // Pre-filter by mask
         if query.mask.is_empty() {
             return Ok(vec![]);
@@ -25,7 +25,20 @@ impl SearchStore {
 
         // If the store does not support FTS, use the internal FTS store
         if let Some(store) = self.internal_fts() {
-            return store.query_account(query).await;
+            let comparators = std::mem::take(&mut query.comparators);
+            let results = store.query_account(query).await?;
+
+            return match results.len().cmp(&1) {
+                Ordering::Equal => Ok(vec![results.min().unwrap()]),
+                Ordering::Less => Ok(vec![]),
+                Ordering::Greater => {
+                    if !comparators.is_empty() {
+                        Ok(QueryResults::new(results, comparators).into_sorted())
+                    } else {
+                        Ok(results.iter().collect())
+                    }
+                }
+            };
         }
 
         // If all filters and comparators are external, delegate to the underlying store
@@ -144,10 +157,6 @@ impl SearchStore {
     }
 
     pub async fn query_global(&self, query: SearchQuery) -> trc::Result<RoaringTreemap> {
-        debug_assert!(
-            query.mask.is_empty() && query.comparators.is_empty(),
-            "global queries ignore mask and comparators"
-        );
         match self {
             #[cfg(feature = "postgres")]
             SearchStore::PostgreSQL(store) => store.query(query.index, &query.filters).await,

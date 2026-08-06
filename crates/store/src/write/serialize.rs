@@ -492,6 +492,14 @@ where
     })
 }
 
+pub struct RawValue(pub Vec<u8>);
+
+impl Deserialize for RawValue {
+    fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
+        Ok(RawValue(bytes.to_vec()))
+    }
+}
+
 impl SerializeInfallible for u32 {
     fn serialize(&self) -> Vec<u8> {
         self.to_be_bytes().to_vec()

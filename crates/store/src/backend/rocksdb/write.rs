@@ -196,13 +196,12 @@ impl RocksDBTransaction<'_, '_> {
                             txn.put_cf(&cf, &key, value)?;
                         }
                         ValueOp::SetFnc(set_op) => {
-                            let value = (set_op.fnc)(&set_op.params, &result)?;
+                            let value = (set_op.0)(&result)?;
 
                             txn.put_cf(&cf, &key, value)?;
                         }
                         ValueOp::MergeFnc(merge_op) => {
-                            let merge_result = (merge_op.fnc)(
-                                &merge_op.params,
+                            let merge_result = (merge_op.0)(
                                 &result,
                                 txn.get_pinned_for_update_cf(&cf, &key, true)?.as_deref(),
                             )?;

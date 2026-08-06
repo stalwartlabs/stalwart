@@ -372,22 +372,14 @@ impl ValueClass {
                     account_id,
                     field,
                     term,
-                    first_document_id,
+                    block_id,
                 } => serializer
                     .write(SearchIndexClass::TYPE_TERM | index.to_u8())
                     .write(*account_id)
                     .write(*field)
                     .write(term.as_key())
                     .write(term.len() as u8)
-                    .write(*first_document_id),
-                SearchIndexClass::Wal {
-                    index,
-                    account_id,
-                    id,
-                } => serializer
-                    .write(SearchIndexClass::TYPE_WAL | index.to_u8())
-                    .write(*account_id)
-                    .write(*id),
+                    .write(*block_id),
                 SearchIndexClass::Document {
                     index,
                     account_id,
@@ -396,29 +388,23 @@ impl ValueClass {
                     .write(SearchIndexClass::TYPE_DOCUMENT | index.to_u8())
                     .write(*account_id)
                     .write(*document_id),
-                SearchIndexClass::Meta { index, account_id } => serializer
-                    .write(SearchIndexClass::TYPE_META | index.to_u8())
-                    .write(*account_id),
                 SearchIndexClass::GlobalTerm {
                     index,
                     field,
                     term,
-                    first_document_id,
+                    block_id,
                 } => serializer
-                    .write(SearchIndexClass::TYPE_GLOBAL_TERM | index.to_u8())
+                    .write(SearchIndexClass::TYPE_TERM | index.to_u8())
                     .write(*field)
                     .write(term.as_key())
                     .write(term.len() as u8)
-                    .write(*first_document_id),
-                SearchIndexClass::GlobalWal { index, id } => serializer
-                    .write(SearchIndexClass::TYPE_GLOBAL_WAL | index.to_u8())
-                    .write(*id),
+                    .write(*block_id),
                 SearchIndexClass::GlobalDocument { index, document_id } => serializer
-                    .write(SearchIndexClass::TYPE_GLOBAL_DOCUMENT | index.to_u8())
+                    .write(SearchIndexClass::TYPE_DOCUMENT | index.to_u8())
                     .write(*document_id),
-                SearchIndexClass::GlobalMeta { index, kind } => serializer
-                    .write(SearchIndexClass::TYPE_GLOBAL_META | index.to_u8())
-                    .write(*kind),
+                SearchIndexClass::GlobalDocumentId { index, block_id } => serializer
+                    .write(SearchIndexClass::TYPE_DOCUMENT_ID | index.to_u8())
+                    .write(*block_id),
             },
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
         }
@@ -530,14 +516,11 @@ impl ValueClass {
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
             ValueClass::NodeId(_) => (U16_LEN * 3) + 1,
             ValueClass::SearchIndex(v) => match v {
-                SearchIndexClass::Term { term, .. } => U32_LEN * 2 + term.key_len() + 3,
-                SearchIndexClass::Wal { .. } => U32_LEN + U64_LEN + 1,
+                SearchIndexClass::Term { term, .. } => U32_LEN + term.key_len() + 4,
                 SearchIndexClass::Document { .. } => U32_LEN * 2 + 1,
-                SearchIndexClass::Meta { .. } => U32_LEN + 1,
-                SearchIndexClass::GlobalTerm { term, .. } => U64_LEN + term.key_len() + 3,
-                SearchIndexClass::GlobalWal { .. } => U64_LEN + 1,
+                SearchIndexClass::GlobalTerm { term, .. } => term.key_len() + U16_LEN + 3,
                 SearchIndexClass::GlobalDocument { .. } => U64_LEN + 1,
-                SearchIndexClass::GlobalMeta { .. } => 2,
+                SearchIndexClass::GlobalDocumentId { .. } => U16_LEN + 1,
             },
             ValueClass::Any(v) => v.key.len(),
         }
@@ -640,14 +623,9 @@ impl From<BlobOp> for ValueClass {
 }
 
 impl SearchIndexClass {
-    pub const TYPE_WAL: u8 = 0 << 5;
-    pub const TYPE_TERM: u8 = 1 << 5;
-    pub const TYPE_DOCUMENT: u8 = 2 << 5;
-    pub const TYPE_META: u8 = 3 << 5;
-    pub const TYPE_GLOBAL_WAL: u8 = 4 << 5;
-    pub const TYPE_GLOBAL_TERM: u8 = 5 << 5;
-    pub const TYPE_GLOBAL_DOCUMENT: u8 = 6 << 5;
-    pub const TYPE_GLOBAL_META: u8 = 7 << 5;
+    pub const TYPE_TERM: u8 = 0 << 5;
+    pub const TYPE_DOCUMENT: u8 = 1 << 5;
+    pub const TYPE_DOCUMENT_ID: u8 = 2 << 5;
 }
 
 impl From<SearchIndexClass> for ValueClass {

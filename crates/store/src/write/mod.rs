@@ -32,6 +32,7 @@ pub mod batch;
 pub mod bitpack;
 pub mod blob;
 pub mod key;
+pub mod lazybitmap;
 pub mod log;
 pub mod serialize;
 
@@ -116,6 +117,7 @@ pub struct BatchBuilder {
     batch_size: usize,
     batch_ops: usize,
     commit_points: Vec<usize>,
+    last_archive_hash: Option<u32>,
     ops: Vec<Operation>,
 }
 
@@ -199,39 +201,26 @@ pub enum SearchIndexClass {
         account_id: u32,
         field: u8,
         term: CheekyHash,
-        first_document_id: u32,
-    },
-    Wal {
-        index: SearchIndex,
-        account_id: u32,
-        id: u64,
+        block_id: u8,
     },
     Document {
         index: SearchIndex,
         account_id: u32,
         document_id: u32,
     },
-    Meta {
-        index: SearchIndex,
-        account_id: u32,
-    },
     GlobalTerm {
         index: SearchIndex,
         field: u8,
         term: CheekyHash,
-        first_document_id: u64,
-    },
-    GlobalWal {
-        index: SearchIndex,
-        id: u64,
+        block_id: u16,
     },
     GlobalDocument {
         index: SearchIndex,
         document_id: u64,
     },
-    GlobalMeta {
+    GlobalDocumentId {
         index: SearchIndex,
-        kind: u8,
+        block_id: u16,
     },
 }
 
@@ -333,33 +322,15 @@ pub enum MergeResult {
     Delete,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Param {
-    I64(i64),
-    U64(u64),
-    String(String),
-    Bytes(Vec<u8>),
-    Bool(bool),
-}
+pub type SetFnc = Box<dyn Fn(&AssignedIds) -> trc::Result<Vec<u8>> + Send + Sync>;
+pub type MergeFnc =
+    Box<dyn Fn(&AssignedIds, Option<&[u8]>) -> trc::Result<MergeResult> + Send + Sync>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct Params(Vec<Param>);
+pub struct MergeOperation(pub(crate) MergeFnc);
 
-pub type SetFnc = fn(&Params, &AssignedIds) -> trc::Result<Vec<u8>>;
-pub type MergeFnc = fn(&Params, &AssignedIds, Option<&[u8]>) -> trc::Result<MergeResult>;
-
-#[derive(Debug, Clone)]
-pub struct MergeOperation {
-    pub(crate) fnc: MergeFnc,
-    pub(crate) params: Params,
-}
-
-#[derive(Debug, Clone)]
-pub struct SetOperation {
-    pub(crate) fnc: SetFnc,
-    pub(crate) params: Params,
-}
+#[repr(transparent)]
+pub struct SetOperation(pub(crate) SetFnc);
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum BlobOp {
@@ -561,9 +532,33 @@ impl From<Field> for ValueClass {
     }
 }
 
+impl MergeOperation {
+    fn id(&self) -> usize {
+        &*self.0 as *const _ as *const u8 as usize
+    }
+}
+
+impl SetOperation {
+    fn id(&self) -> usize {
+        &*self.0 as *const _ as *const u8 as usize
+    }
+}
+
+impl std::fmt::Debug for MergeOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("MergeOperation").field(&self.id()).finish()
+    }
+}
+
+impl std::fmt::Debug for SetOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SetOperation").field(&self.id()).finish()
+    }
+}
+
 impl PartialEq for MergeOperation {
     fn eq(&self, other: &Self) -> bool {
-        self.params == other.params
+        self.id() == other.id()
     }
 }
 
@@ -571,7 +566,7 @@ impl Eq for MergeOperation {}
 
 impl PartialEq for SetOperation {
     fn eq(&self, other: &Self) -> bool {
-        self.params == other.params
+        self.id() == other.id()
     }
 }
 
@@ -579,123 +574,12 @@ impl Eq for SetOperation {}
 
 impl Hash for MergeOperation {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.params.hash(state);
+        self.id().hash(state);
     }
 }
 
 impl Hash for SetOperation {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.params.hash(state);
-    }
-}
-
-impl SetOperation {
-    pub fn params(&self) -> &Params {
-        &self.params
-    }
-}
-
-impl MergeOperation {
-    pub fn params(&self) -> &Params {
-        &self.params
-    }
-}
-
-impl Params {
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity))
-    }
-
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    pub fn with_i64(mut self, value: i64) -> Self {
-        self.0.push(Param::I64(value));
-        self
-    }
-
-    pub fn with_u64(mut self, value: u64) -> Self {
-        self.0.push(Param::U64(value));
-        self
-    }
-
-    pub fn with_string(mut self, value: String) -> Self {
-        self.0.push(Param::String(value));
-        self
-    }
-
-    pub fn with_str(mut self, value: &str) -> Self {
-        self.0.push(Param::String(value.to_string()));
-        self
-    }
-
-    pub fn with_bytes(mut self, value: Vec<u8>) -> Self {
-        self.0.push(Param::Bytes(value));
-        self
-    }
-
-    pub fn with_bool(mut self, value: bool) -> Self {
-        self.0.push(Param::Bool(value));
-        self
-    }
-
-    pub fn i64(&self, idx: usize) -> i64 {
-        match &self.0[idx] {
-            Param::I64(v) => *v,
-            _ => panic!("Param at index {} is not an i64", idx),
-        }
-    }
-
-    pub fn u64(&self, idx: usize) -> u64 {
-        match &self.0[idx] {
-            Param::U64(v) => *v,
-            _ => panic!("Param at index {} is not a u64", idx),
-        }
-    }
-
-    pub fn string(&self, idx: usize) -> &str {
-        match &self.0[idx] {
-            Param::String(v) => v.as_str(),
-            _ => panic!("Param at index {} is not a String", idx),
-        }
-    }
-
-    pub fn bytes(&self, idx: usize) -> &[u8] {
-        match &self.0[idx] {
-            Param::Bytes(v) => v.as_slice(),
-            _ => panic!("Param at index {} is not Bytes", idx),
-        }
-    }
-
-    pub fn bool(&self, idx: usize) -> bool {
-        match &self.0[idx] {
-            Param::Bool(v) => *v,
-            _ => panic!("Param at index {} is not a bool", idx),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn as_slice(&self) -> &[Param] {
-        &self.0
-    }
-}
-
-impl Default for Params {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AsRef<[Param]> for Params {
-    fn as_ref(&self) -> &[Param] {
-        &self.0
+        self.id().hash(state);
     }
 }

@@ -95,7 +95,7 @@ impl SqliteStore {
                                 }
                             }
                             ValueOp::SetFnc(set_op) => {
-                                let value = (set_op.fnc)(&set_op.params, &result)?;
+                                let value = (set_op.0)(&result)?;
                                 trx.prepare_cached(&format!(
                                     "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
                                     table
@@ -112,18 +112,12 @@ impl SqliteStore {
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?
                                     .query_row([&key], |row| {
-                                        Ok((merge_op.fnc)(
-                                            &merge_op.params,
-                                            &result,
-                                            Some(row.get_ref(0)?.as_bytes()?),
-                                        ))
+                                        Ok((merge_op.0)(&result, Some(row.get_ref(0)?.as_bytes()?)))
                                     })
                                     .optional()
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?
-                                    .unwrap_or_else(|| {
-                                        (merge_op.fnc)(&merge_op.params, &result, None)
-                                    })?;
+                                    .unwrap_or_else(|| (merge_op.0)(&result, None))?;
 
                                 match merge_result {
                                     MergeResult::Update(value) => {

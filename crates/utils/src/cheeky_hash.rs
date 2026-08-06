@@ -26,6 +26,8 @@ pub type CheekyBTreeMap<V> = BTreeMap<CheekyHash, V>;
 
 impl CheekyHash {
     pub const HASH_SIZE: usize = HASH_SIZE;
+    pub const EMPTY: CheekyHash = CheekyHash([0u8; HASH_SIZE + 1]);
+    pub const FULL: CheekyHash = CheekyHash([u8::MAX; HASH_SIZE + 1]);
 
     pub fn new(bytes: impl AsRef<[u8]>) -> Self {
         let bytes = bytes.as_ref();

@@ -30,10 +30,9 @@ use groupware::{
 };
 use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
-use store::write::{AlignedBytes, Archive, BatchBuilder, Operation, ValueClass, ValueOp};
+use store::write::{AlignedBytes, Archive, BatchBuilder};
 use types::{
     TimeRange, acl::ArchivedAclGrant, collection::Collection, dead_property::ArchivedDeadProperty,
-    field::Field,
 };
 use uri::{OwnedUri, Urn};
 
@@ -113,28 +112,7 @@ impl<T> ETag for Archive<T> {
 
 impl ExtractETag for BatchBuilder {
     fn etag(&self) -> Option<String> {
-        let p_value = u8::from(Field::ARCHIVE);
-        for op in self.ops().iter().rev() {
-            match op {
-                Operation::Value {
-                    class: ValueClass::Property(p_id),
-                    op: ValueOp::Set(value),
-                } if *p_id == p_value => {
-                    return Archive::<AlignedBytes>::extract_hash(value)
-                        .map(|hash| format!("\"{}\"", hash));
-                }
-                Operation::Value {
-                    class: ValueClass::Property(p_id),
-                    op: ValueOp::SetFnc(set_fnc),
-                } if *p_id == p_value => {
-                    return Archive::<AlignedBytes>::extract_hash(set_fnc.params().bytes(0))
-                        .map(|hash| format!("\"{}\"", hash));
-                }
-                _ => {}
-            }
-        }
-
-        None
+        self.last_archive_hash().map(|hash| format!("\"{}\"", hash))
     }
 }
 

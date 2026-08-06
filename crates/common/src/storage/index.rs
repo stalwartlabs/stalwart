@@ -18,8 +18,8 @@ use std::{borrow::Cow, fmt::Debug};
 use store::{
     Serialize, SerializeInfallible,
     write::{
-        Archive, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations, Params, SearchIndex,
-        ValueClass,
+        AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations,
+        SearchIndex, ValueClass,
     },
 };
 use types::{
@@ -300,24 +300,24 @@ pub trait SerializableObject: IndexableObject {
 impl<T: IndexableAndSerializableObject> SerializableObject for T {
     fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()> {
         if T::is_versioned() {
-            let (offset, bytes) = Archiver::new(self).serialize_versioned()?;
-            batch.set_fnc(
-                Field::ARCHIVE,
-                Params::with_capacity(2).with_bytes(bytes).with_u64(offset),
-                |params, ids| {
+            let (offset, archive) = Archiver::new(self).serialize_versioned()?;
+            batch
+                .set_archive_hash(Archive::<AlignedBytes>::extract_hash(&archive))
+                .set_fnc(Field::ARCHIVE, move |ids| {
                     let change_id = ids.current_change_id()?;
-                    let archive = params.bytes(0);
-                    let offset = params.u64(1);
+                    let offset = offset as usize;
 
                     let mut bytes = Vec::with_capacity(archive.len());
-                    bytes.extend_from_slice(&archive[..offset as usize]);
+                    bytes.extend_from_slice(&archive[..offset]);
                     bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
                     bytes.push(archive.last().copied().unwrap()); // Marker
                     Ok(bytes)
-                },
-            );
+                });
         } else {
-            batch.set(Field::ARCHIVE, Archiver::new(self).serialize()?);
+            let archive = Archiver::new(self).serialize()?;
+            batch
+                .set_archive_hash(Archive::<AlignedBytes>::extract_hash(&archive))
+                .set(Field::ARCHIVE, archive);
         }
 
         Ok(())

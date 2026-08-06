@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-pub(crate) mod account;
 pub(crate) mod codec;
 pub mod document;
 pub mod fields;
-pub(crate) mod global;
 pub mod index;
 pub mod local;
-pub mod maintain;
+pub mod query;
 pub mod split;
+pub(crate) mod term;
 pub(crate) mod tokenize;
 
 use crate::write::SearchIndex;
@@ -23,6 +22,15 @@ use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign};
 use utils::map::vec_map::VecMap;
+
+pub(crate) const GLOBAL_BUCKET_BITS: u32 = 16;
+pub(crate) const GLOBAL_BUCKET_SHIFT: u32 = u64::BITS - GLOBAL_BUCKET_BITS;
+pub(crate) const ACCOUNT_BLOCK_SHIFT: u32 = 16;
+pub(crate) const MAX_DOCUMENT_TOKENS: usize = 100_000;
+
+pub(crate) const fn account_block_id(document_id: u32) -> u8 {
+    (document_id >> ACCOUNT_BLOCK_SHIFT) as u8
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SearchField {
@@ -293,7 +301,7 @@ impl SearchIndex {
 }
 
 impl SearchField {
-    pub(crate) fn u8_id(&self) -> u8 {
+    pub(crate) const fn u8_id(&self) -> u8 {
         match self {
             SearchField::AccountId => 0,
             SearchField::DocumentId => 1,

@@ -85,21 +85,6 @@ impl FdbStore {
 
                         match op {
                             ValueOp::Set(value) => {
-                                if matches!(
-                                    class,
-                                    ValueClass::SearchIndex(SearchIndexClass::Document { .. })
-                                ) {
-                                    trx.clear_range(
-                                        &KeySerializer::new(key.len() + 1)
-                                            .write(key.as_slice())
-                                            .write(0u8)
-                                            .finalize(),
-                                        &KeySerializer::new(key.len() + 1)
-                                            .write(key.as_slice())
-                                            .write(u8::MAX)
-                                            .finalize(),
-                                    );
-                                }
                                 if !chunk_value(&trx, &mut key, value) {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
@@ -107,7 +92,7 @@ impl FdbStore {
                                 }
                             }
                             ValueOp::SetFnc(set_op) => {
-                                let value = (set_op.fnc)(&set_op.params, &result)?;
+                                let value = (set_op.0)(&result)?;
                                 if !chunk_value(&trx, &mut key, &value) {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
@@ -121,26 +106,13 @@ impl FdbStore {
                                         .map_err(into_error)
                                         .caused_by(trc::location!())?
                                     {
-                                        ChunkedValue::Single(slice) => (
-                                            (merge_op.fnc)(
-                                                &merge_op.params,
-                                                &result,
-                                                Some(slice.as_ref()),
-                                            )?,
-                                            false,
-                                        ),
-                                        ChunkedValue::Chunked { bytes, .. } => (
-                                            (merge_op.fnc)(
-                                                &merge_op.params,
-                                                &result,
-                                                Some(bytes.as_ref()),
-                                            )?,
-                                            true,
-                                        ),
-                                        ChunkedValue::None => (
-                                            (merge_op.fnc)(&merge_op.params, &result, None)?,
-                                            false,
-                                        ),
+                                        ChunkedValue::Single(slice) => {
+                                            ((merge_op.0)(&result, Some(slice.as_ref()))?, false)
+                                        }
+                                        ChunkedValue::Chunked { bytes, .. } => {
+                                            ((merge_op.0)(&result, Some(bytes.as_ref()))?, true)
+                                        }
+                                        ChunkedValue::None => ((merge_op.0)(&result, None)?, false),
                                     };
 
                                 match merge_result {
