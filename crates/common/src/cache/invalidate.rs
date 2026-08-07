@@ -113,6 +113,7 @@ impl CacheInvalidationBuilder {
 
             (ObjectInner::Domain(current), ObjectInner::Domain(new)) => {
                 if (current.name != new.name)
+                    || (current.aliases != new.aliases)
                     || (current.directory_id != new.directory_id)
                     || (current.member_tenant_id != new.member_tenant_id)
                     || (current.catch_all_address != new.catch_all_address)

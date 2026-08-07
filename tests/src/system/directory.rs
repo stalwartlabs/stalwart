@@ -60,6 +60,16 @@ pub async fn test(test: &TestServer) {
         Some("catchy@example.com")
     );
 
+    // Cold lookup by alias alone must resolve (not only after primary name is cached)
+    test.server.invalidate_all_local_caches();
+    let alias_domain = test
+        .server
+        .domain("beispiel.de")
+        .await
+        .unwrap()
+        .expect("domain alias must resolve without warming primary name cache");
+    assert_eq!(alias_domain.id, domain_id.document_id());
+
     // Multiple domains with the same name should not be allowed
     account
         .registry_create_object_expect_err(Domain {
