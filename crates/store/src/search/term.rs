@@ -7,10 +7,10 @@
 use crate::{
     Deserialize, Serialize, U32_LEN,
     search::{
-        EmailSearchField, GLOBAL_BUCKET_SHIFT, IndexDocument, MAX_DOCUMENT_TOKENS, SearchField,
-        SearchValue, account_block_id,
+        ACCOUNT_BLOCK_SHIFT, EmailSearchField, GLOBAL_BUCKET_SHIFT, IndexDocument,
+        MAX_DOCUMENT_SIZE, SearchField, SearchValue,
         codec::{self},
-        tokenize::{integer_term, key_value_term, stem_term, tokenize},
+        tokenize::{integer_term, key_value_term, stem_term, tokenize, zigzag},
     },
     write::{
         BatchBuilder, MergeResult, SearchIndex, SearchIndexClass,
@@ -40,7 +40,12 @@ pub(crate) struct GlobalIndexer {
 pub(crate) struct Document {
     pub terms: IndexMap<CheekyHash, Term, nohash_hasher::BuildNoHashHasher<u64>>,
     pub fields: IndexMap<u8, Vec<u32>, ahash::RandomState>,
+    size: usize,
 }
+
+const TERM_OVERHEAD: usize = 4;
+const POSITION_SIZE: usize = 3;
+const FIELD_OVERHEAD: usize = 5;
 
 #[derive(Default)]
 pub(crate) struct Term {
@@ -48,88 +53,107 @@ pub(crate) struct Term {
     field_mask: u32,
 }
 
-fn field_priority(field: &SearchField) -> u16 {
-    match field {
-        SearchField::Email(EmailSearchField::Body) => u16::MAX - 1,
-        SearchField::Email(EmailSearchField::Attachment) => u16::MAX,
-        field => field.u8_id() as u16,
-    }
-}
-
 impl AccountIndexer {
     pub fn insert(&mut self, index_document: IndexDocument, document_id: u32) {
         let mut document = Document::default();
         let mut buf = String::new();
-        let mut token_budget = MAX_DOCUMENT_TOKENS;
-        let mut fields = index_document.fields.into_iter().collect::<Vec<_>>();
-        fields.sort_unstable_by_key(|(field, _)| field_priority(field));
+        let mut body = None;
+        let mut attach = None;
 
-        for (field, value) in fields {
-            if matches!(field, SearchField::AccountId | SearchField::DocumentId) {
-                continue;
-            }
-
-            let field_id = field.u8_id();
-
-            match value {
-                SearchValue::Text { value, language } => {
-                    let add_position = language != Language::None;
-                    tokenize(&value, language, |token| {
-                        if token_budget == 0 {
-                            return false;
-                        }
-                        token_budget -= 1;
-                        let term = CheekyHash::new(token.word.as_bytes());
-                        self.add_term(document_id, term, field_id);
-                        document.add_term(term, field_id, add_position);
-                        if let Some(stem) = token.stem {
-                            let term = stem_term(&stem, &mut buf);
-                            self.add_term(document_id, term, field_id);
-                            document.add_term(term, field_id, false);
-                        }
-                        true
-                    });
+        for (field, value) in &index_document.fields {
+            match field {
+                SearchField::AccountId | SearchField::DocumentId => {}
+                SearchField::Email(EmailSearchField::Body) => {
+                    body = Some((field.u8_id(), value));
                 }
-                SearchValue::KeyValues(map) => {
-                    for (key, value) in map {
-                        let term = CheekyHash::new(key.as_bytes());
-                        self.add_term(document_id, term, field_id);
-                        document.add_term(term, field_id, false);
-                        tokenize(&value, Language::None, |token| {
-                            if token_budget == 0 {
-                                return false;
-                            }
-                            token_budget -= 1;
-                            let term = key_value_term(&key, &token.word, &mut buf);
-                            self.add_term(document_id, term, field_id);
-                            document.add_term(term, field_id, false);
-                            true
-                        });
-                    }
+                SearchField::Email(EmailSearchField::Attachment) => {
+                    attach = Some((field.u8_id(), value));
                 }
-                SearchValue::Int(v) => {
-                    let term = integer_term(((v << 1) ^ (v >> 63)) as u64);
-                    self.add_term(document_id, term, field_id);
-                    document.add_term(term, field_id, false);
-                }
-                SearchValue::Uint(v) => {
-                    let term = integer_term(v);
-                    self.add_term(document_id, term, field_id);
-                    document.add_term(term, field_id, false);
-                }
-                SearchValue::Boolean(v) => {
-                    let term = CheekyHash::new([v as u8]);
-                    self.add_term(document_id, term, field_id);
-                    document.add_term(term, field_id, false);
+                _ => {
+                    self.insert_value(&mut document, &mut buf, document_id, field.u8_id(), value);
                 }
             }
+        }
+
+        if let Some((field_id, value)) = body {
+            self.insert_value(&mut document, &mut buf, document_id, field_id, value);
+        }
+
+        if let Some((field_id, value)) = attach {
+            self.insert_value(&mut document, &mut buf, document_id, field_id, value);
         }
 
         self.documents.insert(document_id, Some(document));
     }
 
+    fn insert_value(
+        &mut self,
+        document: &mut Document,
+        buf: &mut String,
+        document_id: u32,
+        field_id: u8,
+        value: &SearchValue,
+    ) {
+        match value {
+            SearchValue::Text { value, language } => {
+                let language = *language;
+                let add_position = language != Language::None;
+                tokenize(value, language, |token| {
+                    let term = CheekyHash::new(token.word.as_bytes());
+                    if !document.add_term(term, field_id, add_position) {
+                        return false;
+                    }
+                    self.add_term(document_id, term, field_id);
+                    if let Some(stem) = token.stem {
+                        let term = stem_term(&stem, buf);
+                        if !document.add_term(term, field_id, false) {
+                            return false;
+                        }
+                        self.add_term(document_id, term, field_id);
+                    }
+                    true
+                });
+            }
+            SearchValue::KeyValues(map) => {
+                for (key, value) in map {
+                    let term = CheekyHash::new(key.as_bytes());
+                    if !document.add_term(term, field_id, false) {
+                        break;
+                    }
+                    self.add_term(document_id, term, field_id);
+                    tokenize(value, Language::None, |token| {
+                        let term = key_value_term(key, &token.word, buf);
+                        if !document.add_term(term, field_id, false) {
+                            return false;
+                        }
+                        self.add_term(document_id, term, field_id);
+                        true
+                    });
+                }
+            }
+            SearchValue::Int(v) => {
+                let term = integer_term(zigzag(*v));
+                if document.add_term(term, field_id, false) {
+                    self.add_term(document_id, term, field_id);
+                }
+            }
+            SearchValue::Uint(v) => {
+                let term = integer_term(*v);
+                if document.add_term(term, field_id, false) {
+                    self.add_term(document_id, term, field_id);
+                }
+            }
+            SearchValue::Boolean(v) => {
+                let term = CheekyHash::new([*v as u8]);
+                if document.add_term(term, field_id, false) {
+                    self.add_term(document_id, term, field_id);
+                }
+            }
+        }
+    }
+
     pub fn diff(&mut self, current_document: &[u8], document_id: u32) -> trc::Result<()> {
-        let block_id = account_block_id(document_id);
+        let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u8;
         deserialize_term_fields(current_document, |term_hash, mut field_mask| {
             let fields = self.terms.entry(term_hash).or_default();
             while field_mask != 0 {
@@ -151,7 +175,7 @@ impl AccountIndexer {
     pub fn remove(&mut self, current_document: &[u8], document_id: u32) -> trc::Result<()> {
         self.documents.insert(document_id, None);
 
-        let block_id = account_block_id(document_id);
+        let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u8;
         deserialize_term_fields(current_document, |term_hash, mut field_mask| {
             while field_mask != 0 {
                 let item = 31 - field_mask.leading_zeros();
@@ -175,7 +199,7 @@ impl AccountIndexer {
             .or_default()
             .entry(field_id)
             .or_default()
-            .entry(account_block_id(document_id))
+            .entry((document_id >> ACCOUNT_BLOCK_SHIFT) as u8)
             .or_default()
             .insert(document_id, true);
     }
@@ -298,38 +322,47 @@ impl GlobalIndexer {
                 SearchValue::Text { value, language } => {
                     tokenize(&value, language, |token| {
                         let term = CheekyHash::new(token.word.as_bytes());
+                        if !document.add_term(term, field_id, false) {
+                            return false;
+                        }
                         self.add_term(document_id, term, field_id);
-                        document.add_term(term, field_id, false);
                         true
                     });
                 }
                 SearchValue::KeyValues(map) => {
                     for (key, value) in map {
                         let term = CheekyHash::new(key.as_bytes());
+                        if !document.add_term(term, field_id, false) {
+                            break;
+                        }
                         self.add_term(document_id, term, field_id);
-                        document.add_term(term, field_id, false);
                         tokenize(&value, Language::None, |token| {
                             let term = key_value_term(&key, &token.word, &mut buf);
+                            if !document.add_term(term, field_id, false) {
+                                return false;
+                            }
                             self.add_term(document_id, term, field_id);
-                            document.add_term(term, field_id, false);
                             true
                         });
                     }
                 }
                 SearchValue::Int(v) => {
-                    let term = integer_term(((v << 1) ^ (v >> 63)) as u64);
-                    self.add_term(document_id, term, field_id);
-                    document.add_term(term, field_id, false);
+                    let term = integer_term(zigzag(v));
+                    if document.add_term(term, field_id, false) {
+                        self.add_term(document_id, term, field_id);
+                    }
                 }
                 SearchValue::Uint(v) => {
                     let term = integer_term(v);
-                    self.add_term(document_id, term, field_id);
-                    document.add_term(term, field_id, false);
+                    if document.add_term(term, field_id, false) {
+                        self.add_term(document_id, term, field_id);
+                    }
                 }
                 SearchValue::Boolean(v) => {
                     let term = CheekyHash::new([v as u8]);
-                    self.add_term(document_id, term, field_id);
-                    document.add_term(term, field_id, false);
+                    if document.add_term(term, field_id, false) {
+                        self.add_term(document_id, term, field_id);
+                    }
                 }
             }
         }
@@ -428,16 +461,35 @@ impl GlobalIndexer {
 }
 
 impl Document {
-    fn add_term(&mut self, term: CheekyHash, field_id: u8, add_position: bool) {
+    fn add_term(&mut self, term: CheekyHash, field_id: u8, add_position: bool) -> bool {
+        let mut cost = if add_position {
+            POSITION_SIZE
+                + if self.fields.contains_key(&field_id) {
+                    0
+                } else {
+                    FIELD_OVERHEAD
+                }
+        } else {
+            0
+        };
+
         let field_mask = 1 << field_id;
         let term_id = self.terms.len() as u32;
         let term_id = match self.terms.entry(term) {
             Entry::Occupied(entry) => {
+                if self.size + cost > MAX_DOCUMENT_SIZE {
+                    return false;
+                }
                 let term = entry.into_mut();
                 term.field_mask |= field_mask;
                 term.id
             }
             Entry::Vacant(entry) => {
+                cost += term.key_len() + TERM_OVERHEAD;
+                if self.size + cost > MAX_DOCUMENT_SIZE {
+                    return false;
+                }
+
                 entry.insert(Term {
                     id: term_id,
                     field_mask,
@@ -445,9 +497,14 @@ impl Document {
                 term_id
             }
         };
+
+        self.size += cost;
+
         if add_position {
             self.fields.entry(field_id).or_default().push(term_id);
         }
+
+        true
     }
 }
 

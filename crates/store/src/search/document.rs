@@ -171,6 +171,14 @@ impl SearchFilter {
         }
     }
 
+    pub fn signed_eq(field: impl Into<SearchField>, value: impl Into<i64>) -> Self {
+        SearchFilter::Integer {
+            field: field.into(),
+            op: Ordering::Equal,
+            value: crate::search::tokenize::zigzag(value.into()),
+        }
+    }
+
     pub fn integer_gt(field: impl Into<SearchField>, value: impl Into<u64>) -> Self {
         SearchFilter::Integer {
             field: field.into(),

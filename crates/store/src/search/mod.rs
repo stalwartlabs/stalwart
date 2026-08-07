@@ -26,11 +26,7 @@ use utils::map::vec_map::VecMap;
 pub(crate) const GLOBAL_BUCKET_BITS: u32 = 16;
 pub(crate) const GLOBAL_BUCKET_SHIFT: u32 = u64::BITS - GLOBAL_BUCKET_BITS;
 pub(crate) const ACCOUNT_BLOCK_SHIFT: u32 = 16;
-pub(crate) const MAX_DOCUMENT_TOKENS: usize = 100_000;
-
-pub(crate) const fn account_block_id(document_id: u32) -> u8 {
-    (document_id >> ACCOUNT_BLOCK_SHIFT) as u8
-}
+pub(crate) const MAX_DOCUMENT_SIZE: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SearchField {

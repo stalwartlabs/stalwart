@@ -841,8 +841,7 @@ async fn test_phrase_positions(store: &SearchStore) {
             "phrase exceeds repetitions",
         ),
     ] {
-        if (store.is_meilisearch() || store.is_mysql()) && context == "phrase exceeds repetitions"
-        {
+        if (store.is_meilisearch() || store.is_mysql()) && context == "phrase exceeds repetitions" {
             continue;
         }
         let results = store
@@ -1037,6 +1036,7 @@ async fn test_incremental(store: &SearchStore, caps: &Caps) {
     document.index_text(EmailSearchField::From, "alicecorp", Language::None);
     document.index_unsigned(EmailSearchField::To, 2020u64);
     document.index_bool(EmailSearchField::Cc, true);
+    document.index_integer(EmailSearchField::Bcc, -42i64);
     store.index(vec![document]).await.unwrap();
 
     assert_query(
@@ -1075,6 +1075,22 @@ async fn test_incremental(store: &SearchStore, caps: &Caps) {
         mask.clone(),
         &[20],
         "boolean roundtrip",
+    )
+    .await;
+    assert_query(
+        store,
+        vec![SearchFilter::signed_eq(EmailSearchField::Bcc, -42i64)],
+        mask.clone(),
+        &[20],
+        "signed integer roundtrip",
+    )
+    .await;
+    assert_query(
+        store,
+        vec![SearchFilter::signed_eq(EmailSearchField::Bcc, 42i64)],
+        mask.clone(),
+        &[],
+        "signed integer sign mismatch",
     )
     .await;
 
