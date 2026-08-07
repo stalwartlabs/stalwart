@@ -351,6 +351,17 @@ pub(super) async fn fetch_jwks_keys(
                 );
                 continue;
             }
+            _ => {
+                trc::event!(
+                    Auth(AuthEvent::Warning),
+                    Url = jwks_uri.to_string(),
+                    Reason = format!(
+                        "Unrecognised key type in JWKS (kid={:?}), skipping",
+                        key.common.key_id
+                    )
+                );
+                continue;
+            }
         };
 
         let decoding_key = match DecodingKey::from_jwk(key) {

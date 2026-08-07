@@ -98,7 +98,7 @@ impl JmapEmailCopy for Server {
             for (property, value) in create.into_expanded_object() {
                 match (property, value) {
                     (Key::Property(EmailProperty::Id), Value::Element(EmailValue::Id(src))) => {
-                        from_message_id = Some(src.document_id());
+                        from_message_id = Some(src);
                     }
                     (Key::Property(EmailProperty::MailboxIds), Value::Object(ids)) => {
                         mailboxes = ids
@@ -165,7 +165,7 @@ impl JmapEmailCopy for Server {
                 );
                 continue 'create;
             };
-            if !from_message_ids.contains(from_message_id) {
+            if !from_message_ids.contains(from_message_id.document_id()) {
                 response.not_created.append(
                     id,
                     SetError::not_found().with_description(format!(
@@ -212,7 +212,7 @@ impl JmapEmailCopy for Server {
             match self
                 .copy_message(
                     from_account_id,
-                    from_message_id,
+                    from_message_id.document_id(),
                     account_id,
                     mailboxes,
                     keywords,
@@ -220,7 +220,7 @@ impl JmapEmailCopy for Server {
                         .map(|dt| dt.timestamp() as u64)
                         .unwrap_or_else(|| {
                             from_cache
-                                .email_by_id(&from_message_id)
+                                .email_by_id(&from_message_id.document_id())
                                 .map(|v| v.received_at)
                                 .unwrap_or_else(now)
                         }),
@@ -240,6 +240,8 @@ impl JmapEmailCopy for Server {
                             CopyMessageError::NotFound => SetError::not_found()
                                 .with_description("Message not found in account."),
                             CopyMessageError::OverQuota => SetError::over_quota(),
+                            CopyMessageError::AlreadyExists(existing) => SetError::already_exists()
+                                .with_existing_id(types::id::Id::from(existing)),
                         },
                     );
                 }
@@ -247,7 +249,7 @@ impl JmapEmailCopy for Server {
 
             // Add to destroy list
             if on_success_delete {
-                destroy_ids.push(MaybeInvalid::Value(id));
+                destroy_ids.push(MaybeInvalid::Value(from_message_id));
             }
         }
 

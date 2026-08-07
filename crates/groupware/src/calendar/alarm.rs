@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Alarm, AlarmDelta, ArchivedAlarmDelta, ArchivedCalendarEventData};
+use super::{
+    Alarm, AlarmDelta, ArchivedAlarmDelta, ArchivedCalendarEventData, expand::resolve_local,
+};
 use calcard::{
     common::timezone::Tz,
     icalendar::{
@@ -12,7 +14,6 @@ use calcard::{
         ICalendarRelated, ICalendarValue,
     },
 };
-use chrono::{DateTime, TimeZone};
 use std::str::FromStr;
 use store::write::bitpack::BitpackIterator;
 use utils::codec::leb128::Leb128Reader;
@@ -74,18 +75,12 @@ impl ArchivedCalendarEventData {
                 for start_offset in unpacker {
                     let start_date_naive = start_offset as i64 + base_offset;
                     let end_date_naive = start_date_naive + duration;
-                    let start = start_tz
-                        .from_local_datetime(
-                            &DateTime::from_timestamp(start_date_naive, 0)?.naive_local(),
-                        )
-                        .single()?
-                        .timestamp();
-                    let end = end_tz
-                        .from_local_datetime(
-                            &DateTime::from_timestamp(end_date_naive, 0)?.naive_local(),
-                        )
-                        .single()?
-                        .timestamp();
+                    let (Some(start), Some(end)) = (
+                        resolve_local(start_tz, start_date_naive),
+                        resolve_local(end_tz, end_date_naive),
+                    ) else {
+                        continue;
+                    };
 
                     if let Some(alarm_time) = alarm.delta.to_timestamp(start, end, default_tz)
                         && alarm_time > start_time
@@ -124,18 +119,12 @@ impl ArchivedCalendarEventData {
                 // Single event
                 let start_date_naive = offset_or_count as i64 + base_offset;
                 let end_date_naive = start_date_naive + duration;
-                let start = start_tz
-                    .from_local_datetime(
-                        &DateTime::from_timestamp(start_date_naive, 0)?.naive_local(),
-                    )
-                    .single()?
-                    .timestamp();
-                let end = end_tz
-                    .from_local_datetime(
-                        &DateTime::from_timestamp(end_date_naive, 0)?.naive_local(),
-                    )
-                    .single()?
-                    .timestamp();
+                let (Some(start), Some(end)) = (
+                    resolve_local(start_tz, start_date_naive),
+                    resolve_local(end_tz, end_date_naive),
+                ) else {
+                    continue;
+                };
 
                 if let Some(alarm_time) = alarm.delta.to_timestamp(start, end, default_tz)
                     && alarm_time > start_time
@@ -265,10 +254,7 @@ impl AlarmDelta {
             AlarmDelta::Start(delta) => Some(start + delta),
             AlarmDelta::End(delta) => Some(end + delta),
             AlarmDelta::FixedUtc(timestamp) => Some(*timestamp),
-            AlarmDelta::FixedFloating(timestamp) => default_tz
-                .from_local_datetime(&DateTime::from_timestamp(*timestamp, 0)?.naive_local())
-                .single()
-                .map(|dt| dt.timestamp()),
+            AlarmDelta::FixedFloating(timestamp) => resolve_local(default_tz, *timestamp),
         }
     }
 }
@@ -279,12 +265,9 @@ impl ArchivedAlarmDelta {
             ArchivedAlarmDelta::Start(delta) => Some(start + delta.to_native()),
             ArchivedAlarmDelta::End(delta) => Some(end + delta.to_native()),
             ArchivedAlarmDelta::FixedUtc(timestamp) => Some(timestamp.to_native()),
-            ArchivedAlarmDelta::FixedFloating(timestamp) => default_tz
-                .from_local_datetime(
-                    &DateTime::from_timestamp(timestamp.to_native(), 0)?.naive_local(),
-                )
-                .single()
-                .map(|dt| dt.timestamp()),
+            ArchivedAlarmDelta::FixedFloating(timestamp) => {
+                resolve_local(default_tz, timestamp.to_native())
+            }
         }
     }
 }

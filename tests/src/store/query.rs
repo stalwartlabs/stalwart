@@ -9,7 +9,7 @@ use nlp::language::Language;
 use store::{
     SearchStore, Store,
     ahash::AHashMap,
-    rand::{self, Rng, distr::Alphanumeric},
+    rand::{self, RngExt, distr::Alphanumeric},
     roaring::RoaringBitmap,
     search::{
         ContactSearchField, EmailSearchField, IndexDocument, KeyValueMatch, SearchComparator,

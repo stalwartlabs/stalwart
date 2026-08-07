@@ -1,6 +1,6 @@
 [package]
 name = "http_proto"
-version = "0.16.13"
+version = "0.16.16"
 edition = "2024"
 
 [dependencies]
@@ -9,12 +9,12 @@ trc = { path = "../trc" }
 registry = { path = "../registry" }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
-hyper-util = { version = "0.1.1", features = ["tokio"] }
-http-body-util = "0.1.0"
-form_urlencoded = "1.1.0"
-percent-encoding = "2.3.1"
-compact_str = "0.9.0"
+hyper = { version = "1.11.0", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+http-body-util = "0.1.4"
+form_urlencoded = "1.2.2"
+percent-encoding = "2.3.2"
+compact_str = "0.10.0"
 
 [dev-dependencies]
 

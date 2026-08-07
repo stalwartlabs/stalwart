@@ -184,10 +184,7 @@ impl QueuedMessage {
 
         // Throttle sender
         for throttle in &server.core.smtp.queue.outbound_limiters.sender {
-            if let Err(retry_at) = server
-                .is_allowed(throttle, &message.message, message.span_id)
-                .await
-            {
+            if let Err(retry_at) = server.is_allowed(throttle, &message, message.span_id).await {
                 trc::event!(
                     Delivery(DeliveryEvent::RateLimitExceeded),
                     Id = throttle.id.to_string(),

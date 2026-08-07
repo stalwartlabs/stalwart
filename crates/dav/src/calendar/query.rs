@@ -562,7 +562,10 @@ impl CalendarQueryHandler {
                             let _ = write!(&mut out, "END:{component_name}\r\n");
                         }
                     }
-                } else if entries.peek().is_some() {
+                } else if entries.peek().is_some()
+                    || (component.component_type == ICalendarComponentType::VCalendar
+                        && !component.component_ids.is_empty())
+                {
                     let _ = write!(&mut out, "BEGIN:{component_name}\r\n");
 
                     match data.limit_freebusy {

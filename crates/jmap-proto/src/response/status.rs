@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::object::email::{EmailProperty, EmailValue};
 use crate::types::state::State;
+use jmap_tools::Value;
 use types::{id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, Debug)]
 #[serde(tag = "@type")]
 pub enum PushObject {
     StateChange {
@@ -17,7 +19,9 @@ pub enum PushObject {
     EmailPush {
         #[serde(rename = "accountId")]
         account_id: Id,
-        email: EmailPushObject,
+        emails: Vec<Value<'static, EmailProperty, EmailValue>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state: Option<State>,
     },
     CalendarAlert {
         #[serde(rename = "accountId")]
@@ -30,12 +34,4 @@ pub enum PushObject {
         #[serde(rename = "alertId")]
         alert_id: String,
     },
-    Group {
-        entries: Vec<PushObject>,
-    },
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct EmailPushObject {
-    pub subject: String,
 }

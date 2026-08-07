@@ -34,6 +34,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::PrincipalField,
 };
+use utils::cache::Cache;
 
 pub mod calcard;
 pub mod file;
@@ -101,6 +102,7 @@ impl GroupwareCache for Server {
                 if guard.insert(cache.clone()).is_err() {
                     cache_store.update(account_id, cache.clone());
                 }
+                warn_if_uncacheable(cache_store, account_id, collection, &cache);
 
                 trc::event!(
                     Store(StoreEvent::CacheMiss),
@@ -140,6 +142,7 @@ impl GroupwareCache for Server {
             )
             .await?;
             cache_store.update(account_id, cache.clone());
+            warn_if_uncacheable(cache_store, account_id, collection, &cache);
 
             trc::event!(
                 Store(StoreEvent::CacheStale),
@@ -327,6 +330,7 @@ impl GroupwareCache for Server {
         cache.update_lock.set_revision(cache.highest_change_id);
         let cache = Arc::new(cache);
         cache_store.update(account_id, cache.clone());
+        warn_if_uncacheable(cache_store, account_id, collection, &cache);
 
         trc::event!(
             Store(StoreEvent::CacheUpdate),
@@ -546,6 +550,25 @@ async fn process_changes(
         }
     }
     Ok(())
+}
+
+#[inline(always)]
+fn warn_if_uncacheable(
+    cache_store: &Cache<u32, Arc<DavResources>>,
+    account_id: u32,
+    collection: SyncCollection,
+    cache: &Arc<DavResources>,
+) {
+    let capacity = cache_store.weight_capacity();
+    if cache.size > capacity {
+        trc::event!(
+            Store(StoreEvent::CacheEntryTooLarge),
+            AccountId = account_id,
+            Collection = collection.as_str(),
+            Size = cache.size,
+            Limit = capacity,
+        );
+    }
 }
 
 async fn full_cache_build(

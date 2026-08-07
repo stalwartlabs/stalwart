@@ -4,24 +4,36 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose};
+use base64::{
+    Engine, alphabet,
+    engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
+};
 use common::{Server, auth::AccessToken, ipc::PushEvent};
-use email::push::{Keys, PushSubscription, PushSubscriptions};
+use email::push::{EmailPush, Keys, PushSubscription, PushSubscriptions, Urgency};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
-    method::set::{SetRequest, SetResponse},
-    object::push_subscription::{self, PushSubscriptionProperty, PushSubscriptionValue},
+    method::{
+        query::FilterWrapper,
+        set::{SetRequest, SetResponse},
+    },
+    object::{
+        email::{EmailFilter, EmailProperty},
+        push_subscription::{
+            self, EmailPushProperty, PushSubscriptionProperty, PushSubscriptionValue,
+        },
+    },
     references::resolve::ResolveCreatedReference,
     request::MaybeInvalid,
     types::date::UTCDate,
 };
-use jmap_tools::{Key, Map, Value};
+use jmap_tools::{Key, Map, Property, Value};
 use rand::distr::Alphanumeric;
 use registry::schema::enums::StorageQuota;
 use std::future::Future;
+use std::str::FromStr;
 use store::{
     Serialize, ValueKey,
-    rand::{Rng, rng},
+    rand::{RngExt, rng},
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, now},
 };
 use trc::{AddContext, ServerEvent};
@@ -30,6 +42,10 @@ use utils::map::bitmap::Bitmap;
 
 const EXPIRES_MAX: i64 = 7 * 24 * 3600; // 7 days
 const VERIFICATION_CODE_LEN: usize = 32;
+const URL_SAFE_INDIFFERENT: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::URL_SAFE,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
 
 pub trait PushSubscriptionSet: Sync + Send {
     fn push_subscription_set(
@@ -96,7 +112,9 @@ impl PushSubscriptionSet for Server {
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response
                     .resolve_self_references(&mut value, 0, false)
-                    .and_then(|_| validate_push_value(None, &property, value, &mut push, true))
+                    .and_then(|_| {
+                        validate_push_value(None, &property, value, &mut push, true, access_token)
+                    })
                 {
                     response.not_created.append(id, err);
                     continue 'create;
@@ -182,7 +200,9 @@ impl PushSubscriptionSet for Server {
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response
                     .resolve_self_references(&mut value, 0, false)
-                    .and_then(|_| validate_push_value(Some(id), &property, value, push, false))
+                    .and_then(|_| {
+                        validate_push_value(Some(id), &property, value, push, false, access_token)
+                    })
                 {
                     response.not_updated.append(id, err);
                     continue 'update;
@@ -281,6 +301,7 @@ fn validate_push_value(
     value: Value<'_, PushSubscriptionProperty, PushSubscriptionValue>,
     push: &mut PushSubscription,
     is_create: bool,
+    access_token: &AccessToken,
 ) -> Result<(), SetError<PushSubscriptionProperty>> {
     let Key::Property(property) = property else {
         return Err(SetError::invalid_properties()
@@ -304,12 +325,22 @@ fn validate_push_value(
                 value
                     .get(&Key::Property(PushSubscriptionProperty::Auth))
                     .and_then(|v| v.as_str())
-                    .and_then(|v| general_purpose::URL_SAFE.decode(v.as_ref()).ok()),
+                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_ref()).ok()),
                 value
                     .get(&Key::Property(PushSubscriptionProperty::P256dh))
                     .and_then(|v| v.as_str())
-                    .and_then(|v| general_purpose::URL_SAFE.decode(v.as_ref()).ok()),
+                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_ref()).ok()),
             ) {
+                if p256::PublicKey::from_sec1_bytes(&p256dh).is_err() {
+                    return Err(SetError::invalid_properties()
+                        .with_property(property.clone())
+                        .with_description("Invalid P-256 ECDH public key."));
+                }
+                if auth.len() != 16 {
+                    return Err(SetError::invalid_properties()
+                        .with_property(property.clone())
+                        .with_description("Invalid auth secret, expected 16 octets."));
+                }
                 push.keys = Some(Keys { auth, p256dh });
             } else {
                 return Err(SetError::invalid_properties()
@@ -358,6 +389,12 @@ fn validate_push_value(
             push.types = Bitmap::all();
         }
         (PushSubscriptionProperty::VerificationCode, Value::Null) => {}
+        (PushSubscriptionProperty::EmailPush, Value::Null) => {
+            push.email_push.clear();
+        }
+        (PushSubscriptionProperty::EmailPush, Value::Object(configs)) => {
+            push.email_push = parse_email_push(&configs, access_token)?;
+        }
         (PushSubscriptionProperty::Id, value) => {
             if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {
                 return Err(SetError::invalid_properties()
@@ -377,4 +414,85 @@ fn validate_push_value(
     }
 
     Ok(())
+}
+
+fn parse_email_push(
+    configs: &Map<'_, PushSubscriptionProperty, PushSubscriptionValue>,
+    access_token: &AccessToken,
+) -> Result<Vec<EmailPush>, SetError<PushSubscriptionProperty>> {
+    let mut result = Vec::with_capacity(configs.as_vec().len());
+    for (account_key, config) in configs.iter() {
+        let account_id = Id::from_str(account_key.to_string().as_ref())
+            .map(|id| id.document_id())
+            .map_err(|_| email_push_error("Invalid account id in emailPush map."))?;
+        if !access_token.is_member(account_id) {
+            return Err(SetError::forbidden()
+                .with_description("No access to one of the accounts in the emailPush map."));
+        }
+        let Some(config) = config.as_object() else {
+            return Err(email_push_error("EmailPushConfig must be an object."));
+        };
+        let mut email_push = EmailPush {
+            account_id,
+            ..Default::default()
+        };
+        for (key, value) in config.iter() {
+            let key = key.to_string();
+            hashify::fnc_map!(key.as_bytes(),
+                b"filter" => {
+                    email_push.filter = <FilterWrapper<EmailFilter> as serde::Deserialize>::deserialize(value)
+                        .map(|wrapper| wrapper.0)
+                        .map_err(|_| email_push_error("Invalid filter."))?;
+                },
+                b"properties" => {
+                    let Some(properties) = value.as_array() else {
+                        return Err(email_push_error(
+                            "EmailPushConfig properties must be an array.",
+                        ));
+                    };
+                    for property in properties {
+                        let Some(name) = property.as_str() else {
+                            return Err(email_push_error("Email property must be a string."));
+                        };
+                        let property = <EmailProperty as Property>::try_parse(None, name.as_ref())
+                            .ok_or_else(|| email_push_error("Unknown email property."))?;
+                        email_push.properties.push(
+                            EmailPushProperty::try_from(&property)
+                                .map_err(|_| email_push_error("Unsupported email push property."))?,
+                        );
+                    }
+                },
+                b"urgency" => {
+                    email_push.urgency = parse_urgency(value)?;
+                },
+                _ => {
+                    return Err(email_push_error("Unknown EmailPushConfig property."));
+                }
+            );
+        }
+        result.push(email_push);
+    }
+    Ok(result)
+}
+
+fn parse_urgency(
+    value: &Value<'_, PushSubscriptionProperty, PushSubscriptionValue>,
+) -> Result<Urgency, SetError<PushSubscriptionProperty>> {
+    value
+        .as_str()
+        .and_then(|value| {
+            hashify::tiny_map!(value.as_bytes(),
+                "very-low" => Urgency::VeryLow,
+                "low" => Urgency::Low,
+                "normal" => Urgency::Normal,
+                "high" => Urgency::High,
+            )
+        })
+        .ok_or_else(|| email_push_error("Invalid urgency value."))
+}
+
+fn email_push_error(description: &'static str) -> SetError<PushSubscriptionProperty> {
+    SetError::invalid_properties()
+        .with_property(PushSubscriptionProperty::EmailPush)
+        .with_description(description)
 }

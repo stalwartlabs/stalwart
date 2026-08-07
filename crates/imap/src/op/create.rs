@@ -16,7 +16,7 @@ use imap_proto::{
     protocol::{ObjectId, create::Arguments, list::Attribute},
     receiver::Request,
 };
-use registry::schema::enums::Permission;
+use registry::schema::enums::{Permission, StorageQuota};
 use std::time::Instant;
 use store::write::BatchBuilder;
 use trc::AddContext;
@@ -70,6 +70,36 @@ impl<T: SessionStream> SessionData<T> {
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
         debug_assert!(!params.path.is_empty());
+
+        // Validate quota
+        let account = self
+            .server
+            .account(params.account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        let mailbox_count = self
+            .server
+            .get_cached_messages(params.account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?
+            .mailboxes
+            .items
+            .len();
+        if mailbox_count + params.path.len()
+            > self
+                .server
+                .object_quota(account.object_quotas(), StorageQuota::MaxMailboxes)
+                as usize
+        {
+            return Err(trc::ImapEvent::Error
+                .into_err()
+                .details(concat!(
+                    "There are too many mailboxes, ",
+                    "please delete some before adding a new one."
+                ))
+                .code(ResponseCode::OverQuota)
+                .id(arguments.tag.clone()));
+        }
 
         // Build batch
         let mut parent_id = params.parent_mailbox_id.map(|id| id + 1).unwrap_or(0);

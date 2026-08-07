@@ -5,10 +5,11 @@
  */
 
 use crate::calendar_event::{CalendarSyntheticId, assert_is_unique_uid};
+use crate::changes::state::JmapCacheState;
 use calcard::{
-    common::timezone::Tz,
+    common::{PartialDateTime, timezone::Tz},
     icalendar::{
-        ICalendarAction, ICalendarComponent, ICalendarComponentType, ICalendarDuration,
+        ICalendar, ICalendarAction, ICalendarComponent, ICalendarComponentType, ICalendarDuration,
         ICalendarEntry, ICalendarParameter, ICalendarParameterValue, ICalendarProperty,
         ICalendarRelated, ICalendarValue,
     },
@@ -93,10 +94,11 @@ impl CalendarEventSet for Server {
             )
             .await?;
         let account_info = self
-            .account_info(access_token.account_id())
+            .scheduling_account_info(access_token.account_id(), account_id)
             .await
             .caused_by(trc::location!())?;
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(cache.assert_state(false, &request.if_in_state)?);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
 
         // Obtain calendarIds
@@ -215,6 +217,7 @@ impl CalendarEventSet for Server {
                 continue 'update;
             };
             new_calendar_event.data.event = ical;
+            stamp_updated(&mut new_calendar_event.data.event, now() as i64);
 
             // Validate UID
             match (
@@ -557,6 +560,17 @@ impl CalendarEventSet for Server {
                 "Failed to convert calendar event to iCalendar.",
             )));
         };
+        stamp_updated(&mut ical, now() as i64);
+
+        // Generate a UID when the client omitted one
+        if ical.uids().next().is_none() {
+            let uid = generate_uid();
+            for component in &mut ical.components {
+                if component.component_type.is_event_or_todo() {
+                    component.add_uid(&uid);
+                }
+            }
+        }
 
         // Verify that the calendar ids valid
         let default_alert_comp_id = ical.components.len();
@@ -701,6 +715,24 @@ impl CalendarEventSet for Server {
         }
 
         Ok(Ok(document_id))
+    }
+}
+
+fn stamp_updated(ical: &mut ICalendar, timestamp: i64) {
+    let dtstamp = PartialDateTime::from_utc_timestamp(timestamp);
+    for component in &mut ical.components {
+        if !component.component_type.is_event_or_todo() {
+            continue;
+        }
+        if let Some(entry) = component
+            .entries
+            .iter_mut()
+            .find(|entry| entry.name == ICalendarProperty::Dtstamp)
+        {
+            entry.values = vec![ICalendarValue::PartialDateTime(Box::new(dtstamp.clone()))];
+        } else {
+            component.add_dtstamp(dtstamp.clone());
+        }
     }
 }
 
@@ -996,4 +1028,29 @@ fn default_alert_to_ical(alert: &ArchivedDefaultAlert) -> ICalendarComponent {
         ],
         component_ids: vec![],
     }
+}
+
+fn generate_uid() -> String {
+    let mut bytes = rand::random::<[u8; 16]>();
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    )
 }

@@ -19,7 +19,7 @@ use mail_parser::{MessageParser, mailbox::mbox::MessageIterator};
 use std::{io::Cursor, str::FromStr, time::Duration};
 use store::{
     ahash::AHashSet,
-    rand::{self, Rng},
+    rand::{self, RngExt},
 };
 use types::id::Id;
 

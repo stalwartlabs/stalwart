@@ -380,6 +380,12 @@ impl<T: SessionStream> SessionData<T> {
                                 response.code = Some(ResponseCode::OverQuota);
                                 response.message = "Mailbox quota exceeded".into();
                             }
+                            CopyMessageError::AlreadyExists(_) => {
+                                response.rtype = ResponseType::No;
+                                response.code = Some(ResponseCode::AlreadyExists);
+                                response.message =
+                                    "Message already exists in destination mailbox".into();
+                            }
                             CopyMessageError::NotFound => (),
                         }
                         continue;

@@ -19,7 +19,7 @@ use registry::schema::prelude::ObjectType;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use store::{
     ValueKey,
-    rand::{self, Rng},
+    rand::{self, RngExt},
     roaring::RoaringBitmap,
 };
 use types::{collection::Collection, id::Id};

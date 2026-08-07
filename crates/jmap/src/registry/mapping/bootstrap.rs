@@ -18,7 +18,7 @@ use jmap_proto::{
     request::MaybeInvalid,
 };
 use jmap_tools::{JsonPointer, JsonPointerItem, Key};
-use rand::{Rng, distr::Alphanumeric, rng};
+use rand::{RngExt, distr::Alphanumeric, rng};
 use registry::{
     jmap::{IntoValue, JmapValue, JsonPointerPatch, RegistryJsonPatch},
     schema::{

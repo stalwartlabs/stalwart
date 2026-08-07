@@ -43,7 +43,7 @@ pub enum State {
     Bdat(BdatReceiver),
     Data(DataReceiver),
     Sasl(LineReceiver<SaslToken>),
-    DataTooLarge(DummyDataReceiver),
+    SkipData(DummyDataReceiver, &'static [u8]),
     RequestTooLarge(DummyLineReceiver),
     Accepted(QueueId),
     None,

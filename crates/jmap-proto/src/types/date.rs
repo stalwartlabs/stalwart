@@ -6,7 +6,20 @@
 
 use std::{fmt::Display, str::FromStr};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+#[rkyv(derive(Debug), compare(PartialEq))]
 pub struct UTCDate {
     pub year: u16,
     pub month: u8,
@@ -157,6 +170,22 @@ impl UTCDate {
             + self.second as i64
             + ((self.tz_hour as i64 * 3600 + self.tz_minute as i64 * 60)
                 * if self.tz_before_gmt { 1 } else { -1 })
+    }
+}
+
+impl From<&ArchivedUTCDate> for UTCDate {
+    fn from(value: &ArchivedUTCDate) -> Self {
+        UTCDate {
+            year: value.year.to_native(),
+            month: value.month,
+            day: value.day,
+            hour: value.hour,
+            minute: value.minute,
+            second: value.second,
+            tz_before_gmt: value.tz_before_gmt,
+            tz_hour: value.tz_hour,
+            tz_minute: value.tz_minute,
+        }
     }
 }
 

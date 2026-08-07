@@ -8,7 +8,7 @@ use super::{GrantType, crypto::SymmetricEncrypt};
 use crate::Server;
 use base64::{Engine, engine::general_purpose};
 use std::time::SystemTime;
-use store::rand::{Rng, rng};
+use store::rand::{RngExt, rng};
 use utils::codec::leb128::{Leb128Iterator, Leb128Vec};
 
 pub const FAILED_TO_DECODE_TOKEN: &str = concat!(

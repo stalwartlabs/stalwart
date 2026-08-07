@@ -17,7 +17,7 @@ use crate::{
 };
 use registry::schema::{
     enums::{AcmeChallengeType, ClusterTaskType, ProviderInfo, ServiceProtocol},
-    prelude::ObjectType,
+    prelude::{ObjectType, Property},
     structs::{
         self, AcmeProvider, Asn, ClusterTaskGroup, HttpForm, MailExchanger, Rate, Service,
         SystemSettings, TaskManager,
@@ -443,8 +443,11 @@ impl Http {
             } else {
                 String::new()
             },
-            allowed_endpoint: bp
-                .compile_expr(ObjectType::Http.singleton(), &http.ctx_allowed_endpoints()),
+            allowed_endpoint: if bp.registry.is_recovery_mode() {
+                IfBlock::empty(ObjectType::Http.singleton(), Property::AllowedEndpoints)
+            } else {
+                bp.compile_expr(ObjectType::Http.singleton(), &http.ctx_allowed_endpoints())
+            },
             rate_authenticated: if bp.registry.is_recovery_mode() {
                 None
             } else {

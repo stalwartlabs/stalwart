@@ -260,6 +260,11 @@ async fn ensure_dnssec(config: &ResolverConfig, resolver: &TokioResolver) -> boo
 impl Policy {
     pub async fn try_parse(bp: &mut Bootstrap) -> Option<Self> {
         let mta = bp.setting_infallible::<MtaSts>().await;
+
+        if matches!(mta.mode, PolicyEnforcement::Disable) {
+            return None;
+        }
+
         let mut mx_hosts = mta.mx_hosts.into_inner();
 
         if mx_hosts.is_empty() {
@@ -362,7 +367,7 @@ impl Display for Policy {
         match self.mode {
             Mode::Enforce => f.write_str("enforce")?,
             Mode::Testing => f.write_str("testing")?,
-            Mode::None => unreachable!(),
+            Mode::None => f.write_str("none")?,
         }
         f.write_str("\r\nmax_age: ")?;
         self.max_age.fmt(f)?;

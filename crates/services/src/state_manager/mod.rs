@@ -5,6 +5,7 @@
  */
 
 pub mod ece;
+pub mod email_push;
 pub mod http;
 pub mod manager;
 pub mod push;

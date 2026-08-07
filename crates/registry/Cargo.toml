@@ -1,6 +1,6 @@
 [package]
 name = "registry"
-version = "0.16.13"
+version = "0.16.16"
 edition = "2024"
 
 [dependencies]
@@ -9,13 +9,13 @@ trc = { path = "../trc" }
 types = { path = "../types" }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-hashify = "0.2.7"
+hashify = "0.2.9"
 ahash = { version = "0.8" }
 jmap-tools = { version = "0.1" }
-xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
+xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 mail-auth = { version = "0.11" }
-tokio = { version = "1.47", features = ["fs"] }
-lz4_flex = { version = "0.13", default-features = false }
+tokio = { version = "1.53", features = ["fs"] }
+lz4_flex = { version = "0.14", features = ["alloc"], default-features = false }
 
 [features]
 test_mode = []

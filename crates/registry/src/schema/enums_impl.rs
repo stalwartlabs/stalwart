@@ -9143,6 +9143,62 @@ impl<'de> serde::Deserialize<'de> for ProviderInfo {
     }
 }
 
+impl EnumImpl for PublicStringOptionalType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map! {
+            value.as_bytes(),
+            b"None" => PublicStringOptionalType::None,
+            b"Value" => PublicStringOptionalType::Value,
+            b"EnvironmentVariable" => PublicStringOptionalType::EnvironmentVariable,
+            b"File" => PublicStringOptionalType::File,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            PublicStringOptionalType::None => "None",
+            PublicStringOptionalType::Value => "Value",
+            PublicStringOptionalType::EnvironmentVariable => "EnvironmentVariable",
+            PublicStringOptionalType::File => "File",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(PublicStringOptionalType::None),
+            1 => Some(PublicStringOptionalType::Value),
+            2 => Some(PublicStringOptionalType::EnvironmentVariable),
+            3 => Some(PublicStringOptionalType::File),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for PublicStringOptionalType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicStringOptionalType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for PublicTextType {
     fn parse(value: &str) -> Option<Self> {
         hashify::tiny_map! {

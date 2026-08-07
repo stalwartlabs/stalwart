@@ -15,7 +15,7 @@ use registry::schema::enums::DkimSignatureType;
 use registry::schema::structs::DkimSignature;
 use rsa::pkcs1::DecodeRsaPublicKey;
 use store::rand::distr::Alphanumeric;
-use store::rand::{self, Rng};
+use store::rand::{self, RngExt};
 
 pub async fn generate_dkim_private_key(
     key_type: DkimSignatureType,

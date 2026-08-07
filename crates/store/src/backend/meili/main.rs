@@ -60,8 +60,33 @@ impl MeiliSearchStore {
         Ok(())
     }
 
+    async fn index_exists(&self, index_uid: &str) -> trc::Result<bool> {
+        let response = self
+            .client
+            .get(format!("{}/indexes/{}", self.url, index_uid))
+            .send()
+            .await
+            .map_err(|err| trc::StoreEvent::MeilisearchError.reason(err))?;
+
+        match response.status().as_u16() {
+            200..=299 => Ok(true),
+            404 => Ok(false),
+            status => {
+                let text = response.text().await.unwrap_or_default();
+                Err(trc::StoreEvent::MeilisearchError
+                    .reason(text)
+                    .ctx(trc::Key::Code, status))
+            }
+        }
+    }
+
     async fn create_index<T: SearchableField>(&self) -> trc::Result<()> {
         let index_name = T::index().index_name();
+
+        if self.index_exists(index_name).await? {
+            return Ok(());
+        }
+
         let response = assert_success(
             self.client
                 .post(format!("{}/indexes", self.url))

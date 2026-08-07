@@ -14,6 +14,7 @@ use store::{
 };
 use trc::{AddContext, StoreEvent};
 use types::collection::SyncCollection;
+use utils::cache::Cache;
 
 pub mod email;
 pub mod mailbox;
@@ -37,6 +38,7 @@ impl MessageCacheFetch for Server {
                 if guard.insert(cache.clone()).is_err() {
                     cache_store.update(account_id, cache.clone());
                 }
+                warn_if_uncacheable(cache_store, account_id, &cache);
 
                 trc::event!(
                     Store(StoreEvent::CacheMiss),
@@ -69,6 +71,7 @@ impl MessageCacheFetch for Server {
         if changes.is_truncated {
             let cache = full_cache_build(self, account_id, cache.update_lock.clone()).await?;
             cache_store.update(account_id, cache.clone());
+            warn_if_uncacheable(cache_store, account_id, &cache);
 
             trc::event!(
                 Store(StoreEvent::CacheStale),
@@ -181,6 +184,7 @@ impl MessageCacheFetch for Server {
         cache.update_lock.set_revision(cache.last_change_id);
         let cache = Arc::new(cache);
         cache_store.update(account_id, cache.clone());
+        warn_if_uncacheable(cache_store, account_id, &cache);
 
         trc::event!(
             Store(StoreEvent::CacheUpdate),
@@ -193,6 +197,24 @@ impl MessageCacheFetch for Server {
         );
 
         Ok(cache)
+    }
+}
+
+#[inline(always)]
+fn warn_if_uncacheable(
+    cache_store: &Cache<u32, Arc<MessageStoreCache>>,
+    account_id: u32,
+    cache: &Arc<MessageStoreCache>,
+) {
+    let capacity = cache_store.weight_capacity();
+    if cache.size > capacity {
+        trc::event!(
+            Store(StoreEvent::CacheEntryTooLarge),
+            AccountId = account_id,
+            Collection = SyncCollection::Email.as_str(),
+            Size = cache.size,
+            Limit = capacity,
+        );
     }
 }
 

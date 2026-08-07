@@ -654,6 +654,10 @@ impl AccessToken {
             .permissions
     }
 
+    pub fn account_permissions(&self) -> &Permissions {
+        &self.inner.scopes[0].permissions
+    }
+
     pub fn is_shared(&self, account_id: u32) -> bool {
         !self.is_member(account_id)
             && self

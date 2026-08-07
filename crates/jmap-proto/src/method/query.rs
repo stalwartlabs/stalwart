@@ -58,7 +58,7 @@ pub struct QueryResponse {
     pub limit: Option<usize>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Filter<T>
 where
     T: for<'de> DeserializeArguments<'de> + Default,
@@ -154,7 +154,7 @@ struct FilterListCollector<'x, T: 'x>(&'x mut Vec<Filter<T>>)
 where
     T: for<'de> DeserializeArguments<'de> + Default;
 
-pub(super) struct FilterWrapper<T>(pub Vec<Filter<T>>)
+pub struct FilterWrapper<T>(pub Vec<Filter<T>>)
 where
     T: for<'de> DeserializeArguments<'de> + Default;
 

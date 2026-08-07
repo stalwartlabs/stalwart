@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use rand::{Rng, seq::IndexedRandom};
+use rand::{RngExt, seq::IndexedRandom};
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug)]
 pub struct SampleReservoir<T> {
@@ -59,7 +59,7 @@ impl<T: Clone + Eq> SampleReservoir<T> {
             &mut self.ham
         })
         .buffer
-        .choose_multiple(&mut rand::rng(), count_needed)
+        .sample(&mut rand::rng(), count_needed)
     }
 
     pub fn remove_sample(&mut self, item: &T, is_spam: bool) {

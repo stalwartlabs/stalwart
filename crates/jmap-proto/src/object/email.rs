@@ -510,7 +510,7 @@ impl JmapObject for Email {
     const ID_PROPERTY: Self::Property = EmailProperty::Id;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum EmailFilter {
     InMailbox(Id),
     InMailboxOtherThan(Vec<Id>),

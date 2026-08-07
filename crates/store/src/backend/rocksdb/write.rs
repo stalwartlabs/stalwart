@@ -14,7 +14,7 @@ use crate::{
         ValueClass, ValueOp,
     },
 };
-use rand::Rng;
+use rand::RngExt;
 use rocksdb::{
     BoundColumnFamily, ErrorKind, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, WriteOptions,

@@ -36,7 +36,9 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
     tokio::spawn(async move {
         let mut active_spans = AHashMap::new();
         let store = settings.store;
+        let data_store = settings.data;
         let mut batch = BatchBuilder::new();
+        let mut task_batch = BatchBuilder::new();
 
         while let Some(events) = rx.recv().await {
             for event in events {
@@ -55,29 +57,44 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
                             .any(|(k, v)| matches!((k, v), (Key::QueueId, Value::UInt(_))))
                     {
                         // Serialize events
-                        batch
-                            .set(
-                                ValueClass::Telemetry(TelemetryClass::Span(span_id)),
-                                Trace::from_events(
-                                    [span.as_ref()]
-                                        .into_iter()
-                                        .chain(events.iter().map(|event| event.as_ref()))
-                                        .chain([event.as_ref()]),
-                                    events.len() + 2,
-                                )
-                                .to_pickled_vec(),
+                        batch.set(
+                            ValueClass::Telemetry(TelemetryClass::Span(span_id)),
+                            Trace::from_events(
+                                [span.as_ref()]
+                                    .into_iter()
+                                    .chain(events.iter().map(|event| event.as_ref()))
+                                    .chain([event.as_ref()]),
+                                events.len() + 2,
                             )
-                            .schedule_task(Task::IndexTrace(TaskIndexTrace {
-                                status: TaskStatus::now(),
-                                trace_id: span_id.into(),
-                            }));
+                            .to_pickled_vec(),
+                        );
+
+                        let index_task = Task::IndexTrace(TaskIndexTrace {
+                            status: TaskStatus::now(),
+                            trace_id: span_id.into(),
+                        });
+                        if data_store.is_some() {
+                            task_batch.schedule_task(index_task);
+                        } else {
+                            batch.schedule_task(index_task);
+                        }
                     }
                 }
             }
 
             if !batch.is_empty() {
-                if let Err(err) = store.write(batch.build_all()).await {
-                    trc::error!(err.caused_by(trc::location!()));
+                match store.write(batch.build_all()).await {
+                    Ok(_) => {
+                        if let Some(data_store) = &data_store {
+                            if let Err(err) = data_store.write(task_batch.build_all()).await {
+                                trc::error!(err.caused_by(trc::location!()));
+                            }
+                            task_batch = BatchBuilder::new();
+                        }
+                    }
+                    Err(err) => {
+                        trc::error!(err.caused_by(trc::location!()));
+                    }
                 }
                 batch = BatchBuilder::new();
             }

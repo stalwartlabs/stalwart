@@ -21,6 +21,7 @@ use common::{
 use groupware::{
     cache::GroupwareCache,
     calendar::{CALENDAR_SUBSCRIBED, CalendarEvent},
+    strip_mailto_scheme,
 };
 use jmap_proto::{
     method::availability::{
@@ -258,9 +259,7 @@ impl PrincipalGetAvailability for Server {
                                 if include_in_availability == IncludeInAvailability::Attending =>
                             {
                                 if let Some(attendee) = value.as_text().and_then(|attendee| {
-                                    sanitize_email(
-                                        attendee.strip_prefix("mailto:").unwrap_or(attendee),
-                                    )
+                                    sanitize_email(strip_mailto_scheme(attendee))
                                 }) {
                                     // Condition: the Principal is a participant of the event, and has a "participationStatus" of "accepted" or "tentative".
                                     if principal_account.addresses().contains(&attendee) {

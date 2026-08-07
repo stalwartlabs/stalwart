@@ -30,7 +30,7 @@ use store::{
 };
 use store::{
     rand::{
-        Rng,
+        RngExt,
         distr::{Alphanumeric, StandardUniform},
         rng,
     },

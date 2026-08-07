@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{
-    body::{ToBodyPart, TruncateBody},
-    headers::HeaderToValue,
-};
 use crate::blob::download::BlobDownload;
 use common::{Server, auth::AccessToken};
 use email::message::index::PREVIEW_LENGTH;
+use email::message::{
+    body::{ToBodyPart, TruncateBody},
+    headers::HeaderToValue,
+};
 use jmap_proto::{
     method::parse::{ParseRequest, ParseResponse},
     object::email::{Email, EmailProperty},

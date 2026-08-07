@@ -7,7 +7,7 @@
 use arcstr::ArcStr;
 use mail_auth::{DnssecStatus, MX, RecordSet, ResolverCache, Txt};
 use quick_cache::{
-    Equivalent, Weighter,
+    Equivalent, Options, OptionsBuilder, Weighter,
     sync::{DefaultLifecycle, PlaceholderGuard},
 };
 use std::{
@@ -38,9 +38,17 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     }
 
     pub fn new_estimated(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
-        Self(quick_cache::sync::Cache::with(
-            estimated_items_capacity,
-            weight_capacity,
+        Self(quick_cache::sync::Cache::with_options(
+            cache_options(estimated_items_capacity, weight_capacity, None),
+            CacheItemWeighter,
+            ahash::RandomState::default(),
+            DefaultLifecycle::default(),
+        ))
+    }
+
+    pub fn new_single_shard(weight: u64, estimated_weight: u64) -> Self {
+        Self(quick_cache::sync::Cache::with_options(
+            cache_options(weight as usize / estimated_weight as usize, weight, Some(1)),
             CacheItemWeighter,
             ahash::RandomState::default(),
             DefaultLifecycle::default(),
@@ -106,6 +114,11 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     pub fn inner(&self) -> &quick_cache::sync::Cache<K, V, CacheItemWeighter, ahash::RandomState> {
         &self.0
     }
+
+    #[inline(always)]
+    pub fn weight_capacity(&self) -> u64 {
+        self.0.capacity()
+    }
 }
 
 impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> CacheWithTtl<K, V> {
@@ -114,9 +127,8 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> CacheWithTtl<K,
     }
 
     pub fn new_estimated(estimated_items_capacity: usize, weight_capacity: u64) -> Self {
-        Self(quick_cache::sync::Cache::with(
-            estimated_items_capacity,
-            weight_capacity,
+        Self(quick_cache::sync::Cache::with_options(
+            cache_options(estimated_items_capacity, weight_capacity, None),
             CacheItemWeighter,
             ahash::RandomState::default(),
             DefaultLifecycle::default(),
@@ -198,6 +210,21 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> CacheWithTtl<K,
     }
 }
 
+fn cache_options(
+    estimated_items_capacity: usize,
+    weight_capacity: u64,
+    shards: Option<usize>,
+) -> Options {
+    let mut builder = OptionsBuilder::new();
+    builder
+        .estimated_items_capacity(estimated_items_capacity.max(1))
+        .weight_capacity(weight_capacity);
+    if let Some(shards) = shards {
+        builder.shards(shards.max(1));
+    }
+    builder.build().unwrap()
+}
+
 #[derive(Clone)]
 pub struct CacheItemWeighter;
 
@@ -276,25 +303,28 @@ impl CacheItemWeight for u32 {
 
 impl CacheItemWeight for IpAddr {
     fn weight(&self) -> u64 {
-        std::mem::size_of::<Vec<IpAddr>>() as u64
+        std::mem::size_of::<IpAddr>() as u64
     }
 }
 
 impl CacheItemWeight for Ipv4Addr {
     fn weight(&self) -> u64 {
-        std::mem::size_of::<Vec<Ipv4Addr>>() as u64
+        std::mem::size_of::<Ipv4Addr>() as u64
     }
 }
 
 impl CacheItemWeight for Ipv6Addr {
     fn weight(&self) -> u64 {
-        std::mem::size_of::<Vec<Ipv6Addr>>() as u64
+        std::mem::size_of::<Ipv6Addr>() as u64
     }
 }
 
 impl CacheItemWeight for MX {
     fn weight(&self) -> u64 {
-        self.exchanges.iter().map(|e| e.len() as u64).sum::<u64>()
+        self.exchanges
+            .iter()
+            .map(|e| e.len() as u64 + std::mem::size_of::<Box<str>>() as u64)
+            .sum::<u64>()
             + std::mem::size_of::<MX>() as u64
     }
 }
@@ -357,5 +387,34 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> ResolverCache<K
 
     fn insert(&self, key: K, value: V, expires: Instant) {
         self.0.insert(key, TtlEntry::with_expiry(value, expires));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_shard_retains_large_entry() {
+        let capacity = 10_000_000u64;
+        let cache = Cache::<u32, String>::new_single_shard(capacity, 1000);
+        assert_eq!(cache.inner().num_shards(), 1);
+
+        let value = "x".repeat(9_000_000);
+        cache.insert(0, value.clone());
+        assert_eq!(cache.get(&0), Some(value));
+    }
+
+    #[test]
+    fn sharded_cache_drops_entry_larger_than_a_shard() {
+        let capacity = 10_000_000u64;
+        let cache = Cache::<u32, String>::new_estimated(10_000, capacity);
+
+        let value = "x".repeat((capacity / 2) as usize);
+        cache.insert(0, value);
+
+        if cache.inner().num_shards() > 1 {
+            assert_eq!(cache.get(&0), None);
+        }
     }
 }

@@ -346,4 +346,66 @@ async fn dmarc() {
         .assert_contains("spf=pass")
         .assert_contains("dmarc=pass")
         .assert_contains("Received-SPF: pass");
+
+    // A mechanism that authenticates an unaligned identity is reported as failed
+    test.server.txt_add(
+        "_dmarc.example.com",
+        Dmarc::parse(
+            concat!(
+                "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                "rua=mailto:dmarc-feedback@example.com;",
+                "ruf=mailto:dmarc-unaligned@example.com"
+            )
+            .as_bytes(),
+        )
+        .unwrap(),
+        Instant::now() + Duration::from_secs(5),
+    );
+    test.server.txt_add(
+        "ed._domainkey.example.com",
+        DomainKey::parse(
+            concat!(
+                "v=DKIM1; k=ed25519; ",
+                "p=21qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+            )
+            .as_bytes(),
+        )
+        .unwrap(),
+        Instant::now() + Duration::from_secs(5),
+    );
+    test.server.txt_add(
+        "_report._domainkey.example.com",
+        DomainKeyReport::parse(b"ra=dkim-failures; rp=0; rr=d:o:p:s:u:v:x;").unwrap(),
+        Instant::now() + Duration::from_secs(5),
+    );
+    session
+        .send_message(
+            "joe@foobar.com",
+            &["jdoe@localdomain.org"],
+            "test:dkim",
+            "250",
+        )
+        .await;
+
+    let mut failure_report = None;
+    for _ in 0..2 {
+        let message = test.consume_message().await;
+        let rcpt = message
+            .message
+            .recipients
+            .last()
+            .unwrap()
+            .address()
+            .to_string();
+        if rcpt == "dmarc-unaligned@example.com" {
+            failure_report = Some(message.read_lines(&test).await);
+        }
+    }
+    failure_report
+        .expect("no DMARC failure report was sent")
+        .assert_contains("Feedback-Type: auth-failure")
+        .assert_contains("Auth-Failure: dmarc")
+        .assert_contains("Identity-Alignment: spf")
+        .assert_contains("SPF-DNS: txt : foobar.com")
+        .assert_not_contains("DKIM-Domain:");
 }

@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use biscuit::{ClaimsSet, JWT, RegisteredClaims, SingleOrMultiple, jws::RegisteredHeader};
+use jsonwebtoken::Header;
 
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -98,6 +98,19 @@ pub struct StandardClaims {
     pub description: Option<String>,
 }
 
+#[derive(Serialize)]
+struct IdTokenClaims {
+    iss: String,
+    sub: String,
+    aud: String,
+    nbf: i64,
+    iat: i64,
+    exp: i64,
+
+    #[serde(flatten)]
+    private: StandardClaims,
+}
+
 impl Server {
     pub fn issue_id_token(
         &self,
@@ -108,27 +121,22 @@ impl Server {
     ) -> trc::Result<String> {
         let now = now() as i64;
 
-        JWT::new_decoded(
-            From::from(RegisteredHeader {
-                algorithm: self.core.oauth.oidc_signature_algorithm,
-                key_id: Some("default".into()),
-                ..Default::default()
-            }),
-            ClaimsSet::<StandardClaims> {
-                registered: RegisteredClaims {
-                    issuer: Some(issuer.into()),
-                    subject: Some(subject.into()),
-                    audience: Some(SingleOrMultiple::Single(audience.into())),
-                    not_before: Some(now.into()),
-                    issued_at: Some(now.into()),
-                    expiry: Some((now + self.core.oauth.oidc_expiry_id_token as i64).into()),
-                    ..Default::default()
-                },
+        jsonwebtoken::encode(
+            &Header {
+                kid: Some("default".into()),
+                ..Header::new(self.core.oauth.oidc_signature_algorithm)
+            },
+            &IdTokenClaims {
+                iss: issuer.into(),
+                sub: subject.into(),
+                aud: audience.into(),
+                nbf: now,
+                iat: now,
+                exp: now + self.core.oauth.oidc_expiry_id_token as i64,
                 private: claims,
             },
+            &self.core.oauth.oidc_signing_secret,
         )
-        .into_encoded(&self.core.oauth.oidc_signing_secret)
-        .map(|token| token.unwrap_encoded().to_string())
         .map_err(|err| {
             trc::AuthEvent::Error
                 .into_err()

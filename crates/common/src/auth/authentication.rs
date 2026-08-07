@@ -47,7 +47,7 @@ impl Server {
                 // Random delay to mitigate user enumeration attacks
                 #[cfg(not(feature = "test_mode"))]
                 {
-                    use store::rand::{self, Rng};
+                    use store::rand::{self, RngExt};
 
                     let delay = rand::rng().random_range(50..500);
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;

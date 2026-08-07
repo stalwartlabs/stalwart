@@ -144,6 +144,20 @@ pub async fn lookup_tests() {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
     store.purge_in_memory_store().await.unwrap();
+
+    // Failed lock attempts must not extend the lock expiry
+    assert!(store.try_lock(0, "lock".as_bytes(), 2).await.unwrap());
+    let mut acquired = false;
+    for _ in 0..12 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if store.try_lock(0, "lock".as_bytes(), 2).await.unwrap() {
+            acquired = true;
+            break;
+        }
+    }
+    assert!(acquired, "Abandoned lock was never released");
+    store.remove_lock(0, "lock".as_bytes()).await.unwrap();
+    store.purge_in_memory_store().await.unwrap();
     if let InMemoryStore::Store(store) = &store {
         store_assert_is_empty(store, store.clone().into(), false).await;
     }

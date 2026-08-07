@@ -140,6 +140,19 @@ async fn data() {
                 else_: "3".into(),
                 ..Default::default()
             },
+            max_message_size: Expression {
+                match_: List::from_iter([
+                    ExpressionMatch {
+                        if_: "remote_ip = '10.0.0.4'".into(),
+                        then: "100".into(),
+                    },
+                    ExpressionMatch {
+                        if_: "remote_ip = '10.0.0.5'".into(),
+                        then: "0".into(),
+                    },
+                ]),
+                else_: "104857600".into(),
+            },
             ..Default::default()
         })
         .await;
@@ -197,6 +210,51 @@ async fn data() {
     session.ingest(b"DATA\r\n").await.unwrap();
     session.response().assert_code("503 5.5.1");
 
+    // Send BDAT without MAIL FROM
+    session.ingest(b"BDAT 10\r\n0123456789").await.unwrap();
+    session
+        .response()
+        .assert_code("503 5.5.1")
+        .assert_contains("MAIL is required")
+        .assert_not_contains("552");
+
+    // Send BDAT without RCPT
+    session.mail_from("john@doe.org", "250").await;
+    session.ingest(b"BDAT 10\r\n0123456789").await.unwrap();
+    session
+        .response()
+        .assert_code("503 5.5.1")
+        .assert_contains("RCPT is required")
+        .assert_not_contains("552");
+    session.rset().await;
+
+    // Send a BDAT chunk exceeding the maximum message size
+    let mut size_session = test.new_mta_session();
+    size_session.data.remote_ip_str = "10.0.0.4".into();
+    size_session.eval_session_params().await;
+    size_session.ehlo("mx.doe.org").await;
+    size_session.mail_from("john@doe.org", "250").await;
+    size_session.rcpt_to("bill@foobar.org", "250").await;
+    let mut chunk = b"BDAT 200 LAST\r\n".to_vec();
+    chunk.extend_from_slice(&[b'A'; 200]);
+    size_session.ingest(&chunk).await.unwrap();
+    size_session.response().assert_code("552 5.3.4");
+    size_session.rset().await;
+
+    // A maximum message size of zero disables the limit
+    size_session.data.remote_ip_str = "10.0.0.5".into();
+    size_session.eval_session_params().await;
+    size_session
+        .ingest(b"MAIL FROM:<bill@doe.org> SIZE=1073741824\r\n")
+        .await
+        .unwrap();
+    size_session.response().assert_code("250");
+    size_session.rset().await;
+    size_session
+        .send_message("bill@doe.org", &["mike@test.com"], "test:no_dkim", "250")
+        .await;
+    test.expect_message().await;
+
     // Send broken message
     session
         .send_message("john@doe.org", &["bill@foobar.org"], "invalid", "550 5.7.7")
@@ -247,6 +305,26 @@ async fn data() {
         .assert_contains("Received: ")
         .assert_contains("Authentication-Results: ")
         .assert_contains("Received-SPF: ");
+
+    // Send a message using multiple BDAT chunks
+    session.mail_from("bill@doe.org", "250").await;
+    session.rcpt_to("mike@test.com", "250").await;
+    let message = load_test_message("no_msgid", "messages");
+    let (first, last) = message.as_bytes().split_at(message.len() / 2);
+    let mut chunk = format!("BDAT {}\r\n", first.len()).into_bytes();
+    chunk.extend_from_slice(first);
+    session.ingest(&chunk).await.unwrap();
+    session.response().assert_code("250 2.6.0");
+    let mut chunk = format!("BDAT {} LAST\r\n", last.len()).into_bytes();
+    chunk.extend_from_slice(last);
+    session.ingest(&chunk).await.unwrap();
+    session.response().assert_code("250");
+    test.expect_message()
+        .await
+        .read_lines(&test)
+        .await
+        .assert_contains("Subject: ")
+        .assert_contains("Received: ");
 
     // Only one message is allowed in the queue from john@doe.org
     session.data.remote_ip_str = "10.0.0.2".into();

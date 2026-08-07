@@ -56,11 +56,11 @@ where
                             self.tokens = JIEBA
                                 .cut(word, false)
                                 .into_iter()
-                                .map(|word| {
+                                .map(|cut| {
                                     let token_from = token_to;
-                                    token_to += word.len();
+                                    token_to += cut.word.len();
                                     Token {
-                                        word: I::new_alphabetic(word),
+                                        word: I::new_alphabetic(cut.word),
                                         from: token_from,
                                         to: token_to,
                                     }
@@ -72,11 +72,11 @@ where
                             self.tokens = JIEBA
                                 .cut(&word, false)
                                 .into_iter()
-                                .map(|word| {
+                                .map(|cut| {
                                     let token_from = token_to;
-                                    token_to += word.len();
+                                    token_to += cut.word.len();
                                     Token {
-                                        word: I::new_alphabetic(word.to_string()),
+                                        word: I::new_alphabetic(cut.word.to_string()),
                                         from: token_from,
                                         to: token_to,
                                     }

@@ -207,7 +207,7 @@ jobs:
           echo "checksum=$(yq -p toml -oy '.package[] | select((.source | contains("")) or (.checksum | contains("")))' Cargo.lock | sha256sum | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Cache apt
-        uses: actions/cache@v5.0.5
+        uses: actions/cache@v6.1.0
         id: apt-cache
         with:
           path: |
@@ -216,7 +216,7 @@ jobs:
           key: apt-cache-${{ hashFiles('Dockerfile.build') }}
 
       - name: Cache Cargo
-        uses: actions/cache@v5.0.5
+        uses: actions/cache@v6.1.0
         id: cargo-cache
         with:
           path: |
@@ -225,7 +225,7 @@ jobs:
           key: cargo-cache-${{ steps.cal-dep-shasum.outputs.checksum }}
 
       - name: Inject cache into docker
-        uses: reproducible-containers/buildkit-cache-dance@v3.3.2
+        uses: reproducible-containers/buildkit-cache-dance@v3.4.0
         with:
           cache-map: |
             {
@@ -272,7 +272,7 @@ jobs:
           targets: ${{(github.event_name == 'push' || inputs.Docker) && 'build,image' || 'build'}}
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: artifact-${{matrix.target}}
           path: |
@@ -289,7 +289,7 @@ jobs:
 
       - name: Upload digest
         if: github.event_name == 'push' || inputs.Docker
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: digests-${{matrix.suffix == '' && 'gnu' || 'musl'}}-${{ matrix.target }}
           path: ${{ runner.temp }}/digests/*
@@ -297,7 +297,7 @@ jobs:
           retention-days: 1
 
       - name: Upload GNU meta bake definition
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         if: (github.event_name == 'push' || inputs.Docker) && endsWith(matrix.target,'gnu') && startsWith(matrix.target,'x86')
         with:
           name: bake-meta-gnu
@@ -306,7 +306,7 @@ jobs:
           retention-days: 1
 
       - name: Upload musl meta bake definition
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         if: (github.event_name == 'push' || inputs.Docker) && endsWith(matrix.target,'musl') && startsWith(matrix.target,'x86')
         with:
           name: bake-meta-musl
@@ -329,7 +329,7 @@ jobs:
         uses: actions/checkout@v6.0.2
 
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.10
         with:
           disable_annotations: true
 
@@ -341,7 +341,7 @@ jobs:
           mv ./target/${{matrix.target}}/release/stalwart.exe ./artifacts/stalwart.exe
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: artifact-${{matrix.target}}
           path: artifacts
@@ -360,7 +360,7 @@ jobs:
         uses: actions/checkout@v6.0.2
 
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.10
         with:
           disable_annotations: true
 
@@ -386,7 +386,7 @@ jobs:
           mv ./target/${{matrix.target}}/release/stalwart ./artifacts/stalwart
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: artifact-${{matrix.target}}
           path: artifacts
@@ -428,6 +428,8 @@ jobs:
             mkdir -p /usr/local/etc/pkg/repos
             echo 'FreeBSD: { url: "pkg+https://pkg.freebsd.org/${ABI}/latest", mirror_type: "srv" }' > /usr/local/etc/pkg/repos/FreeBSD.conf
             pkg update -f
+            env ASSUME_ALWAYS_YES=yes pkg bootstrap -f
+            pkg update -f
             pkg install -y rust gmake llvm rocksdb
             rustc --version
           run: |
@@ -439,7 +441,7 @@ jobs:
             cp /tmp/target/release/stalwart artifacts/stalwart
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: artifact-${{matrix.target}}
           path: artifacts

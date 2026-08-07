@@ -9,12 +9,13 @@ use crate::{
     spawn_op,
 };
 use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
+use email::cache::MessageCacheFetch;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{ObjectId, rename::Arguments},
     receiver::Request,
 };
-use registry::schema::enums::Permission;
+use registry::schema::enums::{Permission, StorageQuota};
 use std::time::Instant;
 use store::{
     ValueKey,
@@ -133,6 +134,38 @@ impl<T: SessionStream> SessionData<T> {
 
         // Get new mailbox name from path
         let new_mailbox_name = params.path.pop().unwrap();
+
+        // Validate quota
+        if !params.path.is_empty() {
+            let account = self
+                .server
+                .account(params.account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?;
+            let mailbox_count = self
+                .server
+                .get_cached_messages(params.account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?
+                .mailboxes
+                .items
+                .len();
+            if mailbox_count + params.path.len()
+                > self
+                    .server
+                    .object_quota(account.object_quotas(), StorageQuota::MaxMailboxes)
+                    as usize
+            {
+                return Err(trc::ImapEvent::Error
+                    .into_err()
+                    .details(concat!(
+                        "There are too many mailboxes, ",
+                        "please delete some before adding a new one."
+                    ))
+                    .code(ResponseCode::OverQuota)
+                    .id(arguments.tag.clone()));
+            }
+        }
 
         // Build batch
         let mut parent_id = params.parent_mailbox_id.map(|id| id + 1).unwrap_or(0);

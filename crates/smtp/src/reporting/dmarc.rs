@@ -19,7 +19,7 @@ use common::{
 use compact_str::ToCompactString;
 use mail_auth::{
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput,
-    SpfResult,
+    DmarcResult, SpfResult,
     common::verify::VerifySignature,
     dkim2::Dkim2Output,
     dmarc::{self},
@@ -135,8 +135,11 @@ impl<T: SessionStream> Session<T> {
                     .with_authentication_results(auth_results.to_string())
                     .with_headers(std::str::from_utf8(message.raw_headers()).unwrap_or_default());
 
+                let dkim_aligned = matches!(dmarc_output.dkim_result(), DmarcResult::Pass);
+                let spf_aligned = matches!(dmarc_output.spf_result(), DmarcResult::Pass);
+
                 // Report the first failed signature
-                let dkim_failed = if let (
+                if let (
                     dmarc::Report::Dkim
                     | dmarc::Report::DkimSpf
                     | dmarc::Report::All
@@ -144,26 +147,30 @@ impl<T: SessionStream> Session<T> {
                     Some(signature),
                 ) = (
                     &report_options,
-                    dkim_output.iter().find_map(|o| {
-                        let s = o.signature()?;
-                        if !matches!(o.result(), DkimResult::Pass) {
-                            Some(s)
-                        } else {
-                            None
-                        }
-                    }),
+                    if !dkim_aligned {
+                        dkim_output
+                            .iter()
+                            .find_map(|o| {
+                                let s = o.signature()?;
+                                if !matches!(o.result(), DkimResult::Pass) {
+                                    Some(s)
+                                } else {
+                                    None
+                                }
+                            })
+                            .or_else(|| dkim_output.iter().find_map(|o| o.signature()))
+                    } else {
+                        None
+                    },
                 ) {
                     auth_failure = auth_failure
                         .with_dkim_domain(signature.domain())
                         .with_dkim_selector(signature.selector())
                         .with_dkim_identity(signature.identity());
-                    true
-                } else {
-                    false
-                };
+                }
 
                 // Report SPF failure
-                let spf_failed = if let (
+                if let (
                     dmarc::Report::Spf
                     | dmarc::Report::DkimSpf
                     | dmarc::Report::All
@@ -171,40 +178,42 @@ impl<T: SessionStream> Session<T> {
                     Some(output),
                 ) = (
                     &report_options,
-                    self.data
-                        .spf_ehlo
-                        .as_ref()
-                        .and_then(|s| {
-                            if s.result() != SpfResult::Pass {
-                                s.into()
-                            } else {
-                                None
-                            }
-                        })
-                        .or_else(|| {
-                            self.data.spf_mail_from.as_ref().and_then(|s| {
+                    if !spf_aligned {
+                        self.data
+                            .spf_ehlo
+                            .as_ref()
+                            .and_then(|s| {
                                 if s.result() != SpfResult::Pass {
                                     s.into()
                                 } else {
                                     None
                                 }
                             })
-                        }),
+                            .or_else(|| {
+                                self.data.spf_mail_from.as_ref().and_then(|s| {
+                                    if s.result() != SpfResult::Pass {
+                                        s.into()
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                            .or(self.data.spf_mail_from.as_ref())
+                    } else {
+                        None
+                    },
                 ) {
                     auth_failure =
                         auth_failure.with_spf_dns(format!("txt : {} : v=SPF1", output.domain()));
                     // TODO use DNS record
-                    true
-                } else {
-                    false
-                };
+                }
 
                 auth_failure
-                    .with_identity_alignment(match (dkim_failed, spf_failed) {
-                        (true, true) => IdentityAlignment::DkimSpf,
-                        (true, false) => IdentityAlignment::Dkim,
-                        (false, true) => IdentityAlignment::Spf,
-                        (false, false) => IdentityAlignment::None,
+                    .with_identity_alignment(match (dkim_aligned, spf_aligned) {
+                        (false, false) => IdentityAlignment::DkimSpf,
+                        (false, true) => IdentityAlignment::Dkim,
+                        (true, false) => IdentityAlignment::Spf,
+                        (true, true) => IdentityAlignment::None,
                     })
                     .write_rfc5322(
                         (

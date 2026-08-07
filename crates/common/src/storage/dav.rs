@@ -9,7 +9,7 @@ use crate::{
     TinyCalendarPreferences,
 };
 use std::hash::{Hash, Hasher};
-use store::rand::{Rng, distr::Alphanumeric};
+use store::rand::{RngExt, distr::Alphanumeric};
 use types::acl::AclGrant;
 
 const SCHEDULE_INBOX_ID: u32 = u32::MAX - 1;

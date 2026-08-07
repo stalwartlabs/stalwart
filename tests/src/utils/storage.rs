@@ -15,8 +15,9 @@ use registry::{
         structs::{
             BlobStore, DataStore, ElasticSearchStore, FileSystemStore, FoundationDbStore, HttpAuth,
             HttpAuthBasic, HttpAuthBearer, InMemoryStore, MeilisearchStore, MySqlStore,
-            PostgreSqlStore, RedisStore, RocksDbStore, S3Store, S3StoreCustomRegion, S3StoreRegion,
-            SearchStore, SecretKey, SecretKeyOptional, SecretKeyValue, SqliteStore,
+            PostgreSqlStore, PublicStringOptional, PublicStringValue, RedisStore, RocksDbStore,
+            S3Store, S3StoreCustomRegion, S3StoreRegion, SearchStore, SecretKey, SecretKeyOptional,
+            SecretKeyValue, SqliteStore,
         },
     },
     types::{EnumImpl, duration::Duration},
@@ -112,7 +113,9 @@ async fn build_blob_store(typ: BlobStoreType, path: &str) -> BlobStore {
         BlobStoreType::S3 => {
             crate::utils::containers::ensure_minio().await;
             BlobStore::S3(S3Store {
-                access_key: "minioadmin".to_string().into(),
+                access_key: PublicStringOptional::Value(PublicStringValue {
+                    value: "minioadmin".into(),
+                }),
                 bucket: "stalwart".into(),
                 region: S3StoreRegion::Custom(S3StoreCustomRegion {
                     custom_endpoint: "http://localhost:9000".into(),

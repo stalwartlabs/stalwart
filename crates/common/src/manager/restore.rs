@@ -14,8 +14,9 @@ use std::{
     path::{Path, PathBuf},
 };
 use store::{
-    BlobStore, SUBSPACE_BLOBS, SUBSPACE_COUNTER, SUBSPACE_INDEXES, SUBSPACE_QUOTA, Store, U32_LEN,
-    write::{AnyClass, BatchBuilder, ValueClass, key::DeserializeBigEndian},
+    BlobStore, IterateParams, SUBSPACE_BLOBS, SUBSPACE_COUNTER, SUBSPACE_INDEXES, SUBSPACE_QUOTA,
+    Store, U32_LEN,
+    write::{AnyClass, AnyKey, BatchBuilder, ValueClass, key::DeserializeBigEndian},
 };
 use types::{collection::Collection, field::Field};
 use utils::{UnwrapFailure, failed};
@@ -47,10 +48,47 @@ impl Core {
     }
 }
 
+async fn subspace_has_data(store: &Store, subspace: u8) -> bool {
+    let mut has_data = false;
+    store
+        .iterate(
+            IterateParams::new(
+                AnyKey {
+                    subspace,
+                    key: vec![0u8],
+                },
+                AnyKey {
+                    subspace,
+                    key: vec![u8::MAX; 32],
+                },
+            )
+            .no_values(),
+            |_, _| {
+                has_data = true;
+                Ok(false)
+            },
+        )
+        .await
+        .failed("Failed to inspect target database");
+    has_data
+}
+
 async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
     println!("Importing database dump from {}.", path.to_str().unwrap());
 
     let mut reader = KeyValueReader::new(path);
+
+    if subspace_has_data(&store, reader.subspace).await {
+        eprintln!(
+            "Cannot import {}: the target database already contains data in the key range being \
+             imported. This usually means Stalwart was started before the import ran, which can \
+             create duplicate entries. Import into a fresh, empty database and do not start \
+             Stalwart before importing.",
+            path.display()
+        );
+        std::process::exit(1);
+    }
+
     let mut batch = BatchBuilder::new();
 
     match reader.subspace {

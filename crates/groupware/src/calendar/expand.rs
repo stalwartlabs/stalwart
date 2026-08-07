@@ -55,18 +55,13 @@ impl ArchivedCalendarEventData {
                 for start_offset in unpacker {
                     let start_date_naive = start_offset as i64 + base_offset;
                     let end_date_naive = start_date_naive + duration;
-                    let start = start_tz
-                        .from_local_datetime(
-                            &DateTime::from_timestamp(start_date_naive, 0)?.naive_local(),
-                        )
-                        .single()?
-                        .timestamp();
-                    let end = end_tz
-                        .from_local_datetime(
-                            &DateTime::from_timestamp(end_date_naive, 0)?.naive_local(),
-                        )
-                        .single()?
-                        .timestamp();
+                    let (Some(start), Some(end)) = (
+                        resolve_local(start_tz, start_date_naive),
+                        resolve_local(end_tz, end_date_naive),
+                    ) else {
+                        expansion_id += 1;
+                        continue;
+                    };
 
                     if limit.is_in_range(is_todo, start, end) {
                         expansion.push(CalendarEventExpansion {
@@ -85,20 +80,11 @@ impl ArchivedCalendarEventData {
                 // Single event
                 let start_date_naive = offset_or_count as i64 + base_offset;
                 let end_date_naive = start_date_naive + duration;
-                let start = start_tz
-                    .from_local_datetime(
-                        &DateTime::from_timestamp(start_date_naive, 0)?.naive_local(),
-                    )
-                    .single()?
-                    .timestamp();
-                let end = end_tz
-                    .from_local_datetime(
-                        &DateTime::from_timestamp(end_date_naive, 0)?.naive_local(),
-                    )
-                    .single()?
-                    .timestamp();
-
-                if limit.is_in_range(is_todo, start, end) {
+                if let (Some(start), Some(end)) = (
+                    resolve_local(start_tz, start_date_naive),
+                    resolve_local(end_tz, end_date_naive),
+                ) && limit.is_in_range(is_todo, start, end)
+                {
                     expansion.push(CalendarEventExpansion {
                         comp_id,
                         expansion_id: base_expansion_id,
@@ -157,25 +143,17 @@ impl CalendarEventData {
                         if expansion_ids.remove(&expansion_id) {
                             let start_date_naive = start_offset as i64 + base_offset;
                             let end_date_naive = start_date_naive + range.duration as i64;
-                            let start = start_tz
-                                .from_local_datetime(
-                                    &DateTime::from_timestamp(start_date_naive, 0)?.naive_local(),
-                                )
-                                .single()?
-                                .timestamp();
-                            let end = end_tz
-                                .from_local_datetime(
-                                    &DateTime::from_timestamp(end_date_naive, 0)?.naive_local(),
-                                )
-                                .single()?
-                                .timestamp();
-
-                            expansion.push(CalendarEventExpansion {
-                                comp_id: range.id as u32,
-                                expansion_id,
-                                start,
-                                end,
-                            });
+                            if let (Some(start), Some(end)) = (
+                                resolve_local(start_tz, start_date_naive),
+                                resolve_local(end_tz, end_date_naive),
+                            ) {
+                                expansion.push(CalendarEventExpansion {
+                                    comp_id: range.id as u32,
+                                    expansion_id,
+                                    start,
+                                    end,
+                                });
+                            }
 
                             match_count -= 1;
                             if match_count == 0 {
@@ -194,25 +172,17 @@ impl CalendarEventData {
                     // Single event
                     let start_date_naive = offset_or_count as i64 + base_offset;
                     let end_date_naive = start_date_naive + range.duration as i64;
-                    let start = start_tz
-                        .from_local_datetime(
-                            &DateTime::from_timestamp(start_date_naive, 0)?.naive_local(),
-                        )
-                        .single()?
-                        .timestamp();
-                    let end = end_tz
-                        .from_local_datetime(
-                            &DateTime::from_timestamp(end_date_naive, 0)?.naive_local(),
-                        )
-                        .single()?
-                        .timestamp();
-
-                    expansion.push(CalendarEventExpansion {
-                        comp_id: range.id as u32,
-                        expansion_id: base_expansion_id,
-                        start,
-                        end,
-                    });
+                    if let (Some(start), Some(end)) = (
+                        resolve_local(start_tz, start_date_naive),
+                        resolve_local(end_tz, end_date_naive),
+                    ) {
+                        expansion.push(CalendarEventExpansion {
+                            comp_id: range.id as u32,
+                            expansion_id: base_expansion_id,
+                            start,
+                            end,
+                        });
+                    }
 
                     if expansion_ids.is_empty() {
                         break 'outer;
@@ -263,14 +233,8 @@ impl CalendarEventData {
         };
         let start_date_naive = start_offset as i64 + self.base_offset;
         let end_date_naive = start_date_naive + range.duration as i64;
-        let start = start_tz
-            .from_local_datetime(&DateTime::from_timestamp(start_date_naive, 0)?.naive_local())
-            .single()?
-            .timestamp();
-        let end = end_tz
-            .from_local_datetime(&DateTime::from_timestamp(end_date_naive, 0)?.naive_local())
-            .single()?
-            .timestamp();
+        let start = resolve_local(start_tz, start_date_naive)?;
+        let end = resolve_local(end_tz, end_date_naive)?;
 
         Some(CalendarEventExpansion {
             comp_id,
@@ -296,4 +260,10 @@ impl CalendarEventExpansion {
     pub fn is_valid(&self) -> bool {
         self.comp_id != u32::MAX && self.start != i64::MAX && self.end != i64::MAX
     }
+}
+
+pub(crate) fn resolve_local(tz: Tz, naive_secs: i64) -> Option<i64> {
+    tz.from_local_datetime(&DateTime::from_timestamp(naive_secs, 0)?.naive_local())
+        .earliest()
+        .map(|dt| dt.timestamp())
 }

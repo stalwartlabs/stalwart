@@ -72,7 +72,9 @@ impl CalendarDeleteRequestHandler for Server {
             .by_path(delete_path)
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
         let document_id = delete_resource.document_id();
-        let account_info = self.account_info(access_token.account_id()).await?;
+        let account_info = self
+            .scheduling_account_info(access_token.account_id(), account_id)
+            .await?;
         let send_itip = self.core.groupware.itip_enabled
             && !headers.no_schedule_reply
             && !account_info.addresses().is_empty()

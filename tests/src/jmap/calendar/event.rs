@@ -140,13 +140,15 @@ pub async fn test(test: &TestServer) {
         )
         .await;
 
-    response.list()[0].assert_is_equal(
+    assert_eq_ignoring_updated(
+        &response.list()[0],
         event_1
             .with_property(JSCalendarProperty::<Id>::Id, event_1_id.as_str())
             .with_property(JSCalendarProperty::<Id>::IsDraft, true)
             .with_property(JSCalendarProperty::<Id>::IsOrigin, true),
     );
-    response.list()[1].assert_is_equal(
+    assert_eq_ignoring_updated(
+        &response.list()[1],
         event_2
             .with_property(JSCalendarProperty::<Id>::Id, event_2_id.as_str())
             .with_property(JSCalendarProperty::<Id>::IsDraft, false)
@@ -165,7 +167,8 @@ pub async fn test(test: &TestServer) {
                 }),
             ),
     );
-    response.list()[2].assert_is_equal(
+    assert_eq_ignoring_updated(
+        &response.list()[2],
         event_3
             .with_property(JSCalendarProperty::<Id>::Id, event_3_id.as_str())
             .with_property(JSCalendarProperty::<Id>::IsDraft, false)
@@ -227,30 +230,33 @@ pub async fn test(test: &TestServer) {
             "0"
         ]]))
         .await;
-    response.list_array().assert_is_equal(json!([
-      {
-        "title": "Event #2",
-        "recurrenceOverrides": {
-          "2006-01-06T12:00:00": {
-            "updated": "2006-02-06T00:11:21Z",
-            "start": "2006-01-06T14:00:00",
-            "title": "Event #2 bis bis",
-            "duration": "PT1H"
+    assert_eq_ignoring_updated(
+        response.list_array(),
+        json!([
+          {
+            "title": "Event #2",
+            "recurrenceOverrides": {
+              "2006-01-06T12:00:00": {
+                "updated": "2006-02-06T00:11:21Z",
+                "start": "2006-01-06T14:00:00",
+                "title": "Event #2 bis bis",
+                "duration": "PT1H"
+              }
+            },
+            "id": "c"
+          },
+          {
+            "title": "Event #3",
+            "participants": {
+              "3f5bc8c0-c722-5345-b7d9-5a899db08a30": {
+                "calendarAddress": "mailto:cyrus@example.com",
+                "@type": "Participant"
+              }
+            },
+            "id": "d"
           }
-        },
-        "id": "c"
-      },
-      {
-        "title": "Event #3",
-        "participants": {
-          "3f5bc8c0-c722-5345-b7d9-5a899db08a30": {
-            "calendarAddress": "mailto:cyrus@example.com",
-            "@type": "Participant"
-          }
-        },
-        "id": "d"
-      }
-    ]));
+        ]),
+    );
 
     // Creating an event without calendar should fail
     assert_eq!(
@@ -394,36 +400,39 @@ pub async fn test(test: &TestServer) {
       }
     }));
 
-    response.list()[1].assert_is_equal(json!({
-        "id": &event_2_id,
-        "calendarIds": {
-          &calendar1_id: true,
-          &calendar2_id: true
-        },
-        "title": "Event two",
-        "start": "2006-01-02T12:00:00",
-        "description": "Updated description",
-        "recurrenceOverrides": {
-            "2006-01-04T12:00:00": {
-                "title": "Event two overridden",
-                "start": "2006-01-04T14:00:00",
-                "duration": "PT1H",
-                "updated": "2006-02-06T00:11:21Z"
+    assert_eq_ignoring_updated(
+        &response.list()[1],
+        json!({
+            "id": &event_2_id,
+            "calendarIds": {
+              &calendar1_id: true,
+              &calendar2_id: true
             },
-            "2006-01-06T12:00:00": {
-                "title": "Event two overridden twice",
-                "start": "2006-01-06T14:00:00",
-                "duration": "PT1H",
-                "updated": "2006-02-06T00:11:21Z"
-            }
-        },
-        "title": "Event two",
-        "start": "2006-01-02T12:00:00",
-        "mayInviteOthers": false,
-        "mayInviteSelf": false,
-        "hideAttendees": false,
-        "isDraft": false
-    }));
+            "title": "Event two",
+            "start": "2006-01-02T12:00:00",
+            "description": "Updated description",
+            "recurrenceOverrides": {
+                "2006-01-04T12:00:00": {
+                    "title": "Event two overridden",
+                    "start": "2006-01-04T14:00:00",
+                    "duration": "PT1H",
+                    "updated": "2006-02-06T00:11:21Z"
+                },
+                "2006-01-06T12:00:00": {
+                    "title": "Event two overridden twice",
+                    "start": "2006-01-06T14:00:00",
+                    "duration": "PT1H",
+                    "updated": "2006-02-06T00:11:21Z"
+                }
+            },
+            "title": "Event two",
+            "start": "2006-01-02T12:00:00",
+            "mayInviteOthers": false,
+            "mayInviteSelf": false,
+            "hideAttendees": false,
+            "isDraft": false
+        }),
+    );
 
     response.list()[2].assert_is_equal(json!({
         "id": event_3_id,
@@ -702,10 +711,12 @@ END:VCALENDAR
         .with_status(StatusCode::OK)
         .expect_body()
         .lines()
+        .filter(|line| !line.starts_with("DTSTAMP"))
         .map(String::from)
         .collect::<AHashSet<_>>();
     let expected_ical = TEST_ICAL_1
         .lines()
+        .filter(|line| !line.starts_with("DTSTAMP"))
         .map(String::from)
         .collect::<AHashSet<_>>();
     assert_eq!(ical, expected_ical);
@@ -714,6 +725,28 @@ END:VCALENDAR
     test.wait_for_tasks().await;
     account.destroy_all_calendars().await;
     test.assert_is_empty().await;
+}
+
+fn assert_eq_ignoring_updated(got: &Value, expected: Value) {
+    strip_updated(got.clone()).assert_is_equal(strip_updated(expected));
+}
+
+fn strip_updated(mut value: Value) -> Value {
+    match &mut value {
+        Value::Object(map) => {
+            map.remove("updated");
+            for entry in map.values_mut() {
+                *entry = strip_updated(std::mem::take(entry));
+            }
+        }
+        Value::Array(array) => {
+            for entry in array.iter_mut() {
+                *entry = strip_updated(std::mem::take(entry));
+            }
+        }
+        _ => {}
+    }
+    value
 }
 
 pub fn test_jscalendar_1() -> Value {

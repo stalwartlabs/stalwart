@@ -11,7 +11,7 @@ use p256::{
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
 };
 use sha2::Sha256;
-use store::rand::Rng;
+use store::rand::RngExt;
 
 /*
 
@@ -158,8 +158,15 @@ fn hkdf_sha256(salt: &[u8], secret: &[u8], info: &[u8], len: usize) -> Result<Ve
 }
 
 fn aes_gcm_128_encrypt(key: &[u8], nonce: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
-    <Aes128Gcm as aes_gcm::KeyInit>::new(Key::<Aes128Gcm>::from_slice(key))
-        .encrypt(Nonce::from_slice(nonce), data)
+    let key: &Key<Aes128Gcm> = key
+        .try_into()
+        .map_err(|_| "Invalid AES-GCM key length".to_string())?;
+    let nonce: &Nonce<_> = nonce
+        .try_into()
+        .map_err(|_| "Invalid AES-GCM nonce length".to_string())?;
+
+    <Aes128Gcm as aes_gcm::KeyInit>::new(key)
+        .encrypt(nonce, data)
         .map_err(|e| e.to_string())
 }
 

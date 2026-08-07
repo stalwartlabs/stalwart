@@ -60,7 +60,7 @@ impl MtaReportSend for Server {
             #[cfg(not(feature = "test_mode"))]
             {
                 use common::config::smtp::queue::QueueExpiry;
-                use rand::Rng;
+                use rand::RngExt;
 
                 let delivery_time = rand::rng().random_range(0u64..10800u64);
                 for rcpt in &mut message.message.recipients {

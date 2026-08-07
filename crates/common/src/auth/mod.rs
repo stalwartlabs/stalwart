@@ -200,7 +200,11 @@ impl CacheItemWeight for EmailCache {
 impl CacheItemWeight for DomainCache {
     fn weight(&self) -> u64 {
         std::mem::size_of::<DomainCache>() as u64
-            + self.names.iter().map(|s| s.len() as u64).sum::<u64>()
+            + self
+                .names
+                .iter()
+                .map(|s| s.len() as u64 + std::mem::size_of::<Box<str>>() as u64)
+                .sum::<u64>()
             + self.catch_all.as_ref().map_or(0, |s| s.len() as u64)
             + self
                 .sub_addressing_custom
@@ -232,12 +236,18 @@ impl Hash for EmailAddressRef<'_> {
 impl CacheItemWeight for AccountCache {
     fn weight(&self) -> u64 {
         std::mem::size_of::<AccountCache>() as u64
+            + self.name.len() as u64
             + self
                 .addresses
                 .iter()
                 .map(|s| s.local_part.len() as u64 + std::mem::size_of::<EmailAddress>() as u64)
                 .sum::<u64>()
             + self.description.as_ref().map_or(0, |s| s.len() as u64)
+            + self.encryption_key.as_ref().map_or(0, |keys| {
+                keys.iter()
+                    .map(|k| k.len() as u64 + std::mem::size_of::<Box<[u8]>>() as u64)
+                    .sum::<u64>()
+            })
     }
 }
 
@@ -255,7 +265,11 @@ impl CacheItemWeight for MailingListCache {
                 .iter()
                 .map(|s| s.local_part.len() as u64 + std::mem::size_of::<EmailAddress>() as u64)
                 .sum::<u64>()
-            + self.recipients.iter().map(|s| s.len() as u64).sum::<u64>()
+            + self
+                .recipients
+                .iter()
+                .map(|s| s.len() as u64 + std::mem::size_of::<Box<str>>() as u64)
+                .sum::<u64>()
     }
 }
 

@@ -8,6 +8,7 @@ use crate::utils::server::TestServerBuilder;
 use registry::{
     schema::{
         enums::{MtaProtocol, Permission},
+        properties::Property,
         structs::{
             CalendarAlarm, Expression, ExpressionMatch, Imap, Jmap, MtaExtensions,
             MtaOutboundStrategy, MtaRoute, MtaRouteRelay, MtaStageAuth, Sharing,
@@ -90,15 +91,25 @@ pub async fn jmap_tests() {
         })
         .await;
     admin
-        .registry_create_object(Jmap {
-            set_max_objects: 100_000,
-            get_max_results: 100_000,
-            event_source_throttle: 500u64.into(),
-            push_throttle: 500u64.into(),
-            websocket_throttle: 500u64.into(),
-            push_attempt_wait: 500u64.into(),
-            ..Default::default()
-        })
+        .registry_update_setting(
+            Jmap {
+                set_max_objects: 100_000,
+                get_max_results: 100_000,
+                event_source_throttle: 500u64.into(),
+                push_throttle: 500u64.into(),
+                websocket_throttle: 500u64.into(),
+                push_attempt_wait: 500u64.into(),
+                ..Default::default()
+            },
+            &[
+                Property::SetMaxObjects,
+                Property::GetMaxResults,
+                Property::EventSourceThrottle,
+                Property::PushThrottle,
+                Property::WebsocketThrottle,
+                Property::PushAttemptWait,
+            ],
+        )
         .await;
     admin
         .registry_create_object(MtaStageAuth {

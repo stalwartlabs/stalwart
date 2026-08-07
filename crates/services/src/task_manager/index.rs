@@ -20,7 +20,7 @@ use std::cmp::Ordering;
 use store::{
     IterateParams, ValueKey,
     ahash::AHashMap,
-    rand::{self, Rng},
+    rand::{self, RngExt},
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
         AlignedBytes, Archive, BatchBuilder, SearchIndex, TelemetryClass, ValueClass,
@@ -296,7 +296,7 @@ impl SearchIndexTask for Server {
 pub(crate) async fn reindex_telemetry(server: &Server) -> trc::Result<()> {
     let mut spans = Vec::new();
     server
-        .store()
+        .tracing_store()
         .iterate(
             IterateParams::new(
                 ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(0))),
@@ -370,7 +370,6 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
             )
             .await
             .caused_by(trc::location!())?;
-        let mut batch = BatchBuilder::new();
 
         for document_id in cache.document_ids(false) {
             batch.schedule_task(Task::IndexDocument(TaskIndexDocument {
@@ -380,7 +379,7 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
                 status: TaskStatus::at(now + rand::rng().random_range(0..=300)),
             }));
 
-            if batch.len() >= 2000 {
+            if batch.is_large_batch() {
                 server.core.storage.data.write(batch.build_all()).await?;
                 batch = BatchBuilder::new();
             }

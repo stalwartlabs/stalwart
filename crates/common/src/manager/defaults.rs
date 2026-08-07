@@ -19,7 +19,7 @@ use registry::{
 };
 use std::str::FromStr;
 use store::{
-    rand::{Rng, distr::Alphanumeric, rng},
+    rand::{RngExt, distr::Alphanumeric, rng},
     registry::{
         bootstrap::Bootstrap,
         write::{RegistryWrite, RegistryWriteResult},
@@ -51,9 +51,7 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
     let is_bootstrap_mode = bp.registry.is_bootstrap_mode();
 
     #[cfg(not(feature = "test_mode"))]
-    if (!is_recovery_mode || is_bootstrap_mode)
-        && bp.registry.count_object(ObjectType::Application).await? == 0
-    {
+    if bp.registry.count_object(ObjectType::Application).await? == 0 {
         bp.registry
             .write(RegistryWrite::insert(
                 &Application {
@@ -369,6 +367,32 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
                 .into(),
             ))
             .await?;
+
+        // Generate a Web Push VAPID signing key (RFC 9749)
+        if bp.registry.count_object(ObjectType::Jmap).await? == 0 {
+            match crate::network::webpush::generate_pkcs8_pem() {
+                Ok(web_push_pem) => {
+                    bp.registry
+                        .write(RegistryWrite::insert(
+                            &Jmap {
+                                web_push_key: SecretTextOptional::Text(SecretTextValue {
+                                    secret: web_push_pem,
+                                }),
+                                ..Default::default()
+                            }
+                            .into(),
+                        ))
+                        .await?;
+                }
+                Err(err) => {
+                    trc::event!(
+                        Server(trc::ServerEvent::Startup),
+                        Details = "Failed to generate Web Push VAPID key",
+                        Reason = err
+                    );
+                }
+            }
+        }
     }
 
     if bp.registry.count_object(ObjectType::Role).await? == 0 {

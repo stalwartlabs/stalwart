@@ -103,11 +103,25 @@ impl<T: SessionStream> Session<T> {
                 }
             } else {
                 // Build recipients list
-                let mut recipients = vec![];
+                let mut recipients = Vec::with_capacity(self.data.rcpt_to.len());
+                let mut orcpts = Vec::with_capacity(self.data.rcpt_to.len());
+                let mut has_orcpts = false;
+
                 for rcpt in &self.data.rcpt_to {
                     recipients.push(Variable::from(rcpt.address_lcase.to_string()));
+                    orcpts.push(match &rcpt.dsn_info {
+                        Some(orcpt) => {
+                            has_orcpts = true;
+                            Variable::from(orcpt.as_str().to_lowercase())
+                        }
+                        None => Variable::default(),
+                    });
                 }
+
                 params.envelope.push((Envelope::To, recipients.into()));
+                if has_orcpts {
+                    params.envelope.push((Envelope::Orcpt, orcpts.into()));
+                }
             }
 
             if (mail_from.flags & MAIL_RET_FULL) != 0 {

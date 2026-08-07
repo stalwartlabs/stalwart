@@ -209,46 +209,38 @@ pub(crate) trait IntoPushObject {
     fn into_push_object(self) -> PushObject;
 }
 
-impl IntoPushObject for Vec<PushNotification> {
-    fn into_push_object(self) -> PushObject {
-        let mut changed: VecMap<Id, VecMap<DataType, State>> = VecMap::new();
-        let mut objects = Vec::with_capacity(self.len());
-        for notification in self {
-            match notification {
-                PushNotification::StateChange(state_change) => {
-                    for type_state in state_change.types {
-                        changed
-                            .get_mut_or_insert(state_change.account_id.into())
-                            .set(type_state, (state_change.change_id).into());
-                    }
-                }
-                PushNotification::CalendarAlert(calendar_alert) => {
-                    objects.push(calendar_alert.into_push_object());
-                }
-                PushNotification::EmailPush(email_push) => {
-                    let state_change = email_push.to_state_change();
-                    for type_state in state_change.types {
-                        changed
-                            .get_mut_or_insert(state_change.account_id.into())
-                            .set(type_state, state_change.change_id.into());
-                    }
+pub(crate) fn notifications_into_push_objects(
+    notifications: Vec<PushNotification>,
+) -> Vec<PushObject> {
+    let mut changed: VecMap<Id, VecMap<DataType, State>> = VecMap::new();
+    let mut objects = Vec::with_capacity(notifications.len());
+    for notification in notifications {
+        match notification {
+            PushNotification::StateChange(state_change) => {
+                for type_state in state_change.types {
+                    changed
+                        .get_mut_or_insert(state_change.account_id.into())
+                        .set(type_state, (state_change.change_id).into());
                 }
             }
-        }
-
-        if !objects.is_empty() {
-            if changed.is_empty() {
-                objects.push(PushObject::StateChange { changed });
+            PushNotification::CalendarAlert(calendar_alert) => {
+                objects.push(calendar_alert.into_push_object());
             }
-            if objects.len() > 1 {
-                PushObject::Group { entries: objects }
-            } else {
-                objects.into_iter().next().unwrap()
+            PushNotification::EmailPush(email_push) => {
+                let state_change = email_push.to_state_change();
+                for type_state in state_change.types {
+                    changed
+                        .get_mut_or_insert(state_change.account_id.into())
+                        .set(type_state, state_change.change_id.into());
+                }
             }
-        } else {
-            PushObject::StateChange { changed }
         }
     }
+
+    if !changed.is_empty() {
+        objects.push(PushObject::StateChange { changed });
+    }
+    objects
 }
 
 impl IntoPushObject for CalendarAlert {

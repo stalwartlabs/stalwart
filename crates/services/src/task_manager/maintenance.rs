@@ -137,7 +137,7 @@ async fn store_maintenance(
 
                 #[cfg(not(feature = "test_mode"))]
                 let status =
-                    TaskStatus::at(now + rand::Rng::random_range(&mut rand::rng(), 0..=300));
+                    TaskStatus::at(now + rand::RngExt::random_range(&mut rand::rng(), 0..=300));
 
                 batch.schedule_task(Task::AccountMaintenance(TaskAccountMaintenance {
                     account_id: account_id.into(),
@@ -382,7 +382,7 @@ async fn store_maintenance(
 
                     #[cfg(not(feature = "test_mode"))]
                     let status =
-                        TaskStatus::at(now + rand::Rng::random_range(&mut rand::rng(), 0..=300));
+                        TaskStatus::at(now + rand::RngExt::random_range(&mut rand::rng(), 0..=300));
 
                     batch.schedule_task(Task::TenantMaintenance(TaskTenantMaintenance {
                         tenant_id: tenant_id.into(),

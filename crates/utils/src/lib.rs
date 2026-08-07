@@ -422,7 +422,7 @@ pub fn is_valid_domain(domain: &str) -> bool {
         "private",
         "localdomain",
     ];
-    psl::domain(domain.as_bytes()).is_some_and(|d| d.suffix().typ().is_some())
+    (domain.contains('.') && psl::suffix(domain.as_bytes()).is_some_and(|s| s.typ().is_some()))
         || RESERVED_TLDS.contains(&domain)
         || domain
             .rsplit_once('.')
@@ -481,6 +481,17 @@ mod tests {
             sanitize_email("user@example.com").as_deref(),
             Some("user@example.com")
         );
+    }
+
+    #[test]
+    fn bare_public_suffix_domains_are_accepted() {
+        assert_eq!(
+            sanitize_email("user@gov.in").as_deref(),
+            Some("user@gov.in")
+        );
+        assert_eq!(sanitize_email("user@co.uk").as_deref(), Some("user@co.uk"));
+        assert_eq!(sanitize_email("user@com"), None);
+        assert_eq!(sanitize_email("user@example.invalidtld"), None);
     }
 
     #[test]

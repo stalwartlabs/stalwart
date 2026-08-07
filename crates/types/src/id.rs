@@ -9,7 +9,20 @@ use jmap_tools::{Element, Property, Value};
 use std::{ops::Deref, str::FromStr};
 use utils::codec::base32_custom::{BASE32_ALPHABET, BASE32_INVERSE};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, PartialOrd, Ord)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Copy,
+    PartialOrd,
+    Ord,
+)]
+#[rkyv(derive(Debug), compare(PartialEq))]
 #[repr(transparent)]
 pub struct Id(u64);
 
@@ -35,6 +48,12 @@ impl FromStr for Id {
         }
 
         Ok(Id(id))
+    }
+}
+
+impl From<&ArchivedId> for Id {
+    fn from(value: &ArchivedId) -> Self {
+        Id(value.0.to_native())
     }
 }
 

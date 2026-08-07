@@ -12,10 +12,8 @@ use jmap_proto::{
 use jmap_tools::{JsonPointer, JsonPointerItem, Key, Map, Value};
 use types::{id::Id, keyword::Keyword};
 
-pub mod body;
 pub mod copy;
 pub mod get;
-pub mod headers;
 pub mod import;
 pub mod parse;
 pub mod query;

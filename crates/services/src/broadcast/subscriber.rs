@@ -28,7 +28,7 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
 
         trc::event!(Cluster(ClusterEvent::SubscriberStart));
 
-        loop {
+        'subscribe: loop {
             let coordinator = inner.shared_core.load().storage.coordinator.clone();
             if coordinator.is_none() {
                 trc::event!(
@@ -67,138 +67,141 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                 }
             };
 
-            tokio::select! {
-                message = stream.next() => {
-                    match message {
-                        Some(message) => {
-                            let mut batch = BroadcastBatch::new(message.payload().iter());
-                            let node_id = match batch.node_id() {
-                                Some(node_id) => {
-                                    if node_id != this_node_id {
-                                        node_id
-                                    } else {
-                                        trc::event!(
-                                            Cluster(ClusterEvent::MessageSkipped),
-                                            Details = message.payload()
-                                        );
-                                        continue;
-                                    }
-                                }
-                                None => {
-                                    trc::event!(
-                                        Cluster(ClusterEvent::MessageInvalid),
-                                        Details = message.payload()
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            loop {
-                                match batch.next_event() {
-                                    Ok(Some(event)) => {
-                                        trc::event!(
-                                            Cluster(ClusterEvent::MessageReceived),
-                                            From = node_id,
-                                            To = this_node_id,
-                                            Details = log_event(&event),
-                                        );
-                                        match event {
-                                            BroadcastEvent::PushNotification(notification) => {
-                                                if inner
-                                                    .ipc
-                                                    .push_tx
-                                                    .send(PushEvent::Publish {
-                                                        notification,
-                                                        broadcast: false,
-                                                    })
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    trc::event!(
-                                                        Server(ServerEvent::ThreadError),
-                                                        Details = "Error sending push notification.",
-                                                        CausedBy = trc::location!()
-                                                    );
-                                                }
-                                            }
-                                            BroadcastEvent::PushServerUpdate(account_id) => {
-                                                if inner
-                                                    .ipc
-                                                    .push_tx
-                                                    .send(PushEvent::PushServerUpdate { account_id, broadcast: false })
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    trc::event!(
-                                                        Server(ServerEvent::ThreadError),
-                                                        Details = "Error sending reload request.",
-                                                        CausedBy = trc::location!()
-                                                    );
-                                                }
-                                            }
-                                            BroadcastEvent::CacheInvalidate(changes) => {
-                                                inner.build_server().invalidate_local_caches(&changes).await;
-
-                                            }
-                                            BroadcastEvent::CacheInvalidateAll => {
-                                                inner.build_server().invalidate_all_local_caches();
-                                            }
-                                            BroadcastEvent::CacheInvalidateNegative => {
-                                                inner.build_server().invalidate_all_local_negative_caches();
-                                            }
-                                            BroadcastEvent::MtaQueueStatus { is_running } => {
-                                                let _ = inner
-                                                        .ipc
-                                                        .queue_tx
-                                                        .send(QueueEvent::Paused(!is_running))
-                                                        .await;
-                                            }
-                                            BroadcastEvent::QueueRefresh => {
-                                                if inner.shared_core.load().network.roles.outbound_mta {
-                                                    let _ = inner
-                                                            .ipc
-                                                            .queue_tx
-                                                            .send(QueueEvent::Refresh)
-                                                            .await;
-                                                }
-                                            }
-                                            BroadcastEvent::RegistryChange(change) => {
-                                                match Box::pin(inner.build_server().reload_registry(change)).await {
-                                                    Ok(result) => {
-                                                        result.log();
-                                                    }
-                                                    Err(err) => {
-                                                        trc::error!(
-                                                            err.details("Failed to reload settings")
-                                                                .caused_by(trc::location!())
-                                                        );
-                                                    }
-                                                }
-                                            }
+            loop {
+                tokio::select! {
+                    message = stream.next() => {
+                        match message {
+                            Some(message) => {
+                                let mut batch = BroadcastBatch::new(message.payload().iter());
+                                let node_id = match batch.node_id() {
+                                    Some(node_id) => {
+                                        if node_id != this_node_id {
+                                            node_id
+                                        } else {
+                                            trc::event!(
+                                                Cluster(ClusterEvent::MessageSkipped),
+                                                Details = message.payload()
+                                            );
+                                            continue;
                                         }
                                     }
-                                    Ok(None) => break,
-                                    Err(_) => {
+                                    None => {
                                         trc::event!(
                                             Cluster(ClusterEvent::MessageInvalid),
                                             Details = message.payload()
                                         );
-                                        break;
+                                        continue;
+                                    }
+                                };
+
+                                loop {
+                                    match batch.next_event() {
+                                        Ok(Some(event)) => {
+                                            trc::event!(
+                                                Cluster(ClusterEvent::MessageReceived),
+                                                From = node_id,
+                                                To = this_node_id,
+                                                Details = log_event(&event),
+                                            );
+                                            match event {
+                                                BroadcastEvent::PushNotification(notification) => {
+                                                    if inner
+                                                        .ipc
+                                                        .push_tx
+                                                        .send(PushEvent::Publish {
+                                                            notification,
+                                                            broadcast: false,
+                                                        })
+                                                        .await
+                                                        .is_err()
+                                                    {
+                                                        trc::event!(
+                                                            Server(ServerEvent::ThreadError),
+                                                            Details = "Error sending push notification.",
+                                                            CausedBy = trc::location!()
+                                                        );
+                                                    }
+                                                }
+                                                BroadcastEvent::PushServerUpdate(account_id) => {
+                                                    if inner
+                                                        .ipc
+                                                        .push_tx
+                                                        .send(PushEvent::PushServerUpdate { account_id, broadcast: false })
+                                                        .await
+                                                        .is_err()
+                                                    {
+                                                        trc::event!(
+                                                            Server(ServerEvent::ThreadError),
+                                                            Details = "Error sending reload request.",
+                                                            CausedBy = trc::location!()
+                                                        );
+                                                    }
+                                                }
+                                                BroadcastEvent::CacheInvalidate(changes) => {
+                                                    inner.build_server().invalidate_local_caches(&changes).await;
+
+                                                }
+                                                BroadcastEvent::CacheInvalidateAll => {
+                                                    inner.build_server().invalidate_all_local_caches();
+                                                }
+                                                BroadcastEvent::CacheInvalidateNegative => {
+                                                    inner.build_server().invalidate_all_local_negative_caches();
+                                                }
+                                                BroadcastEvent::MtaQueueStatus { is_running } => {
+                                                    let _ = inner
+                                                            .ipc
+                                                            .queue_tx
+                                                            .send(QueueEvent::Paused(!is_running))
+                                                            .await;
+                                                }
+                                                BroadcastEvent::QueueRefresh => {
+                                                    if inner.shared_core.load().network.roles.outbound_mta {
+                                                        let _ = inner
+                                                                .ipc
+                                                                .queue_tx
+                                                                .send(QueueEvent::Refresh)
+                                                                .await;
+                                                    }
+                                                }
+                                                BroadcastEvent::RegistryChange(change) => {
+                                                    match Box::pin(inner.build_server().reload_registry(change)).await {
+                                                        Ok(result) => {
+                                                            result.log();
+                                                        }
+                                                        Err(err) => {
+                                                            trc::error!(
+                                                                err.details("Failed to reload settings")
+                                                                    .caused_by(trc::location!())
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => break,
+                                        Err(_) => {
+                                            trc::event!(
+                                                Cluster(ClusterEvent::MessageInvalid),
+                                                Details = message.payload()
+                                            );
+                                            break;
+                                        }
                                     }
                                 }
                             }
+                            None => {
+                                trc::event!(
+                                    Cluster(ClusterEvent::SubscriberDisconnected),
+                                );
+                                break;
+                            }
                         }
-                        None => {
-                            trc::event!(
-                                Cluster(ClusterEvent::SubscriberDisconnected),
-                            );
-                        }
+                    },
+                    _ = shutdown_rx.changed() => {
+                        break 'subscribe;
                     }
-                },
-                _ = shutdown_rx.changed() => {
-                    break;
-                }
-            };
+                };
+            }
         }
 
         trc::event!(Cluster(ClusterEvent::SubscriberStop));

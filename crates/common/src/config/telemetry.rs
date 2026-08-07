@@ -98,6 +98,7 @@ pub struct WebhookTracer {
 #[cfg(feature = "enterprise")]
 pub struct StoreTracer {
     pub store: store::Store,
+    pub data: Option<store::Store>,
 }
 // SPDX-SnippetEnd
 
@@ -441,6 +442,8 @@ impl Tracers {
                     interests: Default::default(),
                     lossy: false,
                     typ: TelemetrySubscriberType::StoreTracer(StoreTracer {
+                        data: (!storage.tracing.is_same(&storage.data))
+                            .then(|| storage.data.clone()),
                         store: storage.tracing.clone(),
                     }),
                 };

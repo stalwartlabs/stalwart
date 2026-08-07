@@ -15,7 +15,7 @@ use groupware::DavResourceName;
 use hyper::{HeaderMap, Method, StatusCode, header::AUTHORIZATION};
 use quick_xml::{Reader, XmlVersion, events::Event};
 use std::{borrow::Cow, time::Duration};
-use store::rand::{Rng, distr::Alphanumeric, rng};
+use store::rand::{RngExt, distr::Alphanumeric, rng};
 
 #[allow(dead_code)]
 #[derive(Debug)]

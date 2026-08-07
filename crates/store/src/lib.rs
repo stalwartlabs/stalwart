@@ -663,6 +663,26 @@ impl Store {
         !matches!(self, Self::None)
     }
 
+    pub fn is_same(&self, other: &Store) -> bool {
+        match (self, other) {
+            #[cfg(feature = "sqlite")]
+            (Store::SQLite(a), Store::SQLite(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "foundation")]
+            (Store::FoundationDb(a), Store::FoundationDb(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "postgres")]
+            (Store::PostgreSQL(a), Store::PostgreSQL(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "mysql")]
+            (Store::MySQL(a), Store::MySQL(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "rocks")]
+            (Store::RocksDb(a), Store::RocksDb(b)) => Arc::ptr_eq(a, b),
+            (Store::Ephemeral(a), Store::Ephemeral(b)) => Arc::ptr_eq(a, b),
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            (Store::SQLReadReplica(a), Store::SQLReadReplica(b)) => Arc::ptr_eq(a, b),
+            (Store::None, Store::None) => true,
+            _ => false,
+        }
+    }
+
     #[inline(always)]
     pub fn is_sql(&self) -> bool {
         match self {

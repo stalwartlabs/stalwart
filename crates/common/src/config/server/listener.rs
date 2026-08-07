@@ -150,6 +150,20 @@ impl Listeners {
                 }
             };
 
+            #[cfg(windows)]
+            if addr.is_ipv6()
+                && addr.ip().is_unspecified()
+                && let Err(err) = socket2::SockRef::from(&socket).set_only_v6(false)
+            {
+                bp.build_warning(
+                    id,
+                    format!(
+                        "Failed to disable IPV6_V6ONLY on {addr} ({err}); \
+                         IPv4 clients will not be able to connect to this listener"
+                    ),
+                );
+            }
+
             if let Err(err) = socket.set_reuseaddr(listener.socket_reuse_address) {
                 bp.build_error(id, format!("Failed to set SO_REUSEADDR: {err}"));
                 return;

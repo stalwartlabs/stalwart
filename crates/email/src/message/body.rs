@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use email::message::metadata::{
+use crate::message::metadata::{
     ArchivedMessageMetadataContents, ArchivedMetadataHeaderValue, ArchivedMetadataPartType,
     PART_ENCODING_BASE64, PART_ENCODING_QP, PART_SIZE_MASK,
 };
@@ -290,7 +290,7 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
     }
 }
 
-pub(super) trait TruncateBody {
+pub trait TruncateBody {
     fn truncate(&self, max_len: usize) -> (bool, String);
 }
 
@@ -307,7 +307,7 @@ impl TruncateBody for PartType<'_> {
     }
 }
 
-pub(crate) fn truncate_plain(text: &str, mut max_len: usize) -> (bool, String) {
+pub fn truncate_plain(text: &str, mut max_len: usize) -> (bool, String) {
     if max_len != 0 && text.len() > max_len {
         let add_dots = max_len > 6;
         if add_dots {
@@ -331,7 +331,7 @@ pub(crate) fn truncate_plain(text: &str, mut max_len: usize) -> (bool, String) {
     }
 }
 
-pub(crate) fn truncate_html(html: &str, mut max_len: usize) -> (bool, String) {
+pub fn truncate_html(html: &str, mut max_len: usize) -> (bool, String) {
     if max_len != 0 && html.len() > max_len {
         let add_dots = max_len > 6;
         if add_dots {

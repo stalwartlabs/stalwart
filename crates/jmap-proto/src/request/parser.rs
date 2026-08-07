@@ -78,9 +78,9 @@ impl<'de> Visitor<'de> for CallVisitor {
         V: SeqAccess<'de>,
     {
         let method_name = seq
-            .next_element::<&str>()?
+            .next_element::<std::borrow::Cow<str>>()?
             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-        let name = match MethodName::parse(method_name) {
+        let name = match MethodName::parse(method_name.as_ref()) {
             Some(name) => name,
             None => {
                 // Ignore the rest of the call
@@ -919,10 +919,30 @@ mod tests {
       }
     "##;
 
+    const TEST_ESCAPED_SOLIDUS: &str = r#"
+    {
+        "using": [ "urn:ietf:params:jmap:core" ],
+        "methodCalls": [
+          [ "Core\/echo", { "hello": true }, "c1" ]
+        ]
+      }
+    "#;
+
     #[test]
     fn parse_request() {
         println!("{:#?}", Request::parse(TEST.as_bytes(), 10, 10240));
         println!("{:#?}", Request::parse(TEST1.as_bytes(), 10, 10240));
         println!("{:#?}", Request::parse(TEST2.as_bytes(), 10, 10240));
+    }
+
+    #[test]
+    fn parse_method_name_with_escaped_solidus() {
+        let request = Request::parse(TEST_ESCAPED_SOLIDUS.as_bytes(), 10, 10240)
+            .expect("escaped solidus in method name must parse");
+        assert_eq!(request.method_calls.len(), 1);
+        assert!(matches!(
+            request.method_calls[0].method,
+            super::RequestMethod::Echo(_)
+        ));
     }
 }

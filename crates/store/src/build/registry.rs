@@ -15,7 +15,7 @@ use crate::{
         now,
     },
 };
-use rand::{Rng, distr::Alphanumeric, rng};
+use rand::{RngExt, distr::Alphanumeric, rng};
 use registry::{
     schema::{enums::ClusterNodeStatus, structs::ClusterNode},
     types::datetime::UTCDateTime,

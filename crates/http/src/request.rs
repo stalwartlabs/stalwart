@@ -575,14 +575,23 @@ impl ParseHttp for Server {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             "logo" if self.is_enterprise_edition() => {
-                match self
-                    .logo_resource(
+                let domain_hint = req
+                    .uri()
+                    .query()
+                    .and_then(|q| {
+                        form_urlencoded::parse(q.as_bytes())
+                            .find(|(k, v)| k == "domain" && !v.is_empty())
+                            .map(|(_, v)| v)
+                    })
+                    .or_else(|| {
                         req.headers()
                             .get(header::HOST)
                             .and_then(|h| h.to_str().ok())
                             .map(|h| h.rsplit_once(':').map_or(h, |(h, _)| h))
-                            .unwrap_or_default(),
-                    )
+                            .map(std::borrow::Cow::Borrowed)
+                    });
+                match self
+                    .logo_resource(domain_hint.as_deref().unwrap_or_default())
                     .await
                 {
                     Ok(Some(resource)) => {

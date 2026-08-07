@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::api::{IntoPushObject, ToRequestError, request::RequestHandler};
+use crate::api::{ToRequestError, notifications_into_push_objects, request::RequestHandler};
 use common::{Server, auth::AccessToken, ipc::PushNotification};
 use futures_util::{SinkExt, StreamExt};
 use http_proto::HttpSessionData;
@@ -229,17 +229,21 @@ impl WebSocketHandler for Server {
                 // Send any queued changes
                 let elapsed = last_changes_sent.elapsed();
                 if elapsed >= throttle {
-                    let payload = WebSocketPushObject {
-                        push: std::mem::take(&mut notifications).into_push_object(),
-                        push_state: None,
-                    };
-                    if let Err(err) = stream.send(Message::Text(payload.to_json().into())).await {
-                        trc::event!(
-                            Jmap(JmapEvent::WebsocketError),
-                            Details = "Failed to send state change message.",
-                            SpanId = session.session_id,
-                            Reason = err.to_string()
-                        );
+                    for push in notifications_into_push_objects(std::mem::take(&mut notifications))
+                    {
+                        let payload = WebSocketPushObject {
+                            push,
+                            push_state: None,
+                        };
+                        if let Err(err) = stream.send(Message::Text(payload.to_json().into())).await
+                        {
+                            trc::event!(
+                                Jmap(JmapEvent::WebsocketError),
+                                Details = "Failed to send state change message.",
+                                SpanId = session.session_id,
+                                Reason = err.to_string()
+                            );
+                        }
                     }
                     last_changes_sent = Instant::now();
                     last_heartbeat = Instant::now();

@@ -142,14 +142,18 @@ impl<T: SessionStream> Session<T> {
             .await
             .unwrap_or(true);
 
-        self.params.max_message_size = self
+        self.params.max_message_size = match self
             .server
-            .eval_if(
+            .eval_if::<usize, _>(
                 &self.server.core.smtp.session.data.max_message_size,
                 self,
                 self.data.session_id,
             )
             .await
-            .unwrap_or(25 * 1024 * 1024);
+        {
+            Some(0) => usize::MAX,
+            Some(max_message_size) => max_message_size,
+            None => 25 * 1024 * 1024,
+        };
     }
 }

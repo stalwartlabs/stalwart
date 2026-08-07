@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{
-    body::{ToBodyPart, truncate_html, truncate_plain},
-    headers::IntoForm,
-};
-use crate::{changes::state::JmapCacheState, email::headers::HeaderToValue};
+use crate::changes::state::JmapCacheState;
 use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::metadata::{
-        ArchivedMetadataPartType, MessageMetadata, MetadataHeaderName, PART_ENCODING_PROBLEM,
+    message::{
+        body::{ToBodyPart, truncate_html, truncate_plain},
+        headers::{HeaderToValue, IntoForm},
+        metadata::{
+            ArchivedMetadataPartType, MessageMetadata, MetadataHeaderName, PART_ENCODING_PROBLEM,
+        },
     },
 };
 use jmap_proto::{

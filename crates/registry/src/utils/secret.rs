@@ -5,8 +5,9 @@
  */
 
 use crate::schema::prelude::{
-    PublicText, SecretKey, SecretKeyEnvironmentVariable, SecretKeyFile, SecretKeyOptional,
-    SecretKeyValue, SecretText, SecretTextOptional, SecretTextValue,
+    PublicStringOptional, PublicStringValue, PublicText, SecretKey, SecretKeyEnvironmentVariable,
+    SecretKeyFile, SecretKeyOptional, SecretKeyValue, SecretText, SecretTextOptional,
+    SecretTextValue,
 };
 use std::borrow::Cow;
 
@@ -56,6 +57,31 @@ impl SecretKeyOptional {
                 secret_key_file.secret().await.map(|s| Some(Cow::Owned(s)))
             }
         }
+    }
+}
+
+impl PublicStringOptional {
+    pub async fn value(&self) -> Result<Option<Cow<'_, str>>, String> {
+        match self {
+            PublicStringOptional::None => Ok(None),
+            PublicStringOptional::Value(public_string_value) => {
+                Ok(Some(Cow::Borrowed(public_string_value.value())))
+            }
+            PublicStringOptional::EnvironmentVariable(secret_key_environment_variable) => {
+                secret_key_environment_variable
+                    .secret()
+                    .map(|s| Some(Cow::Owned(s)))
+            }
+            PublicStringOptional::File(secret_key_file) => {
+                secret_key_file.secret().await.map(|s| Some(Cow::Owned(s)))
+            }
+        }
+    }
+}
+
+impl PublicStringValue {
+    pub fn value(&self) -> &str {
+        self.value.as_str()
     }
 }
 

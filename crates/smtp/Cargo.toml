@@ -7,7 +7,7 @@ homepage = "https://stalw.art/smtp"
 keywords = ["smtp", "email", "mail", "server"]
 categories = ["email"]
 license = "AGPL-3.0-only OR LicenseRef-SEL"
-version = "0.16.13"
+version = "0.16.16"
 edition = "2024"
 
 [dependencies]
@@ -27,35 +27,35 @@ mail-builder = { version = "0.4" }
 smtp-proto = { version = "0.2", features = ["rkyv", "serde"] }
 sieve-rs = { version = "0.7", features = ["rkyv"] } 
 ahash = { version = "0.8" }
-rustls = { version = "0.23.5", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
-rustls-pemfile = "2.0"
+rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
+rustls-pemfile = "2.2"
 rustls-pki-types = { version = "1", features = ["std"] }
 rustls-webpki = { version = "0.103", default-features = false, features = ["std", "aws-lc-rs"] }
-tokio = { version = "1.47", features = ["full"] }
+tokio = { version = "1.53", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
-hyper = { version = "1.0.1", features = ["server", "http1", "http2"] }
-hyper-util = { version = "0.1.1", features = ["tokio"] }
-http-body-util = "0.1.0"
-form_urlencoded = "1.1.0"
+hyper = { version = "1.11.0", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+http-body-util = "0.1.4"
+form_urlencoded = "1.2.2"
 sha1 = "0.11"
 sha2 = "0.11"
-md5 = "0.8.0"
-rayon = "1.5"
+md5 = "0.8.1"
+rayon = "1.12"
 parking_lot = "0.12"
-regex = "1.7.0"
-blake3 = "1.3"
+regex = "1.13.1"
+blake3 = "1.8"
 lru-cache = "0.1.2"
-rand = "0.9.0"
+rand = "0.10.2"
 x509-parser = { version = "0.18", features = ["verify-aws"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
-num_cpus = "1.15.0"
+num_cpus = "1.17.0"
 chrono = "0.4"
-rkyv = { version = "0.8.10", features = ["little_endian"] }
-compact_str = "0.9.0"
+rkyv = { version = "0.8.17", features = ["little_endian"] }
+compact_str = "0.10.0"
 hashify = { version = "0.2" }
-base64 = "0.22"
+base64 = "0.23"
 
 [features]
 test_mode = ["mail-auth/test"]

@@ -358,24 +358,26 @@ impl<T: SessionStream> Session<T> {
                     .await;
             }
         }
-        if from.size > 0
-            && from.size
-                > self
-                    .server
-                    .eval_if(&config_data.max_message_size, self, self.data.session_id)
-                    .await
-                    .unwrap_or(25 * 1024 * 1024)
-        {
-            trc::event!(
-                Smtp(SmtpEvent::MessageTooLarge),
-                SpanId = self.data.session_id,
-                Size = from.size,
-            );
+        if from.size > 0 {
+            let max_message_size = self
+                .server
+                .eval_if::<usize, _>(&config_data.max_message_size, self, self.data.session_id)
+                .await
+                .unwrap_or(25 * 1024 * 1024);
 
-            self.data.mail_from = None;
-            return self
-                .write(b"552 5.3.4 Message too big for system.\r\n")
-                .await;
+            if max_message_size > 0 && from.size > max_message_size {
+                trc::event!(
+                    Smtp(SmtpEvent::MessageTooLarge),
+                    SpanId = self.data.session_id,
+                    Size = from.size,
+                    Limit = max_message_size,
+                );
+
+                self.data.mail_from = None;
+                return self
+                    .write(b"552 5.3.4 Message too big for system.\r\n")
+                    .await;
+            }
         }
         if from.hold_for != 0 || from.hold_until != 0 {
             if let Some(max_hold) = self

@@ -651,6 +651,28 @@ impl Server {
         self.build_account_info(account).await
     }
 
+    pub async fn scheduling_account_info(
+        &self,
+        authenticated_account_id: u32,
+        owner_account_id: u32,
+    ) -> trc::Result<AccountInfo> {
+        let account = self.account(authenticated_account_id).await?;
+        let mut account_info = self.build_account_info(account).await?;
+
+        if owner_account_id != authenticated_account_id {
+            let owner_account = self.account(owner_account_id).await?;
+            let owner_account_info = self.build_account_info(owner_account).await?;
+
+            for address in owner_account_info.addresses {
+                if !account_info.addresses.contains(&address) {
+                    account_info.addresses.push(address);
+                }
+            }
+        }
+
+        Ok(account_info)
+    }
+
     pub async fn build_account_info(&self, account: Arc<AccountCache>) -> trc::Result<AccountInfo> {
         let mut addresses =
             Vec::with_capacity(account.id_member_of.len() + account.addresses.len());

@@ -7,7 +7,7 @@
 use crate::{
     blob::download::BlobDownload, changes::state::JmapCacheState, email::ingested_into_object,
 };
-use common::{Server, auth::AccessToken};
+use common::{Server, auth::AccessToken, ipc::PushNotification};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::JUNK_ID,
@@ -23,7 +23,12 @@ use jmap_proto::{
 };
 use mail_parser::{HeaderName, MessageParser};
 use std::future::Future;
-use types::{acl::Acl, id::Id, keyword::Keyword};
+use types::{
+    acl::Acl,
+    id::Id,
+    keyword::Keyword,
+    type_state::{DataType, StateChange},
+};
 use utils::map::vec_map::VecMap;
 
 pub trait EmailImport: Sync + Send {
@@ -81,6 +86,7 @@ impl EmailImport for Server {
             not_created: VecMap::new(),
         };
 
+        let mut last_change_id = None;
         'outer: for (id, email) in request.emails {
             // Validate mailboxIds
             let mailbox_ids = email
@@ -182,6 +188,7 @@ impl EmailImport for Server {
                 .await
             {
                 Ok(email) => {
+                    last_change_id = Some(email.change_id);
                     response
                         .created
                         .append(id, ingested_into_object(email).into());
@@ -212,7 +219,16 @@ impl EmailImport for Server {
         }
 
         // Update state
-        if !response.created.is_empty() {
+        if let Some(change_id) = last_change_id {
+            self.broadcast_push_notification(PushNotification::StateChange(
+                StateChange::new(account_id)
+                    .with_change_id(change_id)
+                    .with_change(DataType::Email)
+                    .with_change(DataType::Mailbox)
+                    .with_change(DataType::Thread),
+            ))
+            .await;
+
             response.new_state = self.get_cached_messages(account_id).await?.get_state(false);
         }
 

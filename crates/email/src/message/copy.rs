@@ -43,6 +43,7 @@ use types::{
 pub enum CopyMessageError {
     NotFound,
     OverQuota,
+    AlreadyExists(u32),
 }
 
 pub trait EmailCopy: Sync + Send {
@@ -151,6 +152,10 @@ impl EmailCopy for Server {
             .find_thread_id(to_account_id, subject, &message_ids)
             .await
             .caused_by(trc::location!())?;
+
+        if let Some(&existing) = thread_result.duplicate_ids.first() {
+            return Ok(Err(CopyMessageError::AlreadyExists(existing)));
+        }
 
         // Assign id
         let mut email = IngestedEmail {

@@ -17,7 +17,10 @@ use common::{
     ipc::{CalendarAlert, PushNotification},
     network::{ServerInstance, stream::NullIo},
 };
-use groupware::calendar::{ArchivedCalendarEvent, CalendarEvent};
+use groupware::{
+    calendar::{ArchivedCalendarEvent, CalendarEvent},
+    strip_mailto_scheme,
+};
 use mail_builder::{
     MessageBuilder,
     headers::{HeaderType, content_type::ContentType},
@@ -478,7 +481,7 @@ async fn build_template(
                     .values
                     .first()
                     .and_then(|v| v.as_text())
-                    .map(|v| v.strip_prefix("mailto:").unwrap_or(v))
+                    .map(strip_mailto_scheme)
                     .and_then(sanitize_email);
             }
             _ => {}
@@ -501,7 +504,7 @@ async fn build_template(
                     .values
                     .first()
                     .and_then(|v| v.as_text())
-                    .map(|v| v.strip_prefix("mailto:").unwrap_or(v));
+                    .map(strip_mailto_scheme);
                 let name = entry.params.iter().find_map(|param| {
                     if let ArchivedICalendarParameterName::Cn = param.name {
                         param.value.as_text()

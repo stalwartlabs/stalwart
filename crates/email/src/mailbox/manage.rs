@@ -7,6 +7,7 @@
 use super::*;
 use crate::cache::MessageCacheFetch;
 use common::{Server, storage::index::ObjectIndexBuilder};
+use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::write::BatchBuilder;
 use trc::AddContext;
@@ -125,6 +126,13 @@ impl MailboxFnc for Server {
             if create_paths
                 .iter()
                 .any(|name| name.len() > self.core.email.mailbox_name_max_len)
+            {
+                return Ok(None);
+            }
+
+            let account = self.account(account_id).await.caused_by(trc::location!())?;
+            if cache.mailboxes.items.len() + create_paths.len()
+                > self.object_quota(account.object_quotas(), StorageQuota::MaxMailboxes) as usize
             {
                 return Ok(None);
             }

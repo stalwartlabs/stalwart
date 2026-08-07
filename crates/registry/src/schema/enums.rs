@@ -2223,6 +2223,16 @@ pub enum ProviderInfo {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
+pub enum PublicStringOptionalType {
+    #[default]
+    None = 0,
+    Value = 1,
+    EnvironmentVariable = 2,
+    File = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
 pub enum PublicTextType {
     #[default]
     Text = 0,

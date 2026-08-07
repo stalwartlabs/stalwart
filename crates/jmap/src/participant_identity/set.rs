@@ -6,7 +6,10 @@
 
 use crate::participant_identity::get::ParticipantIdentityGet;
 use common::Server;
-use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
+use groupware::{
+    calendar::{ParticipantIdentities, ParticipantIdentity},
+    strip_mailto_scheme,
+};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
@@ -226,11 +229,7 @@ fn validate_identity_value(
             }
             (ParticipantIdentityProperty::CalendarAddress, Value::Str(value)) => {
                 if identity.calendar_address != value {
-                    let email = if let Some(email) = value.strip_prefix("mailto:") {
-                        sanitize_email(email)
-                    } else {
-                        sanitize_email(&value)
-                    };
+                    let email = sanitize_email(strip_mailto_scheme(&value));
 
                     if let Some(email) = email {
                         if allowed_emails.iter().any(|e| e == &email) {

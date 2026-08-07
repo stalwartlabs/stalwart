@@ -507,7 +507,9 @@ impl EmailIngest for Server {
         // Encrypt message
         let do_encrypt = match params.source {
             IngestSource::Jmap { .. } | IngestSource::Imap { .. } => {
-                self.core.email.encrypt && self.core.email.encrypt_append
+                self.core.email.encrypt
+                    && self.core.email.encrypt_append
+                    && account.flags.encrypt_on_append()
             }
             IngestSource::Smtp { .. } => self.core.email.encrypt,
             IngestSource::Restore => false,

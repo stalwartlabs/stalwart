@@ -12,7 +12,7 @@ use common::{
     expr::functions::ResolveVariable,
 };
 use mail_auth::{IpLookupStrategy, MX, RecordSet};
-use rand::{Rng, seq::SliceRandom};
+use rand::{RngExt, seq::SliceRandom};
 use registry::schema::enums::ExpressionVariable;
 use std::{future::Future, net::IpAddr, sync::Arc};
 

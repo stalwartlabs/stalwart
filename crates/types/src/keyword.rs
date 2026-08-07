@@ -39,8 +39,22 @@ pub const NOTIFY: usize = 27;
 pub const UNSUBSCRIBED: usize = 28;
 pub const OTHER: usize = 29;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    rkyv::Archive,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+)]
 #[serde(untagged)]
+#[rkyv(derive(PartialEq), compare(PartialEq))]
 #[repr(u8)]
 pub enum Keyword {
     Other(CompactString),
@@ -322,6 +336,43 @@ impl Display for Keyword {
             Keyword::Notify => write!(f, "$notify"),
             Keyword::Unsubscribed => write!(f, "$unsubscribed"),
             Keyword::Other(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+impl Display for ArchivedKeyword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArchivedKeyword::Seen => write!(f, "$seen"),
+            ArchivedKeyword::Draft => write!(f, "$draft"),
+            ArchivedKeyword::Flagged => write!(f, "$flagged"),
+            ArchivedKeyword::Answered => write!(f, "$answered"),
+            ArchivedKeyword::Recent => write!(f, "$recent"),
+            ArchivedKeyword::Important => write!(f, "$important"),
+            ArchivedKeyword::Phishing => write!(f, "$phishing"),
+            ArchivedKeyword::Junk => write!(f, "$junk"),
+            ArchivedKeyword::NotJunk => write!(f, "$notjunk"),
+            ArchivedKeyword::Deleted => write!(f, "$deleted"),
+            ArchivedKeyword::Forwarded => write!(f, "$forwarded"),
+            ArchivedKeyword::MdnSent => write!(f, "$mdnsent"),
+            ArchivedKeyword::Autosent => write!(f, "$autosent"),
+            ArchivedKeyword::CanUnsubscribe => write!(f, "$canunsubscribe"),
+            ArchivedKeyword::Followed => write!(f, "$followed"),
+            ArchivedKeyword::HasAttachment => write!(f, "$hasattachment"),
+            ArchivedKeyword::HasMemo => write!(f, "$hasmemo"),
+            ArchivedKeyword::HasNoAttachment => write!(f, "$hasnoattachment"),
+            ArchivedKeyword::Imported => write!(f, "$imported"),
+            ArchivedKeyword::IsTrusted => write!(f, "$istrusted"),
+            ArchivedKeyword::MailFlagBit0 => write!(f, "$MailFlagBit0"),
+            ArchivedKeyword::MailFlagBit1 => write!(f, "$MailFlagBit1"),
+            ArchivedKeyword::MailFlagBit2 => write!(f, "$MailFlagBit2"),
+            ArchivedKeyword::MaskedEmail => write!(f, "$maskedemail"),
+            ArchivedKeyword::Memo => write!(f, "$memo"),
+            ArchivedKeyword::Muted => write!(f, "$muted"),
+            ArchivedKeyword::New => write!(f, "$new"),
+            ArchivedKeyword::Notify => write!(f, "$notify"),
+            ArchivedKeyword::Unsubscribed => write!(f, "$unsubscribed"),
+            ArchivedKeyword::Other(s) => write!(f, "{}", s),
         }
     }
 }

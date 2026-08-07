@@ -16,7 +16,7 @@ use std::time::Duration;
 use store::{
     IterateParams, Key, U32_LEN, ValueKey,
     ahash::AHashMap,
-    rand::Rng,
+    rand::RngExt,
     write::{BatchBuilder, IndexPropertyClass, MergeResult, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;

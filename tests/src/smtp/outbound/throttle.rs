@@ -12,6 +12,7 @@ use crate::{
     },
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
+use common::config::smtp::queue::QueueName;
 use mail_auth::{DnssecStatus, MX};
 use registry::{
     schema::{
@@ -302,6 +303,96 @@ async fn throttle_outbound() {
     local.read_event().await.assert_refresh();
     let due = local.last_queued_due().await - now();
     assert!(due > 0, "Due: {}", due);
+}
+
+#[tokio::test]
+async fn throttle_outbound_queue_name() {
+    let mut local = TestServerBuilder::new("smtp_throttle_outbound_queue_name")
+        .await
+        .with_http_listener(19033)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+
+    let admin = local.account("admin");
+    let queue_id = admin
+        .registry_create_object(MtaVirtualQueue {
+            name: "default".into(),
+            threads_per_node: 25,
+            description: None,
+        })
+        .await;
+    admin
+        .registry_create_object(MtaDeliverySchedule {
+            name: "default".into(),
+            retry: MtaDeliveryScheduleIntervalsOrDefault::Default,
+            notify: MtaDeliveryScheduleIntervalsOrDefault::Default,
+            expiry: MtaDeliveryExpiration::Ttl(MtaDeliveryExpirationTtl {
+                expire: 3_600_000u64.into(),
+            }),
+            queue_id,
+            description: None,
+        })
+        .await;
+    admin
+        .registry_create_object(MtaOutboundStrategy {
+            schedule: Expression {
+                else_: "'default'".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MtaOutboundThrottle {
+            enable: true,
+            key: Map::new(vec![MtaOutboundThrottleKey::SenderDomain]),
+            match_: Expression {
+                else_: "queue_name == 'default'".into(),
+                ..Default::default()
+            },
+            rate: Rate {
+                count: 1,
+                period: (30u64 * 60 * 1000).into(),
+            },
+            description: "queue_name throttle".into(),
+        })
+        .await;
+    admin.reload_settings().await;
+    local.reload_core();
+    local.expect_reload_settings().await;
+
+    let core = local.server.core.clone();
+    let throttle = &core.smtp.queue.outbound_limiters;
+    assert_eq!(throttle.sender.len(), 1);
+    assert!(throttle.rcpt.is_empty());
+    assert!(throttle.remote.is_empty());
+
+    let matching = new_message(0);
+    assert_eq!(matching.queue_name, QueueName::default());
+    local
+        .server
+        .is_allowed(&throttle.sender[0], &matching, 0)
+        .await
+        .unwrap();
+    assert!(
+        local
+            .server
+            .is_allowed(&throttle.sender[0], &matching, 0)
+            .await
+            .is_err(),
+        "sender-bucket throttle failed to resolve queue_name and never engaged"
+    );
+
+    let mut other_queue = new_message(0);
+    other_queue.queue_name = QueueName::new("remote").unwrap();
+    local
+        .server
+        .is_allowed(&throttle.sender[0], &other_queue, 0)
+        .await
+        .unwrap();
 }
 
 pub trait TestQueueEnvelope<'x> {

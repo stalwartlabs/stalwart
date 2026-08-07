@@ -30,7 +30,7 @@ use registry::schema::{
 };
 use std::future::Future;
 use store::{
-    rand::{Rng, distr::Alphanumeric, rng},
+    rand::{RngExt, distr::Alphanumeric, rng},
     registry::write::{RegistryWrite, RegistryWriteResult},
     write::now,
 };

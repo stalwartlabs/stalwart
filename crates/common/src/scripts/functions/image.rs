@@ -17,7 +17,7 @@ pub fn fn_img_metadata<'x>(ctx: &'x Context<'x>, v: Vec<Variable>) -> Variable {
                     Variable::from(match t {
                         imagesize::ImageType::Aseprite => "aseprite",
                         imagesize::ImageType::Bmp => "bmp",
-                        imagesize::ImageType::Dds => "dds",
+                        imagesize::ImageType::Dds(_) => "dds",
                         imagesize::ImageType::Exr => "exr",
                         imagesize::ImageType::Farbfeld => "farbfeld",
                         imagesize::ImageType::Gif => "gif",

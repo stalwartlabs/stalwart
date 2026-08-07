@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::object::email::{EmailProperty, HeaderForm, HeaderProperty};
 use crate::object::{AnyId, JmapObject, JmapObjectId};
 use crate::types::date::UTCDate;
 use jmap_tools::{Element, JsonPointer, JsonPointerItem};
@@ -26,6 +27,7 @@ pub enum PushSubscriptionProperty {
     VerificationCode,
     Expires,
     Types,
+    EmailPush,
 
     // Other
     Pointer(JsonPointer<PushSubscriptionProperty>),
@@ -51,6 +53,7 @@ impl Property for PushSubscriptionProperty {
             PushSubscriptionProperty::Keys => "keys",
             PushSubscriptionProperty::Types => "types",
             PushSubscriptionProperty::Url => "url",
+            PushSubscriptionProperty::EmailPush => "emailPush",
             PushSubscriptionProperty::VerificationCode => "verificationCode",
             PushSubscriptionProperty::P256dh => "p256dh",
             PushSubscriptionProperty::Auth => "auth",
@@ -74,6 +77,7 @@ impl PushSubscriptionProperty {
             b"verificationCode" => PushSubscriptionProperty::VerificationCode,
             b"expires" => PushSubscriptionProperty::Expires,
             b"types" => PushSubscriptionProperty::Types,
+            b"emailPush" => PushSubscriptionProperty::EmailPush,
         )
         .or_else(|| {
             if allow_patch && value.contains('/') {
@@ -131,6 +135,219 @@ impl FromStr for PushSubscriptionProperty {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         PushSubscriptionProperty::parse(s, false).ok_or(())
+    }
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
+pub enum EmailPushProperty {
+    Id,
+    BlobId,
+    ThreadId,
+    MailboxIds,
+    Keywords,
+    Size,
+    ReceivedAt,
+    MessageId,
+    InReplyTo,
+    References,
+    Sender,
+    From,
+    To,
+    Cc,
+    Bcc,
+    ReplyTo,
+    Subject,
+    SentAt,
+    Preview,
+    HasAttachment,
+    BodyStructure,
+    BodyValues,
+    TextBody,
+    HtmlBody,
+    Attachments,
+    Headers,
+    Header(EmailPushHeaderProperty),
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct EmailPushHeaderProperty {
+    pub form: EmailPushHeaderForm,
+    pub header: String,
+    pub all: bool,
+}
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+#[rkyv(compare(PartialEq), derive(Debug))]
+#[repr(u8)]
+pub enum EmailPushHeaderForm {
+    #[default]
+    Raw = 0,
+    Text = 1,
+    Addresses = 2,
+    GroupedAddresses = 3,
+    MessageIds = 4,
+    Date = 5,
+    Urls = 6,
+}
+
+impl TryFrom<&EmailProperty> for EmailPushProperty {
+    type Error = ();
+
+    fn try_from(value: &EmailProperty) -> Result<Self, Self::Error> {
+        Ok(match value {
+            EmailProperty::Id => EmailPushProperty::Id,
+            EmailProperty::BlobId => EmailPushProperty::BlobId,
+            EmailProperty::ThreadId => EmailPushProperty::ThreadId,
+            EmailProperty::MailboxIds => EmailPushProperty::MailboxIds,
+            EmailProperty::Keywords => EmailPushProperty::Keywords,
+            EmailProperty::Size => EmailPushProperty::Size,
+            EmailProperty::ReceivedAt => EmailPushProperty::ReceivedAt,
+            EmailProperty::MessageId => EmailPushProperty::MessageId,
+            EmailProperty::InReplyTo => EmailPushProperty::InReplyTo,
+            EmailProperty::References => EmailPushProperty::References,
+            EmailProperty::Sender => EmailPushProperty::Sender,
+            EmailProperty::From => EmailPushProperty::From,
+            EmailProperty::To => EmailPushProperty::To,
+            EmailProperty::Cc => EmailPushProperty::Cc,
+            EmailProperty::Bcc => EmailPushProperty::Bcc,
+            EmailProperty::ReplyTo => EmailPushProperty::ReplyTo,
+            EmailProperty::Subject => EmailPushProperty::Subject,
+            EmailProperty::SentAt => EmailPushProperty::SentAt,
+            EmailProperty::Preview => EmailPushProperty::Preview,
+            EmailProperty::HasAttachment => EmailPushProperty::HasAttachment,
+            EmailProperty::BodyStructure => EmailPushProperty::BodyStructure,
+            EmailProperty::BodyValues => EmailPushProperty::BodyValues,
+            EmailProperty::TextBody => EmailPushProperty::TextBody,
+            EmailProperty::HtmlBody => EmailPushProperty::HtmlBody,
+            EmailProperty::Attachments => EmailPushProperty::Attachments,
+            EmailProperty::Headers => EmailPushProperty::Headers,
+            EmailProperty::Header(header) => EmailPushProperty::Header(EmailPushHeaderProperty {
+                form: (&header.form).into(),
+                header: header.header.clone(),
+                all: header.all,
+            }),
+            _ => return Err(()),
+        })
+    }
+}
+
+impl From<&EmailPushProperty> for EmailProperty {
+    fn from(value: &EmailPushProperty) -> Self {
+        match value {
+            EmailPushProperty::Id => EmailProperty::Id,
+            EmailPushProperty::BlobId => EmailProperty::BlobId,
+            EmailPushProperty::ThreadId => EmailProperty::ThreadId,
+            EmailPushProperty::MailboxIds => EmailProperty::MailboxIds,
+            EmailPushProperty::Keywords => EmailProperty::Keywords,
+            EmailPushProperty::Size => EmailProperty::Size,
+            EmailPushProperty::ReceivedAt => EmailProperty::ReceivedAt,
+            EmailPushProperty::MessageId => EmailProperty::MessageId,
+            EmailPushProperty::InReplyTo => EmailProperty::InReplyTo,
+            EmailPushProperty::References => EmailProperty::References,
+            EmailPushProperty::Sender => EmailProperty::Sender,
+            EmailPushProperty::From => EmailProperty::From,
+            EmailPushProperty::To => EmailProperty::To,
+            EmailPushProperty::Cc => EmailProperty::Cc,
+            EmailPushProperty::Bcc => EmailProperty::Bcc,
+            EmailPushProperty::ReplyTo => EmailProperty::ReplyTo,
+            EmailPushProperty::Subject => EmailProperty::Subject,
+            EmailPushProperty::SentAt => EmailProperty::SentAt,
+            EmailPushProperty::Preview => EmailProperty::Preview,
+            EmailPushProperty::HasAttachment => EmailProperty::HasAttachment,
+            EmailPushProperty::BodyStructure => EmailProperty::BodyStructure,
+            EmailPushProperty::BodyValues => EmailProperty::BodyValues,
+            EmailPushProperty::TextBody => EmailProperty::TextBody,
+            EmailPushProperty::HtmlBody => EmailProperty::HtmlBody,
+            EmailPushProperty::Attachments => EmailProperty::Attachments,
+            EmailPushProperty::Headers => EmailProperty::Headers,
+            EmailPushProperty::Header(header) => EmailProperty::Header(HeaderProperty {
+                form: (&header.form).into(),
+                header: header.header.clone(),
+                all: header.all,
+            }),
+        }
+    }
+}
+
+impl From<&ArchivedEmailPushProperty> for EmailProperty {
+    fn from(value: &ArchivedEmailPushProperty) -> Self {
+        match value {
+            ArchivedEmailPushProperty::Id => EmailProperty::Id,
+            ArchivedEmailPushProperty::BlobId => EmailProperty::BlobId,
+            ArchivedEmailPushProperty::ThreadId => EmailProperty::ThreadId,
+            ArchivedEmailPushProperty::MailboxIds => EmailProperty::MailboxIds,
+            ArchivedEmailPushProperty::Keywords => EmailProperty::Keywords,
+            ArchivedEmailPushProperty::Size => EmailProperty::Size,
+            ArchivedEmailPushProperty::ReceivedAt => EmailProperty::ReceivedAt,
+            ArchivedEmailPushProperty::MessageId => EmailProperty::MessageId,
+            ArchivedEmailPushProperty::InReplyTo => EmailProperty::InReplyTo,
+            ArchivedEmailPushProperty::References => EmailProperty::References,
+            ArchivedEmailPushProperty::Sender => EmailProperty::Sender,
+            ArchivedEmailPushProperty::From => EmailProperty::From,
+            ArchivedEmailPushProperty::To => EmailProperty::To,
+            ArchivedEmailPushProperty::Cc => EmailProperty::Cc,
+            ArchivedEmailPushProperty::Bcc => EmailProperty::Bcc,
+            ArchivedEmailPushProperty::ReplyTo => EmailProperty::ReplyTo,
+            ArchivedEmailPushProperty::Subject => EmailProperty::Subject,
+            ArchivedEmailPushProperty::SentAt => EmailProperty::SentAt,
+            ArchivedEmailPushProperty::Preview => EmailProperty::Preview,
+            ArchivedEmailPushProperty::HasAttachment => EmailProperty::HasAttachment,
+            ArchivedEmailPushProperty::BodyStructure => EmailProperty::BodyStructure,
+            ArchivedEmailPushProperty::BodyValues => EmailProperty::BodyValues,
+            ArchivedEmailPushProperty::TextBody => EmailProperty::TextBody,
+            ArchivedEmailPushProperty::HtmlBody => EmailProperty::HtmlBody,
+            ArchivedEmailPushProperty::Attachments => EmailProperty::Attachments,
+            ArchivedEmailPushProperty::Headers => EmailProperty::Headers,
+            ArchivedEmailPushProperty::Header(header) => EmailProperty::Header(HeaderProperty {
+                form: (&header.form).into(),
+                header: header.header.as_str().to_string(),
+                all: header.all,
+            }),
+        }
+    }
+}
+
+impl From<&ArchivedEmailPushHeaderForm> for HeaderForm {
+    fn from(value: &ArchivedEmailPushHeaderForm) -> Self {
+        match value {
+            ArchivedEmailPushHeaderForm::Raw => HeaderForm::Raw,
+            ArchivedEmailPushHeaderForm::Text => HeaderForm::Text,
+            ArchivedEmailPushHeaderForm::Addresses => HeaderForm::Addresses,
+            ArchivedEmailPushHeaderForm::GroupedAddresses => HeaderForm::GroupedAddresses,
+            ArchivedEmailPushHeaderForm::MessageIds => HeaderForm::MessageIds,
+            ArchivedEmailPushHeaderForm::Date => HeaderForm::Date,
+            ArchivedEmailPushHeaderForm::Urls => HeaderForm::URLs,
+        }
+    }
+}
+
+impl From<&HeaderForm> for EmailPushHeaderForm {
+    fn from(value: &HeaderForm) -> Self {
+        match value {
+            HeaderForm::Raw => EmailPushHeaderForm::Raw,
+            HeaderForm::Text => EmailPushHeaderForm::Text,
+            HeaderForm::Addresses => EmailPushHeaderForm::Addresses,
+            HeaderForm::GroupedAddresses => EmailPushHeaderForm::GroupedAddresses,
+            HeaderForm::MessageIds => EmailPushHeaderForm::MessageIds,
+            HeaderForm::Date => EmailPushHeaderForm::Date,
+            HeaderForm::URLs => EmailPushHeaderForm::Urls,
+        }
+    }
+}
+
+impl From<&EmailPushHeaderForm> for HeaderForm {
+    fn from(value: &EmailPushHeaderForm) -> Self {
+        match value {
+            EmailPushHeaderForm::Raw => HeaderForm::Raw,
+            EmailPushHeaderForm::Text => HeaderForm::Text,
+            EmailPushHeaderForm::Addresses => HeaderForm::Addresses,
+            EmailPushHeaderForm::GroupedAddresses => HeaderForm::GroupedAddresses,
+            EmailPushHeaderForm::MessageIds => HeaderForm::MessageIds,
+            EmailPushHeaderForm::Date => HeaderForm::Date,
+            EmailPushHeaderForm::Urls => HeaderForm::URLs,
+        }
     }
 }
 

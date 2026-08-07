@@ -5,7 +5,7 @@
  */
 
 use super::{RedisPool, RedisStore, into_error};
-use crate::Deserialize;
+use crate::{Deserialize, write::now};
 use redis::AsyncCommands;
 
 impl RedisStore {
@@ -69,6 +69,23 @@ impl RedisStore {
                     expires,
                 )
                 .await
+            }
+        }
+    }
+
+    pub async fn try_lock(&self, key: &[u8], expires: u64) -> trc::Result<bool> {
+        match &self.pool {
+            RedisPool::Single(pool) => {
+                self.try_lock_(pool.get().await.map_err(into_error)?.as_mut(), key, expires)
+                    .await
+            }
+            RedisPool::Cluster(pool) => {
+                self.try_lock_(pool.get().await.map_err(into_error)?.as_mut(), key, expires)
+                    .await
+            }
+            RedisPool::Sentinel(pool) => {
+                self.try_lock_(pool.get().await.map_err(into_error)?.as_mut(), key, expires)
+                    .await
             }
         }
     }
@@ -225,6 +242,24 @@ impl RedisStore {
         } else {
             conn.incr(key, value).await.map_err(into_error)
         }
+    }
+
+    async fn try_lock_(
+        &self,
+        conn: &mut impl AsyncCommands,
+        key: &[u8],
+        expires: u64,
+    ) -> trc::Result<bool> {
+        redis::cmd("SET")
+            .arg(key)
+            .arg(now() + expires)
+            .arg("NX")
+            .arg("EX")
+            .arg(expires as i64)
+            .query_async::<Option<String>>(conn)
+            .await
+            .map(|reply| reply.is_some())
+            .map_err(into_error)
     }
 
     async fn key_delete_(&self, conn: &mut impl AsyncCommands, key: &[u8]) -> trc::Result<()> {

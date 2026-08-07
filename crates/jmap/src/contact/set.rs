@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::changes::state::JmapCacheState;
 use crate::contact::assert_is_unique_uid;
 use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
 use common::{
@@ -72,7 +73,8 @@ impl ContactCardSet for Server {
                 SyncCollection::AddressBook,
             )
             .await?;
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(cache.assert_state(false, &request.if_in_state)?);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
 
         // Obtain addressBookIds

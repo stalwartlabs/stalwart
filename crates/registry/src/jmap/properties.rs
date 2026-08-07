@@ -42,9 +42,13 @@ impl jmap_tools::Element for RegistryValue {
                 | Property::DomainId
                 | Property::AccountId
                 | Property::DefaultDomainId
+                | Property::DefaultCertificateId
                 | Property::DefaultUserRoleIds
                 | Property::DefaultGroupRoleIds
                 | Property::DefaultTenantRoleIds
+                | Property::DefaultAdminRoleIds
+                | Property::ListenerIds
+                | Property::PublicKey
                 | Property::QueueId
                 | Property::ModelId
                 | Property::AcmeProviderId => {

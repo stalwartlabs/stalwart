@@ -9,7 +9,7 @@ use ahash::AHashSet;
 use std::collections::HashSet;
 use store::{
     ValueKey,
-    rand::{self, Rng},
+    rand::{self, RngExt},
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, MergeResult, ValueClass},
 };
 use types::collection::Collection;

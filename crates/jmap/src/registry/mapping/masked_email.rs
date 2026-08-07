@@ -11,7 +11,7 @@
 use crate::registry::mapping::{ObjectResponse, RegistrySetResponse, ValidationResult};
 use common::enterprise::masked::MaskedAddress;
 use jmap_proto::error::set::SetError;
-use rand::{Rng, distr::Alphanumeric};
+use rand::{RngExt, distr::Alphanumeric};
 use registry::{
     jmap::JmapValue,
     schema::{

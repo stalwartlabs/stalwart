@@ -924,6 +924,7 @@ impl EnumImpl for Property {
             b"maxOutMessages" => Property::MaxOutMessages,
             b"maxParticipantIdentities" => Property::MaxParticipantIdentities,
             b"maxPublicKeys" => Property::MaxPublicKeys,
+            b"maxPushSize" => Property::MaxPushSize,
             b"maxReceivedHeaders" => Property::MaxReceivedHeaders,
             b"maxRecipients" => Property::MaxRecipients,
             b"maxReconnects" => Property::MaxReconnects,
@@ -1322,6 +1323,8 @@ impl EnumImpl for Property {
             b"vrfy" => Property::Vrfy,
             b"waitOnFail" => Property::WaitOnFail,
             b"wapiVersion" => Property::WapiVersion,
+            b"webPushContact" => Property::WebPushContact,
+            b"webPushKey" => Property::WebPushKey,
             b"websocketHeartbeat" => Property::WebsocketHeartbeat,
             b"websocketThrottle" => Property::WebsocketThrottle,
             b"websocketTimeout" => Property::WebsocketTimeout,
@@ -1850,6 +1853,7 @@ impl EnumImpl for Property {
             Property::MaxOutMessages => "maxOutMessages",
             Property::MaxParticipantIdentities => "maxParticipantIdentities",
             Property::MaxPublicKeys => "maxPublicKeys",
+            Property::MaxPushSize => "maxPushSize",
             Property::MaxReceivedHeaders => "maxReceivedHeaders",
             Property::MaxRecipients => "maxRecipients",
             Property::MaxReconnects => "maxReconnects",
@@ -2248,6 +2252,8 @@ impl EnumImpl for Property {
             Property::Vrfy => "vrfy",
             Property::WaitOnFail => "waitOnFail",
             Property::WapiVersion => "wapiVersion",
+            Property::WebPushContact => "webPushContact",
+            Property::WebPushKey => "webPushKey",
             Property::WebsocketHeartbeat => "websocketHeartbeat",
             Property::WebsocketThrottle => "websocketThrottle",
             Property::WebsocketTimeout => "websocketTimeout",
@@ -2780,6 +2786,7 @@ impl EnumImpl for Property {
             704 => Some(Property::MaxOutMessages),
             162 => Some(Property::MaxParticipantIdentities),
             366 => Some(Property::MaxPublicKeys),
+            923 => Some(Property::MaxPushSize),
             561 => Some(Property::MaxReceivedHeaders),
             173 => Some(Property::MaxRecipients),
             580 => Some(Property::MaxReconnects),
@@ -3178,6 +3185,8 @@ impl EnumImpl for Property {
             526 => Some(Property::Vrfy),
             548 => Some(Property::WaitOnFail),
             893 => Some(Property::WapiVersion),
+            922 => Some(Property::WebPushContact),
+            921 => Some(Property::WebPushKey),
             455 => Some(Property::WebsocketHeartbeat),
             456 => Some(Property::WebsocketThrottle),
             457 => Some(Property::WebsocketTimeout),
@@ -3188,7 +3197,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 921;
+    const COUNT: usize = 924;
 }
 
 impl serde::Serialize for Property {

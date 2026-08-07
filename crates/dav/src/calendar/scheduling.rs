@@ -29,7 +29,9 @@ use dav_proto::{
         response::{CalCondition, Href, ScheduleResponse, ScheduleResponseItem},
     },
 };
-use groupware::{DestroyArchive, cache::GroupwareCache, calendar::CalendarEventNotification};
+use groupware::{
+    DestroyArchive, cache::GroupwareCache, calendar::CalendarEventNotification, strip_mailto_scheme,
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::{
@@ -325,9 +327,7 @@ impl CalendarEventNotificationHandler for Server {
                             ICalendarValue::Text(value) | ICalendarValue::Uri(Uri::Location(value)),
                         ),
                     ) => {
-                        if let Some(email) =
-                            sanitize_email(value.strip_prefix("mailto:").unwrap_or(value.as_str()))
-                        {
+                        if let Some(email) = sanitize_email(strip_mailto_scheme(value.as_str())) {
                             attendees.insert(email, entry);
                         }
                     }

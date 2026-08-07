@@ -13,7 +13,7 @@ use crate::{
     telemetry::metrics::store::{MetricsStore, SharedMetricHistory},
 };
 use std::time::Duration;
-use store::rand::{self, Rng};
+use store::rand::{self, RngExt};
 use trc::*;
 
 impl Server {

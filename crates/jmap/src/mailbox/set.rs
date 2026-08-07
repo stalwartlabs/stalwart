@@ -202,7 +202,23 @@ impl MailboxSet for Server {
                     .caused_by(trc::location!())?;
                 if ctx.is_shared {
                     let acl = mailbox.inner.acls.effective_acl(access_token);
-                    if !acl.contains(Acl::Modify) {
+                    let subscription_only = object.keys().all(|key| {
+                        matches!(
+                            key,
+                            Key::Property(MailboxProperty::IsSubscribed | MailboxProperty::Id)
+                        )
+                    });
+                    if subscription_only {
+                        if !acl.contains(Acl::Read) {
+                            ctx.response.not_updated.append(
+                                id,
+                                SetError::forbidden().with_description(
+                                    "You are not allowed to access this mailbox.",
+                                ),
+                            );
+                            continue 'update;
+                        }
+                    } else if !acl.contains(Acl::Modify) {
                         ctx.response.not_updated.append(
                             id,
                             SetError::forbidden()

@@ -7,6 +7,7 @@
 use crate::{
     api::acl::{JmapAcl, JmapRights},
     blob::download::BlobDownload,
+    changes::state::JmapCacheState,
 };
 use common::{DavResourceMetadata, DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
@@ -67,7 +68,8 @@ impl FileNodeSet for Server {
                 SyncCollection::FileNode,
             )
             .await?;
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(cache.assert_state(false, &request.if_in_state)?);
         let mut will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
         let on_destroy_remove_children = request

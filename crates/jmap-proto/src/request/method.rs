@@ -438,9 +438,9 @@ impl<'de> serde::Deserialize<'de> for MethodName {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <&str>::deserialize(deserializer)?;
+        let value = <Cow<str>>::deserialize(deserializer)?;
 
-        MethodName::parse(value)
+        MethodName::parse(value.as_ref())
             .ok_or_else(|| serde::de::Error::custom(format!("Invalid method name: {:?}", value)))
     }
 }

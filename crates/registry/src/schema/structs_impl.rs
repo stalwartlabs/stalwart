@@ -22798,7 +22798,7 @@ impl InMemoryStoreBase {
 
 impl ObjectImpl for Jmap {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 2;
     const OBJECT: ObjectType = ObjectType::Jmap;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -22884,6 +22884,17 @@ impl ObjectImpl for Jmap {
                 errors.push(ValidationError::min_value(Property::MaxSubscriptions, 1));
             }
         }
+        let value = &self.web_push_key;
+        value.validate(errors);
+        if let Some(value) = &self.web_push_contact {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::WebPushContact));
+            }
+        }
+        let value = &self.max_push_size;
+        if *value < 512 {
+            errors.push(ValidationError::min_value(Property::MaxPushSize, 512));
+        }
         errors.len() == neb
     }
 
@@ -22920,6 +22931,9 @@ impl Pickle for Jmap {
         self.websocket_throttle.pickle(out);
         self.websocket_timeout.pickle(out);
         self.max_subscriptions.pickle(out);
+        self.web_push_key.pickle(out);
+        self.web_push_contact.pickle(out);
+        self.max_push_size.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -22952,6 +22966,15 @@ impl Pickle for Jmap {
         this.websocket_throttle = Pickle::unpickle(stream)?;
         this.websocket_timeout = Pickle::unpickle(stream)?;
         this.max_subscriptions = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.web_push_key = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.web_push_contact = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_push_size = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -22987,13 +23010,16 @@ impl Default for Jmap {
             websocket_throttle: Duration::from_millis(1000),
             websocket_timeout: Duration::from_millis(600000),
             max_subscriptions: Some(15u64),
+            web_push_key: Default::default(),
+            web_push_contact: Default::default(),
+            max_push_size: 4096u64,
         }
     }
 }
 
 impl IntoValue for Jmap {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(30);
+        let mut map = jmap_tools::Map::with_capacity(33);
         map.insert_unchecked(
             Property::ParseLimitEvent,
             self.parse_limit_event.into_value(),
@@ -23076,6 +23102,9 @@ impl IntoValue for Jmap {
             Property::MaxSubscriptions,
             self.max_subscriptions.into_value(),
         );
+        map.insert_unchecked(Property::WebPushKey, self.web_push_key.into_value());
+        map.insert_unchecked(Property::WebPushContact, self.web_push_contact.into_value());
+        map.insert_unchecked(Property::MaxPushSize, self.max_push_size.into_value());
         JmapValue::Object(map)
     }
 }
@@ -23119,6 +23148,11 @@ impl RegistryJsonPropertyPatch for Jmap {
             Some(Property::WebsocketThrottle) => self.websocket_throttle.patch(pointer, value),
             Some(Property::WebsocketTimeout) => self.websocket_timeout.patch(pointer, value),
             Some(Property::MaxSubscriptions) => self.max_subscriptions.patch(pointer, value),
+            Some(Property::WebPushKey) => self.web_push_key.patch(pointer, value),
+            Some(Property::WebPushContact) => self
+                .web_push_contact
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::MaxPushSize) => self.max_push_size.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -31303,6 +31337,188 @@ impl RegistryJsonPropertyPatch for PublicKey {
     }
 }
 
+impl PublicStringOptional {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            PublicStringOptional::None => true,
+            PublicStringOptional::Value(inner) => inner.validate(errors),
+            PublicStringOptional::EnvironmentVariable(inner) => inner.validate(errors),
+            PublicStringOptional::File(inner) => inner.validate(errors),
+        }
+    }
+}
+
+impl Default for PublicStringOptional {
+    fn default() -> Self {
+        PublicStringOptional::None
+    }
+}
+
+impl Pickle for PublicStringOptional {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            PublicStringOptional::None => {
+                0u16.pickle(out);
+            }
+            PublicStringOptional::Value(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+            PublicStringOptional::EnvironmentVariable(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+            PublicStringOptional::File(inner) => {
+                3u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(PublicStringOptional::None),
+            1 => Pickle::unpickle(stream).map(PublicStringOptional::Value),
+            2 => Pickle::unpickle(stream).map(PublicStringOptional::EnvironmentVariable),
+            3 => Pickle::unpickle(stream).map(PublicStringOptional::File),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for PublicStringOptional {
+    fn into_value(self) -> JmapValue<'static> {
+        match self {
+            PublicStringOptional::None => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("None".into()));
+                JmapValue::Object(obj)
+            }
+            PublicStringOptional::Value(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Value".into()));
+                obj
+            }
+            PublicStringOptional::EnvironmentVariable(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("EnvironmentVariable".into()));
+                obj
+            }
+            PublicStringOptional::File(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("File".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for PublicStringOptional {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                PublicStringOptionalType::None => *self = PublicStringOptional::None,
+                PublicStringOptionalType::Value => {
+                    *self = PublicStringOptional::Value(Default::default())
+                }
+                PublicStringOptionalType::EnvironmentVariable => {
+                    *self = PublicStringOptional::EnvironmentVariable(Default::default())
+                }
+                PublicStringOptionalType::File => {
+                    *self = PublicStringOptional::File(Default::default())
+                }
+            }
+        }
+        match self {
+            PublicStringOptional::None => pointer.assert_eof(),
+            PublicStringOptional::Value(inner) => inner.patch(pointer, value),
+            PublicStringOptional::EnvironmentVariable(inner) => inner.patch(pointer, value),
+            PublicStringOptional::File(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl PublicStringOptional {
+    pub fn object_type(&self) -> PublicStringOptionalType {
+        match self {
+            PublicStringOptional::None => PublicStringOptionalType::None,
+            PublicStringOptional::Value(_) => PublicStringOptionalType::Value,
+            PublicStringOptional::EnvironmentVariable(_) => {
+                PublicStringOptionalType::EnvironmentVariable
+            }
+            PublicStringOptional::File(_) => PublicStringOptionalType::File,
+        }
+    }
+}
+
+impl PublicStringValue {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.value;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Value));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for PublicStringValue {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.value.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.value = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for PublicStringValue {
+    fn default() -> Self {
+        Self {
+            value: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for PublicStringValue {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Value, self.value.into_value());
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for PublicStringValue {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Value) => self
+                .value
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl PublicText {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         match self {
@@ -33029,11 +33245,8 @@ impl S3Store {
         if value.is_empty() {
             errors.push(ValidationError::required(Property::Bucket));
         }
-        if let Some(value) = &self.access_key {
-            if value.is_empty() {
-                errors.push(ValidationError::required(Property::AccessKey));
-            }
-        }
+        let value = &self.access_key;
+        value.validate(errors);
         let value = &self.secret_key;
         value.validate(errors);
         let value = &self.security_token;
@@ -33152,9 +33365,7 @@ impl RegistryJsonPropertyPatch for S3Store {
             Some(Property::Bucket) => self
                 .bucket
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
-            Some(Property::AccessKey) => self
-                .access_key
-                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::AccessKey) => self.access_key.patch(pointer, value),
             Some(Property::SecretKey) => self.secret_key.patch(pointer, value),
             Some(Property::SecurityToken) => self.security_token.patch(pointer, value),
             Some(Property::SessionToken) => self.session_token.patch(pointer, value),

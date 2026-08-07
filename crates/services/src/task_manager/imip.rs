@@ -123,6 +123,37 @@ async fn send_imip(
             ));
         };
 
+        let organizer_info = match server
+            .account_id_from_email(itip_message.from.as_str(), true)
+            .await
+        {
+            Ok(Some(sender_id)) if sender_id != account_id => {
+                match server.account_info(sender_id).await {
+                    Ok(info) => Some(info),
+                    Err(err) => {
+                        trc::error!(
+                            err.account_id(account_id)
+                                .document_id(document_id)
+                                .caused_by(trc::location!())
+                                .details("Failed to load organizer account for iMIP sender")
+                        );
+                        None
+                    }
+                }
+            }
+            Ok(_) => None,
+            Err(err) => {
+                trc::error!(
+                    err.account_id(account_id)
+                        .document_id(document_id)
+                        .caused_by(trc::location!())
+                        .details("Failed to resolve organizer account for iMIP sender")
+                );
+                None
+            }
+        };
+        let sender_info = organizer_info.as_ref().unwrap_or(&account_info);
+
         for recipient in itip_message.to.iter() {
             // Build template
             let tpl = build_itip_template(
@@ -141,7 +172,7 @@ async fn send_imip(
             // Build message
             let message = MessageBuilder::new()
                 .from((
-                    account_info.description().unwrap_or(account_info.name()),
+                    sender_info.description().unwrap_or(sender_info.name()),
                     itip_message.from.as_str(),
                 ))
                 .to(recipient.as_str())
@@ -188,14 +219,14 @@ async fn send_imip(
             // Send message
             let server_ = server.clone();
             let server_instance = server_instance.clone();
-            let account_info = account_info.clone();
+            let sender_info = sender_info.clone();
             let from = itip_message.from.to_string();
             let to = recipient.to_string();
             tokio::spawn(async move {
                 let mut session = Session::<NullIo>::local(
                     server_,
                     server_instance,
-                    SessionData::local(account_info, None, vec![], vec![], 0),
+                    SessionData::local(sender_info, None, vec![], vec![], 0),
                 );
 
                 // MAIL FROM
