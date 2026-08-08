@@ -26,9 +26,8 @@ use mail_parser::{
 };
 use registry::{
     schema::{
-        enums::IndexDocumentType,
         prelude::{ObjectType, Permission, Property},
-        structs::{SpamTrainingSample, Task, TaskIndexDocument, TaskMergeThreads, TaskStatus},
+        structs::{SpamTrainingSample, Task, TaskMergeThreads, TaskStatus},
     },
     types::{EnumImpl, ObjectImpl, datetime::UTCDateTime, id::ObjectId, map::Map},
 };
@@ -38,8 +37,8 @@ use store::{
     IndexKeyPrefix, IterateParams, SerializeInfallible, U32_LEN, U128_LEN, ValueKey,
     ahash::AHashMap,
     write::{
-        AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, ValueClass,
-        key::DeserializeBigEndian, now,
+        AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, SearchIndex,
+        ValueClass, key::DeserializeBigEndian, now,
     },
 };
 use store::{
@@ -673,12 +672,7 @@ impl EmailIngest for Server {
                 }),
                 ThreadInfo::serialize(thread_id, &message_ids),
             )
-            .schedule_task(Task::IndexDocument(TaskIndexDocument {
-                account_id: account_id.into(),
-                document_id: document_id.into(),
-                document_type: IndexDocumentType::Email,
-                status: TaskStatus::now(),
-            }));
+            .queue_document_index(SearchIndex::Email, account_id, document_id);
 
         if let Some(blob_hold) = blob_hold {
             batch.clear(blob_hold);

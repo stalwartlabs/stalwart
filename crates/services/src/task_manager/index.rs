@@ -9,18 +9,13 @@ use common::Server;
 use email::{cache::MessageCacheFetch, message::metadata::MessageMetadata};
 use groupware::{cache::GroupwareCache, calendar::CalendarEvent, contact::ContactCard};
 use registry::{
-    schema::{
-        enums::IndexDocumentType,
-        prelude::{ObjectType, Property},
-        structs::{TaskIndexDocument, TaskIndexTrace, TaskStatus},
-    },
+    schema::prelude::{ObjectType, Property},
     types::EnumImpl,
 };
 use std::cmp::Ordering;
 use store::{
     IterateParams, ValueKey,
     ahash::AHashMap,
-    rand::{self, RngExt},
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
         AlignedBytes, Archive, BatchBuilder, SearchIndex, TelemetryClass, ValueClass,
@@ -48,18 +43,23 @@ enum TaskType {
 
 #[derive(Debug)]
 pub(crate) struct IndexTaskResult {
-    index: IndexDocumentType,
+    index: SearchIndex,
     task_type: TaskType,
     pub result: TaskResult,
 }
 
 impl SearchIndexTask for Server {
     async fn index(&self, tasks: &[TaskDetails]) -> Vec<IndexTaskResult> {
-        let mut results: Vec<IndexTaskResult> = Vec::with_capacity(tasks.len());
+        todo!()
+
+        /*let mut results: Vec<IndexTaskResult> = Vec::with_capacity(tasks.len());
         let mut batch = BatchBuilder::new();
         let mut document_insertions = Vec::new();
         let mut document_deletions: [AHashMap<u32, Vec<u32>>; NUM_INDEXES] =
             std::array::from_fn(|_| AHashMap::new());
+
+        // roles.search_indexing
+        //inner.build_server().core.email.index_batch_size;
 
         for task in tasks {
             match &task.task {
@@ -289,7 +289,7 @@ impl SearchIndexTask for Server {
             }
         }
 
-        results
+        results*/
     }
 }
 
@@ -314,10 +314,7 @@ pub(crate) async fn reindex_telemetry(server: &Server) -> trc::Result<()> {
     let mut batch = BatchBuilder::new();
     let now = now() as i64;
     for span_id in spans {
-        batch.schedule_task(Task::IndexTrace(TaskIndexTrace {
-            trace_id: span_id.into(),
-            status: TaskStatus::at(now + rand::rng().random_range(0..=300)),
-        }));
+        batch.queue_trace_index(span_id);
         if batch.is_large_batch() {
             server.core.storage.data.write(batch.build_all()).await?;
             batch = BatchBuilder::new();
@@ -331,8 +328,6 @@ pub(crate) async fn reindex_telemetry(server: &Server) -> trc::Result<()> {
 }
 
 pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Result<()> {
-    let now = now() as i64;
-
     let mut batch = BatchBuilder::new();
 
     for document_id in server
@@ -344,12 +339,7 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
         .iter()
         .map(|v| v.document_id)
     {
-        batch.schedule_task(Task::IndexDocument(TaskIndexDocument {
-            account_id: account_id.into(),
-            document_id: document_id.into(),
-            document_type: IndexDocumentType::Email,
-            status: TaskStatus::at(now + rand::rng().random_range(0..=300)),
-        }));
+        batch.queue_document_index(SearchIndex::Email, account_id, document_id);
 
         if batch.is_large_batch() {
             server.core.storage.data.write(batch.build_all()).await?;
@@ -357,12 +347,12 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
         }
     }
 
-    for document_type in [IndexDocumentType::Calendar, IndexDocumentType::Contacts] {
+    for document_type in [SearchIndex::Calendar, SearchIndex::Contacts] {
         let cache = server
             .fetch_dav_resources(
                 account_id,
                 account_id,
-                if document_type == IndexDocumentType::Calendar {
+                if document_type == SearchIndex::Calendar {
                     SyncCollection::Calendar
                 } else {
                     SyncCollection::AddressBook
@@ -372,12 +362,7 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
             .caused_by(trc::location!())?;
 
         for document_id in cache.document_ids(false) {
-            batch.schedule_task(Task::IndexDocument(TaskIndexDocument {
-                account_id: account_id.into(),
-                document_id: document_id.into(),
-                document_type,
-                status: TaskStatus::at(now + rand::rng().random_range(0..=300)),
-            }));
+            batch.queue_document_index(document_type, account_id, document_id);
 
             if batch.is_large_batch() {
                 server.core.storage.data.write(batch.build_all()).await?;

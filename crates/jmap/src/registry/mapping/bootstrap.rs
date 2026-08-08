@@ -558,7 +558,7 @@ fn map_directory(directory: &DirectoryBootstrap) -> Option<Directory> {
 
 fn map_dns_server(dns_server: &DnsServerBootstrap) -> Option<registry::schema::structs::DnsServer> {
     match dns_server {
-        DnsServerBootstrap::Manual | DnsServerBootstrap::Deprecated1 => None,
+        DnsServerBootstrap::Manual => None,
         DnsServerBootstrap::Tsig(dns_server_tsig) => {
             DnsServer::Tsig(dns_server_tsig.clone()).into()
         }

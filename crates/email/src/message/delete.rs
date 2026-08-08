@@ -8,11 +8,9 @@ use crate::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use crate::message::messagedata::EmailMessageData;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
-use registry::schema::enums::IndexDocumentType;
-use registry::schema::structs::{Task, TaskIndexDocument, TaskStatus};
 use std::future::Future;
 use store::write::key::DeserializeBigEndian;
-use store::write::{IndexPropertyClass, now};
+use store::write::{IndexPropertyClass, SearchIndex, now};
 use store::{IterateParams, U32_LEN, U64_LEN, ValueKey};
 use store::{
     roaring::RoaringBitmap,
@@ -84,12 +82,7 @@ impl EmailDeletion for Server {
                         .with_current(metadata),
                 )
                 .caused_by(trc::location!())?
-                .schedule_task(Task::UnindexDocument(TaskIndexDocument {
-                    account_id: account_id.into(),
-                    document_id: document_id.into(),
-                    document_type: IndexDocumentType::Email,
-                    status: TaskStatus::now(),
-                }))
+                .queue_document_unindex(SearchIndex::Email, account_id, document_id)
                 .commit_point();
 
             deleted_ids.insert(document_id);

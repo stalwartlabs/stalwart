@@ -10,7 +10,8 @@ use crate::{
         EnterpriseRegistry,
         mapping::{
             RegistryQueryResponse, account::credential_query, cluster::cluster_node_query,
-            log::log_query, queued_message::queued_message_query, report::report_query,
+            index_queue::index_queue_entry_query, log::log_query,
+            queued_message::queued_message_query, report::report_query,
             spam_sample::spam_sample_query, task::task_query,
         },
     },
@@ -147,6 +148,15 @@ impl RegistryQuery for Server {
                 .await
                 .and_then(|response| response.build())
             }
+
+            ObjectType::IndexQueueEntry => index_queue_entry_query(RegistryQueryResponse {
+                server: self,
+                access_token,
+                object_type,
+                request,
+            })
+            .await
+            .and_then(|response| response.build()),
 
             ObjectType::Task => task_query(RegistryQueryResponse {
                 server: self,

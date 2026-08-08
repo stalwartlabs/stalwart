@@ -83,10 +83,7 @@ pub(crate) async fn task_set(
 
         let task_type = task.object_type();
         match task_type {
-            TaskType::IndexDocument
-            | TaskType::UnindexDocument
-            | TaskType::IndexTrace
-            | TaskType::AccountMaintenance
+            TaskType::AccountMaintenance
             | TaskType::TenantMaintenance
             | TaskType::StoreMaintenance
             | TaskType::SpamFilterMaintenance

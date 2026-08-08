@@ -17,12 +17,12 @@ use imap_proto::{
     parser::parse_sequence_set,
     receiver::{Request, Token},
 };
-use registry::schema::{
-    enums::{IndexDocumentType, Permission},
-    structs::{Task, TaskIndexDocument, TaskStatus},
-};
+use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
-use store::{roaring::RoaringBitmap, write::BatchBuilder};
+use store::{
+    roaring::RoaringBitmap,
+    write::{BatchBuilder, SearchIndex},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -195,12 +195,7 @@ impl<T: SessionStream> SessionData<T> {
                                     .with_current(metadata),
                             )
                             .caused_by(trc::location!())?
-                            .schedule_task(Task::UnindexDocument(TaskIndexDocument {
-                                account_id: account_id.into(),
-                                document_id: document_id.into(),
-                                document_type: IndexDocumentType::Email,
-                                status: TaskStatus::now(),
-                            }))
+                            .queue_document_unindex(SearchIndex::Email, account_id, document_id)
                             .commit_point();
                     } else {
                         // Untag message from this mailbox and remove Deleted flag

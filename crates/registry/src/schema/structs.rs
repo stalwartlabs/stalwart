@@ -1384,7 +1384,6 @@ pub struct DnsResolverTls {
 #[serde(tag = "@type")]
 pub enum DnsServer {
     Tsig(DnsServerTsig),
-    Deprecated1,
     Cloudflare(DnsServerCloudflare),
     DigitalOcean(DnsServerCloud),
     DeSEC(DnsServerCloud),
@@ -1599,7 +1598,6 @@ pub struct DnsServerBluecatV2 {
 pub enum DnsServerBootstrap {
     Manual,
     Tsig(DnsServerTsig),
-    Deprecated1,
     Cloudflare(DnsServerCloudflare),
     DigitalOcean(DnsServerCloud),
     DeSEC(DnsServerCloud),
@@ -3120,6 +3118,19 @@ pub enum InMemoryStoreBase {
     Redis(RedisStore),
     RedisCluster(RedisClusterStore),
     RedisSentinel(RedisSentinelStore),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IndexQueueEntry {
+    #[serde(rename = "action")]
+    pub action: IndexAction,
+    #[serde(rename = "accountId")]
+    pub account_id: Option<Id>,
+    #[serde(rename = "documentId")]
+    pub document_id: u64,
+    #[serde(rename = "createdAt")]
+    pub created_at: UTCDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5467,9 +5478,6 @@ pub struct SystemSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "@type")]
 pub enum Task {
-    IndexDocument(TaskIndexDocument),
-    UnindexDocument(TaskIndexDocument),
-    IndexTrace(TaskIndexTrace),
     CalendarAlarmEmail(TaskCalendarAlarmEmail),
     CalendarAlarmNotification(TaskCalendarAlarmNotification),
     CalendarItipMessage(TaskCalendarItipMessage),
@@ -5608,28 +5616,6 @@ pub struct TaskDnsManagement {
 pub struct TaskDomainManagement {
     #[serde(rename = "domainId")]
     pub domain_id: Id,
-    #[serde(rename = "status")]
-    pub status: TaskStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TaskIndexDocument {
-    #[serde(rename = "documentType")]
-    pub document_type: IndexDocumentType,
-    #[serde(rename = "accountId")]
-    pub account_id: Id,
-    #[serde(rename = "documentId")]
-    pub document_id: Id,
-    #[serde(rename = "status")]
-    pub status: TaskStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TaskIndexTrace {
-    #[serde(rename = "traceId")]
-    pub trace_id: Id,
     #[serde(rename = "status")]
     pub status: TaskStatus,
 }

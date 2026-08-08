@@ -8,8 +8,9 @@ use crate::registry::{
     EnterpriseRegistry,
     mapping::{
         RegistryGetResponse, account::account_get, bootstrap::bootstrap_get,
-        cluster::cluster_node_get, log::log_get, queued_message::queued_message_get,
-        report::report_get, spam_sample::spam_sample_get, task::task_get,
+        cluster::cluster_node_get, index_queue::index_queue_entry_get, log::log_get,
+        queued_message::queued_message_get, report::report_get, spam_sample::spam_sample_get,
+        task::task_get,
     },
 };
 use common::{Server, auth::AccessToken, network::dkim::generate_dkim_public_key};
@@ -322,6 +323,9 @@ impl RegistryGet for Server {
             ObjectType::QueuedMessage => {
                 queued_message_get(get).await.map(|get| get.into_response())
             }
+            ObjectType::IndexQueueEntry => index_queue_entry_get(get)
+                .await
+                .map(|get| get.into_response()),
             ObjectType::Task => task_get(get).await.map(|get| get.into_response()),
             ObjectType::ClusterNode => cluster_node_get(get).await.map(|get| get.into_response()),
             ObjectType::ArfExternalReport

@@ -9,9 +9,10 @@ use super::{
     assert::ToAssertValue, log::VanishedItem,
 };
 use crate::{
-    SerializeInfallible, U32_LEN,
+    SerializeInfallible, U32_LEN, U64_LEN,
     write::{
-        AssignedIds, LogCollection, MergeOperation, MergeResult, SetOperation, TaskQueueClass,
+        AssignedIds, LogCollection, MergeOperation, MergeResult, SearchIndex, SearchIndexClass,
+        SetOperation, TaskQueueClass, key::KeySerializer, now,
     },
 };
 use registry::{
@@ -517,6 +518,58 @@ impl BatchBuilder {
                 ValueClass::TaskQueue(TaskQueueClass::Due { id, due }),
                 class.serialize(),
             )
+    }
+
+    pub fn queue_document_index(
+        &mut self,
+        index: SearchIndex,
+        account_id: u32,
+        document_id: u32,
+    ) -> &mut Self {
+        self.set(
+            ValueClass::SearchIndex(SearchIndexClass::Queue {
+                index,
+                id_prefix: account_id,
+                id_suffix: document_id,
+            }),
+            KeySerializer::new(U64_LEN + 1)
+                .write(1u8)
+                .write(now())
+                .finalize(),
+        )
+    }
+
+    pub fn queue_document_unindex(
+        &mut self,
+        index: SearchIndex,
+        account_id: u32,
+        document_id: u32,
+    ) -> &mut Self {
+        self.set(
+            ValueClass::SearchIndex(SearchIndexClass::Queue {
+                index,
+                id_prefix: account_id,
+                id_suffix: document_id,
+            }),
+            KeySerializer::new(U64_LEN + 1)
+                .write(0u8)
+                .write(now())
+                .finalize(),
+        )
+    }
+
+    pub fn queue_trace_index(&mut self, id: u64) -> &mut Self {
+        self.set(
+            ValueClass::SearchIndex(SearchIndexClass::Queue {
+                index: SearchIndex::Tracing,
+                id_prefix: (id >> 32) as u32,
+                id_suffix: id as u32,
+            }),
+            KeySerializer::new(U64_LEN + 1)
+                .write(1u8)
+                .write(now())
+                .finalize(),
+        )
     }
 }
 

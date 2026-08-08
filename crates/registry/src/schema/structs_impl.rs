@@ -10466,7 +10466,6 @@ impl ObjectImpl for DnsServer {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         match self {
             DnsServer::Tsig(inner) => inner.validate(errors),
-            DnsServer::Deprecated1 => true,
             DnsServer::Cloudflare(inner) => inner.validate(errors),
             DnsServer::DigitalOcean(inner) => inner.validate(errors),
             DnsServer::DeSEC(inner) => inner.validate(errors),
@@ -10543,7 +10542,6 @@ impl ObjectImpl for DnsServer {
             DnsServer::Tsig(object) => {
                 object.index(i);
             }
-            DnsServer::Deprecated1 => {}
             DnsServer::Cloudflare(object) => {
                 object.index(i);
             }
@@ -10764,9 +10762,6 @@ impl Pickle for DnsServer {
             DnsServer::Tsig(inner) => {
                 0u16.pickle(out);
                 inner.pickle(out);
-            }
-            DnsServer::Deprecated1 => {
-                1u16.pickle(out);
             }
             DnsServer::Cloudflare(inner) => {
                 2u16.pickle(out);
@@ -11046,7 +11041,6 @@ impl Pickle for DnsServer {
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
         match u16::unpickle(stream)? {
             0 => Pickle::unpickle(stream).map(DnsServer::Tsig),
-            1 => Some(DnsServer::Deprecated1),
             2 => Pickle::unpickle(stream).map(DnsServer::Cloudflare),
             3 => Pickle::unpickle(stream).map(DnsServer::DigitalOcean),
             4 => Pickle::unpickle(stream).map(DnsServer::DeSEC),
@@ -11115,6 +11109,7 @@ impl Pickle for DnsServer {
             67 => Pickle::unpickle(stream).map(DnsServer::Vultr),
             68 => Pickle::unpickle(stream).map(DnsServer::WebSupport),
             69 => Pickle::unpickle(stream).map(DnsServer::YandexCloud),
+            1 => Some(Self::default()),
             _ => None,
         }
     }
@@ -11129,11 +11124,6 @@ impl IntoValue for DnsServer {
                     .unwrap()
                     .insert_unchecked(Property::Type, JmapValue::Str("Tsig".into()));
                 obj
-            }
-            DnsServer::Deprecated1 => {
-                let mut obj = jmap_tools::Map::new();
-                obj.insert_unchecked(Property::Type, JmapValue::Str("Deprecated1".into()));
-                JmapValue::Object(obj)
             }
             DnsServer::Cloudflare(obj) => {
                 let mut obj = obj.into_value();
@@ -11624,7 +11614,6 @@ impl RegistryJsonPatch for DnsServer {
         if !pointer.has_next() {
             match object_type(&pointer, &value)? {
                 DnsServerType::Tsig => *self = DnsServer::Tsig(Default::default()),
-                DnsServerType::Deprecated1 => *self = DnsServer::Deprecated1,
                 DnsServerType::Cloudflare => *self = DnsServer::Cloudflare(Default::default()),
                 DnsServerType::DigitalOcean => *self = DnsServer::DigitalOcean(Default::default()),
                 DnsServerType::DeSEC => *self = DnsServer::DeSEC(Default::default()),
@@ -11699,7 +11688,6 @@ impl RegistryJsonPatch for DnsServer {
         }
         match self {
             DnsServer::Tsig(inner) => inner.patch(pointer, value),
-            DnsServer::Deprecated1 => pointer.assert_eof(),
             DnsServer::Cloudflare(inner) => inner.patch(pointer, value),
             DnsServer::DigitalOcean(inner) => inner.patch(pointer, value),
             DnsServer::DeSEC(inner) => inner.patch(pointer, value),
@@ -11776,7 +11764,6 @@ impl DnsServer {
     pub fn object_type(&self) -> DnsServerType {
         match self {
             DnsServer::Tsig(_) => DnsServerType::Tsig,
-            DnsServer::Deprecated1 => DnsServerType::Deprecated1,
             DnsServer::Cloudflare(_) => DnsServerType::Cloudflare,
             DnsServer::DigitalOcean(_) => DnsServerType::DigitalOcean,
             DnsServer::DeSEC(_) => DnsServerType::DeSEC,
@@ -12611,7 +12598,6 @@ impl DnsServerBootstrap {
         match self {
             DnsServerBootstrap::Manual => true,
             DnsServerBootstrap::Tsig(inner) => inner.validate(errors),
-            DnsServerBootstrap::Deprecated1 => true,
             DnsServerBootstrap::Cloudflare(inner) => inner.validate(errors),
             DnsServerBootstrap::DigitalOcean(inner) => inner.validate(errors),
             DnsServerBootstrap::DeSEC(inner) => inner.validate(errors),
@@ -12699,9 +12685,6 @@ impl Pickle for DnsServerBootstrap {
             DnsServerBootstrap::Tsig(inner) => {
                 1u16.pickle(out);
                 inner.pickle(out);
-            }
-            DnsServerBootstrap::Deprecated1 => {
-                2u16.pickle(out);
             }
             DnsServerBootstrap::Cloudflare(inner) => {
                 3u16.pickle(out);
@@ -12982,7 +12965,6 @@ impl Pickle for DnsServerBootstrap {
         match u16::unpickle(stream)? {
             0 => Some(DnsServerBootstrap::Manual),
             1 => Pickle::unpickle(stream).map(DnsServerBootstrap::Tsig),
-            2 => Some(DnsServerBootstrap::Deprecated1),
             3 => Pickle::unpickle(stream).map(DnsServerBootstrap::Cloudflare),
             4 => Pickle::unpickle(stream).map(DnsServerBootstrap::DigitalOcean),
             5 => Pickle::unpickle(stream).map(DnsServerBootstrap::DeSEC),
@@ -13051,6 +13033,7 @@ impl Pickle for DnsServerBootstrap {
             68 => Pickle::unpickle(stream).map(DnsServerBootstrap::Vultr),
             69 => Pickle::unpickle(stream).map(DnsServerBootstrap::WebSupport),
             70 => Pickle::unpickle(stream).map(DnsServerBootstrap::YandexCloud),
+            2 => Some(Self::default()),
             _ => None,
         }
     }
@@ -13070,11 +13053,6 @@ impl IntoValue for DnsServerBootstrap {
                     .unwrap()
                     .insert_unchecked(Property::Type, JmapValue::Str("Tsig".into()));
                 obj
-            }
-            DnsServerBootstrap::Deprecated1 => {
-                let mut obj = jmap_tools::Map::new();
-                obj.insert_unchecked(Property::Type, JmapValue::Str("Deprecated1".into()));
-                JmapValue::Object(obj)
             }
             DnsServerBootstrap::Cloudflare(obj) => {
                 let mut obj = obj.into_value();
@@ -13568,7 +13546,6 @@ impl RegistryJsonPatch for DnsServerBootstrap {
                 DnsServerBootstrapType::Tsig => {
                     *self = DnsServerBootstrap::Tsig(Default::default())
                 }
-                DnsServerBootstrapType::Deprecated1 => *self = DnsServerBootstrap::Deprecated1,
                 DnsServerBootstrapType::Cloudflare => {
                     *self = DnsServerBootstrap::Cloudflare(Default::default())
                 }
@@ -13774,7 +13751,6 @@ impl RegistryJsonPatch for DnsServerBootstrap {
         match self {
             DnsServerBootstrap::Manual => pointer.assert_eof(),
             DnsServerBootstrap::Tsig(inner) => inner.patch(pointer, value),
-            DnsServerBootstrap::Deprecated1 => pointer.assert_eof(),
             DnsServerBootstrap::Cloudflare(inner) => inner.patch(pointer, value),
             DnsServerBootstrap::DigitalOcean(inner) => inner.patch(pointer, value),
             DnsServerBootstrap::DeSEC(inner) => inner.patch(pointer, value),
@@ -13852,7 +13828,6 @@ impl DnsServerBootstrap {
         match self {
             DnsServerBootstrap::Manual => DnsServerBootstrapType::Manual,
             DnsServerBootstrap::Tsig(_) => DnsServerBootstrapType::Tsig,
-            DnsServerBootstrap::Deprecated1 => DnsServerBootstrapType::Deprecated1,
             DnsServerBootstrap::Cloudflare(_) => DnsServerBootstrapType::Cloudflare,
             DnsServerBootstrap::DigitalOcean(_) => DnsServerBootstrapType::DigitalOcean,
             DnsServerBootstrap::DeSEC(_) => DnsServerBootstrapType::DeSEC,
@@ -22792,6 +22767,94 @@ impl InMemoryStoreBase {
             InMemoryStoreBase::Redis(_) => InMemoryStoreBaseType::Redis,
             InMemoryStoreBase::RedisCluster(_) => InMemoryStoreBaseType::RedisCluster,
             InMemoryStoreBase::RedisSentinel(_) => InMemoryStoreBaseType::RedisSentinel,
+        }
+    }
+}
+
+impl ObjectImpl for IndexQueueEntry {
+    const FLAGS: u64 = 0;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::IndexQueueEntry;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        if let Some(value) = &self.account_id {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::AccountId));
+            }
+        }
+        let value = &self.created_at;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::CreatedAt, value));
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.search(Property::Action, &self.action);
+        i.foreign_key(ObjectType::Account, self.account_id, None);
+        if let Some(value) = &self.account_id {
+            i.search(Property::AccountId, value);
+        }
+    }
+}
+
+impl Pickle for IndexQueueEntry {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.action.pickle(out);
+        self.account_id.pickle(out);
+        self.document_id.pickle(out);
+        self.created_at.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.action = Pickle::unpickle(stream)?;
+        this.account_id = Pickle::unpickle(stream)?;
+        this.document_id = Pickle::unpickle(stream)?;
+        this.created_at = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for IndexQueueEntry {
+    fn default() -> Self {
+        Self {
+            action: Default::default(),
+            account_id: Default::default(),
+            document_id: 0u64,
+            created_at: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for IndexQueueEntry {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(6);
+        map.insert_unchecked(Property::Action, self.action.into_value());
+        map.insert_unchecked(Property::AccountId, self.account_id.into_value());
+        map.insert_unchecked(Property::DocumentId, self.document_id.into_value());
+        map.insert_unchecked(Property::CreatedAt, self.created_at.into_value());
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for IndexQueueEntry {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Action) => pointer.assert_server_set(),
+            Some(Property::AccountId) => pointer.assert_server_set(),
+            Some(Property::DocumentId) => pointer.assert_server_set(),
+            Some(Property::CreatedAt) => pointer.assert_server_set(),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
         }
     }
 }
@@ -41499,9 +41562,6 @@ impl ObjectImpl for Task {
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         match self {
-            Task::IndexDocument(inner) => inner.validate(errors),
-            Task::UnindexDocument(inner) => inner.validate(errors),
-            Task::IndexTrace(inner) => inner.validate(errors),
             Task::CalendarAlarmEmail(inner) => inner.validate(errors),
             Task::CalendarAlarmNotification(inner) => inner.validate(errors),
             Task::CalendarItipMessage(inner) => inner.validate(errors),
@@ -41522,15 +41582,6 @@ impl ObjectImpl for Task {
 
     fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
         match self {
-            Task::IndexDocument(object) => {
-                object.index(i);
-            }
-            Task::UnindexDocument(object) => {
-                object.index(i);
-            }
-            Task::IndexTrace(object) => {
-                object.index(i);
-            }
             Task::CalendarAlarmEmail(object) => {
                 object.index(i);
             }
@@ -41578,25 +41629,13 @@ impl ObjectImpl for Task {
 
 impl Default for Task {
     fn default() -> Self {
-        Task::IndexDocument(Default::default())
+        Task::CalendarAlarmEmail(Default::default())
     }
 }
 
 impl Pickle for Task {
     fn pickle(&self, out: &mut Vec<u8>) {
         match self {
-            Task::IndexDocument(inner) => {
-                0u16.pickle(out);
-                inner.pickle(out);
-            }
-            Task::UnindexDocument(inner) => {
-                1u16.pickle(out);
-                inner.pickle(out);
-            }
-            Task::IndexTrace(inner) => {
-                2u16.pickle(out);
-                inner.pickle(out);
-            }
             Task::CalendarAlarmEmail(inner) => {
                 3u16.pickle(out);
                 inner.pickle(out);
@@ -41662,9 +41701,6 @@ impl Pickle for Task {
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
         match u16::unpickle(stream)? {
-            0 => Pickle::unpickle(stream).map(Task::IndexDocument),
-            1 => Pickle::unpickle(stream).map(Task::UnindexDocument),
-            2 => Pickle::unpickle(stream).map(Task::IndexTrace),
             3 => Pickle::unpickle(stream).map(Task::CalendarAlarmEmail),
             4 => Pickle::unpickle(stream).map(Task::CalendarAlarmNotification),
             5 => Pickle::unpickle(stream).map(Task::CalendarItipMessage),
@@ -41680,6 +41716,7 @@ impl Pickle for Task {
             15 => Pickle::unpickle(stream).map(Task::AcmeRenewal),
             16 => Pickle::unpickle(stream).map(Task::DkimManagement),
             17 => Pickle::unpickle(stream).map(Task::DnsManagement),
+            0 | 1 | 2 => Some(Self::default()),
             _ => None,
         }
     }
@@ -41688,27 +41725,6 @@ impl Pickle for Task {
 impl IntoValue for Task {
     fn into_value(self) -> JmapValue<'static> {
         match self {
-            Task::IndexDocument(obj) => {
-                let mut obj = obj.into_value();
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("IndexDocument".into()));
-                obj
-            }
-            Task::UnindexDocument(obj) => {
-                let mut obj = obj.into_value();
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("UnindexDocument".into()));
-                obj
-            }
-            Task::IndexTrace(obj) => {
-                let mut obj = obj.into_value();
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("IndexTrace".into()));
-                obj
-            }
             Task::CalendarAlarmEmail(obj) => {
                 let mut obj = obj.into_value();
                 obj.as_object_mut()
@@ -41828,9 +41844,6 @@ impl RegistryJsonPatch for Task {
     ) -> PatchResult<'x> {
         if !pointer.has_next() {
             match object_type(&pointer, &value)? {
-                TaskType::IndexDocument => *self = Task::IndexDocument(Default::default()),
-                TaskType::UnindexDocument => *self = Task::UnindexDocument(Default::default()),
-                TaskType::IndexTrace => *self = Task::IndexTrace(Default::default()),
                 TaskType::CalendarAlarmEmail => {
                     *self = Task::CalendarAlarmEmail(Default::default())
                 }
@@ -41861,9 +41874,6 @@ impl RegistryJsonPatch for Task {
             }
         }
         match self {
-            Task::IndexDocument(inner) => inner.patch(pointer, value),
-            Task::UnindexDocument(inner) => inner.patch(pointer, value),
-            Task::IndexTrace(inner) => inner.patch(pointer, value),
             Task::CalendarAlarmEmail(inner) => inner.patch(pointer, value),
             Task::CalendarAlarmNotification(inner) => inner.patch(pointer, value),
             Task::CalendarItipMessage(inner) => inner.patch(pointer, value),
@@ -41886,9 +41896,6 @@ impl RegistryJsonPatch for Task {
 impl Task {
     pub fn object_type(&self) -> TaskType {
         match self {
-            Task::IndexDocument(_) => TaskType::IndexDocument,
-            Task::UnindexDocument(_) => TaskType::UnindexDocument,
-            Task::IndexTrace(_) => TaskType::IndexTrace,
             Task::CalendarAlarmEmail(_) => TaskType::CalendarAlarmEmail,
             Task::CalendarAlarmNotification(_) => TaskType::CalendarAlarmNotification,
             Task::CalendarItipMessage(_) => TaskType::CalendarItipMessage,
@@ -42689,162 +42696,6 @@ impl RegistryJsonPropertyPatch for TaskDomainManagement {
     ) -> PatchResult<'x> {
         match pointer.next_property() {
             Some(Property::DomainId) => self.domain_id.patch(pointer.assert_read_only()?, value),
-            Some(Property::Status) => self.status.patch(pointer, value),
-            Some(Property::Due) => pointer.assert_server_set(),
-            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
-                property: Property::Type,
-                value,
-            }),
-            _ => Err(PatchError::new(pointer, "Invalid property")),
-        }
-    }
-}
-
-impl TaskIndexDocument {
-    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
-        let neb = errors.len();
-        let value = &self.account_id;
-        if !value.is_valid() {
-            errors.push(ValidationError::required(Property::AccountId));
-        }
-        let value = &self.document_id;
-        if !value.is_valid() {
-            errors.push(ValidationError::invalid(Property::DocumentId, value));
-        }
-        let value = &self.status;
-        value.validate(errors);
-        errors.len() == neb
-    }
-
-    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
-        i.foreign_key(ObjectType::Account, self.account_id.into(), None);
-    }
-}
-
-impl Pickle for TaskIndexDocument {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        self.document_type.pickle(out);
-        self.account_id.pickle(out);
-        self.document_id.pickle(out);
-        self.status.pickle(out);
-    }
-
-    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
-        let mut this = Self::default();
-        this.document_type = Pickle::unpickle(stream)?;
-        this.account_id = Pickle::unpickle(stream)?;
-        this.document_id = Pickle::unpickle(stream)?;
-        this.status = Pickle::unpickle(stream)?;
-        Some(this)
-    }
-}
-
-impl Default for TaskIndexDocument {
-    fn default() -> Self {
-        Self {
-            document_type: Default::default(),
-            account_id: Default::default(),
-            document_id: Default::default(),
-            status: Default::default(),
-        }
-    }
-}
-
-impl IntoValue for TaskIndexDocument {
-    fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(6);
-        map.insert_unchecked(Property::DocumentType, self.document_type.into_value());
-        map.insert_unchecked(Property::AccountId, self.account_id.into_value());
-        map.insert_unchecked(Property::DocumentId, self.document_id.into_value());
-        map.insert_unchecked(Property::Status, self.status.into_value());
-        JmapValue::Object(map)
-    }
-}
-
-impl RegistryJsonPropertyPatch for TaskIndexDocument {
-    fn patch_property<'x>(
-        &mut self,
-        mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'x>,
-    ) -> PatchResult<'x> {
-        match pointer.next_property() {
-            Some(Property::DocumentType) => {
-                self.document_type.patch(pointer.assert_read_only()?, value)
-            }
-            Some(Property::AccountId) => self
-                .account_id
-                .patch(pointer.assert_read_only()?.assert_can_set_account()?, value),
-            Some(Property::DocumentId) => {
-                self.document_id.patch(pointer.assert_read_only()?, value)
-            }
-            Some(Property::Status) => self.status.patch(pointer, value),
-            Some(Property::Due) => pointer.assert_server_set(),
-            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
-                property: Property::Type,
-                value,
-            }),
-            _ => Err(PatchError::new(pointer, "Invalid property")),
-        }
-    }
-}
-
-impl TaskIndexTrace {
-    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
-        let neb = errors.len();
-        let value = &self.trace_id;
-        if !value.is_valid() {
-            errors.push(ValidationError::required(Property::TraceId));
-        }
-        let value = &self.status;
-        value.validate(errors);
-        errors.len() == neb
-    }
-
-    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
-        i.foreign_key(ObjectType::Trace, self.trace_id.into(), None);
-    }
-}
-
-impl Pickle for TaskIndexTrace {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        self.trace_id.pickle(out);
-        self.status.pickle(out);
-    }
-
-    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
-        let mut this = Self::default();
-        this.trace_id = Pickle::unpickle(stream)?;
-        this.status = Pickle::unpickle(stream)?;
-        Some(this)
-    }
-}
-
-impl Default for TaskIndexTrace {
-    fn default() -> Self {
-        Self {
-            trace_id: Default::default(),
-            status: Default::default(),
-        }
-    }
-}
-
-impl IntoValue for TaskIndexTrace {
-    fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(4);
-        map.insert_unchecked(Property::TraceId, self.trace_id.into_value());
-        map.insert_unchecked(Property::Status, self.status.into_value());
-        JmapValue::Object(map)
-    }
-}
-
-impl RegistryJsonPropertyPatch for TaskIndexTrace {
-    fn patch_property<'x>(
-        &mut self,
-        mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'x>,
-    ) -> PatchResult<'x> {
-        match pointer.next_property() {
-            Some(Property::TraceId) => self.trace_id.patch(pointer.assert_read_only()?, value),
             Some(Property::Status) => self.status.patch(pointer, value),
             Some(Property::Due) => pointer.assert_server_set(),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {

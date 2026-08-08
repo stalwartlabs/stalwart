@@ -2952,7 +2952,6 @@ impl EnumImpl for DnsServerBootstrapType {
             DnsServerBootstrapType,
             b"Manual" => DnsServerBootstrapType::Manual,
             b"Tsig" => DnsServerBootstrapType::Tsig,
-            b"Deprecated1" => DnsServerBootstrapType::Deprecated1,
             b"Cloudflare" => DnsServerBootstrapType::Cloudflare,
             b"DigitalOcean" => DnsServerBootstrapType::DigitalOcean,
             b"DeSEC" => DnsServerBootstrapType::DeSEC,
@@ -3029,7 +3028,6 @@ impl EnumImpl for DnsServerBootstrapType {
         match self {
             DnsServerBootstrapType::Manual => "Manual",
             DnsServerBootstrapType::Tsig => "Tsig",
-            DnsServerBootstrapType::Deprecated1 => "Deprecated1",
             DnsServerBootstrapType::Cloudflare => "Cloudflare",
             DnsServerBootstrapType::DigitalOcean => "DigitalOcean",
             DnsServerBootstrapType::DeSEC => "DeSEC",
@@ -3109,7 +3107,6 @@ impl EnumImpl for DnsServerBootstrapType {
         match id {
             0 => Some(DnsServerBootstrapType::Manual),
             1 => Some(DnsServerBootstrapType::Tsig),
-            2 => Some(DnsServerBootstrapType::Deprecated1),
             3 => Some(DnsServerBootstrapType::Cloudflare),
             4 => Some(DnsServerBootstrapType::DigitalOcean),
             5 => Some(DnsServerBootstrapType::DeSEC),
@@ -3210,7 +3207,6 @@ impl EnumImpl for DnsServerType {
             value.as_bytes(),
             DnsServerType,
             b"Tsig" => DnsServerType::Tsig,
-            b"Deprecated1" => DnsServerType::Deprecated1,
             b"Cloudflare" => DnsServerType::Cloudflare,
             b"DigitalOcean" => DnsServerType::DigitalOcean,
             b"DeSEC" => DnsServerType::DeSEC,
@@ -3286,7 +3282,6 @@ impl EnumImpl for DnsServerType {
     fn as_str(&self) -> &'static str {
         match self {
             DnsServerType::Tsig => "Tsig",
-            DnsServerType::Deprecated1 => "Deprecated1",
             DnsServerType::Cloudflare => "Cloudflare",
             DnsServerType::DigitalOcean => "DigitalOcean",
             DnsServerType::DeSEC => "DeSEC",
@@ -3365,7 +3360,6 @@ impl EnumImpl for DnsServerType {
     fn from_id(id: u16) -> Option<Self> {
         match id {
             0 => Some(DnsServerType::Tsig),
-            1 => Some(DnsServerType::Deprecated1),
             2 => Some(DnsServerType::Cloudflare),
             3 => Some(DnsServerType::DigitalOcean),
             4 => Some(DnsServerType::DeSEC),
@@ -4260,23 +4254,33 @@ impl<'de> serde::Deserialize<'de> for InMemoryStoreType {
     }
 }
 
-impl EnumImpl for IndexDocumentType {
+impl EnumImpl for IndexAction {
     fn parse(value: &str) -> Option<Self> {
         hashify::tiny_map! {
             value.as_bytes(),
-            b"email" => IndexDocumentType::Email,
-            b"calendar" => IndexDocumentType::Calendar,
-            b"contacts" => IndexDocumentType::Contacts,
-            b"file" => IndexDocumentType::File,
+            b"indexTelemetry" => IndexAction::IndexTelemetry,
+            b"indexEmail" => IndexAction::IndexEmail,
+            b"unindexEmail" => IndexAction::UnindexEmail,
+            b"indexCalendar" => IndexAction::IndexCalendar,
+            b"unindexCalendar" => IndexAction::UnindexCalendar,
+            b"indexContacts" => IndexAction::IndexContacts,
+            b"unindexContacts" => IndexAction::UnindexContacts,
+            b"indexFile" => IndexAction::IndexFile,
+            b"unindexFile" => IndexAction::UnindexFile,
         }
     }
 
     fn as_str(&self) -> &'static str {
         match self {
-            IndexDocumentType::Email => "email",
-            IndexDocumentType::Calendar => "calendar",
-            IndexDocumentType::Contacts => "contacts",
-            IndexDocumentType::File => "file",
+            IndexAction::IndexTelemetry => "indexTelemetry",
+            IndexAction::IndexEmail => "indexEmail",
+            IndexAction::UnindexEmail => "unindexEmail",
+            IndexAction::IndexCalendar => "indexCalendar",
+            IndexAction::UnindexCalendar => "unindexCalendar",
+            IndexAction::IndexContacts => "indexContacts",
+            IndexAction::UnindexContacts => "unindexContacts",
+            IndexAction::IndexFile => "indexFile",
+            IndexAction::UnindexFile => "unindexFile",
         }
     }
 
@@ -4286,18 +4290,23 @@ impl EnumImpl for IndexDocumentType {
 
     fn from_id(id: u16) -> Option<Self> {
         match id {
-            0 => Some(IndexDocumentType::Email),
-            1 => Some(IndexDocumentType::Calendar),
-            2 => Some(IndexDocumentType::Contacts),
-            3 => Some(IndexDocumentType::File),
+            0 => Some(IndexAction::IndexTelemetry),
+            1 => Some(IndexAction::IndexEmail),
+            2 => Some(IndexAction::UnindexEmail),
+            3 => Some(IndexAction::IndexCalendar),
+            4 => Some(IndexAction::UnindexCalendar),
+            5 => Some(IndexAction::IndexContacts),
+            6 => Some(IndexAction::UnindexContacts),
+            7 => Some(IndexAction::IndexFile),
+            8 => Some(IndexAction::UnindexFile),
             _ => None,
         }
     }
 
-    const COUNT: usize = 4;
+    const COUNT: usize = 9;
 }
 
-impl serde::Serialize for IndexDocumentType {
+impl serde::Serialize for IndexAction {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -4306,7 +4315,7 @@ impl serde::Serialize for IndexDocumentType {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for IndexDocumentType {
+impl<'de> serde::Deserialize<'de> for IndexAction {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -7281,6 +7290,11 @@ impl EnumImpl for Permission {
             b"sysImapUpdate" => Permission::SysImapUpdate,
             b"sysInMemoryStoreGet" => Permission::SysInMemoryStoreGet,
             b"sysInMemoryStoreUpdate" => Permission::SysInMemoryStoreUpdate,
+            b"sysIndexQueueEntryGet" => Permission::SysIndexQueueEntryGet,
+            b"sysIndexQueueEntryCreate" => Permission::SysIndexQueueEntryCreate,
+            b"sysIndexQueueEntryUpdate" => Permission::SysIndexQueueEntryUpdate,
+            b"sysIndexQueueEntryDestroy" => Permission::SysIndexQueueEntryDestroy,
+            b"sysIndexQueueEntryQuery" => Permission::SysIndexQueueEntryQuery,
             b"sysJmapGet" => Permission::SysJmapGet,
             b"sysJmapUpdate" => Permission::SysJmapUpdate,
             b"sysLogGet" => Permission::SysLogGet,
@@ -7484,9 +7498,6 @@ impl EnumImpl for Permission {
             b"sysStoreLookupQuery" => Permission::SysStoreLookupQuery,
             b"sysSystemSettingsGet" => Permission::SysSystemSettingsGet,
             b"sysSystemSettingsUpdate" => Permission::SysSystemSettingsUpdate,
-            b"taskIndexDocument" => Permission::TaskIndexDocument,
-            b"taskUnindexDocument" => Permission::TaskUnindexDocument,
-            b"taskIndexTrace" => Permission::TaskIndexTrace,
             b"taskCalendarAlarmEmail" => Permission::TaskCalendarAlarmEmail,
             b"taskCalendarAlarmNotification" => Permission::TaskCalendarAlarmNotification,
             b"taskCalendarItipMessage" => Permission::TaskCalendarItipMessage,
@@ -7957,6 +7968,11 @@ impl EnumImpl for Permission {
             Permission::SysImapUpdate => "sysImapUpdate",
             Permission::SysInMemoryStoreGet => "sysInMemoryStoreGet",
             Permission::SysInMemoryStoreUpdate => "sysInMemoryStoreUpdate",
+            Permission::SysIndexQueueEntryGet => "sysIndexQueueEntryGet",
+            Permission::SysIndexQueueEntryCreate => "sysIndexQueueEntryCreate",
+            Permission::SysIndexQueueEntryUpdate => "sysIndexQueueEntryUpdate",
+            Permission::SysIndexQueueEntryDestroy => "sysIndexQueueEntryDestroy",
+            Permission::SysIndexQueueEntryQuery => "sysIndexQueueEntryQuery",
             Permission::SysJmapGet => "sysJmapGet",
             Permission::SysJmapUpdate => "sysJmapUpdate",
             Permission::SysLogGet => "sysLogGet",
@@ -8160,9 +8176,6 @@ impl EnumImpl for Permission {
             Permission::SysStoreLookupQuery => "sysStoreLookupQuery",
             Permission::SysSystemSettingsGet => "sysSystemSettingsGet",
             Permission::SysSystemSettingsUpdate => "sysSystemSettingsUpdate",
-            Permission::TaskIndexDocument => "taskIndexDocument",
-            Permission::TaskUnindexDocument => "taskUnindexDocument",
-            Permission::TaskIndexTrace => "taskIndexTrace",
             Permission::TaskCalendarAlarmEmail => "taskCalendarAlarmEmail",
             Permission::TaskCalendarAlarmNotification => "taskCalendarAlarmNotification",
             Permission::TaskCalendarItipMessage => "taskCalendarItipMessage",
@@ -8626,6 +8639,11 @@ impl EnumImpl for Permission {
             392 => Some(Permission::SysImapUpdate),
             393 => Some(Permission::SysInMemoryStoreGet),
             394 => Some(Permission::SysInMemoryStoreUpdate),
+            660 => Some(Permission::SysIndexQueueEntryGet),
+            661 => Some(Permission::SysIndexQueueEntryCreate),
+            662 => Some(Permission::SysIndexQueueEntryUpdate),
+            663 => Some(Permission::SysIndexQueueEntryDestroy),
+            664 => Some(Permission::SysIndexQueueEntryQuery),
             395 => Some(Permission::SysJmapGet),
             396 => Some(Permission::SysJmapUpdate),
             397 => Some(Permission::SysLogGet),
@@ -8829,9 +8847,6 @@ impl EnumImpl for Permission {
             595 => Some(Permission::SysStoreLookupQuery),
             596 => Some(Permission::SysSystemSettingsGet),
             597 => Some(Permission::SysSystemSettingsUpdate),
-            598 => Some(Permission::TaskIndexDocument),
-            599 => Some(Permission::TaskUnindexDocument),
-            600 => Some(Permission::TaskIndexTrace),
             601 => Some(Permission::TaskCalendarAlarmEmail),
             602 => Some(Permission::TaskCalendarAlarmNotification),
             603 => Some(Permission::TaskCalendarItipMessage),
@@ -8894,7 +8909,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 660;
+    const COUNT: usize = 665;
 }
 
 impl serde::Serialize for Permission {
@@ -11814,9 +11829,6 @@ impl EnumImpl for TaskType {
     fn parse(value: &str) -> Option<Self> {
         hashify::tiny_map! {
             value.as_bytes(),
-            b"IndexDocument" => TaskType::IndexDocument,
-            b"UnindexDocument" => TaskType::UnindexDocument,
-            b"IndexTrace" => TaskType::IndexTrace,
             b"CalendarAlarmEmail" => TaskType::CalendarAlarmEmail,
             b"CalendarAlarmNotification" => TaskType::CalendarAlarmNotification,
             b"CalendarItipMessage" => TaskType::CalendarItipMessage,
@@ -11837,9 +11849,6 @@ impl EnumImpl for TaskType {
 
     fn as_str(&self) -> &'static str {
         match self {
-            TaskType::IndexDocument => "IndexDocument",
-            TaskType::UnindexDocument => "UnindexDocument",
-            TaskType::IndexTrace => "IndexTrace",
             TaskType::CalendarAlarmEmail => "CalendarAlarmEmail",
             TaskType::CalendarAlarmNotification => "CalendarAlarmNotification",
             TaskType::CalendarItipMessage => "CalendarItipMessage",
@@ -11864,9 +11873,6 @@ impl EnumImpl for TaskType {
 
     fn from_id(id: u16) -> Option<Self> {
         match id {
-            0 => Some(TaskType::IndexDocument),
-            1 => Some(TaskType::UnindexDocument),
-            2 => Some(TaskType::IndexTrace),
             3 => Some(TaskType::CalendarAlarmEmail),
             4 => Some(TaskType::CalendarAlarmNotification),
             5 => Some(TaskType::CalendarItipMessage),

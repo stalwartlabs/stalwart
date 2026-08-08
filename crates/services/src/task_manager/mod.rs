@@ -87,9 +87,6 @@ pub(crate) trait TaskInfo {
 impl TaskInfo for Task {
     fn name(&self) -> &'static str {
         match self {
-            Task::IndexDocument(_) => "IndexDocument",
-            Task::UnindexDocument(_) => "UnindexDocument",
-            Task::IndexTrace(_) => "IndexTrace",
             Task::CalendarAlarmEmail(_) => "CalendarAlarmEmail",
             Task::CalendarAlarmNotification(_) => "CalendarAlarmNotification",
             Task::CalendarItipMessage(_) => "CalendarItipMessage",

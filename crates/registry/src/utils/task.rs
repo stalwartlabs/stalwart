@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::schema::{
-    enums::Permission,
-    prelude::{Action, Task, TaskStatus, TaskStatusPending, UTCDateTime},
+use crate::{
+    schema::{
+        enums::{IndexAction, Permission},
+        prelude::{Action, Task, TaskStatus, TaskStatusPending, UTCDateTime},
+    },
+    types::{EnumImpl, index::IndexValue},
 };
 
 impl Task {
     pub fn set_status(&mut self, status: TaskStatus) {
         match self {
-            Task::IndexDocument(task) => task.status = status,
-            Task::UnindexDocument(task) => task.status = status,
-            Task::IndexTrace(task) => task.status = status,
             Task::CalendarAlarmEmail(task) => task.status = status,
             Task::CalendarAlarmNotification(task) => task.status = status,
             Task::CalendarItipMessage(task) => task.status = status,
@@ -35,9 +35,6 @@ impl Task {
 
     pub fn status(&self) -> &TaskStatus {
         match self {
-            Task::IndexDocument(task) => &task.status,
-            Task::UnindexDocument(task) => &task.status,
-            Task::IndexTrace(task) => &task.status,
             Task::CalendarAlarmEmail(task) => &task.status,
             Task::CalendarAlarmNotification(task) => &task.status,
             Task::CalendarItipMessage(task) => &task.status,
@@ -74,9 +71,6 @@ impl Task {
 
     pub fn permission(&self) -> Permission {
         match self {
-            Task::IndexDocument(_) => Permission::TaskIndexDocument,
-            Task::UnindexDocument(_) => Permission::TaskUnindexDocument,
-            Task::IndexTrace(_) => Permission::TaskIndexTrace,
             Task::CalendarAlarmEmail(_) => Permission::TaskCalendarAlarmEmail,
             Task::CalendarAlarmNotification(_) => Permission::TaskCalendarAlarmNotification,
             Task::CalendarItipMessage(_) => Permission::TaskCalendarItipMessage,
@@ -128,5 +122,11 @@ impl TaskStatus {
             due: UTCDateTime::from_timestamp(timestamp),
             created_at: UTCDateTime::now(),
         })
+    }
+}
+
+impl From<&IndexAction> for IndexValue<'_> {
+    fn from(value: &IndexAction) -> Self {
+        IndexValue::U16(value.to_id())
     }
 }

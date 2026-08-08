@@ -17,15 +17,12 @@ use crate::message::{
 use common::{MessageUid, Server, storage::index::ObjectIndexBuilder};
 use mail_parser::{DateTime, parsers::fields::thread::thread_name};
 use registry::{
-    schema::{
-        enums::IndexDocumentType,
-        structs::{Task, TaskIndexDocument, TaskMergeThreads, TaskStatus},
-    },
+    schema::structs::{Task, TaskMergeThreads, TaskStatus},
     types::map::Map,
 };
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{AlignedBytes, Archive, SearchIndex},
 };
 use store::{
     write::{BatchBuilder, IndexPropertyClass, ValueClass},
@@ -228,12 +225,7 @@ impl EmailCopy for Server {
                 }),
                 ThreadInfo::serialize(thread_id, &message_ids),
             )
-            .schedule_task(Task::IndexDocument(TaskIndexDocument {
-                account_id: to_account_id.into(),
-                document_id: document_id.into(),
-                document_type: IndexDocumentType::Email,
-                status: TaskStatus::now(),
-            }));
+            .queue_document_index(SearchIndex::Email, to_account_id, document_id);
 
         // Merge threads if necessary
         if !thread_result.merge_ids.is_empty() {

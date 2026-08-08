@@ -12,8 +12,8 @@ use crate::{config::telemetry::StoreTracer, telemetry::tracers::TraceEvents};
 use ahash::AHashMap;
 use registry::{
     schema::structs::{
-        Task, TaskIndexTrace, TaskStatus, Trace, TraceKeyValue, TraceValue, TraceValueIpAddr,
-        TraceValueList, TraceValueString, TraceValueUnsignedInt,
+        Trace, TraceKeyValue, TraceValue, TraceValueIpAddr, TraceValueList, TraceValueString,
+        TraceValueUnsignedInt,
     },
     types::ObjectImpl,
 };
@@ -69,14 +69,10 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
                             .to_pickled_vec(),
                         );
 
-                        let index_task = Task::IndexTrace(TaskIndexTrace {
-                            status: TaskStatus::now(),
-                            trace_id: span_id.into(),
-                        });
                         if data_store.is_some() {
-                            task_batch.schedule_task(index_task);
+                            task_batch.queue_trace_index(span_id);
                         } else {
-                            batch.schedule_task(index_task);
+                            batch.queue_trace_index(span_id);
                         }
                     }
                 }

@@ -13,6 +13,7 @@ use crate::registry::{
         bootstrap::bootstrap_set,
         dkim::validate_dkim_signature,
         domain::{validate_dns_server, validate_domain},
+        index_queue::index_queue_entry_set,
         map_bootstrap_error,
         principal::{
             AccountUpdate, schedule_account_destruction, validate_account, validate_role,
@@ -730,9 +731,15 @@ impl RegistrySet for Server {
                 queued_message_set(set).await.map(|set| set.into_response())
             }
 
+            ObjectType::IndexQueueEntry => index_queue_entry_set(set)
+                .await
+                .map(|set| set.into_response()),
+
             ObjectType::Task => task_set(set).await.map(|set| set.into_response()),
 
-            ObjectType::Action => action_set(set).await.map(|set| set.into_response()),
+            ObjectType::Action => Box::pin(action_set(set))
+                .await
+                .map(|set| set.into_response()),
 
             ObjectType::Bootstrap => Box::pin(bootstrap_set(set))
                 .await

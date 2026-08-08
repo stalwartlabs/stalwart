@@ -10,7 +10,6 @@ use crate::task_manager::destroy_account::DestroyAccountTask;
 use crate::task_manager::dkim::DkimManagementTask;
 use crate::task_manager::dns::DnsManagementTask;
 use crate::task_manager::imip::SendImipTask;
-use crate::task_manager::index::SearchIndexTask;
 use crate::task_manager::lock::TaskLockManager;
 use crate::task_manager::maintenance::MaintenanceTask;
 use crate::task_manager::merge_threads::MergeThreadsTask;
@@ -84,12 +83,6 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
     for idx in 0..TaskType::COUNT {
         let task_type = TaskType::from_id(idx as u16).unwrap();
         let channel_capacity = match task_type {
-            TaskType::IndexDocument | TaskType::UnindexDocument | TaskType::IndexTrace => {
-                std::cmp::max(
-                    inner.build_server().core.email.index_batch_size,
-                    TASK_QUEUE_BUFFER,
-                )
-            }
             TaskType::DestroyAccount
             | TaskType::AccountMaintenance
             | TaskType::TenantMaintenance
@@ -112,180 +105,90 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
         let inner = inner.clone();
         let server_instance = server_instance.clone();
 
-        if matches!(
-            task_type,
-            TaskType::IndexDocument | TaskType::UnindexDocument | TaskType::IndexTrace,
-        ) {
-            tokio::spawn(async move {
-                while let Some(job) = rx.recv().await {
-                    let server = inner.build_server();
-                    let batch_size = server.core.email.index_batch_size;
-                    let mut batch = Vec::with_capacity(batch_size);
-                    match server
-                        .store()
-                        .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                            TaskQueueClass::Task { id: job.id },
-                        )))
-                        .await
-                    {
-                        Ok(Some(task)) => {
-                            batch.push(TaskDetails { task, info: job });
-                        }
-                        Ok(None) => {
-                            trc::event!(
-                                TaskManager(TaskManagerEvent::TaskIgnored),
-                                Id = job.id,
-                                Reason = "Task not found in store, likely already processed.",
-                            );
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.id(job.id)
-                                    .details("Failed to retrieve task details.")
-                                    .caused_by(trc::location!())
-                            );
-                        }
-                    }
+        let server_instance = server_instance.clone();
+        tokio::spawn(async move {
+            while let Some(job) = rx.recv().await {
+                let server = inner.build_server();
+                let mut refresh_queue = false;
 
-                    while batch.len() < batch_size {
-                        match rx.try_recv() {
-                            Ok(job) => {
-                                match server
-                                    .store()
-                                    .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                                        TaskQueueClass::Task { id: job.id },
-                                    )))
-                                    .await
-                                {
-                                    Ok(Some(task)) => {
-                                        batch.push(TaskDetails { task, info: job });
-                                    }
-                                    Ok(None) => {
-                                        trc::event!(
-                                            TaskManager(TaskManagerEvent::TaskIgnored),
-                                            Id = job.id,
-                                            Reason = "Task not found in store, likely already processed.",
-                                        );
-                                    }
-                                    Err(err) => {
-                                        trc::error!(
-                                            err.id(job.id)
-                                                .details("Failed to retrieve task details.")
-                                                .caused_by(trc::location!())
-                                        );
-                                    }
-                                }
+                match server
+                    .store()
+                    .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
+                        TaskQueueClass::Task { id: job.id },
+                    )))
+                    .await
+                {
+                    Ok(Some(task)) => {
+                        let result = match &task {
+                            Task::CalendarAlarmEmail(task) => {
+                                server.send_email_alarm(task, server_instance.clone()).await
                             }
-                            Err(_) => break,
-                        }
+                            Task::CalendarAlarmNotification(task) => {
+                                server.send_display_alarm(task).await
+                            }
+                            Task::CalendarItipMessage(task) => {
+                                server.send_imip(task, server_instance.clone()).await
+                            }
+                            Task::MergeThreads(task) => server.merge_threads(task).await,
+                            Task::DmarcReport(task) => {
+                                server
+                                    .submit_report(report::ReportId::Dmarc(task.report_id.id()))
+                                    .await
+                            }
+                            Task::TlsReport(task) => {
+                                server
+                                    .submit_report(report::ReportId::Tls(task.report_id.id()))
+                                    .await
+                            }
+                            Task::RestoreArchivedItem(task) => server.restore_item(task).await,
+                            Task::DestroyAccount(task) => server.destroy_account(task).await,
+                            Task::AccountMaintenance(task) => {
+                                server.account_maintenance(task).await
+                            }
+                            Task::TenantMaintenance(task) => server.tenant_maintenance(task).await,
+                            Task::StoreMaintenance(task) => server.store_maintenance(task).await,
+                            Task::SpamFilterMaintenance(task) => {
+                                Box::pin(server.spam_filter_maintenance(task)).await
+                            }
+                            Task::AcmeRenewal(task) => server.acme_management(task).await,
+                            Task::DkimManagement(task_dkim_rotation) => {
+                                server.dkim_management(task_dkim_rotation).await
+                            }
+                            Task::DnsManagement(task_dns_management) => {
+                                server.dns_management(task_dns_management).await
+                            }
+                        };
+
+                        refresh_queue = result.is_retry();
+
+                        update_tasks(
+                            &server,
+                            &mut [TaskDetails { task, info: job }],
+                            vec![result],
+                        )
+                        .await;
                     }
-
-                    // Dispatch
-                    let mut refresh_queue = false;
-                    let results = server.index(&batch).await.into_iter().map(|r| {
-                        refresh_queue |= r.result.is_retry();
-                        r.result
-                    });
-                    update_tasks(&server, &mut batch, results).await;
-
-                    if refresh_queue || rx.is_empty() {
-                        server.notify_task_queue();
+                    Ok(None) => {
+                        trc::event!(
+                            TaskManager(TaskManagerEvent::TaskIgnored),
+                            Id = job.id,
+                            Reason = "Task not found in store, likely already processed.",
+                        );
                     }
-                }
-            });
-        } else {
-            let server_instance = server_instance.clone();
-            tokio::spawn(async move {
-                while let Some(job) = rx.recv().await {
-                    let server = inner.build_server();
-                    let mut refresh_queue = false;
-
-                    match server
-                        .store()
-                        .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                            TaskQueueClass::Task { id: job.id },
-                        )))
-                        .await
-                    {
-                        Ok(Some(task)) => {
-                            let result = match &task {
-                                Task::CalendarAlarmEmail(task) => {
-                                    server.send_email_alarm(task, server_instance.clone()).await
-                                }
-                                Task::CalendarAlarmNotification(task) => {
-                                    server.send_display_alarm(task).await
-                                }
-                                Task::CalendarItipMessage(task) => {
-                                    server.send_imip(task, server_instance.clone()).await
-                                }
-                                Task::MergeThreads(task) => server.merge_threads(task).await,
-                                Task::DmarcReport(task) => {
-                                    server
-                                        .submit_report(report::ReportId::Dmarc(task.report_id.id()))
-                                        .await
-                                }
-                                Task::TlsReport(task) => {
-                                    server
-                                        .submit_report(report::ReportId::Tls(task.report_id.id()))
-                                        .await
-                                }
-                                Task::RestoreArchivedItem(task) => server.restore_item(task).await,
-                                Task::DestroyAccount(task) => server.destroy_account(task).await,
-                                Task::AccountMaintenance(task) => {
-                                    server.account_maintenance(task).await
-                                }
-                                Task::TenantMaintenance(task) => {
-                                    server.tenant_maintenance(task).await
-                                }
-                                Task::StoreMaintenance(task) => {
-                                    server.store_maintenance(task).await
-                                }
-                                Task::SpamFilterMaintenance(task) => {
-                                    Box::pin(server.spam_filter_maintenance(task)).await
-                                }
-                                Task::AcmeRenewal(task) => server.acme_management(task).await,
-                                Task::DkimManagement(task_dkim_rotation) => {
-                                    server.dkim_management(task_dkim_rotation).await
-                                }
-                                Task::DnsManagement(task_dns_management) => {
-                                    server.dns_management(task_dns_management).await
-                                }
-                                Task::IndexDocument(_)
-                                | Task::UnindexDocument(_)
-                                | Task::IndexTrace(_) => unreachable!(),
-                            };
-
-                            refresh_queue = result.is_retry();
-
-                            update_tasks(
-                                &server,
-                                &mut [TaskDetails { task, info: job }],
-                                vec![result],
-                            )
-                            .await;
-                        }
-                        Ok(None) => {
-                            trc::event!(
-                                TaskManager(TaskManagerEvent::TaskIgnored),
-                                Id = job.id,
-                                Reason = "Task not found in store, likely already processed.",
-                            );
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.id(job.id)
-                                    .details("Failed to retrieve task details.")
-                                    .caused_by(trc::location!())
-                            );
-                        }
-                    }
-
-                    if refresh_queue || rx.is_empty() {
-                        server.notify_task_queue();
+                    Err(err) => {
+                        trc::error!(
+                            err.id(job.id)
+                                .details("Failed to retrieve task details.")
+                                .caused_by(trc::location!())
+                        );
                     }
                 }
-            });
-        }
+
+                if refresh_queue || rx.is_empty() {
+                    server.notify_task_queue();
+                }
+            }
+        });
     }
 
     const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
@@ -355,9 +258,6 @@ impl TaskQueueManager for Server {
                                     .ctx(trc::Key::Value, value)
                             })?;
                             let enabled = match task_type {
-                                TaskType::IndexDocument
-                                | TaskType::UnindexDocument
-                                | TaskType::IndexTrace => roles.search_indexing,
                                 TaskType::AccountMaintenance
                                 | TaskType::TenantMaintenance
                                 | TaskType::DestroyAccount => roles.account_maintenance,

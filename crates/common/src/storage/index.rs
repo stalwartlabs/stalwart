@@ -5,10 +5,6 @@
  */
 
 use crate::{auth::AccountTenantIds, sharing::notification::ShareNotification};
-use registry::schema::{
-    enums::IndexDocumentType,
-    structs::{Task, TaskIndexDocument, TaskStatus},
-};
 use rkyv::{
     option::ArchivedOption,
     primitive::{ArchivedU32, ArchivedU64},
@@ -439,23 +435,14 @@ fn build_index(
             }
         }
         IndexValue::SearchIndex { index, .. } => {
-            let task = TaskIndexDocument {
-                account_id: batch.last_account_id().unwrap().into(),
-                document_id: batch.last_document_id().unwrap().into(),
-                document_type: match index {
-                    SearchIndex::Email => IndexDocumentType::Email,
-                    SearchIndex::Calendar => IndexDocumentType::Calendar,
-                    SearchIndex::Contacts => IndexDocumentType::Contacts,
-                    SearchIndex::File => IndexDocumentType::File,
-                    SearchIndex::Tracing | SearchIndex::InMemory => unreachable!(),
-                },
-                status: TaskStatus::now(),
-            };
-            batch.schedule_task(if set {
-                Task::IndexDocument(task)
+            let account_id = batch.last_account_id().unwrap();
+            let document_id = batch.last_document_id().unwrap();
+
+            if set {
+                batch.queue_document_index(index, account_id, document_id);
             } else {
-                Task::UnindexDocument(task)
-            });
+                batch.queue_document_unindex(index, account_id, document_id);
+            }
         }
         IndexValue::Property { field, value } => {
             if !value.is_none() {
@@ -585,18 +572,11 @@ fn merge_index(
             }
         }
         (IndexValue::SearchIndex { index, .. }, IndexValue::SearchIndex { .. }) => {
-            batch.schedule_task(Task::IndexDocument(TaskIndexDocument {
-                account_id: batch.last_account_id().unwrap().into(),
-                document_id: batch.last_document_id().unwrap().into(),
-                document_type: match index {
-                    SearchIndex::Email => IndexDocumentType::Email,
-                    SearchIndex::Calendar => IndexDocumentType::Calendar,
-                    SearchIndex::Contacts => IndexDocumentType::Contacts,
-                    SearchIndex::File => IndexDocumentType::File,
-                    SearchIndex::Tracing | SearchIndex::InMemory => unreachable!(),
-                },
-                status: TaskStatus::now(),
-            }));
+            batch.queue_document_index(
+                index,
+                batch.last_account_id().unwrap(),
+                batch.last_document_id().unwrap(),
+            );
         }
         (
             IndexValue::Property {

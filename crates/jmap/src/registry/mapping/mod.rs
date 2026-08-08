@@ -27,6 +27,7 @@ pub mod bootstrap;
 pub mod cluster;
 pub mod dkim;
 pub mod domain;
+pub mod index_queue;
 pub mod log;
 pub mod principal;
 pub mod public_key;

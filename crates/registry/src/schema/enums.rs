@@ -549,7 +549,6 @@ pub enum DnsServerBootstrapType {
     #[default]
     Manual = 0,
     Tsig = 1,
-    Deprecated1 = 2,
     Cloudflare = 3,
     DigitalOcean = 4,
     DeSEC = 5,
@@ -625,7 +624,6 @@ pub enum DnsServerBootstrapType {
 pub enum DnsServerType {
     #[default]
     Tsig = 0,
-    Deprecated1 = 1,
     Cloudflare = 2,
     DigitalOcean = 3,
     DeSEC = 4,
@@ -886,12 +884,17 @@ pub enum InMemoryStoreType {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
-pub enum IndexDocumentType {
+pub enum IndexAction {
     #[default]
-    Email = 0,
-    Calendar = 1,
-    Contacts = 2,
-    File = 3,
+    IndexTelemetry = 0,
+    IndexEmail = 1,
+    UnindexEmail = 2,
+    IndexCalendar = 3,
+    UnindexCalendar = 4,
+    IndexContacts = 5,
+    UnindexContacts = 6,
+    IndexFile = 7,
+    UnindexFile = 8,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1914,6 +1917,11 @@ pub enum Permission {
     SysImapUpdate = 392,
     SysInMemoryStoreGet = 393,
     SysInMemoryStoreUpdate = 394,
+    SysIndexQueueEntryGet = 660,
+    SysIndexQueueEntryCreate = 661,
+    SysIndexQueueEntryUpdate = 662,
+    SysIndexQueueEntryDestroy = 663,
+    SysIndexQueueEntryQuery = 664,
     SysJmapGet = 395,
     SysJmapUpdate = 396,
     SysLogGet = 397,
@@ -2117,9 +2125,6 @@ pub enum Permission {
     SysStoreLookupQuery = 595,
     SysSystemSettingsGet = 596,
     SysSystemSettingsUpdate = 597,
-    TaskIndexDocument = 598,
-    TaskUnindexDocument = 599,
-    TaskIndexTrace = 600,
     TaskCalendarAlarmEmail = 601,
     TaskCalendarAlarmNotification = 602,
     TaskCalendarItipMessage = 603,
@@ -2758,9 +2763,6 @@ pub enum TaskTenantMaintenanceType {
 #[repr(u16)]
 pub enum TaskType {
     #[default]
-    IndexDocument = 0,
-    UnindexDocument = 1,
-    IndexTrace = 2,
     CalendarAlarmEmail = 3,
     CalendarAlarmNotification = 4,
     CalendarItipMessage = 5,

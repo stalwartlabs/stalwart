@@ -222,6 +222,11 @@ pub enum SearchIndexClass {
         index: SearchIndex,
         block_id: u16,
     },
+    Queue {
+        index: SearchIndex,
+        id_prefix: u32,
+        id_suffix: u32,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]

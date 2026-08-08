@@ -1110,7 +1110,6 @@ impl DnsUpdater {
                         .map_err(|err| format!("Failed to build DNS updater: {}", err))?,
                 })
             }
-            DnsServer::Deprecated1 => Err("DNS server type no longer supported".to_string()),
         }
     }
 

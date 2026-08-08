@@ -405,6 +405,14 @@ impl ValueClass {
                 SearchIndexClass::GlobalDocumentId { index, block_id } => serializer
                     .write(SearchIndexClass::TYPE_DOCUMENT_ID | index.to_u8())
                     .write(*block_id),
+                SearchIndexClass::Queue {
+                    index,
+                    id_prefix,
+                    id_suffix,
+                } => serializer
+                    .write(SearchIndexClass::TYPE_QUEUE | index.to_u8())
+                    .write(*id_prefix)
+                    .write(*id_suffix),
             },
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
         }
@@ -521,6 +529,7 @@ impl ValueClass {
                 SearchIndexClass::GlobalTerm { term, .. } => term.key_len() + U16_LEN + 3,
                 SearchIndexClass::GlobalDocument { .. } => U64_LEN + 1,
                 SearchIndexClass::GlobalDocumentId { .. } => U16_LEN + 1,
+                SearchIndexClass::Queue { .. } => U32_LEN * 2 + 1,
             },
             ValueClass::Any(v) => v.key.len(),
         }
@@ -626,6 +635,7 @@ impl SearchIndexClass {
     pub const TYPE_TERM: u8 = 0 << 5;
     pub const TYPE_DOCUMENT: u8 = 1 << 5;
     pub const TYPE_DOCUMENT_ID: u8 = 2 << 5;
+    pub const TYPE_QUEUE: u8 = 3 << 5;
 }
 
 impl From<SearchIndexClass> for ValueClass {

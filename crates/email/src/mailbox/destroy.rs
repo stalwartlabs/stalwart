@@ -15,13 +15,9 @@ use crate::{
 use common::{
     Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
 };
-use registry::schema::{
-    enums::IndexDocumentType,
-    structs::{Task, TaskIndexDocument, TaskStatus},
-};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{AlignedBytes, Archive, SearchIndex},
 };
 use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
@@ -122,12 +118,7 @@ impl MailboxDestroy for Server {
                                     .with_current(prev_message_data),
                             )
                             .caused_by(trc::location!())?
-                            .schedule_task(Task::UnindexDocument(TaskIndexDocument {
-                                account_id: account_id.into(),
-                                document_id: message_id.into(),
-                                document_type: IndexDocumentType::Email,
-                                status: TaskStatus::now(),
-                            }))
+                            .queue_document_unindex(SearchIndex::Email, account_id, message_id)
                             .commit_point();
                     } else {
                         let new_message_data = MessageData {
