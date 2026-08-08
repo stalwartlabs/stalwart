@@ -23,7 +23,7 @@ ahash = { version = "0.8" }
 pwhash = "1"
 argon2 = "0.5.3"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
-scrypt = "0.11.0"
+scrypt = "0.12.0"
 sha1 = "0.11"
 sha2 = "0.11"
 md5 = "0.8.1"
