@@ -342,6 +342,7 @@ pub enum Property {
     AuthenticatedAs = 740,
     AuthenticationResults = 69,
     AutoAddInvitations = 171,
+    AllowAliasInvitations = 999,
     AutoUpdateFrequency = 53,
     BaseDn = 463,
     BaseUrl = 882,

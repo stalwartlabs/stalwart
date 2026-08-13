@@ -14,6 +14,7 @@ pub fn itip_update(
     ical: &mut ICalendar,
     old_ical: &ICalendar,
     account_emails: &[String],
+    allow_alias_invitations: bool,
 ) -> Result<Vec<ItipMessage<ICalendar>>, ItipError> {
     let old_itip = itip_snapshot(old_ical, account_emails, false)?;
     match itip_snapshot(ical, account_emails, false) {
@@ -23,9 +24,9 @@ pub fn itip_update(
                 // RFC 6638 does not support replacing the organizer
                 Err(ItipError::OrganizerMismatch)
             } else if old_itip.organizer.email.is_local {
-                organizer_handle_update(old_ical, ical, old_itip, new_itip, &mut sequences)
+                organizer_handle_update(old_ical, ical, old_itip, new_itip, &mut sequences, allow_alias_invitations)
             } else {
-                attendee_handle_update(ical, old_itip, new_itip)
+                attendee_handle_update(ical, old_itip, new_itip, allow_alias_invitations)
             }
             .inspect(|_| {
                 itip_finalize(ical, &sequences);
@@ -39,7 +40,7 @@ pub fn itip_update(
                 | ItipError::OtherSchedulingAgent => {
                     if old_itip.organizer.email.is_local {
                         // RFC 6638 does not support replacing the organizer, so we cancel the event
-                        itip_cancel(old_ical, account_emails, false).map(|message| vec![message])
+                        itip_cancel(old_ical, account_emails, false, allow_alias_invitations).map(|message| vec![message])
                     } else {
                         Err(ItipError::CannotModifyAddress)
                     }

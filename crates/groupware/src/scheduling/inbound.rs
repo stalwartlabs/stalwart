@@ -54,6 +54,7 @@ pub fn itip_process_message(
     itip: &ICalendar,
     itip_snapshots: ItipSnapshots<'_>,
     sender: String,
+    allow_alias_invitations: bool,
 ) -> Result<MergeResult, ItipError> {
     if snapshots.organizer.email != itip_snapshots.organizer.email {
         return Err(ItipError::OrganizerMismatch);
@@ -72,7 +73,7 @@ pub fn itip_process_message(
                 handle_reply(&snapshots, &itip_snapshots, &sender, &mut merge_actions)?;
             }
             ICalendarMethod::Refresh => {
-                return organizer_request_full(ical, &snapshots, None, false).and_then(
+                return organizer_request_full(ical, &snapshots, None, false, allow_alias_invitations).and_then(
                     |messages| {
                         messages
                             .into_iter()

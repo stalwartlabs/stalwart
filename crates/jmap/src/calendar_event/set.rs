@@ -339,9 +339,10 @@ impl CalendarEventSet for Server {
                         &mut new_calendar_event.data.event,
                         &old_ical,
                         account_info.addresses(),
+                        self.core.groupware.itip_allow_alias_invitations,
                     )
                 } else {
-                    itip_create(&mut new_calendar_event.data.event, account_info.addresses())
+                    itip_create(&mut new_calendar_event.data.event, account_info.addresses(), self.core.groupware.itip_allow_alias_invitations)
                 };
 
                 match result {
@@ -656,7 +657,7 @@ impl CalendarEventSet for Server {
             && access_token.has_permission(Permission::CalendarSchedulingSend)
             && event.data.event_range_end() > now() as i64
         {
-            match itip_create(&mut event.data.event, account_info.addresses()) {
+            match itip_create(&mut event.data.event, account_info.addresses(), self.core.groupware.itip_allow_alias_invitations) {
                 Ok(messages) => {
                     if messages.iter().map(|r| r.to.len()).sum::<usize>()
                         < self.core.groupware.itip_outbound_max_recipients

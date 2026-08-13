@@ -203,8 +203,14 @@ pub struct ItipMessages {
 }
 
 impl Attendee<'_> {
-    pub fn send_invite_messages(&self) -> bool {
-        !self.email.is_local
+    pub fn send_invite_messages(&self, organizer_email: &str, allow_alias_invitations: bool) -> bool {
+        let skip_invite = if allow_alias_invitations {
+            self.email.email == organizer_email
+        } else {
+            self.email.is_local
+        };
+
+        !skip_invite
             && self.is_server_scheduling
             && self.rsvp.is_none_or(|rsvp| rsvp)
             && (self.force_send.is_some()
@@ -213,8 +219,14 @@ impl Attendee<'_> {
                 }))
     }
 
-    pub fn send_update_messages(&self) -> bool {
-        !self.email.is_local
+    pub fn send_update_messages(&self, organizer_email: &str, allow_alias_invitations: bool) -> bool {
+        let skip_invite = if allow_alias_invitations {
+            self.email.email == organizer_email
+        } else {
+            self.email.is_local
+        };
+
+        !skip_invite
             && self.is_server_scheduling
             && self.rsvp.is_none_or(|rsvp| rsvp)
             && (self.force_send.is_some()

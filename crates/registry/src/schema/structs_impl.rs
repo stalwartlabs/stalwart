@@ -4806,6 +4806,7 @@ impl Pickle for CalendarScheduling {
         self.http_rsvp_link_expiry.pickle(out);
         self.http_rsvp_url.pickle(out);
         self.auto_add_invitations.pickle(out);
+        self.allow_alias_invitations.pickle(out);
         self.itip_max_size.pickle(out);
         self.max_recipients.pickle(out);
         self.email_template.pickle(out);
@@ -4819,6 +4820,7 @@ impl Pickle for CalendarScheduling {
         this.http_rsvp_link_expiry = Pickle::unpickle(stream)?;
         this.http_rsvp_url = Pickle::unpickle(stream)?;
         this.auto_add_invitations = Pickle::unpickle(stream)?;
+        this.allow_alias_invitations = Pickle::unpickle(stream)?;
         this.itip_max_size = Pickle::unpickle(stream)?;
         this.max_recipients = Pickle::unpickle(stream)?;
         this.email_template = Pickle::unpickle(stream)?;
@@ -4835,6 +4837,7 @@ impl Default for CalendarScheduling {
             http_rsvp_link_expiry: Duration::from_millis(7776000000),
             http_rsvp_url: Default::default(),
             auto_add_invitations: false,
+            allow_alias_invitations: false,
             itip_max_size: 524288,
             max_recipients: 100u64,
             email_template: Default::default(),
@@ -4856,6 +4859,10 @@ impl IntoValue for CalendarScheduling {
         map.insert_unchecked(
             Property::AutoAddInvitations,
             self.auto_add_invitations.into_value(),
+        );
+        map.insert_unchecked(
+            Property::AllowAliasInvitations,
+            self.allow_alias_invitations.into_value(),
         );
         map.insert_unchecked(Property::ItipMaxSize, self.itip_max_size.into_value());
         map.insert_unchecked(Property::MaxRecipients, self.max_recipients.into_value());
@@ -4882,6 +4889,7 @@ impl RegistryJsonPropertyPatch for CalendarScheduling {
                 .http_rsvp_url
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::AutoAddInvitations) => self.auto_add_invitations.patch(pointer, value),
+            Some(Property::AllowAliasInvitations) => self.allow_alias_invitations.patch(pointer, value),
             Some(Property::ItipMaxSize) => self.itip_max_size.patch(pointer, value),
             Some(Property::MaxRecipients) => self.max_recipients.patch(pointer, value),
             Some(Property::EmailTemplate) => self.email_template.patch(pointer, value),

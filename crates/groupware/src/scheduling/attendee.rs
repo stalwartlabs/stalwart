@@ -26,6 +26,7 @@ pub(crate) fn attendee_handle_update(
     new_ical: &ICalendar,
     old_itip: ItipSnapshots<'_>,
     new_itip: ItipSnapshots<'_>,
+    allow_alias_invitations: bool,
 ) -> Result<Vec<ItipMessage<ICalendar>>, ItipError> {
     let dt_stamp = PartialDateTime::now();
     let mut message = ICalendar {
@@ -125,14 +126,14 @@ pub(crate) fn attendee_handle_update(
                             .collect::<AHashSet<_>>();
                         for external_attendee in instance.external_attendees() {
                             if external_attendee.is_delegated_from(local_attendee) {
-                                if external_attendee.send_invite_messages()
+                                if external_attendee.send_invite_messages(&new_itip.organizer.email.email, allow_alias_invitations)
                                     && !old_delegates
                                         .contains(&external_attendee.email.email.as_str())
                                 {
                                     new_delegates.insert(external_attendee.email.email.as_str());
                                 }
                             } else if external_attendee.is_delegated_to(local_attendee) {
-                                if external_attendee.send_update_messages() {
+                                if external_attendee.send_update_messages(&new_itip.organizer.email.email, allow_alias_invitations) {
                                     email_rcpt.insert(external_attendee.email.email.as_str());
                                 }
                             } else {
@@ -180,11 +181,11 @@ pub(crate) fn attendee_handle_update(
             let mut attendee_entry_uids = vec![local_attendee.entry_id];
             for external_attendee in instance.external_attendees() {
                 if external_attendee.is_delegated_from(local_attendee) {
-                    if external_attendee.send_invite_messages() {
+                    if external_attendee.send_invite_messages(&new_itip.organizer.email.email, allow_alias_invitations) {
                         new_delegates.insert(external_attendee.email.email.as_str());
                     }
                 } else if external_attendee.is_delegated_to(local_attendee) {
-                    if external_attendee.send_update_messages() {
+                    if external_attendee.send_update_messages(&new_itip.organizer.email.email, allow_alias_invitations) {
                         email_rcpt.insert(external_attendee.email.email.as_str());
                     }
                 } else {
@@ -260,7 +261,7 @@ pub(crate) fn attendee_handle_update(
                 .into_iter()
                 .map(|e| e.to_string())
                 .collect::<Vec<_>>();
-            if let Ok(messages_) = organizer_request_full(new_ical, &new_itip, None, true) {
+            if let Ok(messages_) = organizer_request_full(new_ical, &new_itip, None, true, allow_alias_invitations) {
                 for mut message in messages_ {
                     message.from = from.clone();
                     message.to = new_delegates.clone();

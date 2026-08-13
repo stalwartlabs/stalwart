@@ -188,6 +188,7 @@ impl ItipIngest for Server {
                     &itip,
                     itip_snapshots,
                     sender.to_string(),
+                    self.core.groupware.itip_allow_alias_invitations,
                 )? {
                     MergeResult::Actions(changes) => {
                         // Merge changes

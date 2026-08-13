@@ -143,11 +143,12 @@ pub fn test() {
                                 &mut ical,
                                 entry.get_mut(),
                                 std::slice::from_ref(account),
+                                false,
                             ));
                             entry.insert(ical);
                         }
                         Entry::Vacant(entry) => {
-                            last_itip = Some(itip_create(&mut ical, std::slice::from_ref(account)));
+                            last_itip = Some(itip_create(&mut ical, std::slice::from_ref(account), false));
                             entry.insert(ical);
                         }
                     }
@@ -201,7 +202,7 @@ pub fn test() {
 
                     if let Some(ical) = store.remove(name) {
                         last_itip = Some(
-                            itip_cancel(&ical, &[account.to_string()], force_send)
+                            itip_cancel(&ical, &[account.to_string()], force_send, false)
                                 .map(|message| vec![message]),
                         );
                     } else {
@@ -271,6 +272,7 @@ pub fn test() {
                                                         &message.message,
                                                         itip_snapshots,
                                                         message.from.clone(),
+                                                        false,
                                                     ) {
                                                         Ok(result) => match result {
                                                             MergeResult::Actions(changes) => {

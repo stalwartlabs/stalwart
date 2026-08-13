@@ -13,6 +13,7 @@ use calcard::icalendar::ICalendar;
 pub fn itip_create(
     ical: &mut ICalendar,
     account_emails: &[String],
+    allow_alias_invitations: bool,
 ) -> Result<Vec<ItipMessage<ICalendar>>, ItipError> {
     let itip = itip_snapshot(ical, account_emails, false)?;
     if !itip.organizer.is_server_scheduling {
@@ -21,7 +22,7 @@ pub fn itip_create(
         Err(ItipError::NotOrganizer)
     } else {
         let mut sequences = Vec::new();
-        organizer_request_full(ical, &itip, Some(&mut sequences), true).inspect(|_| {
+        organizer_request_full(ical, &itip, Some(&mut sequences), true, allow_alias_invitations).inspect(|_| {
             itip_finalize(ical, &sequences);
         })
     }

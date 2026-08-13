@@ -23,6 +23,7 @@ pub fn itip_cancel(
     ical: &ICalendar,
     account_emails: &[String],
     is_deletion: bool,
+    allow_alias_invitations: bool,
 ) -> Result<ItipMessage<ICalendar>, ItipError> {
     // Prepare iTIP message
     let itip = itip_snapshot(ical, account_emails, false)?;
@@ -45,7 +46,7 @@ pub fn itip_cancel(
         for (instance_id, comp) in &itip.components {
             component_type = &comp.comp.component_type;
             for attendee in &comp.attendees {
-                if attendee.send_update_messages() {
+                if attendee.send_update_messages(&itip.organizer.email.email, allow_alias_invitations) {
                     recipients.insert(attendee.email.email.clone());
                 }
                 cancel_guests.insert(&attendee.email);

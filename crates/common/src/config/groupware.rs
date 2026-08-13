@@ -37,6 +37,7 @@ pub struct GroupwareConfig {
     pub alarms_template: Template<CalendarTemplateVariable>,
     pub itip_enabled: bool,
     pub itip_auto_add: bool,
+    pub itip_allow_alias_invitations: bool,
     pub itip_inbound_max_ical_size: usize,
     pub itip_outbound_max_recipients: usize,
     pub itip_http_rsvp_url: Option<String>,
@@ -121,6 +122,7 @@ impl GroupwareConfig {
             .expect("Failed to parse calendar template"),
             itip_enabled: sched.enable,
             itip_auto_add: sched.auto_add_invitations,
+            itip_allow_alias_invitations: sched.allow_alias_invitations,
             itip_inbound_max_ical_size: sched.itip_max_size as usize,
             itip_outbound_max_recipients: sched.max_recipients as usize,
             itip_inbox_auto_expunge: dr

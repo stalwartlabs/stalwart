@@ -483,7 +483,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
 
-            if let Ok(messages) = itip_cancel(&event.data.event, account_info.addresses(), true) {
+            if let Ok(messages) = itip_cancel(&event.data.event, account_info.addresses(), true, false) {
                 ItipMessages::new(vec![messages])
                     .queue(batch)
                     .caused_by(trc::location!())?;

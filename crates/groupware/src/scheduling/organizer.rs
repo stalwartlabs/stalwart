@@ -25,6 +25,7 @@ pub(crate) fn organizer_handle_update(
     old_itip: ItipSnapshots<'_>,
     new_itip: ItipSnapshots<'_>,
     increment_sequences: &mut Vec<u16>,
+    allow_alias_invitations: bool,
 ) -> Result<Vec<ItipMessage<ICalendar>>, ItipError> {
     let mut changed_instances: Vec<(&InstanceId, &str, &ICalendarMethod)> = Vec::new();
     let mut increment_sequence = false;
@@ -59,7 +60,7 @@ pub(crate) fn organizer_handle_update(
                     changed_instances.extend(
                         old_instance
                             .external_attendees()
-                            .filter(|attendee| attendee.send_update_messages())
+                            .filter(|attendee| attendee.send_update_messages(old_itip.organizer.email.email.as_str(), allow_alias_invitations))
                             .map(|attendee| attendee.email.email.as_str())
                             .collect::<AHashSet<_>>()
                             .difference(
@@ -75,7 +76,7 @@ pub(crate) fn organizer_handle_update(
                 }
 
                 changed_instances.extend(instance.attendees.iter().filter_map(|attendee| {
-                    if attendee.send_update_messages() {
+                    if attendee.send_update_messages(new_itip.organizer.email.email.as_str(), allow_alias_invitations) {
                         Some((
                             instance_id,
                             attendee.email.email.as_str(),
@@ -95,7 +96,7 @@ pub(crate) fn organizer_handle_update(
             };
 
             changed_instances.extend(instance.attendees.iter().filter_map(|attendee| {
-                if attendee.send_invite_messages() {
+                if attendee.send_invite_messages(new_itip.organizer.email.email.as_str(), allow_alias_invitations) {
                     Some((instance_id, attendee.email.email.as_str(), method))
                 } else {
                     None
@@ -112,7 +113,7 @@ pub(crate) fn organizer_handle_update(
         if !new_itip.components.contains_key(instance_id) {
             if instance_id != &InstanceId::Main {
                 changed_instances.extend(old_instance.attendees.iter().filter_map(|attendee| {
-                    if attendee.send_update_messages() {
+                    if attendee.send_update_messages(old_itip.organizer.email.email.as_str(), allow_alias_invitations) {
                         Some((
                             instance_id,
                             attendee.email.email.as_str(),
@@ -185,6 +186,7 @@ pub(crate) fn organizer_handle_update(
             &new_itip,
             increment_sequence.then_some(increment_sequences),
             false,
+            allow_alias_invitations,
         ) {
             Ok(messages_) => {
                 for mut message in messages_ {
@@ -311,6 +313,7 @@ pub(crate) fn organizer_request_full(
     itip: &ItipSnapshots<'_>,
     mut increment_sequence: Option<&mut Vec<u16>>,
     is_first_request: bool,
+    allow_alias_invitations: bool,
 ) -> Result<Vec<ItipMessage<ICalendar>>, ItipError> {
     // Prepare iTIP message
     let dt_stamp = PartialDateTime::now();
@@ -365,8 +368,8 @@ pub(crate) fn organizer_request_full(
 
         // Add attendees
         for attendee in &comp.attendees {
-            if (is_first_request && attendee.send_invite_messages())
-                || (!is_first_request && attendee.send_update_messages())
+            if (is_first_request && attendee.send_invite_messages(itip.organizer.email.email.as_str(), allow_alias_invitations))
+                || (!is_first_request && attendee.send_update_messages(itip.organizer.email.email.as_str(), allow_alias_invitations))
             {
                 recipients.insert(&attendee.email.email);
             }

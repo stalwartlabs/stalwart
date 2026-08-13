@@ -677,6 +677,8 @@ pub struct CalendarScheduling {
     pub http_rsvp_url: Option<String>,
     #[serde(rename = "autoAddInvitations")]
     pub auto_add_invitations: bool,
+    #[serde(rename = "allowAliasInvitations")]
+    pub allow_alias_invitations: bool,
     #[serde(rename = "itipMaxSize")]
     pub itip_max_size: u64,
     #[serde(rename = "maxRecipients")]
