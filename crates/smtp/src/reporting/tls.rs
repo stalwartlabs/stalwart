@@ -128,10 +128,6 @@ impl TlsReporting for Server {
 
         // Try delivering report over HTTP
         for uri in report.http_rua.as_slice() {
-            if let Ok(client) = reqwest::Client::builder()
-                .user_agent(USER_AGENT)
-                .timeout(Duration::from_secs(2 * 60))
-                .build()
             {
                 #[cfg(feature = "test_mode")]
                 if uri == "https://127.0.0.1/tls" {
@@ -140,8 +136,13 @@ impl TlsReporting for Server {
                     return Ok(());
                 }
 
-                match client
+                match self
+                    .core
+                    .smtp
+                    .tls_report_client
                     .post(uri)
+                    .timeout(Duration::from_secs(2 * 60))
+                    .header(reqwest::header::USER_AGENT, USER_AGENT)
                     .header(CONTENT_TYPE, "application/tlsrpt+gzip")
                     .body(json.to_vec())
                     .send()

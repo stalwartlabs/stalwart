@@ -20,6 +20,11 @@ pub struct ImapConfig {
 
     pub rate_requests: Option<Rate>,
     pub rate_concurrent: Option<u64>,
+
+    pub max_messages_per_command: u32,
+    pub max_messages_per_save: u32,
+    pub min_uid_batch_size: u32,
+    pub max_uid_batches: u32,
 }
 
 impl ImapConfig {
@@ -35,6 +40,10 @@ impl ImapConfig {
             rate_requests: imap.max_request_rate,
             rate_concurrent: imap.max_concurrent,
             allow_plain_auth: imap.allow_plain_text_auth,
+            max_messages_per_command: imap.max_messages_per_command.min(u32::MAX as u64) as u32,
+            max_messages_per_save: imap.max_messages_per_save.min(u32::MAX as u64) as u32,
+            min_uid_batch_size: imap.min_uid_batch_size.min(u32::MAX as u64) as u32,
+            max_uid_batches: imap.max_uid_batches.min(u32::MAX as u64) as u32,
         }
     }
 }

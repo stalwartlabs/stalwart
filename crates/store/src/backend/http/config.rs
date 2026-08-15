@@ -52,6 +52,7 @@ impl LookupStores {
                         expires: AtomicU64::new(0),
                         in_flight: AtomicBool::new(false),
                         config: http_config,
+                        client: utils::http::unpooled_http_client(false),
                     };
 
                     entry.insert(InMemoryStore::Http(store.into()));

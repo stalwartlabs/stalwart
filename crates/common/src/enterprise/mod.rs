@@ -203,10 +203,10 @@ impl Server {
 
         let mut logo = None;
         if let Some(logo_url) = logo_url {
-            let response = reqwest::Client::builder()
+            let response = utils::http::http_client_builder(false)
                 .user_agent(USER_AGENT)
                 .build()
-                .unwrap()
+                .unwrap_or_default()
                 .get(logo_url.as_str())
                 .send()
                 .await

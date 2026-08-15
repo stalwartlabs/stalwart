@@ -18,7 +18,7 @@ static SERVER_GREETING: &str = "Stalwart IMAP4rev2 at your service.";
 pub(crate) static GREETING_WITH_TLS: LazyLock<Vec<u8>> = LazyLock::new(|| {
     StatusResponse::ok(SERVER_GREETING)
         .with_code(ResponseCode::Capability {
-            capabilities: Capability::all_capabilities(false, true),
+            capabilities: Capability::all_capabilities(false, true, 0, 0),
         })
         .into_bytes()
 });
@@ -26,7 +26,7 @@ pub(crate) static GREETING_WITH_TLS: LazyLock<Vec<u8>> = LazyLock::new(|| {
 pub(crate) static GREETING_WITHOUT_TLS: LazyLock<Vec<u8>> = LazyLock::new(|| {
     StatusResponse::ok(SERVER_GREETING)
         .with_code(ResponseCode::Capability {
-            capabilities: Capability::all_capabilities(false, false),
+            capabilities: Capability::all_capabilities(false, false, 0, 0),
         })
         .into_bytes()
 });

@@ -90,6 +90,7 @@ pub struct WebhookTracer {
     pub discard_after: Duration,
     pub tls_allow_invalid_certs: bool,
     pub headers: HeaderMap,
+    pub client: reqwest::Client,
 }
 
 // SPDX-SnippetBegin
@@ -490,6 +491,9 @@ impl Tracers {
                         url: hook.url,
                         timeout: hook.timeout.into_inner(),
                         tls_allow_invalid_certs: hook.allow_invalid_certs,
+                        client: utils::http::http_client_builder(hook.allow_invalid_certs)
+                            .build()
+                            .unwrap_or_default(),
                         headers,
                         key: hook
                             .signature_key

@@ -18,7 +18,9 @@ use store::{
     ahash::AHashSet,
     roaring::RoaringBitmap,
     search::{SearchFilter, SearchQuery},
-    write::{IndexPropertyClass, SearchIndex, ValueClass, key::DeserializeBigEndian, now},
+    write::{
+        IndexPropertyClass, QueueClass, SearchIndex, ValueClass, key::DeserializeBigEndian, now,
+    },
 };
 use trc::AddContext;
 use types::{
@@ -39,6 +41,7 @@ struct Submission {
     email_id: u32,
     thread_id: u32,
     identity_id: u32,
+    queue_id: u64,
     undo_status: u8,
 }
 
@@ -84,6 +87,11 @@ impl EmailSubmissionQuery for Server {
                         email_id: value.deserialize_be_u32(0)?,
                         thread_id: value.deserialize_be_u32(U32_LEN)?,
                         identity_id: value.deserialize_be_u32(U32_LEN + U32_LEN)?,
+                        queue_id: if value.len() == (U32_LEN * 3) + U64_LEN + 1 {
+                            value.deserialize_be_u64(U32_LEN * 3)?
+                        } else {
+                            0
+                        },
                         undo_status: value.last().copied().unwrap(),
                     });
 
@@ -94,6 +102,29 @@ impl EmailSubmissionQuery for Server {
             )
             .await
             .caused_by(trc::location!())?;
+
+        if request
+            .filter
+            .iter()
+            .any(|cond| matches!(cond, Filter::Property(EmailSubmissionFilter::UndoStatus(_))))
+        {
+            let pending = UndoStatus::Pending.as_index();
+            for submission in submissions
+                .iter_mut()
+                .filter(|s| s.undo_status == pending && s.queue_id != 0)
+            {
+                if !self
+                    .store()
+                    .key_exists(ValueKey::from(ValueClass::Queue(QueueClass::Message(
+                        submission.queue_id,
+                    ))))
+                    .await
+                    .caused_by(trc::location!())?
+                {
+                    submission.undo_status = UndoStatus::Final.as_index();
+                }
+            }
+        }
 
         let mut filters = Vec::with_capacity(request.filter.len());
         for cond in std::mem::take(&mut request.filter) {

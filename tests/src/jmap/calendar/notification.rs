@@ -243,7 +243,8 @@ pub async fn test(test: &TestServer) {
             "calendarAddress": "mailto:jdoe@example.com",
             "@type": "Participant",
             "roles": {
-                "chair": true
+                "chair": true,
+                "owner": true
             },
             "participationStatus": "accepted"
         },
@@ -298,7 +299,8 @@ pub async fn test(test: &TestServer) {
             "calendarAddress": "mailto:jdoe@example.com",
             "@type": "Participant",
             "roles": {
-                "chair": true
+                "chair": true,
+                "owner": true
             },
             "participationStatus": "accepted"
         },
@@ -411,7 +413,8 @@ fn test_event() -> Value {
           "calendarAddress": "mailto:jdoe@example.com",
           "participationStatus": "accepted",
           "roles": {
-            "chair": true
+            "chair": true,
+            "owner": true
           },
           "@type": "Participant"
         },

@@ -161,6 +161,7 @@ pub struct MTAHook {
     pub tempfail_on_error: bool,
     pub run_on_stage: AHashSet<Stage>,
     pub max_response_size: usize,
+    pub client: reqwest::Client,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -212,6 +213,9 @@ impl SessionConfig {
                 tempfail_on_error: hook.temp_fail_on_error,
                 run_on_stage: hook.stages.into_iter().map(Stage::from).collect(),
                 max_response_size: hook.max_response_size as usize,
+                client: utils::http::http_client_builder(hook.allow_invalid_certs)
+                    .build()
+                    .unwrap_or_default(),
             });
         }
 

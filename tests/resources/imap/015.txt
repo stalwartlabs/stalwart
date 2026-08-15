@@ -1,0 +1,22 @@
+From: "=?koi8-r?B?4czFy9PBzsTS?=" <exchange@example.com>
+To: user@example.com
+Date: Sat, 02 Aug 2026 10:15:05 +0300
+Subject: =?koi8-r?B?+sHQ0s/T?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND1"
+
+--BOUND1
+Content-Type: text/plain; charset=koi8-r
+Content-Transfer-Encoding: quoted-printable
+
+test body
+--BOUND1
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+	name="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="
+Content-Disposition: attachment;
+	filename="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="; size=10
+Content-Description: =?koi8-r?B?0NLJzM/Wxc7JxQ==?=
+Content-Transfer-Encoding: base64
+
+dGVzdA==
+--BOUND1--

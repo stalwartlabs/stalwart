@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Event, http::http_request};
+use super::{
+    Event,
+    http::{build_push_client, http_request},
+};
 use crate::state_manager::PushRegistration;
 use common::{
     BuildServer, IPC_CHANNEL_BUFFER, Inner, LONG_1Y_SLUMBER, Server,
@@ -37,6 +40,7 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
         let mut last_retry = Instant::now();
         let mut retry_timeout = LONG_1Y_SLUMBER;
         let mut retry_ids = AHashSet::default();
+        let push_client = build_push_client();
 
         // Load active subscriptions on startup
         {
@@ -89,6 +93,7 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                                             notifications: Vec::new(),
                                             server: subscription.clone(),
                                             in_flight: false,
+                                            client: push_client.clone(),
                                         },
                                     );
                                 }
@@ -191,6 +196,7 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                                             notifications: Vec::new(),
                                             server: subscription.clone(),
                                             in_flight: false,
+                                            client: push_client.clone(),
                                         });
                                     }
                                 }
@@ -221,8 +227,10 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                                 .unwrap_or(true)
                             {
                                 let core = server.core.clone();
+                                let push_client = push_client.clone();
                                 tokio::spawn(async move {
                                     http_request(
+                                        &push_client,
                                         &subscription,
                                         format!(
                                             concat!(

@@ -144,6 +144,9 @@ impl EmailCopy for Server {
             }
         }
 
+        message_ids.sort_unstable();
+        message_ids.dedup();
+
         // Obtain threadId
         let thread_result = self
             .find_thread_id(to_account_id, subject, &message_ids)

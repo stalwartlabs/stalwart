@@ -365,6 +365,9 @@ impl From<mail_auth::Error> for Error {
                 mail_auth::dkim2::Dkim2Error::SequenceOverflow => {
                     EventType::Dkim(DkimEvent::SequenceOverflow).into_err()
                 }
+                mail_auth::dkim2::Dkim2Error::ChainTooLong => {
+                    EventType::Dkim(DkimEvent::ChainTooLong).into_err()
+                }
                 mail_auth::dkim2::Dkim2Error::SignatureExpired(i) => {
                     EventType::Dkim(DkimEvent::SignatureExpired).ctx(Key::Id, i)
                 }
@@ -379,6 +382,9 @@ impl From<mail_auth::Error> for Error {
                 }
                 mail_auth::dkim2::Dkim2Error::NextDomainMismatch(i) => {
                     EventType::Dkim(DkimEvent::NextDomainMismatch).ctx(Key::Id, i)
+                }
+                mail_auth::dkim2::Dkim2Error::CustodyBreak(i) => {
+                    EventType::Dkim(DkimEvent::CustodyBreak).ctx(Key::Id, i)
                 }
                 mail_auth::dkim2::Dkim2Error::PublicKeyFetch(i) => {
                     EventType::Dkim(DkimEvent::PublicKeyFetch).ctx(Key::Id, i)

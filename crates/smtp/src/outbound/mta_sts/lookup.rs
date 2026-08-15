@@ -67,12 +67,12 @@ impl MtaStsLookup for Server {
 
         // Fetch policy
         #[cfg(not(feature = "test_mode"))]
-        let bytes = reqwest::Client::builder()
-            .user_agent(common::USER_AGENT)
-            .timeout(timeout)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?
+        let bytes = self
+            .core
+            .smtp
+            .mta_sts_client
             .get(format!("https://mta-sts.{domain}/.well-known/mta-sts.txt"))
+            .timeout(timeout)
             .send()
             .await?
             .bytes_with_limit(MAX_POLICY_SIZE)

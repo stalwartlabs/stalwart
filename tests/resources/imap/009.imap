@@ -25,7 +25,7 @@ BODY (
             ) NIL NIL "quoted-printable" 228 3
          )(
             "image" "gif" (
-               "name" "Book about ☕ tables.gif"
+               "name" "=?utf-8?B?Qm9vayBhYm91dCDimJUgdGFibGVzLmdpZg==?="
             ) NIL NIL "Base64" 56
          ) "mixed"
       ) 0
@@ -33,6 +33,46 @@ BODY (
 )
 
 BODYSTRUCTURE (
+   (
+      "text" "html" (
+         "charset" "us-ascii"
+      ) NIL NIL "base64" 239 3 "07aab44e51c5f1833a5d19f2e1804c4b" NIL NIL NIL
+   )(
+      "message" "rfc822" NIL NIL NIL NIL 723 (
+         NIL "Exporting my book about coffee tables" (
+            (
+               "Cosmo Kramer" NIL "kramer" "kramerica.com"
+            )
+         ) (
+            (
+               "Cosmo Kramer" NIL "kramer" "kramerica.com"
+            )
+         ) (
+            (
+               "Cosmo Kramer" NIL "kramer" "kramerica.com"
+            )
+         ) NIL NIL NIL NIL NIL
+      ) (
+         (
+            "text" "plain" (
+               "charset" "utf-16"
+            ) NIL NIL "quoted-printable" 228 3 "3a942a99cdd8a099ae107d3867ec20fb" NIL NIL NIL
+         )(
+            "image" "gif" (
+               "name" "=?utf-8?B?Qm9vayBhYm91dCDimJUgdGFibGVzLmdpZg==?="
+            ) NIL NIL "Base64" 56 "d40fa7f401e9dc2df56cbb740d65ff52" (
+               "attachment" NIL
+            ) NIL NIL
+         ) "mixed" (
+            "boundary" "giddyup"
+         ) NIL NIL NIL
+      ) 0 "cdb0382a03a15601fb1b3c7422521620" NIL NIL NIL
+   ) "mixed" (
+      "boundary" "festivus"
+   ) NIL NIL NIL
+)
+
+BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "html" (
          "charset" "us-ascii"

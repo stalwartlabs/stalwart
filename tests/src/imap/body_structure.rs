@@ -57,15 +57,19 @@ pub fn test() {
         let decoded = metadata.decode_contents(raw_message);
 
         // Serialize body and bodystructure
-        for is_extended in [false, true] {
+        for (is_extended, is_utf8) in [(false, false), (true, false), (true, true)] {
             let mut buf_ = Vec::new();
-            metadata
-                .body_structure(&decoded, is_extended)
-                .serialize(&mut buf_, is_extended);
-            if is_extended {
+            metadata.body_structure(&decoded, is_extended).serialize(
+                &mut buf_,
+                is_extended,
+                is_utf8,
+            );
+            if !is_extended {
+                buf.extend_from_slice(b"BODY ");
+            } else if !is_utf8 {
                 buf.extend_from_slice(b"BODYSTRUCTURE ");
             } else {
-                buf.extend_from_slice(b"BODY ");
+                buf.extend_from_slice(b"BODYSTRUCTURE UTF8=ACCEPT ");
             }
 
             // Poor man's indentation
@@ -127,7 +131,7 @@ pub fn test() {
                                 origin_octet: None,
                                 contents,
                             }
-                            .serialize(&mut buf);
+                            .serialize(&mut buf, false);
 
                             if is_first {
                                 match metadata.binary(&decoded, &sections, None) {
@@ -146,7 +150,7 @@ pub fn test() {
                                                 text => text,
                                             },
                                         }
-                                        .serialize(&mut buf);
+                                        .serialize(&mut buf, false);
                                     }
                                     Ok(None) => (),
                                     Err(_) => {
@@ -173,7 +177,7 @@ pub fn test() {
                                         sections: sections.clone(),
                                         size,
                                     }
-                                    .serialize(&mut buf);
+                                    .serialize(&mut buf, false);
                                 }
                             }
 
@@ -211,7 +215,7 @@ pub fn test() {
                 sections: sections.clone(),
                 origin_octet: None,
             }
-            .serialize(&mut buf);
+            .serialize(&mut buf, false);
             buf.extend_from_slice(b"\n----------------------------------\n");
             DataItem::BodySection {
                 contents: metadata
@@ -220,7 +224,7 @@ pub fn test() {
                 sections,
                 origin_octet: 10.into(),
             }
-            .serialize(&mut buf);
+            .serialize(&mut buf, false);
             buf.extend_from_slice(b"\n----------------------------------\n");
         }
 

@@ -28,6 +28,22 @@ BODYSTRUCTURE (
    ) NIL NIL NIL
 )
 
+BODYSTRUCTURE UTF8=ACCEPT (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 48 1 "2229d79e5de40eae37c43fe934adbd24" NIL NIL NIL
+   )(
+      "text" "enriched" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 69 2 "1aba0fd91c6544b8626008f78b83c3f9" NIL NIL NIL
+   )(
+      "application" "x-whatever" NIL NIL NIL NIL 51 "7f7ef645554f637854b8acdd853aa612" NIL NIL NIL
+   ) "alternative" (
+      "boundary" "boundary42"
+   ) NIL NIL NIL
+)
+
 BODY[] {565}
 From: Nathaniel Borenstein <nsb@bellcore.com>
 To: Ned Freed <ned@innosoft.com>

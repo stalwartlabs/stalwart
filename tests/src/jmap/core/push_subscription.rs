@@ -15,7 +15,7 @@ use email::push::{EmailPush, Urgency};
 use http_proto::{HtmlResponse, ToHttpResponse, request::fetch_body};
 use hyper::{
     StatusCode, body,
-    header::{AUTHORIZATION, CONTENT_ENCODING},
+    header::{AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE},
     server::conn::http1,
     service::service_fn,
 };
@@ -486,7 +486,7 @@ async fn test_email_push_object(test: &TestServer) {
     }
 
     // Size limit: a generous budget keeps every property, a tiny budget drops some (in order)
-    let full =
+    let (full, _) =
         build_email_push_object(&test.server, account_id, document_id, &config(vec![]), 4096)
             .await
             .unwrap()
@@ -496,7 +496,7 @@ async fn test_email_push_object(test: &TestServer) {
         3,
         "all requested properties must fit under a generous budget"
     );
-    let truncated =
+    let (truncated, _) =
         build_email_push_object(&test.server, account_id, document_id, &config(vec![]), 50)
             .await
             .unwrap()
@@ -645,6 +645,21 @@ impl common::network::SessionManager for SessionManager {
                                 .headers()
                                 .get(CONTENT_ENCODING)
                                 .is_some_and(|encoding| encoding.to_str().unwrap() == "aes128gcm");
+
+                            let content_type = req
+                                .headers()
+                                .get(CONTENT_TYPE)
+                                .map(|value| value.to_str().unwrap())
+                                .expect("Push POST must carry a Content-Type header");
+                            assert_eq!(
+                                content_type,
+                                if is_encrypted {
+                                    "application/octet-stream"
+                                } else {
+                                    "application/json"
+                                },
+                                "unexpected Content-Type for encrypted={is_encrypted} push"
+                            );
                             let body = fetch_body(&mut req, 1024 * 1024, 0).await.unwrap();
                             let message = serde_json::from_slice::<PushMessage>(&if is_encrypted {
                                 ece::decrypt(&push.keypair, &push.auth_secret, &body).unwrap()

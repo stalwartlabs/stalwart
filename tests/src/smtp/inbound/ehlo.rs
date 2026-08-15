@@ -9,13 +9,14 @@ use crate::{
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
 use mail_auth::{SpfResult, common::parse::TxtRecordParser, spf::Spf};
+use mail_parser::DateTime;
 use registry::{
     schema::structs::{
         Expression, ExpressionMatch, MtaExtensions, MtaStageData, MtaStageEhlo, SenderAuth,
     },
     types::list::List,
 };
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[tokio::test]
 async fn ehlo() {
@@ -117,13 +118,29 @@ async fn ehlo() {
     session.cmd("EHLO domain", "550 5.5.0").await;
 
     // EHLO capabilities evaluation
-    session
+    let response = session
         .cmd("EHLO mx1.foobar.org", "250")
         .await
         .assert_contains("SIZE 1024")
         .assert_contains("MT-PRIORITY NSEP")
-        .assert_contains("FUTURERELEASE 3600")
+        .assert_contains("FUTURERELEASE 3600 ")
         .assert_contains("STARTTLS");
+
+    // The advertised max-future-release-date-time is an RFC 3339 date-time
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs()) as i64;
+    let max_datetime = response
+        .iter()
+        .find_map(|line| line.split("FUTURERELEASE 3600 ").nth(1))
+        .and_then(|v| v.split_whitespace().next())
+        .and_then(DateTime::parse_rfc3339)
+        .expect("FUTURERELEASE did not advertise an RFC 3339 date-time")
+        .to_timestamp();
+    assert!(
+        ((now + 3595)..=(now + 3605)).contains(&max_datetime),
+        "unexpected max-future-release-date-time {max_datetime}, now is {now}"
+    );
 
     // SPF should be a Pass for 10.0.0.1
     assert_eq!(

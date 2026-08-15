@@ -1,6 +1,6 @@
 [package]
 name = "tests"
-version = "0.16.16"
+version = "0.16.18"
 edition = "2024"
 
 [features]
@@ -45,7 +45,7 @@ migration = { path = "../crates/migration", features = ["test_mode", "enterprise
 trc = { path = "../crates/trc", features = ["enterprise"] }
 managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterprise"] }
 smtp-proto = { version = "0.2" }
-mail-auth = { version = "0.11", features = ["test"] }
+mail-auth = { version = "0.12", features = ["test"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = "0.4.4"
 sieve-rs = { version = "0.7", features = ["rkyv"] } 
@@ -90,4 +90,4 @@ testcontainers = { version = "0.27", features = ["reusable-containers"] }
 rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"] }
 
 [target.'cfg(not(any(target_env = "msvc", target_os = "freebsd")))'.dependencies]
-jemallocator = "0.5.4"
+tikv-jemallocator = "0.7"

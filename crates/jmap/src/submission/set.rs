@@ -729,7 +729,7 @@ impl EmailSubmissionSet for Server {
                 session.data.message = message;
                 let response = session.queue_message().await;
                 if let smtp::core::State::Accepted(queue_id) = session.state {
-                    Ok((true, responses, Some(queue_id)))
+                    Ok((responses, Some(queue_id)))
                 } else {
                     Err(
                         SetError::new(SetErrorType::ForbiddenToSend).with_description(format!(
@@ -739,22 +739,22 @@ impl EmailSubmissionSet for Server {
                     )
                 }
             } else {
-                Ok((false, responses, None))
+                Ok((responses, None))
             }
         });
 
         match handle.await {
-            Ok(Ok((has_success, responses, queue_id))) => {
+            Ok(Ok((responses, queue_id))) => {
                 // Set queue ID
                 if let Some(queue_id) = queue_id {
                     submission.queue_id = Some(queue_id);
                 }
 
                 // Set responses
-                submission.undo_status = if has_success {
-                    UndoStatus::Final
-                } else {
+                submission.undo_status = if submission.queue_id.is_some() {
                     UndoStatus::Pending
+                } else {
+                    UndoStatus::Final
                 };
                 submission.delivery_status = responses
                     .into_iter()

@@ -20,7 +20,7 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{AlignedBytes, Archive, now},
 };
 use trc::AddContext;
 use types::{
@@ -108,21 +108,61 @@ impl FileGetRequestHandler for Server {
         )
         .await?;
 
+        let modified = i64::from(node.modified);
+        let last_modified = Rfc1123DateTime::new(modified).to_string();
+        let byte_range = if !is_head && size > 0 {
+            headers
+                .range
+                .filter(|_| {
+                    headers.eval_if_range(
+                        &etag,
+                        ((modified as u64) < now()).then_some(last_modified.as_str()),
+                    )
+                })
+                .map(|range| range.resolve(size as u64))
+        } else {
+            None
+        };
+        let byte_range = match byte_range {
+            Some(Some(range)) => Some(range.start as usize..range.end as usize),
+            Some(None) => {
+                return Ok(HttpResponse::new(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .with_accept_ranges()
+                    .with_etag(etag)
+                    .with_content_range(format!("bytes */{size}")));
+            }
+            None => None,
+        };
+
         let response = HttpResponse::new(StatusCode::OK)
             .with_content_type(content_type.unwrap_or("application/octet-stream"))
             .with_etag(etag)
-            .with_last_modified(Rfc1123DateTime::new(i64::from(node.modified)).to_string());
+            .with_last_modified(last_modified)
+            .with_accept_ranges();
 
-        if !is_head {
-            Ok(response.with_binary_body(
-                self.blob_store()
-                    .get_blob(hash, 0..usize::MAX)
-                    .await
-                    .caused_by(trc::location!())?
-                    .ok_or(DavError::Code(StatusCode::NOT_FOUND))?,
-            ))
-        } else {
-            Ok(response.with_content_length(size))
+        if is_head {
+            return Ok(response.with_content_length(size));
         }
+
+        let contents = self
+            .blob_store()
+            .get_blob(hash, byte_range.clone().unwrap_or(0..usize::MAX))
+            .await
+            .caused_by(trc::location!())?
+            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+
+        Ok(match byte_range {
+            Some(byte_range) if !contents.is_empty() => response
+                .with_status_code(StatusCode::PARTIAL_CONTENT)
+                .with_content_range(format!(
+                    "bytes {}-{}/{}",
+                    byte_range.start,
+                    byte_range.start + contents.len() - 1,
+                    size
+                )),
+            Some(_) => return Err(DavError::Code(StatusCode::NOT_FOUND)),
+            None => response,
+        }
+        .with_binary_body(contents))
     }
 }

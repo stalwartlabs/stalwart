@@ -69,7 +69,7 @@ impl PrincipalMatching for Server {
                                 uri: headers.uri,
                                 sync_type: Default::default(),
                                 limit: Default::default(),
-                                max_vcard_version: Default::default(),
+                                vcard_version: Default::default(),
                                 expand: Default::default(),
                             },
                         )

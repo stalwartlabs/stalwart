@@ -84,6 +84,54 @@ BODYSTRUCTURE (
    ) NIL NIL NIL
 )
 
+BODYSTRUCTURE UTF8=ACCEPT (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 61 5 "63aa55d7eacd3e7d4af551d3d7f8fe46" NIL NIL NIL
+   )(
+      "message" "rfc822" NIL NIL NIL "7bit" 1979 (
+         "Thu, 13 Aug 1998 17:42:41 +1000" "Map of Argentina with Description" (
+            (
+               "Bill Clinton" NIL "president" "whitehouse.gov"
+            )
+         ) (
+            (
+               "Bill Clinton" NIL "president" "whitehouse.gov"
+            )
+         ) (
+            (
+               "Bill Clinton" NIL "president" "whitehouse.gov"
+            )
+         ) (
+            (
+               "A1 Gore (The Enforcer)" NIL "vice-president" "whitehouse.gov"
+            )
+         ) NIL NIL NIL "<199804130742.RAA20366@mai1host.whitehouse.gov>"
+      ) (
+         (
+            "text" "plain" (
+               "charset" "us-ascii"
+            ) NIL NIL "7bit" 355 12 "47027313db254547987c7eb4be377593" NIL NIL NIL
+         )(
+            "image" "gif" (
+               "name" "map_of_Argentina.gif"
+            ) NIL NIL "base64" 389 "5359a63540c1a8eae06a27e8760e1501" (
+               "inline" (
+                  "fi1ename" "map_of_Argentina.gif"
+               )
+            ) NIL NIL
+         ) "mixed" (
+            "boundary" "DC8------------DC8638F443D87A7F0726DEF7"
+         ) NIL NIL NIL
+      ) 0 "1522079b4114146b37ea1af171484a1a" (
+         "inline" NIL
+      ) NIL NIL
+   ) "mixed" (
+      "boundary" "D7F------------D7FD5A0B8AB9C65CCDBFA872"
+   ) NIL NIL NIL
+)
+
 BODY[] {2652}
 From:  Al Gore <vice-president@whitehouse.gov>
 To:  White House Transportation Coordinator

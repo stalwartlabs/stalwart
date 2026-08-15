@@ -56,6 +56,16 @@ impl HttpResponse {
         self
     }
 
+    pub fn with_content_range(mut self, content_range: String) -> Self {
+        self.builder = self.builder.header(header::CONTENT_RANGE, content_range);
+        self
+    }
+
+    pub fn with_accept_ranges(mut self) -> Self {
+        self.builder = self.builder.header(header::ACCEPT_RANGES, "bytes");
+        self
+    }
+
     pub fn with_etag(mut self, etag: String) -> Self {
         self.builder = self.builder.header(header::ETAG, etag);
         self
@@ -217,11 +227,23 @@ impl HttpResponse {
                     .map_err(|never| match never {})
                     .boxed(),
             ),
-            HttpResponseBody::Empty => self.builder.header(header::CONTENT_LENGTH, 0).body(
-                Full::new(Bytes::new())
-                    .map_err(|never| match never {})
-                    .boxed(),
-            ),
+            HttpResponseBody::Empty => {
+                let has_content_length = self
+                    .builder
+                    .headers_ref()
+                    .is_some_and(|headers| headers.contains_key(header::CONTENT_LENGTH));
+                let builder = if has_content_length {
+                    self.builder
+                } else {
+                    self.builder.header(header::CONTENT_LENGTH, 0)
+                };
+
+                builder.body(
+                    Full::new(Bytes::new())
+                        .map_err(|never| match never {})
+                        .boxed(),
+                )
+            }
             HttpResponseBody::Stream(stream) => self.builder.body(stream),
             HttpResponseBody::WebsocketUpgrade(derived_key) => self
                 .builder

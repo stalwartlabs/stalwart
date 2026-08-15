@@ -19,7 +19,8 @@ impl<T: SessionStream> Session<T> {
                 &Some(mailbox.clone()),
                 false,
                 true,
-                self.is_qresync,
+                self.is_qresync || self.is_uidonly,
+                self.is_uidonly,
                 self.version.is_rev2(),
                 self.is_utf8,
             )

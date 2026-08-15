@@ -442,6 +442,7 @@ impl RegistryJsonPropertyPatch for AcmeProvider {
                 .preferred_chain
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::ReuseKey) => self.reuse_key.patch(pointer, value),
+            Some(Property::Description) => pointer.assert_server_set(),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -6704,7 +6705,7 @@ impl RegistryJsonPropertyPatch for DataRetention {
 
 impl ObjectImpl for DataStore {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::DataStore;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -22400,7 +22401,7 @@ impl RegistryJsonPropertyPatch for HurricaneCredential {
 
 impl ObjectImpl for Imap {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Imap;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -22416,6 +22417,31 @@ impl ObjectImpl for Imap {
         }
         if let Some(value) = &self.max_request_rate {
             value.validate(errors);
+        }
+        let value = &self.max_messages_per_command;
+        if *value < 1000 {
+            errors.push(ValidationError::min_value(
+                Property::MaxMessagesPerCommand,
+                1000,
+            ));
+        }
+        let value = &self.min_uid_batch_size;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MinUidBatchSize, 1));
+        }
+        if *value > 500 {
+            errors.push(ValidationError::max_value(Property::MinUidBatchSize, 500));
+        }
+        let value = &self.max_uid_batches;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxUidBatches, 1));
+        }
+        let value = &self.max_messages_per_save;
+        if *value < 1000 {
+            errors.push(ValidationError::min_value(
+                Property::MaxMessagesPerSave,
+                1000,
+            ));
         }
         errors.len() == neb
     }
@@ -22433,6 +22459,10 @@ impl Pickle for Imap {
         self.timeout_anonymous.pickle(out);
         self.timeout_authenticated.pickle(out);
         self.timeout_idle.pickle(out);
+        self.max_messages_per_command.pickle(out);
+        self.min_uid_batch_size.pickle(out);
+        self.max_uid_batches.pickle(out);
+        self.max_messages_per_save.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -22445,6 +22475,18 @@ impl Pickle for Imap {
         this.timeout_anonymous = Pickle::unpickle(stream)?;
         this.timeout_authenticated = Pickle::unpickle(stream)?;
         this.timeout_idle = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.max_messages_per_command = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.min_uid_batch_size = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.max_uid_batches = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.max_messages_per_save = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -22463,13 +22505,17 @@ impl Default for Imap {
             timeout_anonymous: Duration::from_millis(60000),
             timeout_authenticated: Duration::from_millis(1800000),
             timeout_idle: Duration::from_millis(1800000),
+            max_messages_per_command: 1000000u64,
+            min_uid_batch_size: 500u64,
+            max_uid_batches: 10000u64,
+            max_messages_per_save: 1000000u64,
         }
     }
 }
 
 impl IntoValue for Imap {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(10);
+        let mut map = jmap_tools::Map::with_capacity(14);
         map.insert_unchecked(
             Property::AllowPlainTextAuth,
             self.allow_plain_text_auth.into_value(),
@@ -22490,6 +22536,19 @@ impl IntoValue for Imap {
             self.timeout_authenticated.into_value(),
         );
         map.insert_unchecked(Property::TimeoutIdle, self.timeout_idle.into_value());
+        map.insert_unchecked(
+            Property::MaxMessagesPerCommand,
+            self.max_messages_per_command.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MinUidBatchSize,
+            self.min_uid_batch_size.into_value(),
+        );
+        map.insert_unchecked(Property::MaxUidBatches, self.max_uid_batches.into_value());
+        map.insert_unchecked(
+            Property::MaxMessagesPerSave,
+            self.max_messages_per_save.into_value(),
+        );
         JmapValue::Object(map)
     }
 }
@@ -22511,6 +22570,12 @@ impl RegistryJsonPropertyPatch for Imap {
                 self.timeout_authenticated.patch(pointer, value)
             }
             Some(Property::TimeoutIdle) => self.timeout_idle.patch(pointer, value),
+            Some(Property::MaxMessagesPerCommand) => {
+                self.max_messages_per_command.patch(pointer, value)
+            }
+            Some(Property::MinUidBatchSize) => self.min_uid_batch_size.patch(pointer, value),
+            Some(Property::MaxUidBatches) => self.max_uid_batches.patch(pointer, value),
+            Some(Property::MaxMessagesPerSave) => self.max_messages_per_save.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -23077,6 +23142,13 @@ impl ObjectImpl for Jmap {
         let value = &self.upload_quota;
         if *value < 1 {
             errors.push(ValidationError::min_value(Property::UploadQuota, 1));
+        }
+        let value = &self.upload_ttl;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::UploadTtl, value));
+        }
+        if *value < Duration::from_millis(1000) {
+            errors.push(ValidationError::min_value(Property::UploadTtl, 1000));
         }
         let value = &self.push_max_attempts;
         if *value < 1 {
@@ -33019,7 +33091,7 @@ impl RegistryJsonPropertyPatch for RedisStore {
 
 impl ObjectImpl for ReportSettings {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::ReportSettings;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -33037,6 +33109,13 @@ impl ObjectImpl for ReportSettings {
         }
         let value = &self.outbound_report_submitter;
         value.validate(errors);
+        let value = &self.inbound_report_max_size;
+        if *value < (1024) {
+            errors.push(ValidationError::min_value(
+                Property::InboundReportMaxSize,
+                1024,
+            ));
+        }
         errors.len() == neb
     }
 
@@ -33068,6 +33147,7 @@ impl Pickle for ReportSettings {
         self.inbound_report_forwarding.pickle(out);
         self.outbound_report_domain.pickle(out);
         self.outbound_report_submitter.pickle(out);
+        self.inbound_report_max_size.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -33076,6 +33156,9 @@ impl Pickle for ReportSettings {
         this.inbound_report_forwarding = Pickle::unpickle(stream)?;
         this.outbound_report_domain = Pickle::unpickle(stream)?;
         this.outbound_report_submitter = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.inbound_report_max_size = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -33090,13 +33173,14 @@ impl Default for ReportSettings {
                 else_: "system('hostname')".to_string(),
                 ..Default::default()
             },
+            inbound_report_max_size: 26214400i64,
         }
     }
 }
 
 impl IntoValue for ReportSettings {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(6);
+        let mut map = jmap_tools::Map::with_capacity(7);
         map.insert_unchecked(
             Property::InboundReportAddresses,
             self.inbound_report_addresses.into_value(),
@@ -33112,6 +33196,10 @@ impl IntoValue for ReportSettings {
         map.insert_unchecked(
             Property::OutboundReportSubmitter,
             self.outbound_report_submitter.into_value(),
+        );
+        map.insert_unchecked(
+            Property::InboundReportMaxSize,
+            self.inbound_report_max_size.into_value(),
         );
         JmapValue::Object(map)
     }
@@ -33135,6 +33223,9 @@ impl RegistryJsonPropertyPatch for ReportSettings {
                 .patch(pointer.with_validators(&[StringValidator::Domain]), value),
             Some(Property::OutboundReportSubmitter) => {
                 self.outbound_report_submitter.patch(pointer, value)
+            }
+            Some(Property::InboundReportMaxSize) => {
+                self.inbound_report_max_size.patch(pointer, value)
             }
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
@@ -33160,11 +33251,11 @@ impl RocksDbStore {
             errors.push(ValidationError::min_value(Property::BlobSize, 1024));
         }
         let value = &self.buffer_size;
-        if *value > 1073741824 {
-            errors.push(ValidationError::max_value(Property::BufferSize, 1073741824));
+        if *value > 4294967296 {
+            errors.push(ValidationError::max_value(Property::BufferSize, 4294967296));
         }
-        if *value < 8192 {
-            errors.push(ValidationError::min_value(Property::BufferSize, 8192));
+        if *value < 8388608 {
+            errors.push(ValidationError::min_value(Property::BufferSize, 8388608));
         }
         if let Some(value) = &self.pool_workers {
             if *value > 64 {
@@ -33173,6 +33264,13 @@ impl RocksDbStore {
             if *value < 1 {
                 errors.push(ValidationError::min_value(Property::PoolWorkers, 1));
             }
+        }
+        let value = &self.cache_size;
+        if *value > 17179869184 {
+            errors.push(ValidationError::max_value(Property::CacheSize, 17179869184));
+        }
+        if *value < 8388608 {
+            errors.push(ValidationError::min_value(Property::CacheSize, 8388608));
         }
         errors.len() == neb
     }
@@ -33184,6 +33282,7 @@ impl Pickle for RocksDbStore {
         self.blob_size.pickle(out);
         self.buffer_size.pickle(out);
         self.pool_workers.pickle(out);
+        self.cache_size.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -33192,6 +33291,9 @@ impl Pickle for RocksDbStore {
         this.blob_size = Pickle::unpickle(stream)?;
         this.buffer_size = Pickle::unpickle(stream)?;
         this.pool_workers = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.cache_size = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -33203,17 +33305,19 @@ impl Default for RocksDbStore {
             blob_size: 16834u64,
             buffer_size: 134217728u64,
             pool_workers: Default::default(),
+            cache_size: 134217728u64,
         }
     }
 }
 
 impl IntoValue for RocksDbStore {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(6);
+        let mut map = jmap_tools::Map::with_capacity(7);
         map.insert_unchecked(Property::Path, self.path.into_value());
         map.insert_unchecked(Property::BlobSize, self.blob_size.into_value());
         map.insert_unchecked(Property::BufferSize, self.buffer_size.into_value());
         map.insert_unchecked(Property::PoolWorkers, self.pool_workers.into_value());
+        map.insert_unchecked(Property::CacheSize, self.cache_size.into_value());
         JmapValue::Object(map)
     }
 }
@@ -33231,6 +33335,7 @@ impl RegistryJsonPropertyPatch for RocksDbStore {
             Some(Property::BlobSize) => self.blob_size.patch(pointer, value),
             Some(Property::BufferSize) => self.buffer_size.patch(pointer, value),
             Some(Property::PoolWorkers) => self.pool_workers.patch(pointer, value),
+            Some(Property::CacheSize) => self.cache_size.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,

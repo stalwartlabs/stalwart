@@ -143,24 +143,26 @@ impl AnalyzeReport for Server {
                 }
             }
 
+            let max_size = core.core.smtp.report.analysis.max_size;
+
             for report in reports {
                 let data = match report.compression {
                     Compression::None => Cow::Borrowed(report.data),
                     Compression::Gzip => {
-                        let mut file = GzDecoder::new(report.data);
-                        let mut buf = Vec::new();
-                        if let Err(err) = file.read_to_end(&mut buf) {
-                            trc::event!(
-                                IncomingReport(IncomingReportEvent::DecompressError),
-                                SpanId = session_id,
-                                From = from.to_string(),
-                                Reason = err.to_string(),
-                                CausedBy = trc::location!()
-                            );
+                        match read_capped(GzDecoder::new(report.data), 0, max_size) {
+                            Ok(buf) => Cow::Owned(buf),
+                            Err(err) => {
+                                trc::event!(
+                                    IncomingReport(IncomingReportEvent::DecompressError),
+                                    SpanId = session_id,
+                                    From = from.to_string(),
+                                    Reason = err.to_string(),
+                                    CausedBy = trc::location!()
+                                );
 
-                            continue;
+                                continue;
+                            }
                         }
-                        Cow::Owned(buf)
                     }
                     Compression::Zip => {
                         let data = report.data.to_vec();
@@ -168,14 +170,13 @@ impl AnalyzeReport for Server {
                             move || -> Result<Vec<u8>, std::io::Error> {
                                 let mut archive = zip::ZipArchive::new(Cursor::new(data))
                                     .map_err(std::io::Error::other)?;
-                                let mut buf = Vec::new();
-                                if !archive.is_empty() {
-                                    let mut file =
-                                        archive.by_index(0).map_err(std::io::Error::other)?;
-                                    buf.reserve(file.compressed_size() as usize);
-                                    file.read_to_end(&mut buf)?;
+                                if archive.is_empty() {
+                                    return Ok(Vec::new());
                                 }
-                                Ok(buf)
+                                let mut file =
+                                    archive.by_index(0).map_err(std::io::Error::other)?;
+                                let size_hint = file.size();
+                                read_capped(&mut file, size_hint, max_size)
                             },
                         )
                         .await;
@@ -370,4 +371,30 @@ async fn tenant_ids(server: &Server, domains: AHashSet<&str>) -> Option<Id> {
     } else {
         None
     }
+}
+
+fn read_capped(
+    reader: impl Read,
+    size_hint: u64,
+    max_size: usize,
+) -> Result<Vec<u8>, std::io::Error> {
+    let max_size = max_size as u64;
+    if size_hint > max_size {
+        return Err(std::io::Error::other(format!(
+            "Report is larger than the {max_size} byte limit"
+        )));
+    }
+
+    let mut buf = Vec::with_capacity(size_hint.min(64 * 1024) as usize);
+    reader
+        .take(max_size.saturating_add(1))
+        .read_to_end(&mut buf)?;
+
+    if buf.len() as u64 > max_size {
+        return Err(std::io::Error::other(format!(
+            "Report is larger than the {max_size} byte limit"
+        )));
+    }
+
+    Ok(buf)
 }

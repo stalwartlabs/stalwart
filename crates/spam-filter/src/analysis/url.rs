@@ -18,7 +18,6 @@ use common::scripts::IsMixedCharset;
 use common::scripts::functions::unicode::CharUtils;
 use hyper::{Uri, header::LOCATION};
 use nlp::tokenizers::types::TokenType;
-use reqwest::redirect::Policy;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::{borrow::Cow, future::Future, time::Duration};
@@ -58,6 +57,11 @@ impl SpamFilterAnalyzeUrl for Server {
             let part_id = part_id as u32;
             let is_body = ctx.input.message.text_body.contains(&part_id)
                 || ctx.input.message.html_body.contains(&part_id);
+            let text_location = if is_body {
+                Location::BodyText
+            } else {
+                Location::Attachment
+            };
 
             let tokens = match part {
                 TextPart::Plain { tokens, .. } => tokens,
@@ -107,14 +111,7 @@ impl SpamFilterAnalyzeUrl for Server {
                             }
                         }
 
-                        urls.insert(ElementLocation::new(
-                            url.to_owned(),
-                            if is_body {
-                                Location::BodyHtml
-                            } else {
-                                Location::Attachment
-                            },
-                        ));
+                        urls.insert(ElementLocation::new(url.to_owned(), text_location));
                     }
                     _ => {}
                 }
@@ -183,6 +180,7 @@ impl SpamFilterAnalyzeUrl for Server {
 
                         while redirect_count <= 3 {
                             match http_get_header(
+                                self,
                                 url_redirect.as_ref(),
                                 LOCATION,
                                 Duration::from_secs(5),
@@ -282,6 +280,7 @@ impl SpamFilterAnalyzeUrl for Server {
 #[allow(unreachable_code)]
 #[allow(unused_variables)]
 async fn http_get_header(
+    server: &Server,
     url: &str,
     header: hyper::header::HeaderName,
     timeout: Duration,
@@ -294,19 +293,12 @@ async fn http_get_header(
             Ok(None)
         };
     }
-    reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (X11; Linux i686; rv:109.0) Gecko/20100101 Firefox/118.0")
-        .timeout(timeout)
-        .redirect(Policy::none())
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|err| {
-            trc::SieveEvent::RuntimeError
-                .into_err()
-                .reason(err)
-                .details("Failed to build request")
-        })?
+    server
+        .core
+        .spam
+        .url_client
         .get(url)
+        .timeout(timeout)
         .send()
         .await
         .map_err(|err| {
@@ -406,19 +398,30 @@ impl<'x> UrlParts<'x> {
         let url = url_original.trim().to_lowercase();
 
         Self {
-            url_parsed: url.parse::<Uri>().ok().and_then(|url_parsed| {
-                if url_parsed.host().is_some() {
-                    Some(UrlParsed {
-                        host: Hostname::new(url_parsed.host().unwrap()),
-                        parts: url_parsed,
-                    })
-                } else {
-                    None
-                }
-            }),
+            url_parsed: Self::parse(&url),
             url,
             url_original,
         }
+    }
+
+    pub fn no_scheme(url: impl Into<Cow<'x, str>>) -> Self {
+        let url_original = url.into();
+        let url = format!("https://{}", url_original.trim().to_lowercase());
+
+        Self {
+            url_parsed: Self::parse(&url),
+            url,
+            url_original,
+        }
+    }
+
+    fn parse(url: &str) -> Option<UrlParsed> {
+        url.parse::<Uri>().ok().and_then(|parts| {
+            parts
+                .host()
+                .map(Hostname::new)
+                .map(|host| UrlParsed { host, parts })
+        })
     }
 
     pub fn to_owned(&self) -> UrlParts<'static> {

@@ -7,7 +7,7 @@ homepage = "https://stalw.art"
 keywords = ["imap", "jmap", "smtp", "email", "mail", "webdav", "server"]
 categories = ["email"]
 license = "AGPL-3.0-only OR LicenseRef-SEL"
-version = "0.16.16"
+version = "0.16.18"
 edition = "2024"
 
 [[bin]]
@@ -41,7 +41,7 @@ tokio = { version = "1.53", features = ["full"] }
 rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 
 [target.'cfg(not(any(target_env = "msvc", target_os = "freebsd")))'.dependencies]
-jemallocator = "0.5.4"
+tikv-jemallocator = "0.7"
 
 [features]
 #default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "azure", "nats", "enterprise", "zenoh", "kafka"]

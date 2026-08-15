@@ -24,7 +24,7 @@ use utils::wait_for_shutdown;
 pub mod test_data;
 
 #[cfg(not(any(target_env = "msvc", target_os = "freebsd")))]
-use jemallocator::Jemalloc;
+use tikv_jemallocator::Jemalloc;
 
 #[cfg(not(any(target_env = "msvc", target_os = "freebsd")))]
 #[global_allocator]
@@ -36,6 +36,9 @@ async fn main() -> std::io::Result<()> {
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("failed to install aws-lc-rs as the default rustls crypto provider");
+
+    // Build the shared outbound TLS configurations
+    utils::http::init_shared_tls_configs();
 
     // Load config and apply macros
     let mut init = Box::pin(BootManager::init()).await;

@@ -831,8 +831,9 @@ pub enum ExpressionVariable {
     ToLocal = 86,
     ToName = 87,
     Url = 88,
-    Value = 89,
-    ValueLower = 90,
+    UrlOriginal = 89,
+    Value = 90,
+    ValueLower = 91,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1921,11 +1922,11 @@ pub enum Permission {
     SysImapUpdate = 392,
     SysInMemoryStoreGet = 393,
     SysInMemoryStoreUpdate = 394,
-    SysIndexQueueStatusGet = 598,
-    SysIndexQueueStatusCreate = 660,
-    SysIndexQueueStatusUpdate = 599,
-    SysIndexQueueStatusDestroy = 661,
-    SysIndexQueueStatusQuery = 600,
+    SysIndexQueueStatusGet = 660,
+    SysIndexQueueStatusCreate = 661,
+    SysIndexQueueStatusUpdate = 662,
+    SysIndexQueueStatusDestroy = 663,
+    SysIndexQueueStatusQuery = 664,
     SysJmapGet = 395,
     SysJmapUpdate = 396,
     SysLogGet = 397,
@@ -3906,6 +3907,7 @@ pub static SPAM_IP_VARIABLE: &[ExpressionVariable] = &[
 
 pub static SPAM_URL_VARIABLE: &[ExpressionVariable] = &[
     ExpressionVariable::Url,
+    ExpressionVariable::UrlOriginal,
     ExpressionVariable::Value,
     ExpressionVariable::PathQuery,
     ExpressionVariable::Path,

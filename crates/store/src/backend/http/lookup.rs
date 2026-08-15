@@ -91,12 +91,11 @@ impl HttpStore {
     async fn try_refresh(&self) -> trc::Result<AHashMap<String, Value<'static>>> {
         let time = Instant::now();
         let agent = BROWSER_USER_AGENTS.choose(&mut rand::rng()).unwrap();
-        let response = reqwest::Client::builder()
-            .timeout(self.config.timeout)
-            .user_agent(*agent)
-            .build()
-            .unwrap_or_default()
+        let response = self
+            .client
             .get(&self.config.url)
+            .timeout(self.config.timeout)
+            .header(reqwest::header::USER_AGENT, *agent)
             .send()
             .await
             .map_err(|err| {

@@ -70,6 +70,121 @@ pub async fn test(test: &TestServer) {
             .with_body(content);
     }
 
+    // Test GET with a Range header
+    let path = "/dav/file/john%40example.com/file1.txt";
+    let (content, _, etag) = files.get(path).unwrap();
+    let size = content.len();
+
+    for (range, expect_content_range, expect_body) in [
+        ("bytes=0-4", format!("bytes 0-4/{size}"), &content[..5]),
+        ("bytes=0-0", format!("bytes 0-0/{size}"), &content[..1]),
+        (
+            "bytes=5-",
+            format!("bytes 5-{}/{size}", size - 1),
+            &content[5..],
+        ),
+        (
+            "bytes=-6",
+            format!("bytes {}-{}/{size}", size - 6, size - 1),
+            &content[size - 6..],
+        ),
+        (
+            "bytes=0-100000",
+            format!("bytes 0-{}/{size}", size - 1),
+            &content[..],
+        ),
+    ] {
+        client
+            .request_with_headers("GET", path, [("range", range)], "")
+            .await
+            .with_status(StatusCode::PARTIAL_CONTENT)
+            .with_header("content-range", &expect_content_range)
+            .with_header("content-length", &expect_body.len().to_string())
+            .with_header("accept-ranges", "bytes")
+            .with_header("etag", etag)
+            .with_body(expect_body);
+    }
+
+    // Ranges outside the resource should fail
+    for range in ["bytes=100000-", &format!("bytes={size}-"), "bytes=-0"] {
+        client
+            .request_with_headers("GET", path, [("range", range)], "")
+            .await
+            .with_status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .with_header("content-range", &format!("bytes */{size}"));
+    }
+
+    // Multiple, invalid or unknown ranges should be ignored
+    for range in ["bytes=0-4,6-8", "items=0-4", "bytes=4-2", "bytes=abc"] {
+        client
+            .request_with_headers("GET", path, [("range", range)], "")
+            .await
+            .with_status(StatusCode::OK)
+            .with_header("accept-ranges", "bytes")
+            .with_body(content);
+    }
+
+    // Ranges should be ignored on HEAD requests
+    client
+        .request_with_headers("HEAD", path, [("range", "bytes=0-4")], "")
+        .await
+        .with_status(StatusCode::OK)
+        .with_header("content-length", &size.to_string())
+        .with_empty_body();
+
+    // Ranges should only be served when the If-Range validator matches
+    let weak_etag = format!("W/{etag}");
+    let last_modified = client
+        .request("HEAD", path, "")
+        .await
+        .with_status(StatusCode::OK)
+        .header("last-modified")
+        .to_string();
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    for (if_range, expect_status) in [
+        (etag.as_str(), StatusCode::PARTIAL_CONTENT),
+        (last_modified.as_str(), StatusCode::PARTIAL_CONTENT),
+        (weak_etag.as_str(), StatusCode::OK),
+        ("\"invalid-etag\"", StatusCode::OK),
+        ("Sun, 09 Aug 2020 12:00:00 GMT", StatusCode::OK),
+    ] {
+        client
+            .request_with_headers(
+                "GET",
+                path,
+                [("range", "bytes=0-4"), ("if-range", if_range)],
+                "",
+            )
+            .await
+            .with_status(expect_status);
+    }
+
+    // If-Range without a Range header should be ignored
+    client
+        .request_with_headers("GET", path, [("if-range", "\"invalid-etag\"")], "")
+        .await
+        .with_status(StatusCode::OK)
+        .with_body(content);
+
+    // Ranges on empty files should be ignored
+    let empty_path = "/dav/file/john%40example.com/empty.txt";
+    client
+        .request_with_headers("PUT", empty_path, [("content-type", "text/plain")], "")
+        .await
+        .with_status(StatusCode::CREATED);
+    for range in ["bytes=0-4", "bytes=-5", "bytes=0-"] {
+        client
+            .request_with_headers("GET", empty_path, [("range", range)], "")
+            .await
+            .with_status(StatusCode::OK)
+            .with_header("accept-ranges", "bytes")
+            .with_empty_body();
+    }
+    client
+        .request("DELETE", empty_path, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+
     // PUT under a non-existing parent should fail
     for (path, contents) in [
         ("/dav/file/john%40example.com/foo/file1.txt", TEST_FILE_1),

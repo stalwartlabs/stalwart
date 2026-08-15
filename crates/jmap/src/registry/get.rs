@@ -303,6 +303,20 @@ impl RegistryGet for Server {
                                 JmapValue::Str(self.build_bind_dns_records(id, obj).await?.into()),
                             );
                         }
+                        ObjectInner::AcmeProvider(obj)
+                            if get.properties.is_empty()
+                                || get.properties.contains(&Property::Description) =>
+                        {
+                            let mut description = obj.directory.clone();
+                            if let Some(contact) = obj.contact.as_slice().first() {
+                                description.push_str(" (");
+                                description
+                                    .push_str(contact.strip_prefix("mailto:").unwrap_or(contact));
+                                description.push(')');
+                            }
+                            extra_properties
+                                .append(Property::Description, JmapValue::Str(description.into()));
+                        }
                         _ => {}
                     }
 

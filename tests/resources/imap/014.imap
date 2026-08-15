@@ -16,6 +16,16 @@ BODYSTRUCTURE (
    ) NIL NIL NIL
 )
 
+BODYSTRUCTURE UTF8=ACCEPT (
+   (
+      "text" "x-myown" (
+         "charset" "us-ascii"
+      ) NIL NIL "quoted-printable" 79 15 "22839bb2efefde05dda98625a9ed8875" NIL NIL NIL
+   ) "mixed" (
+      "boundary" "foo bar"
+   ) NIL NIL NIL
+)
+
 BODY[] {404}
 From user@domain  Fri Feb 22 17:06:23 2008
 From: user@domain.org

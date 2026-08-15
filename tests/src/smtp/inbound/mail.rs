@@ -9,6 +9,7 @@ use crate::{
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
 use mail_auth::{IprevResult, SpfResult, common::parse::TxtRecordParser, spf::Spf};
+use mail_parser::DateTime;
 use registry::{
     schema::{
         enums::MtaInboundThrottleKey,
@@ -226,7 +227,7 @@ async fn mail() {
     // Test disabled extensions
     for param in [
         "HOLDFOR=123",
-        "HOLDUNTIL=49374347",
+        "HOLDUNTIL=2079-11-20T05:00:00Z",
         "MT-PRIORITY=3",
         "BY=120;R",
         "REQUIRETLS",
@@ -366,17 +367,55 @@ async fn mail() {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
+    let hold_until = |offset: u64| {
+        format!(
+            "MAIL FROM:<jane@foobar.org> HOLDUNTIL={}\r\n",
+            DateTime::from_timestamp((now + offset) as i64).to_rfc3339()
+        )
+    };
+    session.ingest(hold_until(10).as_bytes()).await.unwrap();
+    session.response().assert_code("250");
+    assert!((9..=10).contains(&session.data.future_release));
+    session.rset().await;
+
+    // Test FUTURERELEASE extension with invalid HOLDUNTIL value
+    session.ingest(hold_until(99999).as_bytes()).await.unwrap();
+    session.response().assert_code("501 5.5.4");
+    session.rset().await;
+
+    // Test FUTURERELEASE extension with a HOLDUNTIL value that is not an RFC 3339 date-time
     session
         .ingest(format!("MAIL FROM:<jane@foobar.org> HOLDUNTIL={}\r\n", now + 10).as_bytes())
         .await
         .unwrap();
-    session.response().assert_code("250");
-    assert_eq!(session.data.future_release, 10);
+    session.response().assert_code("501 5.5.4");
     session.rset().await;
 
-    // Test FUTURERELEASE extension with invalid HOLDUNTIL value
+    // Test FUTURERELEASE extension with a HOLDUNTIL value in the past
     session
-        .ingest(format!("MAIL FROM:<jane@foobar.org> HOLDUNTIL={}\r\n", now + 99999).as_bytes())
+        .ingest(b"MAIL FROM:<jane@foobar.org> HOLDUNTIL=2020-01-01T00:00:00Z\r\n")
+        .await
+        .unwrap();
+    session.response().assert_code("501 5.5.4");
+    session.rset().await;
+
+    // Test FUTURERELEASE extension with both HOLDFOR and HOLDUNTIL
+    session
+        .ingest(
+            format!(
+                "MAIL FROM:<jane@foobar.org> HOLDFOR=1234 HOLDUNTIL={}\r\n",
+                DateTime::from_timestamp((now + 10) as i64).to_rfc3339()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    session.response().assert_code("501 5.5.4");
+    session.rset().await;
+
+    // Test FUTURERELEASE extension with a HOLDFOR value that is not a positive integer
+    session
+        .ingest(b"MAIL FROM:<jane@foobar.org> HOLDFOR=0\r\n")
         .await
         .unwrap();
     session.response().assert_code("501 5.5.4");

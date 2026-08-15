@@ -183,6 +183,9 @@ impl Enterprise {
                 timeout: api.timeout.into_inner(),
                 tls_allow_invalid_certs: api.allow_invalid_certs,
                 default_temperature: api.temperature.into_inner(),
+                client: utils::http::http_client_builder(api.allow_invalid_certs)
+                    .build()
+                    .unwrap_or_default(),
             });
             ai_apis.insert(api.id.clone(), api.clone());
             ai_apis_ids.insert(id.id().id(), api);

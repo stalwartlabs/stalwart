@@ -159,7 +159,8 @@ async fn report_dmarc() {
         .assert_contains("Submitter: mx.example.org");
 
     // Verify generated report
-    let report = Report::parse_rfc5322(message.read_message(&test).await.as_bytes()).unwrap();
+    let report =
+        Report::parse_rfc5322(message.read_message(&test).await.as_bytes(), usize::MAX).unwrap();
     assert_eq!(report.domain(), "foobar.org");
     assert_eq!(report.email(), "reports@example.org");
     assert_eq!(report.org_name(), "Foobar, Inc.");

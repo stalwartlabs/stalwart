@@ -199,15 +199,21 @@ async fn send_imip(
                                             ContentType::new("text/html"),
                                             BodyPart::Text(tpl.body.as_str().into()),
                                         ),
+                                        MimePart::new(
+                                            ContentType::new("text/calendar")
+                                                .attribute("method", summary.method())
+                                                .attribute("charset", "utf-8"),
+                                            BodyPart::Text(
+                                                itip_message.i_calendar_data.as_str().into(),
+                                            ),
+                                        ),
                                     ]),
                                 ),
                                 logo.clone(),
                             ]),
                         ),
                         MimePart::new(
-                            ContentType::new("text/calendar")
-                                .attribute("method", summary.method())
-                                .attribute("charset", "utf-8"),
+                            ContentType::new("application/ics").attribute("name", "event.ics"),
                             BodyPart::Text(itip_message.i_calendar_data.as_str().into()),
                         )
                         .attachment("event.ics"),

@@ -15,11 +15,14 @@ pub mod fetch;
 pub mod idle;
 pub mod mailbox;
 pub mod managesieve;
+pub mod messagelimit;
 pub mod objectid;
 pub mod pop;
 pub mod search;
 pub mod store;
 pub mod thread;
+pub mod uidbatches;
+pub mod uidonly;
 
 use crate::utils::{
     imap::{AssertResult, ImapConnection, Type},
@@ -257,6 +260,11 @@ pub async fn imap_tests() {
     idle::test(&mut imap, &mut imap_check, false).await;
     condstore::test(&mut imap, &mut imap_check).await;
     acl::test(&mut imap, &mut imap_check, &test).await;
+    uidbatches::test(&mut imap, &mut imap_check).await;
+    messagelimit::test(&mut imap, &mut imap_check).await;
+
+    // UIDONLY cannot be disabled once enabled, so it uses its own connection
+    uidonly::test(&test).await;
 
     // Logout
     for imap in [&mut imap, &mut imap_check] {

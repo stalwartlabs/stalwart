@@ -13,7 +13,7 @@ use common::network::SessionStream;
 use email::cache::MessageCacheFetch;
 use imap_proto::protocol::{Sequence, expunge, select::Exists};
 use std::collections::BTreeMap;
-use store::{ValueKey, write::ValueClass};
+use store::{ValueKey, roaring::RoaringBitmap, write::ValueClass};
 use trc::AddContext;
 use types::{collection::Collection, field::MailboxField};
 
@@ -121,7 +121,7 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn write_mailbox_changes(
         &self,
         mailbox: &SelectedMailbox,
-        is_qresync: bool,
+        use_vanished: bool,
     ) -> trc::Result<u64> {
         // Resync mailbox
         let modseq = self.synchronize_messages(mailbox).await?;
@@ -133,10 +133,10 @@ impl<T: SessionStream> SessionData<T> {
                     let mut ids = next_state
                         .deletions
                         .into_iter()
-                        .map(|id| if is_qresync { id.uid } else { id.seqnum })
+                        .map(|id| if use_vanished { id.uid } else { id.seqnum })
                         .collect::<Vec<u32>>();
                     ids.sort_unstable();
-                    expunge::Response { is_qresync, ids }.serialize_to(&mut buf);
+                    expunge::Response { use_vanished, ids }.serialize_to(&mut buf);
                 }
                 if !buf.is_empty()
                     || next_state
@@ -239,6 +239,45 @@ impl SelectedMailbox {
 
             Ok(ids)
         }
+    }
+
+    pub fn uids_in_range(&self, min: Option<u32>, max: Option<u32>) -> RoaringBitmap {
+        let state = self.state.lock();
+        let id_to_imap = state
+            .next_state
+            .as_ref()
+            .map_or(&state.id_to_imap, |next| &next.next_state.id_to_imap);
+
+        RoaringBitmap::from_iter(id_to_imap.iter().filter_map(|(id, imap_id)| {
+            (min.is_none_or(|min| imap_id.uid >= min) && max.is_none_or(|max| imap_id.uid <= max))
+                .then_some(*id)
+        }))
+    }
+
+    pub fn seqnum_to_uid(&self, seqnum: u32) -> Option<u32> {
+        let state = self.state.lock();
+        state
+            .next_state
+            .as_ref()
+            .map_or(&state.id_to_imap, |next| &next.next_state.id_to_imap)
+            .values()
+            .find(|imap_id| imap_id.seqnum == seqnum)
+            .map(|imap_id| imap_id.uid)
+    }
+
+    pub fn uids_descending(&self) -> Vec<u32> {
+        let mut uids = {
+            let state = self.state.lock();
+            state
+                .next_state
+                .as_ref()
+                .map_or(&state.uid_to_id, |next| &next.next_state.uid_to_id)
+                .keys()
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        uids.sort_unstable_by(|a, b| b.cmp(a));
+        uids
     }
 
     pub async fn sequence_expand_missing(&self, sequence: &Sequence, is_uid: bool) -> Vec<u32> {

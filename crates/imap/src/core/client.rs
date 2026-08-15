@@ -11,7 +11,7 @@ use common::{
     network::{SessionResult, SessionStream},
 };
 use imap_proto::{
-    Command, ResponseType, StatusResponse,
+    Command, ResponseCode, ResponseType, StatusResponse,
     receiver::{self, Request},
 };
 use trc::SecurityEvent;
@@ -252,6 +252,10 @@ impl<T: SessionStream> Session<T> {
                     .handle_jmap_access(request)
                     .await
                     .map(|_| SessionResult::Continue),
+                Command::UidBatches => self
+                    .handle_uidbatches(request)
+                    .await
+                    .map(|_| SessionResult::Continue),
             };
 
             match result {
@@ -403,9 +407,18 @@ impl<T: SessionStream> Session<T> {
             | Command::Move(_)
             | Command::Check
             | Command::Sort(_)
-            | Command::Thread(_) => match state {
+            | Command::Thread(_)
+            | Command::UidBatches => match state {
                 State::Selected { mailbox, .. } => {
-                    if mailbox.is_select
+                    // RFC 9586 forbids message numbers once UIDONLY is enabled
+                    if self.is_uidonly && request.command.requires_uid() {
+                        Err(trc::ImapEvent::Error
+                            .into_err()
+                            .details("Message numbers are not allowed once UIDONLY is enabled.")
+                            .code(ResponseCode::UidRequired)
+                            .ctx(trc::Key::Type, ResponseType::Bad)
+                            .id(request.tag))
+                    } else if mailbox.is_select
                         || !matches!(
                             request.command,
                             Command::Store(_) | Command::Expunge(_) | Command::Move(_),

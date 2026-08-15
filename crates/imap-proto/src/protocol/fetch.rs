@@ -5,7 +5,8 @@
  */
 
 use super::{
-    Flag, ImapResponse, ObjectId, Sequence, literal_string, quoted_or_literal_string,
+    Flag, ImapResponse, ObjectId, Sequence, literal_string, quoted_or_literal_encoded_string,
+    quoted_or_literal_encoded_string_or_nil, quoted_or_literal_string,
     quoted_or_literal_string_or_nil, quoted_rfc2822_or_nil, quoted_timestamp,
 };
 use crate::protocol::literal_string_slice;
@@ -24,12 +25,14 @@ pub struct Arguments {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response<'x> {
     pub is_uid: bool,
+    pub is_utf8: bool,
     pub items: Vec<FetchItem<'x>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchItem<'x> {
     pub id: u32,
+    pub is_uidonly: bool,
     pub items: Vec<DataItem<'x>>,
 }
 
@@ -221,10 +224,10 @@ pub struct BodyPartExtension<'x> {
 }
 
 impl Address<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         match self {
-            Address::Single(addr) => addr.serialize(buf),
-            Address::Group(addr) => addr.serialize(buf),
+            Address::Single(addr) => addr.serialize(buf, is_utf8),
+            Address::Group(addr) => addr.serialize(buf, is_utf8),
         }
     }
 
@@ -237,10 +240,10 @@ impl Address<'_> {
 }
 
 impl EmailAddress<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         buf.push(b'(');
         if let Some(name) = &self.name {
-            quoted_or_literal_string(buf, name);
+            quoted_or_literal_encoded_string(buf, name, is_utf8);
         } else {
             buf.extend_from_slice(b"NIL");
         }
@@ -275,16 +278,16 @@ impl EmailAddress<'_> {
 }
 
 impl AddressGroup<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         buf.extend_from_slice(b"(NIL NIL ");
         if let Some(name) = &self.name {
-            quoted_or_literal_string(buf, name);
+            quoted_or_literal_encoded_string(buf, name, is_utf8);
         } else {
             buf.extend_from_slice(b"\"\"");
         }
         buf.extend_from_slice(b" NIL)");
         for addr in &self.addresses {
-            addr.serialize(buf);
+            addr.serialize(buf, is_utf8);
         }
         buf.extend_from_slice(b"(NIL NIL NIL NIL)");
     }
@@ -302,7 +305,7 @@ impl AddressGroup<'_> {
 }
 
 impl<'x> BodyPart<'x> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_extended: bool) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_extended: bool, is_utf8: bool) {
         buf.push(b'(');
         match self {
             BodyPart::Multipart {
@@ -312,7 +315,7 @@ impl<'x> BodyPart<'x> {
                 extension,
             } => {
                 for part in body_parts.iter() {
-                    part.serialize(buf, is_extended);
+                    part.serialize(buf, is_extended, is_utf8);
                 }
                 buf.push(b' ');
                 quoted_or_literal_string(buf, body_subtype);
@@ -325,14 +328,14 @@ impl<'x> BodyPart<'x> {
                             }
                             quoted_or_literal_string(buf, key);
                             buf.push(b' ');
-                            quoted_or_literal_string(buf, value);
+                            quoted_or_literal_encoded_string(buf, value, is_utf8);
                         }
                         buf.push(b')');
                     } else {
                         buf.extend_from_slice(b" NIL");
                     }
                     buf.push(b' ');
-                    extension.serialize(buf);
+                    extension.serialize(buf, is_utf8);
                 }
             }
             BodyPart::Basic {
@@ -343,12 +346,12 @@ impl<'x> BodyPart<'x> {
             } => {
                 quoted_or_literal_string_or_nil(buf, body_type.as_deref());
                 buf.push(b' ');
-                fields.serialize(buf);
+                fields.serialize(buf, is_utf8);
                 if is_extended {
                     buf.push(b' ');
                     quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
                     buf.push(b' ');
-                    extension.serialize(buf);
+                    extension.serialize(buf, is_utf8);
                 }
             }
             BodyPart::Text {
@@ -358,14 +361,14 @@ impl<'x> BodyPart<'x> {
                 extension,
             } => {
                 buf.extend_from_slice(b"\"text\" ");
-                fields.serialize(buf);
+                fields.serialize(buf, is_utf8);
                 buf.push(b' ');
                 buf.extend_from_slice(body_size_lines.to_string().as_bytes());
                 if is_extended {
                     buf.push(b' ');
                     quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
                     buf.push(b' ');
-                    extension.serialize(buf);
+                    extension.serialize(buf, is_utf8);
                 }
             }
             BodyPart::Message {
@@ -377,16 +380,16 @@ impl<'x> BodyPart<'x> {
                 extension,
             } => {
                 buf.extend_from_slice(b"\"message\" ");
-                fields.serialize(buf);
+                fields.serialize(buf, is_utf8);
                 buf.push(b' ');
                 if let Some(envelope) = envelope {
-                    envelope.serialize(buf);
+                    envelope.serialize(buf, is_utf8);
                 } else {
                     buf.extend_from_slice(b"NIL");
                 }
                 buf.push(b' ');
                 if let Some(body) = body {
-                    body.serialize(buf, is_extended);
+                    body.serialize(buf, is_extended, is_utf8);
                 } else {
                     buf.extend_from_slice(b"NIL");
                 }
@@ -396,7 +399,7 @@ impl<'x> BodyPart<'x> {
                     buf.push(b' ');
                     quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
                     buf.push(b' ');
-                    extension.serialize(buf);
+                    extension.serialize(buf, is_utf8);
                 }
             }
         }
@@ -477,7 +480,7 @@ impl<'x> BodyPart<'x> {
 }
 
 impl BodyPartFields<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         quoted_or_literal_string_or_nil(buf, self.body_subtype.as_deref());
         if let Some(body_parameters) = &self.body_parameters {
             buf.extend_from_slice(b" (");
@@ -487,7 +490,7 @@ impl BodyPartFields<'_> {
                 }
                 quoted_or_literal_string(buf, key);
                 buf.push(b' ');
-                quoted_or_literal_string(buf, value);
+                quoted_or_literal_encoded_string(buf, value, is_utf8);
             }
             buf.push(b')');
         } else {
@@ -495,7 +498,7 @@ impl BodyPartFields<'_> {
         }
         for item in [&self.body_id, &self.body_description, &self.body_encoding] {
             buf.push(b' ');
-            quoted_or_literal_string_or_nil(buf, item.as_deref());
+            quoted_or_literal_encoded_string_or_nil(buf, item.as_deref(), is_utf8);
         }
         buf.push(b' ');
         buf.extend_from_slice(self.body_size_octets.to_string().as_bytes());
@@ -518,7 +521,7 @@ impl BodyPartFields<'_> {
 }
 
 impl BodyPartExtension<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         if let Some((disposition, parameters)) = &self.body_disposition {
             buf.push(b'(');
             quoted_or_literal_string(buf, disposition);
@@ -530,7 +533,7 @@ impl BodyPartExtension<'_> {
                     }
                     quoted_or_literal_string(buf, key);
                     buf.push(b' ');
-                    quoted_or_literal_string(buf, value);
+                    quoted_or_literal_encoded_string(buf, value, is_utf8);
                 }
                 buf.extend_from_slice(b"))");
             } else {
@@ -631,11 +634,11 @@ static DUMMY_ADDRESS: [Address; 1] = [Address::Single(EmailAddress {
 })];
 
 impl Envelope<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         buf.push(b'(');
         quoted_rfc2822_or_nil(buf, &self.date);
         buf.push(b' ');
-        quoted_or_literal_string_or_nil(buf, self.subject.as_deref());
+        quoted_or_literal_encoded_string_or_nil(buf, self.subject.as_deref(), is_utf8);
 
         // Note: [RFC-2822] requires that all messages have a valid
         // From header.  Therefore, the from, sender, and reply-to
@@ -647,7 +650,7 @@ impl Envelope<'_> {
             &DUMMY_ADDRESS[..]
         };
 
-        self.serialize_addresses(buf, from);
+        self.serialize_addresses(buf, from, is_utf8);
         self.serialize_addresses(
             buf,
             if !self.sender.is_empty() {
@@ -655,6 +658,7 @@ impl Envelope<'_> {
             } else {
                 from
             },
+            is_utf8,
         );
         self.serialize_addresses(
             buf,
@@ -663,10 +667,11 @@ impl Envelope<'_> {
             } else {
                 from
             },
+            is_utf8,
         );
-        self.serialize_addresses(buf, &self.to);
-        self.serialize_addresses(buf, &self.cc);
-        self.serialize_addresses(buf, &self.bcc);
+        self.serialize_addresses(buf, &self.to, is_utf8);
+        self.serialize_addresses(buf, &self.cc, is_utf8);
+        self.serialize_addresses(buf, &self.bcc, is_utf8);
         for item in [&self.in_reply_to, &self.message_id] {
             buf.push(b' ');
             quoted_or_literal_string_or_nil(buf, item.as_deref());
@@ -674,12 +679,12 @@ impl Envelope<'_> {
         buf.push(b')');
     }
 
-    fn serialize_addresses(&self, buf: &mut Vec<u8>, addresses: &[Address]) {
+    fn serialize_addresses(&self, buf: &mut Vec<u8>, addresses: &[Address], is_utf8: bool) {
         buf.push(b' ');
         if !addresses.is_empty() {
             buf.push(b'(');
             for address in addresses {
-                address.serialize(buf);
+                address.serialize(buf, is_utf8);
             }
             buf.push(b')');
         } else {
@@ -704,7 +709,7 @@ impl Envelope<'_> {
 }
 
 impl DataItem<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         match self {
             DataItem::Binary {
                 sections,
@@ -750,11 +755,11 @@ impl DataItem<'_> {
             }
             DataItem::Body { part } => {
                 buf.extend_from_slice(b"BODY ");
-                part.serialize(buf, false);
+                part.serialize(buf, false, is_utf8);
             }
             DataItem::BodyStructure { part } => {
                 buf.extend_from_slice(b"BODYSTRUCTURE ");
-                part.serialize(buf, true);
+                part.serialize(buf, true, is_utf8);
             }
             DataItem::BodySection {
                 sections,
@@ -779,7 +784,7 @@ impl DataItem<'_> {
             }
             DataItem::Envelope { envelope } => {
                 buf.extend_from_slice(b"ENVELOPE ");
-                envelope.serialize(buf);
+                envelope.serialize(buf, is_utf8);
             }
             DataItem::Flags { flags } => {
                 buf.extend_from_slice(b"FLAGS (");
@@ -836,15 +841,19 @@ impl DataItem<'_> {
 }
 
 impl FetchItem<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
+    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         buf.extend_from_slice(b"* ");
         buf.extend_from_slice(self.id.to_string().as_bytes());
-        buf.extend_from_slice(b" FETCH (");
+        buf.extend_from_slice(if self.is_uidonly {
+            b" UIDFETCH (".as_slice()
+        } else {
+            b" FETCH (".as_slice()
+        });
         for (pos, item) in self.items.iter().enumerate() {
             if pos > 0 {
                 buf.push(b' ');
             }
-            item.serialize(buf);
+            item.serialize(buf, is_utf8);
         }
         buf.extend_from_slice(b")\r\n");
     }
@@ -854,7 +863,7 @@ impl ImapResponse for Response<'_> {
     fn serialize(self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(128);
         for item in &self.items {
-            item.serialize(&mut buf);
+            item.serialize(&mut buf, self.is_utf8);
         }
         buf
     }
@@ -1349,7 +1358,7 @@ mod tests {
         ] {
             let mut buf = Vec::with_capacity(100);
 
-            item.serialize(&mut buf);
+            item.serialize(&mut buf, false);
 
             assert_eq!(String::from_utf8(buf).unwrap(), expected_response);
         }
@@ -1361,8 +1370,10 @@ mod tests {
             String::from_utf8(
                 Response {
                     is_uid: false,
+                    is_utf8: false,
                     items: vec![FetchItem {
                         id: 123,
+                        is_uidonly: false,
                         items: vec![
                             super::DataItem::Flags {
                                 flags: vec![Flag::Deleted, Flag::Flagged],

@@ -39,6 +39,7 @@ pub struct Scripting {
     pub sign: IfBlock,
     pub trusted_scripts: AHashMap<String, Arc<Sieve>>,
     pub untrusted_scripts: AHashMap<String, Arc<Sieve>>,
+    pub http_client: reqwest::Client,
 }
 
 impl Scripting {
@@ -181,6 +182,11 @@ impl Scripting {
             trusted_compiler,
             untrusted_scripts,
             trusted_scripts,
+            http_client: utils::http::http_client_builder(cfg!(feature = "test_mode"))
+                .pool_max_idle_per_host(0)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_default(),
             max_received_headers: untrusted.max_received_headers as usize,
             from_addr: bp.compile_expr(
                 ObjectType::SieveSystemScript.singleton(),
@@ -216,6 +222,7 @@ impl Clone for Scripting {
             trusted_scripts: self.trusted_scripts.clone(),
             untrusted_scripts: self.untrusted_scripts.clone(),
             trusted_compiler: self.trusted_compiler.clone(),
+            http_client: self.http_client.clone(),
         }
     }
 }

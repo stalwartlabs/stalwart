@@ -7,7 +7,7 @@
 #[cfg(test)]
 use ::store::registry::bootstrap::Bootstrap;
 #[cfg(not(any(target_env = "msvc", target_os = "freebsd")))]
-use jemallocator::Jemalloc;
+use tikv_jemallocator::Jemalloc;
 
 #[cfg(not(any(target_env = "msvc", target_os = "freebsd")))]
 #[global_allocator]

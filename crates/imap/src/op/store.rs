@@ -52,18 +52,39 @@ impl<T: SessionStream> Session<T> {
         let arguments = request.parse_store()?;
         let (data, mailbox) = self.state.select_data();
         let is_condstore = self.is_condstore || mailbox.is_condstore;
+        let is_utf8 = self.is_utf8;
+        let is_uidonly = self.is_uidonly;
+        let message_limit = self.server.core.imap.max_messages_per_command;
 
         if spawn {
             spawn_op!(data, {
                 let response = data
-                    .store(arguments, mailbox, is_uid, is_condstore, op_start)
+                    .store(
+                        arguments,
+                        mailbox,
+                        is_uid,
+                        is_condstore,
+                        is_utf8,
+                        is_uidonly,
+                        message_limit,
+                        op_start,
+                    )
                     .await?;
 
                 data.write_bytes(response).await
             })
         } else {
             let response = data
-                .store(arguments, mailbox, is_uid, is_condstore, op_start)
+                .store(
+                    arguments,
+                    mailbox,
+                    is_uid,
+                    is_condstore,
+                    is_utf8,
+                    is_uidonly,
+                    message_limit,
+                    op_start,
+                )
                 .await?;
 
             data.write_bytes(response).await
@@ -72,12 +93,16 @@ impl<T: SessionStream> Session<T> {
 }
 
 impl<T: SessionStream> SessionData<T> {
+    #[allow(clippy::too_many_arguments)]
     pub async fn store(
         &self,
         arguments: Arguments,
         mailbox: Arc<SelectedMailbox>,
         is_uid: bool,
         is_condstore: bool,
+        is_utf8: bool,
+        is_uidonly: bool,
+        message_limit: u32,
         op_start: Instant,
     ) -> trc::Result<Vec<u8>> {
         // Resync messages if needed
@@ -191,7 +216,30 @@ impl<T: SessionStream> SessionData<T> {
 
             return Ok(response.into_bytes());
         }
+        // RFC 9738 requires the highest UIDs to be processed first when truncating.
+        let message_limit = message_limit as usize;
+        let mut untagged = Vec::new();
+        if ids.len() > message_limit {
+            let mut uids = ids.values().map(|imap_id| imap_id.uid).collect::<Vec<_>>();
+            let cutoff = uids.len() - message_limit;
+            let lowest_uid = *uids.select_nth_unstable(cutoff).1;
+            ids.retain(|_, imap_id| imap_id.uid >= lowest_uid);
+
+            let code = ResponseCode::MessageLimit {
+                limit: message_limit as u32,
+                uid: lowest_uid.into(),
+            };
+            if response.code.is_none() {
+                response = response.with_code(code);
+            } else {
+                untagged = StatusResponse::ok("Some messages were not modified.")
+                    .with_code(code)
+                    .into_bytes();
+            }
+        }
+
         let mut items = Response {
+            is_utf8,
             items: Vec::with_capacity(ids.len()),
         };
 
@@ -321,12 +369,22 @@ impl<T: SessionStream> SessionData<T> {
                     data_items.push(DataItem::Uid { uid: imap_id.uid });
                 }
                 items.items.push(FetchItem {
-                    id: imap_id.seqnum,
+                    id: if is_uidonly {
+                        imap_id.uid
+                    } else {
+                        imap_id.seqnum
+                    },
+                    is_uidonly,
                     items: data_items,
                 });
             } else if is_condstore {
                 items.items.push(FetchItem {
-                    id: imap_id.seqnum,
+                    id: if is_uidonly {
+                        imap_id.uid
+                    } else {
+                        imap_id.seqnum
+                    },
+                    is_uidonly,
                     items: if is_uid {
                         vec![DataItem::Uid { uid: imap_id.uid }]
                     } else {
@@ -390,6 +448,12 @@ impl<T: SessionStream> SessionData<T> {
         );
 
         // Send response
-        Ok(response.serialize(items.serialize()))
+        let items = items.serialize();
+        Ok(response.serialize(if untagged.is_empty() {
+            items
+        } else {
+            untagged.extend_from_slice(&items);
+            untagged
+        }))
     }
 }

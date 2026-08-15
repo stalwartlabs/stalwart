@@ -42,6 +42,7 @@ impl Capability {
             "QRESYNC" => Self::QResync,
             "UTF8=ACCEPT" => Self::Utf8Accept,
             "OBJECTID+" => Self::ObjectIdPlus,
+            "UIDONLY" => Self::UidOnly,
         )
         .ok_or_else(|| {
             format!(

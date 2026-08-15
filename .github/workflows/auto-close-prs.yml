@@ -12,7 +12,7 @@ jobs:
   auto-close:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: .github/allowed-pr-authors.txt
           sparse-checkout-cone-mode: false

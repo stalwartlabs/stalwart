@@ -56,6 +56,7 @@ pub struct SpamFilterConfig {
     pub classifier: Option<ClassifierConfig>,
     pub scores: SpamFilterScoreConfig,
     pub spam_rules_url: Option<String>,
+    pub url_client: reqwest::Client,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -203,6 +204,12 @@ impl SpamFilterConfig {
             },
             grey_list_expiry: spam.greylist_for.map(|d| d.into_inner().as_secs()),
             spam_rules_url: spam.spam_filter_rules_url,
+            url_client: utils::http::http_client_builder(true)
+                .pool_max_idle_per_host(0)
+                .redirect(reqwest::redirect::Policy::none())
+                .user_agent("Mozilla/5.0 (X11; Linux i686; rv:109.0) Gecko/20100101 Firefox/118.0")
+                .build()
+                .unwrap_or_default(),
         }
     }
 }

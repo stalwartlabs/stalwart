@@ -1,0 +1,29 @@
+name: "CI retry"
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  rerun:
+    name: Re-run failed jobs
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run failed jobs
+        env:
+          GH_TOKEN: ${{ secrets.CI_RETRY_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -eu
+          echo "Run $RUN_ID failed on attempt $RUN_ATTEMPT, re-running failed jobs"
+          sleep 60
+          gh run rerun "$RUN_ID" --failed

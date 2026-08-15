@@ -147,12 +147,10 @@ async fn post_webhook_events(
     }
 
     // Send request
-    let response = reqwest::Client::builder()
-        .timeout(settings.timeout)
-        .danger_accept_invalid_certs(settings.tls_allow_invalid_certs)
-        .build()
-        .map_err(|err| format!("Failed to create HTTP client: {}", err))?
+    let response = settings
+        .client
         .post(&settings.url)
+        .timeout(settings.timeout)
         .headers(headers)
         .body(body)
         .send()

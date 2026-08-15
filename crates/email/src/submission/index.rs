@@ -7,7 +7,7 @@
 use super::{ArchivedEmailSubmission, EmailSubmission};
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
 use store::{
-    U32_LEN,
+    U32_LEN, U64_LEN,
     write::{IndexPropertyClass, ValueClass, key::KeySerializer},
 };
 use types::{collection::SyncCollection, field::EmailSubmissionField};
@@ -20,10 +20,11 @@ impl IndexableObject for EmailSubmission {
                     property: EmailSubmissionField::Metadata.into(),
                     value: self.send_at,
                 }),
-                value: KeySerializer::new(U32_LEN * 3 + 1)
+                value: KeySerializer::new(U32_LEN * 3 + U64_LEN + 1)
                     .write(self.email_id)
                     .write(self.thread_id)
                     .write(self.identity_id)
+                    .write(self.queue_id.unwrap_or_default())
                     .write(self.undo_status.as_index())
                     .finalize()
                     .into(),
@@ -45,10 +46,11 @@ impl IndexableObject for &ArchivedEmailSubmission {
                     property: EmailSubmissionField::Metadata.into(),
                     value: self.send_at.to_native(),
                 }),
-                value: KeySerializer::new(U32_LEN * 3 + 1)
+                value: KeySerializer::new(U32_LEN * 3 + U64_LEN + 1)
                     .write(self.email_id.to_native())
                     .write(self.thread_id.to_native())
                     .write(self.identity_id.to_native())
+                    .write(self.queue_id.as_ref().map(u64::from).unwrap_or_default())
                     .write(self.undo_status.as_index())
                     .finalize()
                     .into(),

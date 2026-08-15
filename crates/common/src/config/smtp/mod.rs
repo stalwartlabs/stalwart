@@ -28,6 +28,8 @@ pub struct SmtpConfig {
     pub resolvers: Resolvers,
     pub mail_auth: MailAuthConfig,
     pub report: ReportConfig,
+    pub mta_sts_client: reqwest::Client,
+    pub tls_report_client: reqwest::Client,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -58,6 +60,13 @@ impl SmtpConfig {
             resolvers: Resolvers::parse(bp).await,
             mail_auth: MailAuthConfig::parse(bp).await,
             report: ReportConfig::parse(bp).await,
+            mta_sts_client: utils::http::http_client_builder(false)
+                .pool_max_idle_per_host(0)
+                .user_agent(crate::USER_AGENT)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_default(),
+            tls_report_client: utils::http::unpooled_http_client(false),
         };
 
         if !config.resolvers.dnssec_available

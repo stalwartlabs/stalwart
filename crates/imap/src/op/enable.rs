@@ -48,6 +48,9 @@ impl<T: SessionStream> Session<T> {
                 Capability::ObjectIdPlus => {
                     self.is_objectid = true;
                 }
+                Capability::UidOnly => {
+                    self.is_uidonly = true;
+                }
                 _ => {
                     continue;
                 }

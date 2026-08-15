@@ -317,6 +317,26 @@ pub fn parse_filters(
 
 
                     },
+                    "UIDAFTER" => {
+                        filters.push(Filter::UidAfter(parse_number::<u32>(
+                            &tokens
+                                .next()
+                                .ok_or_else(|| Cow::from("Expected integer"))?
+                                .unwrap_bytes(),
+                        )?));
+
+
+                    },
+                    "UIDBEFORE" => {
+                        filters.push(Filter::UidBefore(parse_number::<u32>(
+                            &tokens
+                                .next()
+                                .ok_or_else(|| Cow::from("Expected integer"))?
+                                .unwrap_bytes(),
+                        )?));
+
+
+                    },
                     "OLDER" => {
                         filters.push(Filter::Older(parse_number::<u32>(
                             &tokens

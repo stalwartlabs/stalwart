@@ -153,7 +153,8 @@ async fn report_tls() {
         .assert_contains("Submitter: mx.example.org");
 
     // Verify generated report
-    let report = TlsReport::parse_rfc5322(message.read_message(&test).await.as_bytes()).unwrap();
+    let report =
+        TlsReport::parse_rfc5322(message.read_message(&test).await.as_bytes(), usize::MAX).unwrap();
     assert_eq!(report.organization_name.unwrap(), "Foobar, Inc.");
     assert_eq!(report.contact_info.unwrap(), "https://foobar.org/contact");
     assert_eq!(report.policies.len(), 3);

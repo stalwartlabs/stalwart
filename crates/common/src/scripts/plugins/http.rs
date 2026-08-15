@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use reqwest::redirect::Policy;
+use reqwest::header::USER_AGENT;
 use sieve::{FunctionMap, runtime::Variable};
 
 use super::PluginContext;
@@ -26,23 +26,13 @@ pub async fn exec_header(ctx: PluginContext<'_>) -> trc::Result<Variable> {
         return Ok(Variable::from(url.split_once("/?").unwrap().1.to_string()));
     }
 
-    let builder = reqwest::Client::builder()
-        .user_agent(agent.as_ref())
-        .timeout(Duration::from_millis(timeout))
-        .redirect(Policy::none());
-
-    #[cfg(feature = "test_mode")]
-    let builder = builder.danger_accept_invalid_certs(true);
-
-    builder
-        .build()
-        .map_err(|err| {
-            trc::SieveEvent::RuntimeError
-                .into_err()
-                .reason(err)
-                .details("Failed to build request")
-        })?
+    ctx.server
+        .core
+        .sieve
+        .http_client
         .get(url.as_ref())
+        .header(USER_AGENT, agent.as_ref())
+        .timeout(Duration::from_millis(timeout))
         .send()
         .await
         .map_err(|err| {

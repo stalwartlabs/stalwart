@@ -1,6 +1,6 @@
 [package]
 name = "services"
-version = "0.16.16"
+version = "0.16.18"
 edition = "2024"
 
 [dependencies]
@@ -37,6 +37,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 base64 = "0.23"
 compact_str = "0.10.0"
 dns-update = { version = "0.5" }
+psl = "2"
 
 [dev-dependencies]
 

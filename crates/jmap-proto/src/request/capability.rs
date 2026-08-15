@@ -504,10 +504,13 @@ impl<'de> Deserialize<'de> for CapabilityIds {
             {
                 let mut capability_flags = 0u32;
 
-                while let Some(capability_str) = seq.next_element::<&str>()? {
-                    let capability = Capability::parse(capability_str).ok_or_else(|| {
-                        serde::de::Error::custom(format!("Unknown capability: {capability_str:?}"))
-                    })?;
+                while let Some(capability_str) = seq.next_element::<std::borrow::Cow<str>>()? {
+                    let capability =
+                        Capability::parse(capability_str.as_ref()).ok_or_else(|| {
+                            serde::de::Error::custom(format!(
+                                "Unknown capability: {capability_str:?}"
+                            ))
+                        })?;
 
                     capability_flags |= capability as u32;
                 }

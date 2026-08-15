@@ -129,9 +129,7 @@ impl SpamFilterInit for Server {
                 TokenType::Space => TokenType::Space,
                 TokenType::Url(url) => TokenType::Url(UrlParts::new(url)),
                 TokenType::UrlNoHost(s) => TokenType::UrlNoHost(s.into()),
-                TokenType::UrlNoScheme(s) => {
-                    TokenType::UrlNoScheme(UrlParts::new(format!("https://{}", s.trim())))
-                }
+                TokenType::UrlNoScheme(s) => TokenType::UrlNoScheme(UrlParts::no_scheme(s)),
                 TokenType::IpAddr(i) => TokenType::IpAddr(IpParts::new(i)),
                 TokenType::Email(e) => TokenType::Email(Email::new(e)),
                 TokenType::Float(s) => TokenType::Float(s.into()),
@@ -164,9 +162,9 @@ impl SpamFilterInit for Server {
                                 TokenType::Space => TokenType::Space,
                                 TokenType::Url(url) => TokenType::Url(UrlParts::new(url)),
                                 TokenType::UrlNoHost(s) => TokenType::UrlNoHost(s.into()),
-                                TokenType::UrlNoScheme(s) => TokenType::UrlNoScheme(UrlParts::new(
-                                    format!("https://{}", s.trim()),
-                                )),
+                                TokenType::UrlNoScheme(s) => {
+                                    TokenType::UrlNoScheme(UrlParts::no_scheme(s))
+                                }
                                 TokenType::IpAddr(i) => TokenType::IpAddr(IpParts::new(i)),
                                 TokenType::Email(e) => TokenType::Email(Email::new(e)),
                                 TokenType::Float(s) => TokenType::Float(s.into()),
@@ -230,9 +228,9 @@ impl SpamFilterInit for Server {
                                     TokenType::UrlNoHost(s) => {
                                         TokenType::UrlNoHost(s.to_string().into())
                                     }
-                                    TokenType::UrlNoScheme(s) => TokenType::UrlNoScheme(
-                                        UrlParts::new(format!("https://{}", s.trim())),
-                                    ),
+                                    TokenType::UrlNoScheme(s) => {
+                                        TokenType::UrlNoScheme(UrlParts::no_scheme(s.to_string()))
+                                    }
                                     TokenType::IpAddr(i) => TokenType::IpAddr(IpParts::new(i)),
                                     TokenType::Email(e) => TokenType::Email(Email::new(e)),
                                     TokenType::Float(s) => TokenType::Float(s.to_string().into()),

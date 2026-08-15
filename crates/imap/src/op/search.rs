@@ -18,7 +18,7 @@ use email::{
     message::sortkeys::{EmailSortKeys, MessageComparator, MessageSortField},
 };
 use imap_proto::{
-    Command, StatusResponse,
+    Command, ResponseCode, ResponseType, StatusResponse,
     protocol::{
         Sequence,
         search::{self, Arguments, Comparator, Filter, Response, ResultOption},
@@ -59,7 +59,22 @@ impl<T: SessionStream> Session<T> {
             request.parse_sort()
         }?;
 
+        // RFC 9586 forbids the sequence set criterion once UIDONLY is enabled
+        if self.is_uidonly
+            && arguments.filter.iter().any(|filter| {
+                matches!(filter, Filter::Sequence(sequence, false) if !sequence.is_saved_search())
+            })
+        {
+            return Err(trc::ImapEvent::Error
+                .into_err()
+                .details("The sequence set search criterion is not allowed once UIDONLY is enabled.")
+                .code(ResponseCode::UidRequired)
+                .ctx(trc::Key::Type, ResponseType::Bad)
+                .id(arguments.tag));
+        }
+
         let (data, mailbox) = self.state.mailbox_state();
+        let message_limit = self.server.core.imap.max_messages_per_command;
 
         // Create channel for results
         let (results_tx, prev_saved_search) =
@@ -81,18 +96,27 @@ impl<T: SessionStream> Session<T> {
                     results_tx,
                     prev_saved_search.clone(),
                     is_uid,
+                    message_limit,
                     op_start,
                 )
                 .await
             {
-                Ok(response) => {
+                Ok((response, limited_uid)) => {
                     let response = response.serialize(&tag);
-                    StatusResponse::completed(if !is_sort {
+                    let status = StatusResponse::completed(if !is_sort {
                         Command::Search(is_uid)
                     } else {
                         Command::Sort(is_uid)
                     })
-                    .with_tag(tag)
+                    .with_tag(tag);
+
+                    match limited_uid {
+                        Some(uid) => status.with_code(ResponseCode::MessageLimit {
+                            limit: message_limit,
+                            uid: uid.into(),
+                        }),
+                        None => status,
+                    }
                     .serialize(response)
                 }
                 Err(err) => {
@@ -109,6 +133,7 @@ impl<T: SessionStream> Session<T> {
 }
 
 impl<T: SessionStream> SessionData<T> {
+    #[allow(clippy::too_many_arguments)]
     pub async fn search(
         &self,
         arguments: Arguments,
@@ -116,8 +141,9 @@ impl<T: SessionStream> SessionData<T> {
         results_tx: Option<watch::Sender<Arc<Vec<ImapId>>>>,
         prev_saved_search: Option<Option<Arc<Vec<ImapId>>>>,
         is_uid: bool,
+        message_limit: u32,
         op_start: Instant,
-    ) -> trc::Result<search::Response> {
+    ) -> trc::Result<(search::Response, Option<u32>)> {
         // Run query
         let is_sort = arguments.sort.is_some();
         let (result_set, include_highest_modseq) = self
@@ -161,8 +187,32 @@ impl<T: SessionStream> SessionData<T> {
             &mut imap_ids,
             &mut saved_results,
         );
+        // RFC 9738 exempts SORT, whose ordering is meaningless once truncated
+        let mut limited_uid = None;
         if !is_sort {
             imap_ids.sort_unstable();
+
+            let message_limit = message_limit as usize;
+            if imap_ids.len() > message_limit {
+                let threshold = imap_ids[imap_ids.len() - message_limit];
+                imap_ids.drain(..imap_ids.len() - message_limit);
+                limited_uid = if is_uid {
+                    Some(threshold)
+                } else {
+                    mailbox.seqnum_to_uid(threshold)
+                };
+
+                // RFC 9738 requires the saved search to be truncated to match
+                if let Some(saved_results) = saved_results.as_mut() {
+                    saved_results.retain(|imap_id| {
+                        if is_uid {
+                            imap_id.uid >= threshold
+                        } else {
+                            imap_id.seqnum >= threshold
+                        }
+                    });
+                }
+            }
         }
 
         // Save results
@@ -188,26 +238,29 @@ impl<T: SessionStream> SessionData<T> {
         );
 
         // Build response
-        Ok(Response {
-            is_uid,
-            min: min.map(|(id, _)| id),
-            max: max.map(|(id, _)| id),
-            count: if arguments.result_options.contains(&ResultOption::Count) {
-                Some(total)
-            } else {
-                None
+        Ok((
+            Response {
+                is_uid,
+                min: min.map(|(id, _)| id),
+                max: max.map(|(id, _)| id),
+                count: if arguments.result_options.contains(&ResultOption::Count) {
+                    Some(total)
+                } else {
+                    None
+                },
+                ids: if arguments.result_options.is_empty()
+                    || arguments.result_options.contains(&ResultOption::All)
+                {
+                    imap_ids
+                } else {
+                    vec![]
+                },
+                is_sort,
+                is_esearch: arguments.is_esearch,
+                highest_modseq,
             },
-            ids: if arguments.result_options.is_empty()
-                || arguments.result_options.contains(&ResultOption::All)
-            {
-                imap_ids
-            } else {
-                vec![]
-            },
-            is_sort,
-            is_esearch: arguments.is_esearch,
-            highest_modseq,
-        })
+            limited_uid,
+        ))
     }
 
     pub async fn query(
@@ -257,6 +310,19 @@ impl<T: SessionStream> SessionData<T> {
                         }
                     }
                     filters.push(SearchFilter::is_in_set(set));
+                }
+                Filter::UidAfter(uid) => {
+                    filters.push(SearchFilter::is_in_set(match uid.checked_add(1) {
+                        Some(min) => mailbox.uids_in_range(Some(min), None),
+                        None => RoaringBitmap::new(),
+                    }));
+                }
+                Filter::UidBefore(uid) => {
+                    filters.push(SearchFilter::is_in_set(if uid > 1 {
+                        mailbox.uids_in_range(None, Some(uid - 1))
+                    } else {
+                        RoaringBitmap::new()
+                    }));
                 }
                 Filter::All => {
                     filters.push(SearchFilter::is_in_set(message_ids.clone()));

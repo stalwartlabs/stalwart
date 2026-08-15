@@ -62,6 +62,9 @@ impl<T: SessionStream> Session<T> {
 
         let (data, mailbox) = self.state.select_data();
         let is_qresync = self.is_qresync;
+        let is_uidonly = self.is_uidonly;
+        let is_utf8 = self.is_utf8;
+        let message_limit = self.server.core.imap.max_messages_per_command;
 
         let mut ops = Vec::with_capacity(requests.len());
         let mut activate_objectid = false;
@@ -106,7 +109,10 @@ impl<T: SessionStream> Session<T> {
                                 mailbox.clone(),
                                 is_uid,
                                 is_qresync,
+                                is_uidonly,
                                 enabled_condstore,
+                                is_utf8,
+                                message_limit,
                                 Instant::now(),
                             )
                             .await?;
@@ -130,7 +136,10 @@ impl<T: SessionStream> SessionData<T> {
         mailbox: Arc<SelectedMailbox>,
         is_uid: bool,
         is_qresync: bool,
+        is_uidonly: bool,
         enabled_condstore: bool,
+        is_utf8: bool,
+        message_limit: u32,
         op_start: Instant,
     ) -> trc::Result<StatusResponse> {
         // Validate VANISHED parameter
@@ -337,6 +346,16 @@ impl<T: SessionStream> SessionData<T> {
             .map(|(id, imap_id)| (imap_id.seqnum, imap_id.uid, id))
             .collect::<Vec<_>>();
         ids.sort_unstable_by_key(|(seqnum, _, _)| *seqnum);
+
+        // RFC 9738 requires the highest UIDs to be processed first when truncating
+        let message_limit = message_limit as usize;
+        let limited_uid = if ids.len() > message_limit {
+            ids.drain(..ids.len() - message_limit);
+            ids.first().map(|(_, uid, _)| *uid)
+        } else {
+            None
+        };
+
         let fetched_ids = ids
             .iter()
             .map(|id| trc::Value::from(id.2))
@@ -424,7 +443,12 @@ impl<T: SessionStream> SessionData<T> {
 
                 // Serialize fetch item
                 let mut buf = Vec::with_capacity(128);
-                FetchItem { id: seqnum, items }.serialize(&mut buf);
+                FetchItem {
+                    id: if is_uidonly { uid } else { seqnum },
+                    is_uidonly,
+                    items,
+                }
+                .serialize(&mut buf, is_utf8);
                 self.write_bytes(buf).await?;
             } else {
                 let Some(metadata_) = self
@@ -636,7 +660,12 @@ impl<T: SessionStream> SessionData<T> {
 
                 // Serialize fetch item
                 let mut buf = Vec::with_capacity(128);
-                FetchItem { id: seqnum, items }.serialize(&mut buf);
+                FetchItem {
+                    id: if is_uidonly { uid } else { seqnum },
+                    is_uidonly,
+                    items,
+                }
+                .serialize(&mut buf, is_utf8);
                 self.write_bytes(buf).await?;
             }
 
@@ -710,7 +739,14 @@ impl<T: SessionStream> SessionData<T> {
             .await?;
         }
 
-        Ok(StatusResponse::completed(Command::Fetch(is_uid)).with_tag(arguments.tag))
+        let response = StatusResponse::completed(Command::Fetch(is_uid)).with_tag(arguments.tag);
+        Ok(match limited_uid {
+            Some(uid) => response.with_code(ResponseCode::MessageLimit {
+                limit: message_limit as u32,
+                uid: uid.into(),
+            }),
+            None => response,
+        })
     }
 }
 

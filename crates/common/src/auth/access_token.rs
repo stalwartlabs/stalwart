@@ -68,8 +68,6 @@ impl Server {
                     )
                     .await?;
 
-                let can_impersonate = permissions.enabled.get(Permission::Impersonate as usize)
-                    && !permissions.disabled.get(Permission::Impersonate as usize);
                 let member_of = account
                     .member_group_ids
                     .iter()
@@ -85,7 +83,6 @@ impl Server {
                     {
                         if acl_item.to_account_id != account_id
                             && !member_of.contains(&acl_item.to_account_id)
-                            && !can_impersonate
                         {
                             let acl = Bitmap::<Acl>::from(acl_item.permissions);
                             let collection = acl_item.to_collection;

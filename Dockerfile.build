@@ -9,6 +9,8 @@ FROM --platform=$BUILDPLATFORM rust:slim-trixie AS base
 ENV DEBIAN_FRONTEND="noninteractive" \
     BINSTALL_DISABLE_TELEMETRY=true \
     CARGO_TERM_COLOR=always \
+    CARGO_NET_RETRY=10 \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true \
     LANG=C.UTF-8 \
     TZ=UTC \
     TERM=xterm-256color \
@@ -21,7 +23,7 @@ RUN \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' >/etc/apt/apt.conf.d/keep-cache && \
     apt-get update && \
-    apt-get install -yq --no-install-recommends ca-certificates curl jq xz-utils make libclang-19-dev
+    apt-get install -yq --no-install-recommends ca-certificates curl git jq xz-utils make libclang-19-dev
 # Zig is pinned to 0.13.0. Zig 0.14+ changed how its default target ABI is
 # resolved for `x86_64-linux-gnu`-style triples, and on Stalwart's dep tree
 # (rocksdb, jemalloc, aws-lc-sys, libfdb_c.so, rust-std 1.87+) this surfaces

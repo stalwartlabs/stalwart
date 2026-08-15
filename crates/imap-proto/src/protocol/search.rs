@@ -110,6 +110,10 @@ pub enum Filter {
     // RFC 8474 - ObjectID
     EmailId(String),
     ThreadId(String),
+
+    // RFC 9738 - MESSAGELIMIT
+    UidAfter(u32),
+    UidBefore(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

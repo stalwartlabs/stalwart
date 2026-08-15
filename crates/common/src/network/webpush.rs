@@ -13,16 +13,6 @@ use p256::{
 
 const VAPID_TOKEN_TTL: u64 = 12 * 60 * 60;
 
-pub fn generate_pkcs8_pem() -> Result<String, String> {
-    use p256::elliptic_curve::rand_core::OsRng;
-    use p256::pkcs8::{EncodePrivateKey, LineEnding};
-
-    SigningKey::random(&mut OsRng)
-        .to_pkcs8_pem(LineEnding::LF)
-        .map(|pem| pem.to_string())
-        .map_err(|err| err.to_string())
-}
-
 #[derive(Clone)]
 pub struct Vapid {
     key: VapidKey,
@@ -148,6 +138,28 @@ fn endpoint_origin(url: &str) -> Option<String> {
         }
         _ => Some(format!("{scheme}://{host}")),
     }
+}
+
+pub fn normalize_contact(contact: &str) -> Option<String> {
+    let contact = contact.trim();
+
+    match contact.split_once(':') {
+        Some((scheme, _)) if scheme.eq_ignore_ascii_case("mailto") => Some(contact.to_string()),
+        Some((scheme, _)) if scheme.eq_ignore_ascii_case("https") => Some(contact.to_string()),
+        Some(_) => None,
+        None if contact.contains('@') => Some(format!("mailto:{contact}")),
+        None => None,
+    }
+}
+
+pub fn generate_pkcs8_pem() -> Result<String, String> {
+    use p256::elliptic_curve::rand_core::OsRng;
+    use p256::pkcs8::{EncodePrivateKey, LineEnding};
+
+    SigningKey::random(&mut OsRng)
+        .to_pkcs8_pem(LineEnding::LF)
+        .map(|pem| pem.to_string())
+        .map_err(|err| err.to_string())
 }
 
 fn secret_key_from_explicit_params(pem: &str) -> Option<SecretKey> {
@@ -296,6 +308,30 @@ B4yDfR2rGOd2H6Kv3fQNHPj9Nu5Tks8QYMLzrX8ONCNoFnNUQl9S0r0QS6phVqD0
     fn rejects_garbage_with_actionable_error() {
         let err = VapidKey::from_pkcs8_pem("not a key").err().unwrap();
         assert!(err.contains("openssl pkey"), "{err}");
+    }
+
+    #[test]
+    fn contact_is_normalized_to_a_uri() {
+        for (input, expected) in [
+            ("hello@stalw.art", Some("mailto:hello@stalw.art")),
+            ("  hello@stalw.art  ", Some("mailto:hello@stalw.art")),
+            ("mailto:hello@stalw.art", Some("mailto:hello@stalw.art")),
+            ("MAILTO:hello@stalw.art", Some("MAILTO:hello@stalw.art")),
+            (
+                "https://stalw.art/contact",
+                Some("https://stalw.art/contact"),
+            ),
+            ("stalw.art", None),
+            ("http://stalw.art", None),
+            ("tel:+123456789", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                normalize_contact(input).as_deref(),
+                expected,
+                "unexpected normalization of {input:?}"
+            );
+        }
     }
 
     #[test]

@@ -8,7 +8,7 @@ use super::{ImapContext, ToModSeq};
 use crate::core::{SavedSearch, SelectedMailbox, Session, State};
 use common::network::SessionStream;
 use imap_proto::{
-    Command, ResponseCode, StatusResponse,
+    Command, ResponseCode, ResponseType, StatusResponse,
     protocol::{
         ImapResponse, ObjectId, Sequence, fetch,
         list::ListItem,
@@ -102,6 +102,17 @@ impl<T: SessionStream> Session<T> {
                         .details("QRESYNC is not enabled.")
                         .id(arguments.tag));
                 }
+                if self.is_uidonly && qresync.seq_match.is_some() {
+                    return Err(trc::ImapEvent::Error
+                        .into_err()
+                        .details(concat!(
+                            "The QRESYNC sequence matching parameter ",
+                            "is not allowed once UIDONLY is enabled."
+                        ))
+                        .code(ResponseCode::UidRequired)
+                        .ctx(trc::Key::Type, ResponseType::Bad)
+                        .id(arguments.tag));
+                }
                 if qresync.uid_validity == mailbox_state.uid_validity as u32 {
                     // Send flags for changed messages
                     data.fetch(
@@ -121,7 +132,10 @@ impl<T: SessionStream> Session<T> {
                         mailbox.clone(),
                         true,
                         true,
+                        self.is_uidonly,
                         false,
+                        self.is_utf8,
+                        u32::MAX,
                         Instant::now(),
                     )
                     .await

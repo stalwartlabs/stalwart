@@ -427,7 +427,9 @@ impl<'de> serde::Deserialize<'de> for Keyword {
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(Keyword::parse(<&str>::deserialize(deserializer)?))
+        Ok(Keyword::parse(
+            <std::borrow::Cow<'de, str>>::deserialize(deserializer)?.as_ref(),
+        ))
     }
 }
 

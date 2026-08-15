@@ -851,7 +851,7 @@ impl PropFindRequestHandler for Server {
                                     &card.inner.card,
                                     properties,
                                     (*version)
-                                        .or(query.max_vcard_version)
+                                        .or(query.vcard_version)
                                         .or_else(|| card.inner.card.version()),
                                 )),
                             ));

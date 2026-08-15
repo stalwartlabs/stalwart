@@ -10,7 +10,6 @@ use crate::backend::oidc::{
     DiscoveryDocument, JwksCache, OidcConfig, OidcDiscovery, OidcError, OpenIdDirectory,
 };
 use registry::schema::structs;
-use reqwest::Client;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use trc::AuthEvent;
@@ -32,7 +31,7 @@ impl OpenIdDirectory {
     }
 
     pub async fn new(config: OidcConfig) -> Result<Self, OidcError> {
-        let http = Client::builder()
+        let http = utils::http::http_client_builder(false)
             .user_agent("Stalwart/1.0")
             .timeout(Duration::from_secs(30))
             .build()

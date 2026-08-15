@@ -41,7 +41,7 @@ pub struct RequestHeaders<'x> {
     pub content_type: Option<&'x str>,
     pub destination: Option<&'x str>,
     pub lock_token: Option<&'x str>,
-    pub max_vcard_version: Option<VCardVersion>,
+    pub vcard_version: Option<VCardVersion>,
     pub no_schedule_reply: bool,
     pub if_schedule_tag: Option<u32>,
     pub overwrite_fail: bool,
@@ -49,6 +49,14 @@ pub struct RequestHeaders<'x> {
     pub ret: Return,
     pub depth_no_root: bool,
     pub if_: Vec<If<'x>>,
+    pub range: Option<ByteRange>,
+    pub if_range: Option<&'x str>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ByteRange {
+    Offset { start: u64, end: Option<u64> },
+    Suffix(u64),
 }
 
 pub struct ResourceState<T: AsRef<str>> {
@@ -122,11 +130,27 @@ impl From<&RequestHeaders<'_>> for Value {
             ("Content-Type", headers.content_type),
             ("Destination", headers.destination),
             ("Lock-Token", headers.lock_token),
+            ("If-Range", headers.if_range),
         ] {
             if let Some(value) = header_value {
                 values.push(CompactString::const_new(name).into());
                 values.push(value.to_compact_string().into());
             }
+        }
+        if let Some(range) = headers.range {
+            values.push(CompactString::const_new("Range").into());
+            values.push(
+                match range {
+                    ByteRange::Offset {
+                        start,
+                        end: Some(end),
+                    } => format!("{start}-{end}"),
+                    ByteRange::Offset { start, end: None } => format!("{start}-"),
+                    ByteRange::Suffix(length) => format!("-{length}"),
+                }
+                .to_compact_string()
+                .into(),
+            );
         }
         for (name, is_set) in [
             ("Overwrite", headers.overwrite_fail),

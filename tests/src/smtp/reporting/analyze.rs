@@ -9,6 +9,11 @@ use crate::{
     utils::server::TestServerBuilder,
 };
 use ahash::AHashMap;
+use flate2::{Compression, Crc, write::GzEncoder};
+use mail_builder::{
+    MessageBuilder,
+    mime::{BodyPart, MimePart},
+};
 use registry::{
     schema::{
         enums::TaskStoreMaintenanceType,
@@ -19,7 +24,33 @@ use registry::{
     },
     types::map::Map,
 };
-use std::time::Duration;
+use std::{io::Write, time::Duration};
+
+const MAX_REPORT_SIZE: i64 = 65536;
+
+const DMARC_REPORT: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8"?><feedback><report_metadata>"#,
+    r#"<org_name>Example</org_name><email>dmarc@example.org</email>"#,
+    r#"<report_id>1</report_id><date_range><begin>1</begin><end>2</end></date_range>"#,
+    r#"</report_metadata><policy_published><domain>foobar.org</domain>"#,
+    r#"</policy_published></feedback>"#
+);
+
+fn report_message(content_type: &str, file_name: &str, payload: &[u8]) -> String {
+    MessageBuilder::new()
+        .from(("Reporter", "reporter@test.org"))
+        .to("reports@foobar.org")
+        .subject("Report Domain: foobar.org")
+        .body(MimePart::new(
+            "multipart/report",
+            BodyPart::Multipart(vec![
+                MimePart::new("text/plain", BodyPart::Text("Report attached.".into())),
+                MimePart::new(content_type, BodyPart::Binary(payload.into())).attachment(file_name),
+            ]),
+        ))
+        .write_to_string()
+        .unwrap()
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn report_analyze() {
@@ -49,6 +80,7 @@ async fn report_analyze() {
                 "feedback@foobar.org".to_string(),
             ]),
             inbound_report_forwarding: false,
+            inbound_report_max_size: MAX_REPORT_SIZE,
             ..Default::default()
         })
         .await;
@@ -150,10 +182,128 @@ async fn report_analyze() {
     assert_eq!(admin.registry_get_all::<TlsExternalReport>().await, vec![]);
     assert_eq!(admin.registry_get_all::<ArfExternalReport>().await, vec![]);
 
+    // Reports that lie about their size or exceed the limit must not be ingested
+    let attachment_name = "mx.test.org!foobar.org!1!2.xml";
+    for payload in [
+        report_message(
+            "application/zip",
+            &format!("{attachment_name}.zip"),
+            &zip("report.xml", DMARC_REPORT.as_bytes(), None, Some(u32::MAX)),
+        ),
+        report_message(
+            "application/gzip",
+            &format!("{attachment_name}.gz"),
+            &gzip(&vec![b' '; MAX_REPORT_SIZE as usize * 2]),
+        ),
+    ] {
+        session
+            .send_message("john@test.org", &["reports@foobar.org"], &payload, "250")
+            .await;
+        test.assert_no_events();
+    }
+
+    // A report within the limit is still ingested
+    session
+        .send_message(
+            "john@test.org",
+            &["reports@foobar.org"],
+            &report_message(
+                "application/zip",
+                &format!("{attachment_name}.zip"),
+                &zip("report.xml", DMARC_REPORT.as_bytes(), None, None),
+            ),
+            "250",
+        )
+        .await;
+    test.assert_no_events();
+
+    let admin = test.account("admin");
+    for _ in 0..50 {
+        if !admin
+            .registry_get_all::<DmarcExternalReport>()
+            .await
+            .is_empty()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        admin.registry_get_all::<DmarcExternalReport>().await.len(),
+        1
+    );
+
     // Test delivery to non-report addresses
     session
         .send_message("john@test.org", &["bill@foobar.org"], "test:no_dkim", "250")
         .await;
     test.read_event().await.assert_refresh();
     test.last_queued_message().await;
+}
+
+fn gzip(data: &[u8]) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(data).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn zip(
+    name: &str,
+    data: &[u8],
+    compressed_size: Option<u32>,
+    uncompressed_size: Option<u32>,
+) -> Vec<u8> {
+    let mut crc = Crc::new();
+    crc.update(data);
+    let crc = crc.sum();
+    let compressed_size = compressed_size.unwrap_or(data.len() as u32);
+    let uncompressed_size = uncompressed_size.unwrap_or(data.len() as u32);
+    let name = name.as_bytes();
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+    out.extend_from_slice(&20u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&crc.to_le_bytes());
+    out.extend_from_slice(&compressed_size.to_le_bytes());
+    out.extend_from_slice(&uncompressed_size.to_le_bytes());
+    out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(name);
+    out.extend_from_slice(data);
+
+    let central_offset = out.len() as u32;
+    out.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+    out.extend_from_slice(&20u16.to_le_bytes());
+    out.extend_from_slice(&20u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&crc.to_le_bytes());
+    out.extend_from_slice(&compressed_size.to_le_bytes());
+    out.extend_from_slice(&uncompressed_size.to_le_bytes());
+    out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(name);
+
+    let central_size = out.len() as u32 - central_offset;
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&central_size.to_le_bytes());
+    out.extend_from_slice(&central_offset.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+
+    out
 }

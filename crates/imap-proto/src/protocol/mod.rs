@@ -6,6 +6,7 @@
 
 use crate::{Command, ResponseCode, ResponseType, StatusResponse};
 use ahash::AHashSet;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use std::{cmp::Ordering, fmt::Display};
@@ -34,6 +35,7 @@ pub mod status;
 pub mod store;
 pub mod subscribe;
 pub mod thread;
+pub mod uidbatches;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolVersion {
@@ -219,6 +221,28 @@ pub fn quoted_or_literal_string(buf: &mut Vec<u8>, text: &str) {
 pub fn quoted_or_literal_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
     if let Some(text) = text {
         quoted_or_literal_string(buf, text);
+    } else {
+        buf.extend_from_slice(b"NIL");
+    }
+}
+
+pub fn quoted_or_literal_encoded_string(buf: &mut Vec<u8>, text: &str, is_utf8: bool) {
+    if is_utf8 || text.is_ascii() {
+        quoted_or_literal_string(buf, text);
+    } else {
+        buf.extend_from_slice(b"\"=?utf-8?B?");
+        buf.extend_from_slice(STANDARD.encode(text.as_bytes()).as_bytes());
+        buf.extend_from_slice(b"?=\"");
+    }
+}
+
+pub fn quoted_or_literal_encoded_string_or_nil(
+    buf: &mut Vec<u8>,
+    text: Option<&str>,
+    is_utf8: bool,
+) {
+    if let Some(text) = text {
+        quoted_or_literal_encoded_string(buf, text, is_utf8);
     } else {
         buf.extend_from_slice(b"NIL");
     }
@@ -493,6 +517,18 @@ impl ResponseCode {
                 return;
             }
             ResponseCode::UseAttr => b"USEATTR",
+            ResponseCode::UidRequired => b"UIDREQUIRED",
+            ResponseCode::TooFew => b"TOOFEW",
+            ResponseCode::TooMany => b"TOOMANY",
+            ResponseCode::MessageLimit { limit, uid } => {
+                buf.extend_from_slice(b"MESSAGELIMIT ");
+                buf.extend_from_slice(limit.to_string().as_bytes());
+                if let Some(uid) = uid {
+                    buf.push(b' ');
+                    buf.extend_from_slice(uid.to_string().as_bytes());
+                }
+                return;
+            }
         });
     }
 
@@ -536,6 +572,10 @@ impl ResponseCode {
             ResponseCode::ObjectId { .. } => "OBJECTID",
             ResponseCode::HighestModseq { .. } => "HIGHESTMODSEQ",
             ResponseCode::UseAttr => "USEATTR",
+            ResponseCode::UidRequired => "UIDREQUIRED",
+            ResponseCode::TooFew => "TOOFEW",
+            ResponseCode::TooMany => "TOOMANY",
+            ResponseCode::MessageLimit { .. } => "MESSAGELIMIT",
         }
     }
 }
@@ -679,6 +719,7 @@ pub fn serialize_sequence(buf: &mut Vec<u8>, list: &[u32]) {
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            Command::UidBatches => write!(f, "UIDBATCHES"),
             Command::Capability => write!(f, "CAPABILITY"),
             Command::Noop => write!(f, "NOOP"),
             Command::Logout => write!(f, "LOGOUT"),

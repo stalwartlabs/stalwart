@@ -9,9 +9,14 @@ use crate::{
     utils::{dns::DnsCache, server::TestServer},
 };
 use ahash::AHashMap;
+use common::auth::{AccountCache, EmailAddress};
 use jmap_client::{
     Error,
-    core::set::{SetError, SetErrorType, SetObject},
+    client::Client,
+    core::{
+        response::IdentityGetResponse,
+        set::{SetError, SetErrorType, SetObject},
+    },
     email_submission::{Address, Delivered, DeliveryStatus, Displayed, UndoStatus, query::Filter},
     mailbox::Role,
 };
@@ -20,13 +25,13 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use store::parking_lot::Mutex;
+use store::{parking_lot::Mutex, write::BatchBuilder};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
     sync::mpsc,
 };
-use types::id::Id;
+use types::{collection::Collection, field::PrincipalField, id::Id};
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct MockMessage {
@@ -409,14 +414,16 @@ pub async fn test(test: &TestServer) {
     );
 
     // Confirm that the sendAt property is updated when using FUTURERELEASE
-    let hold_until = DateTime::parse_rfc3339("2079-11-20T05:00:00Z")
+    let hold_until_date = "2079-11-20T05:00:00Z";
+    let hold_until = DateTime::parse_rfc3339(hold_until_date)
         .unwrap()
         .to_timestamp();
     let email_submission_id = client
         .email_submission_create_envelope(
             &email_id,
             &identity_id,
-            Address::new("jdoe@example.com").parameter("HOLDUNTIL", Some(hold_until.to_string())),
+            Address::new("jdoe@example.com")
+                .parameter("HOLDUNTIL", Some(hold_until_date.to_string())),
             ["jane_smith@remote.org"],
         )
         .await
@@ -439,6 +446,30 @@ pub async fn test(test: &TestServer) {
             "jane_smith@remote.org".to_string(),
             DeliveryStatus::new("250 2.1.5 Queued", Delivered::Queued, Displayed::Unknown)
         ),])
+    );
+
+    // Confirm that the query undoStatus filter agrees with EmailSubmission/get
+    assert!(
+        client
+            .email_submission_query(
+                Filter::undo_status(UndoStatus::Pending).into(),
+                None::<Vec<_>>
+            )
+            .await
+            .unwrap()
+            .take_ids()
+            .contains(&email_submission_id)
+    );
+    assert!(
+        !client
+            .email_submission_query(
+                Filter::undo_status(UndoStatus::Final).into(),
+                None::<Vec<_>>
+            )
+            .await
+            .unwrap()
+            .take_ids()
+            .contains(&email_submission_id)
     );
 
     // Verify onSuccessUpdateEmail action
@@ -481,6 +512,49 @@ pub async fn test(test: &TestServer) {
     );
     smtp_settings.lock().do_stop = true;
 
+    // Identities are created and destroyed as the account's addresses change
+    let account_id = account.id().document_id();
+    let account_cache = test.server.inner.cache.accounts.get(&account_id).unwrap();
+    let mut updated_cache = AccountCache::clone(&account_cache);
+    updated_cache.addresses = updated_cache
+        .addresses
+        .iter()
+        .cloned()
+        .chain([EmailAddress {
+            local_part: "jdoe.temp".into(),
+            domain_id: account_cache.addresses.first().unwrap().domain_id,
+        }])
+        .collect();
+    test.server
+        .inner
+        .cache
+        .accounts
+        .insert(account_id, Arc::new(updated_cache));
+    assert!(
+        identity_id_by_email(&client, "jdoe.temp@example.com")
+            .await
+            .is_some(),
+        "Identity was not created for the new address"
+    );
+
+    test.server
+        .inner
+        .cache
+        .accounts
+        .insert(account_id, account_cache);
+    assert!(
+        identity_id_by_email(&client, "jdoe.temp@example.com")
+            .await
+            .is_none(),
+        "Identity was not destroyed for the removed address"
+    );
+    assert!(
+        identity_id_by_email(&client, "jdoe@example.com")
+            .await
+            .is_some(),
+        "Identity for a valid address was destroyed"
+    );
+
     // Destroy the created mailbox, identity and all submissions
     for identity_id in [
         identity_id,
@@ -501,6 +575,15 @@ pub async fn test(test: &TestServer) {
         client.email_submission_destroy(&id).await.unwrap();
     }
     test.destroy_all_mailboxes(account).await;
+
+    let mut batch = BatchBuilder::new();
+    batch
+        .with_account_id(account.id().document_id())
+        .with_collection(Collection::Principal)
+        .with_document(0)
+        .clear(PrincipalField::IdentityAddresses);
+    test.server.commit_batch(batch).await.unwrap();
+
     test.assert_is_empty().await;
 }
 
@@ -663,4 +746,17 @@ pub async fn expect_nothing(event_rx: &mut mpsc::Receiver<MockMessage>) {
             panic!("Received a message when expecting nothing: {:?}", message);
         }
     }
+}
+
+async fn identity_id_by_email(client: &Client, email: &str) -> Option<String> {
+    let mut request = client.build();
+    request.get_identity();
+    request
+        .send_single::<IdentityGetResponse>()
+        .await
+        .unwrap()
+        .take_list()
+        .into_iter()
+        .find(|identity| identity.email() == Some(email))
+        .map(|mut identity| identity.take_id())
 }

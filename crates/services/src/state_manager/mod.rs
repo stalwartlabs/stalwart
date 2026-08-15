@@ -12,6 +12,7 @@ pub mod push;
 
 use common::ipc::PushNotification;
 use email::push::PushSubscription;
+use reqwest::Client;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -37,6 +38,7 @@ pub struct PushRegistration {
     last_request: Instant,
     notifications: Vec<PushNotification>,
     in_flight: bool,
+    client: Client,
 }
 
 #[derive(Debug)]

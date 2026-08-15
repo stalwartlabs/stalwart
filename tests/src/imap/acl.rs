@@ -287,6 +287,80 @@ pub async fn test(
         .await
         .assert_contains("copy test");
 
+    // Repeating a cross-account copy returns the existing destination UID
+    // instead of creating a duplicate, and moving a message that the destination
+    // account already holds still expunges the source.
+    let uid_dedup = assert_append_message(
+        imap_john,
+        "INBOX",
+        concat!(
+            "Message-ID: <dedup@example.com>\n",
+            "From: john\n",
+            "Subject: dedup\n",
+            "\n",
+            "dedup test"
+        ),
+        ResponseType::Ok,
+    )
+    .await
+    .into_append_uid();
+
+    imap_john
+        .send(&format!(
+            "UID COPY {} \"Shared Folders/jane.smith@example.com/INBOX\"",
+            uid_dedup
+        ))
+        .await;
+    let uid_dedup_dest = imap_john
+        .assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .into_copy_uid();
+
+    imap_john
+        .send(&format!(
+            "UID COPY {} \"Shared Folders/jane.smith@example.com/INBOX\"",
+            uid_dedup
+        ))
+        .await;
+    assert_eq!(
+        imap_john
+            .assert_read(Type::Tagged, ResponseType::Ok)
+            .await
+            .into_copy_uid(),
+        uid_dedup_dest
+    );
+
+    imap_jane.send("NOOP").await;
+    imap_jane.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+    imap_jane.send("UID FETCH 1:* (PREVIEW)").await;
+    imap_jane
+        .assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_count("dedup test", 1);
+
+    imap_john
+        .send(&format!(
+            "UID MOVE {} \"Shared Folders/jane.smith@example.com/INBOX\"",
+            uid_dedup
+        ))
+        .await;
+    assert_eq!(
+        imap_john
+            .assert_read(Type::Tagged, ResponseType::Ok)
+            .await
+            .into_copy_uid(),
+        uid_dedup_dest
+    );
+
+    imap_john
+        .send(&format!("UID FETCH {} (PREVIEW)", uid_dedup))
+        .await;
+    imap_john
+        .assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_count("dedup test", 0);
+
     // Jane stops sharing with Bill, and removes Insert access to John
     imap_jane.send("DELETEACL INBOX foobar@example.com").await;
     imap_jane.assert_read(Type::Tagged, ResponseType::Ok).await;

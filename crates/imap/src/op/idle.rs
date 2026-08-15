@@ -46,7 +46,8 @@ impl<T: SessionStream> Session<T> {
         };
         let is_rev2 = self.version.is_rev2();
         let is_utf8 = self.is_utf8;
-        let is_qresync = self.is_qresync;
+        let is_uidonly = self.is_uidonly;
+        let use_vanished = self.is_qresync || is_uidonly;
 
         // Register with push manager
         let mut push_rx = self
@@ -119,7 +120,7 @@ impl<T: SessionStream> Session<T> {
                         }
 
                         if has_mailbox_changes || has_email_changes {
-                            data.write_changes(&mailbox, has_mailbox_changes, has_email_changes, is_qresync, is_rev2, is_utf8).await?;
+                            data.write_changes(&mailbox, has_mailbox_changes, has_email_changes, use_vanished, is_uidonly, is_rev2, is_utf8).await?;
                         }
                     } else {
                         self.write_bytes(&b"* BYE Server shutting down.\r\n"[..]).await.ok();
@@ -132,12 +133,14 @@ impl<T: SessionStream> Session<T> {
 }
 
 impl<T: SessionStream> SessionData<T> {
+    #[allow(clippy::too_many_arguments)]
     pub async fn write_changes(
         &self,
         mailbox: &Option<Arc<SelectedMailbox>>,
         check_mailboxes: bool,
         check_emails: bool,
-        is_qresync: bool,
+        use_vanished: bool,
+        is_uidonly: bool,
         is_rev2: bool,
         is_utf8: bool,
     ) -> trc::Result<()> {
@@ -200,7 +203,7 @@ impl<T: SessionStream> SessionData<T> {
                 // Obtain changes since last sync
                 let modseq = mailbox.state.lock().modseq;
                 let new_state = self
-                    .write_mailbox_changes(mailbox, is_qresync)
+                    .write_mailbox_changes(mailbox, use_vanished)
                     .await
                     .caused_by(trc::location!())?;
                 if new_state == modseq {
@@ -252,8 +255,11 @@ impl<T: SessionStream> SessionData<T> {
                             },
                             mailbox.clone(),
                             true,
-                            is_qresync,
+                            use_vanished,
+                            is_uidonly,
                             false,
+                            is_utf8,
+                            u32::MAX,
                             op_start,
                         )
                         .await

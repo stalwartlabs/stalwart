@@ -421,6 +421,7 @@ impl ResolveVariable for UrlParts<'_> {
             ExpressionVariable::Url | ExpressionVariable::Value => {
                 Variable::from(self.url.as_str())
             }
+            ExpressionVariable::UrlOriginal => Variable::from(self.url_original.as_ref()),
             ExpressionVariable::PathQuery => Variable::from(
                 self.url_parsed
                     .as_ref()

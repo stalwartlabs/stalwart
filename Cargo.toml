@@ -30,6 +30,11 @@ members = [
     "tests",
 ]
 
+[patch.crates-io]
+hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+hickory-net = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+
 [profile.dev]
 opt-level = 0
 debug = 1

@@ -24,6 +24,7 @@ pub mod status;
 pub mod store;
 pub mod subscribe;
 pub mod thread;
+pub mod uidbatches;
 
 use crate::{
     Command,
@@ -79,6 +80,7 @@ impl CommandParser for Command {
             "GETQUOTA" => Command::GetQuota,
             "GETQUOTAROOT" => Command::GetQuotaRoot,
             "GETJMAPACCESS" => Command::GetJmapAccess,
+            "UIDBATCHES" => Command::UidBatches,
         )
     }
 

@@ -8,7 +8,7 @@ use super::{RocksDbStore, into_error};
 use crate::{
     Deserialize, IterateParams, Key, ValueKey, backend::rocksdb::CfHandle, write::ValueClass,
 };
-use rocksdb::{Direction, IteratorMode};
+use rocksdb::{Direction, IteratorMode, ReadOptions};
 
 impl RocksDbStore {
     pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -63,24 +63,44 @@ impl RocksDbStore {
             let cf = db.subspace_handle(params.begin.subspace());
             let begin = params.begin.serialize(0);
             let end = params.end.serialize(0);
-            let it_mode = if params.ascending {
-                IteratorMode::From(&begin, Direction::Forward)
-            } else {
-                IteratorMode::From(&end, Direction::Reverse)
-            };
+            let mut upper_bound = Vec::with_capacity(end.len() + 1);
 
-            for row in db.iterator_cf(&cf, it_mode) {
-                let (key, value) = row.map_err(into_error)?;
-                if key.as_ref() < begin.as_slice()
-                    || key.as_ref() > end.as_slice()
-                    || !cb(&key, &value)?
-                    || params.first
-                {
+            upper_bound.extend_from_slice(&end);
+            upper_bound.push(0u8);
+
+            let mut read_opts = ReadOptions::default();
+            read_opts.set_iterate_lower_bound(begin.as_slice());
+            read_opts.set_iterate_upper_bound(upper_bound);
+
+            let mut it = db.raw_iterator_cf_opt(&cf, read_opts);
+            if params.ascending {
+                it.seek(&begin);
+            } else {
+                it.seek_for_prev(&end);
+            }
+
+            while it.valid() {
+                let Some(key) = it.key() else {
                     break;
+                };
+                let value = if params.values {
+                    it.value().unwrap_or_default()
+                } else {
+                    &[][..]
+                };
+
+                if !cb(key, value)? || params.first {
+                    return Ok(());
+                }
+
+                if params.ascending {
+                    it.next();
+                } else {
+                    it.prev();
                 }
             }
 
-            Ok(())
+            it.status().map_err(into_error)
         })
         .await
     }

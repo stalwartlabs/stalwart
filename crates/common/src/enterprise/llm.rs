@@ -9,6 +9,7 @@
  */
 
 use hyper::HeaderMap;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ pub struct AiApiConfig {
     pub headers: HeaderMap,
     pub tls_allow_invalid_certs: bool,
     pub default_temperature: f64,
+    pub client: Client,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -121,12 +123,10 @@ impl AiApiConfig {
         };
 
         // Send request
-        let response = reqwest::Client::builder()
-            .timeout(self.timeout)
-            .danger_accept_invalid_certs(self.tls_allow_invalid_certs)
-            .build()
-            .map_err(|err| format!("Failed to create HTTP client: {}", err))?
+        let response = self
+            .client
             .post(&self.url)
+            .timeout(self.timeout)
             .headers(self.headers.clone())
             .body(body)
             .send()

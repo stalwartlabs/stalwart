@@ -14,7 +14,12 @@ use compact_str::ToCompactString;
 use registry::{schema::enums::ExpressionVariable, types::ipmask::IpAddrOrMask};
 use rustls::ServerConfig;
 use std::fmt::Debug;
-use std::{borrow::Cow, net::IpAddr, sync::Arc, time::Instant};
+use std::{
+    borrow::Cow,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+    time::Instant,
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::watch,
@@ -268,6 +273,82 @@ impl Debug for TcpAcceptor {
     }
 }
 
+pub fn is_global_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_global_ipv4(ip),
+        IpAddr::V6(ip) => is_global_ipv6(ip),
+    }
+}
+
+fn is_global_ipv4(ip: &Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    let is_this_network = a == 0;
+    let is_shared = a == 100 && (64..128).contains(&b);
+    let is_protocol_assignment = a == 192 && b == 0 && c == 0;
+    let is_benchmarking = a == 198 && (b & 0xfe) == 18;
+    let is_relay_6to4 = a == 192 && b == 88 && c == 99;
+    let is_reserved = a >= 240;
+
+    !(ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || is_this_network
+        || is_shared
+        || is_protocol_assignment
+        || is_benchmarking
+        || is_relay_6to4
+        || is_reserved)
+}
+
+fn is_global_ipv6(ip: &Ipv6Addr) -> bool {
+    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() {
+        return false;
+    }
+
+    if let Some(ip) = ip.to_ipv4() {
+        return is_global_ipv4(&ip);
+    }
+
+    let segments = ip.segments();
+
+    if segments[0] == 0x2002 {
+        return is_global_ipv4(&Ipv4Addr::from(
+            ((segments[1] as u32) << 16) | segments[2] as u32,
+        ));
+    }
+
+    if segments[0] == 0x0064 && segments[1] == 0xff9b {
+        let is_well_known_prefix =
+            segments[2] == 0 && segments[3] == 0 && segments[4] == 0 && segments[5] == 0;
+
+        return is_well_known_prefix
+            && is_global_ipv4(&Ipv4Addr::from(
+                ((segments[6] as u32) << 16) | segments[7] as u32,
+            ));
+    }
+
+    let is_unique_local = (segments[0] & 0xfe00) == 0xfc00;
+    let is_link_local = (segments[0] & 0xffc0) == 0xfe80;
+    let is_site_local = (segments[0] & 0xffc0) == 0xfec0;
+    let is_discard_only =
+        segments[0] == 0x0100 && segments[1] == 0 && segments[2] == 0 && segments[3] == 0;
+    let is_documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+    let is_teredo = segments[0] == 0x2001 && segments[1] == 0;
+    let is_orchid = segments[0] == 0x2001 && (segments[1] & 0xfff0) == 0x0020;
+
+    !(is_unique_local
+        || is_link_local
+        || is_site_local
+        || is_discard_only
+        || is_documentation
+        || is_teredo
+        || is_orchid)
+}
+
 pub fn ip_to_bytes(ip: &IpAddr) -> Vec<u8> {
     match ip {
         IpAddr::V4(ip) => ip.octets().to_vec(),
@@ -288,6 +369,84 @@ pub fn ip_to_bytes_prefix(prefix: u8, ip: &IpAddr) -> Vec<u8> {
             buf.push(prefix);
             buf.extend_from_slice(&ip.octets());
             buf
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_global_ip;
+    use std::net::IpAddr;
+
+    #[test]
+    fn global_ip_classification() {
+        for ip in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "93.184.216.34",
+            "172.32.0.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "198.20.0.1",
+            "192.0.3.1",
+            "2606:4700::1111",
+            "2a00:1450:4001::200e",
+            "::ffff:8.8.8.8",
+            "64:ff9b::808:808",
+            "2002:0808:0808::",
+            "2001:db9::1",
+        ] {
+            assert!(
+                is_global_ip(&ip.parse::<IpAddr>().unwrap()),
+                "expected {ip} to be global"
+            );
+        }
+
+        for ip in [
+            "127.0.0.1",
+            "127.1.2.3",
+            "10.0.0.1",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "100.127.255.255",
+            "198.18.0.1",
+            "198.19.255.255",
+            "192.0.0.1",
+            "192.0.2.5",
+            "192.88.99.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "224.0.0.1",
+            "0.0.0.0",
+            "0.1.2.3",
+            "::1",
+            "::",
+            "fc00::1",
+            "fd12:3456::1",
+            "fe80::1",
+            "febf::1",
+            "fec0::1",
+            "2001:db8::1",
+            "ff02::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+            "::127.0.0.1",
+            "64:ff9b::7f00:1",
+            "64:ff9b::a00:1",
+            "64:ff9b:1::7f00:1",
+            "2002:7f00:1::",
+            "2002:c0a8:101::",
+            "100::1",
+            "2001::1",
+            "2001:20::1",
+        ] {
+            assert!(
+                !is_global_ip(&ip.parse::<IpAddr>().unwrap()),
+                "expected {ip} to be rejected"
+            );
         }
     }
 }

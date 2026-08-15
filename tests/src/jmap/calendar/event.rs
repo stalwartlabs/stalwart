@@ -250,7 +250,10 @@ pub async fn test(test: &TestServer) {
             "participants": {
               "3f5bc8c0-c722-5345-b7d9-5a899db08a30": {
                 "calendarAddress": "mailto:cyrus@example.com",
-                "@type": "Participant"
+                "@type": "Participant",
+                "roles": {
+                  "owner": true
+                }
               }
             },
             "id": "d"
@@ -658,7 +661,10 @@ END:VCALENDAR
     "participants": {
       "25d7647e-52fc-559b-88df-d66f08da079c": {
         "calendarAddress": "mailto:jsmith@example.com",
-        "@type": "Participant"
+        "@type": "Participant",
+        "roles": {
+          "owner": true
+        }
       }
     },
     "keywords": {
@@ -806,7 +812,8 @@ pub fn test_jscalendar_3() -> Value {
           "calendarAddress": "mailto:cyrus@example.com",
           "@type": "Participant",
           "roles": {
-            "chair": true
+            "chair": true,
+            "owner": true
           },
           "participationStatus": "accepted"
         },
@@ -836,6 +843,7 @@ pub fn test_jscalendar_4() -> Value {
 }
 
 const TEST_ICAL_1: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
 BEGIN:VEVENT
 DTSTART;TZID=US/Eastern:20060102T100000
 UID:74855313FA803DA593CD579A@example.com

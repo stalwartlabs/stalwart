@@ -42,6 +42,28 @@ BODYSTRUCTURE (
    ) 0 "dfea5a78f321b331e6d7983a1f9cc6b7" NIL NIL NIL
 )
 
+BODYSTRUCTURE UTF8=ACCEPT (
+   "message" "rfc822" NIL NIL NIL NIL 88 (
+      "Sun, 12 Aug 2012 12:34:56 +0300" "submsg" (
+         (
+            NIL NIL "sub" "domain.org"
+         )
+      ) (
+         (
+            NIL NIL "sub" "domain.org"
+         )
+      ) (
+         (
+            NIL NIL "sub" "domain.org"
+         )
+      ) NIL NIL NIL NIL NIL
+   ) (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 12 1 "f0ef7081e1539ac00ef5b761b4fb01b3" NIL NIL NIL
+   ) 0 "dfea5a78f321b331e6d7983a1f9cc6b7" NIL NIL NIL
+)
+
 BODY[] {196}
 From: user@domain.org
 Date: Sat, 24 Mar 2007 23:00:00 +0200

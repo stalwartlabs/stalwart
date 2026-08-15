@@ -8,7 +8,7 @@ use base64::{
     Engine, alphabet,
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
 };
-use common::{Server, auth::AccessToken, ipc::PushEvent};
+use common::{Server, auth::AccessToken, ipc::PushEvent, network::is_global_ip};
 use email::push::{EmailPush, Keys, PushSubscription, PushSubscriptions, Urgency};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
@@ -29,7 +29,9 @@ use jmap_proto::{
 use jmap_tools::{Key, Map, Property, Value};
 use rand::distr::Alphanumeric;
 use registry::schema::enums::StorageQuota;
+use reqwest::Url;
 use std::future::Future;
+use std::net::IpAddr;
 use std::str::FromStr;
 use store::{
     Serialize, ValueKey,
@@ -315,9 +317,12 @@ fn validate_push_value(
         {
             push.device_client_id = value.into_owned();
         }
-        (PushSubscriptionProperty::Url, Value::Str(value))
-            if is_create && value.len() < 512 && value.starts_with("https://") =>
-        {
+        (PushSubscriptionProperty::Url, Value::Str(value)) if is_create && value.len() < 512 => {
+            validate_push_url(value.as_ref()).map_err(|description| {
+                SetError::invalid_properties()
+                    .with_property(property.clone())
+                    .with_description(description)
+            })?;
             push.url = value.into_owned();
         }
         (PushSubscriptionProperty::Keys, Value::Object(value)) if is_create && value.len() == 2 => {
@@ -416,6 +421,40 @@ fn validate_push_value(
     Ok(())
 }
 
+fn validate_push_url(url: &str) -> Result<(), &'static str> {
+    let url = Url::parse(url).map_err(|_| "Invalid push subscription URL.")?;
+
+    if url.scheme() != "https" {
+        return Err("Push subscription URLs must use the https scheme.");
+    }
+
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("Push subscription URLs must not contain credentials.");
+    }
+
+    let Some(host) = url.host_str() else {
+        return Err("Push subscription URLs must contain a host.");
+    };
+
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        #[cfg(feature = "test_mode")]
+        if ip.is_loopback() {
+            return Ok(());
+        }
+
+        if !is_global_ip(&ip) {
+            return Err("Push subscription URLs must not point to a local or reserved IP address.");
+        }
+    }
+
+    Ok(())
+}
+
 fn parse_email_push(
     configs: &Map<'_, PushSubscriptionProperty, PushSubscriptionValue>,
     access_token: &AccessToken,
@@ -495,4 +534,63 @@ fn email_push_error(description: &'static str) -> SetError<PushSubscriptionPrope
     SetError::invalid_properties()
         .with_property(PushSubscriptionProperty::EmailPush)
         .with_description(description)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_push_url;
+
+    #[test]
+    fn push_url_validation() {
+        for url in [
+            "https://push.example.org/subscription/123",
+            "https://push.example.org:8443/subscription/123",
+            "HTTPS://push.example.org/subscription/123",
+            "https://8.8.8.8/push",
+            "https://[2606:4700::1111]/push",
+            "https://[64:ff9b::808:808]/push",
+        ] {
+            assert!(validate_push_url(url).is_ok(), "expected {url} to be valid");
+        }
+
+        for url in [
+            "http://push.example.org/push",
+            "ftp://push.example.org/push",
+            "https://user:pass@push.example.org/push",
+            "not a url",
+            "https://",
+            "https://10.0.0.1/push",
+            "https://192.168.1.1/push",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://100.100.100.200/push",
+            "https://[fd00::1]/push",
+            "https://[fe80::1]/push",
+            "https://[::ffff:127.0.0.1]/push",
+            "https://[64:ff9b::7f00:1]/push",
+        ] {
+            assert!(
+                validate_push_url(url).is_err(),
+                "expected {url} to be rejected"
+            );
+        }
+
+        for url in [
+            "https://127.0.0.1/push",
+            "https://0177.0.0.1/push",
+            "https://2130706433/push",
+            "https://0x7f000001/push",
+            "https://[::1]/push",
+        ] {
+            let result = validate_push_url(url);
+
+            if cfg!(feature = "test_mode") {
+                assert!(
+                    result.is_ok(),
+                    "expected {url} to be allowed under test_mode"
+                );
+            } else {
+                assert!(result.is_err(), "expected {url} to be rejected");
+            }
+        }
+    }
 }

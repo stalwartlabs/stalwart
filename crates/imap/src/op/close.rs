@@ -17,7 +17,7 @@ impl<T: SessionStream> Session<T> {
         let (data, mailbox) = self.state.select_data();
 
         if mailbox.is_select {
-            data.expunge(mailbox.clone(), None, op_start)
+            data.expunge(mailbox.clone(), None, u32::MAX, op_start)
                 .await
                 .caused_by(trc::location!())?;
         }

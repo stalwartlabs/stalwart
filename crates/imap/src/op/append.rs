@@ -34,6 +34,22 @@ impl<T: SessionStream> Session<T> {
         let arguments = request.parse_append(self.is_utf8)?;
         let (data, selected_mailbox) = self.state.session_mailbox_state();
 
+        // RFC 9738 makes APPEND atomic, so an oversized MULTIAPPEND stores nothing
+        let message_limit = self.server.core.imap.max_messages_per_save;
+        if arguments.messages.len() > message_limit as usize {
+            return self
+                .write_bytes(
+                    StatusResponse::no("Too many messages to append, try a smaller subset.")
+                        .with_tag(arguments.tag)
+                        .with_code(ResponseCode::MessageLimit {
+                            limit: message_limit,
+                            uid: None,
+                        })
+                        .into_bytes(),
+                )
+                .await;
+        }
+
         // Refresh mailboxes
         data.synchronize_mailboxes(false)
             .await

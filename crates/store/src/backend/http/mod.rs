@@ -48,4 +48,5 @@ pub struct HttpStore {
     pub expires: AtomicU64,
     pub in_flight: AtomicBool,
     pub config: HttpStoreConfig,
+    pub client: reqwest::Client,
 }

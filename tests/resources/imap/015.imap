@@ -1,0 +1,214 @@
+BODY (
+   (
+      "text" "plain" (
+         "charset" "koi8-r"
+      ) NIL NIL "quoted-printable" 9 0
+   )(
+      "application" "vnd.openxmlformats-officedocument.wordprocessingml.document" (
+         "name" "=?utf-8?B?0JfQsNC/0YDQvtGBINCk0JjQoSDQotCXLmRvY3g=?="
+      ) NIL "=?utf-8?B?0L/RgNC40LvQvtC20LXQvdC40LU=?=" "base64" 8
+   ) "mixed"
+)
+
+BODYSTRUCTURE (
+   (
+      "text" "plain" (
+         "charset" "koi8-r"
+      ) NIL NIL "quoted-printable" 9 0 "bbf9afe7431caf5f89a608bc31e8d822" NIL NIL NIL
+   )(
+      "application" "vnd.openxmlformats-officedocument.wordprocessingml.document" (
+         "name" "=?utf-8?B?0JfQsNC/0YDQvtGBINCk0JjQoSDQotCXLmRvY3g=?="
+      ) NIL "=?utf-8?B?0L/RgNC40LvQvtC20LXQvdC40LU=?=" "base64" 8 "5fa62ae6176f3746142503a6ebe96cb3" (
+         "attachment" (
+            "filename" "=?utf-8?B?0JfQsNC/0YDQvtGBINCk0JjQoSDQotCXLmRvY3g=?=" "size" "10"
+         )
+      ) NIL NIL
+   ) "mixed" (
+      "boundary" "BOUND1"
+   ) NIL NIL NIL
+)
+
+BODYSTRUCTURE UTF8=ACCEPT (
+   (
+      "text" "plain" (
+         "charset" "koi8-r"
+      ) NIL NIL "quoted-printable" 9 0 "bbf9afe7431caf5f89a608bc31e8d822" NIL NIL NIL
+   )(
+      "application" "vnd.openxmlformats-officedocument.wordprocessingml.document" (
+         "name" "Запрос ФИС ТЗ.docx"
+      ) NIL "приложение" "base64" 8 "5fa62ae6176f3746142503a6ebe96cb3" (
+         "attachment" (
+            "filename" "Запрос ФИС ТЗ.docx" "size" "10"
+         )
+      ) NIL NIL
+   ) "mixed" (
+      "boundary" "BOUND1"
+   ) NIL NIL NIL
+)
+
+BODY[] {682}
+From: "=?koi8-r?B?4czFy9PBzsTS?=" <exchange@example.com>
+To: user@example.com
+Date: Sat, 02 Aug 2026 10:15:05 +0300
+Subject: =?koi8-r?B?+sHQ0s/T?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND1"
+
+--BOUND1
+Content-Type: text/plain; charset=koi8-r
+Content-Transfer-Encoding: quoted-printable
+
+test body
+--BOUND1
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+	name="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="
+Content-Disposition: attachment;
+	filename="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="; size=10
+Content-Description: =?koi8-r?B?0NLJzM/Wxc7JxQ==?=
+Content-Transfer-Encoding: base64
+
+dGVzdA==
+--BOUND1--
+
+BINARY[] {682}
+From: "=?koi8-r?B?4czFy9PBzsTS?=" <exchange@example.com>
+To: user@example.com
+Date: Sat, 02 Aug 2026 10:15:05 +0300
+Subject: =?koi8-r?B?+sHQ0s/T?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND1"
+
+--BOUND1
+Content-Type: text/plain; charset=koi8-r
+Content-Transfer-Encoding: quoted-printable
+
+test body
+--BOUND1
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+	name="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="
+Content-Disposition: attachment;
+	filename="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="; size=10
+Content-Description: =?koi8-r?B?0NLJzM/Wxc7JxQ==?=
+Content-Transfer-Encoding: base64
+
+dGVzdA==
+--BOUND1--
+
+BINARY.SIZE[] 682
+----------------------------------
+BODY[HEADER] {222}
+From: "=?koi8-r?B?4czFy9PBzsTS?=" <exchange@example.com>
+To: user@example.com
+Date: Sat, 02 Aug 2026 10:15:05 +0300
+Subject: =?koi8-r?B?+sHQ0s/T?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND1"
+
+
+----------------------------------
+BODY[TEXT] {460}
+--BOUND1
+Content-Type: text/plain; charset=koi8-r
+Content-Transfer-Encoding: quoted-printable
+
+test body
+--BOUND1
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+	name="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="
+Content-Disposition: attachment;
+	filename="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="; size=10
+Content-Description: =?koi8-r?B?0NLJzM/Wxc7JxQ==?=
+Content-Transfer-Encoding: base64
+
+dGVzdA==
+--BOUND1--
+
+----------------------------------
+BODY[MIME] {52}
+Content-Type: multipart/mixed; boundary="BOUND1"
+
+
+----------------------------------
+BODY[1] {9}
+test body
+BINARY[1] {9}
+test body
+BINARY.SIZE[1] 9
+----------------------------------
+BODY[1.HEADER] {89}
+Content-Type: text/plain; charset=koi8-r
+Content-Transfer-Encoding: quoted-printable
+
+
+----------------------------------
+BODY[1.TEXT] {9}
+test body
+----------------------------------
+BODY[1.MIME] {89}
+Content-Type: text/plain; charset=koi8-r
+Content-Transfer-Encoding: quoted-printable
+
+
+----------------------------------
+BODY[1.1] {9}
+test body
+BINARY[1.1] {9}
+test body
+BINARY.SIZE[1.1] 9
+----------------------------------
+BODY[2] {8}
+dGVzdA==
+BINARY[2] {4}
+test
+BINARY.SIZE[2] 4
+----------------------------------
+BODY[2.HEADER] {318}
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+	name="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="
+Content-Disposition: attachment;
+	filename="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="; size=10
+Content-Description: =?koi8-r?B?0NLJzM/Wxc7JxQ==?=
+Content-Transfer-Encoding: base64
+
+
+----------------------------------
+BODY[2.TEXT] {8}
+dGVzdA==
+----------------------------------
+BODY[2.MIME] {318}
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+	name="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="
+Content-Disposition: attachment;
+	filename="=?koi8-r?B?+sHQ0s/TIObp8yD0+i5kb2N4?="; size=10
+Content-Description: =?koi8-r?B?0NLJzM/Wxc7JxQ==?=
+Content-Transfer-Encoding: base64
+
+
+----------------------------------
+BODY[2.1] {8}
+dGVzdA==
+BINARY[2.1] {4}
+test
+BINARY.SIZE[2.1] 4
+----------------------------------
+BODY[HEADER.FIELDS (FROM TO)] {82}
+From: "=?koi8-r?B?4czFy9PBzsTS?=" <exchange@example.com>
+To: user@example.com
+
+
+----------------------------------
+BODY[HEADER.FIELDS (FROM TO)]<10> {25}
+oi8-r?B?4czFy9PBzsTS?=" <
+----------------------------------
+BODY[HEADER.FIELDS.NOT (SUBJECT CC)] {190}
+From: "=?koi8-r?B?4czFy9PBzsTS?=" <exchange@example.com>
+To: user@example.com
+Date: Sat, 02 Aug 2026 10:15:05 +0300
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND1"
+
+
+----------------------------------
+BODY[HEADER.FIELDS.NOT (SUBJECT CC)]<10> {25}
+oi8-r?B?4czFy9PBzsTS?=" <
+----------------------------------

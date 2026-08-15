@@ -82,6 +82,52 @@ BODYSTRUCTURE (
    ) NIL NIL NIL
 )
 
+BODYSTRUCTURE UTF8=ACCEPT (
+   (
+      "text" "plain" (
+         "charset" "utf-8"
+      ) NIL NIL "7bit" 54 0 "e377afc895a2c4c0d17b378f355de59e" NIL NIL NIL
+   )(
+      "message" "rfc822" NIL NIL NIL "base64" 1179 (
+         "Tue, 14 Dec 2021 11:48:25 +0100" "HTML test" (
+            (
+               "Name" NIL "email" "example.com"
+            )
+         ) (
+            (
+               "Name" NIL "email" "example.com"
+            )
+         ) (
+            (
+               "Name" NIL "email" "example.com"
+            )
+         ) (
+            (
+               "email@example.com" NIL "email" "example.com"
+            )
+         ) NIL NIL NIL "<random-message-id@example.com>"
+      ) (
+         (
+            "text" "plain" (
+               "charset" "utf-8" "format" "flowed"
+            ) NIL NIL "7bit" 30 0 "6891396510cbadf4e2cfe31aee5bd25f" NIL NIL NIL
+         )(
+            "text" "html" (
+               "charset" "utf-8"
+            ) NIL NIL "7bit" 173 8 "1a04bd2ec90f44a42792eacdc14fe8ea" NIL NIL NIL
+         ) "alternative" (
+            "boundary" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+         ) NIL "en-US" NIL
+      ) 0 "eb1ac6e049a544c2bda1b7787e03db50" (
+         "attachment" (
+            "filename" "attached_email.eml"
+         )
+      ) NIL NIL
+   ) "mixed" (
+      "boundary" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ) NIL NIL NIL
+)
+
 BODY[] {1649}
 Content-Type: multipart/mixed;
  boundary=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

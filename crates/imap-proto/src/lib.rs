@@ -78,6 +78,9 @@ pub enum Command {
 
     // RFC 9698
     GetJmapAccess,
+
+    // RFC 10022
+    UidBatches,
 }
 
 impl Command {
@@ -92,6 +95,19 @@ impl Command {
                 | Command::Expunge(true)
                 | Command::Sort(true)
                 | Command::Thread(true)
+        )
+    }
+
+    pub fn requires_uid(&self) -> bool {
+        matches!(
+            self,
+            Command::Fetch(false)
+                | Command::Search(false)
+                | Command::Copy(false)
+                | Command::Move(false)
+                | Command::Store(false)
+                | Command::Sort(false)
+                | Command::Thread(false)
         )
     }
 }
@@ -154,6 +170,19 @@ pub enum ResponseCode {
 
     // USEATTR
     UseAttr,
+
+    // UIDONLY
+    UidRequired,
+
+    // UIDBATCHES
+    TooFew,
+    TooMany,
+
+    // MESSAGELIMIT
+    MessageLimit {
+        limit: u32,
+        uid: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
