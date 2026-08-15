@@ -8680,11 +8680,11 @@ impl EnumImpl for Permission {
             392 => Some(Permission::SysImapUpdate),
             393 => Some(Permission::SysInMemoryStoreGet),
             394 => Some(Permission::SysInMemoryStoreUpdate),
-            660 => Some(Permission::SysIndexQueueStatusGet),
-            661 => Some(Permission::SysIndexQueueStatusCreate),
-            662 => Some(Permission::SysIndexQueueStatusUpdate),
-            663 => Some(Permission::SysIndexQueueStatusDestroy),
-            664 => Some(Permission::SysIndexQueueStatusQuery),
+            598 => Some(Permission::SysIndexQueueStatusGet),
+            599 => Some(Permission::SysIndexQueueStatusCreate),
+            600 => Some(Permission::SysIndexQueueStatusUpdate),
+            660 => Some(Permission::SysIndexQueueStatusDestroy),
+            661 => Some(Permission::SysIndexQueueStatusQuery),
             395 => Some(Permission::SysJmapGet),
             396 => Some(Permission::SysJmapUpdate),
             397 => Some(Permission::SysLogGet),
@@ -8950,7 +8950,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 665;
+    const COUNT: usize = 662;
 }
 
 impl serde::Serialize for Permission {

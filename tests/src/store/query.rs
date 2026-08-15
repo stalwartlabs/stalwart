@@ -181,8 +181,7 @@ async fn search_unindex(store: &SearchStore, query: SearchQuery) -> trc::Result<
     };
 
     let index = query.index();
-    let mut account_id = None;
-    let mut document_ids = Vec::new();
+    let mut accounts: Vec<(u32, Vec<u32>)> = Vec::new();
     let mut before_id = None;
 
     for filter in query.filters() {
@@ -192,14 +191,18 @@ async fn search_unindex(store: &SearchStore, query: SearchQuery) -> trc::Result<
                 op: std::cmp::Ordering::Equal,
                 value,
             } => {
-                account_id = Some(*value as u32);
+                accounts.push((*value as u32, Vec::new()));
             }
             SearchFilter::Integer {
                 field: SearchField::DocumentId,
                 op: std::cmp::Ordering::Equal,
                 value,
             } => {
-                document_ids.push(*value as u32);
+                accounts
+                    .last_mut()
+                    .expect("Missing accountId for unindex")
+                    .1
+                    .push(*value as u32);
             }
             SearchFilter::Integer {
                 field: SearchField::Id,
@@ -209,23 +212,31 @@ async fn search_unindex(store: &SearchStore, query: SearchQuery) -> trc::Result<
                 before_id = Some(*value);
             }
             SearchFilter::And | SearchFilter::Or | SearchFilter::End => {}
-            other => panic!("Unsupported unindex filter {other:?}"),
+            other => {
+                return Err(trc::StoreEvent::NotSupported
+                    .into_err()
+                    .details(format!("Unsupported unindex filter {other:?}")));
+            }
         }
     }
 
     if let Some(before_id) = before_id {
-        internal.unindex_traces(before_id).await
-    } else {
-        let account_id = account_id.expect("Missing accountId for unindex");
+        return internal.unindex_traces(before_id).await;
+    }
 
+    assert!(!accounts.is_empty(), "Missing accountId for unindex");
+
+    for (account_id, document_ids) in accounts {
         if document_ids.is_empty() {
-            internal.unindex_account(index, account_id).await
+            internal.unindex_account(index, account_id).await?;
         } else {
             internal
                 .index_account_documents(account_id, index, vec![], document_ids)
-                .await
+                .await?;
         }
     }
+
+    Ok(())
 }
 
 fn document_field(document: &IndexDocument, field: &SearchField) -> Option<u64> {

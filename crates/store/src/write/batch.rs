@@ -423,6 +423,16 @@ impl BatchBuilder {
             self.batch_size += class.serialized_size();
             if let ValueOp::Set(value) = op {
                 self.batch_size += value.len();
+
+                match class {
+                    ValueClass::TaskQueue(TaskQueueClass::Due { .. }) => {
+                        self.has_tasks = true;
+                    }
+                    ValueClass::SearchIndex(SearchIndexClass::Queue { .. }) => {
+                        self.has_index_tasks = true;
+                    }
+                    _ => {}
+                }
             }
         }
 

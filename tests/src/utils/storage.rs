@@ -24,7 +24,7 @@ use registry::{
 };
 use store::write::now;
 use store::{
-    Deserialize, IterateParams, U32_LEN, ValueKey,
+    Deserialize, IterateParams, ValueKey,
     write::{SearchIndex, SearchIndexClass, TaskQueueClass, ValueClass},
 };
 use store::{RegistryStore, registry::write::RegistryWrite};
@@ -267,25 +267,24 @@ pub async fn wait_for_index(server: &Server) {
             .data
             .iterate(
                 IterateParams::new(
-                    ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueIndex {
+                    ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                         index: SearchIndex::Email,
-                        partition: 0,
+                        id_prefix: 0,
+                        id_suffix: 0,
+                        created_at: 0,
                     })),
-                    ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueStatus {
+                    ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                         index: SearchIndex::Tracing,
-                        partition: u32::MAX,
+                        id_prefix: u32::MAX,
+                        id_suffix: u32::MAX,
+                        created_at: u64::MAX,
                     })),
                 )
                 .ascending()
                 .no_values(),
-                |key, _| {
-                    // Status keys are ignored, only partitions with queued documents are awaited
-                    if key.len() == U32_LEN + 2 {
-                        has_queued_documents = true;
-                        Ok(false)
-                    } else {
-                        Ok(true)
-                    }
+                |_, _| {
+                    has_queued_documents = true;
+                    Ok(false)
                 },
             )
             .await
