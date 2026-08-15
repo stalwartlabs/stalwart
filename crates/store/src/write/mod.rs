@@ -106,6 +106,12 @@ pub struct Batch<'x> {
     pub(crate) ops: &'x mut [Operation],
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueueNotify {
+    pub tasks: bool,
+    pub search_index: bool,
+}
+
 #[derive(Debug)]
 pub struct BatchBuilder {
     current_account_id: Option<u32>,
@@ -118,6 +124,9 @@ pub struct BatchBuilder {
     batch_ops: usize,
     commit_points: Vec<usize>,
     last_archive_hash: Option<u32>,
+    last_index_partition: Option<(SearchIndex, u32)>,
+    has_index_tasks: bool,
+    has_tasks: bool,
     ops: Vec<Operation>,
 }
 
@@ -226,6 +235,15 @@ pub enum SearchIndexClass {
         index: SearchIndex,
         id_prefix: u32,
         id_suffix: u32,
+        created_at: u64,
+    },
+    QueueIndex {
+        index: SearchIndex,
+        partition: u32,
+    },
+    QueueStatus {
+        index: SearchIndex,
+        partition: u32,
     },
 }
 

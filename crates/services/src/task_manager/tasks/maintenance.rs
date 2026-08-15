@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
-use crate::task_manager::{
-    TaskResult,
-    index::{reindex_account, reindex_telemetry},
+use crate::{
+    index_queue::reindex::{reindex_account, reindex_telemetry},
+    task_manager::TaskResult,
 };
 use common::{
     KV_ACME, KV_GREYLIST, KV_LOCK_DAV, KV_LOCK_QUEUE_MESSAGE, KV_LOCK_TASK, KV_OAUTH,
@@ -42,6 +40,7 @@ use registry::{
     types::EnumImpl,
 };
 use smtp::reporting::index::ExternalReportIndex;
+use std::time::Instant;
 use store::{
     Serialize, ValueKey,
     rand::{self},
@@ -146,15 +145,13 @@ async fn store_maintenance(
                 }));
 
                 if batch.is_large_batch() {
-                    server.core.storage.data.write(batch.build_all()).await?;
-                    server.notify_task_queue();
+                    server.commit_batch(batch).await?;
                     batch = BatchBuilder::new();
                 }
             }
 
             if !batch.is_empty() {
-                server.core.storage.data.write(batch.build_all()).await?;
-                server.notify_task_queue();
+                server.commit_batch(batch).await?;
             }
         }
         TaskStoreMaintenanceType::ReindexTelemetry => {
@@ -286,15 +283,13 @@ async fn store_maintenance(
                     }));
 
                     if batch.is_large_batch() {
-                        server.core.storage.data.write(batch.build_all()).await?;
-                        server.notify_task_queue();
+                        server.commit_batch(batch).await?;
                         batch = BatchBuilder::new();
                     }
                 }
 
                 if !batch.is_empty() {
-                    server.core.storage.data.write(batch.build_all()).await?;
-                    server.notify_task_queue();
+                    server.commit_batch(batch).await?;
                 }
             }
         }
@@ -391,15 +386,13 @@ async fn store_maintenance(
                     }));
 
                     if batch.is_large_batch() {
-                        server.core.storage.data.write(batch.build_all()).await?;
-                        server.notify_task_queue();
+                        server.commit_batch(batch).await?;
                         batch = BatchBuilder::new();
                     }
                 }
 
                 if !batch.is_empty() {
-                    server.core.storage.data.write(batch.build_all()).await?;
-                    server.notify_task_queue();
+                    server.commit_batch(batch).await?;
                 }
             }
             // SPDX-SnippetEnd

@@ -8,7 +8,9 @@ use crate::{Server, ipc::PushNotification};
 use std::time::Duration;
 use store::{
     IterateParams, Key, LogKey, SUBSPACE_LOGS, U64_LEN,
-    write::{AnyClass, AssignedIds, BatchBuilder, ValueClass, key::DeserializeBigEndian},
+    write::{
+        AnyClass, AssignedIds, BatchBuilder, QueueNotify, ValueClass, key::DeserializeBigEndian,
+    },
 };
 use trc::AddContext;
 use types::{
@@ -27,6 +29,11 @@ impl Server {
             assigned_ids
                 .ids
                 .extend(self.store().write(batch).await?.ids);
+        }
+
+        let queues = builder.queue_notify();
+        if queues != QueueNotify::default() {
+            self.notify_queues(queues).await;
         }
 
         if let Some(changes) = builder.changes() {

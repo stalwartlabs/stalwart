@@ -10,7 +10,7 @@ use std::env;
 use std::io::{self, Write};
 use store::write::serialize::RawValue;
 use store::write::{AnyClass, AnyKey, BatchBuilder, ValueClass};
-use store::{Deserialize, IterateParams, SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX, Store};
+use store::{IterateParams, SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX, Store};
 
 const HELP: &str = concat!(
     "Stalwart Server v",

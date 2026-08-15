@@ -163,6 +163,12 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                                 .await;
                                                     }
                                                 }
+                                                BroadcastEvent::TaskQueueRefresh => {
+                                                    inner.ipc.task_tx.notify_one();
+                                                }
+                                                BroadcastEvent::IndexQueueRefresh => {
+                                                    inner.ipc.index_tx.notify_one();
+                                                }
                                                 BroadcastEvent::RegistryChange(change) => {
                                                     match Box::pin(inner.build_server().reload_registry(change)).await {
                                                         Ok(result) => {
@@ -268,5 +274,7 @@ fn log_event(event: &BroadcastEvent) -> trc::Value {
             }
         }
         BroadcastEvent::QueueRefresh => "QueueRefresh".into(),
+        BroadcastEvent::TaskQueueRefresh => "TaskQueueRefresh".into(),
+        BroadcastEvent::IndexQueueRefresh => "IndexQueueRefresh".into(),
     }
 }

@@ -67,6 +67,7 @@ pub async fn test(test: &TestServer) {
     lmtp.quit().await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     test.server.notify_task_queue();
+    test.server.notify_index_queue();
     test.wait_for_tasks().await;
 
     // There should be 2 spans

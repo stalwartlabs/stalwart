@@ -128,6 +128,7 @@ pub const KV_LOCK_QUEUE_MESSAGE: u8 = 21;
 pub const KV_LOCK_TASK: u8 = 23;
 pub const KV_LOCK_DAV: u8 = 25;
 pub const KV_SIEVE_ID: u8 = 26;
+pub const KV_LOCK_SEARCH_INDEX: u8 = 27;
 
 #[derive(Clone)]
 pub struct Server {
@@ -282,10 +283,17 @@ pub struct HttpAuthCache {
 pub struct Ipc {
     pub push_tx: mpsc::Sender<PushEvent>,
     pub task_tx: Arc<Notify>,
+    pub index_tx: Arc<Notify>,
     pub queue_tx: mpsc::Sender<QueueEvent>,
     pub report_tx: mpsc::Sender<ReportingEvent>,
     pub broadcast_tx: Option<mpsc::Sender<BroadcastEvent>>,
     pub train_task_controller: Arc<TrainTaskController>,
+}
+
+impl Ipc {
+    pub fn index_queue_notify(&self) -> ipc::IndexQueueNotify {
+        ipc::IndexQueueNotify::new(self.index_tx.clone(), self.broadcast_tx.clone())
+    }
 }
 
 pub struct TlsConnectors {

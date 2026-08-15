@@ -5,14 +5,15 @@
  */
 
 use super::{
-    Batch, BatchBuilder, ChangedCollection, IntoOperations, Operation, ValueClass, ValueOp,
-    assert::ToAssertValue, log::VanishedItem,
+    Batch, BatchBuilder, ChangedCollection, IntoOperations, Operation, QueueNotify, ValueClass,
+    ValueOp, assert::ToAssertValue, log::VanishedItem,
 };
 use crate::{
-    SerializeInfallible, U32_LEN, U64_LEN,
+    SerializeInfallible, U32_LEN,
+    search::GLOBAL_BUCKET_SHIFT,
     write::{
         AssignedIds, LogCollection, MergeOperation, MergeResult, SearchIndex, SearchIndexClass,
-        SetOperation, TaskQueueClass, key::KeySerializer, now,
+        SetOperation, TaskQueueClass,
     },
 };
 use registry::{
@@ -39,6 +40,9 @@ impl BatchBuilder {
             has_assertions: false,
             commit_points: Vec::new(),
             last_archive_hash: None,
+            last_index_partition: None,
+            has_index_tasks: false,
+            has_tasks: false,
         }
     }
 
@@ -399,6 +403,7 @@ impl BatchBuilder {
         self.commit_points.push(self.ops.len());
         self.batch_ops = 0;
         self.batch_size = 0;
+        self.last_index_partition = None;
         if let Some(account_id) = self.current_account_id {
             self.ops.push(Operation::AccountId { account_id });
         }
@@ -471,6 +476,13 @@ impl BatchBuilder {
         }
     }
 
+    pub fn queue_notify(&self) -> QueueNotify {
+        QueueNotify {
+            tasks: self.has_tasks,
+            search_index: self.has_index_tasks,
+        }
+    }
+
     pub fn changes(self) -> Option<VecMap<u32, ChangedCollection>> {
         if self.has_changes() {
             Some(self.changed_collections)
@@ -500,6 +512,7 @@ impl BatchBuilder {
         let class = task.object_type().to_id();
         let task = task.to_pickled_vec();
         let id = SnowflakeIdGenerator::global_id().unwrap_or_default();
+        self.has_tasks = true;
 
         self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), task)
             .set(
@@ -512,6 +525,7 @@ impl BatchBuilder {
         let due = task.due_timestamp();
         let class = task.object_type().to_id();
         let task = task.to_pickled_vec();
+        self.has_tasks = true;
 
         self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), task)
             .set(
@@ -526,16 +540,14 @@ impl BatchBuilder {
         account_id: u32,
         document_id: u32,
     ) -> &mut Self {
-        self.set(
+        self.queue_index_task(index, account_id).set(
             ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index,
                 id_prefix: account_id,
                 id_suffix: document_id,
+                created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0).unwrap_or_default(),
             }),
-            KeySerializer::new(U64_LEN + 1)
-                .write(1u8)
-                .write(now())
-                .finalize(),
+            vec![1u8],
         )
     }
 
@@ -545,31 +557,42 @@ impl BatchBuilder {
         account_id: u32,
         document_id: u32,
     ) -> &mut Self {
-        self.set(
+        self.queue_index_task(index, account_id).set(
             ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index,
                 id_prefix: account_id,
                 id_suffix: document_id,
+                created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0).unwrap_or_default(),
             }),
-            KeySerializer::new(U64_LEN + 1)
-                .write(0u8)
-                .write(now())
-                .finalize(),
+            vec![0u8],
         )
     }
 
     pub fn queue_trace_index(&mut self, id: u64) -> &mut Self {
-        self.set(
-            ValueClass::SearchIndex(SearchIndexClass::Queue {
-                index: SearchIndex::Tracing,
-                id_prefix: (id >> 32) as u32,
-                id_suffix: id as u32,
-            }),
-            KeySerializer::new(U64_LEN + 1)
-                .write(1u8)
-                .write(now())
-                .finalize(),
-        )
+        self.queue_index_task(SearchIndex::Tracing, (id >> GLOBAL_BUCKET_SHIFT) as u32)
+            .set(
+                ValueClass::SearchIndex(SearchIndexClass::Queue {
+                    index: SearchIndex::Tracing,
+                    id_prefix: (id >> 32) as u32,
+                    id_suffix: id as u32,
+                    created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0)
+                        .unwrap_or_default(),
+                }),
+                vec![1u8],
+            )
+    }
+
+    fn queue_index_task(&mut self, index: SearchIndex, partition: u32) -> &mut Self {
+        self.has_index_tasks = true;
+        if self.last_index_partition != Some((index, partition)) {
+            self.last_index_partition = Some((index, partition));
+            self.set(
+                ValueClass::SearchIndex(SearchIndexClass::QueueIndex { index, partition }),
+                vec![],
+            );
+        }
+
+        self
     }
 }
 

@@ -351,6 +351,7 @@ impl TestServerBuilder {
 
         // Parse storage
         let storage = Storage::parse(&mut self.bootstrap).await;
+        let (ipc, mut ipc_rxs) = build_ipc(!storage.coordinator.is_none());
 
         // Reset search store
         if init_store && self.reset {
@@ -358,7 +359,8 @@ impl TestServerBuilder {
         }
 
         // Parse telemetry
-        let telemetry = Telemetry::parse(&mut self.bootstrap, &storage).await;
+        let telemetry =
+            Telemetry::parse(&mut self.bootstrap, &storage, ipc.index_queue_notify()).await;
 
         // Parse components
         let core = Box::pin(Core::parse(&mut self.bootstrap, storage)).await;
@@ -369,7 +371,6 @@ impl TestServerBuilder {
         telemetry.enable(true);
 
         // Build inner
-        let (ipc, mut ipc_rxs) = build_ipc(!core.storage.coordinator.is_none());
         let inner = Arc::new(Inner {
             shared_core: core.into_shared(),
             data,

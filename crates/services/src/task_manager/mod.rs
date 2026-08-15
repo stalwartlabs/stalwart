@@ -15,21 +15,10 @@ use store::write::Operation;
 use tokio::sync::mpsc;
 use trc::TaskManagerEvent;
 
-pub mod acme;
-pub mod alarm;
-pub mod destroy_account;
-pub mod dkim;
-pub mod dns;
-pub mod imip;
-pub mod index;
 pub mod lock;
-pub mod maintenance;
 pub mod manager;
-pub mod merge_threads;
-pub mod report;
-pub mod restore_item;
 pub mod scheduler;
-pub mod spam_classifier;
+pub mod tasks;
 
 const QUEUE_REFRESH_INTERVAL: u64 = 60 * 5; // 5 minutes
 const DEFAULT_LOCK_EXPIRY: u64 = 60 * 60; // 1 hour
@@ -38,6 +27,8 @@ pub(crate) struct TaskManagerIpc {
     txs: [mpsc::Sender<TaskJob>; TaskType::COUNT],
     locked: AHashMap<u64, Locked>,
     revision: u64,
+    scan_from: u64,
+    last_full_scan: Instant,
 }
 
 #[derive(Debug)]
@@ -45,6 +36,7 @@ pub(crate) struct Locked {
     expires: Instant,
     due: u64,
     revision: u64,
+    dispatch_revision: u64,
 }
 
 #[derive(Debug)]
@@ -58,6 +50,14 @@ pub(crate) struct TaskJob {
     id: u64,
     due: u64,
     typ: TaskType,
+    dispatch_revision: u64,
+}
+
+#[derive(Debug)]
+pub(crate) struct TaskDone {
+    id: u64,
+    dispatch_revision: u64,
+    is_committed: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -69,7 +69,6 @@ pub(crate) enum TaskResult {
         message: String,
         max_attempts: Option<u64>,
     },
-    Ignored,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

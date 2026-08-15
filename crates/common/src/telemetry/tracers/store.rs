@@ -37,6 +37,7 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
         let mut active_spans = AHashMap::new();
         let store = settings.store;
         let data_store = settings.data;
+        let index_tx = settings.index_tx;
         let mut batch = BatchBuilder::new();
         let mut task_batch = BatchBuilder::new();
 
@@ -93,6 +94,7 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
                     }
                 }
                 batch = BatchBuilder::new();
+                index_tx.notify();
             }
         }
     });
@@ -126,13 +128,20 @@ impl TracingStore for Store {
         .caused_by(trc::location!())?;
 
         if let Some(search_store) = search_store {
-            search_store
-                .unindex(
-                    SearchQuery::new(SearchIndex::Tracing)
-                        .with_filter(SearchFilter::integer_lt(SearchField::Id, until_span_id)),
-                )
-                .await
-                .caused_by(trc::location!())?;
+            if let Some(store) = search_store.internal_fts() {
+                store
+                    .unindex_traces(until_span_id)
+                    .await
+                    .caused_by(trc::location!())?;
+            } else {
+                search_store
+                    .unindex(
+                        SearchQuery::new(SearchIndex::Tracing)
+                            .with_filter(SearchFilter::integer_lt(SearchField::Id, until_span_id)),
+                    )
+                    .await
+                    .caused_by(trc::location!())?;
+            }
         }
 
         Ok(())

@@ -24,8 +24,8 @@ use registry::{
 };
 use store::write::now;
 use store::{
-    Deserialize, IterateParams, ValueKey,
-    write::{TaskQueueClass, ValueClass},
+    Deserialize, IterateParams, U32_LEN, ValueKey,
+    write::{SearchIndex, SearchIndexClass, TaskQueueClass, ValueClass},
 };
 use store::{RegistryStore, registry::write::RegistryWrite};
 
@@ -247,6 +247,55 @@ pub async fn wait_for_tasks(server: &Server, skip_not_due: bool, skip_permanent_
             count += 1;
             if count % 10 == 0 {
                 println!("Waiting for pending task {:?}...", task);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        } else {
+            break;
+        }
+    }
+
+    wait_for_index(server).await;
+}
+
+pub async fn wait_for_index(server: &Server) {
+    let mut count = 0;
+    loop {
+        let mut has_queued_documents = false;
+        server
+            .core
+            .storage
+            .data
+            .iterate(
+                IterateParams::new(
+                    ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueIndex {
+                        index: SearchIndex::Email,
+                        partition: 0,
+                    })),
+                    ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueStatus {
+                        index: SearchIndex::Tracing,
+                        partition: u32::MAX,
+                    })),
+                )
+                .ascending()
+                .no_values(),
+                |key, _| {
+                    // Status keys are ignored, only partitions with queued documents are awaited
+                    if key.len() == U32_LEN + 2 {
+                        has_queued_documents = true;
+                        Ok(false)
+                    } else {
+                        Ok(true)
+                    }
+                },
+            )
+            .await
+            .unwrap();
+
+        if has_queued_documents {
+            server.notify_index_queue();
+            count += 1;
+            if count % 10 == 0 {
+                println!("Waiting for pending search index documents...");
             }
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         } else {

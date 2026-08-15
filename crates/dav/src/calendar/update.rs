@@ -319,7 +319,6 @@ impl CalendarUpdateRequestHandler for Server {
                     .caused_by(trc::location!())?;
             }
             self.commit_batch(batch).await.caused_by(trc::location!())?;
-            self.notify_task_queue();
 
             Ok(HttpResponse::new(StatusCode::NO_CONTENT)
                 .with_etag_opt(etag)
@@ -448,7 +447,6 @@ impl CalendarUpdateRequestHandler for Server {
                     .caused_by(trc::location!())?;
             }
             self.commit_batch(batch).await.caused_by(trc::location!())?;
-            self.notify_task_queue();
 
             Ok(HttpResponse::new(StatusCode::CREATED)
                 .with_etag_opt(etag)

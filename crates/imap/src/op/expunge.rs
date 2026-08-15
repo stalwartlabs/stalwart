@@ -158,7 +158,6 @@ impl<T: SessionStream> SessionData<T> {
                 .commit_batch(batch)
                 .await
                 .caused_by(trc::location!())?;
-            self.server.notify_task_queue();
         }
 
         Ok(())

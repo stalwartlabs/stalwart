@@ -884,17 +884,21 @@ pub enum InMemoryStoreType {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
-pub enum IndexAction {
+pub enum IndexStatusType {
     #[default]
-    IndexTelemetry = 0,
-    IndexEmail = 1,
-    UnindexEmail = 2,
-    IndexCalendar = 3,
-    UnindexCalendar = 4,
-    IndexContacts = 5,
-    UnindexContacts = 6,
-    IndexFile = 7,
-    UnindexFile = 8,
+    Running = 0,
+    Failed = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum IndexType {
+    #[default]
+    Telemetry = 0,
+    Email = 1,
+    Calendar = 2,
+    Contacts = 3,
+    File = 4,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1917,11 +1921,11 @@ pub enum Permission {
     SysImapUpdate = 392,
     SysInMemoryStoreGet = 393,
     SysInMemoryStoreUpdate = 394,
-    SysIndexQueueEntryGet = 660,
-    SysIndexQueueEntryCreate = 661,
-    SysIndexQueueEntryUpdate = 662,
-    SysIndexQueueEntryDestroy = 663,
-    SysIndexQueueEntryQuery = 664,
+    SysIndexQueueStatusGet = 598,
+    SysIndexQueueStatusCreate = 660,
+    SysIndexQueueStatusUpdate = 599,
+    SysIndexQueueStatusDestroy = 661,
+    SysIndexQueueStatusQuery = 600,
     SysJmapGet = 395,
     SysJmapUpdate = 396,
     SysLogGet = 397,
@@ -2345,8 +2349,6 @@ pub enum SearchCalendarField {
     Location = 2,
     Owner = 3,
     Attendee = 4,
-    Start = 5,
-    Uid = 6,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -2363,7 +2365,6 @@ pub enum SearchContactField {
     OnlineService = 7,
     Address = 8,
     Note = 9,
-    Uid = 10,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -2377,11 +2378,7 @@ pub enum SearchEmailField {
     Subject = 4,
     Body = 5,
     Attachment = 6,
-    ReceivedAt = 7,
-    SentAt = 8,
-    Size = 9,
-    HasAttachment = 10,
-    Headers = 11,
+    Headers = 7,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -2763,21 +2760,21 @@ pub enum TaskTenantMaintenanceType {
 #[repr(u16)]
 pub enum TaskType {
     #[default]
-    CalendarAlarmEmail = 3,
-    CalendarAlarmNotification = 4,
-    CalendarItipMessage = 5,
-    MergeThreads = 6,
-    DmarcReport = 7,
-    TlsReport = 8,
-    RestoreArchivedItem = 9,
-    DestroyAccount = 10,
-    AccountMaintenance = 11,
-    TenantMaintenance = 12,
-    StoreMaintenance = 13,
-    SpamFilterMaintenance = 14,
-    AcmeRenewal = 15,
-    DkimManagement = 16,
-    DnsManagement = 17,
+    CalendarAlarmEmail = 0,
+    CalendarAlarmNotification = 1,
+    CalendarItipMessage = 2,
+    MergeThreads = 3,
+    DmarcReport = 4,
+    TlsReport = 5,
+    RestoreArchivedItem = 6,
+    DestroyAccount = 7,
+    AccountMaintenance = 8,
+    TenantMaintenance = 9,
+    StoreMaintenance = 10,
+    SpamFilterMaintenance = 11,
+    AcmeRenewal = 12,
+    DkimManagement = 13,
+    DnsManagement = 14,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]

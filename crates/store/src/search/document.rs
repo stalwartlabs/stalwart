@@ -113,6 +113,10 @@ impl IndexDocument {
         }
     }
 
+    pub fn index(&self) -> SearchIndex {
+        self.index
+    }
+
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty()
     }

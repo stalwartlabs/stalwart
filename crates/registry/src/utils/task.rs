@@ -6,7 +6,7 @@
 
 use crate::{
     schema::{
-        enums::{IndexAction, Permission},
+        enums::{IndexType, Permission},
         prelude::{Action, Task, TaskStatus, TaskStatusPending, UTCDateTime},
     },
     types::{EnumImpl, index::IndexValue},
@@ -125,8 +125,8 @@ impl TaskStatus {
     }
 }
 
-impl From<&IndexAction> for IndexValue<'_> {
-    fn from(value: &IndexAction) -> Self {
+impl From<&IndexType> for IndexValue<'_> {
+    fn from(value: &IndexType) -> Self {
         IndexValue::U16(value.to_id())
     }
 }

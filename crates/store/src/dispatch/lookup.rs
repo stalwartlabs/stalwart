@@ -404,6 +404,49 @@ impl InMemoryStore {
         }
     }
 
+    // Extends the expiry of a lock held by this process
+    pub async fn renew_lock(&self, prefix: u8, key: &[u8], duration: u64) -> trc::Result<()> {
+        match self {
+            InMemoryStore::Store(store) => {
+                let mut batch = BatchBuilder::new();
+                batch.set(
+                    ValueClass::InMemory(InMemoryClass::Key(KeyValue::<()>::build_key(
+                        prefix, key,
+                    ))),
+                    (now() + duration).serialize(),
+                );
+
+                store
+                    .write(batch.build_all())
+                    .await
+                    .map(|_| ())
+                    .map_err(|err| {
+                        err.details("Failed to renew lock.")
+                            .caused_by(trc::location!())
+                    })
+            }
+            #[cfg(feature = "redis")]
+            InMemoryStore::Redis(store) => {
+                store
+                    .renew_lock(&KeyValue::<()>::build_key(prefix, key), duration)
+                    .await
+            }
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            InMemoryStore::Sharded(store) => {
+                store
+                    .renew_lock(&KeyValue::<()>::build_key(prefix, key), duration)
+                    .await
+            }
+            // SPDX-SnippetEnd
+            InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
+                Err(trc::StoreEvent::NotSupported.into_err())
+            }
+        }
+    }
+
     pub async fn remove_lock(&self, prefix: u8, key: &[u8]) -> trc::Result<()> {
         self.key_delete(KeyValue::<()>::build_key(prefix, key))
             .await

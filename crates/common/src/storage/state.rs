@@ -9,6 +9,7 @@ use crate::{
     auth::AccessToken,
     ipc::{BroadcastEvent, PushEvent, PushNotification},
 };
+use store::write::QueueNotify;
 use tokio::sync::mpsc;
 use types::type_state::DataType;
 use utils::map::bitmap::Bitmap;
@@ -41,6 +42,25 @@ impl Server {
     #[inline(always)]
     pub fn notify_task_queue(&self) {
         self.inner.ipc.task_tx.notify_one();
+    }
+
+    #[inline(always)]
+    pub fn notify_index_queue(&self) {
+        self.inner.ipc.index_tx.notify_one();
+    }
+
+    pub async fn notify_queues(&self, queues: QueueNotify) {
+        if queues.tasks {
+            self.notify_task_queue();
+            self.cluster_broadcast(BroadcastEvent::TaskQueueRefresh)
+                .await;
+        }
+
+        if queues.search_index {
+            self.notify_index_queue();
+            self.cluster_broadcast(BroadcastEvent::IndexQueueRefresh)
+                .await;
+        }
     }
 
     pub async fn broadcast_push_notification(&self, notification: PushNotification) -> bool {

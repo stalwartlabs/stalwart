@@ -399,7 +399,6 @@ impl AddressBookSet for Server {
                 .caused_by(trc::location!())?
                 .last_change_id(account_id)
         {
-            self.notify_task_queue();
             response.new_state = State::Exact(change_id).into();
         }
 

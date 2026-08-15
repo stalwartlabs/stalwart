@@ -38,6 +38,7 @@ pub enum CalendarNotificationField {
 pub enum EmailField {
     Archive,
     Metadata,
+    SortKeys,
     Threading,
     DeletedAt,
 }
@@ -113,6 +114,7 @@ impl From<EmailField> for u8 {
     fn from(value: EmailField) -> Self {
         match value {
             EmailField::Metadata => 71,
+            EmailField::SortKeys => 72,
             EmailField::Threading => 90,
             EmailField::DeletedAt => 91,
             EmailField::Archive => ARCHIVE_FIELD,

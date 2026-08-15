@@ -11,135 +11,114 @@ use crate::{
         query::RegistryQueryFilters,
     },
 };
-use common::Server;
+use common::{Server, storage::search::SearchIndexStatus};
 use jmap_proto::{error::set::SetError, object::registry::RegistryComparator, types::state::State};
+use jmap_tools::{JsonPointer, JsonPointerItem, Key};
 use registry::{
-    jmap::IntoValue,
-    schema::{enums::IndexAction, prelude::Property, structs::IndexQueueEntry},
+    jmap::{IntoValue, JsonPointerPatch, RegistryJsonPatch},
+    schema::{
+        enums::{IndexStatusType, IndexType},
+        prelude::Property,
+        structs::{IndexQueueStatus, IndexStatus, IndexStatusFailed},
+    },
     types::{EnumImpl, datetime::UTCDateTime},
 };
-use std::str::FromStr;
 use store::{
     IterateParams, U32_LEN, ValueKey,
     registry::RegistryFilterOp,
     write::{
-        BatchBuilder, SearchIndex, SearchIndexClass, ValueClass, key::DeserializeBigEndian,
-        serialize::RawValue,
+        BatchBuilder, QueueNotify, SearchIndex, SearchIndexClass, ValueClass,
+        key::DeserializeBigEndian,
     },
 };
 use trc::AddContext;
 use types::id::Id;
 
-const QUEUE_INDEXES: [SearchIndex; 5] = [
-    SearchIndex::Email,
-    SearchIndex::Calendar,
-    SearchIndex::Contacts,
-    SearchIndex::File,
-    SearchIndex::Tracing,
-];
+const MAX_QUEUED_ITEMS: u64 = 10000;
 
-const ACCOUNT_INDEXES: [SearchIndex; 4] = [
-    SearchIndex::Email,
-    SearchIndex::Calendar,
-    SearchIndex::Contacts,
-    SearchIndex::File,
-];
-
-const TRACING_FLAG: u64 = 1 << 63;
-const MAX_SPAN_ID: u64 = TRACING_FLAG - 1;
-const MAX_ACCOUNT_ID: u32 = (1 << 29) - 1;
-const INDEX_SHIFT: u32 = 61;
-const ACCOUNT_ID_SHIFT: u32 = 32;
-
-#[derive(Clone, Copy)]
-struct QueueId {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct QueuePartition {
     index: SearchIndex,
-    id_prefix: u32,
-    id_suffix: u32,
+    partition: u32,
 }
 
-pub(crate) async fn index_queue_entry_get(
+pub(crate) async fn index_queue_status_get(
     mut get: RegistryGetResponse<'_>,
 ) -> trc::Result<RegistryGetResponse<'_>> {
-    if let Some(ids) = get.ids.take() {
-        for id in ids {
-            let Some(queue_id) = QueueId::parse(id) else {
-                get.not_found(id);
-                continue;
-            };
-
-            match get
-                .server
-                .store()
-                .get_value::<RawValue>(ValueKey::from(queue_id.class()))
-                .await
-                .caused_by(trc::location!())?
-            {
-                Some(value) => {
-                    let entry = map_entry(&queue_id, &value.0)?.into_value();
-                    get.insert(id, entry);
-                }
-                None => get.not_found(id),
-            }
-        }
+    let ids = if let Some(ids) = get.ids.take() {
+        ids
     } else {
-        let limit = get.server.core.jmap.get_max_objects;
-        let mut entries = Vec::with_capacity(std::cmp::min(limit, 16));
-
-        scan_queue(
+        scan_partitions(
             get.server,
-            &QUEUE_INDEXES.map(|index| (index, None)),
-            true,
-            true,
-            |queue_id, value| {
-                if let Some(id) = queue_id.to_id() {
-                    entries.push((id, map_entry(&queue_id, value)?));
-                }
-
-                Ok(entries.len() < limit)
-            },
+            None,
+            None,
+            None,
+            get.server.core.jmap.get_max_objects,
         )
-        .await?;
+        .await?
+    };
 
-        for (id, entry) in entries {
-            get.insert(id, entry.into_value());
+    // Counting the queued documents of every partition is bounded by a single budget
+    // shared by the whole request
+    let mut budget = MAX_QUEUED_ITEMS;
+
+    for id in ids {
+        match QueuePartition::from_id(id) {
+            Some(partition) => match build_status(get.server, partition, &mut budget).await? {
+                Some(status) => get.insert(id, status.into_value()),
+                None => get.not_found(id),
+            },
+            None => get.not_found(id),
         }
     }
 
     Ok(get)
 }
 
-pub(crate) async fn index_queue_entry_query(
+pub(crate) async fn index_queue_status_query(
     mut req: RegistryQueryResponse<'_>,
 ) -> trc::Result<QueryResponseBuilder> {
-    let mut action = None;
-    let mut account_id = None;
+    let mut index = None;
+    let mut partition = None;
+    let mut status = None;
 
-    req.request.extract_filters(|property, op, value| {
-        if !matches!(op, RegistryFilterOp::Equal) {
-            return false;
-        }
-
-        match property {
-            Property::Action => {
-                if let Some(value) = value.as_str().and_then(IndexAction::parse) {
-                    action = Some(value);
+    req.request
+        .extract_filters(|property, op, value| match property {
+            Property::Index => {
+                if matches!(op, RegistryFilterOp::Equal)
+                    && let Some(index_) = value
+                        .as_str()
+                        .and_then(IndexType::parse)
+                        .and_then(search_index)
+                {
+                    index = Some(index_);
                     true
                 } else {
                     false
                 }
             }
-            Property::AccountId => {
-                if let Some(value) = value.as_str().and_then(|value| Id::from_str(value).ok()) {
-                    account_id = Some(value.document_id());
+            Property::Partition => {
+                if matches!(op, RegistryFilterOp::Equal)
+                    && let Some(partition_) = value.as_str().and_then(|v| v.parse::<u32>().ok())
+                {
+                    partition = Some(partition_);
+                    true
+                } else {
+                    false
+                }
+            }
+            Property::Status => {
+                if matches!(op, RegistryFilterOp::Equal)
+                    && let Some(status_) = value.as_str().and_then(IndexStatusType::parse)
+                {
+                    status = Some(status_);
                     true
                 } else {
                     false
                 }
             }
             _ => false,
-        }
-    })?;
+        })?;
 
     if req
         .request
@@ -150,64 +129,49 @@ pub(crate) async fn index_queue_entry_query(
     {
         return Err(trc::JmapEvent::UnsupportedSort
             .into_err()
-            .details("Only sorting by 'id' is supported for index queue entries".to_string()));
+            .details("Only sorting by 'id' is supported for index queues".to_string()));
     }
 
+    // Paging by anchor is resolved by the response builder, which needs the full result set
+    let has_anchor = req.request.anchor.is_some();
     let params = req
         .request
         .extract_parameters(req.server.core.jmap.query_max_results, None)?;
-
-    let action = action.map(action_index);
-    let ranges = match (action, account_id) {
-        (Some((index, _)), Some(account_id)) if index != SearchIndex::Tracing => {
-            vec![(index, Some(account_id))]
-        }
-        (Some(_), Some(_)) => vec![],
-        (Some((index, _)), None) => vec![(index, None)],
-        (None, Some(account_id)) => ACCOUNT_INDEXES
-            .iter()
-            .map(|index| (*index, Some(account_id)))
-            .collect(),
-        (None, None) => QUEUE_INDEXES.iter().map(|index| (*index, None)).collect(),
-    };
-    let expected_flag = action.and_then(|(_, flag)| flag);
-
     let mut response = QueryResponseBuilder::new(
-        req.server.core.jmap.query_max_results,
+        req.server.core.jmap.query_max_results + 1,
         req.server.core.jmap.query_max_results,
         State::Initial,
         &req.request,
     );
-    let mut total = 0;
 
-    scan_queue(
+    let mut partitions = scan_partitions(
         req.server,
-        &ranges,
-        params.sort_ascending,
-        expected_flag.is_some(),
-        |queue_id, value| {
-            if expected_flag
-                .is_some_and(|flag| !value.first().is_some_and(|value| (*value != 0) == flag))
-            {
-                return Ok(true);
-            }
-
-            let Some(id) = queue_id.to_id() else {
-                return Ok(true);
-            };
-
-            total += 1;
-            if response.response.total.is_some() {
-                if !response.is_full() {
-                    response.add_id(id);
-                }
-                Ok(true)
-            } else {
-                Ok(response.add_id(id))
-            }
+        index,
+        partition,
+        status,
+        if has_anchor || response.response.total.is_some() {
+            usize::MAX
+        } else {
+            req.server.core.jmap.query_max_results + 1
         },
     )
     .await?;
+
+    if !params.sort_ascending {
+        partitions.reverse();
+    }
+
+    let mut total = 0;
+    for id in partitions {
+        total += 1;
+        if response.response.total.is_some() {
+            if !response.is_full() {
+                response.add_id(id);
+            }
+        } else if !response.add_id(id) {
+            break;
+        }
+    }
 
     if response.response.total.is_some() {
         response.response.total = Some(total);
@@ -222,211 +186,293 @@ pub(crate) async fn index_queue_entry_query(
     Ok(response)
 }
 
-pub(crate) async fn index_queue_entry_set(
+pub(crate) async fn index_queue_status_set(
     mut set: RegistrySetResponse<'_>,
 ) -> trc::Result<RegistrySetResponse<'_>> {
-    set.fail_all_create("Index queue entries cannot be created");
-    set.fail_all_update("Index queue entries cannot be modified");
+    set.fail_all_create("Index queues cannot be created");
+    set.fail_all_destroy("Index queues cannot be deleted");
 
     let mut batch = BatchBuilder::new();
-    let mut destroyed = Vec::with_capacity(set.destroy.len());
+    let mut has_changes = false;
 
-    for id in std::mem::take(&mut set.destroy) {
-        let Some(queue_id) = QueueId::parse(id) else {
-            set.response.not_destroyed.append(id, SetError::not_found());
+    'outer: for (id, value) in set.update.drain(..) {
+        let Some(partition) = QueuePartition::from_id(id) else {
+            set.response.not_updated.append(id, SetError::not_found());
             continue;
         };
 
-        let class = queue_id.class();
-        if set
+        let stored = set
             .server
-            .store()
-            .key_exists(ValueKey::from(class.clone()))
+            .search_index_status(partition.index, partition.partition)
             .await
-            .caused_by(trc::location!())?
-        {
-            batch.clear(class).commit_point();
-            destroyed.push(id);
-        } else {
-            set.response.not_destroyed.append(id, SetError::not_found());
+            .caused_by(trc::location!())?;
+        let attempts = stored.as_ref().map_or(0, |stored| stored.attempts);
+        let mut status = status_object(partition, 0, 0, stored);
+        let previous = status.status.clone();
+
+        for (key, value) in value.into_expanded_object() {
+            let ptr = match key {
+                Key::Property(prop) => {
+                    JsonPointer::new(vec![JsonPointerItem::Key(Key::Property(prop))])
+                }
+                Key::Borrowed(other) => JsonPointer::parse(other),
+                Key::Owned(other) => JsonPointer::parse(&other),
+            };
+
+            if let Err(err) = status.patch(JsonPointerPatch::new(&ptr).with_create(false), value) {
+                set.response.not_updated.append(id, err.into());
+                continue 'outer;
+            }
         }
+
+        if status.status != previous {
+            match &status.status {
+                IndexStatus::Running => {
+                    batch.clear(partition.status_class());
+                }
+                IndexStatus::Failed(failed) => {
+                    batch.set(
+                        partition.status_class(),
+                        SearchIndexStatus {
+                            next_retry: failed.next_retry.timestamp().max(0) as u64,
+                            attempts,
+                            reason: failed.reason.clone(),
+                        }
+                        .serialize(),
+                    );
+                }
+            }
+
+            batch.commit_point();
+            has_changes = true;
+        }
+
+        set.response.updated.append(id, None);
     }
 
-    if !batch.is_empty() {
+    if has_changes {
         set.server
             .store()
             .write(batch.build_all())
             .await
             .caused_by(trc::location!())?;
-
-        set.response.destroyed.extend(destroyed);
+        set.server
+            .notify_queues(QueueNotify {
+                tasks: false,
+                search_index: true,
+            })
+            .await;
     }
 
     Ok(set)
 }
 
-async fn scan_queue(
+async fn build_status(
     server: &Server,
-    ranges: &[(SearchIndex, Option<u32>)],
-    ascending: bool,
-    with_values: bool,
-    mut cb: impl FnMut(QueueId, &[u8]) -> trc::Result<bool> + Sync + Send,
-) -> trc::Result<()> {
-    let mut ranges = ranges.to_vec();
-    if !ascending {
-        ranges.reverse();
+    partition: QueuePartition,
+    budget: &mut u64,
+) -> trc::Result<Option<IndexQueueStatus>> {
+    let stored = server
+        .search_index_status(partition.index, partition.partition)
+        .await
+        .caused_by(trc::location!())?;
+    let (queued_updates, queued_deletions) = queued_items(server, partition, budget)
+        .await
+        .caused_by(trc::location!())?;
+
+    if stored.is_none() && queued_updates == 0 && queued_deletions == 0 {
+        return Ok(None);
     }
 
-    for (index, account_id) in ranges {
-        let (from_key, to_key) = queue_range(index, account_id);
-        let mut is_done = false;
-
-        server
-            .store()
-            .iterate(
-                IterateParams::new(from_key, to_key)
-                    .set_ascending(ascending)
-                    .set_values(with_values),
-                |key, value| {
-                    let keep_scanning = cb(QueueId::from_key(index, key)?, value)?;
-                    is_done = !keep_scanning;
-
-                    Ok(keep_scanning)
-                },
-            )
-            .await
-            .caused_by(trc::location!())?;
-
-        if is_done {
-            break;
-        }
-    }
-
-    Ok(())
+    Ok(Some(status_object(
+        partition,
+        queued_updates,
+        queued_deletions,
+        stored,
+    )))
 }
 
-fn queue_range(
-    index: SearchIndex,
-    account_id: Option<u32>,
-) -> (ValueKey<ValueClass>, ValueKey<ValueClass>) {
-    let (from_prefix, to_prefix) = match account_id {
-        Some(account_id) => (account_id, account_id),
-        None => (0, u32::MAX),
+fn status_object(
+    partition: QueuePartition,
+    queued_updates: u64,
+    queued_deletions: u64,
+    stored: Option<SearchIndexStatus>,
+) -> IndexQueueStatus {
+    IndexQueueStatus {
+        index: index_type(partition.index),
+        partition: partition.partition as u64,
+        queued_updates,
+        queued_deletions,
+        status: match stored {
+            Some(stored) => IndexStatus::Failed(IndexStatusFailed {
+                reason: stored.reason,
+                next_retry: UTCDateTime::from_timestamp(stored.next_retry as i64),
+            }),
+            None => IndexStatus::Running,
+        },
+    }
+}
+
+async fn queued_items(
+    server: &Server,
+    partition: QueuePartition,
+    budget: &mut u64,
+) -> trc::Result<(u64, u64)> {
+    if *budget == 0 {
+        return Ok((0, 0));
+    }
+
+    let (from_class, to_class) =
+        SearchIndexClass::queue_range(partition.index, partition.partition);
+    let mut queued_updates = 0;
+    let mut queued_deletions = 0;
+
+    server
+        .store()
+        .iterate(
+            IterateParams::new(
+                ValueKey::from(ValueClass::SearchIndex(from_class)),
+                ValueKey::from(ValueClass::SearchIndex(to_class)),
+            ),
+            |_, value| {
+                if value.first().is_some_and(|flag| *flag != 0) {
+                    queued_updates += 1;
+                } else {
+                    queued_deletions += 1;
+                }
+
+                Ok(queued_updates + queued_deletions < *budget)
+            },
+        )
+        .await?;
+
+    *budget -= queued_updates + queued_deletions;
+
+    Ok((queued_updates, queued_deletions))
+}
+
+async fn scan_partitions(
+    server: &Server,
+    index: Option<SearchIndex>,
+    partition: Option<u32>,
+    status: Option<IndexStatusType>,
+    max_results: usize,
+) -> trc::Result<Vec<Id>> {
+    let from_key = ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueIndex {
+        index: index.unwrap_or(SearchIndex::Email),
+        partition: partition.unwrap_or(0),
+    }));
+    let to_key = ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueStatus {
+        index: index.unwrap_or(SearchIndex::Tracing),
+        partition: partition.unwrap_or(u32::MAX),
+    }));
+
+    // Every partition is stored as a queue index key optionally followed by a status key,
+    // so a partition is only emitted once the next key reveals whether it has a status
+    let mut ids: Vec<Id> = Vec::new();
+    let mut pending: Option<(QueuePartition, bool)> = None;
+    let matches_status = |has_status: bool| match status {
+        Some(IndexStatusType::Failed) => has_status,
+        Some(IndexStatusType::Running) => !has_status,
+        None => true,
     };
 
-    (
-        ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
-            index,
-            id_prefix: from_prefix,
-            id_suffix: 0,
-        })),
-        ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
-            index,
-            id_prefix: to_prefix,
-            id_suffix: u32::MAX,
-        })),
-    )
-}
+    server
+        .store()
+        .iterate(
+            IterateParams::new(from_key, to_key).ascending().no_values(),
+            |key, _| {
+                if key.len() < U32_LEN + 2 {
+                    return Ok(true);
+                }
+                let Some(index) = SearchIndex::try_from_u8(key[1]) else {
+                    return Ok(true);
+                };
+                let queue_partition = QueuePartition {
+                    index,
+                    partition: key.deserialize_be_u32(2)?,
+                };
+                if partition.is_some_and(|partition| partition != queue_partition.partition) {
+                    return Ok(true);
+                }
+                let is_status = key.len() > U32_LEN + 2;
 
-fn map_entry(queue_id: &QueueId, value: &[u8]) -> trc::Result<IndexQueueEntry> {
-    let is_index = value.first().is_some_and(|flag| *flag != 0);
-    let created_at = value.deserialize_be_u64(1)?;
-    let is_tracing = queue_id.index == SearchIndex::Tracing;
+                match &mut pending {
+                    Some((last, has_status)) if *last == queue_partition => {
+                        *has_status |= is_status;
+                        return Ok(true);
+                    }
+                    _ => (),
+                }
 
-    Ok(IndexQueueEntry {
-        action: index_action(queue_id.index, is_index),
-        account_id: (!is_tracing).then(|| Id::from(queue_id.id_prefix)),
-        document_id: if is_tracing {
-            queue_id.span_id()
-        } else {
-            queue_id.id_suffix as u64
-        },
-        created_at: UTCDateTime::from_timestamp(created_at as i64),
-    })
-}
+                if let Some((last, has_status)) = pending.replace((queue_partition, is_status))
+                    && matches_status(has_status)
+                {
+                    ids.push(last.to_id());
+                    if ids.len() >= max_results {
+                        pending = None;
+                        return Ok(false);
+                    }
+                }
 
-fn index_action(index: SearchIndex, is_index: bool) -> IndexAction {
-    match index {
-        SearchIndex::Email if is_index => IndexAction::IndexEmail,
-        SearchIndex::Email => IndexAction::UnindexEmail,
-        SearchIndex::Calendar if is_index => IndexAction::IndexCalendar,
-        SearchIndex::Calendar => IndexAction::UnindexCalendar,
-        SearchIndex::Contacts if is_index => IndexAction::IndexContacts,
-        SearchIndex::Contacts => IndexAction::UnindexContacts,
-        SearchIndex::File if is_index => IndexAction::IndexFile,
-        SearchIndex::File => IndexAction::UnindexFile,
-        SearchIndex::Tracing | SearchIndex::InMemory => IndexAction::IndexTelemetry,
-    }
-}
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
 
-fn action_index(action: IndexAction) -> (SearchIndex, Option<bool>) {
-    match action {
-        IndexAction::IndexTelemetry => (SearchIndex::Tracing, None),
-        IndexAction::IndexEmail => (SearchIndex::Email, Some(true)),
-        IndexAction::UnindexEmail => (SearchIndex::Email, Some(false)),
-        IndexAction::IndexCalendar => (SearchIndex::Calendar, Some(true)),
-        IndexAction::UnindexCalendar => (SearchIndex::Calendar, Some(false)),
-        IndexAction::IndexContacts => (SearchIndex::Contacts, Some(true)),
-        IndexAction::UnindexContacts => (SearchIndex::Contacts, Some(false)),
-        IndexAction::IndexFile => (SearchIndex::File, Some(true)),
-        IndexAction::UnindexFile => (SearchIndex::File, Some(false)),
-    }
-}
-
-impl QueueId {
-    fn from_key(index: SearchIndex, key: &[u8]) -> trc::Result<Self> {
-        Ok(QueueId {
-            index,
-            id_prefix: key.deserialize_be_u32(1)?,
-            id_suffix: key.deserialize_be_u32(1 + U32_LEN)?,
-        })
+    if let Some((last, has_status)) = pending
+        && matches_status(has_status)
+        && ids.len() < max_results
+    {
+        ids.push(last.to_id());
     }
 
-    fn parse(id: Id) -> Option<Self> {
+    Ok(ids)
+}
+
+impl QueuePartition {
+    fn from_id(id: Id) -> Option<Self> {
         let id = id.id();
 
-        Some(if id & TRACING_FLAG != 0 {
-            let span_id = id & MAX_SPAN_ID;
-
-            QueueId {
-                index: SearchIndex::Tracing,
-                id_prefix: (span_id >> 32) as u32,
-                id_suffix: span_id as u32,
-            }
-        } else {
-            QueueId {
-                index: SearchIndex::try_from_u8((id >> INDEX_SHIFT) as u8)?,
-                id_prefix: ((id >> ACCOUNT_ID_SHIFT) as u32) & MAX_ACCOUNT_ID,
-                id_suffix: id as u32,
-            }
-        })
-    }
-
-    fn to_id(self) -> Option<Id> {
-        if self.index == SearchIndex::Tracing {
-            let span_id = self.span_id();
-
-            (span_id <= MAX_SPAN_ID).then(|| Id::from(TRACING_FLAG | span_id))
-        } else {
-            (self.id_prefix <= MAX_ACCOUNT_ID).then(|| {
-                Id::from(
-                    ((self.index.to_u8() as u64) << INDEX_SHIFT)
-                        | ((self.id_prefix as u64) << ACCOUNT_ID_SHIFT)
-                        | self.id_suffix as u64,
-                )
-            })
+        if id >> 40 != 0 {
+            return None;
         }
-    }
 
-    fn span_id(&self) -> u64 {
-        ((self.id_prefix as u64) << 32) | self.id_suffix as u64
-    }
-
-    fn class(&self) -> ValueClass {
-        ValueClass::SearchIndex(SearchIndexClass::Queue {
-            index: self.index,
-            id_prefix: self.id_prefix,
-            id_suffix: self.id_suffix,
+        SearchIndex::try_from_u8((id >> 32) as u8).map(|index| QueuePartition {
+            index,
+            partition: id as u32,
         })
+    }
+
+    fn to_id(self) -> Id {
+        Id::from(((self.index.to_u8() as u64) << 32) | self.partition as u64)
+    }
+
+    fn status_class(&self) -> ValueClass {
+        ValueClass::SearchIndex(SearchIndexClass::QueueStatus {
+            index: self.index,
+            partition: self.partition,
+        })
+    }
+}
+
+fn index_type(index: SearchIndex) -> IndexType {
+    match index {
+        SearchIndex::Email => IndexType::Email,
+        SearchIndex::Calendar => IndexType::Calendar,
+        SearchIndex::Contacts => IndexType::Contacts,
+        SearchIndex::File => IndexType::File,
+        SearchIndex::Tracing | SearchIndex::InMemory => IndexType::Telemetry,
+    }
+}
+
+fn search_index(index: IndexType) -> Option<SearchIndex> {
+    match index {
+        IndexType::Email => Some(SearchIndex::Email),
+        IndexType::Calendar => Some(SearchIndex::Calendar),
+        IndexType::Contacts => Some(SearchIndex::Contacts),
+        IndexType::File => Some(SearchIndex::File),
+        IndexType::Telemetry => Some(SearchIndex::Tracing),
     }
 }

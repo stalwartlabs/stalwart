@@ -222,11 +222,9 @@ pub(crate) async fn archived_item_set(
 
     if !batch.is_empty() {
         set.server
-            .store()
-            .write(batch.build_all())
+            .commit_batch(batch)
             .await
             .caused_by(trc::location!())?;
-        set.server.notify_task_queue();
     }
 
     Ok(set)

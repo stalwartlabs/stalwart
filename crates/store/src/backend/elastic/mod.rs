@@ -51,21 +51,15 @@ pub struct DeleteByQueryResponse {
 impl SearchField {
     pub fn es_schema(&self) -> Value {
         match self {
-            SearchField::AccountId
-            | SearchField::DocumentId
-            | SearchField::Email(EmailSearchField::_Size) => json!({
+            SearchField::AccountId | SearchField::DocumentId => json!({
               "type": "integer"
             }),
             SearchField::Id
-            | SearchField::Email(EmailSearchField::_SentAt | EmailSearchField::_ReceivedAt)
             | SearchField::Tracing(TracingSearchField::QueueId | TracingSearchField::EventType) => {
                 json!({
                   "type": "long"
                 })
             }
-            SearchField::Email(EmailSearchField::_HasAttachment) => json!({
-              "type": "boolean"
-            }),
             SearchField::Email(
                 EmailSearchField::From | EmailSearchField::To | EmailSearchField::Subject,
             ) => json!({

@@ -5,6 +5,7 @@
  */
 
 use crate::config::storage::Storage;
+use crate::ipc::IndexQueueNotify;
 use ahash::{AHashMap, AHashSet};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::HeaderMap;
@@ -99,6 +100,7 @@ pub struct WebhookTracer {
 pub struct StoreTracer {
     pub store: store::Store,
     pub data: Option<store::Store>,
+    pub index_tx: IndexQueueNotify,
 }
 // SPDX-SnippetEnd
 
@@ -136,9 +138,9 @@ pub struct PrometheusMetrics {
 }
 
 impl Telemetry {
-    pub async fn parse(bp: &mut Bootstrap, storage: &Storage) -> Self {
+    pub async fn parse(bp: &mut Bootstrap, storage: &Storage, index_tx: IndexQueueNotify) -> Self {
         let mut telemetry = Telemetry {
-            tracers: Tracers::parse(bp, storage).await,
+            tracers: Tracers::parse(bp, storage, index_tx).await,
             metrics: Interests::default(),
         };
 
@@ -156,7 +158,7 @@ impl Telemetry {
 }
 
 impl Tracers {
-    pub async fn parse(bp: &mut Bootstrap, storage: &Storage) -> Self {
+    pub async fn parse(bp: &mut Bootstrap, storage: &Storage, index_tx: IndexQueueNotify) -> Self {
         let mut custom_levels = AHashMap::new();
         let mut tracers: Vec<TelemetrySubscriber> = Vec::new();
         let mut global_interests = Interests::default();
@@ -445,6 +447,7 @@ impl Tracers {
                         data: (!storage.tracing.is_same(&storage.data))
                             .then(|| storage.data.clone()),
                         store: storage.tracing.clone(),
+                        index_tx,
                     }),
                 };
 

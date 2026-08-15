@@ -4254,33 +4254,19 @@ impl<'de> serde::Deserialize<'de> for InMemoryStoreType {
     }
 }
 
-impl EnumImpl for IndexAction {
+impl EnumImpl for IndexStatusType {
     fn parse(value: &str) -> Option<Self> {
         hashify::tiny_map! {
             value.as_bytes(),
-            b"indexTelemetry" => IndexAction::IndexTelemetry,
-            b"indexEmail" => IndexAction::IndexEmail,
-            b"unindexEmail" => IndexAction::UnindexEmail,
-            b"indexCalendar" => IndexAction::IndexCalendar,
-            b"unindexCalendar" => IndexAction::UnindexCalendar,
-            b"indexContacts" => IndexAction::IndexContacts,
-            b"unindexContacts" => IndexAction::UnindexContacts,
-            b"indexFile" => IndexAction::IndexFile,
-            b"unindexFile" => IndexAction::UnindexFile,
+            b"Running" => IndexStatusType::Running,
+            b"Failed" => IndexStatusType::Failed,
         }
     }
 
     fn as_str(&self) -> &'static str {
         match self {
-            IndexAction::IndexTelemetry => "indexTelemetry",
-            IndexAction::IndexEmail => "indexEmail",
-            IndexAction::UnindexEmail => "unindexEmail",
-            IndexAction::IndexCalendar => "indexCalendar",
-            IndexAction::UnindexCalendar => "unindexCalendar",
-            IndexAction::IndexContacts => "indexContacts",
-            IndexAction::UnindexContacts => "unindexContacts",
-            IndexAction::IndexFile => "indexFile",
-            IndexAction::UnindexFile => "unindexFile",
+            IndexStatusType::Running => "Running",
+            IndexStatusType::Failed => "Failed",
         }
     }
 
@@ -4290,23 +4276,16 @@ impl EnumImpl for IndexAction {
 
     fn from_id(id: u16) -> Option<Self> {
         match id {
-            0 => Some(IndexAction::IndexTelemetry),
-            1 => Some(IndexAction::IndexEmail),
-            2 => Some(IndexAction::UnindexEmail),
-            3 => Some(IndexAction::IndexCalendar),
-            4 => Some(IndexAction::UnindexCalendar),
-            5 => Some(IndexAction::IndexContacts),
-            6 => Some(IndexAction::UnindexContacts),
-            7 => Some(IndexAction::IndexFile),
-            8 => Some(IndexAction::UnindexFile),
+            0 => Some(IndexStatusType::Running),
+            1 => Some(IndexStatusType::Failed),
             _ => None,
         }
     }
 
-    const COUNT: usize = 9;
+    const COUNT: usize = 2;
 }
 
-impl serde::Serialize for IndexAction {
+impl serde::Serialize for IndexStatusType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -4315,7 +4294,66 @@ impl serde::Serialize for IndexAction {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for IndexAction {
+impl<'de> serde::Deserialize<'de> for IndexStatusType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for IndexType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map! {
+            value.as_bytes(),
+            b"telemetry" => IndexType::Telemetry,
+            b"email" => IndexType::Email,
+            b"calendar" => IndexType::Calendar,
+            b"contacts" => IndexType::Contacts,
+            b"file" => IndexType::File,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            IndexType::Telemetry => "telemetry",
+            IndexType::Email => "email",
+            IndexType::Calendar => "calendar",
+            IndexType::Contacts => "contacts",
+            IndexType::File => "file",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(IndexType::Telemetry),
+            1 => Some(IndexType::Email),
+            2 => Some(IndexType::Calendar),
+            3 => Some(IndexType::Contacts),
+            4 => Some(IndexType::File),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 5;
+}
+
+impl serde::Serialize for IndexType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for IndexType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -7290,11 +7328,11 @@ impl EnumImpl for Permission {
             b"sysImapUpdate" => Permission::SysImapUpdate,
             b"sysInMemoryStoreGet" => Permission::SysInMemoryStoreGet,
             b"sysInMemoryStoreUpdate" => Permission::SysInMemoryStoreUpdate,
-            b"sysIndexQueueEntryGet" => Permission::SysIndexQueueEntryGet,
-            b"sysIndexQueueEntryCreate" => Permission::SysIndexQueueEntryCreate,
-            b"sysIndexQueueEntryUpdate" => Permission::SysIndexQueueEntryUpdate,
-            b"sysIndexQueueEntryDestroy" => Permission::SysIndexQueueEntryDestroy,
-            b"sysIndexQueueEntryQuery" => Permission::SysIndexQueueEntryQuery,
+            b"sysIndexQueueStatusGet" => Permission::SysIndexQueueStatusGet,
+            b"sysIndexQueueStatusCreate" => Permission::SysIndexQueueStatusCreate,
+            b"sysIndexQueueStatusUpdate" => Permission::SysIndexQueueStatusUpdate,
+            b"sysIndexQueueStatusDestroy" => Permission::SysIndexQueueStatusDestroy,
+            b"sysIndexQueueStatusQuery" => Permission::SysIndexQueueStatusQuery,
             b"sysJmapGet" => Permission::SysJmapGet,
             b"sysJmapUpdate" => Permission::SysJmapUpdate,
             b"sysLogGet" => Permission::SysLogGet,
@@ -7968,11 +8006,11 @@ impl EnumImpl for Permission {
             Permission::SysImapUpdate => "sysImapUpdate",
             Permission::SysInMemoryStoreGet => "sysInMemoryStoreGet",
             Permission::SysInMemoryStoreUpdate => "sysInMemoryStoreUpdate",
-            Permission::SysIndexQueueEntryGet => "sysIndexQueueEntryGet",
-            Permission::SysIndexQueueEntryCreate => "sysIndexQueueEntryCreate",
-            Permission::SysIndexQueueEntryUpdate => "sysIndexQueueEntryUpdate",
-            Permission::SysIndexQueueEntryDestroy => "sysIndexQueueEntryDestroy",
-            Permission::SysIndexQueueEntryQuery => "sysIndexQueueEntryQuery",
+            Permission::SysIndexQueueStatusGet => "sysIndexQueueStatusGet",
+            Permission::SysIndexQueueStatusCreate => "sysIndexQueueStatusCreate",
+            Permission::SysIndexQueueStatusUpdate => "sysIndexQueueStatusUpdate",
+            Permission::SysIndexQueueStatusDestroy => "sysIndexQueueStatusDestroy",
+            Permission::SysIndexQueueStatusQuery => "sysIndexQueueStatusQuery",
             Permission::SysJmapGet => "sysJmapGet",
             Permission::SysJmapUpdate => "sysJmapUpdate",
             Permission::SysLogGet => "sysLogGet",
@@ -8639,11 +8677,11 @@ impl EnumImpl for Permission {
             392 => Some(Permission::SysImapUpdate),
             393 => Some(Permission::SysInMemoryStoreGet),
             394 => Some(Permission::SysInMemoryStoreUpdate),
-            660 => Some(Permission::SysIndexQueueEntryGet),
-            661 => Some(Permission::SysIndexQueueEntryCreate),
-            662 => Some(Permission::SysIndexQueueEntryUpdate),
-            663 => Some(Permission::SysIndexQueueEntryDestroy),
-            664 => Some(Permission::SysIndexQueueEntryQuery),
+            598 => Some(Permission::SysIndexQueueStatusGet),
+            660 => Some(Permission::SysIndexQueueStatusCreate),
+            599 => Some(Permission::SysIndexQueueStatusUpdate),
+            661 => Some(Permission::SysIndexQueueStatusDestroy),
+            600 => Some(Permission::SysIndexQueueStatusQuery),
             395 => Some(Permission::SysJmapGet),
             396 => Some(Permission::SysJmapUpdate),
             397 => Some(Permission::SysLogGet),
@@ -8909,7 +8947,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 665;
+    const COUNT: usize = 662;
 }
 
 impl serde::Serialize for Permission {
@@ -9705,8 +9743,6 @@ impl EnumImpl for SearchCalendarField {
             b"location" => SearchCalendarField::Location,
             b"owner" => SearchCalendarField::Owner,
             b"attendee" => SearchCalendarField::Attendee,
-            b"start" => SearchCalendarField::Start,
-            b"uid" => SearchCalendarField::Uid,
         }
     }
 
@@ -9717,8 +9753,6 @@ impl EnumImpl for SearchCalendarField {
             SearchCalendarField::Location => "location",
             SearchCalendarField::Owner => "owner",
             SearchCalendarField::Attendee => "attendee",
-            SearchCalendarField::Start => "start",
-            SearchCalendarField::Uid => "uid",
         }
     }
 
@@ -9733,13 +9767,11 @@ impl EnumImpl for SearchCalendarField {
             2 => Some(SearchCalendarField::Location),
             3 => Some(SearchCalendarField::Owner),
             4 => Some(SearchCalendarField::Attendee),
-            5 => Some(SearchCalendarField::Start),
-            6 => Some(SearchCalendarField::Uid),
             _ => None,
         }
     }
 
-    const COUNT: usize = 7;
+    const COUNT: usize = 5;
 }
 
 impl serde::Serialize for SearchCalendarField {
@@ -9775,7 +9807,6 @@ impl EnumImpl for SearchContactField {
             b"onlineService" => SearchContactField::OnlineService,
             b"address" => SearchContactField::Address,
             b"note" => SearchContactField::Note,
-            b"uid" => SearchContactField::Uid,
         }
     }
 
@@ -9791,7 +9822,6 @@ impl EnumImpl for SearchContactField {
             SearchContactField::OnlineService => "onlineService",
             SearchContactField::Address => "address",
             SearchContactField::Note => "note",
-            SearchContactField::Uid => "uid",
         }
     }
 
@@ -9811,12 +9841,11 @@ impl EnumImpl for SearchContactField {
             7 => Some(SearchContactField::OnlineService),
             8 => Some(SearchContactField::Address),
             9 => Some(SearchContactField::Note),
-            10 => Some(SearchContactField::Uid),
             _ => None,
         }
     }
 
-    const COUNT: usize = 11;
+    const COUNT: usize = 10;
 }
 
 impl serde::Serialize for SearchContactField {
@@ -9849,10 +9878,6 @@ impl EnumImpl for SearchEmailField {
             b"subject" => SearchEmailField::Subject,
             b"body" => SearchEmailField::Body,
             b"attachment" => SearchEmailField::Attachment,
-            b"receivedAt" => SearchEmailField::ReceivedAt,
-            b"sentAt" => SearchEmailField::SentAt,
-            b"size" => SearchEmailField::Size,
-            b"hasAttachment" => SearchEmailField::HasAttachment,
             b"headers" => SearchEmailField::Headers,
         }
     }
@@ -9866,10 +9891,6 @@ impl EnumImpl for SearchEmailField {
             SearchEmailField::Subject => "subject",
             SearchEmailField::Body => "body",
             SearchEmailField::Attachment => "attachment",
-            SearchEmailField::ReceivedAt => "receivedAt",
-            SearchEmailField::SentAt => "sentAt",
-            SearchEmailField::Size => "size",
-            SearchEmailField::HasAttachment => "hasAttachment",
             SearchEmailField::Headers => "headers",
         }
     }
@@ -9887,16 +9908,12 @@ impl EnumImpl for SearchEmailField {
             4 => Some(SearchEmailField::Subject),
             5 => Some(SearchEmailField::Body),
             6 => Some(SearchEmailField::Attachment),
-            7 => Some(SearchEmailField::ReceivedAt),
-            8 => Some(SearchEmailField::SentAt),
-            9 => Some(SearchEmailField::Size),
-            10 => Some(SearchEmailField::HasAttachment),
-            11 => Some(SearchEmailField::Headers),
+            7 => Some(SearchEmailField::Headers),
             _ => None,
         }
     }
 
-    const COUNT: usize = 12;
+    const COUNT: usize = 8;
 }
 
 impl serde::Serialize for SearchEmailField {
@@ -11873,26 +11890,26 @@ impl EnumImpl for TaskType {
 
     fn from_id(id: u16) -> Option<Self> {
         match id {
-            3 => Some(TaskType::CalendarAlarmEmail),
-            4 => Some(TaskType::CalendarAlarmNotification),
-            5 => Some(TaskType::CalendarItipMessage),
-            6 => Some(TaskType::MergeThreads),
-            7 => Some(TaskType::DmarcReport),
-            8 => Some(TaskType::TlsReport),
-            9 => Some(TaskType::RestoreArchivedItem),
-            10 => Some(TaskType::DestroyAccount),
-            11 => Some(TaskType::AccountMaintenance),
-            12 => Some(TaskType::TenantMaintenance),
-            13 => Some(TaskType::StoreMaintenance),
-            14 => Some(TaskType::SpamFilterMaintenance),
-            15 => Some(TaskType::AcmeRenewal),
-            16 => Some(TaskType::DkimManagement),
-            17 => Some(TaskType::DnsManagement),
+            0 => Some(TaskType::CalendarAlarmEmail),
+            1 => Some(TaskType::CalendarAlarmNotification),
+            2 => Some(TaskType::CalendarItipMessage),
+            3 => Some(TaskType::MergeThreads),
+            4 => Some(TaskType::DmarcReport),
+            5 => Some(TaskType::TlsReport),
+            6 => Some(TaskType::RestoreArchivedItem),
+            7 => Some(TaskType::DestroyAccount),
+            8 => Some(TaskType::AccountMaintenance),
+            9 => Some(TaskType::TenantMaintenance),
+            10 => Some(TaskType::StoreMaintenance),
+            11 => Some(TaskType::SpamFilterMaintenance),
+            12 => Some(TaskType::AcmeRenewal),
+            13 => Some(TaskType::DkimManagement),
+            14 => Some(TaskType::DnsManagement),
             _ => None,
         }
     }
 
-    const COUNT: usize = 18;
+    const COUNT: usize = 15;
 }
 
 impl serde::Serialize for TaskType {

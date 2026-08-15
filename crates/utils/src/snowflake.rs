@@ -81,6 +81,17 @@ impl SnowflakeIdGenerator {
         Self::from_timestamp(timestamp).map(|id| id | (sequence << NODE_ID_LEN) | node_id())
     }
 
+    pub fn global_id_with_sequence_id(sequence: u64) -> Option<u64> {
+        (SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_EPOCH))
+            .elapsed()
+            .ok()
+            .map(|elapsed| {
+                ((elapsed.as_millis() as u64) << (SEQUENCE_LEN + NODE_ID_LEN))
+                    | (sequence << NODE_ID_LEN)
+                    | node_id()
+            })
+    }
+
     pub fn global_id() -> Option<u64> {
         let sequence = SEQUENCE_ID.fetch_add(1, Ordering::Relaxed) & SEQUENCE_MASK;
 

@@ -113,7 +113,12 @@ impl Server {
                 };
 
                 // Parse tracers
-                let tracers = Telemetry::parse(&mut bootstrap, &storage).await;
+                let tracers = Telemetry::parse(
+                    &mut bootstrap,
+                    &storage,
+                    self.inner.ipc.index_queue_notify(),
+                )
+                .await;
 
                 if bootstrap.errors.is_empty() {
                     let core = Box::pin(Core::parse(&mut bootstrap, storage)).await;

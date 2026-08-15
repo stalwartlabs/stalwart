@@ -23,6 +23,7 @@ pub mod document;
 pub mod encryption;
 pub mod index;
 pub mod quota;
+pub mod search;
 pub mod state;
 pub mod transaction;
 

@@ -11,6 +11,7 @@ use crate::message::{
         ArchivedMessageMetadata, ArchivedMessageMetadataPart, ArchivedMetadataHeaderName,
         MessageMetadata, MessageMetadataPart, build_metadata_contents,
     },
+    sortkeys::MessageSortKeys,
 };
 use common::storage::index::ObjectIndexBuilder;
 use mail_parser::{
@@ -46,6 +47,10 @@ impl MessageMetadata {
                     },
                     Vec::new(),
                 )
+                .set(
+                    EmailField::SortKeys,
+                    MessageSortKeys::from_metadata(&self).serialize(),
+                )
                 .set(EmailField::Metadata, Archiver::new(self).serialize()?);
         } else {
             batch
@@ -53,6 +58,7 @@ impl MessageMetadata {
                     hash: self.blob_hash.clone(),
                     to: BlobLink::Document,
                 })
+                .clear(EmailField::SortKeys)
                 .clear(EmailField::Metadata);
         }
 
@@ -86,6 +92,7 @@ impl ArchivedMessageMetadata {
 
         batch
             .clear(EmailField::Metadata)
+            .clear(EmailField::SortKeys)
             .clear(ValueClass::IndexProperty(IndexPropertyClass::Hash {
                 property: EmailField::Threading.into(),
                 hash: xxh3_128(
@@ -245,6 +252,10 @@ impl IndexMessage for BatchBuilder {
                 .with_changes(data),
         )
         .caused_by(trc::location!())?
+        .set(
+            EmailField::SortKeys,
+            MessageSortKeys::from_metadata(&metadata).serialize(),
+        )
         .set(
             EmailField::Metadata,
             Archiver::new(metadata)

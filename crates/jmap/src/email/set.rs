@@ -1169,7 +1169,6 @@ impl EmailSet for Server {
                         .and_then(|ids| ids.last_change_id(account_id))
                         .caused_by(trc::location!())?
                         .into();
-                    self.notify_task_queue();
                 }
 
                 // Mark messages that were not found as not destroyed (this should not occur in practice)

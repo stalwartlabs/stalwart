@@ -15,6 +15,7 @@ use crate::{
     SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_PK, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
     SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
     SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
+    search::GLOBAL_BUCKET_SHIFT,
     write::{BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexClass},
 };
 use registry::schema::prelude::ObjectType;
@@ -409,10 +410,21 @@ impl ValueClass {
                     index,
                     id_prefix,
                     id_suffix,
+                    created_at,
                 } => serializer
                     .write(SearchIndexClass::TYPE_QUEUE | index.to_u8())
                     .write(*id_prefix)
-                    .write(*id_suffix),
+                    .write(*id_suffix)
+                    .write(*created_at),
+                SearchIndexClass::QueueIndex { index, partition } => serializer
+                    .write(u8::MAX)
+                    .write(index.to_u8())
+                    .write(*partition),
+                SearchIndexClass::QueueStatus { index, partition } => serializer
+                    .write(u8::MAX)
+                    .write(index.to_u8())
+                    .write(*partition)
+                    .write(0u8),
             },
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
         }
@@ -529,7 +541,9 @@ impl ValueClass {
                 SearchIndexClass::GlobalTerm { term, .. } => term.key_len() + U16_LEN + 3,
                 SearchIndexClass::GlobalDocument { .. } => U64_LEN + 1,
                 SearchIndexClass::GlobalDocumentId { .. } => U16_LEN + 1,
-                SearchIndexClass::Queue { .. } => U32_LEN * 2 + 1,
+                SearchIndexClass::Queue { .. } => U32_LEN * 2 + U64_LEN + 1,
+                SearchIndexClass::QueueIndex { .. } => U32_LEN + 2,
+                SearchIndexClass::QueueStatus { .. } => U32_LEN + 3,
             },
             ValueClass::Any(v) => v.key.len(),
         }
@@ -636,6 +650,38 @@ impl SearchIndexClass {
     pub const TYPE_DOCUMENT: u8 = 1 << 5;
     pub const TYPE_DOCUMENT_ID: u8 = 2 << 5;
     pub const TYPE_QUEUE: u8 = 3 << 5;
+
+    pub fn queue_range(index: SearchIndex, partition: u32) -> (Self, Self) {
+        let (from_prefix, to_prefix) = if matches!(index, SearchIndex::Tracing) {
+            let bucket = partition << (GLOBAL_BUCKET_SHIFT - 32);
+            (bucket, bucket | ((1 << (GLOBAL_BUCKET_SHIFT - 32)) - 1))
+        } else {
+            (partition, partition)
+        };
+
+        (
+            SearchIndexClass::Queue {
+                index,
+                id_prefix: from_prefix,
+                id_suffix: 0,
+                created_at: 0,
+            },
+            SearchIndexClass::Queue {
+                index,
+                id_prefix: to_prefix,
+                id_suffix: u32::MAX,
+                created_at: u64::MAX,
+            },
+        )
+    }
+
+    pub fn queue_partition(index: SearchIndex, id_prefix: u32) -> u32 {
+        if matches!(index, SearchIndex::Tracing) {
+            id_prefix >> (GLOBAL_BUCKET_SHIFT - 32)
+        } else {
+            id_prefix
+        }
+    }
 }
 
 impl From<SearchIndexClass> for ValueClass {

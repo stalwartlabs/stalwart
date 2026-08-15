@@ -60,7 +60,7 @@ impl EnumImpl for ObjectType {
             b"HttpLookup" => ObjectType::HttpLookup,
             b"Imap" => ObjectType::Imap,
             b"InMemoryStore" => ObjectType::InMemoryStore,
-            b"IndexQueueEntry" => ObjectType::IndexQueueEntry,
+            b"IndexQueueStatus" => ObjectType::IndexQueueStatus,
             b"Jmap" => ObjectType::Jmap,
             b"Log" => ObjectType::Log,
             b"MailingList" => ObjectType::MailingList,
@@ -183,7 +183,7 @@ impl EnumImpl for ObjectType {
             ObjectType::HttpLookup => "HttpLookup",
             ObjectType::Imap => "Imap",
             ObjectType::InMemoryStore => "InMemoryStore",
-            ObjectType::IndexQueueEntry => "IndexQueueEntry",
+            ObjectType::IndexQueueStatus => "IndexQueueStatus",
             ObjectType::Jmap => "Jmap",
             ObjectType::Log => "Log",
             ObjectType::MailingList => "MailingList",
@@ -310,7 +310,7 @@ impl EnumImpl for ObjectType {
             45 => Some(ObjectType::HttpLookup),
             46 => Some(ObjectType::Imap),
             47 => Some(ObjectType::InMemoryStore),
-            117 => Some(ObjectType::IndexQueueEntry),
+            117 => Some(ObjectType::IndexQueueStatus),
             48 => Some(ObjectType::Jmap),
             49 => Some(ObjectType::Log),
             50 => Some(ObjectType::MailingList),
@@ -428,7 +428,6 @@ impl EnumImpl for Property {
             b"accountUri" => Property::AccountUri,
             b"accounts" => Property::Accounts,
             b"acmeProviderId" => Property::AcmeProviderId,
-            b"action" => Property::Action,
             b"addAuthResultsHeader" => Property::AddAuthResultsHeader,
             b"addDateHeader" => Property::AddDateHeader,
             b"addDeliveredToHeader" => Property::AddDeliveredToHeader,
@@ -809,11 +808,13 @@ impl EnumImpl for Property {
             b"inboundReportForwarding" => Property::InboundReportForwarding,
             b"incidents" => Property::Incidents,
             b"includeSource" => Property::IncludeSource,
+            b"index" => Property::Index,
             b"indexAsn" => Property::IndexAsn,
             b"indexAsnName" => Property::IndexAsnName,
             b"indexBatchSize" => Property::IndexBatchSize,
             b"indexCalendar" => Property::IndexCalendar,
             b"indexCalendarFields" => Property::IndexCalendarFields,
+            b"indexConcurrency" => Property::IndexConcurrency,
             b"indexContactFields" => Property::IndexContactFields,
             b"indexContacts" => Property::IndexContacts,
             b"indexCountry" => Property::IndexCountry,
@@ -834,6 +835,7 @@ impl EnumImpl for Property {
             b"isActive" => Property::IsActive,
             b"isArchive" => Property::IsArchive,
             b"isBad" => Property::IsBad,
+            b"isDeletion" => Property::IsDeletion,
             b"isEnabled" => Property::IsEnabled,
             b"isFromOrganizer" => Property::IsFromOrganizer,
             b"isGlobPattern" => Property::IsGlobPattern,
@@ -1019,6 +1021,7 @@ impl EnumImpl for Property {
             b"parseLimitContact" => Property::ParseLimitContact,
             b"parseLimitEmail" => Property::ParseLimitEmail,
             b"parseLimitEvent" => Property::ParseLimitEvent,
+            b"partition" => Property::Partition,
             b"password" => Property::Password,
             b"passwordDefaultExpiry" => Property::PasswordDefaultExpiry,
             b"passwordHashAlgorithm" => Property::PasswordHashAlgorithm,
@@ -1092,6 +1095,8 @@ impl EnumImpl for Property {
             b"queryRecipient" => Property::QueryRecipient,
             b"queueId" => Property::QueueId,
             b"queueName" => Property::QueueName,
+            b"queuedDeletions" => Property::QueuedDeletions,
+            b"queuedUpdates" => Property::QueuedUpdates,
             b"quotas" => Property::Quotas,
             b"rate" => Property::Rate,
             b"rateLimit" => Property::RateLimit,
@@ -1358,7 +1363,6 @@ impl EnumImpl for Property {
             Property::AccountUri => "accountUri",
             Property::Accounts => "accounts",
             Property::AcmeProviderId => "acmeProviderId",
-            Property::Action => "action",
             Property::AddAuthResultsHeader => "addAuthResultsHeader",
             Property::AddDateHeader => "addDateHeader",
             Property::AddDeliveredToHeader => "addDeliveredToHeader",
@@ -1739,11 +1743,13 @@ impl EnumImpl for Property {
             Property::InboundReportForwarding => "inboundReportForwarding",
             Property::Incidents => "incidents",
             Property::IncludeSource => "includeSource",
+            Property::Index => "index",
             Property::IndexAsn => "indexAsn",
             Property::IndexAsnName => "indexAsnName",
             Property::IndexBatchSize => "indexBatchSize",
             Property::IndexCalendar => "indexCalendar",
             Property::IndexCalendarFields => "indexCalendarFields",
+            Property::IndexConcurrency => "indexConcurrency",
             Property::IndexContactFields => "indexContactFields",
             Property::IndexContacts => "indexContacts",
             Property::IndexCountry => "indexCountry",
@@ -1764,6 +1770,7 @@ impl EnumImpl for Property {
             Property::IsActive => "isActive",
             Property::IsArchive => "isArchive",
             Property::IsBad => "isBad",
+            Property::IsDeletion => "isDeletion",
             Property::IsEnabled => "isEnabled",
             Property::IsFromOrganizer => "isFromOrganizer",
             Property::IsGlobPattern => "isGlobPattern",
@@ -1949,6 +1956,7 @@ impl EnumImpl for Property {
             Property::ParseLimitContact => "parseLimitContact",
             Property::ParseLimitEmail => "parseLimitEmail",
             Property::ParseLimitEvent => "parseLimitEvent",
+            Property::Partition => "partition",
             Property::Password => "password",
             Property::PasswordDefaultExpiry => "passwordDefaultExpiry",
             Property::PasswordHashAlgorithm => "passwordHashAlgorithm",
@@ -2022,6 +2030,8 @@ impl EnumImpl for Property {
             Property::QueryRecipient => "queryRecipient",
             Property::QueueId => "queueId",
             Property::QueueName => "queueName",
+            Property::QueuedDeletions => "queuedDeletions",
+            Property::QueuedUpdates => "queuedUpdates",
             Property::Quotas => "quotas",
             Property::Rate => "rate",
             Property::RateLimit => "rateLimit",
@@ -2292,7 +2302,6 @@ impl EnumImpl for Property {
             16 => Some(Property::AccountUri),
             151 => Some(Property::Accounts),
             182 => Some(Property::AcmeProviderId),
-            924 => Some(Property::Action),
             554 => Some(Property::AddAuthResultsHeader),
             555 => Some(Property::AddDateHeader),
             556 => Some(Property::AddDeliveredToHeader),
@@ -2673,11 +2682,13 @@ impl EnumImpl for Property {
             652 => Some(Property::InboundReportForwarding),
             70 => Some(Property::Incidents),
             352 => Some(Property::IncludeSource),
+            924 => Some(Property::Index),
             94 => Some(Property::IndexAsn),
             95 => Some(Property::IndexAsnName),
             664 => Some(Property::IndexBatchSize),
             667 => Some(Property::IndexCalendar),
             668 => Some(Property::IndexCalendarFields),
+            927 => Some(Property::IndexConcurrency),
             670 => Some(Property::IndexContactFields),
             669 => Some(Property::IndexContacts),
             96 => Some(Property::IndexCountry),
@@ -2698,6 +2709,7 @@ impl EnumImpl for Property {
             707 => Some(Property::IsActive),
             755 => Some(Property::IsArchive),
             756 => Some(Property::IsBad),
+            925 => Some(Property::IsDeletion),
             340 => Some(Property::IsEnabled),
             806 => Some(Property::IsFromOrganizer),
             491 => Some(Property::IsGlobPattern),
@@ -2883,6 +2895,7 @@ impl EnumImpl for Property {
             433 => Some(Property::ParseLimitContact),
             434 => Some(Property::ParseLimitEmail),
             432 => Some(Property::ParseLimitEvent),
+            926 => Some(Property::Partition),
             876 => Some(Property::Password),
             113 => Some(Property::PasswordDefaultExpiry),
             109 => Some(Property::PasswordHashAlgorithm),
@@ -2956,6 +2969,8 @@ impl EnumImpl for Property {
             784 => Some(Property::QueryRecipient),
             514 => Some(Property::QueueId),
             644 => Some(Property::QueueName),
+            929 => Some(Property::QueuedDeletions),
+            928 => Some(Property::QueuedUpdates),
             394 => Some(Property::Quotas),
             532 => Some(Property::Rate),
             410 => Some(Property::RateLimit),
@@ -3203,7 +3218,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 925;
+    const COUNT: usize = 930;
 }
 
 impl serde::Serialize for Property {
@@ -3276,7 +3291,7 @@ impl ObjectType {
             ObjectType::HttpLookup => HttpLookup::FLAGS,
             ObjectType::Imap => Imap::FLAGS,
             ObjectType::InMemoryStore => InMemoryStore::FLAGS,
-            ObjectType::IndexQueueEntry => IndexQueueEntry::FLAGS,
+            ObjectType::IndexQueueStatus => IndexQueueStatus::FLAGS,
             ObjectType::Jmap => Jmap::FLAGS,
             ObjectType::Log => Log::FLAGS,
             ObjectType::MailingList => MailingList::FLAGS,
@@ -3457,18 +3472,6 @@ impl ObjectType {
                     Property::Name,
                     IndexSchemaType::Unique,
                     IndexSchemaValueType::Keyword,
-                ),
-            ],
-            ObjectType::IndexQueueEntry => vec![
-                IndexSchema::new(
-                    Property::AccountId,
-                    IndexSchemaType::Search,
-                    IndexSchemaValueType::Id,
-                ),
-                IndexSchema::new(
-                    Property::Action,
-                    IndexSchemaType::Search,
-                    IndexSchemaValueType::Enum,
                 ),
             ],
             ObjectType::MailingList => vec![
@@ -3656,7 +3659,7 @@ impl ObjectType {
             ObjectType::HttpLookup => Permission::SysHttpLookupGet,
             ObjectType::Imap => Permission::SysImapGet,
             ObjectType::InMemoryStore => Permission::SysInMemoryStoreGet,
-            ObjectType::IndexQueueEntry => Permission::SysIndexQueueEntryGet,
+            ObjectType::IndexQueueStatus => Permission::SysIndexQueueStatusGet,
             ObjectType::Jmap => Permission::SysJmapGet,
             ObjectType::Log => Permission::SysLogGet,
             ObjectType::MailingList => Permission::SysMailingListGet,
@@ -3754,7 +3757,7 @@ impl ObjectType {
             ObjectType::Domain => Permission::SysDomainQuery,
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelQuery,
             ObjectType::HttpLookup => Permission::SysHttpLookupQuery,
-            ObjectType::IndexQueueEntry => Permission::SysIndexQueueEntryQuery,
+            ObjectType::IndexQueueStatus => Permission::SysIndexQueueStatusQuery,
             ObjectType::Log => Permission::SysLogQuery,
             ObjectType::MailingList => Permission::SysMailingListQuery,
             ObjectType::MaskedEmail => Permission::SysMaskedEmailQuery,
@@ -4037,10 +4040,10 @@ impl ObjectType {
                 Permission::SysInMemoryStoreUpdate,
                 Permission::SysInMemoryStoreUpdate,
             ],
-            ObjectType::IndexQueueEntry => [
-                Permission::SysIndexQueueEntryCreate,
-                Permission::SysIndexQueueEntryUpdate,
-                Permission::SysIndexQueueEntryDestroy,
+            ObjectType::IndexQueueStatus => [
+                Permission::SysIndexQueueStatusCreate,
+                Permission::SysIndexQueueStatusUpdate,
+                Permission::SysIndexQueueStatusDestroy,
             ],
             ObjectType::Jmap => [
                 Permission::SysJmapUpdate,
@@ -4597,7 +4600,6 @@ impl ObjectInner {
             ObjectInner::ArchivedItem(ArchivedItem::CalendarEvent(obj)) => Some(obj.account_id),
             ObjectInner::ArchivedItem(ArchivedItem::ContactCard(obj)) => Some(obj.account_id),
             ObjectInner::ArchivedItem(ArchivedItem::SieveScript(obj)) => Some(obj.account_id),
-            ObjectInner::IndexQueueEntry(obj) => obj.account_id,
             ObjectInner::MaskedEmail(obj) => Some(obj.account_id),
             ObjectInner::PublicKey(obj) => Some(obj.account_id),
             ObjectInner::SpamTrainingSample(obj) => obj.account_id,
@@ -4619,7 +4621,6 @@ impl ObjectInner {
             ObjectInner::ArchivedItem(ArchivedItem::CalendarEvent(obj)) => obj.account_id = id,
             ObjectInner::ArchivedItem(ArchivedItem::ContactCard(obj)) => obj.account_id = id,
             ObjectInner::ArchivedItem(ArchivedItem::SieveScript(obj)) => obj.account_id = id,
-            ObjectInner::IndexQueueEntry(obj) => obj.account_id = Some(id),
             ObjectInner::MaskedEmail(obj) => obj.account_id = id,
             ObjectInner::PublicKey(obj) => obj.account_id = id,
             ObjectInner::SpamTrainingSample(obj) => obj.account_id = Some(id),
@@ -4684,7 +4685,7 @@ impl ObjectInner {
             ObjectInner::HttpLookup(obj) => obj.to_pickled_vec(),
             ObjectInner::Imap(obj) => obj.to_pickled_vec(),
             ObjectInner::InMemoryStore(obj) => obj.to_pickled_vec(),
-            ObjectInner::IndexQueueEntry(obj) => obj.to_pickled_vec(),
+            ObjectInner::IndexQueueStatus(obj) => obj.to_pickled_vec(),
             ObjectInner::Jmap(obj) => obj.to_pickled_vec(),
             ObjectInner::Log(obj) => obj.to_pickled_vec(),
             ObjectInner::MailingList(obj) => obj.to_pickled_vec(),
@@ -4830,8 +4831,8 @@ impl ObjectInner {
             ObjectType::HttpLookup => Pickle::unpickle(stream).map(ObjectInner::HttpLookup),
             ObjectType::Imap => Pickle::unpickle(stream).map(ObjectInner::Imap),
             ObjectType::InMemoryStore => Pickle::unpickle(stream).map(ObjectInner::InMemoryStore),
-            ObjectType::IndexQueueEntry => {
-                Pickle::unpickle(stream).map(ObjectInner::IndexQueueEntry)
+            ObjectType::IndexQueueStatus => {
+                Pickle::unpickle(stream).map(ObjectInner::IndexQueueStatus)
             }
             ObjectType::Jmap => Pickle::unpickle(stream).map(ObjectInner::Jmap),
             ObjectType::Log => Pickle::unpickle(stream).map(ObjectInner::Log),
@@ -5074,8 +5075,8 @@ impl ObjectInner {
             ObjectType::InMemoryStore => {
                 InMemoryStore::deserialize(deserializer).map(ObjectInner::InMemoryStore)
             }
-            ObjectType::IndexQueueEntry => {
-                IndexQueueEntry::deserialize(deserializer).map(ObjectInner::IndexQueueEntry)
+            ObjectType::IndexQueueStatus => {
+                IndexQueueStatus::deserialize(deserializer).map(ObjectInner::IndexQueueStatus)
             }
             ObjectType::Jmap => Jmap::deserialize(deserializer).map(ObjectInner::Jmap),
             ObjectType::Log => Log::deserialize(deserializer).map(ObjectInner::Log),
@@ -5327,7 +5328,7 @@ impl Object {
             ObjectInner::HttpLookup(_) => HttpLookup::FLAGS,
             ObjectInner::Imap(_) => Imap::FLAGS,
             ObjectInner::InMemoryStore(_) => InMemoryStore::FLAGS,
-            ObjectInner::IndexQueueEntry(_) => IndexQueueEntry::FLAGS,
+            ObjectInner::IndexQueueStatus(_) => IndexQueueStatus::FLAGS,
             ObjectInner::Jmap(_) => Jmap::FLAGS,
             ObjectInner::Log(_) => Log::FLAGS,
             ObjectInner::MailingList(_) => MailingList::FLAGS,
@@ -5450,7 +5451,7 @@ impl Object {
             ObjectInner::HttpLookup(_) => ObjectType::HttpLookup,
             ObjectInner::Imap(_) => ObjectType::Imap,
             ObjectInner::InMemoryStore(_) => ObjectType::InMemoryStore,
-            ObjectInner::IndexQueueEntry(_) => ObjectType::IndexQueueEntry,
+            ObjectInner::IndexQueueStatus(_) => ObjectType::IndexQueueStatus,
             ObjectInner::Jmap(_) => ObjectType::Jmap,
             ObjectInner::Log(_) => ObjectType::Log,
             ObjectInner::MailingList(_) => ObjectType::MailingList,
@@ -5602,7 +5603,7 @@ impl Object {
             ObjectInner::HttpLookup(obj) => obj.validate(errors),
             ObjectInner::Imap(obj) => obj.validate(errors),
             ObjectInner::InMemoryStore(obj) => obj.validate(errors),
-            ObjectInner::IndexQueueEntry(obj) => obj.validate(errors),
+            ObjectInner::IndexQueueStatus(obj) => obj.validate(errors),
             ObjectInner::Jmap(obj) => obj.validate(errors),
             ObjectInner::Log(obj) => obj.validate(errors),
             ObjectInner::MailingList(obj) => obj.validate(errors),
@@ -5725,7 +5726,7 @@ impl Object {
             ObjectInner::HttpLookup(obj) => obj.index(i),
             ObjectInner::Imap(obj) => obj.index(i),
             ObjectInner::InMemoryStore(obj) => obj.index(i),
-            ObjectInner::IndexQueueEntry(obj) => obj.index(i),
+            ObjectInner::IndexQueueStatus(obj) => obj.index(i),
             ObjectInner::Jmap(obj) => obj.index(i),
             ObjectInner::Log(obj) => obj.index(i),
             ObjectInner::MailingList(obj) => obj.index(i),
@@ -5852,7 +5853,7 @@ impl Object {
             ObjectInner::HttpLookup(obj) => obj.patch(pointer, value),
             ObjectInner::Imap(obj) => obj.patch(pointer, value),
             ObjectInner::InMemoryStore(obj) => obj.patch(pointer, value),
-            ObjectInner::IndexQueueEntry(obj) => obj.patch(pointer, value),
+            ObjectInner::IndexQueueStatus(obj) => obj.patch(pointer, value),
             ObjectInner::Jmap(obj) => obj.patch(pointer, value),
             ObjectInner::Log(obj) => obj.patch(pointer, value),
             ObjectInner::MailingList(obj) => obj.patch(pointer, value),
@@ -5977,7 +5978,7 @@ impl IntoValue for Object {
             ObjectInner::HttpLookup(obj) => obj.into_value(),
             ObjectInner::Imap(obj) => obj.into_value(),
             ObjectInner::InMemoryStore(obj) => obj.into_value(),
-            ObjectInner::IndexQueueEntry(obj) => obj.into_value(),
+            ObjectInner::IndexQueueStatus(obj) => obj.into_value(),
             ObjectInner::Jmap(obj) => obj.into_value(),
             ObjectInner::Log(obj) => obj.into_value(),
             ObjectInner::MailingList(obj) => obj.into_value(),
@@ -6102,7 +6103,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::HttpLookup => ObjectInner::HttpLookup(Default::default()),
             ObjectType::Imap => ObjectInner::Imap(Default::default()),
             ObjectType::InMemoryStore => ObjectInner::InMemoryStore(Default::default()),
-            ObjectType::IndexQueueEntry => ObjectInner::IndexQueueEntry(Default::default()),
+            ObjectType::IndexQueueStatus => ObjectInner::IndexQueueStatus(Default::default()),
             ObjectType::Jmap => ObjectInner::Jmap(Default::default()),
             ObjectType::Log => ObjectInner::Log(Default::default()),
             ObjectType::MailingList => ObjectInner::MailingList(Default::default()),
@@ -6904,16 +6905,16 @@ impl From<Object> for InMemoryStore {
     }
 }
 
-impl From<IndexQueueEntry> for ObjectInner {
-    fn from(value: IndexQueueEntry) -> Self {
-        ObjectInner::IndexQueueEntry(value)
+impl From<IndexQueueStatus> for ObjectInner {
+    fn from(value: IndexQueueStatus) -> Self {
+        ObjectInner::IndexQueueStatus(value)
     }
 }
 
-impl From<Object> for IndexQueueEntry {
+impl From<Object> for IndexQueueStatus {
     fn from(obj: Object) -> Self {
         match obj.inner {
-            ObjectInner::IndexQueueEntry(obj) => obj,
+            ObjectInner::IndexQueueStatus(obj) => obj,
             _ => unreachable!(),
         }
     }

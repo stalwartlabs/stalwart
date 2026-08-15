@@ -13,7 +13,7 @@ use store::{
     roaring::RoaringBitmap,
     search::{
         ContactSearchField, EmailSearchField, IndexDocument, KeyValueMatch, SearchComparator,
-        SearchField, SearchFilter, SearchQuery, TextMatch,
+        SearchField, SearchFilter, SearchQuery, SearchValue, TextMatch,
     },
     write::SearchIndex,
 };
@@ -141,6 +141,100 @@ struct Caps {
     text_boolean: bool,
 }
 
+async fn search_index(store: &SearchStore, documents: Vec<IndexDocument>) -> trc::Result<()> {
+    let Some(internal) = store.internal_fts() else {
+        return store.index(documents).await;
+    };
+
+    let mut accounts: AHashMap<(SearchIndex, u32), Vec<IndexDocument>> = AHashMap::new();
+    let mut traces = Vec::new();
+
+    for document in documents {
+        if matches!(document.index(), SearchIndex::Tracing) {
+            traces.push(document);
+        } else {
+            let account_id = document_field(&document, &SearchField::AccountId)
+                .expect("Missing accountId for document") as u32;
+            accounts
+                .entry((document.index(), account_id))
+                .or_default()
+                .push(document);
+        }
+    }
+
+    for ((index, account_id), documents) in accounts {
+        internal
+            .index_account_documents(account_id, index, documents, vec![])
+            .await?;
+    }
+
+    if !traces.is_empty() {
+        internal.index_trace(traces).await?;
+    }
+
+    Ok(())
+}
+
+async fn search_unindex(store: &SearchStore, query: SearchQuery) -> trc::Result<()> {
+    let Some(internal) = store.internal_fts() else {
+        return store.unindex(query).await.map(|_| ());
+    };
+
+    let index = query.index();
+    let mut account_id = None;
+    let mut document_ids = Vec::new();
+    let mut before_id = None;
+
+    for filter in query.filters() {
+        match filter {
+            SearchFilter::Integer {
+                field: SearchField::AccountId,
+                op: std::cmp::Ordering::Equal,
+                value,
+            } => {
+                account_id = Some(*value as u32);
+            }
+            SearchFilter::Integer {
+                field: SearchField::DocumentId,
+                op: std::cmp::Ordering::Equal,
+                value,
+            } => {
+                document_ids.push(*value as u32);
+            }
+            SearchFilter::Integer {
+                field: SearchField::Id,
+                op: std::cmp::Ordering::Less,
+                value,
+            } => {
+                before_id = Some(*value);
+            }
+            SearchFilter::And | SearchFilter::Or | SearchFilter::End => {}
+            other => panic!("Unsupported unindex filter {other:?}"),
+        }
+    }
+
+    if let Some(before_id) = before_id {
+        internal.unindex_traces(before_id).await
+    } else {
+        let account_id = account_id.expect("Missing accountId for unindex");
+
+        if document_ids.is_empty() {
+            internal.unindex_account(index, account_id).await
+        } else {
+            internal
+                .index_account_documents(account_id, index, vec![], document_ids)
+                .await
+        }
+    }
+}
+
+fn document_field(document: &IndexDocument, field: &SearchField) -> Option<u64> {
+    document.fields().find_map(|(name, value)| match value {
+        SearchValue::Uint(value) if name == field => Some(*value),
+        _ => None,
+    })
+}
+
 async fn refresh(store: &SearchStore) {
     if let SearchStore::ElasticSearch(store) = store {
         for index in [
@@ -228,7 +322,7 @@ pub async fn test(test: &TestServer) {
             header: None,
         },
     ));
-    store.index(documents).await.unwrap();
+    search_index(&store, documents).await.unwrap();
     refresh(&store).await;
 
     println!("Running robustness tests (large document)...");
@@ -823,7 +917,7 @@ async fn test_phrase_positions(store: &SearchStore) {
         "alpha alpha alpha omega",
         Language::English,
     );
-    store.index(vec![document]).await.unwrap();
+    search_index(store, vec![document]).await.unwrap();
     refresh(store).await;
 
     for (phrase, expected, context) in [
@@ -878,7 +972,7 @@ async fn test_phrase_positions(store: &SearchStore) {
         documents.push(document);
     }
     expected.sort_unstable();
-    store.index(documents).await.unwrap();
+    search_index(store, documents).await.unwrap();
     refresh(store).await;
 
     let results = store
@@ -1037,7 +1131,7 @@ async fn test_incremental(store: &SearchStore, caps: &Caps) {
     document.index_unsigned(EmailSearchField::To, 2020u64);
     document.index_bool(EmailSearchField::Cc, true);
     document.index_integer(EmailSearchField::Bcc, -42i64);
-    store.index(vec![document]).await.unwrap();
+    search_index(store, vec![document]).await.unwrap();
 
     assert_query(
         store,
@@ -1097,7 +1191,7 @@ async fn test_incremental(store: &SearchStore, caps: &Caps) {
     let query = SearchQuery::new(SearchIndex::Email)
         .with_account_id(ACCOUNT)
         .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 20u32));
-    store.unindex(query).await.unwrap();
+    search_unindex(store, query).await.unwrap();
 
     assert_query(
         store,
@@ -1220,7 +1314,7 @@ async fn test_update(store: &SearchStore) {
         .with_account_id(ACCOUNT_CONTACTS)
         .with_document_id(0);
     document.index_text(ContactSearchField::Name, "john smith", Language::None);
-    store.index(vec![document]).await.unwrap();
+    search_index(store, vec![document]).await.unwrap();
     refresh(store).await;
 
     let query_name = |name: &str| {
@@ -1240,7 +1334,7 @@ async fn test_update(store: &SearchStore) {
         .with_account_id(ACCOUNT_CONTACTS)
         .with_document_id(0);
     document.index_text(ContactSearchField::Name, "jane doe", Language::None);
-    store.index(vec![document]).await.unwrap();
+    search_index(store, vec![document]).await.unwrap();
     refresh(store).await;
 
     assert_eq!(
@@ -1277,7 +1371,7 @@ async fn test_unindex(store: &SearchStore) {
         query = query.with_filter(SearchFilter::integer_eq(SearchField::DocumentId, id));
     }
     query = query.with_filter(SearchFilter::End);
-    store.unindex(query).await.unwrap();
+    search_unindex(store, query).await.unwrap();
     refresh(store).await;
 
     assert_query(
@@ -1299,7 +1393,7 @@ async fn test_unindex(store: &SearchStore) {
         query = query.with_filter(SearchFilter::integer_eq(SearchField::DocumentId, id));
     }
     query = query.with_filter(SearchFilter::End);
-    store.unindex(query).await.unwrap();
+    search_unindex(store, query).await.unwrap();
     refresh(store).await;
 
     assert_query(
@@ -1314,25 +1408,25 @@ async fn test_unindex(store: &SearchStore) {
     )
     .await;
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Email)
-                .with_filter(SearchFilter::Or)
-                .with_filter(SearchFilter::And)
-                .with_account_id(ACCOUNT)
-                .with_filter(SearchFilter::Or)
-                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 10u32))
-                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 11u32))
-                .with_filter(SearchFilter::End)
-                .with_filter(SearchFilter::End)
-                .with_filter(SearchFilter::And)
-                .with_account_id(ACCOUNT_DUP)
-                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 0u32))
-                .with_filter(SearchFilter::End)
-                .with_filter(SearchFilter::End),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Email)
+            .with_filter(SearchFilter::Or)
+            .with_filter(SearchFilter::And)
+            .with_account_id(ACCOUNT)
+            .with_filter(SearchFilter::Or)
+            .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 10u32))
+            .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 11u32))
+            .with_filter(SearchFilter::End)
+            .with_filter(SearchFilter::End)
+            .with_filter(SearchFilter::And)
+            .with_account_id(ACCOUNT_DUP)
+            .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 0u32))
+            .with_filter(SearchFilter::End)
+            .with_filter(SearchFilter::End),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     assert_query(
@@ -1367,14 +1461,14 @@ async fn test_unindex(store: &SearchStore) {
 
     if store.internal_fts().is_some() {
         assert!(
-            store
-                .unindex(
-                    SearchQuery::new(SearchIndex::Email)
-                        .with_account_id(ACCOUNT)
-                        .with_filter(SearchFilter::has_keyword(EmailSearchField::From, "x")),
-                )
-                .await
-                .is_err(),
+            search_unindex(
+                store,
+                SearchQuery::new(SearchIndex::Email)
+                    .with_account_id(ACCOUNT)
+                    .with_filter(SearchFilter::has_keyword(EmailSearchField::From, "x")),
+            )
+            .await
+            .is_err(),
             "unsupported unindex filters are rejected"
         );
     }
@@ -1403,7 +1497,7 @@ async fn test_term_blocks(store: &SearchStore) {
         }
         documents.push(document);
     }
-    store.index(documents).await.unwrap();
+    search_index(store, documents).await.unwrap();
     refresh(store).await;
 
     let query = |filter: SearchFilter| {
@@ -1448,14 +1542,14 @@ async fn test_term_blocks(store: &SearchStore) {
         assert_eq!(results, vec![1], "unexpected results for {context}");
     }
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Email)
-                .with_account_id(ACCOUNT_BLOCKS)
-                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, ids[4])),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Email)
+            .with_account_id(ACCOUNT_BLOCKS)
+            .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, ids[4])),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     let results = store
@@ -1471,14 +1565,14 @@ async fn test_term_blocks(store: &SearchStore) {
         "removing an aliased block entry keeps its block neighbors"
     );
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Email)
-                .with_account_id(ACCOUNT_BLOCKS)
-                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, ids[1])),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Email)
+            .with_account_id(ACCOUNT_BLOCKS)
+            .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, ids[1])),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     let results = store
@@ -1586,7 +1680,7 @@ async fn test_duplicate_batch(store: &SearchStore) {
         "finalword revision",
         Language::English,
     );
-    store.index(vec![first, second]).await.unwrap();
+    search_index(store, vec![first, second]).await.unwrap();
 
     let mut first = IndexDocument::new(SearchIndex::Contacts)
         .with_account_id(ACCOUNT_DUP)
@@ -1596,7 +1690,7 @@ async fn test_duplicate_batch(store: &SearchStore) {
         .with_account_id(ACCOUNT_DUP)
         .with_document_id(0);
     second.index_text(ContactSearchField::Name, "finalname", Language::None);
-    store.index(vec![first, second]).await.unwrap();
+    search_index(store, vec![first, second]).await.unwrap();
     refresh(store).await;
 
     let assert_dup =
@@ -1665,14 +1759,14 @@ async fn test_hashed_term_unindex(store: &SearchStore) {
     )
     .await;
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Email)
-                .with_account_id(ACCOUNT)
-                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 5u32)),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Email)
+            .with_account_id(ACCOUNT)
+            .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 5u32)),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     assert_query(
@@ -1705,7 +1799,7 @@ async fn test_bulk_unindex(store: &SearchStore, internal_store: &Store) {
             document.index_text(EmailSearchField::Body, &body, Language::None);
             documents.push(document);
         }
-        store.index(documents).await.unwrap();
+        search_index(store, documents).await.unwrap();
     }
 
     let query_chunkterm = || {
@@ -1737,7 +1831,7 @@ async fn test_bulk_unindex(store: &SearchStore, internal_store: &Store) {
         unindex = unindex.with_filter(SearchFilter::integer_eq(SearchField::DocumentId, id));
     }
     unindex = unindex.with_filter(SearchFilter::End);
-    store.unindex(unindex).await.unwrap();
+    search_unindex(store, unindex).await.unwrap();
 
     let expected = RoaringBitmap::from_iter((0..400u32).chain(800..total));
     let results = store
@@ -1774,10 +1868,12 @@ async fn test_bulk_unindex(store: &SearchStore, internal_store: &Store) {
 }
 
 async fn test_account_wipe(store: &SearchStore) {
-    store
-        .unindex(SearchQuery::new(SearchIndex::Email).with_account_id(ACCOUNT_OTHER))
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Email).with_account_id(ACCOUNT_OTHER),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     let results = store
@@ -1844,7 +1940,7 @@ async fn test_large_document(store: &SearchStore, caps: &Caps) {
         "needleinhaystack marker",
         Language::English,
     );
-    store.index(vec![document]).await.unwrap();
+    search_index(store, vec![document]).await.unwrap();
     refresh(store).await;
 
     let results = store
@@ -1861,14 +1957,14 @@ async fn test_large_document(store: &SearchStore, caps: &Caps) {
         .unwrap();
     assert_eq!(results, vec![1], "large document is searchable");
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Email)
-                .with_account_id(ACCOUNT_LARGE)
-                .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 1u32)),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Email)
+            .with_account_id(ACCOUNT_LARGE)
+            .with_filter(SearchFilter::integer_eq(SearchField::DocumentId, 1u32)),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 }
 
@@ -1901,7 +1997,7 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         document.index_text(TracingSearchField::Keywords, keywords, Language::None);
         documents.push(document);
     }
-    store.index(documents).await.unwrap();
+    search_index(store, documents).await.unwrap();
     refresh(store).await;
 
     let query_all = || {
@@ -2053,24 +2149,24 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
 
     if caps.internal {
         assert!(
-            store
-                .unindex(
-                    SearchQuery::new(SearchIndex::Tracing)
-                        .with_filter(SearchFilter::integer_lt(SearchField::Id, 3u64)),
-                )
-                .await
-                .is_err(),
+            search_unindex(
+                store,
+                SearchQuery::new(SearchIndex::Tracing)
+                    .with_filter(SearchFilter::integer_lt(SearchField::Id, 3u64)),
+            )
+            .await
+            .is_err(),
             "purge cutoff within the first bucket must be rejected"
         );
     }
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Tracing)
-                .with_filter(SearchFilter::integer_lt(SearchField::Id, ID3)),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Tracing)
+            .with_filter(SearchFilter::integer_lt(SearchField::Id, ID3)),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     assert_global(query_all(), vec![ID3, ID4, ID5, ID6], "all ids after purge").await;
@@ -2113,13 +2209,13 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
     )
     .await;
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Tracing)
-                .with_filter(SearchFilter::integer_lt(SearchField::Id, 2 * BUCKET)),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Tracing)
+            .with_filter(SearchFilter::integer_lt(SearchField::Id, 2 * BUCKET)),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     assert_global(query_all(), vec![ID5, ID6], "all ids after boundary purge").await;
@@ -2141,7 +2237,7 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         "restart start",
         Language::None,
     );
-    store.index(vec![document]).await.unwrap();
+    search_index(store, vec![document]).await.unwrap();
     refresh(store).await;
 
     assert_global(query_all(), vec![ID5, ID6, ID7], "id added after purge").await;
@@ -2155,13 +2251,13 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
     )
     .await;
 
-    store
-        .unindex(
-            SearchQuery::new(SearchIndex::Tracing)
-                .with_filter(SearchFilter::integer_lt(SearchField::Id, u64::MAX)),
-        )
-        .await
-        .unwrap();
+    search_unindex(
+        store,
+        SearchQuery::new(SearchIndex::Tracing)
+            .with_filter(SearchFilter::integer_lt(SearchField::Id, u64::MAX)),
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     assert_global(query_all(), vec![], "all ids after wipe").await;
@@ -2204,10 +2300,12 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
         "mixedbatch trace",
         Language::None,
     );
-    store
-        .index(vec![account_document, stale_document, global_document])
-        .await
-        .unwrap();
+    search_index(
+        store,
+        vec![account_document, stale_document, global_document],
+    )
+    .await
+    .unwrap();
     refresh(store).await;
 
     assert_global(

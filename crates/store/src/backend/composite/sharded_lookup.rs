@@ -98,6 +98,18 @@ impl ShardedInMemory {
         .await
     }
 
+    pub async fn renew_lock(&self, key: &[u8], expires: u64) -> trc::Result<()> {
+        Box::pin(async move {
+            match self.get_store(key) {
+                #[cfg(feature = "redis")]
+                InMemoryStore::Redis(store) => store.renew_lock(key, expires).await,
+                InMemoryStore::Static(_) => Err(trc::StoreEvent::NotSupported.into_err()),
+                _ => Err(trc::StoreEvent::NotSupported.into_err()),
+            }
+        })
+        .await
+    }
+
     pub async fn key_delete(&self, key: impl Into<LookupKey<'_>>) -> trc::Result<()> {
         let key_ = key.into();
         let key = key_.as_bytes();

@@ -242,6 +242,7 @@ impl EmailCopy for Server {
             .caused_by(trc::location!())?;
 
         // Insert and obtain ids
+        let queues = batch.queue_notify();
         let change_id = self
             .store()
             .write(batch.build_all())
@@ -250,7 +251,7 @@ impl EmailCopy for Server {
             .last_change_id(to_account_id)?;
 
         // Request indexing
-        self.notify_task_queue();
+        self.notify_queues(queues).await;
 
         // Update response
         email.document_id = document_id;

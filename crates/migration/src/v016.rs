@@ -35,14 +35,21 @@ const LEGACY_SUBSPACE_TELEMETRY_INDEX: u8 = b'w'; // Now SUBSPACE_SPAM_SAMPLES
 
 pub async fn migrate_v0_16(server: &Server) -> trc::Result<()> {
     // Delete tracing index
-    server
-        .search_store()
-        .unindex(
-            SearchQuery::new(SearchIndex::Tracing)
-                .with_filter(SearchFilter::integer_lt(SearchField::Id, u64::MAX)),
-        )
-        .await
-        .caused_by(trc::location!())?;
+    if let Some(store) = server.search_store().internal_fts() {
+        store
+            .unindex_traces(u64::MAX)
+            .await
+            .caused_by(trc::location!())?;
+    } else {
+        server
+            .search_store()
+            .unindex(
+                SearchQuery::new(SearchIndex::Tracing)
+                    .with_filter(SearchFilter::integer_lt(SearchField::Id, u64::MAX)),
+            )
+            .await
+            .caused_by(trc::location!())?;
+    }
 
     // Delete old quotas
     server

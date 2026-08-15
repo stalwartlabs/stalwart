@@ -203,11 +203,7 @@ impl MailboxDestroy for Server {
                 .await
                 .and_then(|ids| ids.last_change_id(account_id))
             {
-                Ok(change_id) => {
-                    self.notify_task_queue();
-
-                    Ok(Ok(Some(change_id)))
-                }
+                Ok(change_id) => Ok(Ok(Some(change_id))),
                 Err(err) if err.is_assertion_failure() => {
                     Ok(Err(MailboxDestroyError::AssertionFailed))
                 }

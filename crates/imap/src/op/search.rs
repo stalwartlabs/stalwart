@@ -10,9 +10,12 @@ use crate::{
     spawn_op,
 };
 use common::network::SessionStream;
-use email::cache::{
-    MessageCacheFetch,
-    email::{MessageCacheAccess, SearchOperator},
+use email::{
+    cache::{
+        MessageCacheFetch,
+        email::{MessageCacheAccess, SearchOperator},
+    },
+    message::sortkeys::{EmailSortKeys, MessageComparator, MessageSortField},
 };
 use imap_proto::{
     Command, StatusResponse,
@@ -29,15 +32,12 @@ use std::{str::FromStr, sync::Arc, time::Instant};
 use store::{
     query::log::Query,
     roaring::RoaringBitmap,
-    search::{
-        EmailSearchField, KeyValueMatch, SearchComparator, SearchFilter, SearchQuery, SearchValue,
-    },
+    search::{EmailSearchField, KeyValueMatch, SearchComparator, SearchFilter, SearchQuery},
     write::{SearchIndex, now},
 };
 use tokio::sync::watch;
 use trc::AddContext;
 use types::{collection::SyncCollection, id::Id, keyword::Keyword};
-use utils::map::vec_map::VecMap;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_search(
@@ -641,7 +641,7 @@ impl<T: SessionStream> SessionData<T> {
         let mut comparators = Vec::with_capacity(imap_comparator.len());
         for comparator in imap_comparator {
             comparators.push(match comparator.sort {
-                search::Sort::Arrival => SearchComparator::sorted_set(
+                search::Sort::Arrival => MessageComparator::Search(SearchComparator::sorted_set(
                     cache
                         .emails
                         .items
@@ -650,7 +650,7 @@ impl<T: SessionStream> SessionData<T> {
                         .map(|(i, m)| (m.document_id, i as u32))
                         .collect(),
                     comparator.ascending,
-                ),
+                )),
                 search::Sort::Cc => {
                     return Err(trc::ImapEvent::Error
                         .into_err()
@@ -676,15 +676,16 @@ impl<T: SessionStream> SessionData<T> {
                         prev_ts = Some(ts);
                     }
 
-                    SearchComparator::sorted_set(set, comparator.ascending)
+                    MessageComparator::Search(SearchComparator::sorted_set(
+                        set,
+                        comparator.ascending,
+                    ))
                 }
-                search::Sort::From | search::Sort::DisplayFrom => {
-                    let todo = "fix sort";
-                    todo!()
-
-                    //SearchComparator::field(EmailSearchField::From, comparator.ascending)
-                }
-                search::Sort::Size => SearchComparator::sorted_set(
+                search::Sort::From | search::Sort::DisplayFrom => MessageComparator::SortKey {
+                    field: MessageSortField::From,
+                    ascending: comparator.ascending,
+                },
+                search::Sort::Size => MessageComparator::Search(SearchComparator::sorted_set(
                     cache
                         .emails
                         .items
@@ -692,30 +693,27 @@ impl<T: SessionStream> SessionData<T> {
                         .map(|m| (m.document_id, m.size))
                         .collect(),
                     comparator.ascending,
-                ),
-                search::Sort::Subject => {
-                    let todo = "fix sort";
-                    todo!()
-
-                    //SearchComparator::field(EmailSearchField::Subject, comparator.ascending)
-                }
-                search::Sort::To | search::Sort::DisplayTo => {
-                    let todo = "fix sort";
-                    todo!()
-                    //SearchComparator::field(EmailSearchField::To, comparator.ascending)
-                }
+                )),
+                search::Sort::Subject => MessageComparator::SortKey {
+                    field: MessageSortField::Subject,
+                    ascending: comparator.ascending,
+                },
+                search::Sort::To | search::Sort::DisplayTo => MessageComparator::SortKey {
+                    field: MessageSortField::To,
+                    ascending: comparator.ascending,
+                },
             });
         }
 
         // Run query
         self.server
-            .search_store()
-            .query_account(
+            .query_emails(
+                mailbox.id.account_id,
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(filters)
-                    .with_comparators(comparators)
                     .with_account_id(mailbox.id.account_id)
                     .with_mask(message_ids),
+                comparators,
             )
             .await
             .map(|res| (res, include_highest_modseq))

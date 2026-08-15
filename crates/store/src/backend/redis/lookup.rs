@@ -90,6 +90,23 @@ impl RedisStore {
         }
     }
 
+    pub async fn renew_lock(&self, key: &[u8], expires: u64) -> trc::Result<()> {
+        match &self.pool {
+            RedisPool::Single(pool) => {
+                self.renew_lock_(pool.get().await.map_err(into_error)?.as_mut(), key, expires)
+                    .await
+            }
+            RedisPool::Cluster(pool) => {
+                self.renew_lock_(pool.get().await.map_err(into_error)?.as_mut(), key, expires)
+                    .await
+            }
+            RedisPool::Sentinel(pool) => {
+                self.renew_lock_(pool.get().await.map_err(into_error)?.as_mut(), key, expires)
+                    .await
+            }
+        }
+    }
+
     pub async fn key_delete(&self, key: &[u8]) -> trc::Result<()> {
         match &self.pool {
             RedisPool::Single(pool) => {
@@ -259,6 +276,22 @@ impl RedisStore {
             .query_async::<Option<String>>(conn)
             .await
             .map(|reply| reply.is_some())
+            .map_err(into_error)
+    }
+
+    async fn renew_lock_(
+        &self,
+        conn: &mut impl AsyncCommands,
+        key: &[u8],
+        expires: u64,
+    ) -> trc::Result<()> {
+        redis::cmd("SET")
+            .arg(key)
+            .arg(now() + expires)
+            .arg("EX")
+            .arg(expires as i64)
+            .query_async::<()>(conn)
+            .await
             .map_err(into_error)
     }
 

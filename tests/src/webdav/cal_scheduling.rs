@@ -24,7 +24,7 @@ use groupware::{
 };
 use hyper::StatusCode;
 use mail_parser::{DateTime, MessageParser};
-use services::task_manager::imip::build_itip_template;
+use services::task_manager::tasks::imip::build_itip_template;
 use std::str::FromStr;
 use store::write::now;
 use types::collection::SyncCollection;

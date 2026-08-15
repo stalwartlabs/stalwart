@@ -22771,85 +22771,229 @@ impl InMemoryStoreBase {
     }
 }
 
-impl ObjectImpl for IndexQueueEntry {
+impl ObjectImpl for IndexQueueStatus {
     const FLAGS: u64 = 0;
     const VERSION: u8 = 0;
-    const OBJECT: ObjectType = ObjectType::IndexQueueEntry;
+    const OBJECT: ObjectType = ObjectType::IndexQueueStatus;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
-        if let Some(value) = &self.account_id {
-            if !value.is_valid() {
-                errors.push(ValidationError::required(Property::AccountId));
-            }
-        }
-        let value = &self.created_at;
-        if !value.is_valid() {
-            errors.push(ValidationError::invalid(Property::CreatedAt, value));
-        }
+        let value = &self.status;
+        value.validate(errors);
         errors.len() == neb
     }
 
-    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
-        i.search(Property::Action, &self.action);
-        i.foreign_key(ObjectType::Account, self.account_id, None);
-        if let Some(value) = &self.account_id {
-            i.search(Property::AccountId, value);
-        }
-    }
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
 }
 
-impl Pickle for IndexQueueEntry {
+impl Pickle for IndexQueueStatus {
     fn pickle(&self, out: &mut Vec<u8>) {
-        self.action.pickle(out);
-        self.account_id.pickle(out);
-        self.document_id.pickle(out);
-        self.created_at.pickle(out);
+        self.index.pickle(out);
+        self.partition.pickle(out);
+        self.queued_updates.pickle(out);
+        self.queued_deletions.pickle(out);
+        self.status.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
         let mut this = Self::default();
-        this.action = Pickle::unpickle(stream)?;
-        this.account_id = Pickle::unpickle(stream)?;
-        this.document_id = Pickle::unpickle(stream)?;
-        this.created_at = Pickle::unpickle(stream)?;
+        this.index = Pickle::unpickle(stream)?;
+        this.partition = Pickle::unpickle(stream)?;
+        this.queued_updates = Pickle::unpickle(stream)?;
+        this.queued_deletions = Pickle::unpickle(stream)?;
+        this.status = Pickle::unpickle(stream)?;
         Some(this)
     }
 }
 
-impl Default for IndexQueueEntry {
+impl Default for IndexQueueStatus {
     fn default() -> Self {
         Self {
-            action: Default::default(),
-            account_id: Default::default(),
-            document_id: 0u64,
-            created_at: Default::default(),
+            index: Default::default(),
+            partition: 0u64,
+            queued_updates: 0u64,
+            queued_deletions: 0u64,
+            status: Default::default(),
         }
     }
 }
 
-impl IntoValue for IndexQueueEntry {
+impl IntoValue for IndexQueueStatus {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(6);
-        map.insert_unchecked(Property::Action, self.action.into_value());
-        map.insert_unchecked(Property::AccountId, self.account_id.into_value());
-        map.insert_unchecked(Property::DocumentId, self.document_id.into_value());
-        map.insert_unchecked(Property::CreatedAt, self.created_at.into_value());
+        let mut map = jmap_tools::Map::with_capacity(7);
+        map.insert_unchecked(Property::Index, self.index.into_value());
+        map.insert_unchecked(Property::Partition, self.partition.into_value());
+        map.insert_unchecked(Property::QueuedUpdates, self.queued_updates.into_value());
+        map.insert_unchecked(
+            Property::QueuedDeletions,
+            self.queued_deletions.into_value(),
+        );
+        map.insert_unchecked(Property::Status, self.status.into_value());
         JmapValue::Object(map)
     }
 }
 
-impl RegistryJsonPropertyPatch for IndexQueueEntry {
+impl RegistryJsonPropertyPatch for IndexQueueStatus {
     fn patch_property<'x>(
         &mut self,
         mut pointer: JsonPointerPatch<'_>,
         value: JmapValue<'x>,
     ) -> PatchResult<'x> {
         match pointer.next_property() {
-            Some(Property::Action) => pointer.assert_server_set(),
-            Some(Property::AccountId) => pointer.assert_server_set(),
-            Some(Property::DocumentId) => pointer.assert_server_set(),
-            Some(Property::CreatedAt) => pointer.assert_server_set(),
+            Some(Property::Index) => pointer.assert_server_set(),
+            Some(Property::Partition) => pointer.assert_server_set(),
+            Some(Property::QueuedUpdates) => pointer.assert_server_set(),
+            Some(Property::QueuedDeletions) => pointer.assert_server_set(),
+            Some(Property::Status) => self.status.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl IndexStatus {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            IndexStatus::Running => true,
+            IndexStatus::Failed(inner) => inner.validate(errors),
+        }
+    }
+}
+
+impl Default for IndexStatus {
+    fn default() -> Self {
+        IndexStatus::Running
+    }
+}
+
+impl Pickle for IndexStatus {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            IndexStatus::Running => {
+                0u16.pickle(out);
+            }
+            IndexStatus::Failed(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(IndexStatus::Running),
+            1 => Pickle::unpickle(stream).map(IndexStatus::Failed),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for IndexStatus {
+    fn into_value(self) -> JmapValue<'static> {
+        match self {
+            IndexStatus::Running => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Running".into()));
+                JmapValue::Object(obj)
+            }
+            IndexStatus::Failed(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Failed".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for IndexStatus {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                IndexStatusType::Running => *self = IndexStatus::Running,
+                IndexStatusType::Failed => *self = IndexStatus::Failed(Default::default()),
+            }
+        }
+        match self {
+            IndexStatus::Running => pointer.assert_eof(),
+            IndexStatus::Failed(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl IndexStatus {
+    pub fn object_type(&self) -> IndexStatusType {
+        match self {
+            IndexStatus::Running => IndexStatusType::Running,
+            IndexStatus::Failed(_) => IndexStatusType::Failed,
+        }
+    }
+}
+
+impl IndexStatusFailed {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.reason;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Reason));
+        }
+        let value = &self.next_retry;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::NextRetry, value));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for IndexStatusFailed {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.reason.pickle(out);
+        self.next_retry.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.reason = Pickle::unpickle(stream)?;
+        this.next_retry = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for IndexStatusFailed {
+    fn default() -> Self {
+        Self {
+            reason: Default::default(),
+            next_retry: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for IndexStatusFailed {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(4);
+        map.insert_unchecked(Property::Reason, self.reason.into_value());
+        map.insert_unchecked(Property::NextRetry, self.next_retry.into_value());
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for IndexStatusFailed {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Reason) => self.reason.patch(pointer, value),
+            Some(Property::NextRetry) => self.next_retry.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -34139,7 +34283,7 @@ impl S3StoreRegion {
 
 impl ObjectImpl for Search {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Search;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -34147,6 +34291,10 @@ impl ObjectImpl for Search {
         let value = &self.index_batch_size;
         if *value < 1 {
             errors.push(ValidationError::min_value(Property::IndexBatchSize, 1));
+        }
+        let value = &self.index_concurrency;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::IndexConcurrency, 1));
         }
         errors.len() == neb
     }
@@ -34167,6 +34315,7 @@ impl Pickle for Search {
         self.index_email_fields.pickle(out);
         self.index_telemetry.pickle(out);
         self.index_tracing_fields.pickle(out);
+        self.index_concurrency.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -34182,6 +34331,9 @@ impl Pickle for Search {
         this.index_email_fields = Pickle::unpickle(stream)?;
         this.index_telemetry = Pickle::unpickle(stream)?;
         this.index_tracing_fields = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.index_concurrency = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -34199,8 +34351,6 @@ impl Default for Search {
                 SearchCalendarField::Location,
                 SearchCalendarField::Owner,
                 SearchCalendarField::Attendee,
-                SearchCalendarField::Start,
-                SearchCalendarField::Uid,
             ]),
             index_contacts: true,
             index_contact_fields: Map::new(vec![
@@ -34214,7 +34364,6 @@ impl Default for Search {
                 SearchContactField::OnlineService,
                 SearchContactField::Address,
                 SearchContactField::Note,
-                SearchContactField::Uid,
             ]),
             index_email: true,
             index_email_fields: Map::new(vec![
@@ -34225,10 +34374,6 @@ impl Default for Search {
                 SearchEmailField::Subject,
                 SearchEmailField::Body,
                 SearchEmailField::Attachment,
-                SearchEmailField::ReceivedAt,
-                SearchEmailField::SentAt,
-                SearchEmailField::Size,
-                SearchEmailField::HasAttachment,
             ]),
             index_telemetry: true,
             index_tracing_fields: Map::new(vec![
@@ -34236,13 +34381,14 @@ impl Default for Search {
                 SearchTracingField::QueueId,
                 SearchTracingField::Keywords,
             ]),
+            index_concurrency: 5u64,
         }
     }
 }
 
 impl IntoValue for Search {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(13);
+        let mut map = jmap_tools::Map::with_capacity(14);
         map.insert_unchecked(Property::IndexBatchSize, self.index_batch_size.into_value());
         map.insert_unchecked(
             Property::DefaultLanguage,
@@ -34272,6 +34418,10 @@ impl IntoValue for Search {
             Property::IndexTracingFields,
             self.index_tracing_fields.into_value(),
         );
+        map.insert_unchecked(
+            Property::IndexConcurrency,
+            self.index_concurrency.into_value(),
+        );
         JmapValue::Object(map)
     }
 }
@@ -34294,6 +34444,7 @@ impl RegistryJsonPropertyPatch for Search {
             Some(Property::IndexEmailFields) => self.index_email_fields.patch(pointer, value),
             Some(Property::IndexTelemetry) => self.index_telemetry.patch(pointer, value),
             Some(Property::IndexTracingFields) => self.index_tracing_fields.patch(pointer, value),
+            Some(Property::IndexConcurrency) => self.index_concurrency.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -41637,63 +41788,63 @@ impl Pickle for Task {
     fn pickle(&self, out: &mut Vec<u8>) {
         match self {
             Task::CalendarAlarmEmail(inner) => {
-                3u16.pickle(out);
+                0u16.pickle(out);
                 inner.pickle(out);
             }
             Task::CalendarAlarmNotification(inner) => {
-                4u16.pickle(out);
+                1u16.pickle(out);
                 inner.pickle(out);
             }
             Task::CalendarItipMessage(inner) => {
-                5u16.pickle(out);
+                2u16.pickle(out);
                 inner.pickle(out);
             }
             Task::MergeThreads(inner) => {
-                6u16.pickle(out);
+                3u16.pickle(out);
                 inner.pickle(out);
             }
             Task::DmarcReport(inner) => {
-                7u16.pickle(out);
+                4u16.pickle(out);
                 inner.pickle(out);
             }
             Task::TlsReport(inner) => {
-                8u16.pickle(out);
+                5u16.pickle(out);
                 inner.pickle(out);
             }
             Task::RestoreArchivedItem(inner) => {
-                9u16.pickle(out);
+                6u16.pickle(out);
                 inner.pickle(out);
             }
             Task::DestroyAccount(inner) => {
-                10u16.pickle(out);
+                7u16.pickle(out);
                 inner.pickle(out);
             }
             Task::AccountMaintenance(inner) => {
-                11u16.pickle(out);
+                8u16.pickle(out);
                 inner.pickle(out);
             }
             Task::TenantMaintenance(inner) => {
-                12u16.pickle(out);
+                9u16.pickle(out);
                 inner.pickle(out);
             }
             Task::StoreMaintenance(inner) => {
-                13u16.pickle(out);
+                10u16.pickle(out);
                 inner.pickle(out);
             }
             Task::SpamFilterMaintenance(inner) => {
-                14u16.pickle(out);
+                11u16.pickle(out);
                 inner.pickle(out);
             }
             Task::AcmeRenewal(inner) => {
-                15u16.pickle(out);
+                12u16.pickle(out);
                 inner.pickle(out);
             }
             Task::DkimManagement(inner) => {
-                16u16.pickle(out);
+                13u16.pickle(out);
                 inner.pickle(out);
             }
             Task::DnsManagement(inner) => {
-                17u16.pickle(out);
+                14u16.pickle(out);
                 inner.pickle(out);
             }
         }
@@ -41701,22 +41852,21 @@ impl Pickle for Task {
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
         match u16::unpickle(stream)? {
-            3 => Pickle::unpickle(stream).map(Task::CalendarAlarmEmail),
-            4 => Pickle::unpickle(stream).map(Task::CalendarAlarmNotification),
-            5 => Pickle::unpickle(stream).map(Task::CalendarItipMessage),
-            6 => Pickle::unpickle(stream).map(Task::MergeThreads),
-            7 => Pickle::unpickle(stream).map(Task::DmarcReport),
-            8 => Pickle::unpickle(stream).map(Task::TlsReport),
-            9 => Pickle::unpickle(stream).map(Task::RestoreArchivedItem),
-            10 => Pickle::unpickle(stream).map(Task::DestroyAccount),
-            11 => Pickle::unpickle(stream).map(Task::AccountMaintenance),
-            12 => Pickle::unpickle(stream).map(Task::TenantMaintenance),
-            13 => Pickle::unpickle(stream).map(Task::StoreMaintenance),
-            14 => Pickle::unpickle(stream).map(Task::SpamFilterMaintenance),
-            15 => Pickle::unpickle(stream).map(Task::AcmeRenewal),
-            16 => Pickle::unpickle(stream).map(Task::DkimManagement),
-            17 => Pickle::unpickle(stream).map(Task::DnsManagement),
-            0 | 1 | 2 => Some(Self::default()),
+            0 => Pickle::unpickle(stream).map(Task::CalendarAlarmEmail),
+            1 => Pickle::unpickle(stream).map(Task::CalendarAlarmNotification),
+            2 => Pickle::unpickle(stream).map(Task::CalendarItipMessage),
+            3 => Pickle::unpickle(stream).map(Task::MergeThreads),
+            4 => Pickle::unpickle(stream).map(Task::DmarcReport),
+            5 => Pickle::unpickle(stream).map(Task::TlsReport),
+            6 => Pickle::unpickle(stream).map(Task::RestoreArchivedItem),
+            7 => Pickle::unpickle(stream).map(Task::DestroyAccount),
+            8 => Pickle::unpickle(stream).map(Task::AccountMaintenance),
+            9 => Pickle::unpickle(stream).map(Task::TenantMaintenance),
+            10 => Pickle::unpickle(stream).map(Task::StoreMaintenance),
+            11 => Pickle::unpickle(stream).map(Task::SpamFilterMaintenance),
+            12 => Pickle::unpickle(stream).map(Task::AcmeRenewal),
+            13 => Pickle::unpickle(stream).map(Task::DkimManagement),
+            14 => Pickle::unpickle(stream).map(Task::DnsManagement),
             _ => None,
         }
     }

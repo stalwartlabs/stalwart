@@ -3122,15 +3122,33 @@ pub enum InMemoryStoreBase {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct IndexQueueEntry {
-    #[serde(rename = "action")]
-    pub action: IndexAction,
-    #[serde(rename = "accountId")]
-    pub account_id: Option<Id>,
-    #[serde(rename = "documentId")]
-    pub document_id: u64,
-    #[serde(rename = "createdAt")]
-    pub created_at: UTCDateTime,
+pub struct IndexQueueStatus {
+    #[serde(rename = "index")]
+    pub index: IndexType,
+    #[serde(rename = "partition")]
+    pub partition: u64,
+    #[serde(rename = "queuedUpdates")]
+    pub queued_updates: u64,
+    #[serde(rename = "queuedDeletions")]
+    pub queued_deletions: u64,
+    #[serde(rename = "status")]
+    pub status: IndexStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum IndexStatus {
+    Running,
+    Failed(IndexStatusFailed),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IndexStatusFailed {
+    #[serde(rename = "reason")]
+    pub reason: String,
+    #[serde(rename = "nextRetry")]
+    pub next_retry: UTCDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4603,6 +4621,8 @@ pub struct Search {
     pub index_telemetry: bool,
     #[serde(rename = "indexTracingFields")]
     pub index_tracing_fields: Map<SearchTracingField>,
+    #[serde(rename = "indexConcurrency")]
+    pub index_concurrency: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -454,10 +454,6 @@ impl GlobalIndexer {
 
         batch
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.terms.is_empty() && self.documents.is_empty()
-    }
 }
 
 impl Document {

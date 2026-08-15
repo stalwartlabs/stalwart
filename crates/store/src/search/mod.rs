@@ -50,10 +50,6 @@ pub enum EmailSearchField {
     Body,
     Attachment,
     Headers,
-    _ReceivedAt,
-    _SentAt,
-    _Size,
-    _HasAttachment,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -310,11 +306,7 @@ impl SearchField {
                 EmailSearchField::Subject => 7,
                 EmailSearchField::Body => 8,
                 EmailSearchField::Attachment => 9,
-                EmailSearchField::_ReceivedAt => 10,
-                EmailSearchField::_SentAt => 11,
-                EmailSearchField::_Size => 12,
-                EmailSearchField::_HasAttachment => 13,
-                EmailSearchField::Headers => 14,
+                EmailSearchField::Headers => 10,
             },
             SearchField::Calendar(field) => match field {
                 CalendarSearchField::Title => 3,
@@ -362,10 +354,6 @@ impl SearchField {
                 EmailSearchField::Subject => "subj",
                 EmailSearchField::Body => "body",
                 EmailSearchField::Attachment => "attach",
-                EmailSearchField::_ReceivedAt => "rcvd",
-                EmailSearchField::_SentAt => "sent",
-                EmailSearchField::_Size => "size",
-                EmailSearchField::_HasAttachment => "has_att",
                 EmailSearchField::Headers => "headers",
             },
             SearchField::Calendar(field) => match field {

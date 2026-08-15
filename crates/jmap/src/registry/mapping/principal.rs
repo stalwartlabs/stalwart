@@ -485,8 +485,7 @@ pub(crate) async fn schedule_account_destruction(
         status,
     }));
 
-    server.store().write(batch.build_all()).await?;
-    server.notify_task_queue();
+    server.commit_batch(batch).await?;
 
     Ok(())
 }

@@ -20,7 +20,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::sync::{Semaphore, SemaphorePermit, mpsc};
+use tokio::sync::{Notify, Semaphore, SemaphorePermit, mpsc};
 use types::type_state::{DataType, StateChange};
 use utils::map::bitmap::Bitmap;
 
@@ -79,6 +79,28 @@ pub enum BroadcastEvent {
     CacheInvalidateNegative,
     MtaQueueStatus { is_running: bool },
     QueueRefresh,
+    TaskQueueRefresh,
+    IndexQueueRefresh,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexQueueNotify {
+    notify: Arc<Notify>,
+    broadcast: Option<mpsc::Sender<BroadcastEvent>>,
+}
+
+impl IndexQueueNotify {
+    pub fn new(notify: Arc<Notify>, broadcast: Option<mpsc::Sender<BroadcastEvent>>) -> Self {
+        Self { notify, broadcast }
+    }
+
+    pub fn notify(&self) {
+        self.notify.notify_one();
+
+        if let Some(broadcast) = &self.broadcast {
+            let _ = broadcast.try_send(BroadcastEvent::IndexQueueRefresh);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

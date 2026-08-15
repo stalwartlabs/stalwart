@@ -138,9 +138,10 @@ impl BootManager {
 
         // Parse storage
         let storage = Storage::parse(&mut bootstrap).await;
+        let (ipc, ipc_rxs) = build_ipc(!storage.coordinator.is_none());
 
         // Parse telemetry
-        let telemetry = Telemetry::parse(&mut bootstrap, &storage).await;
+        let telemetry = Telemetry::parse(&mut bootstrap, &storage, ipc.index_queue_notify()).await;
 
         match import_export {
             StoreOp::None => {
@@ -203,7 +204,6 @@ impl BootManager {
                     core.network.asn_geo_lookup,
                     AsnGeoLookupConfig::Resource { .. }
                 );
-                let (ipc, ipc_rxs) = build_ipc(!core.storage.coordinator.is_none());
                 let inner = Arc::new(Inner {
                     shared_core: ArcSwap::new(Arc::from(core)),
                     data,
@@ -291,6 +291,7 @@ pub fn build_ipc(has_pubsub: bool) -> (Ipc, IpcReceivers) {
             report_tx,
             broadcast_tx: has_pubsub.then_some(broadcast_tx),
             task_tx: Arc::new(Notify::new()),
+            index_tx: Arc::new(Notify::new()),
             train_task_controller: Arc::new(TrainTaskController::default()),
         },
         IpcReceivers {

@@ -186,16 +186,13 @@ impl SearchStore {
             #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
             SearchStore::SQLReadReplica(store) => store.index(documents).await,
             // SPDX-SnippetEnd
-            SearchStore::Store(store) => store.index(documents).await,
             SearchStore::ElasticSearch(store) => store.index(documents).await,
             SearchStore::MeiliSearch(store) => store.index(documents).await,
+            SearchStore::Store(_) => unreachable!(),
         }
     }
 
     pub async fn unindex(&self, query: SearchQuery) -> trc::Result<u64> {
-        if let Some(store) = self.internal_fts() {
-            return store.unindex(query).await.map(|_| 0);
-        }
         match self {
             #[cfg(feature = "postgres")]
             SearchStore::PostgreSQL(store) => store.unindex(query).await,
@@ -207,9 +204,9 @@ impl SearchStore {
             #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
             SearchStore::SQLReadReplica(store) => store.unindex(query).await,
             // SPDX-SnippetEnd
-            SearchStore::Store(store) => store.unindex(query).await.map(|_| 0),
             SearchStore::ElasticSearch(store) => store.unindex(query).await,
             SearchStore::MeiliSearch(store) => store.unindex(query).await,
+            SearchStore::Store(_) => unreachable!(),
         }
     }
 

@@ -6,6 +6,8 @@
 
 #![warn(clippy::large_futures)]
 
+use crate::index_queue::manager::spawn_index_queue_manager;
+use crate::task_manager::{manager::spawn_task_manager, scheduler::spawn_task_scheduler};
 use broadcast::publisher::spawn_broadcast_publisher;
 use common::{
     BuildServer, Inner,
@@ -14,9 +16,8 @@ use common::{
 use state_manager::manager::spawn_push_router;
 use std::sync::Arc;
 
-use crate::task_manager::{manager::spawn_task_manager, scheduler::spawn_task_scheduler};
-
 pub mod broadcast;
+pub mod index_queue;
 pub mod state_manager;
 pub mod task_manager;
 
@@ -58,6 +59,9 @@ impl SpawnServices for IpcReceivers {
 
             // Spawn task manager
             spawn_task_manager(inner.clone());
+
+            // Spawn search index queue manager
+            spawn_index_queue_manager(inner.clone());
 
             // Spawn task scheduler
             spawn_task_scheduler(inner);

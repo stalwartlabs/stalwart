@@ -57,6 +57,7 @@ pub struct EmailConfig {
     pub encrypt_append: bool,
 
     pub index_batch_size: usize,
+    pub index_concurrency: usize,
     pub index_fields: AHashMap<SearchIndex, AHashSet<SearchField>>,
 
     pub max_objects: ObjectQuota,
@@ -211,10 +212,6 @@ impl EmailConfig {
                             SearchEmailField::Subject => EmailSearchField::Subject,
                             SearchEmailField::Body => EmailSearchField::Body,
                             SearchEmailField::Attachment => EmailSearchField::Attachment,
-                            SearchEmailField::ReceivedAt => EmailSearchField::_ReceivedAt,
-                            SearchEmailField::SentAt => EmailSearchField::_SentAt,
-                            SearchEmailField::Size => EmailSearchField::_Size,
-                            SearchEmailField::HasAttachment => EmailSearchField::_HasAttachment,
                             SearchEmailField::Headers => EmailSearchField::Headers,
                         })
                     })
@@ -222,7 +219,6 @@ impl EmailConfig {
             );
         }
         if search.index_contacts {
-            let todo = "remove unused contact fields from registry";
             index_fields.insert(
                 SearchIndex::Contacts,
                 search
@@ -240,14 +236,12 @@ impl EmailConfig {
                             SearchContactField::OnlineService => ContactSearchField::OnlineService,
                             SearchContactField::Address => ContactSearchField::Address,
                             SearchContactField::Note => ContactSearchField::Note,
-                            SearchContactField::Uid => ContactSearchField::Name,
                         })
                     })
                     .collect(),
             );
         }
         if search.index_calendar {
-            let todo = "remove unused calendar fields from registry";
             index_fields.insert(
                 SearchIndex::Calendar,
                 search
@@ -260,8 +254,6 @@ impl EmailConfig {
                             SearchCalendarField::Location => CalendarSearchField::Location,
                             SearchCalendarField::Owner => CalendarSearchField::Owner,
                             SearchCalendarField::Attendee => CalendarSearchField::Attendee,
-                            SearchCalendarField::Start => CalendarSearchField::Title,
-                            SearchCalendarField::Uid => CalendarSearchField::Title,
                         })
                     })
                     .collect(),
@@ -284,7 +276,8 @@ impl EmailConfig {
             sieve_max_script_name: sieve.max_script_name_length as usize,
             encrypt: email.encrypt_at_rest,
             encrypt_append: email.encrypt_on_append,
-            index_batch_size: search.index_batch_size as usize,
+            index_batch_size: std::cmp::max(search.index_batch_size as usize, 1),
+            index_concurrency: std::cmp::max(search.index_concurrency as usize, 1),
             index_fields,
             max_objects,
             default_folders,

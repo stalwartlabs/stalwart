@@ -50,6 +50,14 @@ impl SearchQuery {
         self
     }
 
+    pub fn index(&self) -> SearchIndex {
+        self.index
+    }
+
+    pub fn filters(&self) -> &[SearchFilter] {
+        &self.filters
+    }
+
     pub fn with_comparator(mut self, comparator: SearchComparator) -> Self {
         self.comparators.push(comparator);
         self

@@ -37,7 +37,18 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
     }
 
     pub fn insert(&mut self, message: BroadcastEvent) -> bool {
-        self.messages.push(message);
+        if !matches!(
+            message,
+            BroadcastEvent::TaskQueueRefresh
+                | BroadcastEvent::IndexQueueRefresh
+                | BroadcastEvent::QueueRefresh
+        ) || !self
+            .messages
+            .iter()
+            .any(|queued| std::mem::discriminant(queued) == std::mem::discriminant(&message))
+        {
+            self.messages.push(message);
+        }
         self.messages.len() < MAX_BATCH_SIZE
     }
 
@@ -137,6 +148,12 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                 }
                 BroadcastEvent::QueueRefresh => {
                     serialized.push(12u8);
+                }
+                BroadcastEvent::TaskQueueRefresh => {
+                    serialized.push(13u8);
+                }
+                BroadcastEvent::IndexQueueRefresh => {
+                    serialized.push(14u8);
                 }
             }
         }
@@ -270,6 +287,8 @@ where
                 10 => Ok(Some(BroadcastEvent::MtaQueueStatus { is_running: true })),
                 11 => Ok(Some(BroadcastEvent::MtaQueueStatus { is_running: false })),
                 12 => Ok(Some(BroadcastEvent::QueueRefresh)),
+                13 => Ok(Some(BroadcastEvent::TaskQueueRefresh)),
+                14 => Ok(Some(BroadcastEvent::IndexQueueRefresh)),
                 _ => Err(()),
             }
         } else {

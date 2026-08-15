@@ -701,6 +701,7 @@ impl EmailIngest for Server {
         }
 
         // Insert and obtain ids
+        let queues = batch.queue_notify();
         let change_id = self
             .store()
             .write(batch.build_all())
@@ -708,8 +709,8 @@ impl EmailIngest for Server {
             .caused_by(trc::location!())?
             .last_change_id(account_id)?;
 
-        // Request FTS index
-        self.notify_task_queue();
+        // Request indexing
+        self.notify_queues(queues).await;
 
         trc::event!(
             MessageIngest(match params.source {

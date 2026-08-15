@@ -581,7 +581,6 @@ async fn copy_event(
         .commit_batch(batch)
         .await
         .caused_by(trc::location!())?;
-    server.notify_task_queue();
 
     response
 }
@@ -756,7 +755,6 @@ async fn move_event(
         .commit_batch(batch)
         .await
         .caused_by(trc::location!())?;
-    server.notify_task_queue();
 
     response
 }
@@ -812,7 +810,6 @@ async fn rename_event(
         .commit_batch(batch)
         .await
         .caused_by(trc::location!())?;
-    server.notify_task_queue();
 
     Ok(HttpResponse::new(StatusCode::CREATED))
 }
@@ -1035,7 +1032,6 @@ async fn copy_container(
         .commit_batch(batch)
         .await
         .caused_by(trc::location!())?;
-    server.notify_task_queue();
 
     if !is_overwrite {
         Ok(HttpResponse::new(StatusCode::CREATED))
@@ -1087,7 +1083,6 @@ async fn rename_container(
         .commit_batch(batch)
         .await
         .caused_by(trc::location!())?;
-    server.notify_task_queue();
 
     Ok(HttpResponse::new(StatusCode::CREATED))
 }

@@ -6,9 +6,12 @@
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
 use common::{MessageStoreCache, Server, auth::AccessToken};
-use email::cache::{
-    MessageCacheFetch,
-    email::{MessageCacheAccess, SearchOperator},
+use email::{
+    cache::{
+        MessageCacheFetch,
+        email::{MessageCacheAccess, SearchOperator},
+    },
+    message::sortkeys::{EmailSortKeys, MessageComparator, MessageSortField},
 };
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -310,17 +313,19 @@ impl EmailQuery for Server {
             .unwrap_or_default()
         {
             comparators.push(match comparator.property {
-                EmailComparator::ReceivedAt => SearchComparator::sorted_set(
-                    cached_messages
-                        .emails
-                        .items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, m)| (m.document_id, i as u32))
-                        .collect(),
-                    comparator.is_ascending,
-                ),
-                EmailComparator::Size => SearchComparator::sorted_set(
+                EmailComparator::ReceivedAt => {
+                    MessageComparator::Search(SearchComparator::sorted_set(
+                        cached_messages
+                            .emails
+                            .items
+                            .iter()
+                            .enumerate()
+                            .map(|(i, m)| (m.document_id, i as u32))
+                            .collect(),
+                        comparator.is_ascending,
+                    ))
+                }
+                EmailComparator::Size => MessageComparator::Search(SearchComparator::sorted_set(
                     cached_messages
                         .emails
                         .items
@@ -328,22 +333,19 @@ impl EmailQuery for Server {
                         .map(|m| (m.document_id, m.size))
                         .collect(),
                     comparator.is_ascending,
-                ),
-                EmailComparator::From => {
-                    let todo = "fix sort";
-                    todo!()
-                    //SearchComparator::field(EmailSearchField::From, comparator.is_ascending)
-                }
-                EmailComparator::To => {
-                    let todo = "fix sort";
-                    todo!()
-                    //SearchComparator::field(EmailSearchField::To, comparator.is_ascending)
-                }
-                EmailComparator::Subject => {
-                    let todo = "fix sort";
-                    todo!()
-                    //SearchComparator::field(EmailSearchField::Subject, comparator.is_ascending)
-                }
+                )),
+                EmailComparator::From => MessageComparator::SortKey {
+                    field: MessageSortField::From,
+                    ascending: comparator.is_ascending,
+                },
+                EmailComparator::To => MessageComparator::SortKey {
+                    field: MessageSortField::To,
+                    ascending: comparator.is_ascending,
+                },
+                EmailComparator::Subject => MessageComparator::SortKey {
+                    field: MessageSortField::Subject,
+                    ascending: comparator.is_ascending,
+                },
                 EmailComparator::SentAt => {
                     let mut sorted = cached_messages
                         .emails
@@ -364,31 +366,33 @@ impl EmailQuery for Server {
                         prev_ts = Some(ts);
                     }
 
-                    SearchComparator::sorted_set(set, comparator.is_ascending)
+                    MessageComparator::Search(SearchComparator::sorted_set(
+                        set,
+                        comparator.is_ascending,
+                    ))
                 }
-                EmailComparator::HasKeyword(keyword) => SearchComparator::set(
-                    RoaringBitmap::from_iter(
-                        cached_messages
-                            .with_keyword(&keyword)
-                            .map(|item| item.document_id),
-                    ),
-                    comparator.is_ascending,
-                ),
-                EmailComparator::AllInThreadHaveKeyword(keyword) => SearchComparator::set(
-                    thread_keywords(&cached_messages, keyword, true),
-                    comparator.is_ascending,
-                ),
-                EmailComparator::SomeInThreadHaveKeyword(keyword) => SearchComparator::set(
-                    thread_keywords(&cached_messages, keyword, false),
-                    comparator.is_ascending,
-                ),
-                // Non-standard
-                EmailComparator::Cc => {
-                    let todo = "fix sort";
-                    todo!()
-                    //SearchComparator::field(EmailSearchField::Cc, comparator.is_ascending)
+                EmailComparator::HasKeyword(keyword) => {
+                    MessageComparator::Search(SearchComparator::set(
+                        RoaringBitmap::from_iter(
+                            cached_messages
+                                .with_keyword(&keyword)
+                                .map(|item| item.document_id),
+                        ),
+                        comparator.is_ascending,
+                    ))
                 }
-
+                EmailComparator::AllInThreadHaveKeyword(keyword) => {
+                    MessageComparator::Search(SearchComparator::set(
+                        thread_keywords(&cached_messages, keyword, true),
+                        comparator.is_ascending,
+                    ))
+                }
+                EmailComparator::SomeInThreadHaveKeyword(keyword) => {
+                    MessageComparator::Search(SearchComparator::set(
+                        thread_keywords(&cached_messages, keyword, false),
+                        comparator.is_ascending,
+                    ))
+                }
                 other => {
                     return Err(trc::JmapEvent::UnsupportedSort
                         .into_err()
@@ -398,11 +402,10 @@ impl EmailQuery for Server {
         }
 
         let results = self
-            .search_store()
-            .query_account(
+            .query_emails(
+                account_id,
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(filters)
-                    .with_comparators(comparators)
                     .with_account_id(account_id)
                     .with_mask(if access_token.is_shared(account_id) {
                         cached_messages.shared_messages(access_token, Acl::ReadItems)
@@ -414,6 +417,7 @@ impl EmailQuery for Server {
                             .map(|item| item.document_id)
                             .collect()
                     }),
+                comparators,
             )
             .await?;
 

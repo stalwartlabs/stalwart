@@ -221,7 +221,6 @@ impl EmailDeletion for Server {
         self.emails_delete(account_id, tenant_id, &mut batch, destroy_ids)
             .await?;
         self.commit_batch(batch).await?;
-        self.notify_task_queue();
 
         Ok(())
     }

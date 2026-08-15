@@ -140,9 +140,18 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         SearchIndex::Contacts,
         SearchIndex::Calendar,
     ] {
+        if let Some(store) = server.search_store().internal_fts() {
+            store.unindex_account(index, account_id).await?;
+        } else {
+            server
+                .search_store()
+                .unindex(SearchQuery::new(index).with_account_id(account_id))
+                .await?;
+        }
+
         server
-            .search_store()
-            .unindex(SearchQuery::new(index).with_account_id(account_id))
+            .store()
+            .clear_search_index_queue(index, account_id)
             .await?;
     }
 

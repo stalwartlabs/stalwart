@@ -11,7 +11,7 @@ use registry::{
     schema::{enums::CompressionAlgo, structs::Jmap},
     types::duration::Duration,
 };
-use services::task_manager::destroy_account::destroy_account_blobs;
+use services::task_manager::tasks::destroy_account::destroy_account_blobs;
 use store::{
     BlobStore, Serialize, SerializeInfallible,
     write::{Archiver, BatchBuilder, BlobLink, BlobOp, ValueClass, now},
