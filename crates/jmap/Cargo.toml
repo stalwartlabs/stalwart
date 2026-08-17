@@ -44,7 +44,7 @@ tokio-tungstenite = "0.30"
 tungstenite = "0.30"
 chrono = "0.4"
 rand = "0.10.2"
-pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
+pkcs8 = { version = "0.11.0", features = ["alloc", "std"] }
 lz4_flex = { version = "0.14", default-features = false }
 aes-gcm = "0.11.0"
 aes-gcm-siv = "0.11.1"

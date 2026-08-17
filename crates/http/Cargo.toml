@@ -35,7 +35,7 @@ serde_json = "1.0"
 x509-parser = "0.18"
 chrono = "0.4"
 base64 = "0.23"
-pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
+pkcs8 = { version = "0.11.0", features = ["alloc", "std"] }
 rsa = "0.9.10"
 sha1 = "0.11"
 sha2 = "0.11"
