@@ -14,6 +14,7 @@ use crate::network::acme::{
     AcmeError, AcmeResult, Auth, AuthStatus, Challenge, ChallengeType, Directory, Identifier,
     Order, SerializedCert,
 };
+use aws_lc_rs::digest::{SHA256, digest};
 use aws_lc_rs::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, EcdsaSigningAlgorithm};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -159,6 +160,10 @@ impl AcmeRequestBuilder {
         key_authorization_sha256_base64(&self.key_pair, challenge_token)
     }
 
+    pub fn dns_account_label(&self) -> String {
+        dns_account_label(&self.kid)
+    }
+
     pub fn tls_alpn_key(&self, challenge: &Challenge, domain: String) -> AcmeResult<Vec<u8>> {
         let challenge_token = challenge.token.as_deref().ok_or_else(|| {
             AcmeError::Invalid("Missing tls-alpn-01 challenge token in response".to_string())
@@ -185,6 +190,25 @@ impl AcmeRequestBuilder {
         .serialize()
         .map_err(|_| AcmeError::Crypto("Failed to serialize certificate".to_string()))
     }
+}
+
+fn dns_account_label(account_url: &str) -> String {
+    const BASE32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let digest = digest(&SHA256, account_url.as_bytes());
+    let bytes = &digest.as_ref()[..10];
+    let mut label = String::with_capacity(17);
+    label.push('_');
+
+    for chunk in bytes.chunks_exact(5) {
+        let value = u64::from_be_bytes([
+            0, 0, 0, chunk[0], chunk[1], chunk[2], chunk[3], chunk[4],
+        ]);
+        for shift in (0..8).rev() {
+            label.push(BASE32[((value >> (shift * 5)) & 0x1f) as usize] as char);
+        }
+    }
+
+    label
 }
 
 impl Directory {
@@ -244,6 +268,7 @@ impl ChallengeType {
         match self {
             Self::Http01 => "http-01",
             Self::Dns01 => "dns-01",
+            Self::DnsAccount01 => "dns-account-01",
             Self::TlsAlpn01 => "tls-alpn-01",
             Self::DnsPersist01 => "dns-persist-01",
             Self::Unknown => "unknown",

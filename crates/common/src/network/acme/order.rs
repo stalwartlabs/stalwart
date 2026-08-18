@@ -36,7 +36,9 @@ impl AcmeRequestBuilder {
         if hostnames.is_empty() {
             if matches!(
                 self.challenge,
-                ChallengeType::Dns01 | ChallengeType::DnsPersist01
+                ChallengeType::Dns01
+                    | ChallengeType::DnsAccount01
+                    | ChallengeType::DnsPersist01
             ) {
                 vec![format!("*.{domain}"), domain.to_string()]
             } else {
@@ -116,7 +118,10 @@ impl AcmeRequestBuilder {
         loop {
             match order.status {
                 OrderStatus::Pending => {
-                    if matches!(self.challenge, ChallengeType::Dns01) {
+                    if matches!(
+                        self.challenge,
+                        ChallengeType::Dns01 | ChallengeType::DnsAccount01
+                    ) {
                         for url in &order.authorizations {
                             self.authorize(server, url, dns_parameters.as_ref()).await?;
                         }
@@ -282,6 +287,34 @@ impl AcmeRequestBuilder {
 
                         let proof = self.dns_proof(challenge)?;
                         let challenge_name = format!("_acme-challenge.{}", domain);
+                        dns_parameters
+                            .updater
+                            .set_rrset(
+                                zone,
+                                &challenge_name,
+                                dns_update::DnsRecordType::TXT,
+                                vec![DnsRecord::TXT(proof.clone())],
+                            )
+                            .await
+                            .map_err(AcmeError::Dns)?;
+                        dns_parameters
+                            .updater
+                            .wait_for_txt_propagation(&challenge_name, zone, &proof)
+                            .await;
+                    }
+                    ChallengeType::DnsAccount01 => {
+                        let dns_parameters = dns_parameters.unwrap();
+                        let domain = domain.strip_prefix("*.").unwrap_or(&domain);
+
+                        let zone = dns_parameters
+                            .origin
+                            .as_deref()
+                            .or_else(|| psl::domain_str(domain))
+                            .unwrap_or(domain);
+
+                        let proof = self.dns_proof(challenge)?;
+                        let challenge_name =
+                            format!("{}._acme-challenge.{}", self.dns_account_label(), domain);
                         dns_parameters
                             .updater
                             .set_rrset(

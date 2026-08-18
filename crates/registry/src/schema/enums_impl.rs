@@ -66,6 +66,7 @@ impl EnumImpl for AcmeChallengeType {
             b"DnsPersist01" => AcmeChallengeType::DnsPersist01,
             b"Dns01" => AcmeChallengeType::Dns01,
             b"Http01" => AcmeChallengeType::Http01,
+            b"DnsAccount01" => AcmeChallengeType::DnsAccount01,
         }
     }
 
@@ -75,6 +76,7 @@ impl EnumImpl for AcmeChallengeType {
             AcmeChallengeType::DnsPersist01 => "DnsPersist01",
             AcmeChallengeType::Dns01 => "Dns01",
             AcmeChallengeType::Http01 => "Http01",
+            AcmeChallengeType::DnsAccount01 => "DnsAccount01",
         }
     }
 
@@ -88,11 +90,12 @@ impl EnumImpl for AcmeChallengeType {
             1 => Some(AcmeChallengeType::DnsPersist01),
             2 => Some(AcmeChallengeType::Dns01),
             3 => Some(AcmeChallengeType::Http01),
+            4 => Some(AcmeChallengeType::DnsAccount01),
             _ => None,
         }
     }
 
-    const COUNT: usize = 4;
+    const COUNT: usize = 5;
 }
 
 impl serde::Serialize for AcmeChallengeType {

@@ -22,6 +22,7 @@ pub enum AcmeChallengeType {
     DnsPersist01 = 1,
     Dns01 = 2,
     Http01 = 3,
+    DnsAccount01 = 4,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]

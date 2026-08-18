@@ -80,7 +80,12 @@ impl Server {
         }
 
         let dns_parameters = match &domain.dns_management {
-            DnsManagement::Automatic(props) if challenge_type == AcmeChallengeType::Dns01 => {
+            DnsManagement::Automatic(props)
+                if matches!(
+                    challenge_type,
+                    AcmeChallengeType::Dns01 | AcmeChallengeType::DnsAccount01
+                ) =>
+            {
                 match self.build_dns_updater(props.dns_server_id).await? {
                     Ok(updater) => Some(AcmeDnsParameters {
                         updater,
@@ -96,7 +101,11 @@ impl Server {
             }
             _ => None,
         };
-        if challenge_type == AcmeChallengeType::Dns01 && dns_parameters.is_none() {
+        if matches!(
+            challenge_type,
+            AcmeChallengeType::Dns01 | AcmeChallengeType::DnsAccount01
+        ) && dns_parameters.is_none()
+        {
             return Err(AcmeError::Invalid(
                 "ACME provider requires DNS challenge but a DNS provider was not configured"
                     .to_string(),

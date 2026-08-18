@@ -155,7 +155,10 @@ pub(crate) async fn validate_domain(
                 .with_description("ACME provider not found")));
         };
 
-        if matches!(provider.challenge_type, AcmeChallengeType::Dns01)
+        if matches!(
+            provider.challenge_type,
+            AcmeChallengeType::Dns01 | AcmeChallengeType::DnsAccount01
+        )
             && !matches!(domain.dns_management, DnsManagement::Automatic(_))
         {
             return Ok(Err(SetError::invalid_properties()

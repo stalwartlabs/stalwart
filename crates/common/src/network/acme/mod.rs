@@ -88,6 +88,8 @@ pub enum ChallengeType {
     Http01,
     #[serde(rename = "dns-01")]
     Dns01,
+    #[serde(rename = "dns-account-01")]
+    DnsAccount01,
     #[serde(rename = "dns-persist-01")]
     DnsPersist01,
     #[serde(rename = "tls-alpn-01")]
@@ -199,6 +201,7 @@ impl From<AcmeChallengeType> for ChallengeType {
             AcmeChallengeType::Dns01 => ChallengeType::Dns01,
             AcmeChallengeType::TlsAlpn01 => ChallengeType::TlsAlpn01,
             AcmeChallengeType::DnsPersist01 => ChallengeType::DnsPersist01,
+            AcmeChallengeType::DnsAccount01 => ChallengeType::DnsAccount01,
         }
     }
 }
