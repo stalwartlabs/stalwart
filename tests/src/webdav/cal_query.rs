@@ -193,6 +193,21 @@ pub async fn test(test: &TestServer) {
         .calendar_data()
         .is_not_empty();
 
+    // Test 13: Unbounded yearly recurrences are visible far beyond their first instance
+    client
+        .request("PUT", &rfc_file_name(10), ICAL_UNBOUNDED_YEARLY_ICS)
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .request("REPORT", &cal_path, REPORT_13)
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs([rfc_file_name(10).as_str()])
+        .into_propfind_response(None)
+        .properties(&rfc_file_name(10))
+        .calendar_data()
+        .is_not_empty();
+
     client.delete_default_containers().await;
     test.assert_is_empty().await;
 }
@@ -380,6 +395,65 @@ fn calendar_expand_dst_fallback() {
         "the ambiguous fall-back occurrence must resolve to its earliest instant"
     );
 }
+
+#[test]
+fn calendar_expand_beyond_indexable_span() {
+    let ical = ICalendar::parse(ICAL_UNBOUNDED_YEARLY_ICS).unwrap();
+    let event_data = CalendarEventData::new(ical, Tz::UTC, 3000, &mut None);
+    let expanded_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event_data).unwrap();
+    let archive = rkyv_unarchive::<CalendarEventData>(&expanded_bytes).unwrap();
+
+    let instances = archive
+        .expand(
+            Tz::UTC,
+            TimeRange {
+                start: i64::MIN,
+                end: i64::MAX,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(instances.first().unwrap().start, FIRST_YEARLY_INSTANCE);
+    assert_eq!(instances.last().unwrap().start, LAST_YEARLY_INSTANCE);
+    assert_eq!(instances.len(), 137);
+    assert!(
+        instances.windows(2).all(|w| w[0].start < w[1].start),
+        "instance offsets wrapped around u32"
+    );
+
+    assert_eq!(event_data.event_range_start(), FIRST_YEARLY_INSTANCE);
+    assert!(
+        event_data.event_range_end() >= instances.last().unwrap().end,
+        "indexed range ends at {}, before its last instance at {}",
+        event_data.event_range_end(),
+        instances.last().unwrap().end
+    );
+
+    let in_2027 = archive
+        .expand(
+            Tz::UTC,
+            TimeRange {
+                start: JUNE_2027_START,
+                end: JUNE_2027_END,
+            },
+        )
+        .unwrap();
+    assert_eq!(in_2027.len(), 1);
+    assert_eq!(in_2027[0].start, JUNE_2027_INSTANCE);
+    assert!(
+        event_data.event_range_start() < JUNE_2027_END
+            && event_data.event_range_end() > JUNE_2027_START,
+        "indexed range {}..{} does not overlap June 2027",
+        event_data.event_range_start(),
+        event_data.event_range_end()
+    );
+}
+
+const FIRST_YEARLY_INSTANCE: i64 = 1527843600;
+const LAST_YEARLY_INSTANCE: i64 = 5819590800;
+const JUNE_2027_START: i64 = 1811808000;
+const JUNE_2027_END: i64 = 1814400000;
+const JUNE_2027_INSTANCE: i64 = 1811840400;
 
 fn rfc_file_name(num: usize) -> String {
     format!(
@@ -859,6 +933,38 @@ FREEBUSY;FBTYPE=BUSY-TENTATIVE:20060102T100000Z/20060102T120000Z
 FREEBUSY;FBTYPE=BUSY:20060102T150000Z/20060102T160000Z,20060102T170000Z/20060102T180000Z,
  20060103T100000Z/20060103T120000Z,20060103T170000Z/20060103T180000Z,20060104T100000Z/20060104T120000Z
 END:VFREEBUSY
+END:VCALENDAR
+"#;
+
+const REPORT_13: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20270601T000000Z"
+                         end="20270701T000000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>
+"#;
+
+const ICAL_UNBOUNDED_YEARLY_ICS: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+DTSTAMP:20180601T000000Z
+DTSTART:20180601T090000Z
+DTEND:20180601T100000Z
+RRULE:FREQ=YEARLY
+SUMMARY:Unbounded yearly event
+UID:yearly-unbounded@example.com
+END:VEVENT
 END:VCALENDAR
 "#;
 

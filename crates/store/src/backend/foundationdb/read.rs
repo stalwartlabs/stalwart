@@ -134,7 +134,9 @@ impl FdbStore {
                                         && cb_key[..chunk.key.len()] == chunk.key[..]
                                     {
                                         // This is a chunk of the current value
-                                        chunk.bytes.extend_from_slice(cb_value);
+                                        if params.values {
+                                            chunk.bytes.extend_from_slice(cb_value);
+                                        }
                                         continue;
                                     } else {
                                         // Return collected chunked value
@@ -155,7 +157,11 @@ impl FdbStore {
                                     // Start collecting chunked value
                                     chunked_key = Some(ChunkedValueCollector {
                                         key: cb_key.to_vec(),
-                                        bytes: cb_value.to_vec(),
+                                        bytes: if params.values {
+                                            cb_value.to_vec()
+                                        } else {
+                                            Vec::new()
+                                        },
                                     });
                                 }
                             }

@@ -80,16 +80,9 @@ impl OpenIdDirectory {
 
                     let mut claims = token_data.claims;
                     let jwt_email = self.resolve_email(&claims).ok();
-                    let missing_profile = self
-                        .config
-                        .claim_name
-                        .as_ref()
-                        .is_some_and(|claim| claims.get(claim).is_none())
-                        || self
-                            .config
-                            .claim_groups
-                            .as_ref()
-                            .is_some_and(|claim| claims.get(claim).is_none());
+                    let missing_profile =
+                        is_claim_missing(&claims, self.config.claim_name.as_ref())
+                            || is_claim_missing(&claims, self.config.claim_groups.as_ref());
 
                     if jwt_email.is_none() || missing_profile {
                         match self.fetch_userinfo(token).await {
@@ -98,7 +91,9 @@ impl OpenIdDirectory {
                                     (claims.as_object_mut(), userinfo)
                                 {
                                     for (key, value) in extra {
-                                        base.entry(key).or_insert_with(|| value);
+                                        if base.get(&key).is_none_or(Value::is_null) {
+                                            base.insert(key, value);
+                                        }
                                     }
                                 }
                             }
@@ -234,18 +229,21 @@ impl OpenIdDirectory {
             email,
             email_aliases: Vec::new(),
             secret: None,
-            groups: self.config.claim_groups.as_ref().map(|groups_claim| {
-                claims
-                    .get(groups_claim)
-                    .map(extract_string_list)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|group| match &self.config.default_domain {
-                        Some(domain) if !group.contains('@') => format!("{group}@{domain}"),
-                        _ => group,
-                    })
-                    .collect()
-            }),
+            groups: self
+                .config
+                .claim_groups
+                .as_ref()
+                .and_then(|groups_claim| claims.get(groups_claim))
+                .and_then(extract_string_list)
+                .map(|groups| {
+                    groups
+                        .into_iter()
+                        .map(|group| match &self.config.default_domain {
+                            Some(domain) if !group.contains('@') => format!("{group}@{domain}"),
+                            _ => group,
+                        })
+                        .collect()
+                }),
             description: self
                 .config
                 .claim_name
@@ -410,13 +408,53 @@ fn extract_scopes(claims: &serde_json::Value) -> Vec<String> {
     }
 }
 
-fn extract_string_list(value: &serde_json::Value) -> Vec<String> {
+fn extract_string_list(value: &serde_json::Value) -> Option<Vec<String>> {
     match value {
-        serde_json::Value::Array(arr) => arr
-            .iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect(),
-        serde_json::Value::String(s) => s.split_whitespace().map(|s| s.to_string()).collect(),
-        _ => Vec::new(),
+        serde_json::Value::Array(arr) => Some(
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+        ),
+        serde_json::Value::String(s) => Some(s.split_whitespace().map(|s| s.to_string()).collect()),
+        _ => None,
+    }
+}
+
+#[inline(always)]
+fn is_claim_missing(claims: &serde_json::Value, claim: Option<&String>) -> bool {
+    claim.is_some_and(|claim| claims.get(claim).is_none_or(serde_json::Value::is_null))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extract_string_list_distinguishes_absent_from_empty() {
+        assert_eq!(
+            extract_string_list(&json!(["sales", "support"])),
+            Some(vec!["sales".to_string(), "support".to_string()])
+        );
+        assert_eq!(
+            extract_string_list(&json!("sales support")),
+            Some(vec!["sales".to_string(), "support".to_string()])
+        );
+        assert_eq!(extract_string_list(&json!([])), Some(vec![]));
+        assert_eq!(extract_string_list(&json!("")), Some(vec![]));
+        assert_eq!(extract_string_list(&json!(null)), None);
+        assert_eq!(extract_string_list(&json!({"groups": []})), None);
+        assert_eq!(extract_string_list(&json!(42)), None);
+    }
+
+    #[test]
+    fn is_claim_missing_treats_null_as_absent() {
+        let claims = json!({"groups": null, "name": "John Doe", "roles": []});
+
+        assert!(is_claim_missing(&claims, Some(&"groups".to_string())));
+        assert!(is_claim_missing(&claims, Some(&"unknown".to_string())));
+        assert!(!is_claim_missing(&claims, Some(&"name".to_string())));
+        assert!(!is_claim_missing(&claims, Some(&"roles".to_string())));
+        assert!(!is_claim_missing(&claims, None));
     }
 }

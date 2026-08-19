@@ -54,6 +54,8 @@ const CANDIDATE_OVERSCAN: usize = 4;
 const REMOTE_LOCK_EXPIRY: u64 = QUEUE_REFRESH_INTERVAL;
 const MIN_SCAN_INTERVAL: Duration = Duration::from_millis(100);
 const FULL_SCAN_INTERVAL: Duration = Duration::from_secs(QUEUE_REFRESH_INTERVAL / 2);
+const PERPETUAL_RETRY_MIN_DELAY: u64 = 3600;
+const PERPETUAL_RETRY_MAX_DELAY: u64 = 21600;
 
 pub fn spawn_task_manager(inner: Arc<Inner>) {
     let is_clustered = {
@@ -517,8 +519,8 @@ async fn update_tasks(
                 message,
                 max_attempts,
             } => {
-                let (attempt_number, created_at) = match task.task.status() {
-                    TaskStatus::Pending(status) => (0, status.created_at),
+                let (attempt_number, retry_since) = match task.task.status() {
+                    TaskStatus::Pending(_) => (0, UTCDateTime::now()),
                     TaskStatus::Retry(status) => (status.attempt_number, status.created_at),
                     TaskStatus::Failed(status) => (status.failed_attempt_number, status.failed_at),
                 };
@@ -529,14 +531,16 @@ async fn update_tasks(
                             < retry_at.saturating_add(
                                 server.core.network.task_manager.total_deadline.as_secs(),
                             ))
-                    .then_some(retry_at),
+                    .then_some(retry_at)
+                    .or_else(|| perpetual_retry_time(task.info.typ, attempt_number)),
                     TaskFailureType::Temporary => next_retry_time(
                         &server.core.network.task_manager,
                         max_attempts,
-                        created_at.timestamp() as u64,
+                        retry_since.timestamp() as u64,
                         attempt_number,
                         now(),
-                    ),
+                    )
+                    .or_else(|| perpetual_retry_time(task.info.typ, attempt_number)),
                     TaskFailureType::Permanent => None,
                 };
 
@@ -553,7 +557,7 @@ async fn update_tasks(
                         due: UTCDateTime::from_timestamp(retry_at as i64),
                         attempt_number: attempt_number + 1,
                         failure_reason: message,
-                        created_at,
+                        created_at: retry_since,
                     }));
 
                     retry_at
@@ -569,7 +573,7 @@ async fn update_tasks(
                         failed_at: UTCDateTime::now(),
                         failed_attempt_number: attempt_number,
                         failure_reason: message,
-                        created_at,
+                        created_at: retry_since,
                     }));
                     u64::MAX
                 };
@@ -612,10 +616,20 @@ async fn update_tasks(
     is_committed
 }
 
+pub fn perpetual_retry_time(typ: TaskType, attempt: u64) -> Option<u64> {
+    matches!(typ, TaskType::AcmeRenewal | TaskType::DkimManagement).then(|| {
+        now().saturating_add(
+            PERPETUAL_RETRY_MIN_DELAY
+                .saturating_mul(1u64 << attempt.min(4))
+                .min(PERPETUAL_RETRY_MAX_DELAY),
+        )
+    })
+}
+
 pub fn next_retry_time(
     manager: &TaskManager,
     max_attempts_override: Option<u64>,
-    create_time: u64,
+    retry_since: u64,
     attempt: u64,
     now: u64,
 ) -> Option<u64> {
@@ -640,7 +654,7 @@ pub fn next_retry_time(
     };
 
     let next_time = now.saturating_add(delay_secs);
-    let deadline = create_time.saturating_add(manager.total_deadline.as_secs());
+    let deadline = retry_since.saturating_add(manager.total_deadline.as_secs());
     if next_time > deadline {
         return None;
     }

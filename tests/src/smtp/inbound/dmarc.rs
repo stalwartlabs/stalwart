@@ -88,10 +88,16 @@ async fn dmarc() {
                 ..Default::default()
             },
             dkim_verify: Expression {
-                match_: List::from_iter([ExpressionMatch {
-                    if_: "sender_domain = 'test.net'".into(),
-                    then: "relaxed".into(),
-                }]),
+                match_: List::from_iter([
+                    ExpressionMatch {
+                        if_: "sender_domain = 'test.net'".into(),
+                        then: "relaxed".into(),
+                    },
+                    ExpressionMatch {
+                        if_: "sender_domain = 'xn--eebajf.xn--9dbq2a'".into(),
+                        then: "relaxed".into(),
+                    },
+                ]),
                 else_: "strict".into(),
             },
             dkim_strict: false,
@@ -408,4 +414,50 @@ async fn dmarc() {
         .assert_contains("Identity-Alignment: spf")
         .assert_contains("SPF-DNS: txt : foobar.com")
         .assert_not_contains("DKIM-Domain:");
+
+    // Aggregate reports identify an IDN author domain by its A-label
+    test.server.txt_add(
+        "xn--eebajf.xn--9dbq2a",
+        Spf::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
+        Instant::now() + Duration::from_secs(5),
+    );
+    test.server.txt_add(
+        "_dmarc.xn--eebajf.xn--9dbq2a",
+        Dmarc::parse(
+            concat!(
+                "v=DMARC1; p=none; aspf=s; adkim=s; fo=1;",
+                "rua=mailto:dmarc-feedback@xn--eebajf.xn--9dbq2a"
+            )
+            .as_bytes(),
+        )
+        .unwrap(),
+        Instant::now() + Duration::from_secs(5),
+    );
+    session
+        .send_message(
+            "yossi@xn--eebajf.xn--9dbq2a",
+            &["jdoe@localdomain.org"],
+            "test:idn_from",
+            "250",
+        )
+        .await;
+    test.consume_message().await;
+
+    let mut idn_report = None;
+    for _ in 0..10 {
+        let Some(report) = test.try_read_report().await else {
+            break;
+        };
+        let report = report.unwrap_dmarc();
+        if report.domain == "xn--eebajf.xn--9dbq2a" {
+            idn_report = Some(report);
+            break;
+        }
+    }
+    let report = idn_report.expect("no aggregate report for the IDN author domain");
+    assert_eq!(report.report_record.header_from(), "xn--eebajf.xn--9dbq2a");
+    assert_eq!(
+        report.report_record.envelope_from(),
+        "xn--eebajf.xn--9dbq2a"
+    );
 }

@@ -19,6 +19,8 @@ use store::{
     write::{key::KeySerializer, now},
 };
 
+const MAX_TIME_SPAN: i64 = u32::MAX as i64;
+
 impl CalendarEventData {
     pub fn new(
         ical: ICalendar,
@@ -127,7 +129,8 @@ impl CalendarEventData {
                     start_tz,
                     end_tz,
                     event.comp_id as u16,
-                    (end_timestamp_naive - start_timestamp_naive) as i32,
+                    (end_timestamp_naive - start_timestamp_naive)
+                        .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
                 ))
                 .or_default()
                 .push(start_timestamp_naive);
@@ -135,22 +138,28 @@ impl CalendarEventData {
 
         let mut events = Vec::with_capacity(groups.len());
         for ((start_tz, end_tz, id, duration), mut instances) in groups {
-            let instances = if instances.len() > 1 {
-                instances.sort_unstable();
-                // Bitpack instances
-                let mut instance_offsets = Vec::with_capacity(instances.len());
-                for instance in instances {
-                    debug_assert!(instance >= ranges.base_offset);
-                    instance_offsets.push((instance - ranges.base_offset) as u32);
-                }
+            instances.sort_unstable();
+            instances.truncate(instances.partition_point(|instance| {
+                instance.saturating_sub(ranges.base_offset) <= MAX_TIME_SPAN
+            }));
 
-                KeySerializer::new(instance_offsets.len() * std::mem::size_of::<u32>())
-                    .bitpack_sorted(&instance_offsets)
-                    .finalize()
-            } else {
-                KeySerializer::new(std::mem::size_of::<u32>())
-                    .write_leb128((instances.first().unwrap() - ranges.base_offset) as u32)
-                    .finalize()
+            let instances = match instances.len() {
+                0 => continue,
+                1 => KeySerializer::new(std::mem::size_of::<u32>())
+                    .write_leb128((instances[0] - ranges.base_offset) as u32)
+                    .finalize(),
+                len => {
+                    // Bitpack instances
+                    let mut instance_offsets = Vec::with_capacity(len);
+                    for instance in instances {
+                        debug_assert!(instance >= ranges.base_offset);
+                        instance_offsets.push((instance - ranges.base_offset) as u32);
+                    }
+
+                    KeySerializer::new(instance_offsets.len() * std::mem::size_of::<u32>())
+                        .bitpack_sorted(&instance_offsets)
+                        .finalize()
+                }
             };
 
             events.push(ComponentTimeRange {
@@ -184,8 +193,9 @@ impl CalendarEventData {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             base_offset: ranges.base_offset,
-            base_time_utc: (ranges.min_time_utc - ranges.base_offset) as u32,
-            duration: (ranges.max_time_utc - ranges.min_time_utc) as u32,
+            base_time_utc: (ranges.min_time_utc - ranges.base_offset).clamp(0, MAX_TIME_SPAN)
+                as u32,
+            duration: (ranges.max_time_utc - ranges.min_time_utc).clamp(0, MAX_TIME_SPAN) as u32,
         }
     }
 

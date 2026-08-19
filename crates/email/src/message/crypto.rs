@@ -15,7 +15,7 @@ use common::auth::{
     ACCOUNT_FLAG_ENCRYPT_ALGO_CHACHA20_POLY1305, ACCOUNT_FLAG_ENCRYPT_APPEND,
     ACCOUNT_FLAG_ENCRYPT_METHOD_PGP, ACCOUNT_FLAG_ENCRYPT_TRAIN_SPAM_FILTER, EncryptionKeys,
 };
-use mail_builder::{encoders::base64::base64_encode_mime, mime::make_boundary};
+use mail_builder::{encoders::Base64Encoder, mime::make_boundary};
 use mail_parser::{Message, MimeHeaders, PartType};
 use openpgp::{
     parse::Parse,
@@ -332,9 +332,12 @@ impl EncryptMessage for Message<'_> {
                 )
                 .as_bytes(),
             );
-            base64_encode_mime(&pkcs7, &mut outer_message, false).map_err(|err| {
-                EncryptMessageError::Error(format!("Failed to base64 encode PKCS7: {}", err))
-            })?;
+            Base64Encoder::new()
+                .wrap_lines()
+                .encode_to_writer(&pkcs7, &mut outer_message)
+                .map_err(|err| {
+                    EncryptMessageError::Error(format!("Failed to base64 encode PKCS7: {}", err))
+                })?;
         }
 
         Ok(outer_message)

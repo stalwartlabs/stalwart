@@ -9,7 +9,7 @@ use chrono::Utc;
 use dns_update::{DnsRecord, NamedDnsRecord};
 use mail_auth::common::crypto::Ed25519Key;
 use mail_auth::dkim::generate::DkimKeyPair;
-use mail_builder::encoders::base64::base64_encode;
+use mail_builder::encoders::Base64Encoder;
 use pkcs8::Document;
 use registry::schema::enums::DkimSignatureType;
 use registry::schema::structs::DkimSignature;
@@ -39,7 +39,10 @@ pub async fn generate_dkim_private_key(
         .map(|(private_key, pk_type)| {
             let mut pem = format!("-----BEGIN {pk_type}-----\n").into_bytes();
             let mut lf_count = 65;
-            for ch in base64_encode(private_key.private_key()).unwrap_or_default() {
+            for ch in Base64Encoder::new()
+                .encode(private_key.private_key())
+                .unwrap_or_default()
+            {
                 pem.push(ch);
                 lf_count -= 1;
                 if lf_count == 0 {
@@ -78,8 +81,12 @@ pub async fn generate_dkim_public_key(key: &DkimSignature) -> trc::Result<String
                 })
             })
             .map(|pk| {
-                String::from_utf8(base64_encode(pk.as_bytes()).unwrap_or_default())
-                    .unwrap_or_default()
+                String::from_utf8(
+                    Base64Encoder::new()
+                        .encode(pk.as_bytes())
+                        .unwrap_or_default(),
+                )
+                .unwrap_or_default()
             })
     } else {
         simple_pem_parse(&pem)
@@ -96,8 +103,12 @@ pub async fn generate_dkim_public_key(key: &DkimSignature) -> trc::Result<String
                 })
             })
             .map(|pk| {
-                String::from_utf8(base64_encode(&pk.public_key()).unwrap_or_default())
-                    .unwrap_or_default()
+                String::from_utf8(
+                    Base64Encoder::new()
+                        .encode(&pk.public_key())
+                        .unwrap_or_default(),
+                )
+                .unwrap_or_default()
             })
     }
 }

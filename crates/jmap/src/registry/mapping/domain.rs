@@ -8,11 +8,11 @@ use crate::registry::mapping::{
     ObjectResponse, RegistrySetResponse, ValidationResult, principal::validate_tenant_quota,
 };
 use common::network::{dkim::generate_dkim_selector, dns::update::DnsUpdater};
-use jmap_proto::error::set::SetError;
+use jmap_proto::error::set::{SetError, SetErrorType};
 use registry::{
     schema::{
         enums::{AcmeChallengeType, DkimSignatureType, DnsRecordType, TenantStorageQuota},
-        prelude::Property,
+        prelude::{ObjectType, Property},
         structs::{
             AcmeProvider, CertificateManagement, DkimManagement, DkimManagementProperties,
             DnsManagement, DnsServer, Domain, Task, TaskDnsManagement, TaskDomainManagement,
@@ -59,6 +59,41 @@ pub(crate) async fn validate_domain(
         return Ok(Err(SetError::invalid_properties()
             .with_property(Property::SelectorTemplate)
             .with_description(err)));
+    }
+
+    // Validate that names and aliases do not collide with another domain
+    let registry = set.server.registry();
+    if old_domain.is_none_or(|old| old.name != domain.name)
+        && let Some(existing) = registry
+            .primary_key(
+                ObjectType::Domain.into(),
+                Property::Aliases,
+                domain.name.as_bytes().to_vec(),
+            )
+            .await?
+    {
+        return Ok(Err(SetError::new(SetErrorType::PrimaryKeyViolation)
+            .with_property(Property::Name)
+            .with_object_id(existing)));
+    }
+
+    for alias in domain.aliases.iter() {
+        if alias == &domain.name
+            || old_domain.is_some_and(|old| old.aliases.contains(alias) || &old.name == alias)
+        {
+            continue;
+        }
+
+        for index in [Property::Name, Property::Aliases] {
+            if let Some(existing) = registry
+                .primary_key(ObjectType::Domain.into(), index, alias.as_bytes().to_vec())
+                .await?
+            {
+                return Ok(Err(SetError::new(SetErrorType::PrimaryKeyViolation)
+                    .with_property(Property::Aliases)
+                    .with_object_id(existing)));
+            }
+        }
     }
 
     // Schedule DNS update task

@@ -113,7 +113,7 @@ impl TlsaLookup for Server {
                 });
 
                 let preference = mx.preference;
-                let exchange = mx.exchange.to_lowercase().to_string().into_boxed_str();
+                let exchange = mx.exchange.to_lowercase().to_ascii().into_boxed_str();
 
                 if let Some(record) = records.iter_mut().find(|r| r.0 == preference) {
                     record.1.push(exchange);

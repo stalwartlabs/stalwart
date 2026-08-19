@@ -93,7 +93,8 @@ impl LdapDirectory {
             attrs_principal: vec![],
         };
 
-        for attr in [
+        let mut attrs_principal: Vec<String> = Vec::new();
+        for attrs in [
             &mappings.attr_description,
             &mappings.attr_secret,
             &mappings.attr_secret_changed,
@@ -102,10 +103,13 @@ impl LdapDirectory {
             &mappings.attr_email,
             &mappings.attr_class,
         ] {
-            mappings
-                .attrs_principal
-                .extend(attr.iter().filter(|a| !a.is_empty()).cloned());
+            for attr in attrs.iter().filter(|a| !a.is_empty()) {
+                if !attrs_principal.contains(attr) {
+                    attrs_principal.push(attr.clone());
+                }
+            }
         }
+        mappings.attrs_principal = attrs_principal;
 
         let pool = Pool::builder(manager)
             .runtime(Runtime::Tokio1)

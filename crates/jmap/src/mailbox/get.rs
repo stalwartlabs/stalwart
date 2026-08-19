@@ -15,7 +15,7 @@ use std::future::Future;
 use store::ahash::AHashSet;
 use types::{acl::Acl, keyword::Keyword, special_use::SpecialUse};
 
-use crate::api::acl::JmapRights;
+use crate::{api::acl::JmapRights, changes::state::JmapCacheState};
 
 pub trait MailboxGet: Sync + Send {
     fn mailbox_get(
@@ -67,7 +67,7 @@ impl MailboxGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: Some(cache.mailboxes.change_id.into()),
+            state: Some(cache.get_state(true)),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };

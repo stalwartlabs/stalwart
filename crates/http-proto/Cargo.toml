@@ -1,6 +1,6 @@
 [package]
 name = "http_proto"
-version = "0.16.18"
+version = "0.16.19"
 edition = "2024"
 
 [dependencies]

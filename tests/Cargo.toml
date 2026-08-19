@@ -1,6 +1,6 @@
 [package]
 name = "tests"
-version = "0.16.18"
+version = "0.16.19"
 edition = "2024"
 
 [features]
@@ -47,7 +47,7 @@ managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterp
 smtp-proto = { version = "0.2" }
 mail-auth = { version = "0.12", features = ["test"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-mail-builder = "0.4.4"
+mail-builder = "0.5.0"
 sieve-rs = { version = "0.7", features = ["rkyv"] } 
 utils = { path = "../crates/utils", features = ["test_mode"] }
 jmap-client = { version = "0.4", features = ["websockets", "debug", "async"] }

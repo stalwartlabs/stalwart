@@ -14,7 +14,7 @@ use jmap_proto::{
     object::vacation_response::{self, VacationResponseProperty, VacationResponseValue},
     references::resolve::ResolveCreatedReference,
     request::IntoValid,
-    types::date::UTCDate,
+    types::{date::UTCDate, state::State},
 };
 use jmap_tools::{Key, Map, Value};
 use mail_builder::MessageBuilder;
@@ -296,13 +296,12 @@ impl VacationResponseSet for Server {
 
             // Write changes
             if !batch.is_empty() {
-                response.new_state = Some(
+                response.new_state = Some(State::Exact(
                     self.commit_batch(batch)
                         .await
                         .and_then(|ids| ids.last_change_id(account_id))
-                        .caused_by(trc::location!())?
-                        .into(),
-                );
+                        .caused_by(trc::location!())?,
+                ));
             }
 
             // Add result

@@ -285,6 +285,12 @@ impl ContactCardSet for Server {
             }
 
             // Update record
+            let vanished_paths = new_contact_card
+                .removed_addressbook_ids(contact_card.inner)
+                .filter_map(|addressbook_id| {
+                    cache.format_resource_path_by_parent(document_id, addressbook_id)
+                })
+                .collect::<Vec<_>>();
             new_contact_card
                 .update(
                     access_token.account_tenant_ids(),
@@ -294,6 +300,9 @@ impl ContactCardSet for Server {
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
+            for path in vanished_paths {
+                batch.log_vanished_item(VanishedCollection::AddressBook, path);
+            }
             response.updated.append(id, None);
         }
 

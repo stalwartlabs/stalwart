@@ -214,3 +214,19 @@ expect SPOOF_DISPLAY_NAME FROM_HAS_DN FROM_EQ_ENV_FROM
 From: "Foo 'foo@bar.com'" <baz@domain.org>
 
 Test
+<!-- NEXT TEST -->
+envelope_from hello@xn--eebajf.xn--9dbq2a
+expect FROM_EQ_ENV_FROM FROM_HAS_DN FROM_NEEDS_ENCODING FROMHOST_NORES_A_OR_MX
+
+From: "Hello" <hello@מייל.קום>
+X-Confirm-Reading-To: <hello@xn--eebajf.xn--9dbq2a>
+
+Test
+<!-- NEXT TEST -->
+envelope_from hello@xn--eebajf.xn--9dbq2a
+expect FROM_EQ_ENV_FROM FROM_HAS_DN FROM_NEEDS_ENCODING FROMHOST_NORES_A_OR_MX
+
+From: "Hello" <hello@מייל.קום>
+Disposition-Notification-To: <hello@מייל.קום>
+
+Test

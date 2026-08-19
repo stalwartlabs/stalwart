@@ -353,8 +353,8 @@ impl Archive<AlignedBytes> {
         };
         match self.version {
             ArchiveVersion::Versioned { change_id, hash } => {
-                bytes.extend_from_slice(&change_id.to_be_bytes());
                 bytes.extend_from_slice(&hash.to_be_bytes());
+                bytes.extend_from_slice(&change_id.to_be_bytes());
                 bytes.push(MAGIC_MARKER | VERSIONED | HASHED);
             }
             ArchiveVersion::Hashed { hash } => {

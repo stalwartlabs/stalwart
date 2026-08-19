@@ -33,7 +33,7 @@ use registry::{
     },
     types::{EnumImpl, ObjectImpl, datetime::UTCDateTime, map::Map},
 };
-use std::future::Future;
+use std::{borrow::Cow, future::Future};
 use store::{
     SerializeInfallible, U64_LEN, ValueKey,
     registry::ObjectIdVersioned,
@@ -282,19 +282,29 @@ impl<T: SessionStream> Session<T> {
             return;
         }
 
+        // Report the same identifier forms that were used for alignment
+        let message_from = message.from();
+        let header_from = message_from.domain_part();
+        let header_from = header_from
+            .to_ascii_domain()
+            .unwrap_or(Cow::Borrowed(header_from));
+        let envelope_from = self
+            .data
+            .mail_from
+            .as_ref()
+            .map(|mf| mf.domain.as_str())
+            .unwrap_or_else(|| self.data.helo_domain.as_str());
+        let envelope_from = envelope_from
+            .to_ascii_domain()
+            .unwrap_or(Cow::Borrowed(envelope_from));
+
         // Create DMARC report record
         let mut report_record = Record::new()
             .with_dmarc_output(&dmarc_output)
             .with_dkim_output(dkim_output)
             .with_source_ip(self.data.remote_ip)
-            .with_header_from(message.from().domain_part())
-            .with_envelope_from(
-                self.data
-                    .mail_from
-                    .as_ref()
-                    .map(|mf| mf.domain.as_str())
-                    .unwrap_or_else(|| self.data.helo_domain.as_str()),
-            );
+            .with_header_from(header_from.as_ref())
+            .with_envelope_from(envelope_from.as_ref());
         if let Some(dkim2_output) = dkim2_output {
             report_record = report_record.with_dkim2_output(dkim2_output);
         }

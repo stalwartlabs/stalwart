@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "0.16.18"
+version = "0.16.19"
 edition = "2024"
 build = "build.rs"
 
@@ -17,7 +17,7 @@ jmap_proto = { path = "../jmap-proto" }
 imap_proto = { path = "../imap-proto" }
 sieve-rs = { version = "0.7", features = ["rkyv", "serde"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-builder = { version = "0.4" }
+mail-builder = { version = "0.5" }
 mail-auth = { version = "0.12", features = ["generate", "arc"] }
 smtp-proto = { version = "0.2.3", features = ["rkyv"] }
 dns-update = { version = "0.5" }

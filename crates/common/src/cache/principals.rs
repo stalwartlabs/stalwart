@@ -68,7 +68,7 @@ impl Server {
         } else {
             let domain_names_negative = &self.inner.cache.domain_names_negative;
             if domain_names_negative.get(domain).is_none() {
-                if let Some(domain) = self
+                let mut object = self
                     .registry()
                     .primary_key(
                         ObjectType::Domain.into(),
@@ -76,8 +76,20 @@ impl Server {
                         domain.as_bytes().to_vec(),
                     )
                     .await
-                    .caused_by(trc::location!())?
-                {
+                    .caused_by(trc::location!())?;
+                if object.is_none() {
+                    object = self
+                        .registry()
+                        .primary_key(
+                            ObjectType::Domain.into(),
+                            Property::Aliases,
+                            domain.as_bytes().to_vec(),
+                        )
+                        .await
+                        .caused_by(trc::location!())?;
+                }
+
+                if let Some(domain) = object {
                     // Cache positive result
                     let domain_id = domain.id().document_id();
                     let domain = self.domain_by_id(domain_id).await?;

@@ -26,10 +26,14 @@ use store::{
     },
 };
 
-pub const ASN_IPV4: &str = "https://cdn.jsdelivr.net/npm/@ip-location-db/asn/asn-ipv4.csv";
-pub const ASN_IPV6: &str = "https://cdn.jsdelivr.net/npm/@ip-location-db/asn/asn-ipv6.csv";
-pub const GEO_IPV4: &str = "https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-geo-whois-asn-country/geolite2-geo-whois-asn-country-ipv4.csv";
-pub const GEO_IPV6: &str = "https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-geo-whois-asn-country/geolite2-geo-whois-asn-country-ipv6.csv";
+pub const ASN_IPV4: &str =
+    "https://github.com/sapics/ip-location-db/releases/download/latest/origin-asn-ipv4.csv";
+pub const ASN_IPV6: &str =
+    "https://github.com/sapics/ip-location-db/releases/download/latest/origin-asn-ipv6.csv";
+pub const GEO_IPV4: &str =
+    "https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv4.csv";
+pub const GEO_IPV6: &str =
+    "https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv6.csv";
 
 pub trait BootstrapDefaults {
     fn insert_safe_defaults(&mut self) -> impl Future<Output = ()> + Send;

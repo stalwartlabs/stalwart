@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::scheduling::{ItipMessage, ItipMessages, ItipSummary};
+use crate::scheduling::{Email, ItipMessage, ItipMessages, ItipSummary};
 use calcard::{
     common::{IanaString, PartialDateTime},
     icalendar::{
         ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarMethod,
         ICalendarParameter, ICalendarParameterName, ICalendarParameterValue,
-        ICalendarParticipationStatus, ICalendarProperty, ICalendarValue,
+        ICalendarParticipationStatus, ICalendarProperty, ICalendarScheduleAgentValue,
+        ICalendarValue,
     },
 };
 use common::PROD_ID;
@@ -41,6 +42,106 @@ pub(crate) fn itip_build_envelope(method: ICalendarMethod) -> ICalendarComponent
         ],
         component_ids: Default::default(),
     }
+}
+
+pub fn itip_assign_organizer(ical: &mut ICalendar, organizer_address: &str) -> bool {
+    let mut assigned = false;
+
+    for component in &mut ical.components {
+        if !component.component_type.is_scheduling_object() {
+            continue;
+        }
+
+        let mut has_organizer = false;
+        let mut has_attendee = false;
+
+        for entry in &component.entries {
+            match entry.name {
+                ICalendarProperty::Organizer => has_organizer = true,
+                ICalendarProperty::Attendee => has_attendee = true,
+                _ => {}
+            }
+        }
+
+        if has_attendee && !has_organizer {
+            component.entries.push(ICalendarEntry {
+                name: ICalendarProperty::Organizer,
+                params: vec![],
+                values: vec![ICalendarValue::Text(format!("mailto:{organizer_address}"))],
+            });
+            assigned = true;
+        }
+    }
+
+    assigned
+}
+
+pub fn itip_unreachable_recipient<'x>(
+    ical: &'x ICalendar,
+    account_emails: &[String],
+) -> Option<&'x str> {
+    let organizer = ical
+        .components
+        .iter()
+        .filter(|comp| comp.component_type.is_scheduling_object())
+        .find_map(|comp| {
+            comp.entries
+                .iter()
+                .find(|entry| entry.name == ICalendarProperty::Organizer)
+                .and_then(|entry| entry.values.first())
+                .and_then(|value| value.as_text())
+        });
+
+    if let Some(organizer) = organizer {
+        let Some(email) = Email::new(organizer, account_emails) else {
+            return Some(organizer);
+        };
+        if !email.is_local {
+            return None;
+        }
+    }
+
+    for comp in &ical.components {
+        if !comp.component_type.is_scheduling_object() {
+            continue;
+        }
+
+        for entry in &comp.entries {
+            if entry.name != ICalendarProperty::Attendee {
+                continue;
+            }
+
+            let mut is_server_scheduling = true;
+            let mut rsvp = true;
+
+            for param in &entry.params {
+                match (&param.name, &param.value) {
+                    (
+                        ICalendarParameterName::ScheduleAgent,
+                        ICalendarParameterValue::ScheduleAgent(agent),
+                    ) => {
+                        is_server_scheduling = agent == &ICalendarScheduleAgentValue::Server;
+                    }
+                    (ICalendarParameterName::Rsvp, ICalendarParameterValue::Bool(value)) => {
+                        rsvp = *value;
+                    }
+                    _ => {}
+                }
+            }
+
+            if !is_server_scheduling || !rsvp {
+                continue;
+            }
+
+            if let Some(value) = entry.values.first().and_then(|value| value.as_text())
+                && Email::new(value, account_emails).is_none()
+            {
+                return Some(value);
+            }
+        }
+    }
+
+    None
 }
 
 pub(crate) enum ItipExportAs<'x> {

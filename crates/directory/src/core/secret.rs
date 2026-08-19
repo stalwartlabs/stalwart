@@ -10,7 +10,7 @@ use argon2::PasswordHasher;
 use argon2::PasswordVerifier;
 use argon2::password_hash::SaltString;
 use argon2::password_hash::rand_core::OsRng;
-use mail_builder::encoders::base64::base64_encode;
+use mail_builder::encoders::Base64Encoder;
 use mail_parser::decoders::base64::base64_decode;
 use pbkdf2::Pbkdf2;
 use pwhash::{bcrypt, bsdi_crypt, md5_crypt, sha1_crypt, sha256_crypt, sha512_crypt, unix_crypt};
@@ -148,13 +148,13 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     // SHA-1
                     let mut hasher = Sha1::new();
                     hasher.update(secret);
-                    Ok(
-                        String::from_utf8(
-                            base64_encode(&hasher.finalize()[..]).unwrap_or_default(),
-                        )
-                        .unwrap()
-                            == hashed_secret,
+                    Ok(String::from_utf8(
+                        Base64Encoder::new()
+                            .encode(&hasher.finalize()[..])
+                            .unwrap_or_default(),
                     )
+                    .unwrap()
+                        == hashed_secret)
                 }
                 "SSHA" => {
                     // Salted SHA-1
@@ -170,13 +170,13 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     // Verify hash
                     let mut hasher = Sha256::new();
                     hasher.update(secret);
-                    Ok(
-                        String::from_utf8(
-                            base64_encode(&hasher.finalize()[..]).unwrap_or_default(),
-                        )
-                        .unwrap()
-                            == hashed_secret,
+                    Ok(String::from_utf8(
+                        Base64Encoder::new()
+                            .encode(&hasher.finalize()[..])
+                            .unwrap_or_default(),
                     )
+                    .unwrap()
+                        == hashed_secret)
                 }
                 "SSHA256" => {
                     // Salted SHA-256
@@ -192,13 +192,13 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     // SHA-512
                     let mut hasher = Sha512::new();
                     hasher.update(secret);
-                    Ok(
-                        String::from_utf8(
-                            base64_encode(&hasher.finalize()[..]).unwrap_or_default(),
-                        )
-                        .unwrap()
-                            == hashed_secret,
+                    Ok(String::from_utf8(
+                        Base64Encoder::new()
+                            .encode(&hasher.finalize()[..])
+                            .unwrap_or_default(),
                     )
+                    .unwrap()
+                        == hashed_secret)
                 }
                 "SSHA512" => {
                     // Salted SHA-512
@@ -213,10 +213,11 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                 "MD5" => {
                     // MD5
                     let digest = md5::compute(secret);
-                    Ok(
-                        String::from_utf8(base64_encode(&digest[..]).unwrap_or_default()).unwrap()
-                            == hashed_secret,
+                    Ok(String::from_utf8(
+                        Base64Encoder::new().encode(&digest[..]).unwrap_or_default(),
                     )
+                    .unwrap()
+                        == hashed_secret)
                 }
                 "CRYPT" => {
                     if hashed_secret.starts_with('$') {
@@ -447,7 +448,7 @@ mod tests {
     use super::*;
 
     fn b64(bytes: &[u8]) -> String {
-        String::from_utf8(base64_encode(bytes).unwrap()).unwrap()
+        String::from_utf8(Base64Encoder::new().encode(bytes).unwrap()).unwrap()
     }
 
     #[test]

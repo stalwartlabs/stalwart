@@ -8,7 +8,8 @@
 
 use calcard::common::timezone::Tz;
 use common::DavResources;
-use percent_encoding::{AsciiSet, CONTROLS};
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str};
+use std::borrow::Cow;
 use types::collection::{Collection, SyncCollection};
 
 pub mod cache;
@@ -155,4 +156,15 @@ pub fn strip_mailto_scheme(value: &str) -> &str {
         .split_once(':')
         .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("mailto"))
         .map_or(value, |(_, address)| address.trim())
+}
+
+pub fn decode_mailto_address(value: &str) -> Cow<'_, str> {
+    match value.split_once(':') {
+        Some((scheme, address)) if scheme.eq_ignore_ascii_case("mailto") => {
+            let address = address.trim();
+            let address = address.split_once('?').map_or(address, |(to, _)| to);
+            percent_decode_str(address).decode_utf8_lossy()
+        }
+        _ => Cow::Borrowed(value),
+    }
 }

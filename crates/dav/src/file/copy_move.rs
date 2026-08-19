@@ -438,10 +438,10 @@ async fn copy_container(
     delete_source: bool,
 ) -> crate::Result<HttpResponse> {
     let infinity_copy = match depth {
-        Depth::Zero => {
+        Depth::Zero if !delete_source => {
             return copy_item(server, access_token, from_resource, destination).await;
         }
-        Depth::One => false,
+        Depth::One if !delete_source => false,
         _ => true,
     };
 

@@ -192,7 +192,7 @@ impl SpamFilterAnalyzeDomain for Server {
                 if let TokenType::Email(email) = token {
                     if !ctx.input.is_train && is_body && !ctx.result.has_tag("RCPT_IN_BODY") {
                         for rcpt in ctx.output.all_recipients() {
-                            if rcpt.email.address == email.address {
+                            if &rcpt.email == email {
                                 ctx.result.add_tag("RCPT_IN_BODY");
                                 break;
                             }

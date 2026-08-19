@@ -450,6 +450,163 @@ pub async fn test(test: &TestServer) {
         .await
         .unwrap();
 
+        // Overwriting a chunked value with a shorter one must not leave orphaned chunks behind
+        println!("Running FoundationDB orphaned chunk test...");
+        const ORPHAN_FIELD: u8 = 200;
+        let orphan_range = |document_id: u32| ValueKey {
+            account_id: 0,
+            collection: 0,
+            document_id,
+            class: ValueClass::Property(ORPHAN_FIELD),
+        };
+        let marker = value_gen([(b'z', 16)]);
+        db.write(
+            BatchBuilder::new()
+                .with_account_id(0)
+                .with_collection(Collection::Email)
+                .with_document(1)
+                .set(ValueClass::Property(ORPHAN_FIELD), marker.clone())
+                .build_all(),
+        )
+        .await
+        .unwrap();
+
+        for (byte, size) in [
+            (b'a', MAX_VALUE_SIZE * 3),
+            (b'b', MAX_VALUE_SIZE * 2),
+            (b'c', MAX_VALUE_SIZE / 2),
+            (b'd', MAX_VALUE_SIZE * 3 / 2),
+            (b'e', MAX_VALUE_SIZE),
+            (b'f', 1),
+            (b'g', MAX_VALUE_SIZE * 4),
+            (b'h', 0),
+        ] {
+            let value = value_gen([(byte, size)]);
+            db.write(
+                BatchBuilder::new()
+                    .with_account_id(0)
+                    .with_collection(Collection::Email)
+                    .with_document(0)
+                    .set(ValueClass::Property(ORPHAN_FIELD), value.clone())
+                    .build_all(),
+            )
+            .await
+            .unwrap();
+
+            let mut results = Vec::new();
+            db.iterate(
+                store::IterateParams::new(orphan_range(0), orphan_range(u32::MAX)),
+                |key, value| {
+                    results.push((key.to_vec(), value.to_vec()));
+                    Ok(true)
+                },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                results.len(),
+                2,
+                "orphaned chunks surfaced as extra rows after writing {size} bytes"
+            );
+            assert_eq!(
+                results[0].1.len(),
+                value.len(),
+                "stale chunk spliced onto the value after writing {size} bytes"
+            );
+            assert_eq!(results[0].1, value, "value mismatch for {size} bytes");
+            assert_eq!(
+                results[1].1, marker,
+                "neighbouring document corrupted after writing {size} bytes"
+            );
+            assert_eq!(
+                results[0].0.len(),
+                results[1].0.len(),
+                "chunk key returned as a document key after writing {size} bytes"
+            );
+        }
+
+        // A short key sharing a subspace with longer structured keys must never clear them,
+        // as the database schema version does in the property subspace
+        println!("Running FoundationDB short key test...");
+        for document_id in [0u32, 1, 0xFFFF, 0x10000] {
+            db.write(
+                BatchBuilder::new()
+                    .with_account_id(document_id)
+                    .with_collection(Collection::Email)
+                    .with_document(document_id)
+                    .set(ValueClass::Property(ORPHAN_FIELD), marker.clone())
+                    .build_all(),
+            )
+            .await
+            .unwrap();
+        }
+
+        db.write(
+            BatchBuilder::new()
+                .set(
+                    ValueClass::Any(store::write::AnyClass {
+                        subspace: store::SUBSPACE_PROPERTY,
+                        key: vec![0u8],
+                    }),
+                    vec![1u8],
+                )
+                .build_all(),
+        )
+        .await
+        .unwrap();
+
+        for document_id in [0u32, 1, 0xFFFF, 0x10000] {
+            let key = ValueKey {
+                account_id: document_id,
+                collection: 0,
+                document_id,
+                class: ValueClass::Property(ORPHAN_FIELD),
+            };
+            let mut found = Vec::new();
+            db.iterate(
+                store::IterateParams::new(key.clone(), key.clone()),
+                |_, value| {
+                    found.push(value.to_vec());
+                    Ok(true)
+                },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                found,
+                vec![marker.clone()],
+                "property key for account {document_id} was cleared by a shorter key"
+            );
+
+            db.write(
+                BatchBuilder::new()
+                    .with_account_id(document_id)
+                    .with_collection(Collection::Email)
+                    .with_document(document_id)
+                    .clear(ValueClass::Property(ORPHAN_FIELD))
+                    .build_all(),
+            )
+            .await
+            .unwrap();
+        }
+
+        db.write(
+            BatchBuilder::new()
+                .clear(ValueClass::Any(store::write::AnyClass {
+                    subspace: store::SUBSPACE_PROPERTY,
+                    key: vec![0u8],
+                }))
+                .build_all(),
+        )
+        .await
+        .unwrap();
+
+        db.delete_range(orphan_range(0), orphan_range(u32::MAX))
+            .await
+            .unwrap();
+
         if std::env::var("SLOW_FDB_TRX").is_ok() {
             println!("Running FoundationDB slow transaction tests...");
             // Create 900000 keys

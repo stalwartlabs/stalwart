@@ -57,21 +57,13 @@ async fn asn() {
     admin
         .registry_create_object(Asn::Resource(AsnResource {
             asn_urls: Map::new(vec![
-                "https://cdn.jsdelivr.net/npm/@ip-location-db/asn/asn-ipv4.csv".to_string(),
-                "https://cdn.jsdelivr.net/npm/@ip-location-db/asn/asn-ipv6.csv".to_string(),
+                common::manager::defaults::ASN_IPV4.to_string(),
+                common::manager::defaults::ASN_IPV6.to_string(),
             ]),
             expires: 86_400_100u64.into(),
             geo_urls: Map::new(vec![
-                concat!(
-                    "https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-geo-whois-",
-                    "asn-country/geolite2-geo-whois-asn-country-ipv4.csv"
-                )
-                .to_string(),
-                concat!(
-                    "https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-geo-whois-",
-                    "asn-country/geolite2-geo-whois-asn-country-ipv6.csv"
-                )
-                .to_string(),
+                common::manager::defaults::GEO_IPV4.to_string(),
+                common::manager::defaults::GEO_IPV6.to_string(),
             ]),
             max_size: 100 * 1024 * 1024,
             timeout: 100_000u64.into(),
@@ -97,7 +89,12 @@ async fn asn() {
         ("8.8.8.8", 15169, "Google LLC", "US"),
         ("1.1.1.1", 13335, "Cloudflare, Inc.", "AU"),
         ("2a01:4f9:c011:b43c::1", 24940, "Hetzner Online GmbH", "FI"),
-        ("1.33.1.1", 2514, "NTT PC Communications, Inc.", "JP"),
+        (
+            "1.33.1.1",
+            2514,
+            "InfoSphere - NTT PC Communications, Inc.",
+            "JP",
+        ),
     ] {
         let result = test.server.lookup_asn_country(ip.parse().unwrap()).await;
         println!("{ip}: {result:?}");

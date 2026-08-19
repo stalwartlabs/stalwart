@@ -64,3 +64,20 @@ To: user@domain.com
 Received: invalid
 
 test
+<!-- NEXT TEST -->
+param.smtputf8 1
+expect RCVD_COUNT_ONE RCVD_NO_TLS_LAST
+
+Received: from mail-pl1-f179.google.com (mail-pl1-f179.google.com [209.85.214.179]) 
+          by mail.מייל.קום (Postfix) 
+          with UTF8SMTP id h2DBpvs24047 for <יוסי@מייל.קום>; Thu, 13 Mar 2003 11:51:57 GMT
+
+test
+<!-- NEXT TEST -->
+expect RCVD_ILLEGAL_CHARS RCVD_COUNT_ONE RCVD_NO_TLS_LAST
+
+Received: from mail-pl1-f179.google.com (mail-pl1-f179.google.com [209.85.214.179]) 
+          by mail.מייל.קום (Postfix) 
+          with UTF8SMTP id h2DBpvs24047 for <יוסי@מייל.קום>; Thu, 13 Mar 2003 11:51:57 GMT
+
+test

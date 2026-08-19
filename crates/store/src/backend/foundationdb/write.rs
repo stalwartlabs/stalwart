@@ -11,9 +11,9 @@ use super::{
 use crate::{
     backend::deserialize_i64_le,
     write::{
-        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        RegistryClass, SearchIndexClass, TaskQueueClass, TelemetryClass, ValueClass, ValueOp,
-        key::KeySerializer,
+        AssignedIds, Batch, IndexPropertyClass, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult,
+        Operation, QueueClass, RegistryClass, SearchIndexClass, TaskQueueClass, TelemetryClass,
+        ValueClass, ValueOp, key::KeySerializer,
     },
     *,
 };
@@ -24,6 +24,7 @@ use foundationdb::{
 use futures::TryStreamExt;
 use rand::RngExt;
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     time::{Duration, Instant},
 };
@@ -85,7 +86,7 @@ impl FdbStore {
 
                         match op {
                             ValueOp::Set(value) => {
-                                if !chunk_value(&trx, &mut key, value) {
+                                if !chunk_value(&trx, &mut key, value, class, None).await {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
                                         .ctx(trc::Key::Reason, "Value is too large"));
@@ -93,7 +94,7 @@ impl FdbStore {
                             }
                             ValueOp::SetFnc(set_op) => {
                                 let value = (set_op.0)(&result)?;
-                                if !chunk_value(&trx, &mut key, &value) {
+                                if !chunk_value(&trx, &mut key, &value, class, None).await {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
                                         .ctx(trc::Key::Reason, "Value is too large"));
@@ -105,15 +106,16 @@ impl FdbStore {
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?;
                                 let mut current_value = None;
-                                let (merge_result, is_chunked) = match &chunked_value {
+                                let (merge_result, prev_num_chunks) = match &chunked_value {
                                     ChunkedValue::Single(slice) => {
                                         current_value = Some(slice.as_ref());
-                                        ((merge_op.0)(&result, Some(slice.as_ref()))?, false)
+                                        ((merge_op.0)(&result, Some(slice.as_ref()))?, 1)
                                     }
-                                    ChunkedValue::Chunked { bytes, .. } => {
-                                        ((merge_op.0)(&result, Some(bytes.as_ref()))?, true)
-                                    }
-                                    ChunkedValue::None => ((merge_op.0)(&result, None)?, false),
+                                    ChunkedValue::Chunked { bytes, n_chunks } => (
+                                        (merge_op.0)(&result, Some(bytes.as_ref()))?,
+                                        *n_chunks as usize + 1,
+                                    ),
+                                    ChunkedValue::None => ((merge_op.0)(&result, None)?, 0),
                                 };
 
                                 match merge_result {
@@ -130,21 +132,23 @@ impl FdbStore {
                                                 append_bytes,
                                                 MutationType::AppendIfFits,
                                             );
-                                        } else if !chunk_value(&trx, &mut key, &value) {
+                                        } else if !chunk_value(
+                                            &trx,
+                                            &mut key,
+                                            &value,
+                                            class,
+                                            Some(prev_num_chunks),
+                                        )
+                                        .await
+                                        {
                                             trx.cancel();
                                             return Err(trc::StoreEvent::FoundationdbError
                                                 .ctx(trc::Key::Reason, "Value is too large"));
                                         }
                                     }
                                     MergeResult::Delete => {
-                                        if is_chunked {
-                                            trx.clear_range(
-                                                &key,
-                                                &KeySerializer::new(key.len() + 1)
-                                                    .write(key.as_slice())
-                                                    .write(u8::MAX)
-                                                    .finalize(),
-                                            );
+                                        if prev_num_chunks > 1 {
+                                            clear_chunks(&trx, &key, None).await;
                                         } else {
                                             trx.clear(&key);
                                         }
@@ -167,38 +171,8 @@ impl FdbStore {
                                 result.push_counter_id(num);
                             }
                             ValueOp::Clear => {
-                                if matches!(
-                                    key[0],
-                                    SUBSPACE_TASK_QUEUE
-                                        | SUBSPACE_IN_MEMORY_VALUE
-                                        | SUBSPACE_PROPERTY
-                                        | SUBSPACE_QUEUE_MESSAGE
-                                        | SUBSPACE_REPORT_OUT
-                                        | SUBSPACE_REPORT_IN
-                                        | SUBSPACE_TELEMETRY_SPAN
-                                        | SUBSPACE_SEARCH_INDEX
-                                        | SUBSPACE_LOGS
-                                ) && matches!(
-                                    class,
-                                    ValueClass::Property(_)
-                                        | ValueClass::Queue(_)
-                                        | ValueClass::Registry(RegistryClass::Item { .. })
-                                        | ValueClass::ShareNotification { .. }
-                                        | ValueClass::Telemetry(TelemetryClass::Metric { .. })
-                                        | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
-                                        | ValueClass::InMemory(_)
-                                        | ValueClass::SearchIndex(
-                                            SearchIndexClass::Document { .. }
-                                        )
-                                ) {
-                                    // Clear range for potentially chunked values to avoid leaving orphaned chunks
-                                    trx.clear_range(
-                                        &key,
-                                        &KeySerializer::new(key.len() + 1)
-                                            .write(key.as_slice())
-                                            .write(u8::MAX)
-                                            .finalize(),
-                                    );
+                                if is_chunked_value(key[0], class) {
+                                    clear_chunks(&trx, &key, None).await;
                                 } else {
                                     trx.clear(&key);
                                 }
@@ -350,8 +324,100 @@ impl FdbStore {
     }
 }
 
-fn chunk_value(trx: &Transaction, key: &mut Vec<u8>, value: &[u8]) -> bool {
-    if !value.is_empty() && value.len() > MAX_VALUE_SIZE {
+fn is_chunked_subspace(subspace: u8) -> bool {
+    matches!(
+        subspace,
+        crate::SUBSPACE_PROPERTY
+            | crate::SUBSPACE_SEARCH_INDEX
+            | crate::SUBSPACE_QUEUE_MESSAGE
+            | crate::SUBSPACE_TASK_QUEUE
+            | crate::SUBSPACE_DIRECTORY
+            | crate::SUBSPACE_REGISTRY
+            | crate::SUBSPACE_DELETED_ITEMS
+            | crate::SUBSPACE_SPAM_SAMPLES
+            | crate::SUBSPACE_REPORT_IN
+            | crate::SUBSPACE_REPORT_OUT
+            | crate::SUBSPACE_TELEMETRY_SPAN
+    )
+}
+
+fn is_chunked_value(subspace: u8, class: &ValueClass) -> bool {
+    is_chunked_subspace(subspace)
+        && match class {
+            ValueClass::Property(_)
+            | ValueClass::IndexProperty(IndexPropertyClass::Hash { .. })
+            | ValueClass::Registry(RegistryClass::Item { .. })
+            | ValueClass::Queue(QueueClass::Message(_))
+            | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
+            | ValueClass::Telemetry(TelemetryClass::Span(_)) => true,
+            ValueClass::SearchIndex(SearchIndexClass::Document { .. }) => true,
+            _ => false,
+        }
+}
+
+async fn clear_chunks(trx: &Transaction, key: &[u8], from_chunk: Option<u8>) {
+    let to = KeySerializer::new(key.len() + 1)
+        .write(key)
+        .write(u8::MAX)
+        .finalize();
+    let from = match from_chunk {
+        Some(from_chunk) => Cow::Owned(
+            KeySerializer::new(key.len() + 1)
+                .write(key)
+                .write(from_chunk)
+                .finalize(),
+        ),
+        None => Cow::Borrowed(key),
+    };
+
+    #[cfg(debug_assertions)]
+    {
+        let mut chunks = trx.get_ranges_keyvalues(
+            RangeOption {
+                begin: KeySelector::first_greater_or_equal(from.as_ref()),
+                end: KeySelector::first_greater_or_equal(to.as_slice()),
+                mode: options::StreamingMode::WantAll,
+                ..Default::default()
+            },
+            true,
+        );
+
+        while let Ok(Some(chunk)) = chunks.try_next().await {
+            let found = chunk.key();
+            debug_assert!(
+                found.len() == key.len() + 1 || found == key,
+                "chunk range of {key:?} holds foreign key {found:?}, clearing it would destroy data"
+            );
+        }
+    }
+
+    trx.clear_range(from.as_ref(), &to);
+}
+
+async fn chunk_value(
+    trx: &Transaction,
+    key: &mut Vec<u8>,
+    value: &[u8],
+    class: &ValueClass,
+    prev_num_chunks: Option<usize>,
+) -> bool {
+    let num_chunks = if value.len() > MAX_VALUE_SIZE {
+        value.len().div_ceil(MAX_VALUE_SIZE)
+    } else {
+        1
+    };
+
+    if num_chunks > u8::MAX as usize {
+        return false;
+    }
+
+    if is_chunked_value(key[0], class)
+        && prev_num_chunks.is_none_or(|prev_num_chunks| prev_num_chunks > num_chunks)
+    {
+        clear_chunks(trx, key, Some((num_chunks - 1) as u8)).await;
+    }
+
+    if value.len() > MAX_VALUE_SIZE {
         for (pos, chunk) in value.chunks(MAX_VALUE_SIZE).enumerate() {
             match pos.cmp(&1) {
                 Ordering::Less => {}
@@ -359,17 +425,13 @@ fn chunk_value(trx: &Transaction, key: &mut Vec<u8>, value: &[u8]) -> bool {
                     key.push(0);
                 }
                 Ordering::Greater => {
-                    if pos < u8::MAX as usize {
-                        *key.last_mut().unwrap() += 1;
-                    } else {
-                        return false;
-                    }
+                    *key.last_mut().unwrap() += 1;
                 }
             }
             trx.set(key, chunk);
         }
     } else {
-        trx.set(key, value.as_ref());
+        trx.set(key, value);
     }
 
     true

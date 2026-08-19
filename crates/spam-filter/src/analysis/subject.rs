@@ -129,16 +129,13 @@ impl SpamFilterAnalyzeSubject for Server {
                 TokenType::Email(email) => {
                     // Subject contains recipient
                     if ctx.output.env_to_orig_addr.contains(email)
-                        || ctx
-                            .output
-                            .all_recipients()
-                            .any(|r| r.email.address == email.address)
+                        || ctx.output.all_recipients().any(|r| &r.email == email)
                     {
                         ctx.result.add_tag("RCPT_IN_SUBJECT");
                     } else {
                         let host = email.domain_part.sld_or_default();
                         for rcpt in ctx.output.all_recipients() {
-                            if rcpt.email.address == email.address {
+                            if &rcpt.email == email {
                                 ctx.result.add_tag("RCPT_IN_SUBJECT");
                                 break;
                             } else if rcpt.email.domain_part.sld_or_default() == host {

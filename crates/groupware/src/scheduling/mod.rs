@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::strip_mailto_scheme;
+use crate::decode_mailto_address;
 use ahash::{AHashMap, AHashSet};
 use calcard::{
     common::{IanaString, PartialDateTime},
@@ -17,6 +17,7 @@ use calcard::{
 };
 use registry::schema::structs::TaskCalendarItipContents;
 use std::{fmt::Display, hash::Hash};
+use utils::sanitize_email;
 
 pub mod attendee;
 pub mod event_cancel;
@@ -238,11 +239,9 @@ impl Attendee<'_> {
 
 impl Email {
     pub fn new(email: &str, local_addresses: &[String]) -> Option<Self> {
-        email.contains('@').then(|| {
-            let email = strip_mailto_scheme(email.trim()).to_lowercase();
-            let is_local = local_addresses.contains(&email);
-            Email { email, is_local }
-        })
+        let email = sanitize_email(&decode_mailto_address(email.trim()))?;
+        let is_local = local_addresses.contains(&email);
+        Some(Email { email, is_local })
     }
 
     pub fn from_uri(uri: &Uri, local_addresses: &[String]) -> Option<Self> {

@@ -8,7 +8,7 @@ use common::{DavResources, MessageStoreCache, Server};
 use jmap_proto::types::state::State;
 use std::future::Future;
 use trc::AddContext;
-use types::collection::SyncCollection;
+use types::{ChangeId, collection::SyncCollection};
 
 pub trait StateManager: Sync + Send {
     fn get_state(
@@ -67,22 +67,27 @@ impl StateManager for Server {
     }
 }
 
+#[inline(always)]
+fn cache_state(change_id: ChangeId) -> State {
+    (change_id != 0).then_some(change_id).into()
+}
+
 impl JmapCacheState for MessageStoreCache {
     fn get_state(&self, is_container: bool) -> State {
-        if is_container {
-            State::from(self.mailboxes.change_id)
+        cache_state(if is_container {
+            self.mailboxes.change_id
         } else {
-            State::from(self.emails.change_id)
-        }
+            self.emails.change_id
+        })
     }
 }
 
 impl JmapCacheState for DavResources {
     fn get_state(&self, is_container: bool) -> State {
-        if is_container {
-            State::from(self.container_change_id)
+        cache_state(if is_container {
+            self.container_change_id
         } else {
-            State::from(self.item_change_id)
-        }
+            self.item_change_id
+        })
     }
 }

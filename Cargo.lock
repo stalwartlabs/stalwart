@@ -664,7 +664,7 @@ checksum = "2dbfddc8cc5cc927876d9f138e7ded44c6116c544d3cca2c3a2759e46ba916c7"
 dependencies = [
  "chrono",
  "data-encoding",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "once_cell",
  "ring",
@@ -1038,7 +1038,7 @@ dependencies = [
  "chrono-tz",
  "hashify",
  "jmap-tools",
- "mail-builder",
+ "mail-builder 0.4.4",
  "mail-parser",
  "rkyv",
  "serde",
@@ -1287,7 +1287,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "aes-gcm-siv",
  "ahash",
@@ -1317,7 +1317,7 @@ dependencies = [
  "libc",
  "lz4_flex 0.14.0",
  "mail-auth",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "md5",
  "nlp",
@@ -1482,7 +1482,7 @@ checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "coordinator"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "async-nats",
  "futures",
@@ -1846,7 +1846,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "dav"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "calcard",
  "chrono",
@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "dav-proto"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "calcard",
  "chrono",
@@ -2016,7 +2016,7 @@ dependencies = [
  "asn1-rs",
  "displaydoc",
  "nom",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "rusticata-macros",
 ]
@@ -2106,7 +2106,7 @@ dependencies = [
 
 [[package]]
 name = "directory"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "argon2",
@@ -2116,7 +2116,7 @@ dependencies = [
  "futures",
  "jsonwebtoken",
  "ldap3",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "md5",
  "nlp",
@@ -2357,7 +2357,7 @@ dependencies = [
 
 [[package]]
 name = "email"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "aes 0.9.2",
  "aes-gcm 0.11.0",
@@ -2371,7 +2371,7 @@ dependencies = [
  "hashify",
  "jmap-tools",
  "jmap_proto",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "nlp",
  "rand 0.8.7",
@@ -2467,7 +2467,7 @@ dependencies = [
 
 [[package]]
 name = "event_macro"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2980,7 +2980,7 @@ dependencies = [
 
 [[package]]
 name = "groupware"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "calcard",
@@ -3262,7 +3262,7 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "async-stream",
  "base64 0.23.1",
@@ -3282,7 +3282,7 @@ dependencies = [
  "jmap",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "mime",
  "percent-encoding",
@@ -3362,7 +3362,7 @@ dependencies = [
 
 [[package]]
 name = "http_proto"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "common",
  "compact_str",
@@ -3670,7 +3670,7 @@ checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "imap"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "common",
@@ -3697,7 +3697,7 @@ dependencies = [
 
 [[package]]
 name = "imap_proto"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "base64 0.23.1",
@@ -3945,7 +3945,7 @@ dependencies = [
 
 [[package]]
 name = "jmap"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "aes-gcm 0.11.0",
  "aes-gcm-siv",
@@ -3969,7 +3969,7 @@ dependencies = [
  "jmap_proto",
  "lz4_flex 0.14.0",
  "mail-auth",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "nlp",
  "p256",
@@ -4033,7 +4033,7 @@ dependencies = [
 
 [[package]]
 name = "jmap_proto"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "calcard",
@@ -4481,9 +4481,9 @@ dependencies = [
 
 [[package]]
 name = "mail-auth"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5585c5377c1463b4165601db14a7b0465b467ca81f21f4a2f7e10f3a231cb64a"
+checksum = "faa246141b9a9194be268605d9db7228784a0eb347d155eeaa223181037693d0"
 dependencies = [
  "aws-lc-rs",
  "flate2",
@@ -4491,7 +4491,8 @@ dependencies = [
  "getrandom 0.4.3",
  "hashify",
  "hickory-resolver",
- "mail-builder",
+ "idna",
+ "mail-builder 0.4.4",
  "mail-parser",
  "quick-xml 0.41.0",
  "rand 0.8.7",
@@ -4514,6 +4515,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mail-builder"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c942e8a4b83f9351236c1e531ea9fa0237913d63c7fc36818430e0128a1ddf3"
+dependencies = [
+ "gethostname",
+]
+
+[[package]]
 name = "mail-parser"
 version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4527,7 +4537,7 @@ dependencies = [
 
 [[package]]
 name = "managesieve"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "common",
@@ -4669,7 +4679,7 @@ checksum = "c797b9d6bb23aab2fc369c65f871be49214f5c759af65bde26ffaaa2b646b492"
 
 [[package]]
 name = "migration"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "base64 0.23.1",
  "common",
@@ -4824,7 +4834,7 @@ dependencies = [
  "darling 0.23.0",
  "heck",
  "manyhow",
- "num-bigint",
+ "num-bigint 0.4.8",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
@@ -4878,7 +4888,7 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "mysql-common-derive",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "regex",
  "saturating",
@@ -4925,7 +4935,7 @@ dependencies = [
 
 [[package]]
 name = "nlp"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "bincode",
@@ -5016,7 +5026,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
 dependencies = [
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-complex",
  "num-integer",
  "num-iter",
@@ -5029,6 +5039,16 @@ name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-bigint"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
 dependencies = [
  "num-integer",
  "num-traits",
@@ -5090,7 +5110,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
 dependencies = [
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-integer",
  "num-traits",
 ]
@@ -5747,7 +5767,7 @@ dependencies = [
 
 [[package]]
 name = "pop3"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "common",
  "directory",
@@ -5939,7 +5959,7 @@ dependencies = [
 
 [[package]]
 name = "proc_macros"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6004,9 +6024,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.223"
+version = "2.1.224"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0dedad316e05de220cbf3fd8bfb69f3df8755dde2d7d479211827b595168a93"
+checksum = "d6fd4be744906217175e617ecbaff30e1d4574954e5ab2ad6ac0fead0e9abc3a"
 dependencies = [
  "psl-types",
 ]
@@ -6351,7 +6371,7 @@ dependencies = [
  "chrono",
  "either",
  "nom",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-integer",
  "num-traits",
  "once_cell",
@@ -6473,9 +6493,9 @@ dependencies = [
 
 [[package]]
 name = "redis"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3257df217f7eab0044627a268c9cc6cdb60c0c421c88f83ac41c4e31520b6b84"
+checksum = "e37a4ca5c6ca42aa3e6df2fd32b987a65d32a4c2159a6f3fe0fd1df306a2658f"
 dependencies = [
  "arcstr",
  "async-lock",
@@ -6487,7 +6507,7 @@ dependencies = [
  "futures-util",
  "itoa",
  "log",
- "num-bigint",
+ "num-bigint 0.5.1",
  "percent-encoding",
  "pin-project-lite",
  "rand 0.10.2",
@@ -6574,7 +6594,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "registry"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "hashify",
@@ -7442,7 +7462,7 @@ dependencies = [
 
 [[package]]
 name = "services"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "aes-gcm 0.11.0",
  "aes-gcm-siv",
@@ -7459,7 +7479,7 @@ dependencies = [
  "hkdf 0.13.0",
  "jmap-tools",
  "jmap_proto",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "memory-stats",
  "p256",
@@ -7644,7 +7664,7 @@ dependencies = [
  "arc-swap",
  "fancy-regex",
  "hashify",
- "mail-builder",
+ "mail-builder 0.4.4",
  "mail-parser",
  "rkyv",
  "serde",
@@ -7716,7 +7736,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d585997b0ac10be3c5ee635f1bab02d512760d14b7c468801ac8a01d9ae5f1d"
 dependencies = [
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "thiserror 2.0.20",
  "time",
@@ -7761,7 +7781,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "smtp"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "base64 0.23.1",
@@ -7778,7 +7798,7 @@ dependencies = [
  "hyper-util",
  "lru-cache",
  "mail-auth",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "md5",
  "nlp",
@@ -7863,7 +7883,7 @@ dependencies = [
 
 [[package]]
 name = "spam-filter"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "common",
  "compact_str",
@@ -7872,7 +7892,7 @@ dependencies = [
  "idna",
  "infer 0.22.0",
  "mail-auth",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "nlp",
  "psl",
@@ -7978,7 +7998,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stalwart"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "common",
  "coordinator",
@@ -7986,7 +8006,7 @@ dependencies = [
  "directory",
  "email",
  "groupware",
- "http 0.16.18",
+ "http 0.16.19",
  "http_proto",
  "imap",
  "jmap",
@@ -8015,7 +8035,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -8269,7 +8289,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "async-trait",
@@ -8293,7 +8313,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "groupware",
- "http 0.16.18",
+ "http 0.16.19",
  "http-body-util",
  "http_proto",
  "hyper",
@@ -8305,7 +8325,7 @@ dependencies = [
  "jmap-tools",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "managesieve",
  "migration",
@@ -8869,7 +8889,7 @@ dependencies = [
 
 [[package]]
 name = "trc"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "base64 0.23.1",
@@ -8978,7 +8998,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "types"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "blake3",
  "compact_str",
@@ -9186,7 +9206,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "utils"
-version = "0.16.18"
+version = "0.16.19"
 dependencies = [
  "ahash",
  "arcstr",
@@ -9229,9 +9249,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.24.0"
+version = "1.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
+checksum = "2cefc03fd367c0c6d4305de1b312cf00248c4114f4a0418ce6a6af769e3b0bd9"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",

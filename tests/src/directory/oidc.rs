@@ -120,6 +120,28 @@ pub async fn test() {
         }
     );
 
+    // A configured group claim that the provider does not emit must not assert an empty group list
+    let mut config_missing_groups = config.clone();
+    config_missing_groups.claim_groups = Some("not_a_real_claim".to_string());
+    assert_eq!(
+        OpenIdDirectory::open(config_missing_groups)
+            .await
+            .unwrap()
+            .authenticate(&Credentials::Bearer {
+                username: None,
+                token: token.clone(),
+            })
+            .await
+            .unwrap(),
+        Account {
+            email: "john.doe@example.org".to_string(),
+            email_aliases: vec![],
+            secret: None,
+            groups: None,
+            description: Some("John Doe".to_string())
+        }
+    );
+
     // Not matching the required audience should fail
     let mut config_wrong_audience = config.clone();
     config_wrong_audience.require_audience = Some("wrong_audience".to_string());

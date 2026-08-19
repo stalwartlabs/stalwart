@@ -47,6 +47,12 @@ pub async fn test(test: &TestServer) {
             .await;
         response.list_array().assert_is_equal(json!([]));
         *change_id = response.state().to_string();
+
+        let response = client
+            .jmap_changes(MethodObject::CalendarEventNotification, &change_id)
+            .await;
+        assert_eq!(response.changes().next(), None);
+        assert_eq!(response.new_state(), change_id.as_str());
     }
 
     // Create test calendars
@@ -387,13 +393,154 @@ pub async fn test(test: &TestServer) {
         "status": "cancelled"
     }));
 
+    // Scheduling messages are sent for a server-assigned organizer
+    let jane_change_id = jane
+        .jmap_get(
+            MethodObject::CalendarEventNotification,
+            [CalendarEventNotificationProperty::Id],
+            Vec::<&str>::new(),
+        )
+        .await
+        .state()
+        .to_string();
+
+    let response = john
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [test_event_without_organizer().with_property(
+                JSCalendarProperty::<Id>::CalendarIds,
+                [john_calendar_id.as_str()].into_jmap_set(),
+            )],
+            [("sendSchedulingMessages", true)],
+        )
+        .await;
+    let john_event_id = response.created(0).id().to_string();
+
+    john.jmap_get(
+        MethodObject::CalendarEvent,
+        [
+            JSCalendarProperty::<Id>::Id,
+            JSCalendarProperty::OrganizerCalendarAddress,
+        ],
+        [&john_event_id],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({
+            "id": &john_event_id,
+            "organizerCalendarAddress": "mailto:jdoe@example.com"
+        }));
+
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    test.wait_for_tasks().await;
+
+    let response = jane
+        .jmap_changes(MethodObject::CalendarEventNotification, &jane_change_id)
+        .await;
+    let changes = response.changes().collect::<Vec<_>>();
+    assert_eq!(changes.len(), 1);
+    let notification_id = changes[0].as_created();
+    let jane_event_id = jane
+        .jmap_get(
+            MethodObject::CalendarEventNotification,
+            [
+                CalendarEventNotificationProperty::Id,
+                CalendarEventNotificationProperty::CalendarEventId,
+            ],
+            [notification_id],
+        )
+        .await
+        .list()[0]
+        .text_field("calendarEventId")
+        .to_string();
+
+    jane.jmap_get(
+        MethodObject::CalendarEvent,
+        [
+            JSCalendarProperty::<Id>::Id,
+            JSCalendarProperty::Title,
+            JSCalendarProperty::OrganizerCalendarAddress,
+        ],
+        [&jane_event_id],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({
+            "id": &jane_event_id,
+            "title": "Brunch",
+            "organizerCalendarAddress": "mailto:jdoe@example.com"
+        }));
+
+    // An attendee replying to the invitation does not take over as organizer
+    jane.jmap_update(
+        MethodObject::CalendarEvent,
+        [(
+            &jane_event_id,
+            json!({
+         "participants/a0171748-fe8d-57d8-879e-56036a5251d1/participationStatus":
+         "accepted"}),
+        )],
+        [("sendSchedulingMessages", true)],
+    )
+    .await
+    .updated(&jane_event_id);
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    jane.jmap_get(
+        MethodObject::CalendarEvent,
+        [
+            JSCalendarProperty::<Id>::Id,
+            JSCalendarProperty::OrganizerCalendarAddress,
+        ],
+        [&jane_event_id],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({
+            "id": &jane_event_id,
+            "organizerCalendarAddress": "mailto:jdoe@example.com"
+        }));
+
     // Cleanup
+    test.wait_for_tasks().await;
     for client in [john, jane, bill] {
         client.destroy_all_calendars().await;
         client.destroy_all_event_notifications().await;
         test.destroy_all_mailboxes(client).await;
     }
     test.assert_is_empty().await;
+}
+
+fn test_event_without_organizer() -> Value {
+    json!({
+      "uid": "9263504FD3AE",
+      "title": "Brunch",
+      "timeZone": "Europe/London",
+      "start": DateTime::from_timestamp(now() as i64 + 60 * 60)
+        .to_rfc3339().trim_end_matches("Z").to_string(),
+      "duration": "PT1H",
+      "freeBusyStatus": "busy",
+      "updated": "2009-06-02T17:00:00Z",
+      "sequence": 0,
+      "@type": "Event",
+      "participants": {
+        "8584f8f9-5414-55e3-8a1c-ad6fc2f3ffb6": {
+          "calendarAddress": "mailto:jdoe@example.com",
+          "participationStatus": "accepted",
+          "roles": {
+            "chair": true,
+            "owner": true
+          },
+          "@type": "Participant"
+        },
+        "a0171748-fe8d-57d8-879e-56036a5251d1": {
+          "calendarAddress": "mailto:jane.smith@example.com",
+          "@type": "Participant",
+          "participationStatus": "needs-action",
+          "kind": "individual"
+        }
+      }
+    })
 }
 
 fn test_event() -> Value {

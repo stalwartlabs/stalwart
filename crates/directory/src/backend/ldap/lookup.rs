@@ -189,7 +189,7 @@ impl LdapDirectory {
                 Some(groups)
             };
         } else {
-            result.account.groups = Some(Vec::new());
+            result.account.groups = (!self.mappings.attr_groups.is_empty()).then(Vec::new);
         }
 
         Ok(())
@@ -235,12 +235,19 @@ impl LdapMappings {
 
         for (attr, value) in entry.attrs {
             let attr = attr.to_lowercase();
-            if self.attr_email.contains(&attr) {
-                account.email = value
-                    .into_iter()
-                    .filter_map(|v| sanitize_email(&v))
-                    .next()
-                    .unwrap_or_default();
+            let is_email = self.attr_email.contains(&attr);
+            let is_email_alias = self.attr_email_alias.contains(&attr);
+            if is_email || is_email_alias {
+                let mut values = value.into_iter().filter_map(|v| sanitize_email(&v));
+                if is_email
+                    && account.email.is_empty()
+                    && let Some(email) = values.next()
+                {
+                    account.email = email;
+                }
+                if is_email_alias {
+                    account.email_aliases.extend(values);
+                }
             } else if self.attr_secret.contains(&attr) {
                 account.secret = value.into_iter().next();
             } else if self.attr_secret_changed.contains(&attr) {
@@ -250,10 +257,6 @@ impl LdapMappings {
                     account.secret = value.into_iter().next().map(|item| {
                         format!("$app${}$", xxhash_rust::xxh3::xxh3_64(item.as_bytes()))
                     });
-                }
-            } else if self.attr_email_alias.contains(&attr) {
-                for item in value.into_iter().filter_map(|v| sanitize_email(&v)) {
-                    account.email_aliases.push(item);
                 }
             } else if let Some(idx) = self.attr_description.iter().position(|a| a == &attr) {
                 if (account.description.is_none() || idx == 0)
@@ -268,6 +271,16 @@ impl LdapMappings {
                     is_group |= value.eq_ignore_ascii_case(&self.group_class);
                 }
             }
+        }
+
+        if !account.email_aliases.is_empty() {
+            let mut aliases = Vec::with_capacity(account.email_aliases.len());
+            for alias in std::mem::take(&mut account.email_aliases) {
+                if alias != account.email && !aliases.contains(&alias) {
+                    aliases.push(alias);
+                }
+            }
+            account.email_aliases = aliases;
         }
 
         LdapResult {

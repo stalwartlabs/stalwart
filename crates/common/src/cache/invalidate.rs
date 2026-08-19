@@ -113,6 +113,7 @@ impl CacheInvalidationBuilder {
 
             (ObjectInner::Domain(current), ObjectInner::Domain(new)) => {
                 if (current.name != new.name)
+                    || (current.aliases != new.aliases)
                     || (current.directory_id != new.directory_id)
                     || (current.member_tenant_id != new.member_tenant_id)
                     || (current.catch_all_address != new.catch_all_address)
@@ -121,6 +122,10 @@ impl CacheInvalidationBuilder {
                     || (current.is_enabled != new.is_enabled)
                 {
                     self.invalidate(CacheInvalidation::Domain(id));
+                }
+
+                if (current.name != new.name) || (current.aliases != new.aliases) {
+                    self.invalidate(CacheInvalidation::DomainNegative);
                 }
 
                 if current.logo != new.logo {
@@ -209,6 +214,9 @@ impl CacheInvalidationBuilder {
     }
 
     pub fn process_create(&mut self, object: &Object) {
+        if matches!(&object.inner, ObjectInner::Domain(_)) {
+            self.invalidate(CacheInvalidation::DomainNegative);
+        }
         self.invalidate_negative_email(&object.inner);
     }
 
@@ -423,6 +431,9 @@ impl Server {
                     local_part_hash,
                 } => {
                     negative_emails.insert((*domain_id, *local_part_hash));
+                }
+                CacheInvalidation::DomainNegative => {
+                    cache.domain_names_negative.clear();
                 }
             }
         }

@@ -134,6 +134,7 @@ impl CalendarEventGet for Server {
                     }
                     JSCalendarProperty::IsOrigin => {
                         return_is_origin = true;
+                        jmap_properties.push(property);
                     }
                     _ => {
                         if matches!(property, JSCalendarProperty::ICalendar) {

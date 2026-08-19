@@ -12,6 +12,7 @@ use common::{
 };
 use rustls::{ServerConfig, server::ResolvesServerCert};
 use smtp::core::{Session, SessionAddress, SessionData, SessionParameters, State};
+use smtp::queue::MessageSource;
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -276,6 +277,7 @@ impl TestSession for Session<DummyIo> {
                         dsn_info: None,
                     },
                 ],
+                MessageSource::Authenticated,
                 self.server.inner.data.queue_id_gen.generate(),
                 0,
             )

@@ -18,13 +18,17 @@ use mail_auth::{
     mta_sts::{MtaSts, ReportUri, TlsRpt},
     report::tlsrpt::ResultType,
 };
-use registry::schema::{
-    enums::MtaRequiredOrOptional,
-    prelude::ObjectType,
-    structs::{Expression, MtaTlsStrategy, TlsReportSettings},
+use registry::{
+    schema::{
+        enums::{MtaRequiredOrOptional, NetworkListenerProtocol},
+        prelude::ObjectType,
+        structs::{Expression, MtaTlsStrategy, NetworkListener, TlsReportSettings},
+    },
+    types::{map::Map, socketaddr::SocketAddr},
 };
 use smtp::outbound::mta_sts::{lookup::STS_TEST_POLICY, parse::ParsePolicy};
 use std::{
+    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -260,4 +264,103 @@ async fn mta_sts_verify() {
         )
     );
     assert!(report.failure.is_none());
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn mta_sts_testing_mode_does_not_enforce_tls() {
+    let mut local = TestServerBuilder::new("smtp_mta_sts_testing_local")
+        .await
+        .with_http_listener(19051)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+    let mut remote = TestServerBuilder::new("smtp_mta_sts_testing_remote")
+        .await
+        .with_http_listener(19052)
+        .await
+        .with_object(NetworkListener {
+            bind: Map::new(vec![SocketAddr::from_str("0.0.0.0:9925").unwrap()]),
+            name: "smtp".to_string(),
+            protocol: NetworkListenerProtocol::Smtp,
+            use_tls: false,
+            tls_implicit: false,
+            ..Default::default()
+        })
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+
+    let local_admin = local.account("admin");
+    local_admin.mta_allow_relaying().await;
+    local_admin.mta_no_auth().await;
+    local_admin.reload_settings().await;
+    local.reload_core();
+    local.expect_reload_settings().await;
+
+    let remote_admin = remote.account("admin");
+    remote_admin.mta_no_auth().await;
+    remote_admin.mta_allow_relaying().await;
+    remote_admin.mta_allow_non_fqdn().await;
+    remote_admin.mta_add_all_headers().await;
+    remote_admin.reload_settings().await;
+    remote.reload_core();
+    remote.expect_reload_settings().await;
+
+    local.server.mx_add(
+        "foobar.org",
+        vec![MX {
+            exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
+            preference: 10,
+        }],
+        DnssecStatus::Secure,
+        Instant::now() + Duration::from_secs(10),
+    );
+    local.server.ipv4_add(
+        "mx.foobar.org",
+        vec!["127.0.0.1".parse().unwrap()],
+        Instant::now() + Duration::from_secs(10),
+    );
+    local.server.txt_add(
+        "_mta-sts.foobar.org",
+        MtaSts::parse(b"v=STSv1; id=policy_in_testing;").unwrap(),
+        Instant::now() + Duration::from_secs(10),
+    );
+
+    STS_TEST_POLICY.lock().clear();
+    STS_TEST_POLICY.lock().extend_from_slice(
+        concat!(
+            "version: STSv1\n",
+            "mode: testing\n",
+            "mx: *.foobar.org\n",
+            "max_age: 604800\n"
+        )
+        .as_bytes(),
+    );
+
+    let mut session = local.new_mta_session();
+    session.data.remote_ip_str = "10.0.0.1".into();
+    session.eval_session_params().await;
+    session.ehlo("mx.test.org").await;
+    session
+        .send_message("john@test.org", &["bill@foobar.org"], "test:no_dkim", "250")
+        .await;
+    local
+        .expect_message_then_deliver()
+        .await
+        .try_deliver(local.server.clone());
+    local.read_event().await.assert_done();
+
+    remote
+        .expect_message()
+        .await
+        .read_lines(&remote)
+        .await
+        .assert_not_contains("using TLSv1.3 with cipher");
+
+    STS_TEST_POLICY.lock().clear();
 }

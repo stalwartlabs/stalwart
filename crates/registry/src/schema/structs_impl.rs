@@ -19678,6 +19678,9 @@ impl ObjectImpl for Domain {
         i.unique(Property::Name, &self.name);
         i.text(Property::Text, &self.name);
         for value in self.aliases.iter() {
+            i.unique(Property::Aliases, value);
+        }
+        for value in self.aliases.iter() {
             i.text(Property::Text, value);
         }
         if let Some(value) = &self.description {
@@ -30721,7 +30724,9 @@ impl RegistryJsonPropertyPatch for OidcDirectory {
             Some(Property::ClaimName) => self
                 .claim_name
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
-            Some(Property::ClaimGroups) => self.claim_groups.patch(pointer, value),
+            Some(Property::ClaimGroups) => self
+                .claim_groups
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::MemberTenantId) => self
                 .member_tenant_id
                 .patch(pointer.assert_can_set_tenant()?, value),

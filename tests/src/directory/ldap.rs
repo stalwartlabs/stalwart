@@ -137,6 +137,59 @@ pub async fn test() {
         ldap.recipient("nonexistent@example.org").await.unwrap(),
         Recipient::Invalid
     );
+
+    const MULTI_MAIL: &[&str] = &[
+        "mm@example.org",
+        "multi.mail@example.org",
+        "multi@example.org",
+    ];
+    let mut config = ldap_test_directory();
+    config.attr_secret = Map::new(vec!["userPassword".to_string()]);
+    config.attr_secret_changed = Map::new(vec![]);
+    config.bind_authentication = false;
+    let ldap_dedicated_attr = LdapDirectory::open(config.clone()).await.unwrap();
+    config.attr_email_alias = Map::new(vec!["mail".to_string()]);
+    let ldap_overloaded_attr = LdapDirectory::open(config).await.unwrap();
+
+    for address in MULTI_MAIL {
+        let Recipient::Account(account) = ldap_dedicated_attr.recipient(address).await.unwrap()
+        else {
+            panic!("Expected an account for {address}");
+        };
+        assert!(
+            MULTI_MAIL.contains(&account.email.as_str()),
+            "Unexpected primary address {:?}",
+            account.email
+        );
+        assert!(
+            account.email_aliases.is_empty(),
+            "Expected no aliases, got {:?}",
+            account.email_aliases
+        );
+
+        let Recipient::Account(account) = ldap_overloaded_attr.recipient(address).await.unwrap()
+        else {
+            panic!("Expected an account for {address}");
+        };
+        assert_eq!(sorted_addresses(&account), MULTI_MAIL);
+    }
+
+    let account = ldap_overloaded_attr
+        .authenticate(&Credentials::Basic {
+            username: "mm@example.org".into(),
+            secret: "this is Multi's LDAP password".into(),
+            mfa_token: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(sorted_addresses(&account), MULTI_MAIL);
+}
+
+fn sorted_addresses(account: &Account) -> Vec<String> {
+    let mut addresses = account.email_aliases.clone();
+    addresses.push(account.email.clone());
+    addresses.sort_unstable();
+    addresses
 }
 
 pub fn ldap_test_directory() -> structs::LdapDirectory {

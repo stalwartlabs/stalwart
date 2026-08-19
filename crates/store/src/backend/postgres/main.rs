@@ -6,7 +6,11 @@
 
 use super::{PostgresStore, into_error};
 use crate::{
-    backend::postgres::{PsqlSearchField, into_pool_error, tls::MakeRustlsConnect},
+    backend::postgres::{
+        PsqlSearchField, into_pool_error,
+        search::{PG_FALLBACK_LANG, PG_LANGS, PG_UNSTEMMED_LANG},
+        tls::MakeRustlsConnect,
+    },
     search::{
         CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
         TracingSearchField,
@@ -14,7 +18,10 @@ use crate::{
     *,
 };
 use ::registry::schema::{enums::PostgreSqlRecyclingMethod, structs};
-use deadpool_postgres::{Config, ManagerConfig, Object, PoolConfig, RecyclingMethod, Runtime};
+use ahash::AHashSet;
+use deadpool_postgres::{
+    Config, ManagerConfig, Object, Pool, PoolConfig, RecyclingMethod, Runtime,
+};
 use tokio_postgres::NoTls;
 use utils::tls::rustls_client_config;
 
@@ -39,6 +46,17 @@ impl PostgresStore {
             cfg.pool = PoolConfig::new(max_conn as usize).into();
         }
 
+        let primary_pool = if config.use_tls {
+            cfg.create_pool(
+                Some(Runtime::Tokio1),
+                MakeRustlsConnect::new(rustls_client_config(config.allow_invalid_certs)?),
+            )
+        } else {
+            cfg.create_pool(Some(Runtime::Tokio1), NoTls)
+        }
+        .map_err(|e| format!("Failed to create connection pool: {e}"))?;
+        let ts_configs = discover_ts_configs(&primary_pool).await;
+
         let mut replicas = vec![];
         for replica in config.read_replicas {
             let mut cfg = cfg.clone();
@@ -58,19 +76,13 @@ impl PostgresStore {
                     cfg.create_pool(Some(Runtime::Tokio1), NoTls)
                 }
                 .map_err(|e| format!("Failed to create connection pool: {e}"))?,
+                ts_configs: ts_configs.clone(),
             })));
         }
 
         let primary = Store::PostgreSQL(Arc::new(PostgresStore {
-            conn_pool: if config.use_tls {
-                cfg.create_pool(
-                    Some(Runtime::Tokio1),
-                    MakeRustlsConnect::new(rustls_client_config(config.allow_invalid_certs)?),
-                )
-            } else {
-                cfg.create_pool(Some(Runtime::Tokio1), NoTls)
-            }
-            .map_err(|e| format!("Failed to create connection pool: {e}"))?,
+            conn_pool: primary_pool,
+            ts_configs,
         }));
 
         // SPDX-SnippetBegin
@@ -221,4 +233,38 @@ async fn create_search_tables<T: SearchableField + PsqlSearchField + 'static>(
     }
 
     Ok(())
+}
+
+async fn discover_ts_configs(pool: &Pool) -> AHashSet<&'static str> {
+    let mut ts_configs = AHashSet::from_iter([PG_FALLBACK_LANG, PG_UNSTEMMED_LANG]);
+
+    match probe_ts_configs(pool).await {
+        Ok(available) => {
+            for name in available {
+                if let Some(config) = PG_LANGS.iter().copied().find(|config| *config == name) {
+                    ts_configs.insert(config);
+                }
+            }
+        }
+        Err(err) => {
+            trc::event!(
+                Store(trc::StoreEvent::PostgresqlError),
+                Details = "Failed to query pg_ts_config, assuming english only",
+                Reason = err.to_string(),
+            );
+        }
+    }
+
+    ts_configs
+}
+
+async fn probe_ts_configs(pool: &Pool) -> trc::Result<Vec<String>> {
+    let conn = pool.get().await.map_err(into_pool_error)?;
+
+    conn.query("SELECT cfgname::text FROM pg_ts_config", &[])
+        .await
+        .map_err(into_error)?
+        .into_iter()
+        .map(|row| row.try_get::<_, String>(0).map_err(into_error))
+        .collect()
 }

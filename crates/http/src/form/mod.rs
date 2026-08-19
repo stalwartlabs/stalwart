@@ -158,10 +158,9 @@ impl FormHandler for Server {
                 )
                 .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
                 .message_id(format!(
-                    "<{}@{}.{}>",
+                    "{}@{}",
                     make_boundary("."),
-                    session.remote_ip,
-                    session.remote_port
+                    self.core.network.server_name
                 ))
                 .subject(from_subject)
                 .text_body(body)

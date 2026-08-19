@@ -27,6 +27,12 @@ pub async fn test(test: &TestServer) {
         .state()
         .to_string();
 
+    let response = account
+        .jmap_changes(MethodObject::FileNode, &change_id)
+        .await;
+    assert_eq!(response.changes().next(), None);
+    assert_eq!(response.new_state(), change_id);
+
     // Create test folders
     let response = account
         .jmap_create(

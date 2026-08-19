@@ -577,6 +577,52 @@ END:VCARD
         }
     }
 
+    // Sub-addressed local members must resolve when the list is expanded
+    admin
+        .registry_create_object(MailingList {
+            name: "tps-reports".to_string(),
+            recipients: Map::new(vec!["bill+tps@example.org".to_string()]),
+            domain_id,
+            ..Default::default()
+        })
+        .await;
+
+    let bill_messages = test
+        .server
+        .get_cached_messages(bill.id().document_id())
+        .await
+        .unwrap()
+        .emails
+        .items
+        .len();
+
+    lmtp.ingest(
+        "john.doe@example.org",
+        &["tps-reports@example.org"],
+        concat!(
+            "From: john.doe@example.org\r\n",
+            "To: tps-reports@example.org\r\n",
+            "Subject: Cover sheet\r\n",
+            "\r\n",
+            "Did you get the memo about the new cover sheet?"
+        ),
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    assert_eq!(
+        test.server
+            .get_cached_messages(bill.id().document_id())
+            .await
+            .unwrap()
+            .emails
+            .items
+            .len(),
+        bill_messages + 1,
+        "sub-addressed mailing list member was not delivered"
+    );
+
     // Remove test data
     john.registry_destroy(
         ObjectType::MaskedEmail,

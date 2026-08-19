@@ -116,7 +116,7 @@ impl EventSourceHandler for Server {
                                     for type_state in state_change.types {
                                         changed
                                             .get_mut_or_insert(state_change.account_id.into())
-                                            .set(type_state, (state_change.change_id).into());
+                                            .set(type_state, State::Exact(state_change.change_id));
                                     }
                                 }
                                 PushNotification::CalendarAlert(calendar_alert) => {
@@ -130,7 +130,7 @@ impl EventSourceHandler for Server {
                                     for type_state in state_change.types {
                                         changed
                                             .get_mut_or_insert(state_change.account_id.into())
-                                            .set(type_state, state_change.change_id.into());
+                                            .set(type_state, State::Exact(state_change.change_id));
                                     }
                                 }
                             }

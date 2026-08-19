@@ -371,3 +371,102 @@ END:VCALENDAR
 > expect
 MultipleObjectInstances
 
+
+> reset
+
+# Attendee whose mailto URI percent-encodes a display name is skipped
+> put a@example.com percent-encoded-attendee@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+ORGANIZER:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe";EMAIL="John Doe <john.doe@example.net>":mailto:john%20doe%20%3Cjohn.doe@example.net%3E
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe":mailto:john.doe@example.net
+DTSTAMP:19970611T190000Z
+DTSTART:19970701T200000Z
+DTEND:19970701T210000Z
+SUMMARY:Conference
+UID:percent-encoded-attendee@example.com
+SEQUENCE:0
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: john.doe@example.net
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "john.doe@example.net", name: Some("John Doe"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 867787200, tz_id: 32768 })
+summary.summary: Text("Conference")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+STATUS:CONFIRMED
+SUMMARY:Conference
+DTEND:19970701T210000Z
+DTSTART:19970701T200000Z
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe";PARTSTAT=NEEDS-ACTION:mai
+ lto:john.doe@example.net
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe";EMAIL="John Doe <john.do
+ e@example.net>";PARTSTAT=NEEDS-ACTION:mailto:john%20doe%20%3Cjohn.doe@examp
+ le.net%3E
+ORGANIZER:mailto:a@example.com
+UID:percent-encoded-attendee@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+
+> reset
+
+# Attendee whose mailto URI percent-encodes the addr-spec is decoded
+> put a@example.com percent-encoded-addrspec@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+ORGANIZER:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Jane Doe":mailto:jane%2Edoe@example.net?subject=Conference
+DTSTAMP:19970611T190000Z
+DTSTART:19970701T200000Z
+DTEND:19970701T210000Z
+SUMMARY:Conference
+UID:percent-encoded-addrspec@example.com
+SEQUENCE:0
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: jane.doe@example.net
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "jane.doe@example.net", name: Some("Jane Doe"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 867787200, tz_id: 32768 })
+summary.summary: Text("Conference")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+STATUS:CONFIRMED
+SUMMARY:Conference
+DTEND:19970701T210000Z
+DTSTART:19970701T200000Z
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Jane Doe";PARTSTAT=NEEDS-ACTION:mai
+ lto:jane%2Edoe@example.net?subject=Conference
+ORGANIZER:mailto:a@example.com
+UID:percent-encoded-addrspec@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+

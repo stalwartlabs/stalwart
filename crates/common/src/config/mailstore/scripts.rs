@@ -24,7 +24,7 @@ use registry::{
     types::EnumImpl,
 };
 use sieve::{Compiler, Runtime, Sieve, compiler::grammar::Capability};
-use std::sync::Arc;
+use std::{collections::hash_map::Entry, sync::Arc};
 use store::registry::bootstrap::Bootstrap;
 
 pub struct Scripting {
@@ -136,16 +136,27 @@ impl Scripting {
         trusted_runtime.set_local_hostname(system.default_hostname.clone());
 
         // Parse trusted scripts
-        let mut trusted_scripts = AHashMap::new();
+        let mut trusted_scripts: AHashMap<String, Arc<Sieve>> = AHashMap::new();
         for script in bp.list_infallible::<SieveSystemScript>().await {
             if !script.object.is_active {
                 continue;
             }
 
             match trusted_compiler.compile(script.object.contents.as_bytes()) {
-                Ok(compiled) => {
-                    trusted_scripts.insert(script.object.name, compiled.into());
-                }
+                Ok(compiled) => match trusted_scripts.entry(script.object.name.to_lowercase()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(compiled.into());
+                    }
+                    Entry::Occupied(_) => {
+                        bp.build_error(
+                            script.id,
+                            format!(
+                                "Another active system Sieve script is already named {:?}, script names are case insensitive",
+                                script.object.name
+                            ),
+                        );
+                    }
+                },
                 Err(err) => {
                     bp.build_error(
                         script.id,
@@ -156,16 +167,27 @@ impl Scripting {
         }
 
         // Parse untrusted scripts
-        let mut untrusted_scripts = AHashMap::new();
+        let mut untrusted_scripts: AHashMap<String, Arc<Sieve>> = AHashMap::new();
         for script in bp.list_infallible::<SieveUserScript>().await {
             if !script.object.is_active {
                 continue;
             }
 
             match untrusted_compiler.compile(script.object.contents.as_bytes()) {
-                Ok(compiled) => {
-                    untrusted_scripts.insert(script.object.name, compiled.into());
-                }
+                Ok(compiled) => match untrusted_scripts.entry(script.object.name.to_lowercase()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(compiled.into());
+                    }
+                    Entry::Occupied(_) => {
+                        bp.build_error(
+                            script.id,
+                            format!(
+                                "Another active user global Sieve script is already named {:?}, script names are case insensitive",
+                                script.object.name
+                            ),
+                        );
+                    }
+                },
                 Err(err) => {
                     bp.build_error(
                         script.id,
@@ -206,6 +228,23 @@ impl Scripting {
             ),
         }
     }
+
+    pub fn trusted_script(&self, name: &str) -> Option<&Arc<Sieve>> {
+        script_by_name(&self.trusted_scripts, name)
+    }
+
+    pub fn untrusted_script(&self, name: &str) -> Option<&Arc<Sieve>> {
+        script_by_name(&self.untrusted_scripts, name)
+    }
+}
+
+fn script_by_name<'x>(
+    scripts: &'x AHashMap<String, Arc<Sieve>>,
+    name: &str,
+) -> Option<&'x Arc<Sieve>> {
+    scripts
+        .get(name)
+        .or_else(|| scripts.get(name.to_lowercase().as_str()))
 }
 
 impl Clone for Scripting {

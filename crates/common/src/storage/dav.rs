@@ -176,6 +176,25 @@ impl DavResources {
             })
     }
 
+    pub fn format_resource_path_by_parent(
+        &self,
+        document_id: u32,
+        parent_id: u32,
+    ) -> Option<String> {
+        self.paths
+            .iter()
+            .find(|path| {
+                self.resources[path.resource_idx].document_id == document_id
+                    && path.parent_id == Some(parent_id)
+            })
+            .map(|path| {
+                self.format_resource(DavResourcePath {
+                    path,
+                    resource: &self.resources[path.resource_idx],
+                })
+            })
+    }
+
     pub fn format_collection(&self, name: &str) -> String {
         format!("{}{name}/", self.base_path)
     }

@@ -185,7 +185,7 @@ impl Eq for Hostname {}
 
 impl PartialEq for Email {
     fn eq(&self, other: &Self) -> bool {
-        self.address.eq(&other.address)
+        self.local_part.eq(&other.local_part) && self.domain_part.eq(&other.domain_part)
     }
 }
 
@@ -199,7 +199,8 @@ impl Hash for Hostname {
 
 impl Hash for Email {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.address.hash(state)
+        self.local_part.hash(state);
+        self.domain_part.hash(state);
     }
 }
 
@@ -247,7 +248,9 @@ impl PartialOrd for Recipient {
 
 impl Ord for Email {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.address.cmp(&other.address)
+        self.local_part
+            .cmp(&other.local_part)
+            .then_with(|| self.domain_part.fqdn.cmp(&other.domain_part.fqdn))
     }
 }
 

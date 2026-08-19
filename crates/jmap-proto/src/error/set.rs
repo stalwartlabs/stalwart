@@ -111,6 +111,8 @@ pub enum SetErrorType {
     NodeHasChildren,
     #[serde(rename = "calendarHasEvent")]
     CalendarHasEvent,
+    #[serde(rename = "noSupportedScheduleMethods")]
+    NoSupportedScheduleMethods,
     // Stalwart registry errors
     #[serde(rename = "objectIsLinked")]
     ObjectIsLinked,
@@ -153,6 +155,7 @@ impl SetErrorType {
             SetErrorType::AddressBookHasContents => "addressBookHasContents",
             SetErrorType::NodeHasChildren => "nodeHasChildren",
             SetErrorType::CalendarHasEvent => "calendarHasEvent",
+            SetErrorType::NoSupportedScheduleMethods => "noSupportedScheduleMethods",
             SetErrorType::ObjectIsLinked => "objectIsLinked",
             SetErrorType::InvalidForeignKey => "invalidForeignKey",
             SetErrorType::PrimaryKeyViolation => "primaryKeyViolation",
@@ -247,6 +250,12 @@ impl<T: Property> SetError<T> {
 
     pub fn already_exists() -> Self {
         Self::new(SetErrorType::AlreadyExists)
+    }
+
+    pub fn no_supported_schedule_methods(calendar_address: &str) -> Self {
+        Self::new(SetErrorType::NoSupportedScheduleMethods).with_description(format!(
+            "No supported scheduling method for calendar address {calendar_address}."
+        ))
     }
 
     pub fn too_large() -> Self {

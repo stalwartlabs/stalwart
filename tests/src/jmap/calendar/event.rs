@@ -10,10 +10,12 @@ use crate::utils::{
 };
 use ahash::AHashSet;
 use calcard::jscalendar::JSCalendarProperty;
-use groupware::cache::GroupwareCache;
+use dav_proto::Depth;
+use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
 use jmap_proto::request::method::MethodObject;
 use serde_json::{Value, json};
+use std::str::FromStr;
 use types::{collection::SyncCollection, id::Id};
 
 pub async fn test(test: &TestServer) {
@@ -727,10 +729,316 @@ END:VCALENDAR
         .collect::<AHashSet<_>>();
     assert_eq!(ical, expected_ical);
 
+    // Organizer assignment tests
+    let response = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [
+                test_jscalendar_participants("organizer-auto@example.com", None).with_property(
+                    JSCalendarProperty::<Id>::CalendarIds,
+                    [calendar1_id.as_str()].into_jmap_set(),
+                ),
+                test_jscalendar_participants(
+                    "organizer-explicit@example.com",
+                    Some("mailto:cyrus@example.com"),
+                )
+                .with_property(
+                    JSCalendarProperty::<Id>::CalendarIds,
+                    [calendar1_id.as_str()].into_jmap_set(),
+                ),
+                test_jscalendar_4()
+                    .with_property(JSCalendarProperty::<Id>::Uid, "organizer-none@example.com")
+                    .with_property(
+                        JSCalendarProperty::<Id>::CalendarIds,
+                        [calendar1_id.as_str()].into_jmap_set(),
+                    ),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let auto_event_id = response.created(0).id().to_string();
+    let explicit_event_id = response.created(1).id().to_string();
+    let no_participants_event_id = response.created(2).id().to_string();
+
+    let response = account
+        .jmap_get(
+            MethodObject::CalendarEvent,
+            [
+                JSCalendarProperty::<Id>::Id,
+                JSCalendarProperty::OrganizerCalendarAddress,
+            ],
+            [
+                &auto_event_id,
+                &explicit_event_id,
+                &no_participants_event_id,
+            ],
+        )
+        .await;
+
+    // The server assigns an organizer when participants are present but none was supplied
+    response.list()[0].assert_is_equal(json!({
+        "id": &auto_event_id,
+        "organizerCalendarAddress": "mailto:jdoe@example.com"
+    }));
+
+    // An organizer supplied by the client is never overwritten
+    response.list()[1].assert_is_equal(json!({
+        "id": &explicit_event_id,
+        "organizerCalendarAddress": "mailto:cyrus@example.com"
+    }));
+
+    // An event without participants is left without an organizer
+    response.list()[2].assert_is_equal(json!({
+        "id": &no_participants_event_id
+    }));
+
+    // Adding participants to an event that had none assigns the organizer
+    account
+        .jmap_update(
+            MethodObject::CalendarEvent,
+            [(
+                &no_participants_event_id,
+                json!({
+                    "participants": {
+                        "8584f8f9-5414-55e3-8a1c-ad6fc2f3ffb6": {
+                            "calendarAddress": "mailto:jdoe@example.com",
+                            "participationStatus": "accepted",
+                            "roles": {
+                                "chair": true,
+                                "owner": true
+                            },
+                            "@type": "Participant"
+                        },
+                        "a0171748-fe8d-57d8-879e-56036a5251d1": {
+                            "calendarAddress": "mailto:rupert@example.com",
+                            "participationStatus": "needs-action",
+                            "kind": "individual",
+                            "@type": "Participant"
+                        }
+                    }
+                }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .updated(&no_participants_event_id);
+
+    account
+        .jmap_get(
+            MethodObject::CalendarEvent,
+            [
+                JSCalendarProperty::<Id>::Id,
+                JSCalendarProperty::OrganizerCalendarAddress,
+            ],
+            [&no_participants_event_id],
+        )
+        .await
+        .list()[0]
+        .assert_is_equal(json!({
+            "id": &no_participants_event_id,
+            "organizerCalendarAddress": "mailto:jdoe@example.com"
+        }));
+
+    // Moving an event between calendars tombstones the previous CalDAV href
+    test.wait_for_tasks().await;
+    let cal_base_path = format!("{}/jdoe%40example.com/", DavResourceName::Cal.base_path());
+    let sync_token = dav_client
+        .sync_collection(&cal_base_path, "", Depth::Infinity, None, ["D:getetag"])
+        .await
+        .sync_token()
+        .to_string();
+    let moved_event_id = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [json!({
+                "@type": "Event",
+                "uid": "d3a15a44-fe25-4b6a-9e2f-58d40f0f1d4c",
+                "title": "Moving Event",
+                "start": "2026-01-15T13:00:00",
+                "timeZone": "America/New_York",
+                "duration": "PT1H",
+                "calendarIds": {
+                    &calendar1_id: true
+                },
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    let response = dav_client
+        .sync_collection(
+            &cal_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(1);
+    let sync_token = response.sync_token().to_string();
+    let href_in_calendar1 = response.hrefs()[0].to_string();
+
+    account
+        .jmap_update(
+            MethodObject::CalendarEvent,
+            [(
+                &moved_event_id,
+                json!({
+                    "calendarIds": {
+                        &calendar2_id: true
+                    }
+                }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .updated(&moved_event_id);
+
+    let response = dav_client
+        .sync_collection(
+            &cal_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(2);
+    let sync_token = response.sync_token().to_string();
+    let href_in_calendar2 = response
+        .hrefs()
+        .into_iter()
+        .find(|href| *href != href_in_calendar1)
+        .unwrap()
+        .to_string();
+    let response = response.into_propfind_response(None);
+    response
+        .properties(&href_in_calendar1)
+        .with_status(StatusCode::NOT_FOUND);
+    response
+        .properties(&href_in_calendar2)
+        .with_status(StatusCode::OK);
+
+    account
+        .jmap_destroy(
+            MethodObject::CalendarEvent,
+            [moved_event_id.as_str()],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .assert_destroyed(&[Id::from_str(&moved_event_id).unwrap()]);
+
+    dav_client
+        .sync_collection(
+            &cal_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(1)
+        .into_propfind_response(None)
+        .properties(&href_in_calendar2)
+        .with_status(StatusCode::NOT_FOUND);
+
+    // Unbounded yearly recurrences remain queryable far beyond their first instance
+    let yearly_event_id = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [json!({
+                "@type": "Event",
+                "uid": "yearly-unbounded@example.com",
+                "title": "Unbounded yearly event",
+                "start": "2018-06-01T09:00:00",
+                "duration": "PT1H",
+                "timeZone": "Etc/UTC",
+                "calendarIds": {
+                    &calendar1_id: true
+                },
+                "recurrenceRule": {
+                    "@type": "RecurrenceRule",
+                    "frequency": "yearly"
+                }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    test.wait_for_tasks().await;
+
+    assert!(
+        account
+            .jmap_query(
+                MethodObject::CalendarEvent,
+                [
+                    ("after", "2027-06-01T00:00:00"),
+                    ("before", "2027-07-01T00:00:00"),
+                ],
+                ["start"],
+                [("timeZone", "Etc/UTC")],
+            )
+            .await
+            .ids()
+            .any(|id| id == yearly_event_id),
+        "unbounded yearly event was pruned from a June 2027 query"
+    );
+
+    account
+        .jmap_destroy(
+            MethodObject::CalendarEvent,
+            [yearly_event_id.as_str()],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .assert_destroyed(&[Id::from_str(&yearly_event_id).unwrap()]);
+
     // Clean up
     test.wait_for_tasks().await;
     account.destroy_all_calendars().await;
     test.assert_is_empty().await;
+}
+
+fn test_jscalendar_participants(uid: &str, organizer: Option<&str>) -> Value {
+    let mut event = json!({
+      "@type": "Event",
+      "uid": uid,
+      "title": "Organizer assignment",
+      "start": "2006-01-04T10:00:00",
+      "duration": "PT1H",
+      "timeZone": "US/Eastern",
+      "updated": "2006-02-06T00:11:02Z",
+      "participants": {
+        "8584f8f9-5414-55e3-8a1c-ad6fc2f3ffb6": {
+          "calendarAddress": "mailto:jdoe@example.com",
+          "participationStatus": "accepted",
+          "roles": {
+            "chair": true,
+            "owner": true
+          },
+          "@type": "Participant"
+        },
+        "a0171748-fe8d-57d8-879e-56036a5251d1": {
+          "calendarAddress": "mailto:rupert@example.com",
+          "participationStatus": "needs-action",
+          "kind": "individual",
+          "@type": "Participant"
+        }
+      }
+    });
+
+    if let Some(organizer) = organizer {
+        event.as_object_mut().unwrap().insert(
+            "organizerCalendarAddress".to_string(),
+            Value::String(organizer.to_string()),
+        );
+    }
+
+    event
 }
 
 fn assert_eq_ignoring_updated(got: &Value, expected: Value) {

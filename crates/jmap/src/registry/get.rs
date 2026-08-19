@@ -308,10 +308,14 @@ impl RegistryGet for Server {
                                 || get.properties.contains(&Property::Description) =>
                         {
                             let mut description = obj.directory.clone();
-                            if let Some(contact) = obj.contact.as_slice().first() {
+                            let account = obj
+                                .account_uri
+                                .rsplit('/')
+                                .find(|segment| !segment.is_empty())
+                                .unwrap_or(obj.account_uri.as_str());
+                            if !account.is_empty() {
                                 description.push_str(" (");
-                                description
-                                    .push_str(contact.strip_prefix("mailto:").unwrap_or(contact));
+                                description.push_str(account);
                                 description.push(')');
                             }
                             extra_properties

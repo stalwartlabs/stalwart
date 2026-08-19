@@ -72,6 +72,44 @@ pub async fn test(test: &TestServer) {
         .await
         .assert_type(SetErrorType::PrimaryKeyViolation);
 
+    // An alias matching another domain's name should not be allowed
+    account
+        .registry_create_object_expect_err(Domain {
+            name: "example.net".to_string(),
+            certificate_management: CertificateManagement::Manual,
+            dns_management: DnsManagement::Manual,
+            dkim_management: DkimManagement::Manual,
+            aliases: Map::new(vec!["example.com".to_string()]),
+            ..Default::default()
+        })
+        .await
+        .assert_type(SetErrorType::PrimaryKeyViolation);
+
+    // An alias matching another domain's alias should not be allowed
+    account
+        .registry_create_object_expect_err(Domain {
+            name: "example.net".to_string(),
+            certificate_management: CertificateManagement::Manual,
+            dns_management: DnsManagement::Manual,
+            dkim_management: DkimManagement::Manual,
+            aliases: Map::new(vec!["beispiel.de".to_string()]),
+            ..Default::default()
+        })
+        .await
+        .assert_type(SetErrorType::PrimaryKeyViolation);
+
+    // A domain name matching another domain's alias should not be allowed
+    account
+        .registry_create_object_expect_err(Domain {
+            name: "beispiel.de".to_string(),
+            certificate_management: CertificateManagement::Manual,
+            dns_management: DnsManagement::Manual,
+            dkim_management: DkimManagement::Manual,
+            ..Default::default()
+        })
+        .await
+        .assert_type(SetErrorType::PrimaryKeyViolation);
+
     // Invalid local part should not be allowed
     account
         .registry_create_object_expect_err(Account::User(UserAccount {
@@ -317,6 +355,29 @@ pub async fn test(test: &TestServer) {
         ]))
     );
 
+    // Verify that alias domains resolve without the primary name warming the cache
+    for address in [
+        "johndoe@beispiel.de",
+        "sales@beispiel.de",
+        "newsletter@beispiel.de",
+    ] {
+        test.server.invalidate_all_local_caches();
+        assert!(
+            test.server.domain("beispiel.de").await.unwrap().is_some(),
+            "Alias domain failed to resolve on a cold cache"
+        );
+
+        test.server.invalidate_all_local_caches();
+        assert!(
+            test.server
+                .rcpt_id_from_email(address)
+                .await
+                .unwrap()
+                .is_some(),
+            "Cold cache resolution failed for {address}"
+        );
+    }
+
     // Verify RCPT expansion
     for (address, expected) in [
         (
@@ -401,47 +462,47 @@ pub async fn test(test: &TestServer) {
         }))
         .await;
     assert_eq!(
-        test.server.rcpt_resolve("unknown", 0).await.unwrap(),
+        test.server.rcpt_resolve("unknown", true, 0).await.unwrap(),
         RcptResolution::UnknownDomain
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("unknown@unknown.org", 0)
+            .rcpt_resolve("unknown@unknown.org", true, 0)
             .await
             .unwrap(),
         RcptResolution::UnknownDomain
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("jdoe@example.com", 0)
+            .rcpt_resolve("jdoe@example.com", true, 0)
             .await
             .unwrap(),
         RcptResolution::Accept
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("johndoe@beispiel.de", 0)
+            .rcpt_resolve("johndoe@beispiel.de", true, 0)
             .await
             .unwrap(),
         RcptResolution::Accept
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("sales@example.com", 0)
+            .rcpt_resolve("sales@example.com", true, 0)
             .await
             .unwrap(),
         RcptResolution::Accept
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("jdoe+promotions@example.com", 0)
+            .rcpt_resolve("jdoe+promotions@example.com", true, 0)
             .await
             .unwrap(),
         RcptResolution::Rewrite("jdoe@example.com".into())
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("newsletter@example.com", 0)
+            .rcpt_resolve("newsletter@example.com", true, 0)
             .await
             .unwrap(),
         RcptResolution::Expand(Arc::from(Box::from_iter([
@@ -451,28 +512,42 @@ pub async fn test(test: &TestServer) {
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("unknown@example.com", 0)
+            .rcpt_resolve("unknown@example.com", true, 0)
             .await
             .unwrap(),
         RcptResolution::Rewrite("catchy@example.com".into())
     );
     assert_eq!(
         test.server
-            .rcpt_resolve("subaddresser.ignoreme@another-example.com", 0)
-            .await
-            .unwrap(),
-        RcptResolution::Rewrite("subaddresser@another-example.com".into())
-    );
-    assert_eq!(
-        test.server
-            .rcpt_resolve("unknown@another-example.com", 0)
+            .rcpt_resolve("unknown@example.com", false, 0)
             .await
             .unwrap(),
         RcptResolution::UnknownRecipient
     );
     assert_eq!(
         test.server
-            .rcpt_resolve(masked_email.as_str(), 0)
+            .rcpt_resolve("jdoe+promotions@example.com", false, 0)
+            .await
+            .unwrap(),
+        RcptResolution::Rewrite("jdoe@example.com".into())
+    );
+    assert_eq!(
+        test.server
+            .rcpt_resolve("subaddresser.ignoreme@another-example.com", true, 0)
+            .await
+            .unwrap(),
+        RcptResolution::Rewrite("subaddresser@another-example.com".into())
+    );
+    assert_eq!(
+        test.server
+            .rcpt_resolve("unknown@another-example.com", true, 0)
+            .await
+            .unwrap(),
+        RcptResolution::UnknownRecipient
+    );
+    assert_eq!(
+        test.server
+            .rcpt_resolve(masked_email.as_str(), true, 0)
             .await
             .unwrap(),
         RcptResolution::Rewrite("johndoe@example.com".into())

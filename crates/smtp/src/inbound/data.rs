@@ -738,8 +738,25 @@ impl<T: SessionStream> Session<T> {
         // Build message
         let mail_from = self.data.mail_from.clone().unwrap();
         let rcpt_to = std::mem::take(&mut self.data.rcpt_to);
+        let source = if !self.is_authenticated() {
+            let dmarc_pass = dmarc_result.is_some_and(|result| result == DmarcResult::Pass);
+
+            #[cfg(feature = "test_mode")]
+            {
+                MessageSource::Unauthenticated {
+                    dmarc_pass: dmarc_pass || mail_from.address.starts_with("dmarc-"),
+                }
+            }
+
+            #[cfg(not(feature = "test_mode"))]
+            {
+                MessageSource::Unauthenticated { dmarc_pass }
+            }
+        } else {
+            MessageSource::Authenticated
+        };
         let mut message = self
-            .build_message(mail_from, rcpt_to, message_id, self.data.session_id)
+            .build_message(mail_from, rcpt_to, source, message_id, self.data.session_id)
             .await;
 
         // Add Return-Path
@@ -787,34 +804,14 @@ impl<T: SessionStream> Session<T> {
         if let Some(metadata) = self.server.has_quota(&mut message).await {
             // Queue message
             let queue_id = message.queue_id;
-            let source = if !self.is_authenticated() {
-                let dmarc_pass = dmarc_result.is_some_and(|result| result == DmarcResult::Pass);
-
-                #[cfg(feature = "test_mode")]
-                {
-                    MessageSource::Unauthenticated {
-                        dmarc_pass: dmarc_pass || message.message.return_path.starts_with("dmarc-"),
-                        train_spam,
-                    }
-                }
-
-                #[cfg(not(feature = "test_mode"))]
-                {
-                    MessageSource::Unauthenticated {
-                        dmarc_pass,
-                        train_spam,
-                    }
-                }
-            } else {
-                MessageSource::Authenticated
-            };
             let dkim_signers = self
                 .server
                 .eval_signers(&ac.dkim.sign, self, self.data.session_id)
                 .await;
             if message
                 .queue(
-                    QueueParams::new(raw_message, self.data.session_id, &self.server, source)
+                    QueueParams::new(raw_message, self.data.session_id, &self.server)
+                        .with_train_spam(train_spam)
                         .with_raw_headers(&headers)
                         .with_dkim_signers(dkim_signers)
                         .with_original_raw_message(original_message)
@@ -840,6 +837,7 @@ impl<T: SessionStream> Session<T> {
         &self,
         mail_from: SessionAddress,
         mut rcpt_to: Vec<SessionAddress>,
+        source: MessageSource,
         queue_id: u64,
         span_id: u64,
     ) -> MessageWrapper {
@@ -854,7 +852,7 @@ impl<T: SessionStream> Session<T> {
                 .to_lowercase_address(false)
                 .into_boxed_str(),
             recipients: Vec::with_capacity(rcpt_to.len()),
-            flags: mail_from.flags,
+            flags: mail_from.flags | source.flags(),
             priority: self.data.priority,
             size: 0,
             env_id: mail_from.dsn_info.map(|i| i.into_boxed_str()),

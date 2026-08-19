@@ -185,8 +185,7 @@ impl SieveScriptIngest for Server {
                             }
                         }
                         sieve::Script::Global(name_) => {
-                            if let Some(script) =
-                                self.get_untrusted_sieve_script(&name_.to_lowercase(), session_id)
+                            if let Some(script) = self.get_untrusted_sieve_script(name_, session_id)
                             {
                                 input = Input::script(name, script.clone());
                             } else {

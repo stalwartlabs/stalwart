@@ -11,6 +11,7 @@ use crate::{
     },
     write::SearchIndex,
 };
+use ahash::AHashSet;
 use deadpool_postgres::Pool;
 
 pub mod blob;
@@ -23,6 +24,7 @@ pub mod write;
 
 pub struct PostgresStore {
     pub(crate) conn_pool: Pool,
+    pub(crate) ts_configs: AHashSet<&'static str>,
 }
 
 #[inline(always)]

@@ -25,12 +25,6 @@ pub enum State {
     Intermediate(JMAPIntermediateState),
 }
 
-impl From<ChangeId> for State {
-    fn from(change_id: ChangeId) -> Self {
-        State::Exact(change_id)
-    }
-}
-
 impl From<Option<ChangeId>> for State {
     fn from(change_id: Option<ChangeId>) -> Self {
         match change_id {
@@ -48,7 +42,9 @@ impl State {
             b'n' => Some(State::Initial),
             b's' => {
                 let mut reader = Base32Reader::from_iter(it);
-                reader.next_leb128::<ChangeId>().map(State::Exact)
+                reader
+                    .next_leb128::<ChangeId>()
+                    .map(|change_id| (change_id != 0).then_some(change_id).into())
             }
             b'r' => {
                 let mut it = Base32Reader::from_iter(it);
@@ -154,7 +150,7 @@ mod tests {
     fn test_state_id() {
         for id in [
             State::new_initial(),
-            State::new_exact(0),
+            State::new_exact(1),
             State::new_exact(12345678),
             State::new_exact(ChangeId::MAX),
             State::new_intermediate(0, 0, 1),
@@ -168,5 +164,14 @@ mod tests {
         ] {
             assert_eq!(State::parse(&id.to_string()).unwrap(), id);
         }
+    }
+
+    #[test]
+    fn test_state_zero_change_id_is_initial() {
+        assert_eq!(
+            State::parse(&State::new_exact(0).to_string()).unwrap(),
+            State::Initial
+        );
+        assert_eq!(State::from(None), State::Initial);
     }
 }

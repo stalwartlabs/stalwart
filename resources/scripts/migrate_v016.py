@@ -626,6 +626,12 @@ def secret_key_optional(value: str | None) -> dict[str, Any]:
         return {"@type": "None"}
     return {"@type": "Value", "secret": value}
 
+def public_string_optional(value: str | None) -> dict[str, Any]:
+
+    if value is None or value == "":
+        return {"@type": "None"}
+    return {"@type": "Value", "value": value}
+
 def secret_key(value: str | None) -> dict[str, Any]:
 
     if value is None or value == "":
@@ -1569,9 +1575,7 @@ class Converter:
         if not bucket:
             raise ConvertError("s3 store missing required 'bucket'")
         body["bucket"] = bucket
-        ak = sub.get("access-key", "").strip()
-        if ak:
-            body["accessKey"] = ak
+        body["accessKey"] = public_string_optional(sub.get("access-key", "").strip())
         body["secretKey"] = secret_key_optional(sub.get("secret-key"))
         body["securityToken"] = secret_key_optional(sub.get("security-token"))
         profile = sub.get("profile", "").strip()

@@ -38,7 +38,7 @@ impl SendDsn for Server {
         if !message.message.return_path.is_empty() {
             // Build DSN
             if let Some(dsn) = message.build_dsn(self).await {
-                let mut dsn_message = self.new_message("", message.span_id);
+                let mut dsn_message = self.new_message("", MessageSource::Dsn, message.span_id);
                 dsn_message
                     .expand_and_add_recipient(message.message.return_path.as_ref(), self)
                     .await;
@@ -53,7 +53,7 @@ impl SendDsn for Server {
                     .await;
                 dsn_message
                     .queue(
-                        QueueParams::new(&dsn, message.span_id, self, MessageSource::Dsn)
+                        QueueParams::new(&dsn, message.span_id, self)
                             .with_dkim_signers(dkim_signers),
                     )
                     .await;
@@ -336,7 +336,7 @@ impl MessageWrapper {
                 HeaderType::Text(self.message.return_path.as_ref().into()),
             )
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
-            .message_id(format!("<{}@{}>", make_boundary("."), reporting_mta))
+            .message_id(format!("{}@{}", make_boundary("."), reporting_mta))
             .subject(subject)
             .body(MimePart::new(
                 ContentType::new("multipart/report").attribute("report-type", "delivery-status"),

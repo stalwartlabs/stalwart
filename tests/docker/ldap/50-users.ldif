@@ -36,6 +36,23 @@ gidNumber: 10002
 homeDirectory: /home/jane.smith
 loginShell: /bin/bash
 
+dn: uid=multi.mail,ou=users,dc=stalwart,dc=test
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: multi.mail
+cn: Multi Mail
+sn: Mail
+givenName: Multi
+mail: multi.mail@example.org
+mail: multi@example.org
+mail: mm@example.org
+userPassword: this is Multi's LDAP password
+uidNumber: 10004
+gidNumber: 10004
+homeDirectory: /home/multi.mail
+loginShell: /bin/bash
+
 dn: uid=bill.foobar,ou=users,dc=stalwart,dc=test
 objectClass: inetOrgPerson
 objectClass: posixAccount

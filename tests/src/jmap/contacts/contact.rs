@@ -10,10 +10,12 @@ use crate::utils::{
 };
 use ahash::AHashSet;
 use calcard::jscontact::JSContactProperty;
-use groupware::cache::GroupwareCache;
+use dav_proto::Depth;
+use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
 use jmap_proto::request::method::MethodObject;
 use serde_json::{Value, json};
+use std::str::FromStr;
 use types::{collection::SyncCollection, id::Id};
 
 pub async fn test(test: &TestServer) {
@@ -488,6 +490,110 @@ END:VCARD"#
         .map(String::from)
         .collect::<AHashSet<_>>();
     assert_eq!(vcard, expected_vcard);
+
+    // Moving a card between address books tombstones the previous CardDAV href
+    test.wait_for_tasks().await;
+    let card_base_path = format!("{}/jdoe%40example.com/", DavResourceName::Card.base_path());
+    let sync_token = dav_client
+        .sync_collection(&card_base_path, "", Depth::Infinity, None, ["D:getetag"])
+        .await
+        .sync_token()
+        .to_string();
+    let moved_card_id = account
+        .jmap_create(
+            MethodObject::ContactCard,
+            [json!({
+                "@type": "Card",
+                "uid": "9b1f6c22-2f0e-4d6b-8f3a-1c7f2b5d9e10",
+                "name": {
+                    "full": "Moving Contact",
+                },
+                "addressBookIds": {
+                    &book1_id: true
+                },
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    let response = dav_client
+        .sync_collection(
+            &card_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(1);
+    let sync_token = response.sync_token().to_string();
+    let href_in_book1 = response.hrefs()[0].to_string();
+
+    account
+        .jmap_update(
+            MethodObject::ContactCard,
+            [(
+                &moved_card_id,
+                json!({
+                    "addressBookIds": {
+                        &book2_id: true
+                    }
+                }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .updated(&moved_card_id);
+
+    let response = dav_client
+        .sync_collection(
+            &card_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(2);
+    let sync_token = response.sync_token().to_string();
+    let href_in_book2 = response
+        .hrefs()
+        .into_iter()
+        .find(|href| *href != href_in_book1)
+        .unwrap()
+        .to_string();
+    let response = response.into_propfind_response(None);
+    response
+        .properties(&href_in_book1)
+        .with_status(StatusCode::NOT_FOUND);
+    response
+        .properties(&href_in_book2)
+        .with_status(StatusCode::OK);
+
+    account
+        .jmap_destroy(
+            MethodObject::ContactCard,
+            [moved_card_id.as_str()],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .assert_destroyed(&[Id::from_str(&moved_card_id).unwrap()]);
+
+    dav_client
+        .sync_collection(
+            &card_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(1)
+        .into_propfind_response(None)
+        .properties(&href_in_book2)
+        .with_status(StatusCode::NOT_FOUND);
 
     // Clean up
     test.wait_for_tasks().await;
