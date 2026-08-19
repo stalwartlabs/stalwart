@@ -9,12 +9,12 @@ use compact_str::CompactString;
 use store::{
     Deserialize, IterateParams, Serialize, U32_LEN, U64_LEN, ValueKey,
     dispatch::DocumentSet,
-    write::{ValueClass, key::DeserializeBigEndian},
+    write::{BatchBuilder, MergeResult, ValueClass, key::DeserializeBigEndian},
 };
 use tinyvec::TinyVec;
 use trc::AddContext;
 use types::{
-    collection::Collection,
+    collection::{Collection, SyncCollection},
     field::Field,
     keyword::{HASATTACHMENT, HASNOATTACHMENT, Keyword},
 };
@@ -183,6 +183,25 @@ impl MessageData {
         self.keywords != prev_data.keywords || self.keywords_extra != prev_data.keywords_extra
     }
 
+    pub fn keyword_diff(&self, prev_data: &MessageData) -> KeywordDiff {
+        KeywordDiff {
+            added: self.keywords & !prev_data.keywords,
+            removed: prev_data.keywords & !self.keywords,
+            added_extra: self
+                .keywords_extra
+                .iter()
+                .filter(|k| !prev_data.keywords_extra.contains(*k))
+                .cloned()
+                .collect(),
+            removed_extra: prev_data
+                .keywords_extra
+                .iter()
+                .filter(|k| !self.keywords_extra.contains(*k))
+                .cloned()
+                .collect(),
+        }
+    }
+
     pub fn added_keywords(&self, prev_data: &MessageData) -> impl Iterator<Item = Keyword> {
         KeywordsIter(self.keywords & !prev_data.keywords)
     }
@@ -241,6 +260,77 @@ impl Serialize for MessageData {
     fn serialize(&self) -> trc::Result<Vec<u8>> {
         self.serialize_with_change_id(self.change_id)
     }
+}
+
+#[derive(Debug, Default)]
+pub struct KeywordDiff {
+    added: u32,
+    removed: u32,
+    added_extra: Vec<CompactString>,
+    removed_extra: Vec<CompactString>,
+}
+
+impl KeywordDiff {
+    pub fn with_added(mut self, keyword: Keyword) -> Self {
+        match keyword.into_id() {
+            Ok(id) => self.added |= 1 << id,
+            Err(name) => self.added_extra.push(name),
+        }
+        self
+    }
+
+    pub fn with_removed(mut self, keyword: Keyword) -> Self {
+        match keyword.into_id() {
+            Ok(id) => self.removed |= 1 << id,
+            Err(name) => self.removed_extra.push(name),
+        }
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.added == 0
+            && self.removed == 0
+            && self.added_extra.is_empty()
+            && self.removed_extra.is_empty()
+    }
+
+    fn apply(&self, data: &mut MessageData) -> bool {
+        let prev_keywords = data.keywords;
+        let prev_extra_len = data.keywords_extra.len();
+
+        data.keywords = (data.keywords | self.added) & !self.removed;
+        if !self.removed_extra.is_empty() {
+            data.keywords_extra
+                .retain(|k| !self.removed_extra.contains(k));
+        }
+
+        let mut extra_changed = data.keywords_extra.len() != prev_extra_len;
+        for keyword in &self.added_extra {
+            if !data.keywords_extra.contains(keyword) {
+                data.keywords_extra.push(keyword.clone());
+                extra_changed = true;
+            }
+        }
+
+        data.keywords != prev_keywords || extra_changed
+    }
+}
+
+pub fn merge_keywords(batch: &mut BatchBuilder, thread_id: u32, diff: KeywordDiff) {
+    batch.log_item_update(SyncCollection::Email, Some(thread_id));
+    batch.merge_fnc(Field::ARCHIVE, move |ids, bytes| {
+        let Some(bytes) = bytes else {
+            return Ok(MergeResult::Skip);
+        };
+
+        let mut data = MessageData::deserialize(bytes)?;
+        if !diff.apply(&mut data) {
+            return Ok(MergeResult::Skip);
+        }
+
+        data.serialize_with_change_id(ids.current_change_id()?)
+            .map(MergeResult::Update)
+    });
 }
 
 impl MessageData {

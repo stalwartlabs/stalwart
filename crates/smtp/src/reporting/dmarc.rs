@@ -35,9 +35,9 @@ use registry::{
 };
 use std::{borrow::Cow, future::Future};
 use store::{
-    SerializeInfallible, U64_LEN, ValueKey,
+    Deserialize, U64_LEN, ValueKey,
     registry::ObjectIdVersioned,
-    write::{BatchBuilder, RegistryClass, ValueClass, assert::AssertValue, key::KeySerializer},
+    write::{BatchBuilder, MergeResult, RegistryClass, ValueClass, key::KeySerializer},
 };
 use trc::{AddContext, OutgoingReportEvent};
 use utils::DomainPart;
@@ -539,12 +539,66 @@ impl DmarcReporting for Server {
 
             // Create report if missing
             let config = &self.core.smtp.report.dmarc_aggregate;
-            let (item_id, mut report) = if let Some((mut object_id_v, report)) = report {
-                batch.assert_value(pk.clone(), AssertValue::U32(object_id_v.version));
-                object_id_v.version += 1;
-                batch.set(pk.clone(), object_id_v.serialize());
+            let max_report_size = self
+                .eval_if(
+                    &config.max_size,
+                    &RecipientDomain::new(&event.domain),
+                    event.span_id,
+                )
+                .await
+                .unwrap_or(5 * 1024 * 1024);
 
-                (object_id_v.object_id.id().id(), report)
+            let (item_id, mut report) = if let Some((object_id_v, _)) = report {
+                // Merge the record into the stored report
+                let item_id = object_id_v.object_id.id().id();
+                let record = event.report_record.clone();
+                let domain = event.domain.clone();
+                let span_id = event.span_id;
+
+                batch.merge_fnc(
+                    ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
+                    move |_, bytes| {
+                        let Some(bytes) = bytes else {
+                            return Err(trc::StoreEvent::AssertValueFailed
+                                .into_err()
+                                .details("DMARC report was delivered concurrently.")
+                                .caused_by(trc::location!()));
+                        };
+
+                        let mut report = DmarcInternalReport::deserialize(bytes)?;
+                        add_dmarc_record(&mut report, DmarcReportRecord::from(record.clone()));
+
+                        let report_bytes = report.to_pickled_vec();
+                        if max_report_size != 0 && report_bytes.len() > max_report_size {
+                            trc::event!(
+                                OutgoingReport(OutgoingReportEvent::MaxSizeExceeded),
+                                SpanId = span_id,
+                                Domain = domain.clone(),
+                                Details = report_bytes.len(),
+                                Limit = max_report_size,
+                            );
+
+                            return Ok(MergeResult::Skip);
+                        }
+
+                        Ok(MergeResult::Update(report_bytes))
+                    },
+                );
+
+                match self.core.storage.data.write(batch.build_all()).await {
+                    Ok(_) => return,
+                    Err(err) if err.is_assertion_failure() && rety_count < 3 => {
+                        rety_count += 1;
+                        continue;
+                    }
+                    Err(err) => {
+                        trc::error!(
+                            err.caused_by(trc::location!())
+                                .details("Failed to write DMARC report")
+                        );
+                        return;
+                    }
+                }
             } else {
                 let item_id = self.inner.data.queue_id_gen.generate();
                 let date_range_begin = UTCDateTime::now();
@@ -625,31 +679,13 @@ impl DmarcReporting for Server {
             };
 
             // Add record
-            let mut record = DmarcReportRecord::from(event.report_record.clone());
-            if let Some(idx) = report
-                .report
-                .records
-                .0
-                .inner
-                .iter()
-                .position(|d| d.value.eq_except_count(&record))
-            {
-                report.report.records.0.inner[idx].value.count += 1;
-            } else {
-                record.count = 1;
-                report.report.records.push(record);
-            }
+            add_dmarc_record(
+                &mut report,
+                DmarcReportRecord::from(event.report_record.clone()),
+            );
 
             // Write entry
             let report_bytes = report.to_pickled_vec();
-            let max_report_size = self
-                .eval_if(
-                    &config.max_size,
-                    &RecipientDomain::new(&event.domain),
-                    event.span_id,
-                )
-                .await
-                .unwrap_or(5 * 1024 * 1024);
             if max_report_size != 0 && report_bytes.len() > max_report_size {
                 trc::event!(
                     OutgoingReport(OutgoingReportEvent::MaxSizeExceeded),
@@ -683,5 +719,21 @@ impl DmarcReporting for Server {
                 }
             }
         }
+    }
+}
+
+fn add_dmarc_record(report: &mut DmarcInternalReport, mut record: DmarcReportRecord) {
+    if let Some(idx) = report
+        .report
+        .records
+        .0
+        .inner
+        .iter()
+        .position(|d| d.value.eq_except_count(&record))
+    {
+        report.report.records.0.inner[idx].value.count += 1;
+    } else {
+        record.count = 1;
+        report.report.records.push(record);
     }
 }

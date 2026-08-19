@@ -72,6 +72,19 @@ impl ArchivedMessageMetadata {
         &self.contents[0].parts[0]
     }
 
+    pub fn index_verbatim(&self, batch: &mut BatchBuilder, metadata: Vec<u8>, sort_keys: Vec<u8>) {
+        batch
+            .set(
+                BlobOp::Link {
+                    hash: BlobHash::from(&self.blob_hash),
+                    to: BlobLink::Document,
+                },
+                Vec::new(),
+            )
+            .set(EmailField::SortKeys, sort_keys)
+            .set(EmailField::Metadata, metadata);
+    }
+
     pub fn unindex(&self, batch: &mut BatchBuilder) {
         // Delete metadata
         let thread_name = self

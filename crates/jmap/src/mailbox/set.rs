@@ -18,6 +18,7 @@ use email::{
     mailbox::{
         Mailbox,
         destroy::{MailboxDestroy, MailboxDestroyError},
+        merge_subscription,
     },
 };
 use jmap_proto::{
@@ -200,14 +201,14 @@ impl MailboxSet for Server {
                 let mailbox = mailbox
                     .into_deserialized::<email::mailbox::Mailbox>()
                     .caused_by(trc::location!())?;
+                let subscription_only = object.keys().all(|key| {
+                    matches!(
+                        key,
+                        Key::Property(MailboxProperty::IsSubscribed | MailboxProperty::Id)
+                    )
+                });
                 if ctx.is_shared {
                     let acl = mailbox.inner.acls.effective_acl(access_token);
-                    let subscription_only = object.keys().all(|key| {
-                        matches!(
-                            key,
-                            Key::Property(MailboxProperty::IsSubscribed | MailboxProperty::Id)
-                        )
-                    });
                     if subscription_only {
                         if !acl.contains(Acl::Read) {
                             ctx.response.not_updated.append(
@@ -247,18 +248,34 @@ impl MailboxSet for Server {
                             .with_account_id(account_id)
                             .with_collection(Collection::Mailbox);
 
-                        let parent_id = builder.changes().unwrap().parent_id;
-                        if parent_id > 0 {
-                            batch
-                                .with_document(parent_id - 1)
-                                .assert_value(MailboxField::Archive, AssertValue::Some);
-                        }
+                        if subscription_only {
+                            let subscriber = access_token.account_id();
+                            let subscribe = builder.changes().unwrap().is_subscribed(subscriber);
 
-                        batch
-                            .with_document(document_id)
-                            .custom(builder)
-                            .caused_by(trc::location!())?
-                            .commit_point();
+                            if builder.current().unwrap().inner.is_subscribed(subscriber)
+                                == subscribe
+                            {
+                                ctx.response.updated.append(id, None);
+                                continue 'update;
+                            }
+
+                            batch.with_document(document_id);
+                            merge_subscription(&mut batch, subscriber, subscribe);
+                            batch.commit_point();
+                        } else {
+                            let parent_id = builder.changes().unwrap().parent_id;
+                            if parent_id > 0 {
+                                batch
+                                    .with_document(parent_id - 1)
+                                    .assert_value(MailboxField::Archive, AssertValue::Some);
+                            }
+
+                            batch
+                                .with_document(document_id)
+                                .custom(builder)
+                                .caused_by(trc::location!())?
+                                .commit_point();
+                        }
                         will_update.push(id);
                     }
                     Err(err) => {

@@ -205,8 +205,8 @@ impl PushSubscriptionFetch for Server {
                 batch
                     .with_account_id(u32::MAX)
                     .with_collection(Collection::Principal)
-                    .with_account_id(account_id)
-                    .tag(PrincipalField::PushSubscriptions);
+                    .with_document(account_id)
+                    .untag(PrincipalField::PushSubscriptions);
             }
 
             batch

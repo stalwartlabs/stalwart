@@ -12,7 +12,8 @@ use crate::message::{
     index::extractors::VisitTextArchived,
     ingest::ThreadInfo,
     messagedata::MessageData,
-    metadata::{MetadataHeaderName, MetadataHeaderValue},
+    metadata::{ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue},
+    sortkeys::MessageSortKeys,
 };
 use common::{MessageUid, Server, storage::index::ObjectIndexBuilder};
 use mail_parser::{DateTime, parsers::fields::thread::thread_name};
@@ -21,8 +22,8 @@ use registry::{
     types::map::Map,
 };
 use store::{
-    ValueKey,
-    write::{AlignedBytes, Archive, SearchIndex},
+    Deserialize, ValueKey,
+    write::{AlignedBytes, Archive, SearchIndex, serialize::RawValue},
 };
 use store::{
     write::{BatchBuilder, IndexPropertyClass, ValueClass},
@@ -32,6 +33,7 @@ use tinyvec::TinyVec;
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId},
+    blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
     field::EmailField,
     keyword::Keyword,
@@ -69,26 +71,32 @@ impl EmailCopy for Server {
         received_at: u64,
         session_id: u64,
     ) -> trc::Result<Result<IngestedEmail, CopyMessageError>> {
-        // Obtain metadata
-        let metadata = if let Some(metadata) = self
-            .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+        // Obtain the metadata and sort key rows verbatim
+        let (metadata_bytes, sort_keys_bytes) = tokio::try_join!(
+            self.store().get_value::<RawValue>(ValueKey::immutable(
                 from_account_id,
                 Collection::Email,
                 from_message_id,
                 EmailField::Metadata,
-            ))
-            .await?
-        {
-            metadata
-                .deserialize::<MessageMetadata>()
-                .caused_by(trc::location!())?
-        } else {
+            )),
+            self.store().get_value::<RawValue>(ValueKey::immutable(
+                from_account_id,
+                Collection::Email,
+                from_message_id,
+                EmailField::SortKeys,
+            )),
+        )?;
+        let Some(metadata_bytes) = metadata_bytes else {
             return Ok(Err(CopyMessageError::NotFound));
         };
+        let archive = <Archive<AlignedBytes> as Deserialize>::deserialize(&metadata_bytes.0)
+            .caused_by(trc::location!())?;
+        let metadata = archive
+            .unarchive::<MessageMetadata>()
+            .caused_by(trc::location!())?;
 
         // Check quota
-        let size = metadata.root_part().offset_end;
+        let size = metadata.root_part().offset_end.to_native();
         let to_account = self.account(to_account_id).await?;
         match self.has_available_quota(&to_account, size as u64).await {
             Ok(_) => (),
@@ -108,35 +116,35 @@ impl EmailCopy for Server {
         let mut message_ids = Vec::new();
         let mut subject = "";
         let mut sent_at = None;
-        for header in &metadata.contents[0].parts[0].headers {
+        for header in metadata.root_part().headers.iter() {
             match &header.name {
-                MetadataHeaderName::MessageId => {
+                ArchivedMetadataHeaderName::MessageId => {
                     header.value.visit_text(|id| {
                         if !id.is_empty() {
                             message_ids.push(xxh3_128(id.as_bytes()));
                         }
                     });
                 }
-                MetadataHeaderName::InReplyTo
-                | MetadataHeaderName::References
-                | MetadataHeaderName::ResentMessageId => {
+                ArchivedMetadataHeaderName::InReplyTo
+                | ArchivedMetadataHeaderName::References
+                | ArchivedMetadataHeaderName::ResentMessageId => {
                     header.value.visit_text(|id| {
                         if !id.is_empty() {
                             message_ids.push(xxh3_128(id.as_bytes()));
                         }
                     });
                 }
-                MetadataHeaderName::Subject if subject.is_empty() => {
+                ArchivedMetadataHeaderName::Subject if subject.is_empty() => {
                     subject = thread_name(match &header.value {
-                        MetadataHeaderValue::Text(text) => text.as_ref(),
-                        MetadataHeaderValue::TextList(list) if !list.is_empty() => {
+                        ArchivedMetadataHeaderValue::Text(text) => text.as_ref(),
+                        ArchivedMetadataHeaderValue::TextList(list) if !list.is_empty() => {
                             list.first().unwrap().as_ref()
                         }
                         _ => "",
                     });
                 }
-                MetadataHeaderName::Date => {
-                    if let MetadataHeaderValue::DateTime(date) = &header.value {
+                ArchivedMetadataHeaderName::Date => {
+                    if let ArchivedMetadataHeaderValue::DateTime(date) = &header.value {
                         sent_at = Some(DateTime::from(date).to_timestamp());
                     }
                 }
@@ -162,7 +170,7 @@ impl EmailCopy for Server {
             size: size as usize,
             ..Default::default()
         };
-        let blob_hash = metadata.blob_hash.clone();
+        let blob_hash = BlobHash::from(&metadata.blob_hash);
 
         // Assign IMAP UIDs
         let mut mailbox_ids: TinyVec<[MessageUid; 2]> = TinyVec::with_capacity(mailboxes.len());
@@ -240,9 +248,17 @@ impl EmailCopy for Server {
             }));
         }
 
-        metadata
-            .index(&mut batch, true)
-            .caused_by(trc::location!())?;
+        let sort_keys = match sort_keys_bytes {
+            Some(sort_keys) => sort_keys.0,
+            None => MessageSortKeys::from_metadata(
+                &archive
+                    .deserialize::<MessageMetadata>()
+                    .caused_by(trc::location!())?,
+            )
+            .serialize(),
+        };
+
+        metadata.index_verbatim(&mut batch, metadata_bytes.0, sort_keys);
 
         // Insert and obtain ids
         let queues = batch.queue_notify();

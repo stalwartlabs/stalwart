@@ -10,11 +10,11 @@ use crate::{
     spawn_op,
 };
 use ahash::AHashMap;
-use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
+use common::network::SessionStream;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::{
-        messagedata::MessageData,
+        messagedata::{KeywordDiff, merge_keywords},
         metadata::{
             ArchivedMessageMetadata, ArchivedMessageMetadataContents, ArchivedMetadataHeaderValue,
             ArchivedMetadataPartType, DecodedParts, MessageMetadata, MetadataHeaderName,
@@ -51,7 +51,7 @@ use types::{
     collection::{Collection, SyncCollection, VanishedCollection},
     field::EmailField,
     id::Id,
-    keyword::{Keyword, SEEN},
+    keyword::Keyword,
 };
 use utils::chained_bytes::{ChainedBytes, SliceRange};
 
@@ -670,28 +670,17 @@ impl<T: SessionStream> SessionData<T> {
             }
 
             // Add to set flags
-            if set_seen_flag
-                && let Some(data) = self
-                    .server
-                    .store()
-                    .get_value::<MessageData>(ValueKey::archive(account_id, Collection::Email, id))
-                    .await
-                    .imap_ctx(&arguments.tag, trc::location!())?
-            {
-                let mut new_data = data.clone();
-                new_data.keywords |= 1 << SEEN;
-
+            if set_seen_flag {
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::Email)
-                    .with_document(id)
-                    .custom(
-                        ObjectIndexBuilder::new()
-                            .with_current(data)
-                            .with_changes(new_data),
-                    )
-                    .imap_ctx(&arguments.tag, trc::location!())?
-                    .commit_point();
+                    .with_document(id);
+                merge_keywords(
+                    &mut batch,
+                    data.thread_id,
+                    KeywordDiff::default().with_added(Keyword::Seen),
+                );
+                batch.commit_point();
             }
         }
 

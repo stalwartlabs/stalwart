@@ -20,7 +20,7 @@ use crate::{
 use crate::{
     SerializeInfallible,
     backend::{http::lookup::HttpStoreGet, memory::StaticMemoryStore},
-    write::{InMemoryClass, assert::AssertValue},
+    write::{InMemoryClass, MergeResult},
 };
 
 pub struct KeyValue<T> {
@@ -329,51 +329,22 @@ impl InMemoryStore {
     pub async fn try_lock(&self, prefix: u8, key: &[u8], duration: u64) -> trc::Result<bool> {
         match self {
             InMemoryStore::Store(store) => {
-                let key = KeyValue::<()>::build_key(prefix, key);
-                let lock_expiry = match store
-                    .get_value::<u64>(ValueKey::from(ValueClass::InMemory(InMemoryClass::Key(
-                        key.clone(),
-                    ))))
-                    .await
-                {
-                    Ok(lock_expiry) => lock_expiry,
-                    Err(err)
-                        if err.matches(trc::EventType::Store(trc::StoreEvent::DataCorruption)) =>
-                    {
-                        // TODO remove in 1.0
-                        let mut batch = BatchBuilder::new();
-                        batch.any_op(Operation::Value {
-                            class: ValueClass::InMemory(InMemoryClass::Key(key.clone())),
-                            op: ValueOp::Clear,
-                        });
-                        store
-                            .write(batch.build_all())
-                            .await
-                            .caused_by(trc::location!())?;
-                        None
-                    }
-                    Err(err) => {
-                        return Err(err
-                            .details("Failed to read lock.")
-                            .caused_by(trc::location!()));
-                    }
-                };
-
-                let now = now();
-                if lock_expiry.is_some_and(|expiry| expiry > now) {
-                    return Ok(false);
-                }
-
-                let key: ValueClass = ValueClass::InMemory(InMemoryClass::Key(key));
+                let key: ValueClass = ValueClass::InMemory(InMemoryClass::Key(
+                    KeyValue::<()>::build_key(prefix, key),
+                ));
                 let mut batch = BatchBuilder::new();
-                batch.assert_value(
-                    key.clone(),
-                    match lock_expiry {
-                        Some(value) => AssertValue::U64(value),
-                        None => AssertValue::None,
-                    },
-                );
-                batch.set(key.clone(), (now + duration).serialize());
+                batch.merge_fnc(key, move |_, bytes| {
+                    let now = now();
+                    if bytes
+                        .and_then(|bytes| u64::deserialize(bytes).ok())
+                        .is_some_and(|expiry| expiry > now)
+                    {
+                        Err(trc::StoreEvent::AssertValueFailed.into_err())
+                    } else {
+                        Ok(MergeResult::Update((now + duration).serialize()))
+                    }
+                });
+
                 match store.write(batch.build_all()).await {
                     Ok(_) => Ok(true),
                     Err(err) if err.is_assertion_failure() => Ok(false),

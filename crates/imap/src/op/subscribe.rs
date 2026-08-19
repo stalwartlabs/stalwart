@@ -9,7 +9,8 @@ use crate::{
     core::{Session, SessionData},
     spawn_op,
 };
-use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
+use common::network::SessionStream;
+use email::mailbox::merge_subscription;
 use imap_proto::{Command, ResponseCode, StatusResponse, receiver::Request};
 use registry::schema::enums::Permission;
 use std::time::Instant;
@@ -115,27 +116,14 @@ impl<T: SessionStream> SessionData<T> {
             .to_unarchived::<email::mailbox::Mailbox>()
             .imap_ctx(&tag, trc::location!())?;
 
-        if (subscribe && !mailbox.inner.is_subscribed(self.account_id))
-            || (!subscribe && mailbox.inner.is_subscribed(self.account_id))
-        {
+        if mailbox.inner.is_subscribed(self.account_id) != subscribe {
             // Build batch
-            let mut new_mailbox = mailbox.deserialize().imap_ctx(&tag, trc::location!())?;
-            if subscribe {
-                new_mailbox.subscribers.push(self.account_id);
-            } else {
-                new_mailbox.remove_subscriber(self.account_id);
-            }
             let mut batch = BatchBuilder::new();
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Mailbox)
-                .with_document(mailbox_id)
-                .custom(
-                    ObjectIndexBuilder::new()
-                        .with_current(mailbox)
-                        .with_changes(new_mailbox),
-                )
-                .imap_ctx(&tag, trc::location!())?;
+                .with_document(mailbox_id);
+            merge_subscription(&mut batch, self.account_id, subscribe);
             self.server
                 .commit_batch(batch)
                 .await

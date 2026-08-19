@@ -10,10 +10,11 @@ use crate::{
     spawn_op,
 };
 use ahash::AHashSet;
-use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
+use common::network::SessionStream;
 use email::{
+    cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::TRASH_ID,
-    message::{ingest::EmailIngest, messagedata::MessageData},
+    message::{ingest::EmailIngest, messagedata::merge_keywords},
 };
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
@@ -27,7 +28,6 @@ use imap_proto::{
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use store::{
-    ValueKey,
     query::log::{Change, Query},
     write::BatchBuilder,
 };
@@ -108,6 +108,11 @@ impl<T: SessionStream> SessionData<T> {
         // Resync messages if needed
         let account_id = mailbox.id.account_id;
         self.synchronize_messages(&mailbox)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        let message_cache = self
+            .server
+            .get_cached_messages(account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
@@ -254,15 +259,7 @@ impl<T: SessionStream> SessionData<T> {
 
         for (id, imap_id) in &ids {
             // Obtain message data
-            let data = if let Some(data) = self
-                .server
-                .store()
-                .get_value::<MessageData>(ValueKey::archive(account_id, Collection::Email, *id))
-                .await
-                .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?
-            {
-                data
-            } else {
+            let Some(data) = message_cache.message_data(*id) else {
                 continue;
             };
 
@@ -292,7 +289,8 @@ impl<T: SessionStream> SessionData<T> {
                 }
             }
 
-            if !new_data.has_keyword_changes(&data) {
+            let keyword_diff = new_data.keyword_diff(&data);
+            if keyword_diff.is_empty() {
                 continue;
             }
 
@@ -337,13 +335,8 @@ impl<T: SessionStream> SessionData<T> {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Email)
-                .with_document(*id)
-                .custom(
-                    ObjectIndexBuilder::new()
-                        .with_current(data)
-                        .with_changes(new_data),
-                )
-                .imap_ctx(response.tag.as_ref().unwrap(), trc::location!())?;
+                .with_document(*id);
+            merge_keywords(&mut batch, data.thread_id, keyword_diff);
 
             // Add spam train task
             if let Some(learn_spam) = train_spam {

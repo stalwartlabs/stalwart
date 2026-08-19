@@ -20,7 +20,7 @@ use email::{
     message::{
         delete::EmailDeletion,
         ingest::{EmailIngest, IngestEmail, IngestSource},
-        messagedata::MessageData,
+        messagedata::merge_keywords,
     },
 };
 use http_proto::HttpSessionData;
@@ -44,7 +44,7 @@ use mail_builder::{
 use mail_parser::MessageParser;
 use std::future::Future;
 use std::{borrow::Cow, collections::HashMap};
-use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap, write::BatchBuilder};
+use store::{ahash::AHashMap, roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -804,20 +804,9 @@ impl EmailSet for Server {
 
             // Obtain message data
             let document_id = id.document_id();
-            let data = match self
-                .store()
-                .get_value::<MessageData>(ValueKey::archive(
-                    account_id,
-                    Collection::Email,
-                    document_id,
-                ))
-                .await?
-            {
-                Some(data) => data,
-                None => {
-                    response.not_updated.append(id, SetError::not_found());
-                    continue 'update;
-                }
+            let Some(data) = cache.message_data(document_id) else {
+                response.not_updated.append(id, SetError::not_found());
+                continue 'update;
             };
             let mut new_data = data.clone();
 
@@ -1058,13 +1047,18 @@ impl EmailSet for Server {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Email)
-                .with_document(document_id)
-                .custom(
-                    ObjectIndexBuilder::new()
-                        .with_current(data)
-                        .with_changes(new_data),
-                )
-                .caused_by(trc::location!())?;
+                .with_document(document_id);
+            if has_mailbox_changes {
+                batch
+                    .custom(
+                        ObjectIndexBuilder::new()
+                            .with_current(data)
+                            .with_changes(new_data),
+                    )
+                    .caused_by(trc::location!())?;
+            } else {
+                merge_keywords(&mut batch, data.thread_id, new_data.keyword_diff(&data));
+            }
 
             if let Some(train_spam) = train_spam {
                 self.add_account_spam_sample(

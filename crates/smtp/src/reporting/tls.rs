@@ -34,9 +34,9 @@ use reqwest::header::CONTENT_TYPE;
 use std::fmt::Write;
 use std::{future::Future, sync::Arc, time::Duration};
 use store::{
-    SerializeInfallible, ValueKey,
+    Deserialize, ValueKey,
     registry::ObjectIdVersioned,
-    write::{BatchBuilder, RegistryClass, ValueClass, assert::AssertValue},
+    write::{BatchBuilder, MergeResult, RegistryClass, ValueClass},
 };
 use trc::{AddContext, OutgoingReportEvent};
 
@@ -232,6 +232,7 @@ impl TlsReporting for Server {
     }
 
     async fn schedule_tls(&self, event: Box<TlsEvent>) {
+        let event: Arc<TlsEvent> = event.into();
         let object_id = ObjectType::TlsInternalReport.to_id();
         let pk = ValueClass::Registry(RegistryClass::PrimaryKey {
             object_id: object_id.into(),
@@ -292,12 +293,66 @@ impl TlsReporting for Server {
 
             // Create report if missing
             let config = &self.core.smtp.report.tls;
-            let (item_id, mut report) = if let Some((mut object_id_v, report)) = report {
-                batch.assert_value(pk.clone(), AssertValue::U32(object_id_v.version));
-                object_id_v.version += 1;
-                batch.set(pk.clone(), object_id_v.serialize());
+            let max_report_size = self
+                .eval_if(
+                    &config.max_size,
+                    &RecipientDomain::new(&event.domain),
+                    event.span_id,
+                )
+                .await
+                .unwrap_or(5 * 1024 * 1024);
 
-                (object_id_v.object_id.id().id(), report)
+            let (item_id, mut report) = if let Some((object_id_v, _)) = report {
+                // Merge the record into the stored report
+                let item_id = object_id_v.object_id.id().id();
+                let domain = event.domain.clone();
+                let span_id = event.span_id;
+                let event = event.clone();
+
+                batch.merge_fnc(
+                    ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
+                    move |_, bytes| {
+                        let Some(bytes) = bytes else {
+                            return Err(trc::StoreEvent::AssertValueFailed
+                                .into_err()
+                                .details("TLS report was delivered concurrently.")
+                                .caused_by(trc::location!()));
+                        };
+
+                        let mut report = TlsInternalReport::deserialize(bytes)?;
+                        add_tls_record(&mut report, &event, policy_hash);
+
+                        let report_bytes = report.to_pickled_vec();
+                        if max_report_size != 0 && report_bytes.len() > max_report_size {
+                            trc::event!(
+                                OutgoingReport(OutgoingReportEvent::MaxSizeExceeded),
+                                SpanId = span_id,
+                                Domain = domain.clone(),
+                                Details = report_bytes.len(),
+                                Limit = max_report_size,
+                            );
+
+                            return Ok(MergeResult::Skip);
+                        }
+
+                        Ok(MergeResult::Update(report_bytes))
+                    },
+                );
+
+                match self.core.storage.data.write(batch.build_all()).await {
+                    Ok(_) => return,
+                    Err(err) if err.is_assertion_failure() && rety_count < 3 => {
+                        rety_count += 1;
+                        continue;
+                    }
+                    Err(err) => {
+                        trc::error!(
+                            err.caused_by(trc::location!())
+                                .details("Failed to write TLS report")
+                        );
+                        return;
+                    }
+                }
             } else {
                 let item_id = self.inner.data.queue_id_gen.generate();
                 let date_range_start = UTCDateTime::now();
@@ -339,123 +394,10 @@ impl TlsReporting for Server {
                 (item_id, report)
             };
 
-            let policy = if let Some(policy) = report
-                .policy_identifiers
-                .as_slice()
-                .iter()
-                .position(|id| *id == policy_hash)
-                .and_then(|idx| report.report.policies.0.inner.get_mut(idx))
-            {
-                &mut policy.value
-            } else {
-                // Create policy
-                let mut policy = TlsReportPolicy {
-                    policy_type: TlsPolicyType::NoPolicyFound,
-                    policy_domain: report.domain.clone(),
-                    ..Default::default()
-                };
-
-                match &event.policy {
-                    common::ipc::PolicyType::Tlsa(tlsa) => {
-                        policy.policy_type = TlsPolicyType::Tlsa;
-                        if let Some(tlsa) = tlsa {
-                            for entry in &tlsa.entries {
-                                policy.policy_strings.push(format!(
-                                    "{} {} {} {}",
-                                    if entry.is_end_entity { 3 } else { 2 },
-                                    i32::from(entry.is_spki),
-                                    match entry.matching {
-                                        TlsaMatching::Full => 0,
-                                        TlsaMatching::Sha256 => 1,
-                                        TlsaMatching::Sha512 => 2,
-                                    },
-                                    entry.data.iter().fold(
-                                        String::with_capacity(64),
-                                        |mut s, b| {
-                                            write!(s, "{b:02X}").ok();
-                                            s
-                                        }
-                                    )
-                                ));
-                            }
-                        }
-                    }
-                    common::ipc::PolicyType::Sts(sts) => {
-                        policy.policy_type = TlsPolicyType::Sts;
-                        if let Some(sts) = sts {
-                            policy.policy_strings.push("version: STSv1".to_string());
-                            policy.policy_strings.push(format!(
-                                "mode: {}",
-                                match sts.mode {
-                                    Mode::Enforce => "enforce",
-                                    Mode::Testing => "testing",
-                                    Mode::None => "none",
-                                }
-                            ));
-                            policy
-                                .policy_strings
-                                .push(format!("max_age: {}", sts.max_age));
-                            for mx in &sts.mx {
-                                let mx = match mx {
-                                    MxPattern::Equals(mx) => mx.to_string(),
-                                    MxPattern::StartsWith(mx) => format!("*.{mx}"),
-                                };
-                                policy.policy_strings.push(format!("mx: {mx}"));
-                                policy.mx_hosts.push(mx);
-                            }
-                        }
-                    }
-                    _ => (),
-                }
-
-                for rua in &event.tls_record.rua {
-                    match rua {
-                        ReportUri::Mail(mail) => {
-                            report.mail_rua.push(mail.clone());
-                        }
-                        ReportUri::Http(uri) => {
-                            report.http_rua.push(uri.clone());
-                        }
-                    }
-                }
-
-                report.policy_identifiers.push(policy_hash);
-                report.report.policies.push(policy);
-                &mut report.report.policies.0.inner.last_mut().unwrap().value
-            };
-
-            // Add failure details
-            if let Some(mut failure) = event.failure.clone().map(TlsFailureDetails::from) {
-                if let Some(idx) = policy
-                    .failure_details
-                    .0
-                    .inner
-                    .iter()
-                    .position(|d| d.value.eq_except_count(&failure))
-                {
-                    policy.failure_details.0.inner[idx]
-                        .value
-                        .failed_session_count += 1;
-                } else {
-                    failure.failed_session_count = 1;
-                    policy.failure_details.push(failure);
-                }
-
-                policy.total_failed_sessions += 1;
-            } else {
-                policy.total_successful_sessions += 1;
-            }
+            add_tls_record(&mut report, &event, policy_hash);
 
             // Write entry
             let report_bytes = report.to_pickled_vec();
-            let max_report_size = self
-                .eval_if(
-                    &config.max_size,
-                    &RecipientDomain::new(&event.domain),
-                    event.span_id,
-                )
-                .await
-                .unwrap_or(5 * 1024 * 1024);
             if max_report_size != 0 && report_bytes.len() > max_report_size {
                 trc::event!(
                     OutgoingReport(OutgoingReportEvent::MaxSizeExceeded),
@@ -489,5 +431,114 @@ impl TlsReporting for Server {
                 }
             }
         }
+    }
+}
+
+fn add_tls_record(report: &mut TlsInternalReport, event: &TlsEvent, policy_hash: u64) {
+    let policy = if let Some(policy) = report
+        .policy_identifiers
+        .as_slice()
+        .iter()
+        .position(|id| *id == policy_hash)
+        .and_then(|idx| report.report.policies.0.inner.get_mut(idx))
+    {
+        &mut policy.value
+    } else {
+        // Create policy
+        let mut policy = TlsReportPolicy {
+            policy_type: TlsPolicyType::NoPolicyFound,
+            policy_domain: report.domain.clone(),
+            ..Default::default()
+        };
+
+        match &event.policy {
+            common::ipc::PolicyType::Tlsa(tlsa) => {
+                policy.policy_type = TlsPolicyType::Tlsa;
+                if let Some(tlsa) = tlsa {
+                    for entry in &tlsa.entries {
+                        policy.policy_strings.push(format!(
+                            "{} {} {} {}",
+                            if entry.is_end_entity { 3 } else { 2 },
+                            i32::from(entry.is_spki),
+                            match entry.matching {
+                                TlsaMatching::Full => 0,
+                                TlsaMatching::Sha256 => 1,
+                                TlsaMatching::Sha512 => 2,
+                            },
+                            entry
+                                .data
+                                .iter()
+                                .fold(String::with_capacity(64), |mut s, b| {
+                                    write!(s, "{b:02X}").ok();
+                                    s
+                                })
+                        ));
+                    }
+                }
+            }
+            common::ipc::PolicyType::Sts(sts) => {
+                policy.policy_type = TlsPolicyType::Sts;
+                if let Some(sts) = sts {
+                    policy.policy_strings.push("version: STSv1".to_string());
+                    policy.policy_strings.push(format!(
+                        "mode: {}",
+                        match sts.mode {
+                            Mode::Enforce => "enforce",
+                            Mode::Testing => "testing",
+                            Mode::None => "none",
+                        }
+                    ));
+                    policy
+                        .policy_strings
+                        .push(format!("max_age: {}", sts.max_age));
+                    for mx in &sts.mx {
+                        let mx = match mx {
+                            MxPattern::Equals(mx) => mx.to_string(),
+                            MxPattern::StartsWith(mx) => format!("*.{mx}"),
+                        };
+                        policy.policy_strings.push(format!("mx: {mx}"));
+                        policy.mx_hosts.push(mx);
+                    }
+                }
+            }
+            _ => (),
+        }
+
+        for rua in &event.tls_record.rua {
+            match rua {
+                ReportUri::Mail(mail) => {
+                    report.mail_rua.push(mail.clone());
+                }
+                ReportUri::Http(uri) => {
+                    report.http_rua.push(uri.clone());
+                }
+            }
+        }
+
+        report.policy_identifiers.push(policy_hash);
+        report.report.policies.push(policy);
+        &mut report.report.policies.0.inner.last_mut().unwrap().value
+    };
+
+    // Add failure details
+    if let Some(mut failure) = event.failure.clone().map(TlsFailureDetails::from) {
+        if let Some(idx) = policy
+            .failure_details
+            .0
+            .inner
+            .iter()
+            .position(|d| d.value.eq_except_count(&failure))
+        {
+            policy.failure_details.0.inner[idx]
+                .value
+                .failed_session_count += 1;
+        } else {
+            failure.failed_session_count = 1;
+            policy.failure_details.push(failure);
+        }
+
+        policy.total_failed_sessions += 1;
+    } else {
+        policy.total_successful_sessions += 1;
     }
 }

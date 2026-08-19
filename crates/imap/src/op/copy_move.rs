@@ -239,140 +239,161 @@ impl<T: SessionStream> SessionData<T> {
             let account_id = src_mailbox.id.account_id;
             let dest_mailbox_id = MessageUid::new_unassigned(dest_mailbox_id);
             let mut batch = BatchBuilder::new();
-
-            for (id, imap_id) in ids {
-                // Obtain mailbox tags
-                let data = if let Some(result) = self
-                    .get_message_data(account_id, id)
-                    .await
-                    .imap_ctx(&arguments.tag, trc::location!())?
-                {
-                    result
-                } else {
-                    continue;
-                };
-
-                // Make sure the message still belongs to this mailbox
-                if !data
-                    .mailboxes
-                    .iter()
-                    .any(|mailbox| mailbox.mailbox_id == src_mailbox.id.mailbox_id)
-                {
-                    continue;
-                }
-
-                // If the message is already in the destination mailbox, skip it.
-                if let Some(mailbox) = data
-                    .mailboxes
-                    .iter()
-                    .find(|mailbox| mailbox.mailbox_id == dest_mailbox_id.mailbox_id)
-                {
-                    copied_ids.push((imap_id.uid, mailbox.uid));
-
-                    if is_move {
-                        let mut new_data = data.clone();
-                        new_data.remove_mailbox(src_mailbox.id.mailbox_id);
-                        batch
-                            .with_account_id(account_id)
-                            .with_collection(Collection::Email)
-                            .with_document(id)
-                            .custom(
-                                ObjectIndexBuilder::new()
-                                    .with_current(data)
-                                    .with_changes(new_data),
-                            )
-                            .imap_ctx(&arguments.tag, trc::location!())?
-                            .log_vanished_item(
-                                VanishedCollection::Email,
-                                (src_mailbox.id.mailbox_id, imap_id.uid),
-                            )
-                            .commit_point();
-                        did_move = true;
-                    }
-
-                    continue;
-                }
-
-                // Prepare changes
-                let mut new_data = data.clone();
-
-                // Add destination folder
-                new_data.add_mailbox(dest_mailbox_id);
-                if is_move {
-                    new_data.remove_mailbox(src_mailbox.id.mailbox_id);
-                }
-
-                // Assign IMAP UIDs
-                let ids = self
-                    .server
-                    .assign_email_ids(
-                        account_id,
-                        new_data
-                            .mailboxes
-                            .iter()
-                            .filter(|m| m.uid == 0)
-                            .map(|m| m.mailbox_id),
-                        false,
-                    )
-                    .await
-                    .caused_by(trc::location!())?;
-
-                for (uid_mailbox, uid) in new_data
-                    .mailboxes
-                    .iter_mut()
-                    .filter(|m| m.uid == 0)
-                    .zip(ids)
-                {
-                    copied_ids.push((imap_id.uid, uid));
-                    uid_mailbox.uid = uid;
-                }
-
-                // Prepare write batch
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(Collection::Email)
-                    .with_document(id)
-                    .custom(
-                        ObjectIndexBuilder::new()
-                            .with_current(data)
-                            .with_changes(new_data),
-                    )
-                    .imap_ctx(&arguments.tag, trc::location!())?;
-                if is_move {
-                    batch.log_vanished_item(
-                        VanishedCollection::Email,
-                        (src_mailbox.id.mailbox_id, imap_id.uid),
-                    );
-                }
-
-                // Add message to training queue
-                if dest_mailbox_id.mailbox_id == JUNK_ID {
-                    self.server
-                        .add_account_spam_sample(&mut batch, account_id, id, true, self.session_id)
-                        .await
-                        .imap_ctx(&arguments.tag, trc::location!())?;
-                } else if src_mailbox.id.mailbox_id == JUNK_ID
-                    && dest_mailbox_id.mailbox_id != TRASH_ID
-                {
-                    self.server
-                        .add_account_spam_sample(&mut batch, account_id, id, false, self.session_id)
-                        .await
-                        .imap_ctx(&arguments.tag, trc::location!())?;
-                }
-
-                batch.commit_point();
-
-                // Update changelog
-                if is_move {
-                    did_move = true;
-                }
-            }
-
-            // Write changes
-            self.server
-                .commit_batch(batch)
+            let cache = self
+                .server
+                .get_cached_messages(account_id)
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?;
+
+            {
+                for (&id, imap_id) in &ids {
+                    // Obtain mailbox tags
+                    let Some(data) = cache.message_data(id) else {
+                        trc::event!(
+                            Store(trc::StoreEvent::NotFound),
+                            AccountId = account_id,
+                            DocumentId = id,
+                            Collection = Collection::Email,
+                            Details = "Message data not found.",
+                            CausedBy = trc::location!(),
+                        );
+                        continue;
+                    };
+
+                    // Make sure the message still belongs to this mailbox
+                    if !data
+                        .mailboxes
+                        .iter()
+                        .any(|mailbox| mailbox.mailbox_id == src_mailbox.id.mailbox_id)
+                    {
+                        continue;
+                    }
+
+                    // If the message is already in the destination mailbox, skip it.
+                    if let Some(mailbox) = data
+                        .mailboxes
+                        .iter()
+                        .find(|mailbox| mailbox.mailbox_id == dest_mailbox_id.mailbox_id)
+                    {
+                        copied_ids.push((imap_id.uid, mailbox.uid));
+
+                        if is_move {
+                            let mut new_data = data.clone();
+                            new_data.remove_mailbox(src_mailbox.id.mailbox_id);
+                            batch
+                                .with_account_id(account_id)
+                                .with_collection(Collection::Email)
+                                .with_document(id)
+                                .custom(
+                                    ObjectIndexBuilder::new()
+                                        .with_current(data)
+                                        .with_changes(new_data),
+                                )
+                                .imap_ctx(&arguments.tag, trc::location!())?
+                                .log_vanished_item(
+                                    VanishedCollection::Email,
+                                    (src_mailbox.id.mailbox_id, imap_id.uid),
+                                )
+                                .commit_point();
+                            did_move = true;
+                        }
+
+                        continue;
+                    }
+
+                    // Prepare changes
+                    let mut new_data = data.clone();
+
+                    // Add destination folder
+                    new_data.add_mailbox(dest_mailbox_id);
+                    if is_move {
+                        new_data.remove_mailbox(src_mailbox.id.mailbox_id);
+                    }
+
+                    // Assign IMAP UIDs
+                    let ids = self
+                        .server
+                        .assign_email_ids(
+                            account_id,
+                            new_data
+                                .mailboxes
+                                .iter()
+                                .filter(|m| m.uid == 0)
+                                .map(|m| m.mailbox_id),
+                            false,
+                        )
+                        .await
+                        .caused_by(trc::location!())?;
+
+                    for (uid_mailbox, uid) in new_data
+                        .mailboxes
+                        .iter_mut()
+                        .filter(|m| m.uid == 0)
+                        .zip(ids)
+                    {
+                        copied_ids.push((imap_id.uid, uid));
+                        uid_mailbox.uid = uid;
+                    }
+
+                    // Prepare write batch
+                    batch
+                        .with_account_id(account_id)
+                        .with_collection(Collection::Email)
+                        .with_document(id)
+                        .custom(
+                            ObjectIndexBuilder::new()
+                                .with_current(data)
+                                .with_changes(new_data),
+                        )
+                        .imap_ctx(&arguments.tag, trc::location!())?;
+                    if is_move {
+                        batch.log_vanished_item(
+                            VanishedCollection::Email,
+                            (src_mailbox.id.mailbox_id, imap_id.uid),
+                        );
+                    }
+
+                    // Add message to training queue
+                    if dest_mailbox_id.mailbox_id == JUNK_ID {
+                        self.server
+                            .add_account_spam_sample(
+                                &mut batch,
+                                account_id,
+                                id,
+                                true,
+                                self.session_id,
+                            )
+                            .await
+                            .imap_ctx(&arguments.tag, trc::location!())?;
+                    } else if src_mailbox.id.mailbox_id == JUNK_ID
+                        && dest_mailbox_id.mailbox_id != TRASH_ID
+                    {
+                        self.server
+                            .add_account_spam_sample(
+                                &mut batch,
+                                account_id,
+                                id,
+                                false,
+                                self.session_id,
+                            )
+                            .await
+                            .imap_ctx(&arguments.tag, trc::location!())?;
+                    }
+
+                    batch.commit_point();
+
+                    // Update changelog
+                    if is_move {
+                        did_move = true;
+                    }
+                }
+
+                // Write changes
+                self.server
+                    .commit_batch(batch)
+                    .await
+                    .imap_ctx(&arguments.tag, trc::location!())?;
+            }
         } else {
             // Obtain quota for target account
             let src_account_id = src_mailbox.id.account_id;

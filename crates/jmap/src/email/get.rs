@@ -12,6 +12,7 @@ use email::{
         body::{ToBodyPart, truncate_html, truncate_plain},
         headers::{HeaderToValue, IntoForm},
         metadata::{
+            ArchivedMessageMetadata, ArchivedMessageMetadataContents, ArchivedMessageMetadataPart,
             ArchivedMetadataPartType, MessageMetadata, MetadataHeaderName, PART_ENCODING_PROBLEM,
         },
     },
@@ -134,19 +135,29 @@ impl EmailGet for Server {
             not_found: not_found_ids,
         };
 
-        // Check if we need to fetch the raw headers or body
+        // Check which properties can be answered from the message cache alone
         let mut needs_body = false;
+        let mut needs_metadata = false;
         for property in &properties {
-            if matches!(
-                property,
+            match property {
+                EmailProperty::Id
+                | EmailProperty::ThreadId
+                | EmailProperty::MailboxIds
+                | EmailProperty::Keywords
+                | EmailProperty::Size
+                | EmailProperty::ReceivedAt
+                | EmailProperty::HasAttachment => (),
                 EmailProperty::BodyValues
-                    | EmailProperty::TextBody
-                    | EmailProperty::HtmlBody
-                    | EmailProperty::Attachments
-                    | EmailProperty::BodyStructure
-            ) {
-                needs_body = true;
-                break;
+                | EmailProperty::TextBody
+                | EmailProperty::HtmlBody
+                | EmailProperty::Attachments
+                | EmailProperty::BodyStructure => {
+                    needs_body = true;
+                    needs_metadata = true;
+                }
+                _ => {
+                    needs_metadata = true;
+                }
             }
         }
 
@@ -156,25 +167,6 @@ impl EmailGet for Server {
                 response.push_not_found(id);
                 continue;
             }
-            let metadata_ = match self
-                .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
-                    account_id,
-                    Collection::Email,
-                    id.document_id(),
-                    EmailField::Metadata,
-                ))
-                .await?
-            {
-                Some(metadata) => metadata,
-                None => {
-                    response.push_not_found(id);
-                    continue;
-                }
-            };
-            let metadata = metadata_
-                .unarchive::<MessageMetadata>()
-                .caused_by(trc::location!())?;
 
             // Obtain message data
             let data = match cache.email_by_id(&id.document_id()) {
@@ -185,66 +177,97 @@ impl EmailGet for Server {
                 }
             };
 
-            // Retrieve raw message if needed
-            let blob_hash = BlobHash::from(&metadata.blob_hash);
+            // Obtain the message metadata if any of the requested properties need it
+            let metadata_;
             let raw_body;
-            let mut raw_message = ChainedBytes::new(metadata.raw_headers.as_ref());
-            if needs_body {
-                raw_body = self
-                    .blob_store()
-                    .get_blob(blob_hash.as_slice(), 0..usize::MAX)
-                    .await?;
+            let message = if needs_metadata {
+                metadata_ = match self
+                    .store()
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+                        account_id,
+                        Collection::Email,
+                        id.document_id(),
+                        EmailField::Metadata,
+                    ))
+                    .await?
+                {
+                    Some(metadata) => metadata,
+                    None => {
+                        response.push_not_found(id);
+                        continue;
+                    }
+                };
+                let metadata = metadata_
+                    .unarchive::<MessageMetadata>()
+                    .caused_by(trc::location!())?;
 
-                if let Some(raw_body) = &raw_body {
-                    raw_message.append(
-                        raw_body
-                            .get(metadata.blob_body_offset.to_native() as usize..)
-                            .unwrap_or_default(),
-                    );
-                } else {
-                    trc::event!(
-                        Store(StoreEvent::NotFound),
-                        AccountId = account_id,
-                        DocumentId = id.document_id(),
-                        Collection = Collection::Email,
-                        BlobId = blob_hash.to_hex(),
-                        Details = "Blob not found.",
-                        CausedBy = trc::location!(),
-                    );
+                // Retrieve raw message if needed
+                let blob_hash = BlobHash::from(&metadata.blob_hash);
+                let mut raw_message = ChainedBytes::new(metadata.raw_headers.as_ref());
+                if needs_body {
+                    raw_body = self
+                        .blob_store()
+                        .get_blob(blob_hash.as_slice(), 0..usize::MAX)
+                        .await?;
 
-                    response.push_not_found(id);
-                    continue;
+                    if let Some(raw_body) = &raw_body {
+                        raw_message.append(
+                            raw_body
+                                .get(metadata.blob_body_offset.to_native() as usize..)
+                                .unwrap_or_default(),
+                        );
+                    } else {
+                        trc::event!(
+                            Store(StoreEvent::NotFound),
+                            AccountId = account_id,
+                            DocumentId = id.document_id(),
+                            Collection = Collection::Email,
+                            BlobId = blob_hash.to_hex(),
+                            Details = "Blob not found.",
+                            CausedBy = trc::location!(),
+                        );
+
+                        response.push_not_found(id);
+                        continue;
+                    }
                 }
-            }
-            let blob_id = BlobId {
-                hash: blob_hash,
-                class: BlobClass::Linked {
-                    account_id,
-                    collection: Collection::Email.into(),
-                    document_id: id.document_id(),
-                },
-                section: None,
+
+                let contents = &metadata.contents[0];
+                let root_part = &contents.parts[0];
+
+                Some(MessageContext {
+                    metadata,
+                    contents,
+                    root_part,
+                    raw_message,
+                    blob_id: BlobId {
+                        hash: blob_hash,
+                        class: BlobClass::Linked {
+                            account_id,
+                            collection: Collection::Email.into(),
+                            document_id: id.document_id(),
+                        },
+                        section: None,
+                    },
+                    blob_body_offset: metadata.blob_body_offset.to_native() as isize
+                        - root_part.offset_body.to_native() as isize,
+                })
+            } else {
+                None
             };
 
             // Prepare response
             let mut email: Map<'_, EmailProperty, EmailValue> =
                 Map::with_capacity(properties.len());
-            let contents = &metadata.contents[0];
-            let root_part = &contents.parts[0];
-            let blob_body_offset = metadata.blob_body_offset.to_native() as isize
-                - root_part.offset_body.to_native() as isize;
             for property in &properties {
-                match property {
-                    EmailProperty::Id => {
+                match (property, &message) {
+                    (EmailProperty::Id, _) => {
                         email.insert_unchecked(EmailProperty::Id, Id::from(*id));
                     }
-                    EmailProperty::ThreadId => {
+                    (EmailProperty::ThreadId, _) => {
                         email.insert_unchecked(EmailProperty::ThreadId, Id::from(id.prefix_id()));
                     }
-                    EmailProperty::BlobId => {
-                        email.insert_unchecked(EmailProperty::BlobId, blob_id.clone());
-                    }
-                    EmailProperty::MailboxIds => {
+                    (EmailProperty::MailboxIds, _) => {
                         let mut obj = Map::with_capacity(data.mailboxes.len());
                         for id in data.mailboxes.iter() {
                             debug_assert!(id.uid != 0);
@@ -256,60 +279,69 @@ impl EmailGet for Server {
 
                         email.insert_unchecked(property.clone(), Value::Object(obj));
                     }
-                    EmailProperty::Keywords => {
+                    (EmailProperty::Keywords, _) => {
                         let mut obj = Map::with_capacity(2);
                         for keyword in cache.expand_keywords(data) {
                             obj.insert_unchecked(EmailProperty::Keyword(keyword), true);
                         }
                         email.insert_unchecked(property.clone(), Value::Object(obj));
                     }
-                    EmailProperty::Size => {
+                    (EmailProperty::Size, _) => {
                         email.insert_unchecked(EmailProperty::Size, data.size);
                     }
-                    EmailProperty::ReceivedAt => {
+                    (EmailProperty::ReceivedAt, _) => {
                         email.insert_unchecked(
                             EmailProperty::ReceivedAt,
                             EmailValue::Date(UTCDate::from_timestamp(data.received_at as i64)),
                         );
                     }
-                    EmailProperty::Preview => {
-                        if !metadata.preview.is_empty() {
-                            email.insert_unchecked(
-                                EmailProperty::Preview,
-                                metadata.preview.to_string(),
-                            );
-                        }
-                    }
-                    EmailProperty::HasAttachment => {
+                    (EmailProperty::HasAttachment, _) => {
                         email.insert_unchecked(
                             EmailProperty::HasAttachment,
                             (data.keywords & 1 << HASATTACHMENT) != 0,
                         );
                     }
-                    EmailProperty::Subject => {
+                    (EmailProperty::BlobId, Some(message)) => {
+                        email.insert_unchecked(EmailProperty::BlobId, message.blob_id.clone());
+                    }
+                    (EmailProperty::Preview, Some(message)) => {
+                        if !message.metadata.preview.is_empty() {
+                            email.insert_unchecked(
+                                EmailProperty::Preview,
+                                message.metadata.preview.to_string(),
+                            );
+                        }
+                    }
+                    (EmailProperty::Subject, Some(message)) => {
                         email.insert_unchecked(
                             EmailProperty::Subject,
-                            root_part
+                            message
+                                .root_part
                                 .header_value(&MetadataHeaderName::Subject)
                                 .map(|value| HeaderValue::from(value).into_form(&HeaderForm::Text))
                                 .unwrap_or_default(),
                         );
                     }
-                    EmailProperty::SentAt => {
+                    (EmailProperty::SentAt, Some(message)) => {
                         email.insert_unchecked(
                             EmailProperty::SentAt,
-                            root_part
+                            message
+                                .root_part
                                 .header_value(&MetadataHeaderName::Date)
                                 .map(|value| HeaderValue::from(value).into_form(&HeaderForm::Date))
                                 .unwrap_or_default(),
                         );
                     }
-                    EmailProperty::MessageId
-                    | EmailProperty::InReplyTo
-                    | EmailProperty::References => {
+                    (
+                        EmailProperty::MessageId
+                        | EmailProperty::InReplyTo
+                        | EmailProperty::References,
+                        Some(message),
+                    ) => {
                         email.insert_unchecked(
                             property.clone(),
-                            root_part
+                            message
+                                .root_part
                                 .header_value(&match property {
                                     EmailProperty::MessageId => MetadataHeaderName::MessageId,
                                     EmailProperty::InReplyTo => MetadataHeaderName::InReplyTo,
@@ -323,15 +355,19 @@ impl EmailGet for Server {
                         );
                     }
 
-                    EmailProperty::Sender
-                    | EmailProperty::From
-                    | EmailProperty::To
-                    | EmailProperty::Cc
-                    | EmailProperty::Bcc
-                    | EmailProperty::ReplyTo => {
+                    (
+                        EmailProperty::Sender
+                        | EmailProperty::From
+                        | EmailProperty::To
+                        | EmailProperty::Cc
+                        | EmailProperty::Bcc
+                        | EmailProperty::ReplyTo,
+                        Some(message),
+                    ) => {
                         email.insert_unchecked(
                             property.clone(),
-                            root_part
+                            message
+                                .root_part
                                 .header_value(&match property {
                                     EmailProperty::Sender => MetadataHeaderName::Sender,
                                     EmailProperty::From => MetadataHeaderName::From,
@@ -347,67 +383,72 @@ impl EmailGet for Server {
                                 .unwrap_or_default(),
                         );
                     }
-                    EmailProperty::Header(_) => {
+                    (EmailProperty::Header(_), Some(message)) => {
                         email.insert_unchecked(
                             property.clone(),
-                            root_part.header_to_value(property, &raw_message),
+                            message
+                                .root_part
+                                .header_to_value(property, &message.raw_message),
                         );
                     }
-                    EmailProperty::Headers => {
+                    (EmailProperty::Headers, Some(message)) => {
                         email.insert_unchecked(
                             EmailProperty::Headers,
-                            root_part.headers_to_value(&raw_message),
+                            message.root_part.headers_to_value(&message.raw_message),
                         );
                     }
-                    EmailProperty::TextBody
-                    | EmailProperty::HtmlBody
-                    | EmailProperty::Attachments => {
+                    (
+                        EmailProperty::TextBody
+                        | EmailProperty::HtmlBody
+                        | EmailProperty::Attachments,
+                        Some(message),
+                    ) => {
                         let list = match property {
-                            EmailProperty::TextBody => &contents.text_body,
-                            EmailProperty::HtmlBody => &contents.html_body,
-                            EmailProperty::Attachments => &contents.attachments,
+                            EmailProperty::TextBody => &message.contents.text_body,
+                            EmailProperty::HtmlBody => &message.contents.html_body,
+                            EmailProperty::Attachments => &message.contents.attachments,
                             _ => unreachable!(),
                         }
                         .iter();
                         email.insert_unchecked(
                             property.clone(),
                             list.map(|part_id| {
-                                contents.to_body_part(
+                                message.contents.to_body_part(
                                     u16::from(part_id) as u32,
                                     &body_properties,
-                                    &raw_message,
-                                    &blob_id,
-                                    blob_body_offset,
+                                    &message.raw_message,
+                                    &message.blob_id,
+                                    message.blob_body_offset,
                                 )
                             })
                             .collect::<Vec<_>>(),
                         );
                     }
-                    EmailProperty::BodyStructure => {
+                    (EmailProperty::BodyStructure, Some(message)) => {
                         email.insert_unchecked(
                             EmailProperty::BodyStructure,
-                            contents.to_body_part(
+                            message.contents.to_body_part(
                                 0,
                                 &body_properties,
-                                &raw_message,
-                                &blob_id,
-                                blob_body_offset,
+                                &message.raw_message,
+                                &message.blob_id,
+                                message.blob_body_offset,
                             ),
                         );
                     }
-                    EmailProperty::BodyValues => {
-                        let mut body_values = Map::with_capacity(contents.parts.len());
-                        for (part_id, part) in contents.parts.iter().enumerate() {
-                            if ((contents.is_html_part(part_id as u16)
+                    (EmailProperty::BodyValues, Some(message)) => {
+                        let mut body_values = Map::with_capacity(message.contents.parts.len());
+                        for (part_id, part) in message.contents.parts.iter().enumerate() {
+                            if ((message.contents.is_html_part(part_id as u16)
                                 && (fetch_all_body_values || fetch_html_body_values))
-                                || (contents.is_text_part(part_id as u16)
+                                || (message.contents.is_text_part(part_id as u16)
                                     && (fetch_all_body_values || fetch_text_body_values)))
                                 && matches!(
                                     part.body,
                                     ArchivedMetadataPartType::Text | ArchivedMetadataPartType::Html
                                 )
                             {
-                                let contents = part.decode_contents(&raw_message);
+                                let contents = part.decode_contents(&message.raw_message);
 
                                 let (is_truncated, value) = match &part.body {
                                     ArchivedMetadataPartType::Text => {
@@ -434,10 +475,16 @@ impl EmailGet for Server {
                         email.insert_unchecked(EmailProperty::BodyValues, body_values);
                     }
 
-                    _ => {
+                    (_, Some(_)) => {
                         return Err(trc::JmapEvent::InvalidArguments
                             .into_err()
                             .details(format!("Invalid property {property:?}")));
+                    }
+                    (_, None) => {
+                        debug_assert!(
+                            false,
+                            "Property {property:?} requires metadata but none was fetched."
+                        );
                     }
                 }
             }
@@ -446,4 +493,13 @@ impl EmailGet for Server {
 
         Ok(response)
     }
+}
+
+struct MessageContext<'x> {
+    metadata: &'x ArchivedMessageMetadata,
+    contents: &'x ArchivedMessageMetadataContents,
+    root_part: &'x ArchivedMessageMetadataPart,
+    raw_message: ChainedBytes<'x>,
+    blob_id: BlobId,
+    blob_body_offset: isize,
 }

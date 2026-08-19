@@ -9,6 +9,7 @@ use common::{
     CustomKeywords, MessageCache, MessageStoreCache, MessageUid, MessagesCache, Server,
     auth::AccessToken, sharing::EffectiveAcl,
 };
+use compact_str::CompactString;
 use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, keyword::Keyword};
@@ -72,11 +73,11 @@ pub(crate) async fn update_email_cache(
     for item in &store_cache.emails.items {
         if !changed_ids.contains_key(&item.document_id) {
             if item.keywords & HAS_CUSTOM_KEYWORDS != 0
-                && let Some(custom_keywords) = store_cache
+                && let Ok(idx) = store_cache
                     .emails
                     .keywords
-                    .iter()
-                    .find(|k| k.document_id == item.document_id)
+                    .binary_search_by_key(&item.document_id, |k| k.document_id)
+                && let Some(custom_keywords) = store_cache.emails.keywords.get(idx)
             {
                 new_cache.keywords.push(CustomKeywords {
                     names: custom_keywords.names.clone(),
@@ -134,6 +135,7 @@ pub(crate) async fn full_email_cache_build(
 impl MessagesCacheBuilder {
     pub fn build(mut self) -> MessagesCache {
         self.items.sort_unstable_by_key(|m| m.received_at);
+        self.keywords.sort_unstable_by_key(|k| k.document_id);
         self.index = AHashMap::with_capacity(self.items.len());
 
         let mut size = self
@@ -175,6 +177,10 @@ pub trait MessageCacheAccess {
     fn email_by_id(&self, id: &u32) -> Option<&MessageCache>;
 
     fn has_email_id(&self, id: &u32) -> bool;
+
+    fn custom_keywords(&self, message: &MessageCache) -> &[CompactString];
+
+    fn message_data(&self, document_id: u32) -> Option<MessageData>;
 
     fn in_mailbox(&self, mailbox_id: u32) -> impl Iterator<Item = &MessageCache>;
 
@@ -350,31 +356,47 @@ impl MessageCacheAccess for MessageStoreCache {
         self.emails.index.contains_key(id)
     }
 
+    fn custom_keywords(&self, message: &MessageCache) -> &[CompactString] {
+        if message.keywords & HAS_CUSTOM_KEYWORDS != 0 {
+            self.emails
+                .keywords
+                .binary_search_by_key(&message.document_id, |k| k.document_id)
+                .map_or(&[][..], |idx| &self.emails.keywords[idx].names)
+        } else {
+            &[]
+        }
+    }
+
+    fn message_data(&self, document_id: u32) -> Option<MessageData> {
+        let message = self.email_by_id(&document_id)?;
+
+        Some(MessageData {
+            mailboxes: message.mailboxes.clone(),
+            keywords: message.keywords & !HAS_CUSTOM_KEYWORDS,
+            keywords_extra: self.custom_keywords(message).to_vec(),
+            thread_id: message.thread_id,
+            size: message.size,
+            received_at: message.received_at,
+            sent_at: message.sent_at,
+            change_id: message.change_id,
+        })
+    }
+
     fn expand_keywords(&self, message: &MessageCache) -> impl Iterator<Item = Keyword> {
         KeywordsIter(message.keywords & !HAS_CUSTOM_KEYWORDS).chain(
-            (message.keywords & HAS_CUSTOM_KEYWORDS != 0)
-                .then(|| {
-                    self.emails
-                        .keywords
-                        .iter()
-                        .filter(|k| k.document_id == message.document_id)
-                        .flat_map(|k| k.names.iter().map(|n| Keyword::Other(n.clone())))
-                })
-                .into_iter()
-                .flatten(),
+            self.custom_keywords(message)
+                .iter()
+                .map(|name| Keyword::Other(name.clone())),
         )
     }
 
     fn has_keyword(&self, message: &MessageCache, keyword: &Keyword) -> bool {
         match keyword.id() {
             Ok(id) => (message.keywords & (1 << id)) != 0,
-            Err(name) => {
-                message.keywords & HAS_CUSTOM_KEYWORDS != 0
-                    && self.emails.keywords.iter().any(|k| {
-                        k.document_id == message.document_id
-                            && k.names.iter().any(|n| n.as_str() == name)
-                    })
-            }
+            Err(name) => self
+                .custom_keywords(message)
+                .iter()
+                .any(|n| n.as_str() == name),
         }
     }
 }

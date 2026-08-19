@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use types::{acl::AclGrant, special_use::SpecialUse};
+use store::{
+    Deserialize, Serialize,
+    write::{AlignedBytes, Archive, Archiver, BatchBuilder, MergeResult},
+};
+use trc::AddContext;
+use types::{acl::AclGrant, collection::SyncCollection, field::Field, special_use::SpecialUse};
 
 pub mod destroy;
 pub mod index;
@@ -84,4 +89,34 @@ impl ArchivedMailbox {
     pub fn is_subscribed(&self, subscriber: u32) -> bool {
         self.subscribers.iter().any(|x| u32::from(x) == subscriber)
     }
+}
+
+pub fn merge_subscription(batch: &mut BatchBuilder, subscriber: u32, subscribe: bool) {
+    batch.log_container_update(SyncCollection::Email);
+    batch.merge_fnc(Field::ARCHIVE, move |_, bytes| {
+        let Some(bytes) = bytes else {
+            return Err(trc::StoreEvent::AssertValueFailed
+                .into_err()
+                .details("Mailbox no longer exists.")
+                .caused_by(trc::location!()));
+        };
+
+        let mut mailbox = <Archive<AlignedBytes> as Deserialize>::deserialize(bytes)
+            .and_then(|archive| archive.deserialize::<Mailbox>())
+            .caused_by(trc::location!())?;
+
+        let changed = if subscribe {
+            mailbox.add_subscriber(subscriber)
+        } else {
+            let was_subscribed = mailbox.is_subscribed(subscriber);
+            mailbox.remove_subscriber(subscriber);
+            was_subscribed
+        };
+
+        if changed {
+            Archiver::new(mailbox).serialize().map(MergeResult::Update)
+        } else {
+            Ok(MergeResult::Skip)
+        }
+    });
 }
