@@ -140,77 +140,76 @@ where
     T: rkyv::Archive
         + for<'a> rkyv::Serialize<
             rkyv::api::high::HighSerializer<
-                rkyv::util::AlignedVec,
+                Vec<u8>,
                 rkyv::ser::allocator::ArenaHandle<'a>,
                 rkyv::rancor::Error,
             >,
         >,
 {
     fn serialize(&self) -> trc::Result<Vec<u8>> {
-        rkyv::to_bytes::<rkyv::rancor::Error>(&self.inner)
-            .map_err(|err| {
-                trc::StoreEvent::DeserializeError
-                    .caused_by(trc::location!())
-                    .reason(err)
-            })
-            .map(|input| {
-                let input = input.as_ref();
-                let input_len = input.len();
-                let version_offset = ((self.flags & VERSIONED != 0) as usize) * U64_LEN;
-                let mut bytes = if input_len > COMPRESS_WATERMARK {
-                    let mut bytes = vec![
-                        self.flags | LZ4_COMPRESSED;
-                        lz4_flex::block::get_maximum_output_size(input_len)
-                            + (U32_LEN * 2)
-                            + version_offset
-                            + 1
-                    ];
+        let version_offset = ((self.flags & VERSIONED != 0) as usize) * U64_LEN;
+        let trailer_len = U32_LEN + version_offset + 1;
+        let mut bytes = rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(
+            &self.inner,
+            Vec::with_capacity(std::mem::size_of::<T::Archived>() + trailer_len),
+        )
+        .map_err(|err| {
+            trc::StoreEvent::DeserializeError
+                .caused_by(trc::location!())
+                .reason(err)
+        })?;
+        let input_len = bytes.len();
 
-                    // Compress the data
-                    let compressed_len =
-                        lz4_flex::compress_into(input, &mut bytes[U32_LEN..]).unwrap();
+        if input_len > COMPRESS_WATERMARK {
+            let mut compressed = vec![
+                self.flags | LZ4_COMPRESSED;
+                lz4_flex::block::get_maximum_output_size(input_len)
+                    + (U32_LEN * 2)
+                    + version_offset
+                    + 1
+            ];
 
-                    if compressed_len < input_len {
-                        // Prepend the length of the uncompressed data
-                        bytes[..U32_LEN].copy_from_slice(&(input_len as u32).to_le_bytes());
+            // Compress the data
+            let compressed_len =
+                lz4_flex::compress_into(&bytes, &mut compressed[U32_LEN..]).unwrap();
 
-                        if self.flags & HASHED != 0 {
-                            // Hash the compressed data including the length
-                            let hash =
-                                xxhash_rust::xxh3::xxh3_64(&bytes[..compressed_len + U32_LEN])
-                                    as u32;
+            if compressed_len < input_len {
+                // Prepend the length of the uncompressed data
+                compressed[..U32_LEN].copy_from_slice(&(input_len as u32).to_le_bytes());
 
-                            // Add the hash
-                            bytes[compressed_len + U32_LEN..compressed_len + (U32_LEN * 2)]
-                                .copy_from_slice(&hash.to_be_bytes());
-
-                            // Truncate to the actual size
-                            bytes.truncate(compressed_len + (U32_LEN * 2) + version_offset + 1);
-                        } else {
-                            // Truncate to the actual size
-                            bytes.truncate(compressed_len + U32_LEN + 1);
-                        }
-
-                        return bytes;
-                    }
-                    bytes.clear();
-                    bytes
-                } else {
-                    Vec::with_capacity(input_len + U32_LEN + version_offset + 1)
-                };
-
-                bytes.extend_from_slice(input);
                 if self.flags & HASHED != 0 {
-                    bytes.extend_from_slice(
-                        &(xxhash_rust::xxh3::xxh3_64(input) as u32).to_be_bytes(),
-                    );
+                    // Hash the compressed data including the length
+                    let hash =
+                        xxhash_rust::xxh3::xxh3_64(&compressed[..compressed_len + U32_LEN]) as u32;
+
+                    // Add the hash
+                    let hashed_len = compressed_len + (U32_LEN * 2);
+                    compressed[compressed_len + U32_LEN..hashed_len]
+                        .copy_from_slice(&hash.to_be_bytes());
+                    compressed[hashed_len..hashed_len + version_offset].fill(0);
+
+                    // Truncate to the actual size
+                    compressed.truncate(hashed_len + version_offset + 1);
+                } else {
+                    // Truncate to the actual size
+                    compressed.truncate(compressed_len + U32_LEN + 1);
                 }
-                if version_offset != 0 {
-                    bytes.extend_from_slice(0u64.to_be_bytes().as_slice());
-                }
-                bytes.push(self.flags);
-                bytes
-            })
+
+                return Ok(compressed);
+            }
+        }
+
+        bytes.reserve_exact(trailer_len);
+        if self.flags & HASHED != 0 {
+            let hash = (xxhash_rust::xxh3::xxh3_64(&bytes) as u32).to_be_bytes();
+            bytes.extend_from_slice(&hash);
+        }
+        if version_offset != 0 {
+            bytes.extend_from_slice(0u64.to_be_bytes().as_slice());
+        }
+        bytes.push(self.flags);
+
+        Ok(bytes)
     }
 }
 
@@ -389,7 +388,7 @@ where
     T: rkyv::Archive
         + for<'a> rkyv::Serialize<
             rkyv::api::high::HighSerializer<
-                rkyv::util::AlignedVec,
+                Vec<u8>,
                 rkyv::ser::allocator::ArenaHandle<'a>,
                 rkyv::rancor::Error,
             >,

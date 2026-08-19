@@ -5,10 +5,10 @@
  */
 
 use crate::{
-    Deserialize, IterateParams, Store, U16_LEN, U32_LEN,
+    IterateParams, Store, U16_LEN, U32_LEN,
     search::{
-        GLOBAL_BUCKET_SHIFT, KeyValueMatch, SearchField, SearchFilter, SearchQuery, TextMatch,
-        codec,
+        ACCOUNT_BLOCK_SHIFT, GLOBAL_BUCKET_SHIFT, KeyValueMatch, SearchField, SearchFilter,
+        SearchQuery, TextMatch, codec,
         term::matches_phrase,
         tokenize::{integer_term, key_value_term, stem_term, tokenize},
     },
@@ -586,7 +586,7 @@ impl AccountContext<'_> {
                     .zip(codec::parse_prefix_key(
                         key,
                         codec::ACCOUNT_TERM_BASE_LEN,
-                        1,
+                        U16_LEN,
                     ))
                     .and_then(|(field, parsed)| {
                         CheekyHash::from_key_bytes(parsed.term, parsed.len)
@@ -611,7 +611,10 @@ impl AccountContext<'_> {
                 });
 
                 if is_probe || has_prefix {
-                    match LazyBitmap::deserialize(value) {
+                    match LazyBitmap::deserialize_delta(
+                        value,
+                        (parsed.block_id as u32) << ACCOUNT_BLOCK_SHIFT,
+                    ) {
                         Ok(bitmap) => {
                             if has_prefix {
                                 prefix_matches |= &bitmap.0;

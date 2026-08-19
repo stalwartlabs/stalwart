@@ -8,7 +8,7 @@ use crate::utils::{cleanup::store_assert_is_empty, server::TestServer};
 use ahash::AHashSet;
 use std::collections::HashSet;
 use store::{
-    ValueKey,
+    U64_LEN, ValueKey,
     rand::{self, RngExt},
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, MergeResult, ValueClass},
 };
@@ -873,16 +873,18 @@ pub async fn test(test: &TestServer) {
                     .with_account_id(0)
                     .with_collection(Collection::Email)
                     .with_document(document_id)
-                    .set_fnc(ValueClass::Property(5), move |ids| {
-                        let change_id = ids.current_change_id()?;
-                        let offset = offset as usize;
+                    .set_fnc(
+                        ValueClass::Property(5),
+                        archived_value,
+                        move |ids, bytes| {
+                            let change_id = ids.current_change_id()?;
+                            let offset = offset as usize;
 
-                        let mut bytes = Vec::with_capacity(archived_value.len());
-                        bytes.extend_from_slice(&archived_value[..offset]);
-                        bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
-                        bytes.push(archived_value.last().copied().unwrap()); // Marker
-                        Ok(bytes)
-                    })
+                            bytes[offset..offset + U64_LEN]
+                                .copy_from_slice(&change_id.to_be_bytes());
+                            Ok(())
+                        },
+                    )
                     .log_container_insert(SyncCollection::Email);
                 db.write(builder.build_all())
                     .await

@@ -12,7 +12,7 @@ use rkyv::{
 };
 use std::{borrow::Cow, fmt::Debug};
 use store::{
-    Serialize, SerializeInfallible,
+    Serialize, SerializeInfallible, U64_LEN,
     write::{
         AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations,
         SearchIndex, ValueClass,
@@ -235,7 +235,7 @@ pub trait IndexableAndSerializableObject:
     + rkyv::Archive
     + for<'a> rkyv::Serialize<
         rkyv::api::high::HighSerializer<
-            rkyv::util::AlignedVec,
+            Vec<u8>,
             rkyv::ser::allocator::ArenaHandle<'a>,
             rkyv::rancor::Error,
         >,
@@ -297,17 +297,13 @@ impl<T: IndexableAndSerializableObject> SerializableObject for T {
     fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()> {
         if T::is_versioned() {
             let (offset, archive) = Archiver::new(self).serialize_versioned()?;
+            let offset = offset as usize;
             batch
                 .set_archive_hash(Archive::<AlignedBytes>::extract_hash(&archive))
-                .set_fnc(Field::ARCHIVE, move |ids| {
+                .set_fnc(Field::ARCHIVE, archive, move |ids, bytes| {
                     let change_id = ids.current_change_id()?;
-                    let offset = offset as usize;
-
-                    let mut bytes = Vec::with_capacity(archive.len());
-                    bytes.extend_from_slice(&archive[..offset]);
-                    bytes.extend_from_slice(&change_id.to_be_bytes()[..]);
-                    bytes.push(archive.last().copied().unwrap()); // Marker
-                    Ok(bytes)
+                    bytes[offset..offset + U64_LEN].copy_from_slice(&change_id.to_be_bytes());
+                    Ok(())
                 });
         } else {
             let archive = Archiver::new(self).serialize()?;

@@ -102,9 +102,9 @@ impl FdbStore {
                                         .ctx(trc::Key::Reason, "Value is too large"));
                                 }
                             }
-                            ValueOp::SetFnc(set_op) => {
-                                let value = (set_op.0)(&result)?;
-                                if !chunk_value(&trx, &mut key_buf, &value, subspace, class, None)
+                            ValueOp::SetFnc { payload, fnc } => {
+                                (fnc.0)(&result, payload)?;
+                                if !chunk_value(&trx, &mut key_buf, payload, subspace, class, None)
                                     .await
                                 {
                                     trx.cancel();

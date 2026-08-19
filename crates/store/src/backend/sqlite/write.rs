@@ -99,15 +99,15 @@ impl SqliteStore {
                                     .caused_by(trc::location!())?;
                                 }
                             }
-                            ValueOp::SetFnc(set_op) => {
-                                let value = (set_op.0)(&result)?;
+                            ValueOp::SetFnc { payload, fnc } => {
+                                (fnc.0)(&result, payload)?;
                                 trx.prepare_cached(&format!(
                                     "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
                                     table
                                 ))
                                 .map_err(into_error)
                                 .caused_by(trc::location!())?
-                                .execute([key, &value])
+                                .execute([key, &*payload])
                                 .map_err(into_error)
                                 .caused_by(trc::location!())?;
                             }

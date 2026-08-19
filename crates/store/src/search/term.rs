@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    Deserialize, Serialize, U32_LEN,
+    Serialize, U32_LEN,
     search::{
         ACCOUNT_BLOCK_SHIFT, EmailSearchField, GLOBAL_BUCKET_SHIFT, IndexDocument,
         MAX_DOCUMENT_SIZE, SearchField, SearchValue,
@@ -26,7 +26,7 @@ use utils::cheeky_hash::{CheekyHash, CheekyHashMap};
 #[derive(Default)]
 pub(crate) struct AccountIndexer {
     #[allow(clippy::type_complexity)]
-    pub terms: CheekyHashMap<AHashMap<u8, AHashMap<u8, AHashMap<u32, bool>>>>,
+    pub terms: CheekyHashMap<AHashMap<u8, AHashMap<u16, AHashMap<u32, bool>>>>,
     pub documents: AHashMap<u32, Option<Document>>,
 }
 
@@ -153,7 +153,7 @@ impl AccountIndexer {
     }
 
     pub fn diff(&mut self, current_document: &[u8], document_id: u32) -> trc::Result<()> {
-        let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u8;
+        let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u16;
         deserialize_term_fields(current_document, |term_hash, mut field_mask| {
             let fields = self.terms.entry(term_hash).or_default();
             while field_mask != 0 {
@@ -175,7 +175,7 @@ impl AccountIndexer {
     pub fn remove(&mut self, current_document: &[u8], document_id: u32) -> trc::Result<()> {
         self.documents.insert(document_id, None);
 
-        let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u8;
+        let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u16;
         deserialize_term_fields(current_document, |term_hash, mut field_mask| {
             while field_mask != 0 {
                 let item = 31 - field_mask.leading_zeros();
@@ -199,7 +199,7 @@ impl AccountIndexer {
             .or_default()
             .entry(field_id)
             .or_default()
-            .entry((document_id >> ACCOUNT_BLOCK_SHIFT) as u8)
+            .entry((document_id >> ACCOUNT_BLOCK_SHIFT) as u16)
             .or_default()
             .insert(document_id, true);
     }
@@ -215,6 +215,7 @@ impl AccountIndexer {
                     if documents.is_empty() {
                         continue;
                     }
+                    let block_base = (block_id as u32) << ACCOUNT_BLOCK_SHIFT;
 
                     batch.merge_fnc(
                         SearchIndexClass::Term {
@@ -226,7 +227,7 @@ impl AccountIndexer {
                         },
                         move |_, bytes| {
                             if let Some(bytes) = bytes {
-                                let mut map = LazyBitmap::deserialize(bytes)?;
+                                let mut map = LazyBitmap::deserialize_delta(bytes, block_base)?;
                                 let mut has_changes = false;
                                 for (document_id, do_insert) in &documents {
                                     if *do_insert {
@@ -237,7 +238,7 @@ impl AccountIndexer {
                                 }
                                 if has_changes {
                                     if !map.0.is_empty() {
-                                        Ok(MergeResult::Update(map.serialize_optimized()))
+                                        Ok(MergeResult::Update(map.serialize_optimized(block_base)))
                                     } else {
                                         Ok(MergeResult::Delete)
                                     }
@@ -252,7 +253,9 @@ impl AccountIndexer {
                                     }
                                 }
                                 if !map.is_empty() {
-                                    Ok(MergeResult::Update(LazyBitmap(map).serialize_optimized()))
+                                    Ok(MergeResult::Update(
+                                        LazyBitmap(map).serialize_optimized(block_base),
+                                    ))
                                 } else {
                                     Ok(MergeResult::Skip)
                                 }

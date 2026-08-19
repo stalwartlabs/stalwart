@@ -198,10 +198,10 @@ impl RocksDBTransaction<'_, '_> {
                         ValueOp::Set(value) => {
                             txn.put_cf(&cf, key, value)?;
                         }
-                        ValueOp::SetFnc(set_op) => {
-                            let value = (set_op.0)(&result)?;
+                        ValueOp::SetFnc { payload, fnc } => {
+                            (fnc.0)(&result, payload)?;
 
-                            txn.put_cf(&cf, key, value)?;
+                            txn.put_cf(&cf, key, &*payload)?;
                         }
                         ValueOp::MergeFnc(merge_op) => {
                             let merge_result = (merge_op.0)(

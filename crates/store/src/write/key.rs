@@ -616,7 +616,7 @@ impl ValueClass {
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
             ValueClass::NodeId(_) => U16_LEN + 1,
             ValueClass::SearchIndex(v) => match v {
-                SearchIndexClass::Term { term, .. } => U32_LEN + term.key_len() + 4,
+                SearchIndexClass::Term { term, .. } => U32_LEN + term.key_len() + U16_LEN + 3,
                 SearchIndexClass::Document { .. } => (U32_LEN * 2) + 1,
                 SearchIndexClass::GlobalTerm { term, .. } => term.key_len() + U16_LEN + 3,
                 SearchIndexClass::GlobalDocument { .. } => U64_LEN + 1,

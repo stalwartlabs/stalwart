@@ -183,8 +183,8 @@ impl MysqlStore {
                                 trx.exec_drop(&s, (key,)).await?;
                             }
                         }
-                        ValueOp::SetFnc(set_op) => {
-                            let value = (set_op.0)(&result)?;
+                        ValueOp::SetFnc { payload, fnc } => {
+                            (fnc.0)(&result, payload)?;
                             let exists = asserted_values.get(key);
                             let s = if let Some(exists) = exists {
                                 if *exists {
@@ -205,7 +205,10 @@ impl MysqlStore {
                             .await?
                             };
 
-                            match trx.exec_drop(&s, params! {"k" => key, "v" => &value}).await {
+                            match trx
+                                .exec_drop(&s, params! {"k" => key, "v" => &*payload})
+                                .await
+                            {
                                 Ok(_) => {
                                     if trx.affected_rows() == 0 {
                                         trx.rollback().await?;

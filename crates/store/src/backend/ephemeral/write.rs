@@ -64,9 +64,9 @@ impl EphemeralStore {
                         ValueOp::Set(value) => {
                             map.insert(key, std::mem::take(value));
                         }
-                        ValueOp::SetFnc(set_op) => {
-                            let value = (set_op.0)(&result)?;
-                            map.insert(key, value);
+                        ValueOp::SetFnc { payload, fnc } => {
+                            (fnc.0)(&result, payload)?;
+                            map.insert(key, payload.clone());
                         }
                         ValueOp::MergeFnc(merge_op) => {
                             let merge_result =

@@ -164,13 +164,17 @@ impl BatchBuilder {
     pub fn set_fnc(
         &mut self,
         class: impl Into<ValueClass>,
-        fnc: impl Fn(&AssignedIds) -> trc::Result<Vec<u8>> + Send + Sync + 'static,
+        payload: Vec<u8>,
+        fnc: impl Fn(&AssignedIds, &mut [u8]) -> trc::Result<()> + Send + Sync + 'static,
     ) -> &mut Self {
         let class = class.into();
-        self.batch_size += class.key_len_hint();
+        self.batch_size += class.key_len_hint() + payload.len();
         self.ops.push(Operation::Value {
             class,
-            op: ValueOp::SetFnc(SetOperation(Box::new(fnc))),
+            op: ValueOp::SetFnc {
+                payload,
+                fnc: SetOperation(Box::new(fnc)),
+            },
         });
         self.batch_ops += 1;
         self

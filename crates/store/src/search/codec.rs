@@ -144,14 +144,14 @@ pub(crate) fn account_term_range(
     field: u8,
     term: &CheekyHash,
 ) -> (Vec<u8>, Vec<u8>) {
-    let mut begin = Vec::with_capacity(ACCOUNT_TERM_BASE_LEN + term.key_len() + 3);
+    let mut begin = Vec::with_capacity(ACCOUNT_TERM_BASE_LEN + term.key_len() + 4);
     begin.push(index.to_u8());
     begin.extend_from_slice(&account_id.to_be_bytes());
     begin.push(field);
     begin.extend_from_slice(term.as_key());
     begin.push(term.len() as u8);
     let mut end = begin.clone();
-    end.extend_from_slice(&[u8::MAX; 2]);
+    end.extend_from_slice(&[u8::MAX; U16_LEN + 1]);
     (begin, end)
 }
 
@@ -245,10 +245,10 @@ mod tests {
         let hashed_term = CheekyHash::new(b"this term is longer than sixteen bytes");
 
         for (term, block_id) in [
-            (short_term, 0u8),
+            (short_term, 0u16),
             (short_term, 7),
-            (short_term, u8::MAX),
-            (hashed_term, 3),
+            (short_term, u16::MAX),
+            (hashed_term, 0x0300),
         ] {
             let key = ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Term {
                 index: SearchIndex::Email,
@@ -260,10 +260,10 @@ mod tests {
             .serialize(0);
             let (begin, end) = account_term_range(SearchIndex::Email, 42, 3, &term);
             assert!(key >= begin && key < end, "block {block_id} outside range");
-            let parsed = parse_prefix_key(&key, ACCOUNT_TERM_BASE_LEN, 1).unwrap();
+            let parsed = parse_prefix_key(&key, ACCOUNT_TERM_BASE_LEN, U16_LEN).unwrap();
             assert_eq!(parsed.term, term.as_key());
             assert_eq!(parsed.len as usize, term.len());
-            assert_eq!(parsed.block_id, block_id as u16);
+            assert_eq!(parsed.block_id, block_id);
             assert_eq!(
                 CheekyHash::from_key_bytes(parsed.term, parsed.len),
                 Some(term)
@@ -292,7 +292,7 @@ mod tests {
         .serialize(0);
         assert!(!(outside >= begin && outside < end));
 
-        assert!(parse_prefix_key(&[1, 2], ACCOUNT_TERM_BASE_LEN, 1).is_none());
+        assert!(parse_prefix_key(&[1, 2], ACCOUNT_TERM_BASE_LEN, U16_LEN).is_none());
         assert!(parse_block_id(&[1]).is_none());
     }
 

@@ -179,8 +179,8 @@ impl PostgresStore {
                                 trx.execute(&s, &[&key]).await?;
                             }
                         }
-                        ValueOp::SetFnc(set_op) => {
-                            let value = (set_op.0)(&result)?;
+                        ValueOp::SetFnc { payload, fnc } => {
+                            (fnc.0)(&result, payload)?;
 
                             let s = if let Some(exists) = asserted_values.get(key) {
                                 if *exists {
@@ -207,7 +207,7 @@ impl PostgresStore {
                                 .await?
                             };
 
-                            if trx.execute(&s, &[&key, &value]).await? == 0 {
+                            if trx.execute(&s, &[&key, &&**payload]).await? == 0 {
                                 return Err(trc::StoreEvent::AssertValueFailed
                                     .into_err()
                                     .caused_by(trc::location!())

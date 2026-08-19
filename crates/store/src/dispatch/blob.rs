@@ -13,6 +13,13 @@ const LZ4_MARKER: u8 = MAGIC_MARKER | 0x01;
 //const ZSTD_MARKER: u8 = MAGIC_MARKER | 0x02;
 const NONE_MARKER: u8 = 0x00;
 
+fn store_uncompressed(data: &[u8]) -> Vec<u8> {
+    let mut uncompressed = Vec::with_capacity(data.len() + 1);
+    uncompressed.extend_from_slice(data);
+    uncompressed.push(NONE_MARKER);
+    uncompressed
+}
+
 impl BlobStore {
     pub async fn get_blob(&self, key: &[u8], range: Range<usize>) -> trc::Result<Option<Vec<u8>>> {
         let start_time = Instant::now();
@@ -111,12 +118,6 @@ impl BlobStore {
         compression: CompressionAlgo,
     ) -> trc::Result<()> {
         let data = match compression {
-            CompressionAlgo::None => {
-                let mut uncompressed = Vec::with_capacity(data.len() + 1);
-                uncompressed.extend_from_slice(data);
-                uncompressed.push(NONE_MARKER);
-                uncompressed
-            }
             CompressionAlgo::Lz4 => {
                 let mut compressed =
                     vec![
@@ -128,13 +129,18 @@ impl BlobStore {
                 let compressed_len =
                     lz4_flex::compress_into(data, &mut compressed[U32_LEN..]).unwrap();
 
-                // Prepend the length of the uncompressed data
-                compressed[..U32_LEN].copy_from_slice(&(data.len() as u32).to_le_bytes());
+                if compressed_len + U32_LEN < data.len() {
+                    // Prepend the length of the uncompressed data
+                    compressed[..U32_LEN].copy_from_slice(&(data.len() as u32).to_le_bytes());
 
-                // Truncate to the actual size
-                compressed.truncate(compressed_len + U32_LEN + 1);
-                compressed
+                    // Truncate to the actual size
+                    compressed.truncate(compressed_len + U32_LEN + 1);
+                    compressed
+                } else {
+                    store_uncompressed(data)
+                }
             }
+            CompressionAlgo::None => store_uncompressed(data),
         };
 
         let start_time = Instant::now();

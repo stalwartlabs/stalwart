@@ -62,7 +62,7 @@ where
     T: rkyv::Archive
         + for<'a> rkyv::Serialize<
             rkyv::api::high::HighSerializer<
-                rkyv::util::AlignedVec,
+                Vec<u8>,
                 rkyv::ser::allocator::ArenaHandle<'a>,
                 rkyv::rancor::Error,
             >,
@@ -212,7 +212,7 @@ pub enum SearchIndexClass {
         account_id: u32,
         field: u8,
         term: CheekyHash,
-        block_id: u8,
+        block_id: u16,
     },
     Document {
         index: SearchIndex,
@@ -333,7 +333,10 @@ pub struct QueueEvent {
 #[derive(Debug, PartialEq, Eq, Hash, Default)]
 pub enum ValueOp {
     Set(Vec<u8>),
-    SetFnc(SetOperation),
+    SetFnc {
+        payload: Vec<u8>,
+        fnc: SetOperation,
+    },
     MergeFnc(MergeOperation),
     AtomicAdd(i64),
     AddAndGet(i64),
@@ -347,7 +350,7 @@ pub enum MergeResult {
     Delete,
 }
 
-pub type SetFnc = Box<dyn Fn(&AssignedIds) -> trc::Result<Vec<u8>> + Send + Sync>;
+pub type SetFnc = Box<dyn Fn(&AssignedIds, &mut [u8]) -> trc::Result<()> + Send + Sync>;
 pub type MergeFnc =
     Box<dyn Fn(&AssignedIds, Option<&[u8]>) -> trc::Result<MergeResult> + Send + Sync>;
 
