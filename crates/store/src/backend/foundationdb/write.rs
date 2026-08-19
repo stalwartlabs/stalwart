@@ -100,24 +100,37 @@ impl FdbStore {
                                 }
                             }
                             ValueOp::MergeFnc(merge_op) => {
-                                let (merge_result, is_chunked) =
-                                    match read_chunked_value(&key, &trx, false)
-                                        .await
-                                        .map_err(into_error)
-                                        .caused_by(trc::location!())?
-                                    {
-                                        ChunkedValue::Single(slice) => {
-                                            ((merge_op.0)(&result, Some(slice.as_ref()))?, false)
-                                        }
-                                        ChunkedValue::Chunked { bytes, .. } => {
-                                            ((merge_op.0)(&result, Some(bytes.as_ref()))?, true)
-                                        }
-                                        ChunkedValue::None => ((merge_op.0)(&result, None)?, false),
-                                    };
+                                let chunked_value = read_chunked_value(&key, &trx, false)
+                                    .await
+                                    .map_err(into_error)
+                                    .caused_by(trc::location!())?;
+                                let mut current_value = None;
+                                let (merge_result, is_chunked) = match &chunked_value {
+                                    ChunkedValue::Single(slice) => {
+                                        current_value = Some(slice.as_ref());
+                                        ((merge_op.0)(&result, Some(slice.as_ref()))?, false)
+                                    }
+                                    ChunkedValue::Chunked { bytes, .. } => {
+                                        ((merge_op.0)(&result, Some(bytes.as_ref()))?, true)
+                                    }
+                                    ChunkedValue::None => ((merge_op.0)(&result, None)?, false),
+                                };
 
                                 match merge_result {
                                     MergeResult::Update(value) => {
-                                        if !chunk_value(&trx, &mut key, &value) {
+                                        if let Some(append_bytes) =
+                                            current_value.and_then(|current| {
+                                                value
+                                                    .strip_prefix(current)
+                                                    .filter(|_| value.len() < MAX_VALUE_SIZE)
+                                            })
+                                        {
+                                            trx.atomic_op(
+                                                &key,
+                                                append_bytes,
+                                                MutationType::AppendIfFits,
+                                            );
+                                        } else if !chunk_value(&trx, &mut key, &value) {
                                             trx.cancel();
                                             return Err(trc::StoreEvent::FoundationdbError
                                                 .ctx(trc::Key::Reason, "Value is too large"));
