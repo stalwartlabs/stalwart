@@ -60,6 +60,7 @@ impl FdbStore {
                 }
             }
 
+            let mut key_buf = Vec::with_capacity(64);
             for op in batch.ops.iter_mut() {
                 match op {
                     Operation::AccountId {
@@ -81,12 +82,21 @@ impl FdbStore {
                         document_id = *document_id_;
                     }
                     Operation::Value { class, op } => {
-                        let mut key =
-                            class.serialize(account_id, collection, document_id, WITH_SUBSPACE);
+                        let subspace = class.subspace(collection);
+                        key_buf.clear();
+                        class.serialize_into(
+                            &mut key_buf,
+                            account_id,
+                            collection,
+                            document_id,
+                            WITH_SUBSPACE,
+                        );
 
                         match op {
                             ValueOp::Set(value) => {
-                                if !chunk_value(&trx, &mut key, value, class, None).await {
+                                if !chunk_value(&trx, &mut key_buf, value, subspace, class, None)
+                                    .await
+                                {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
                                         .ctx(trc::Key::Reason, "Value is too large"));
@@ -94,14 +104,16 @@ impl FdbStore {
                             }
                             ValueOp::SetFnc(set_op) => {
                                 let value = (set_op.0)(&result)?;
-                                if !chunk_value(&trx, &mut key, &value, class, None).await {
+                                if !chunk_value(&trx, &mut key_buf, &value, subspace, class, None)
+                                    .await
+                                {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
                                         .ctx(trc::Key::Reason, "Value is too large"));
                                 }
                             }
                             ValueOp::MergeFnc(merge_op) => {
-                                let chunked_value = read_chunked_value(&key, &trx, false)
+                                let chunked_value = read_chunked_value(&key_buf, &trx, false)
                                     .await
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?;
@@ -128,14 +140,15 @@ impl FdbStore {
                                             })
                                         {
                                             trx.atomic_op(
-                                                &key,
+                                                &key_buf,
                                                 append_bytes,
                                                 MutationType::AppendIfFits,
                                             );
                                         } else if !chunk_value(
                                             &trx,
-                                            &mut key,
+                                            &mut key_buf,
                                             &value,
+                                            subspace,
                                             class,
                                             Some(prev_num_chunks),
                                         )
@@ -148,71 +161,79 @@ impl FdbStore {
                                     }
                                     MergeResult::Delete => {
                                         if prev_num_chunks > 1 {
-                                            clear_chunks(&trx, &key, None).await;
+                                            clear_chunks(&trx, &key_buf, None).await;
                                         } else {
-                                            trx.clear(&key);
+                                            trx.clear(&key_buf);
                                         }
                                     }
                                     MergeResult::Skip => (),
                                 }
                             }
                             ValueOp::AtomicAdd(by) => {
-                                trx.atomic_op(&key, &by.to_le_bytes()[..], MutationType::Add);
+                                trx.atomic_op(&key_buf, &by.to_le_bytes()[..], MutationType::Add);
                             }
                             ValueOp::AddAndGet(by) => {
                                 let num = if let Some(bytes) =
-                                    trx.get(&key, false).await.map_err(into_error)?
+                                    trx.get(&key_buf, false).await.map_err(into_error)?
                                 {
-                                    deserialize_i64_le(&key, &bytes)? + *by
+                                    deserialize_i64_le(&key_buf, &bytes)? + *by
                                 } else {
                                     *by
                                 };
-                                trx.set(&key, &num.to_le_bytes()[..]);
+                                trx.set(&key_buf, &num.to_le_bytes()[..]);
                                 result.push_counter_id(num);
                             }
                             ValueOp::Clear => {
-                                if is_chunked_value(key[0], class) {
-                                    clear_chunks(&trx, &key, None).await;
+                                if is_chunked_value(subspace, class) {
+                                    clear_chunks(&trx, &key_buf, None).await;
                                 } else {
-                                    trx.clear(&key);
+                                    trx.clear(&key_buf);
                                 }
                             }
                         }
                     }
                     Operation::Index { field, key, set } => {
-                        let key = IndexKey {
+                        key_buf.clear();
+                        IndexKey {
                             account_id,
                             collection,
                             document_id,
                             field: *field,
                             key: &*key,
                         }
-                        .serialize(WITH_SUBSPACE);
+                        .serialize_into(&mut key_buf, WITH_SUBSPACE);
 
                         if *set {
-                            trx.set(&key, &[]);
+                            trx.set(&key_buf, &[]);
                         } else {
-                            trx.clear(&key);
+                            trx.clear(&key_buf);
                         }
                     }
                     Operation::Log { collection, set } => {
-                        let key = LogKey {
+                        key_buf.clear();
+                        LogKey {
                             account_id,
                             collection: u8::from(*collection),
                             change_id,
                         }
-                        .serialize(WITH_SUBSPACE);
+                        .serialize_into(&mut key_buf, WITH_SUBSPACE);
 
-                        trx.set(&key, set);
+                        trx.set(&key_buf, set);
                     }
                     Operation::AssertValue {
                         class,
                         assert_value,
                     } => {
-                        let key =
-                            class.serialize(account_id, collection, document_id, WITH_SUBSPACE);
+                        key_buf.clear();
+                        class.serialize_into(
+                            &mut key_buf,
+                            account_id,
+                            collection,
+                            document_id,
+                            WITH_SUBSPACE,
+                        );
 
-                        let matches = match read_chunked_value(&key, &trx, false).await {
+                        let matches = match read_chunked_value(&key_buf, &trx, false).await {
                             Ok(ChunkedValue::Single(bytes)) => assert_value.matches(bytes.as_ref()),
                             Ok(ChunkedValue::Chunked { bytes, .. }) => {
                                 assert_value.matches(bytes.as_ref())
@@ -266,10 +287,14 @@ impl FdbStore {
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
         // Obtain all zero counters
         let mut delete_keys = Vec::new();
-        for subspace in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
+        for subspace in Subspace::ALL
+            .iter()
+            .copied()
+            .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
+        {
             let trx = self.db.create_trx().map_err(into_error)?;
-            let from_key = [subspace, 0u8];
-            let to_key = [subspace, u8::MAX, u8::MAX, u8::MAX, u8::MAX, u8::MAX];
+            let from_key = [subspace.byte(), 0u8];
+            let to_key = [subspace.byte(), u8::MAX, u8::MAX, u8::MAX, u8::MAX, u8::MAX];
 
             let mut values = trx.get_ranges_keyvalues(
                 RangeOption {
@@ -324,35 +349,38 @@ impl FdbStore {
     }
 }
 
-fn is_chunked_subspace(subspace: u8) -> bool {
+fn is_chunked_subspace(subspace: Subspace) -> bool {
     matches!(
         subspace,
-        crate::SUBSPACE_PROPERTY
-            | crate::SUBSPACE_SEARCH_INDEX
-            | crate::SUBSPACE_QUEUE_MESSAGE
-            | crate::SUBSPACE_TASK_QUEUE
-            | crate::SUBSPACE_DIRECTORY
-            | crate::SUBSPACE_REGISTRY
-            | crate::SUBSPACE_DELETED_ITEMS
-            | crate::SUBSPACE_SPAM_SAMPLES
-            | crate::SUBSPACE_REPORT_IN
-            | crate::SUBSPACE_REPORT_OUT
-            | crate::SUBSPACE_TELEMETRY_SPAN
+        Subspace::Property
+            | Subspace::Immutable
+            | Subspace::IndexProperty
+            | Subspace::SearchDocument
+            | Subspace::QueueMessage
+            | Subspace::TaskQueue
+            | Subspace::Directory
+            | Subspace::Registry
+            | Subspace::DeletedItems
+            | Subspace::SpamSamples
+            | Subspace::ReportIn
+            | Subspace::ReportOut
+            | Subspace::TelemetrySpan
     )
 }
 
-fn is_chunked_value(subspace: u8, class: &ValueClass) -> bool {
+fn is_chunked_value(subspace: Subspace, class: &ValueClass) -> bool {
     is_chunked_subspace(subspace)
-        && match class {
+        && matches!(
+            class,
             ValueClass::Property(_)
-            | ValueClass::IndexProperty(IndexPropertyClass::Hash { .. })
-            | ValueClass::Registry(RegistryClass::Item { .. })
-            | ValueClass::Queue(QueueClass::Message(_))
-            | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
-            | ValueClass::Telemetry(TelemetryClass::Span(_)) => true,
-            ValueClass::SearchIndex(SearchIndexClass::Document { .. }) => true,
-            _ => false,
-        }
+                | ValueClass::Immutable(_)
+                | ValueClass::IndexProperty(IndexPropertyClass::Hash { .. })
+                | ValueClass::Registry(RegistryClass::Item { .. })
+                | ValueClass::Queue(QueueClass::Message(_))
+                | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
+                | ValueClass::Telemetry(TelemetryClass::Span(_))
+                | ValueClass::SearchIndex(SearchIndexClass::Document { .. })
+        )
 }
 
 async fn clear_chunks(trx: &Transaction, key: &[u8], from_chunk: Option<u8>) {
@@ -398,6 +426,7 @@ async fn chunk_value(
     trx: &Transaction,
     key: &mut Vec<u8>,
     value: &[u8],
+    subspace: Subspace,
     class: &ValueClass,
     prev_num_chunks: Option<usize>,
 ) -> bool {
@@ -411,7 +440,7 @@ async fn chunk_value(
         return false;
     }
 
-    if is_chunked_value(key[0], class)
+    if is_chunked_value(subspace, class)
         && prev_num_chunks.is_none_or(|prev_num_chunks| prev_num_chunks > num_chunks)
     {
         clear_chunks(trx, key, Some((num_chunks - 1) as u8)).await;

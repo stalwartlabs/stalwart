@@ -13,7 +13,7 @@ use std::{
     sync::mpsc::{self, SyncSender},
 };
 use store::{
-    write::{AnyClass, AnyKey, ValueClass},
+    write::{AnyClass, AnyKey, ValueClass, key::SystemKind},
     *,
 };
 use types::blob_hash::{BLOB_HASH_LEN, BlobHash};
@@ -55,8 +55,8 @@ impl Core {
             .storage
             .data
             .get_value::<u32>(AnyKey {
-                subspace: SUBSPACE_PROPERTY,
-                key: vec![0u8],
+                subspace: Subspace::System,
+                key: vec![SystemKind::SchemaVersion as u8],
             })
             .await
             .failed("Could not retrieve database schema version.")
@@ -77,13 +77,8 @@ impl Core {
             .collect();
         }
 
-        for subspace in params
-            .families
-            .into_iter()
-            .flat_map(|f| f.subspaces())
-            .copied()
-        {
-            let (async_handle, sync_handle) = if subspace == SUBSPACE_BLOBS {
+        for subspace in params.families.into_iter().flat_map(|f| f.subspaces()) {
+            let (async_handle, sync_handle) = if subspace == Subspace::Blobs {
                 self.backup_blobs(&params.dest, subspace, schema_version)
             } else {
                 self.backup_subspace(&params.dest, subspace, schema_version)
@@ -97,11 +92,11 @@ impl Core {
         }
     }
 
-    fn backup_blobs(&self, dest: &Path, subspace: u8, schema_version: u32) -> TaskHandle {
+    fn backup_blobs(&self, dest: &Path, subspace: Subspace, schema_version: u32) -> TaskHandle {
         let store = self.storage.data.clone();
         let blob_store = self.storage.blob.clone();
         let (handle, writer) = spawn_writer(
-            dest.join(format!("subspace_{}", char::from(subspace))),
+            dest.join(format!("subspace_{}", subspace.name())),
             subspace,
             schema_version,
         );
@@ -113,11 +108,11 @@ impl Core {
                     .iterate(
                         IterateParams::new(
                             AnyKey {
-                                subspace: SUBSPACE_BLOB_LINK,
+                                subspace: Subspace::BlobLink,
                                 key: vec![0u8],
                             },
                             AnyKey {
-                                subspace: SUBSPACE_BLOB_LINK,
+                                subspace: Subspace::BlobLink,
                                 key: vec![u8::MAX; 32],
                             },
                         )
@@ -157,16 +152,16 @@ impl Core {
         )
     }
 
-    fn backup_subspace(&self, dest: &Path, subspace: u8, schema_version: u32) -> TaskHandle {
+    fn backup_subspace(&self, dest: &Path, subspace: Subspace, schema_version: u32) -> TaskHandle {
         let store = self.storage.data.clone();
         let (handle, writer) = spawn_writer(
-            dest.join(format!("subspace_{}", char::from(subspace))),
+            dest.join(format!("subspace_{}", subspace.name())),
             subspace,
             schema_version,
         );
         (
             tokio::spawn(async move {
-                if !store.is_sql() || (subspace != SUBSPACE_COUNTER && subspace != SUBSPACE_QUOTA) {
+                if !store.is_sql() || !matches!(subspace.shape(), Shape::Counter) {
                     store
                         .iterate(
                             IterateParams::new(
@@ -179,9 +174,7 @@ impl Core {
                                     key: vec![u8::MAX; 32],
                                 },
                             )
-                            .set_values(
-                                ![SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX].contains(&subspace),
-                            ),
+                            .set_values(!matches!(subspace.shape(), Shape::Presence)),
                             |key, value| {
                                 writer
                                     .send((key.to_vec(), value.to_vec()))
@@ -238,7 +231,7 @@ impl Core {
 #[allow(clippy::type_complexity)]
 fn spawn_writer(
     path: PathBuf,
-    subspace: u8,
+    subspace: Subspace,
     version: u32,
 ) -> (std::thread::JoinHandle<()>, SyncSender<(Vec<u8>, Vec<u8>)>) {
     let (tx, rx) = mpsc::sync_channel::<(Vec<u8>, Vec<u8>)>(10);
@@ -249,7 +242,7 @@ fn spawn_writer(
         let mut file = FrameEncoder::new(BufWriter::new(
             std::fs::File::create(path).failed("Failed to create backup file"),
         ));
-        file.write_all(&[MAGIC_MARKER, subspace])
+        file.write_all(&[MAGIC_MARKER, subspace.byte()])
             .failed("Failed to write version");
         file.write_all(&version.to_le_bytes())
             .failed("Failed to write version");
@@ -304,29 +297,50 @@ impl BackupParams {
     }
 }
 
-impl Family {
-    pub fn subspaces(&self) -> &'static [u8] {
+pub(super) trait BackupFamily {
+    fn family(self) -> Option<Family>;
+}
+
+impl BackupFamily for Subspace {
+    fn family(self) -> Option<Family> {
         match self {
-            Family::Data => &[
-                SUBSPACE_ACL,
-                SUBSPACE_INDEXES,
-                SUBSPACE_QUOTA,
-                SUBSPACE_COUNTER,
-                SUBSPACE_PROPERTY,
-            ],
-            Family::Blob => &[SUBSPACE_BLOBS, SUBSPACE_BLOB_LINK],
-            Family::Registry => &[
-                SUBSPACE_REGISTRY,
-                SUBSPACE_REGISTRY_IDX,
-                SUBSPACE_REGISTRY_PK,
-                SUBSPACE_DIRECTORY,
-            ],
-            Family::Changelog => &[SUBSPACE_LOGS],
-            Family::Queue => &[SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUEUE_EVENT],
-            Family::Report => &[SUBSPACE_REPORT_OUT, SUBSPACE_REPORT_IN],
-            Family::Telemetry => &[SUBSPACE_TELEMETRY_SPAN, SUBSPACE_TELEMETRY_METRIC],
-            Family::Tasks => &[SUBSPACE_TASK_QUEUE],
+            Subspace::Acl
+            | Subspace::Indexes
+            | Subspace::Quota
+            | Subspace::Counter
+            | Subspace::GlobalCounter
+            | Subspace::Property
+            | Subspace::Immutable
+            | Subspace::IndexProperty
+            | Subspace::System => Some(Family::Data),
+            Subspace::Blobs | Subspace::BlobLink => Some(Family::Blob),
+            Subspace::Registry
+            | Subspace::RegistryIndex
+            | Subspace::RegistryPrimaryKey
+            | Subspace::Directory
+            | Subspace::DeletedItems
+            | Subspace::SpamSamples => Some(Family::Registry),
+            Subspace::Logs => Some(Family::Changelog),
+            Subspace::QueueMessage | Subspace::QueueEvent => Some(Family::Queue),
+            Subspace::ReportOut | Subspace::ReportIn => Some(Family::Report),
+            Subspace::TelemetrySpan | Subspace::TelemetryMetric => Some(Family::Telemetry),
+            Subspace::TaskQueue => Some(Family::Tasks),
+            Subspace::InMemoryValue
+            | Subspace::InMemoryCounter
+            | Subspace::SearchTerm
+            | Subspace::SearchDocument
+            | Subspace::SearchQueue => None,
         }
+    }
+}
+
+impl Family {
+    pub fn subspaces(&self) -> Vec<Subspace> {
+        Subspace::ALL
+            .iter()
+            .copied()
+            .filter(|subspace| subspace.family() == Some(*self))
+            .collect()
     }
 
     pub fn parse(family: &str) -> Result<Self, String> {

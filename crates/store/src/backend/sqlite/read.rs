@@ -19,7 +19,7 @@ impl SqliteStore {
             let mut result = conn
                 .prepare_cached(&format!(
                     "SELECT v FROM {} WHERE k = ?",
-                    char::from(key.subspace())
+                    key.subspace().name()
                 ))
                 .map_err(into_error)?;
             let key = key.serialize(0);
@@ -41,7 +41,7 @@ impl SqliteStore {
             let mut result = conn
                 .prepare_cached(&format!(
                     "SELECT 1 FROM {} WHERE k = ?",
-                    char::from(key.subspace())
+                    key.subspace().name()
                 ))
                 .map_err(into_error)?;
             let key = key.serialize(0);
@@ -62,7 +62,7 @@ impl SqliteStore {
         let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            let table = char::from(params.begin.subspace());
+            let table = params.begin.subspace().name();
             let begin = params.begin.serialize(0);
             let end = params.end.serialize(0);
             let keys = if params.values { "k, v" } else { "k" };
@@ -135,7 +135,7 @@ impl SqliteStore {
         let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            let table = char::from(ranges[0].begin.subspace());
+            let table = ranges[0].begin.subspace().name();
             let mut stmt = conn
                 .prepare_cached(&format!(
                     "SELECT k, v FROM {table} WHERE k >= ? AND k <= ? ORDER BY k ASC"
@@ -174,7 +174,7 @@ impl SqliteStore {
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,
     ) -> trc::Result<i64> {
         let key = key.into();
-        let table = char::from(key.subspace());
+        let table = key.subspace().name();
         let key = key.serialize(0);
         let manager = self.conn_pool.clone();
         self.spawn_worker(move || {

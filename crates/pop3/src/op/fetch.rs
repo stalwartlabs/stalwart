@@ -30,7 +30,7 @@ impl<T: SessionStream> Session<T> {
             if let Some(metadata_) = self
                 .server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+                .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
                     mailbox.account_id,
                     Collection::Email,
                     message.id,

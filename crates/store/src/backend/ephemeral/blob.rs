@@ -5,7 +5,7 @@
  */
 
 use super::EphemeralStore;
-use crate::SUBSPACE_BLOBS;
+use crate::Subspace;
 use std::ops::Range;
 
 impl EphemeralStore {
@@ -17,7 +17,7 @@ impl EphemeralStore {
         let state = self.state.read();
         Ok(state
             .subspaces
-            .get(&SUBSPACE_BLOBS)
+            .get(&Subspace::Blobs)
             .and_then(|m| m.get(key))
             .map(|bytes| {
                 if range.start == 0 && range.end == usize::MAX {
@@ -35,7 +35,7 @@ impl EphemeralStore {
         let mut state = self.state.write();
         state
             .subspaces
-            .entry(SUBSPACE_BLOBS)
+            .entry(Subspace::Blobs)
             .or_default()
             .insert(key.to_vec(), data.to_vec());
         Ok(())
@@ -43,7 +43,7 @@ impl EphemeralStore {
 
     pub(crate) async fn delete_blob(&self, key: &[u8]) -> trc::Result<bool> {
         let mut state = self.state.write();
-        if let Some(map) = state.subspaces.get_mut(&SUBSPACE_BLOBS) {
+        if let Some(map) = state.subspaces.get_mut(&Subspace::Blobs) {
             map.remove(key);
         }
         Ok(true)

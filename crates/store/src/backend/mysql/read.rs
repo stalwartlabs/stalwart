@@ -18,7 +18,7 @@ impl MysqlStore {
         let s = conn
             .prep(format!(
                 "SELECT v FROM {} WHERE k = ?",
-                char::from(key.subspace())
+                key.subspace().name()
             ))
             .await
             .map_err(into_error)?;
@@ -40,7 +40,7 @@ impl MysqlStore {
         let s = conn
             .prep(format!(
                 "SELECT 1 FROM {} WHERE k = ?",
-                char::from(key.subspace())
+                key.subspace().name()
             ))
             .await
             .map_err(into_error)?;
@@ -57,7 +57,7 @@ impl MysqlStore {
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
-        let table = char::from(params.begin.subspace());
+        let table = params.begin.subspace().name();
         let begin = params.begin.serialize(0);
         let end = params.end.serialize(0);
         let keys = if params.values { "k, v" } else { "k" };
@@ -127,7 +127,7 @@ impl MysqlStore {
         const MAX_RANGES_PER_STMT: usize = 64;
 
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
-        let table = char::from(ranges[0].begin.subspace());
+        let table = ranges[0].begin.subspace().name();
 
         type RangeCallback<'y> =
             &'y mut (dyn for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Send + Sync);
@@ -135,7 +135,7 @@ impl MysqlStore {
         let build_query = |count: usize| {
             let mut query = String::with_capacity(count * 24 + 40);
             query.push_str("SELECT k, v FROM ");
-            query.push(table);
+            query.push_str(table);
             query.push_str(" WHERE ");
             for i in 0..count {
                 if i > 0 {
@@ -223,7 +223,7 @@ impl MysqlStore {
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,
     ) -> trc::Result<i64> {
         let key = key.into();
-        let table = char::from(key.subspace());
+        let table = key.subspace().name();
         let key = key.serialize(0);
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
         let s = conn

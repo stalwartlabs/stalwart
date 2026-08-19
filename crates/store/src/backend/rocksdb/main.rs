@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{CF_BLOBS, RocksDbStore};
+use super::RocksDbStore;
 use crate::*;
 use ::registry::schema::structs;
 use rocksdb::{
@@ -24,6 +24,7 @@ const CHURN_DELETION_WINDOW: usize = 4096;
 const CHURN_DELETION_TRIGGER: usize = 1024;
 const CHURN_DELETION_RATIO: f64 = 0.5;
 const BYTES_PER_SYNC: u64 = 1024 * 1024;
+const COLD_MIN_BLOB_SIZE: u64 = 16 * 1024;
 
 #[derive(Clone, Copy)]
 enum CfProfile {
@@ -39,6 +40,48 @@ enum CfProfile {
     Counter,
     /// Blob values held in RocksDB blob files.
     Blob,
+    /// Write-once values, large ones offloaded to RocksDB blob files.
+    Cold,
+}
+
+trait RocksDbProfile {
+    fn profile(self) -> CfProfile;
+}
+
+impl RocksDbProfile for Subspace {
+    fn profile(self) -> CfProfile {
+        match self {
+            Subspace::Counter
+            | Subspace::Quota
+            | Subspace::InMemoryCounter
+            | Subspace::GlobalCounter => CfProfile::Counter,
+            Subspace::Blobs => CfProfile::Blob,
+            Subspace::Immutable => CfProfile::Cold,
+            Subspace::Indexes
+            | Subspace::Acl
+            | Subspace::Logs
+            | Subspace::TelemetryMetric
+            | Subspace::SearchTerm
+            | Subspace::RegistryIndex
+            | Subspace::IndexProperty => CfProfile::Scan,
+            Subspace::TaskQueue
+            | Subspace::DeletedItems
+            | Subspace::BlobLink
+            | Subspace::InMemoryValue
+            | Subspace::QueueMessage
+            | Subspace::ReportOut
+            | Subspace::ReportIn
+            | Subspace::SpamSamples => CfProfile::Churn,
+            Subspace::Property
+            | Subspace::Registry
+            | Subspace::TelemetrySpan
+            | Subspace::RegistryPrimaryKey
+            | Subspace::Directory
+            | Subspace::SearchDocument
+            | Subspace::System => CfProfile::PointLookup,
+            Subspace::QueueEvent | Subspace::SearchQueue => CfProfile::Queue,
+        }
+    }
 }
 
 impl RocksDbStore {
@@ -58,52 +101,23 @@ impl RocksDbStore {
             ((config.buffer_size as usize) / 4).clamp(MIN_WRITE_BUFFER_SIZE, MAX_WRITE_BUFFER_SIZE);
         let mut cfs = Vec::new();
 
-        // Counters
-        for subspace in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
-            cfs.push(ColumnFamilyDescriptor::new(
-                std::str::from_utf8(&[subspace]).unwrap(),
-                cf_options(CfProfile::Counter, &cache, write_buffer_size),
-            ));
-        }
+        for subspace in Subspace::ALL.iter().copied() {
+            let profile = subspace.profile();
+            let mut cf_opts = cf_options(profile, &cache, write_buffer_size);
 
-        // Blobs
-        let mut cf_opts = cf_options(CfProfile::Blob, &cache, write_buffer_size);
-        cf_opts.set_enable_blob_files(true);
-        cf_opts.set_min_blob_size(config.blob_size);
-        cf_opts.set_enable_blob_gc(true);
-        cf_opts.set_blob_gc_age_cutoff(1.0);
-        cf_opts.set_blob_gc_force_threshold(0.5);
-        cfs.push(ColumnFamilyDescriptor::new(CF_BLOBS, cf_opts));
+            if let Some(min_blob_size) = match profile {
+                CfProfile::Blob => Some(config.blob_size),
+                CfProfile::Cold => Some(COLD_MIN_BLOB_SIZE),
+                _ => None,
+            } {
+                cf_opts.set_enable_blob_files(true);
+                cf_opts.set_min_blob_size(min_blob_size);
+                cf_opts.set_enable_blob_gc(true);
+                cf_opts.set_blob_gc_age_cutoff(1.0);
+                cf_opts.set_blob_gc_force_threshold(0.5);
+            }
 
-        // Other cfs
-        for (subspace, profile) in [
-            (SUBSPACE_INDEXES, CfProfile::Scan),
-            (SUBSPACE_ACL, CfProfile::Scan),
-            (SUBSPACE_TASK_QUEUE, CfProfile::Churn),
-            (SUBSPACE_DELETED_ITEMS, CfProfile::Churn),
-            (SUBSPACE_BLOB_LINK, CfProfile::Churn),
-            (SUBSPACE_IN_MEMORY_VALUE, CfProfile::Churn),
-            (SUBSPACE_PROPERTY, CfProfile::PointLookup),
-            (SUBSPACE_REGISTRY, CfProfile::PointLookup),
-            (SUBSPACE_QUEUE_MESSAGE, CfProfile::Churn),
-            (SUBSPACE_QUEUE_EVENT, CfProfile::Queue),
-            (SUBSPACE_REPORT_OUT, CfProfile::Churn),
-            (SUBSPACE_REPORT_IN, CfProfile::Churn),
-            (SUBSPACE_LOGS, CfProfile::Scan),
-            (SUBSPACE_TELEMETRY_SPAN, CfProfile::PointLookup),
-            (SUBSPACE_TELEMETRY_METRIC, CfProfile::Scan),
-            (SUBSPACE_SEARCH_INDEX, CfProfile::Scan),
-            (SUBSPACE_SPAM_SAMPLES, CfProfile::Churn),
-            (SUBSPACE_REGISTRY_IDX, CfProfile::Scan),
-            (SUBSPACE_REGISTRY_PK, CfProfile::PointLookup),
-            (SUBSPACE_DIRECTORY, CfProfile::PointLookup),
-            (LEGACY_SUBSPACE_BITMAP_TEXT, CfProfile::Scan),
-            (LEGACY_SUBSPACE_BITMAP_TAG, CfProfile::Scan),
-        ] {
-            cfs.push(ColumnFamilyDescriptor::new(
-                std::str::from_utf8(&[subspace]).unwrap(),
-                cf_options(profile, &cache, write_buffer_size),
-            ));
+            cfs.push(ColumnFamilyDescriptor::new(subspace.name(), cf_opts));
         }
 
         let mut db_opts = Options::default();
@@ -221,6 +235,10 @@ fn cf_options(profile: CfProfile, cache: &Cache, write_buffer_size: usize) -> Op
         CfProfile::Blob => {
             block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
             opts.set_compression_type(DBCompressionType::None);
+        }
+        CfProfile::Cold => {
+            block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
+            opts.set_compression_type(DBCompressionType::Lz4);
         }
     }
 

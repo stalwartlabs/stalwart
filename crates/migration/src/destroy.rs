@@ -5,12 +5,12 @@
  */
 
 use store::{
-    Store, U64_LEN,
+    Store, Subspace, U64_LEN,
     write::{AnyKey, key::KeySerializer},
 };
 use trc::AddContext;
 
-pub async fn destroy_subspace(store: &Store, subspace: u8) -> trc::Result<()> {
+pub async fn destroy_subspace(store: &Store, subspace: Subspace) -> trc::Result<()> {
     store
         .delete_range(
             AnyKey {

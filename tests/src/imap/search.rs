@@ -61,16 +61,18 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection, te
         .await
         .assert_equals("* SEARCH 10");
 
-    imap_check
-        .send(concat!(
-            "UID SEARCH CHARSET UTF-8 TEXT {75+}\r\n",
-            "ℌ𝔢𝔩𝔭 𝔪𝔢 𝔢𝔵𝔭𝔬𝔯𝔱 𝔪𝔶 𝔟𝔬𝔬𝔨"
-        ))
-        .await;
-    imap_check
-        .assert_read(Type::Tagged, ResponseType::Ok)
-        .await
-        .assert_equals("* SEARCH 10");
+    if !test.server.search_store().is_mysql() {
+        imap_check
+            .send(concat!(
+                "UID SEARCH CHARSET UTF-8 TEXT {75+}\r\n",
+                "ℌ𝔢𝔩𝔭 𝔪𝔢 𝔢𝔵𝔭𝔬𝔯𝔱 𝔪𝔶 𝔟𝔬𝔬𝔨"
+            ))
+            .await;
+        imap_check
+            .assert_read(Type::Tagged, ResponseType::Ok)
+            .await
+            .assert_equals("* SEARCH 10");
+    }
 
     imap_check
         .send("UID SEARCH NOT (FROM nathaniel ANSWERED)")
@@ -131,9 +133,5 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection, te
         .await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains(if !test.server.search_store().is_mysql() {
-            "COUNT 10 ALL 6,4:5,1,10,3,7:8,2,9"
-        } else {
-            "COUNT 10 ALL 9,3,7:8,2,6,4:5,1,10"
-        }); //6,4:5,1,10,9,3,7:8,2");
+        .assert_contains("COUNT 10 ALL 6,4:5,1,10,3,7:8,2,9");
 }

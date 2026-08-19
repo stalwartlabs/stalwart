@@ -15,7 +15,7 @@ use imap_proto::protocol::{Sequence, expunge, select::Exists};
 use std::collections::BTreeMap;
 use store::{ValueKey, roaring::RoaringBitmap, write::ValueClass};
 use trc::AddContext;
-use types::{collection::Collection, field::MailboxField};
+use types::collection::Collection;
 
 impl<T: SessionStream> SessionData<T> {
     pub async fn fetch_messages(
@@ -169,7 +169,7 @@ impl<T: SessionStream> SessionData<T> {
                 account_id: mailbox.account_id,
                 collection: Collection::Mailbox.into(),
                 document_id: mailbox.mailbox_id,
-                class: ValueClass::Property(MailboxField::UidCounter.into()),
+                class: ValueClass::MailboxUid,
             })
             .await
             .map(|v| (v + 1) as u32)

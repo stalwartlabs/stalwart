@@ -5,8 +5,9 @@
  */
 
 use crate::{
-    SUBSPACE_SEARCH_INDEX, U16_LEN, U32_LEN,
-    write::{AnyKey, SearchIndex, SearchIndexClass},
+    Subspace, U16_LEN, U32_LEN,
+    search::SearchField,
+    write::{AnyKey, SearchIndex},
 };
 use std::slice::Iter;
 use utils::{
@@ -84,20 +85,23 @@ impl Writer {
     }
 }
 
-pub(crate) fn any_key(key: Vec<u8>) -> AnyKey<Vec<u8>> {
+pub(crate) fn term_key(key: Vec<u8>) -> AnyKey<Vec<u8>> {
     AnyKey {
-        subspace: SUBSPACE_SEARCH_INDEX,
+        subspace: Subspace::SearchTerm,
         key,
     }
 }
 
-pub(crate) fn account_region_range(
-    typ: u8,
-    index: SearchIndex,
-    account_id: u32,
-) -> (Vec<u8>, Vec<u8>) {
+pub(crate) fn document_key(key: Vec<u8>) -> AnyKey<Vec<u8>> {
+    AnyKey {
+        subspace: Subspace::SearchDocument,
+        key,
+    }
+}
+
+pub(crate) fn account_region_range(index: SearchIndex, account_id: u32) -> (Vec<u8>, Vec<u8>) {
     let mut begin = Vec::with_capacity(1 + U32_LEN + RANGE_PADDING.len());
-    begin.push(typ | index.to_u8());
+    begin.push(index.to_u8());
     begin.extend_from_slice(&account_id.to_be_bytes());
     let mut end = begin.clone();
     end.extend_from_slice(&RANGE_PADDING);
@@ -111,7 +115,7 @@ pub(crate) fn account_term_prefix_range(
     prefix: &[u8],
 ) -> (Vec<u8>, Vec<u8>) {
     let mut begin = Vec::with_capacity(U32_LEN + prefix.len() + RANGE_PADDING.len() + 2);
-    begin.push(SearchIndexClass::TYPE_TERM | index.to_u8());
+    begin.push(index.to_u8());
     begin.extend_from_slice(&account_id.to_be_bytes());
     begin.push(field);
     begin.extend_from_slice(prefix);
@@ -126,7 +130,7 @@ pub(crate) fn global_term_prefix_range(
     prefix: &[u8],
 ) -> (Vec<u8>, Vec<u8>) {
     let mut begin = Vec::with_capacity(prefix.len() + RANGE_PADDING.len() + 2);
-    begin.push(SearchIndexClass::TYPE_TERM | index.to_u8());
+    begin.push(index.to_u8());
     begin.push(field);
     begin.extend_from_slice(prefix);
     let mut end = begin.clone();
@@ -141,7 +145,7 @@ pub(crate) fn account_term_range(
     term: &CheekyHash,
 ) -> (Vec<u8>, Vec<u8>) {
     let mut begin = Vec::with_capacity(ACCOUNT_TERM_BASE_LEN + term.key_len() + 3);
-    begin.push(SearchIndexClass::TYPE_TERM | index.to_u8());
+    begin.push(index.to_u8());
     begin.extend_from_slice(&account_id.to_be_bytes());
     begin.push(field);
     begin.extend_from_slice(term.as_key());
@@ -157,7 +161,7 @@ pub(crate) fn account_document_key(
     document_id: u32,
 ) -> Vec<u8> {
     let mut key = Vec::with_capacity(1 + U32_LEN * 2);
-    key.push(SearchIndexClass::TYPE_DOCUMENT | index.to_u8());
+    key.push(index.to_u8());
     key.extend_from_slice(&account_id.to_be_bytes());
     key.extend_from_slice(&document_id.to_be_bytes());
     key
@@ -171,7 +175,7 @@ pub(crate) fn global_term_block_range(
     until_block: u16,
 ) -> (Vec<u8>, Vec<u8>) {
     let mut begin = Vec::with_capacity(GLOBAL_TERM_BASE_LEN + term.key_len() + U16_LEN + 2);
-    begin.push(SearchIndexClass::TYPE_TERM | index.to_u8());
+    begin.push(index.to_u8());
     begin.push(field);
     begin.extend_from_slice(term.as_key());
     begin.push(term.len() as u8);
@@ -187,12 +191,11 @@ pub(crate) fn global_document_id_range(
     from_block: u16,
     until_block: u16,
 ) -> (Vec<u8>, Vec<u8>) {
-    let base = SearchIndexClass::TYPE_DOCUMENT_ID | index.to_u8();
-    let mut begin = Vec::with_capacity(U16_LEN + 2);
-    begin.push(base);
+    let mut begin = Vec::with_capacity(U16_LEN + 3);
+    begin.push(index.to_u8());
+    begin.push(SearchField::Id.u8_id());
+    let mut end = begin.clone();
     begin.extend_from_slice(&from_block.to_be_bytes());
-    let mut end = Vec::with_capacity(U16_LEN + 2);
-    end.push(base);
     end.extend_from_slice(&until_block.to_be_bytes());
     end.push(u8::MAX);
     (begin, end)
@@ -231,7 +234,10 @@ pub(crate) fn parse_block_id(key: &[u8]) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Key, ValueKey, write::ValueClass};
+    use crate::{
+        Key, ValueKey,
+        write::{SearchIndexClass, ValueClass},
+    };
 
     #[test]
     fn test_account_term_keys() {

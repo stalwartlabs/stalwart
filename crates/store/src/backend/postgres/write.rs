@@ -6,8 +6,7 @@
 
 use super::{PostgresStore, into_error};
 use crate::{
-    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
-    SUBSPACE_REGISTRY_IDX,
+    IndexKey, Key, LogKey, Shape, Subspace,
     backend::postgres::into_pool_error,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
@@ -109,6 +108,7 @@ impl PostgresStore {
             }
         }
 
+        let mut key_buf = Vec::with_capacity(64);
         for op in batch.ops.iter_mut() {
             match op {
                 Operation::AccountId {
@@ -130,14 +130,16 @@ impl PostgresStore {
                     document_id = *document_id_;
                 }
                 Operation::Value { class, op } => {
-                    let key = class.serialize(account_id, collection, document_id, 0);
+                    key_buf.clear();
+                    class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+                    let key = &key_buf;
                     let subspace = class.subspace(collection);
-                    let table = char::from(subspace);
+                    let table = subspace.name();
 
                     match op {
                         ValueOp::Set(value) => {
-                            if subspace != SUBSPACE_REGISTRY_IDX {
-                                let s = if let Some(exists) = asserted_values.get(&key) {
+                            if !matches!(subspace.shape(), Shape::Presence) {
+                                let s = if let Some(exists) = asserted_values.get(key) {
                                     if *exists {
                                         trx.prepare_cached(&format!(
                                             "UPDATE {} SET v = $2 WHERE k = $1",
@@ -170,9 +172,9 @@ impl PostgresStore {
                                 }
                             } else {
                                 let s = trx
-                                    .prepare_cached(
-                                        "INSERT INTO b (k) VALUES ($1) ON CONFLICT (k) DO NOTHING",
-                                    )
+                                    .prepare_cached(&format!(
+                                        "INSERT INTO {table} (k) VALUES ($1) ON CONFLICT (k) DO NOTHING"
+                                    ))
                                     .await?;
                                 trx.execute(&s, &[&key]).await?;
                             }
@@ -180,7 +182,7 @@ impl PostgresStore {
                         ValueOp::SetFnc(set_op) => {
                             let value = (set_op.0)(&result)?;
 
-                            let s = if let Some(exists) = asserted_values.get(&key) {
+                            let s = if let Some(exists) = asserted_values.get(key) {
                                 if *exists {
                                     trx.prepare_cached(&format!(
                                         "UPDATE {} SET v = $2 WHERE k = $1",
@@ -265,7 +267,7 @@ impl PostgresStore {
                                     trx.execute(&s, &[&key]).await?;
 
                                     // Update asserted value
-                                    if let Some(exists) = asserted_values.get_mut(&key) {
+                                    if let Some(exists) = asserted_values.get_mut(key) {
                                         *exists = false;
                                     }
                                 }
@@ -316,21 +318,23 @@ impl PostgresStore {
                             trx.execute(&s, &[&key]).await?;
 
                             // Update asserted value
-                            if let Some(exists) = asserted_values.get_mut(&key) {
+                            if let Some(exists) = asserted_values.get_mut(key) {
                                 *exists = false;
                             }
                         }
                     }
                 }
                 Operation::Index { field, key, set } => {
-                    let key = IndexKey {
+                    key_buf.clear();
+                    IndexKey {
                         account_id,
                         collection,
                         document_id,
                         field: *field,
                         key: &*key,
                     }
-                    .serialize(0);
+                    .serialize_into(&mut key_buf, 0);
+                    let key = &key_buf;
 
                     let s = if *set {
                         trx.prepare_cached(
@@ -343,12 +347,14 @@ impl PostgresStore {
                     trx.execute(&s, &[&key]).await?;
                 }
                 Operation::Log { collection, set } => {
-                    let key = LogKey {
+                    key_buf.clear();
+                    LogKey {
                         account_id,
                         collection: u8::from(*collection),
                         change_id,
                     }
-                    .serialize(0);
+                    .serialize_into(&mut key_buf, 0);
+                    let key = &key_buf;
 
                     let s = trx
                         .prepare_cached(concat!(
@@ -364,7 +370,7 @@ impl PostgresStore {
                     assert_value,
                 } => {
                     let key = class.serialize(account_id, collection, document_id, 0);
-                    let table = char::from(class.subspace(collection));
+                    let table = class.subspace(collection).name();
 
                     let s = trx
                         .prepare_cached(&format!("SELECT v FROM {} WHERE k = $1 FOR UPDATE", table))
@@ -394,9 +400,13 @@ impl PostgresStore {
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
 
-        for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
+        for subspace in Subspace::ALL
+            .iter()
+            .copied()
+            .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
+        {
             let s = conn
-                .prepare_cached(&format!("DELETE FROM {} WHERE v = 0", char::from(subspace),))
+                .prepare_cached(&format!("DELETE FROM {} WHERE v = 0", subspace.name()))
                 .await
                 .map_err(into_error)?;
             conn.execute(&s, &[])
@@ -414,7 +424,7 @@ impl PostgresStore {
         let s = conn
             .prepare_cached(&format!(
                 "DELETE FROM {} WHERE k >= $1 AND k < $2",
-                char::from(from.subspace()),
+                from.subspace().name(),
             ))
             .await
             .map_err(into_error)?;

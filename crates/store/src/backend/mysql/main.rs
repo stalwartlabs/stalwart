@@ -84,69 +84,28 @@ impl MysqlStore {
     pub(crate) async fn create_storage_tables(&self) -> trc::Result<()> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
 
-        for table in [
-            SUBSPACE_ACL,
-            SUBSPACE_TASK_QUEUE,
-            SUBSPACE_DELETED_ITEMS,
-            SUBSPACE_SPAM_SAMPLES,
-            SUBSPACE_BLOB_LINK,
-            SUBSPACE_IN_MEMORY_VALUE,
-            SUBSPACE_PROPERTY,
-            SUBSPACE_REGISTRY,
-            SUBSPACE_REGISTRY_PK,
-            SUBSPACE_DIRECTORY,
-            SUBSPACE_QUEUE_MESSAGE,
-            SUBSPACE_QUEUE_EVENT,
-            SUBSPACE_REPORT_OUT,
-            SUBSPACE_REPORT_IN,
-            SUBSPACE_LOGS,
-            SUBSPACE_TELEMETRY_SPAN,
-            SUBSPACE_TELEMETRY_METRIC,
-            SUBSPACE_SEARCH_INDEX,
-        ] {
-            let table = char::from(table);
-            conn.query_drop(format!(
-                "CREATE TABLE IF NOT EXISTS {table} (
-                    k TINYBLOB,
-                    v MEDIUMBLOB NOT NULL,
-                    PRIMARY KEY (k(255))
-                ) ENGINE=InnoDB"
-            ))
-            .await
-            .map_err(into_error)?;
-        }
+        for subspace in Subspace::ALL
+            .iter()
+            .copied()
+            .filter(|subspace| !subspace.is_internal_fts())
+        {
+            let table = subspace.name();
+            let columns = match subspace.shape() {
+                Shape::Value => {
+                    let value_type = match subspace {
+                        Subspace::Blobs | Subspace::Immutable => "LONGBLOB",
+                        _ => "MEDIUMBLOB",
+                    };
+                    format!("k TINYBLOB, v {value_type} NOT NULL, PRIMARY KEY (k(255))")
+                }
+                Shape::Presence => "k BLOB, PRIMARY KEY (k(400))".to_string(),
+                Shape::Counter => {
+                    "k TINYBLOB, v BIGINT NOT NULL DEFAULT 0, PRIMARY KEY (k(255))".to_string()
+                }
+            };
 
-        conn.query_drop(format!(
-            "CREATE TABLE IF NOT EXISTS {} (
-                k TINYBLOB,
-                v LONGBLOB NOT NULL,
-                PRIMARY KEY (k(255))
-            ) ENGINE=InnoDB",
-            char::from(SUBSPACE_BLOBS),
-        ))
-        .await
-        .map_err(into_error)?;
-
-        for table in [SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX] {
-            let table = char::from(table);
             conn.query_drop(format!(
-                "CREATE TABLE IF NOT EXISTS {table} (
-                    k BLOB,
-                    PRIMARY KEY (k(400))
-                ) ENGINE=InnoDB"
-            ))
-            .await
-            .map_err(into_error)?;
-        }
-
-        for table in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
-            conn.query_drop(format!(
-                "CREATE TABLE IF NOT EXISTS {} (
-                k TINYBLOB,
-                v BIGINT NOT NULL DEFAULT 0,
-                PRIMARY KEY (k(255))
-            ) ENGINE=InnoDB",
-                char::from(table)
+                "CREATE TABLE IF NOT EXISTS {table} ({columns}) ENGINE=InnoDB"
             ))
             .await
             .map_err(into_error)?;

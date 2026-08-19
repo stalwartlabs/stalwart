@@ -73,11 +73,11 @@
     "headers": [
       {
         "name": "Bcc",
-        "value": " \"=?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\"\r\n\t<addr1@example.com>"
+        "value": " =?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\r\n\t<addr1@example.com>"
       },
       {
         "name": "Cc",
-        "value": " \"=?utf-8?B?0J/RgNC40LLQtdGCLCDQvNC40YA=?=\" <addr0@example.com>"
+        "value": " =?utf-8?B?0J/RgNC40LLQtdGCLCDQvNC40YA=?= <addr0@example.com>"
       },
       {
         "name": "Date",
@@ -113,7 +113,7 @@
       },
       {
         "name": "Reply-To",
-        "value": " \"=?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?=\" <addr2@example.com>, \r\n\t\"=?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?=\" <addr3@example.com>"
+        "value": " =?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?= <addr2@example.com>, \r\n\t=?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?= <addr3@example.com>"
       },
       {
         "name": "Resent-Date",
@@ -129,7 +129,7 @@
       },
       {
         "name": "Sender",
-        "value": " \"=?utf-8?B?44OP44Ot44O844O744Ov44O844Or44OJ?=\" <joe@example.com>"
+        "value": " =?utf-8?B?44OP44Ot44O844O744Ov44O844Or44OJ?= <joe@example.com>"
       },
       {
         "name": "Subject",

@@ -16,10 +16,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use store::{
-    IterateParams, U32_LEN, U64_LEN, ValueKey,
-    write::{
-        BatchBuilder, SearchIndex, SearchIndexClass, ValueClass, key::DeserializeBigEndian, now,
-    },
+    IterateParams, U32_LEN, U64_LEN,
+    write::{BatchBuilder, SearchIndex, SearchIndexClass, key::DeserializeBigEndian, now},
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use trc::TaskManagerEvent;
@@ -140,14 +138,8 @@ impl IndexQueueManager for Server {
             partition: 0,
         });
 
-        let from_key = ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueIndex {
-            index: from_partition.index,
-            partition: from_partition.partition,
-        }));
-        let to_key = ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueStatus {
-            index: SearchIndex::Tracing,
-            partition: u32::MAX,
-        }));
+        let (from_key, to_key) =
+            SearchIndexClass::control_range((from_partition.index, from_partition.partition), None);
 
         // Each partition is stored as a queue index key optionally followed by a status key
         let mut candidates = Vec::with_capacity(budget);
@@ -161,7 +153,7 @@ impl IndexQueueManager for Server {
             .iterate(
                 IterateParams::new(from_key, to_key).ascending(),
                 |key, value| {
-                    if key.len() < U32_LEN + 2 {
+                    if key.len() != U32_LEN + 3 {
                         return Ok(true);
                     }
                     let Some(index) = SearchIndex::try_from_u8(key[1]) else {
@@ -172,7 +164,7 @@ impl IndexQueueManager for Server {
                         partition: key.deserialize_be_u32(2)?,
                     };
 
-                    if key.len() == U32_LEN + 2 {
+                    if key[U32_LEN + 2] == SearchIndexClass::CONTROL_INDEX {
                         if let Some(pending) = pending.take() {
                             state.failed.remove(&pending);
                             candidates.push(pending);

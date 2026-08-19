@@ -19,33 +19,8 @@ use types::blob_hash::{BLOB_HASH_LEN, BlobHash};
 pub async fn store_destroy(store: &Store) {
     store_destroy_sql_indexes(store).await;
 
-    for subspace in [
-        SUBSPACE_ACL,
-        SUBSPACE_TASK_QUEUE,
-        SUBSPACE_INDEXES,
-        SUBSPACE_DELETED_ITEMS,
-        SUBSPACE_SPAM_SAMPLES,
-        SUBSPACE_BLOB_LINK,
-        SUBSPACE_LOGS,
-        SUBSPACE_IN_MEMORY_COUNTER,
-        SUBSPACE_IN_MEMORY_VALUE,
-        SUBSPACE_COUNTER,
-        SUBSPACE_PROPERTY,
-        SUBSPACE_REGISTRY,
-        SUBSPACE_BLOBS,
-        SUBSPACE_QUEUE_MESSAGE,
-        SUBSPACE_QUEUE_EVENT,
-        SUBSPACE_QUOTA,
-        SUBSPACE_REPORT_OUT,
-        SUBSPACE_REPORT_IN,
-        SUBSPACE_TELEMETRY_SPAN,
-        SUBSPACE_TELEMETRY_METRIC,
-        SUBSPACE_SEARCH_INDEX,
-        SUBSPACE_REGISTRY_IDX,
-        SUBSPACE_REGISTRY_PK,
-        SUBSPACE_DIRECTORY,
-    ] {
-        if subspace == SUBSPACE_SEARCH_INDEX && store.is_pg_or_mysql() {
+    for subspace in Subspace::ALL.iter().copied() {
+        if subspace.is_internal_fts() && store.is_pg_or_mysql() {
             continue;
         }
 
@@ -98,19 +73,25 @@ pub async fn search_store_destroy(store: &SearchStore) {
 }
 
 async fn search_subspace_destroy(store: &Store) {
-    store
-        .delete_range(
-            AnyKey {
-                subspace: SUBSPACE_SEARCH_INDEX,
-                key: vec![0u8],
-            },
-            AnyKey {
-                subspace: SUBSPACE_SEARCH_INDEX,
-                key: vec![u8::MAX; 32],
-            },
-        )
-        .await
-        .unwrap();
+    for subspace in [
+        Subspace::SearchTerm,
+        Subspace::SearchDocument,
+        Subspace::SearchQueue,
+    ] {
+        store
+            .delete_range(
+                AnyKey {
+                    subspace,
+                    key: vec![0u8],
+                },
+                AnyKey {
+                    subspace,
+                    key: vec![u8::MAX; 32],
+                },
+            )
+            .await
+            .unwrap();
+    }
 }
 
 #[allow(unused_variables)]
@@ -266,34 +247,17 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
     let mut failed = false;
     let mut delete_batch = BatchBuilder::new();
 
-    for (subspace, with_values) in [
-        (SUBSPACE_ACL, true),
-        (SUBSPACE_TASK_QUEUE, true),
-        (SUBSPACE_IN_MEMORY_VALUE, true),
-        (SUBSPACE_IN_MEMORY_COUNTER, false),
-        (SUBSPACE_PROPERTY, true),
-        (SUBSPACE_QUEUE_MESSAGE, true),
-        (SUBSPACE_QUEUE_EVENT, true),
-        (SUBSPACE_REPORT_OUT, true),
-        (SUBSPACE_REPORT_IN, true),
-        (SUBSPACE_DELETED_ITEMS, true),
-        (SUBSPACE_SPAM_SAMPLES, true),
-        (SUBSPACE_BLOB_LINK, true),
-        (SUBSPACE_BLOBS, true),
-        (SUBSPACE_COUNTER, false),
-        (SUBSPACE_QUOTA, false),
-        (SUBSPACE_INDEXES, false),
-        (SUBSPACE_TELEMETRY_SPAN, true),
-        (SUBSPACE_TELEMETRY_METRIC, true),
-        (SUBSPACE_SEARCH_INDEX, true),
-        (SUBSPACE_REGISTRY, true),
-        (SUBSPACE_REGISTRY_IDX, false),
-        (SUBSPACE_REGISTRY_PK, true),
-        (SUBSPACE_DIRECTORY, true),
-    ] {
-        if subspace == SUBSPACE_SEARCH_INDEX && store.is_pg_or_mysql() {
+    for subspace in Subspace::ALL.iter().copied().filter(|subspace| {
+        !matches!(
+            subspace,
+            Subspace::Logs | Subspace::System | Subspace::GlobalCounter
+        )
+    }) {
+        if subspace.is_internal_fts() && store.is_pg_or_mysql() {
             continue;
         }
+
+        let with_values = matches!(subspace.shape(), Shape::Value);
 
         let from_key = AnyKey {
             subspace,
@@ -309,22 +273,15 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
                 IterateParams::new(from_key, to_key).set_values(with_values),
                 |key, value| {
                     match subspace {
-                        SUBSPACE_COUNTER
-                            if key.len() == U32_LEN + 1
-                                || key.len() == U32_LEN
-                                || key.len() == U16_LEN =>
-                        {
-                            // Message ID, change ID counters and registry counters
-                            if key.len() != U16_LEN {
-                                // Keep registry counters, delete the rest
-                                delete_batch.clear(ValueClass::Any(AnyClass {
-                                    subspace,
-                                    key: key.to_vec(),
-                                }));
-                            }
+                        Subspace::Counter if key.len() == U32_LEN + 1 || key.len() == U32_LEN => {
+                            // Document id and change id counters
+                            delete_batch.clear(ValueClass::Any(AnyClass {
+                                subspace,
+                                key: key.to_vec(),
+                            }));
                             return Ok(true);
                         }
-                        SUBSPACE_INDEXES => {
+                        Subspace::Indexes => {
                             println!(
                                 concat!(
                                     "Found index key, account {}, collection {}, ",
@@ -338,7 +295,7 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
                                 key
                             );
                         }
-                        SUBSPACE_REGISTRY | SUBSPACE_DIRECTORY | SUBSPACE_SPAM_SAMPLES => {
+                        Subspace::Registry | Subspace::Directory | Subspace::SpamSamples => {
                             let object_id =
                                 ObjectType::from_id(key.deserialize_be_u16(0).unwrap()).unwrap();
 
@@ -352,7 +309,7 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
                                 object_id, item_id
                             );
                         }
-                        SUBSPACE_REGISTRY_IDX => {
+                        Subspace::RegistryIndex => {
                             let mut id = key.deserialize_be_u16(0).unwrap();
                             if id == u16::MAX {
                                 id = key.deserialize_be_u16(U16_LEN).unwrap();
@@ -369,7 +326,7 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
                                 object_id, key
                             );
                         }
-                        SUBSPACE_REGISTRY_PK => {
+                        Subspace::RegistryPrimaryKey => {
                             let mut id = key.deserialize_be_u16(0).unwrap();
                             if id == u16::MAX {
                                 id = value.deserialize_be_u16(0).unwrap();
@@ -387,7 +344,7 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
                         _ => {
                             println!(
                                 "Found key in {:?}: {:?} ({:?}) = {:?} ({:?})",
-                                char::from(subspace),
+                                subspace.name(),
                                 key,
                                 String::from_utf8_lossy(key),
                                 value,
@@ -408,11 +365,11 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
     store
         .delete_range(
             AnyKey {
-                subspace: SUBSPACE_LOGS,
+                subspace: Subspace::Logs,
                 key: &[0u8],
             },
             AnyKey {
-                subspace: SUBSPACE_LOGS,
+                subspace: Subspace::Logs,
                 key: &[
                     u8::MAX,
                     u8::MAX,

@@ -403,7 +403,12 @@ async fn filter_text_search_body(ctx: &CompCtx<'_>) -> TestOutcome {
 }
 
 async fn filter_from(ctx: &CompCtx<'_>) -> TestOutcome {
-    let resp = email_query(ctx, json!({ "filter": { "from": "alice@example.com" } })).await;
+    let from = if ctx.caps.stopword_terms {
+        "alice@example.com"
+    } else {
+        "alice@example"
+    };
+    let resp = email_query(ctx, json!({ "filter": { "from": from } })).await;
     let ids = query_ids(&resp);
     check(
         has_id(&ids, ctx.email("plain-simple")),
@@ -416,7 +421,12 @@ async fn filter_from(ctx: &CompCtx<'_>) -> TestOutcome {
 }
 
 async fn filter_to(ctx: &CompCtx<'_>) -> TestOutcome {
-    let resp = email_query(ctx, json!({ "filter": { "to": "alice@example.com" } })).await;
+    let to = if ctx.caps.stopword_terms {
+        "alice@example.com"
+    } else {
+        "alice@example"
+    };
+    let resp = email_query(ctx, json!({ "filter": { "to": to } })).await;
     let ids = query_ids(&resp);
     check(
         has_id(&ids, ctx.email("thread-starter")),
@@ -465,9 +475,14 @@ async fn filter_header_name_only(ctx: &CompCtx<'_>) -> TestOutcome {
 }
 
 async fn filter_header_name_value(ctx: &CompCtx<'_>) -> TestOutcome {
+    let header_value = if ctx.caps.punctuated_header_values {
+        "custom-value-12345"
+    } else {
+        "12345"
+    };
     let resp = email_query(
         ctx,
-        json!({ "filter": { "header": ["X-Custom-Header", "custom-value-12345"] } }),
+        json!({ "filter": { "header": ["X-Custom-Header", header_value] } }),
     )
     .await;
     let ids = query_ids(&resp);

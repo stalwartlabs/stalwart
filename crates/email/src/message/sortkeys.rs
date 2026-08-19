@@ -128,7 +128,7 @@ impl EmailSortKeys for Server {
         I: DocumentSet + Send + Sync,
     {
         let collection: u8 = Collection::Email.into();
-        let class = ValueClass::Property(EmailField::SortKeys.into());
+        let class = ValueClass::Immutable(EmailField::SortKeys.into());
         let mut sort_keys: Vec<(SortKey, u32)> = Vec::with_capacity(documents.len());
 
         self.core

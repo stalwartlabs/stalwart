@@ -67,7 +67,7 @@ impl Server {
         &self,
         account_id: u32,
         collection: Collection,
-        field: u8,
+        class: ValueClass,
         mut cb: CB,
     ) -> trc::Result<()>
     where
@@ -84,13 +84,13 @@ impl Server {
                         account_id,
                         collection,
                         document_id: 0,
-                        class: ValueClass::Property(field),
+                        class: class.clone(),
                     },
                     ValueKey {
                         account_id,
                         collection,
                         document_id: u32::MAX,
-                        class: ValueClass::Property(field),
+                        class,
                     },
                 ),
                 |key, value| {

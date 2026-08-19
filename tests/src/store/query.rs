@@ -7,7 +7,7 @@
 use crate::utils::server::TestServer;
 use nlp::language::Language;
 use store::{
-    SearchStore, Store,
+    SearchStore, Store, Subspace,
     ahash::AHashMap,
     rand::{self, RngExt, distr::Alphanumeric},
     roaring::RoaringBitmap,
@@ -1600,10 +1600,9 @@ async fn test_term_blocks(store: &SearchStore) {
     );
 }
 
-async fn search_region_key_count(store: &Store, typ: u8, account_id: u32) -> u64 {
+async fn search_region_key_count(store: &Store, subspace: Subspace, account_id: u32) -> u64 {
     use store::write::{AnyKey, SearchIndex};
-    let tag = typ | SearchIndex::Email.to_u8();
-    let mut begin = vec![tag];
+    let mut begin = vec![SearchIndex::Email.to_u8()];
     begin.extend_from_slice(&account_id.to_be_bytes());
     let mut end = begin.clone();
     end.extend_from_slice(&[u8::MAX; 30]);
@@ -1612,13 +1611,10 @@ async fn search_region_key_count(store: &Store, typ: u8, account_id: u32) -> u64
         .iterate(
             store::IterateParams::new(
                 AnyKey {
-                    subspace: store::SUBSPACE_SEARCH_INDEX,
+                    subspace,
                     key: begin,
                 },
-                AnyKey {
-                    subspace: store::SUBSPACE_SEARCH_INDEX,
-                    key: end,
-                },
+                AnyKey { subspace, key: end },
             )
             .no_values(),
             |_, _| {
@@ -1632,34 +1628,30 @@ async fn search_region_key_count(store: &Store, typ: u8, account_id: u32) -> u64
 }
 
 async fn verify_account_regions_empty(store: &Store, account_id: u32) {
-    use store::write::SearchIndexClass;
-    for typ in [SearchIndexClass::TYPE_TERM, SearchIndexClass::TYPE_DOCUMENT] {
+    for subspace in [Subspace::SearchTerm, Subspace::SearchDocument] {
         assert_eq!(
-            search_region_key_count(store, typ, account_id).await,
+            search_region_key_count(store, subspace, account_id).await,
             0,
-            "search region type {typ} for account {account_id} is not empty"
+            "search subspace {} for account {account_id} is not empty",
+            subspace.name()
         );
     }
 }
 
-async fn global_region_key_count(store: &Store, typ: u8) -> u64 {
+async fn global_region_key_count(store: &Store, subspace: Subspace) -> u64 {
     use store::write::{AnyKey, SearchIndex};
-    let tag = typ | SearchIndex::Tracing.to_u8();
-    let begin = vec![tag];
-    let mut end = vec![tag];
+    let begin = vec![SearchIndex::Tracing.to_u8()];
+    let mut end = begin.clone();
     end.extend_from_slice(&[u8::MAX; 30]);
     let mut count = 0u64;
     store
         .iterate(
             store::IterateParams::new(
                 AnyKey {
-                    subspace: store::SUBSPACE_SEARCH_INDEX,
+                    subspace,
                     key: begin,
                 },
-                AnyKey {
-                    subspace: store::SUBSPACE_SEARCH_INDEX,
-                    key: end,
-                },
+                AnyKey { subspace, key: end },
             )
             .no_values(),
             |_, _| {
@@ -1794,8 +1786,6 @@ async fn test_hashed_term_unindex(store: &SearchStore) {
 }
 
 async fn test_bulk_unindex(store: &SearchStore, internal_store: &Store) {
-    use store::write::SearchIndexClass;
-
     let total = 1200u32;
     let unique_terms = total as u64 + 1;
     let mask = RoaringBitmap::from_iter(0..total);
@@ -1832,7 +1822,7 @@ async fn test_bulk_unindex(store: &SearchStore, internal_store: &Store) {
     assert_eq!(results, mask, "all documents match before deletion");
 
     let keys_before =
-        search_region_key_count(internal_store, SearchIndexClass::TYPE_TERM, ACCOUNT_CHUNKS).await;
+        search_region_key_count(internal_store, Subspace::SearchTerm, ACCOUNT_CHUNKS).await;
     assert_eq!(keys_before, unique_terms, "expected one key per term");
 
     let mut unindex = SearchQuery::new(SearchIndex::Email)
@@ -1870,7 +1860,7 @@ async fn test_bulk_unindex(store: &SearchStore, internal_store: &Store) {
     }
 
     let keys_after =
-        search_region_key_count(internal_store, SearchIndexClass::TYPE_TERM, ACCOUNT_CHUNKS).await;
+        search_region_key_count(internal_store, Subspace::SearchTerm, ACCOUNT_CHUNKS).await;
     assert_eq!(
         keys_after,
         unique_terms - 400,
@@ -2274,17 +2264,13 @@ async fn test_global(store: &SearchStore, caps: &Caps) {
     assert_global(query_all(), vec![], "all ids after wipe").await;
 
     if caps.internal {
-        use store::write::SearchIndexClass;
         let internal_store = store.internal_fts().unwrap();
-        for typ in [
-            SearchIndexClass::TYPE_TERM,
-            SearchIndexClass::TYPE_DOCUMENT,
-            SearchIndexClass::TYPE_DOCUMENT_ID,
-        ] {
+        for subspace in [Subspace::SearchTerm, Subspace::SearchDocument] {
             assert_eq!(
-                global_region_key_count(internal_store, typ).await,
+                global_region_key_count(internal_store, subspace).await,
                 0,
-                "global region type {typ} is not empty after wipe"
+                "global subspace {} is not empty after wipe",
+                subspace.name()
             );
         }
     }

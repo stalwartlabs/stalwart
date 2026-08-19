@@ -6,7 +6,7 @@
 
 use super::{FdbStore, MAX_VALUE_SIZE};
 use crate::{
-    IterateParams, SUBSPACE_BLOBS,
+    IterateParams, Subspace,
     backend::foundationdb::into_error,
     write::{AnyKey, key::KeySerializer},
 };
@@ -40,11 +40,11 @@ impl FdbStore {
         self.iterate(
             IterateParams::new(
                 AnyKey {
-                    subspace: SUBSPACE_BLOBS,
+                    subspace: Subspace::Blobs,
                     key: begin,
                 },
                 AnyKey {
-                    subspace: SUBSPACE_BLOBS,
+                    subspace: Subspace::Blobs,
                     key: end,
                 },
             ),
@@ -113,7 +113,7 @@ impl FdbStore {
         for (chunk_pos, chunk_bytes) in data.chunks(MAX_VALUE_SIZE).enumerate() {
             trx.set(
                 &KeySerializer::new(key.len() + 3)
-                    .write(SUBSPACE_BLOBS)
+                    .write(Subspace::Blobs.byte())
                     .write(key)
                     .write(chunk_pos as u16)
                     .finalize(),
@@ -140,12 +140,12 @@ impl FdbStore {
         let trx = self.db.create_trx().map_err(into_error)?;
         trx.clear_range(
             &KeySerializer::new(key.len() + 3)
-                .write(SUBSPACE_BLOBS)
+                .write(Subspace::Blobs.byte())
                 .write(key)
                 .write(0u16)
                 .finalize(),
             &KeySerializer::new(key.len() + 3)
-                .write(SUBSPACE_BLOBS)
+                .write(Subspace::Blobs.byte())
                 .write(key)
                 .write(u16::MAX)
                 .finalize(),

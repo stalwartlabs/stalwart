@@ -454,7 +454,7 @@ impl<T: SessionStream> SessionData<T> {
                 let Some(metadata_) = self
                     .server
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+                    .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
                         account_id,
                         Collection::Email,
                         id,

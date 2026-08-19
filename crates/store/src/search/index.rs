@@ -128,13 +128,15 @@ impl Store {
     }
 
     pub async fn unindex_account(&self, index: SearchIndex, account_id: u32) -> trc::Result<()> {
-        // Delete all documents for the account
-        for typ in [SearchIndexClass::TYPE_DOCUMENT, SearchIndexClass::TYPE_TERM] {
-            let (begin, end) = codec::account_region_range(typ, index, account_id);
-            self.delete_range(codec::any_key(begin), codec::any_key(end))
-                .await
-                .caused_by(trc::location!())?;
-        }
+        let (begin, end) = codec::account_region_range(index, account_id);
+
+        self.delete_range(codec::term_key(begin.clone()), codec::term_key(end.clone()))
+            .await
+            .caused_by(trc::location!())?;
+
+        self.delete_range(codec::document_key(begin), codec::document_key(end))
+            .await
+            .caused_by(trc::location!())?;
 
         Ok(())
     }

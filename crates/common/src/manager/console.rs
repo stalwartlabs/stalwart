@@ -10,7 +10,7 @@ use std::env;
 use std::io::{self, Write};
 use store::write::serialize::RawValue;
 use store::write::{AnyClass, AnyKey, BatchBuilder, ValueClass};
-use store::{IterateParams, SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX, Store};
+use store::{IterateParams, Shape, Store, Subspace};
 
 const HELP: &str = concat!(
     "Stalwart Server v",
@@ -53,8 +53,13 @@ pub async fn store_console(store: Store) {
                     println!("Scanning from {:?} to {:?}", from_key, to_key);
                     let mut from_key = from_key.into_iter();
                     let mut to_key = to_key.into_iter();
-                    let from_subspace = from_key.next().unwrap();
-                    let to_subspace = to_key.next().unwrap();
+                    let (Some(from_subspace), Some(to_subspace)) = (
+                        from_key.next().and_then(Subspace::try_from_byte),
+                        to_key.next().and_then(Subspace::try_from_byte),
+                    ) else {
+                        println!("Unknown subspace.");
+                        continue;
+                    };
 
                     if from_subspace != to_subspace {
                         println!("Keys must be in the same subspace.");
@@ -73,11 +78,9 @@ pub async fn store_console(store: Store) {
                                     key: to_key.collect::<Vec<_>>(),
                                 },
                             )
-                            .set_values(
-                                ![SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX].contains(&from_subspace),
-                            ),
+                            .set_values(!matches!(from_subspace.shape(), Shape::Presence)),
                             |key, value| {
-                                print!("{}", char::from(from_subspace));
+                                print!("{}", from_subspace.name());
                                 print_escaped(key);
                                 print!(" : ");
                                 print_escaped(value);
@@ -96,12 +99,19 @@ pub async fn store_console(store: Store) {
                         let mut from_key = from_key.into_iter();
                         let mut to_key = to_key.into_iter();
 
+                        let (Some(from_subspace), Some(to_subspace)) = (
+                            from_key.next().and_then(Subspace::try_from_byte),
+                            to_key.next().and_then(Subspace::try_from_byte),
+                        ) else {
+                            println!("Unknown subspace.");
+                            continue;
+                        };
                         let from_key = AnyKey {
-                            subspace: from_key.next().unwrap(),
+                            subspace: from_subspace,
                             key: from_key.collect::<Vec<_>>(),
                         };
                         let to_key = AnyKey {
-                            subspace: to_key.next().unwrap(),
+                            subspace: to_subspace,
                             key: to_key.collect::<Vec<_>>(),
                         };
 
@@ -146,9 +156,13 @@ pub async fn store_console(store: Store) {
                     if let Some(key) = parse_key(key) {
                         println!("Deleting key: {:?}", key);
                         let mut key = key.into_iter();
+                        let Some(subspace) = key.next().and_then(Subspace::try_from_byte) else {
+                            println!("Unknown subspace.");
+                            continue;
+                        };
                         let mut batch = BatchBuilder::new();
                         batch.clear(ValueClass::Any(AnyClass {
-                            subspace: key.next().unwrap(),
+                            subspace,
                             key: key.collect(),
                         }));
                         if let Err(err) = store.write(batch.build_all()).await {
@@ -165,9 +179,13 @@ pub async fn store_console(store: Store) {
                     println!("Usage: get <key>");
                 } else if let Some(key) = parse_key(parts[1]) {
                     let mut key = key.into_iter();
+                    let Some(subspace) = key.next().and_then(Subspace::try_from_byte) else {
+                        println!("Unknown subspace.");
+                        continue;
+                    };
                     match store
                         .get_value::<RawValue>(AnyKey {
-                            subspace: key.next().unwrap(),
+                            subspace,
                             key: key.collect::<Vec<_>>(),
                         })
                         .await
@@ -193,10 +211,14 @@ pub async fn store_console(store: Store) {
                     println!("Putting key: {key:?}");
 
                     let mut key = key.into_iter();
+                    let Some(subspace) = key.next().and_then(Subspace::try_from_byte) else {
+                        println!("Unknown subspace.");
+                        continue;
+                    };
                     let mut batch = BatchBuilder::new();
                     batch.set(
                         ValueClass::Any(AnyClass {
-                            subspace: key.next().unwrap(),
+                            subspace,
                             key: key.collect(),
                         }),
                         value,

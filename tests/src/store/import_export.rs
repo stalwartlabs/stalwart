@@ -16,14 +16,14 @@ use store::{
     rand,
     write::{
         AnyClass, AnyKey, BatchBuilder, BlobLink, BlobOp, Operation, QueueClass, QueueEvent,
-        RegistryClass, ValueClass,
+        RegistryClass, ValueClass, key::SystemKind,
     },
     *,
 };
 use types::{
     blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
-    field::{Field, MailboxField},
+    field::Field,
 };
 
 pub async fn test(test: &TestServer) {
@@ -36,8 +36,8 @@ pub async fn test(test: &TestServer) {
     let mut batch = BatchBuilder::new();
     batch.set(
         ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_PROPERTY,
-            key: vec![0u8],
+            subspace: Subspace::System,
+            key: vec![SystemKind::SchemaVersion as u8],
         }),
         DATABASE_SCHEMA_VERSION.serialize(),
     );
@@ -79,10 +79,7 @@ pub async fn test(test: &TestServer) {
                             ValueClass::Property(Field::ARCHIVE.into()),
                             random_bytes(10),
                         )
-                        .add(
-                            ValueClass::Property(MailboxField::UidCounter.into()),
-                            rand::random(),
-                        );
+                        .add(ValueClass::MailboxUid, rand::random());
                 }
 
                 for (idx, value_size) in [16, 128, 1024, 2056, 102400].into_iter().enumerate() {
@@ -221,7 +218,7 @@ struct Snapshot {
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 struct KeyValue {
-    subspace: u8,
+    subspace: Subspace,
     key: Vec<u8>,
     value: Vec<u8>,
 }
@@ -232,28 +229,22 @@ impl Snapshot {
 
         let mut keys = AHashSet::new();
 
-        for (subspace, with_values) in [
-            (SUBSPACE_ACL, true),
-            (SUBSPACE_TASK_QUEUE, true),
-            (SUBSPACE_INDEXES, false),
-            (SUBSPACE_DELETED_ITEMS, true),
-            (SUBSPACE_SPAM_SAMPLES, true),
-            (SUBSPACE_BLOB_LINK, true),
-            (SUBSPACE_BLOBS, true),
-            (SUBSPACE_LOGS, true),
-            (SUBSPACE_COUNTER, !is_sql),
-            (SUBSPACE_IN_MEMORY_COUNTER, !is_sql),
-            (SUBSPACE_IN_MEMORY_VALUE, true),
-            (SUBSPACE_PROPERTY, true),
-            (SUBSPACE_REGISTRY, true),
-            (SUBSPACE_REGISTRY_IDX, !is_sql),
-            (SUBSPACE_REGISTRY_PK, true),
-            (SUBSPACE_QUEUE_MESSAGE, true),
-            (SUBSPACE_QUEUE_EVENT, true),
-            (SUBSPACE_QUOTA, !is_sql),
-            (SUBSPACE_REPORT_OUT, true),
-            (SUBSPACE_REPORT_IN, true),
-        ] {
+        for subspace in Subspace::ALL.iter().copied().filter(|subspace| {
+            !matches!(
+                subspace,
+                Subspace::Directory
+                    | Subspace::TelemetrySpan
+                    | Subspace::TelemetryMetric
+                    | Subspace::SearchTerm
+                    | Subspace::SearchDocument
+                    | Subspace::SearchQueue
+            )
+        }) {
+            let with_values = match subspace.shape() {
+                Shape::Value => true,
+                Shape::Presence => false,
+                Shape::Counter => !is_sql,
+            };
             let from_key = AnyKey {
                 subspace,
                 key: vec![0u8],
@@ -288,7 +279,7 @@ impl Snapshot {
             if !other.keys.contains(key) {
                 println!(
                     "Subspace {}, Key {:?} not found in restored snapshot",
-                    char::from(key.subspace),
+                    key.subspace.name(),
                     key.key,
                 );
                 is_err = true;
@@ -298,7 +289,7 @@ impl Snapshot {
             if !self.keys.contains(key) {
                 println!(
                     "Subspace {}, Key {:?} not found in original snapshot",
-                    char::from(key.subspace),
+                    key.subspace.name(),
                     key.key,
                 );
                 is_err = true;

@@ -20,21 +20,11 @@ use utils::chained_bytes::ChainedBytes;
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug)]
 pub struct MessageMetadata {
     pub contents: Box<[MessageMetadataContents]>,
-    //pub rcvd_attach: u64,
     pub blob_hash: BlobHash,
     pub blob_body_offset: u32,
     pub preview: Box<str>,
     pub raw_headers: Box<[u8]>,
 }
-
-/*pub const MESSAGE_HAS_ATTACHMENT: u64 = 1 << 63;
-pub const MESSAGE_RECEIVED_MASK: u64 = !MESSAGE_HAS_ATTACHMENT;
-
-impl IndexableAndSerializableObject for MessageData {
-    fn is_versioned() -> bool {
-        true
-    }
-}*/
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug)]
 pub struct MessageMetadataContents {

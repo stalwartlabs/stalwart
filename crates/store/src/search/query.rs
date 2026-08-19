@@ -497,7 +497,7 @@ impl AccountContext<'_> {
                         codec::account_document_key(self.index, self.account_id, document_id);
                     let mut end = begin.clone();
                     end.push(0);
-                    IterateParams::new(codec::any_key(begin), codec::any_key(end))
+                    IterateParams::new(codec::document_key(begin), codec::document_key(end))
                 })
                 .collect::<Vec<_>>();
             let mut corrupted = None;
@@ -551,8 +551,8 @@ impl AccountContext<'_> {
                 let (begin, end) =
                     codec::account_term_range(self.index, self.account_id, probe.0, &probe.1);
                 ranges.push(IterateParams::new(
-                    codec::any_key(begin),
-                    codec::any_key(end),
+                    codec::term_key(begin),
+                    codec::term_key(end),
                 ));
                 self.terms.insert(probe, RoaringBitmap::new());
             }
@@ -564,8 +564,8 @@ impl AccountContext<'_> {
                 let (begin, end) =
                     codec::account_term_prefix_range(self.index, self.account_id, field, prefix);
                 ranges.push(IterateParams::new(
-                    codec::any_key(begin),
-                    codec::any_key(end),
+                    codec::term_key(begin),
+                    codec::term_key(end),
                 ));
                 fetch_prefix = Some((field, prefix, cache_key));
             }
@@ -775,8 +775,8 @@ impl GlobalContext<'_> {
                     self.until_block,
                 );
                 ranges.push(IterateParams::new(
-                    codec::any_key(begin),
-                    codec::any_key(end),
+                    codec::term_key(begin),
+                    codec::term_key(end),
                 ));
                 self.terms.insert(probe, RoaringTreemap::new());
             }
@@ -787,8 +787,8 @@ impl GlobalContext<'_> {
             if !self.prefixes.contains_key(&cache_key) {
                 let (begin, end) = codec::global_term_prefix_range(self.index, field, prefix);
                 ranges.push(IterateParams::new(
-                    codec::any_key(begin),
-                    codec::any_key(end),
+                    codec::term_key(begin),
+                    codec::term_key(end),
                 ));
                 fetch_prefix = Some((field, prefix, cache_key));
             }
@@ -876,7 +876,7 @@ impl GlobalContext<'_> {
 
         self.store
             .iterate(
-                IterateParams::new(codec::any_key(begin), codec::any_key(end)),
+                IterateParams::new(codec::term_key(begin), codec::term_key(end)),
                 |key, value| {
                     let decoded = codec::parse_block_id(key).and_then(|block_id| {
                         LazyTreemap::deserialize_delta(

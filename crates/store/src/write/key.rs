@@ -8,27 +8,22 @@ use super::{
     AnyKey, BlobOp, InMemoryClass, QueueClass, TaskQueueClass, TelemetryClass, ValueClass,
 };
 use crate::{
-    IndexKey, IndexKeyPrefix, Key, LogKey, SUBSPACE_ACL, SUBSPACE_BLOB_LINK, SUBSPACE_COUNTER,
-    SUBSPACE_DELETED_ITEMS, SUBSPACE_DIRECTORY, SUBSPACE_IN_MEMORY_COUNTER,
-    SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY,
-    SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REGISTRY,
-    SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_PK, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
-    SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
-    SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
-    search::GLOBAL_BUCKET_SHIFT,
+    IndexKey, IndexKeyPrefix, Key, LogKey, Subspace, U16_LEN, U32_LEN, U64_LEN, U128_LEN, ValueKey,
+    WITH_SUBSPACE,
+    search::{GLOBAL_BUCKET_SHIFT, SearchField},
     write::{BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexClass},
 };
 use registry::schema::prelude::ObjectType;
-use std::convert::TryInto;
+use std::{borrow::BorrowMut, convert::TryInto};
 use types::{
     blob_hash::BLOB_HASH_LEN,
     collection::{Collection, SyncCollection},
-    field::{Field, MailboxField},
+    field::{EmailField, Field, MailboxField},
 };
 use utils::codec::leb128::Leb128_;
 
-pub struct KeySerializer {
-    pub buf: Vec<u8>,
+pub struct KeySerializer<B = Vec<u8>> {
+    pub buf: B,
 }
 
 pub trait KeySerialize {
@@ -41,25 +36,33 @@ pub trait DeserializeBigEndian {
     fn deserialize_be_u64(&self, index: usize) -> trc::Result<u64>;
 }
 
-impl KeySerializer {
+impl KeySerializer<Vec<u8>> {
     pub fn new(capacity: usize) -> Self {
         Self {
             buf: Vec::with_capacity(capacity),
         }
     }
 
+    pub fn finalize(self) -> Vec<u8> {
+        self.buf
+    }
+}
+
+impl<'x> KeySerializer<&'x mut Vec<u8>> {
+    pub fn borrowed(buf: &'x mut Vec<u8>) -> Self {
+        Self { buf }
+    }
+}
+
+impl<B: BorrowMut<Vec<u8>>> KeySerializer<B> {
     pub fn write<T: KeySerialize>(mut self, value: T) -> Self {
-        value.serialize(&mut self.buf);
+        value.serialize(self.buf.borrow_mut());
         self
     }
 
     pub fn write_leb128<T: Leb128_>(mut self, value: T) -> Self {
-        T::to_leb128_bytes(value, &mut self.buf);
+        T::to_leb128_bytes(value, self.buf.borrow_mut());
         self
-    }
-
-    pub fn finalize(self) -> Vec<u8> {
-        self.buf
     }
 }
 
@@ -182,26 +185,42 @@ impl ValueKey<ValueClass> {
             class: ValueClass::Property(Field::ARCHIVE.into()),
         }
     }
+
+    pub fn immutable(
+        account_id: u32,
+        collection: impl Into<u8>,
+        document_id: u32,
+        field: impl Into<u8>,
+    ) -> ValueKey<ValueClass> {
+        ValueKey {
+            account_id,
+            collection: collection.into(),
+            document_id,
+            class: ValueClass::Immutable(field.into()),
+        }
+    }
 }
 
 impl Key for IndexKeyPrefix {
-    fn serialize(&self, flags: u32) -> Vec<u8> {
-        {
-            if (flags & WITH_SUBSPACE) != 0 {
-                KeySerializer::new(std::mem::size_of::<IndexKeyPrefix>() + 1)
-                    .write(crate::SUBSPACE_INDEXES)
-            } else {
-                KeySerializer::new(std::mem::size_of::<IndexKeyPrefix>())
-            }
-        }
-        .write(self.account_id)
-        .write(self.collection)
-        .write(self.field)
-        .finalize()
+    fn key_len_hint(&self) -> usize {
+        IndexKeyPrefix::len()
     }
 
-    fn subspace(&self) -> u8 {
-        SUBSPACE_INDEXES
+    fn serialize_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        let serializer = if (flags & WITH_SUBSPACE) != 0 {
+            KeySerializer::borrowed(buf).write(Subspace::Indexes.byte())
+        } else {
+            KeySerializer::borrowed(buf)
+        };
+
+        serializer
+            .write(self.account_id)
+            .write(self.collection)
+            .write(self.field);
+    }
+
+    fn subspace(&self) -> Subspace {
+        Subspace::Indexes
     }
 }
 
@@ -212,34 +231,45 @@ impl IndexKeyPrefix {
 }
 
 impl Key for LogKey {
-    fn subspace(&self) -> u8 {
-        SUBSPACE_LOGS
+    fn subspace(&self) -> Subspace {
+        Subspace::Logs
     }
 
-    fn serialize(&self, flags: u32) -> Vec<u8> {
-        {
-            if (flags & WITH_SUBSPACE) != 0 {
-                KeySerializer::new(std::mem::size_of::<LogKey>() + 1).write(crate::SUBSPACE_LOGS)
-            } else {
-                KeySerializer::new(std::mem::size_of::<LogKey>())
-            }
-        }
-        .write(self.account_id)
-        .write(self.collection)
-        .write(self.change_id)
-        .finalize()
+    fn key_len_hint(&self) -> usize {
+        U32_LEN + 1 + U64_LEN
+    }
+
+    fn serialize_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        let serializer = if (flags & WITH_SUBSPACE) != 0 {
+            KeySerializer::borrowed(buf).write(Subspace::Logs.byte())
+        } else {
+            KeySerializer::borrowed(buf)
+        };
+
+        serializer
+            .write(self.account_id)
+            .write(self.collection)
+            .write(self.change_id);
     }
 }
 
 impl<T: AsRef<ValueClass> + Sync + Send + Clone> Key for ValueKey<T> {
-    fn subspace(&self) -> u8 {
+    fn subspace(&self) -> Subspace {
         self.class.as_ref().subspace(self.collection)
     }
 
-    fn serialize(&self, flags: u32) -> Vec<u8> {
-        self.class
-            .as_ref()
-            .serialize(self.account_id, self.collection, self.document_id, flags)
+    fn key_len_hint(&self) -> usize {
+        self.class.as_ref().key_len_hint()
+    }
+
+    fn serialize_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        self.class.as_ref().serialize_into(
+            buf,
+            self.account_id,
+            self.collection,
+            self.document_id,
+            flags,
+        )
     }
 }
 
@@ -251,30 +281,57 @@ impl ValueClass {
         document_id: u32,
         flags: u32,
     ) -> Vec<u8> {
-        let serializer = if (flags & WITH_SUBSPACE) != 0 {
-            KeySerializer::new(self.serialized_size() + 2).write(self.subspace(collection))
+        let mut buf = Vec::with_capacity(self.key_len_hint() + 1);
+        self.serialize_into(&mut buf, account_id, collection, document_id, flags);
+        buf
+    }
+
+    pub fn serialize_into(
+        &self,
+        buf: &mut Vec<u8>,
+        account_id: u32,
+        collection: u8,
+        document_id: u32,
+        flags: u32,
+    ) {
+        let start = buf.len();
+        let with_subspace = (flags & WITH_SUBSPACE) != 0;
+        let serializer = if with_subspace {
+            KeySerializer::borrowed(buf).write(self.subspace(collection).byte())
         } else {
-            KeySerializer::new(self.serialized_size() + 1)
+            KeySerializer::borrowed(buf)
         };
 
-        match self {
+        let serializer = match self {
             ValueClass::Property(property) => serializer
                 .write(account_id)
                 .write(collection)
                 .write(*property)
                 .write(document_id),
+            ValueClass::Immutable(property) => serializer
+                .write(account_id)
+                .write(collection)
+                .write(*property)
+                .write(document_id),
+            ValueClass::MailboxUid => serializer
+                .write(account_id)
+                .write(MAILBOX_COLLECTION)
+                .write(u8::from(MailboxField::UidCounter))
+                .write(document_id),
             ValueClass::IndexProperty(property) => match property {
-                IndexPropertyClass::Hash { property, hash } => serializer
-                    .write(account_id)
-                    .write(collection)
-                    .write(*property)
-                    .write(*hash)
-                    .write(document_id),
                 IndexPropertyClass::Integer { property, value } => serializer
                     .write(account_id)
                     .write(collection)
                     .write(*property)
+                    .write(IndexPropertyClass::KIND_INTEGER)
                     .write(*value)
+                    .write(document_id),
+                IndexPropertyClass::Hash { property, hash } => serializer
+                    .write(account_id)
+                    .write(collection)
+                    .write(*property)
+                    .write(IndexPropertyClass::KIND_HASH)
+                    .write(*hash)
                     .write(document_id),
             },
             ValueClass::Acl(grant_account_id) => serializer
@@ -340,7 +397,9 @@ impl ValueClass {
                     .write((*object_id).unwrap_or(u16::MAX))
                     .write(*index_id)
                     .write(key.as_slice()),
-                RegistryClass::IdCounter { object_id } => serializer.write(*object_id),
+                RegistryClass::IdCounter { object_id } => serializer
+                    .write(GlobalCounterKind::RegistryId as u8)
+                    .write(*object_id),
             },
             ValueClass::Queue(queue) => match queue {
                 QueueClass::Message(queue_id) => serializer.write(*queue_id),
@@ -358,8 +417,12 @@ impl ValueClass {
             ValueClass::DocumentId => serializer.write(account_id).write(collection),
             ValueClass::ChangeId => serializer.write(account_id),
             ValueClass::Quota => serializer.write(account_id).write(u8::MAX),
-            ValueClass::TenantQuota(tenant_id) => serializer.write(*tenant_id).write(u8::MAX - 1),
-            ValueClass::NodeId(node_id) => serializer.write(u32::MAX).write(*node_id),
+            ValueClass::TenantQuota(tenant_id) => serializer
+                .write(GlobalCounterKind::TenantQuota as u8)
+                .write(*tenant_id),
+            ValueClass::NodeId(node_id) => {
+                serializer.write(SystemKind::NodeId as u8).write(*node_id)
+            }
             ValueClass::ShareNotification {
                 notification_id,
                 notify_account_id,
@@ -375,7 +438,7 @@ impl ValueClass {
                     term,
                     block_id,
                 } => serializer
-                    .write(SearchIndexClass::TYPE_TERM | index.to_u8())
+                    .write(index.to_u8())
                     .write(*account_id)
                     .write(*field)
                     .write(term.as_key())
@@ -386,7 +449,7 @@ impl ValueClass {
                     account_id,
                     document_id,
                 } => serializer
-                    .write(SearchIndexClass::TYPE_DOCUMENT | index.to_u8())
+                    .write(index.to_u8())
                     .write(*account_id)
                     .write(*document_id),
                 SearchIndexClass::GlobalTerm {
@@ -395,16 +458,17 @@ impl ValueClass {
                     term,
                     block_id,
                 } => serializer
-                    .write(SearchIndexClass::TYPE_TERM | index.to_u8())
+                    .write(index.to_u8())
                     .write(*field)
                     .write(term.as_key())
                     .write(term.len() as u8)
                     .write(*block_id),
-                SearchIndexClass::GlobalDocument { index, document_id } => serializer
-                    .write(SearchIndexClass::TYPE_DOCUMENT | index.to_u8())
-                    .write(*document_id),
+                SearchIndexClass::GlobalDocument { index, document_id } => {
+                    serializer.write(index.to_u8()).write(*document_id)
+                }
                 SearchIndexClass::GlobalDocumentId { index, block_id } => serializer
-                    .write(SearchIndexClass::TYPE_DOCUMENT_ID | index.to_u8())
+                    .write(index.to_u8())
+                    .write(SearchField::Id.u8_id())
                     .write(*block_id),
                 SearchIndexClass::Queue {
                     index,
@@ -412,69 +476,79 @@ impl ValueClass {
                     id_suffix,
                     created_at,
                 } => serializer
-                    .write(SearchIndexClass::TYPE_QUEUE | index.to_u8())
+                    .write(index.to_u8())
                     .write(*id_prefix)
                     .write(*id_suffix)
                     .write(*created_at),
                 SearchIndexClass::QueueIndex { index, partition } => serializer
-                    .write(u8::MAX)
-                    .write(index.to_u8())
-                    .write(*partition),
-                SearchIndexClass::QueueStatus { index, partition } => serializer
-                    .write(u8::MAX)
+                    .write(SearchIndexClass::QUEUE_CONTROL)
                     .write(index.to_u8())
                     .write(*partition)
-                    .write(0u8),
+                    .write(SearchIndexClass::CONTROL_INDEX),
+                SearchIndexClass::QueueStatus { index, partition } => serializer
+                    .write(SearchIndexClass::QUEUE_CONTROL)
+                    .write(index.to_u8())
+                    .write(*partition)
+                    .write(SearchIndexClass::CONTROL_STATUS),
             },
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
-        }
-        .finalize()
+        };
+
+        debug_assert_eq!(
+            serializer.buf.len() - start,
+            self.key_len_hint() + usize::from(with_subspace),
+            "key length hint disagrees with the serialized key for {self:?}"
+        );
     }
 }
 
 impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for IndexKey<T> {
-    fn subspace(&self) -> u8 {
-        SUBSPACE_INDEXES
+    fn subspace(&self) -> Subspace {
+        Subspace::Indexes
     }
 
-    fn serialize(&self, flags: u32) -> Vec<u8> {
-        let key = self.key.as_ref();
-        {
-            if (flags & WITH_SUBSPACE) != 0 {
-                KeySerializer::new(std::mem::size_of::<IndexKey<T>>() + key.len() + 1)
-                    .write(crate::SUBSPACE_INDEXES)
-            } else {
-                KeySerializer::new(std::mem::size_of::<IndexKey<T>>() + key.len())
-            }
-        }
-        .write(self.account_id)
-        .write(self.collection)
-        .write(self.field)
-        .write(key)
-        .write(self.document_id)
-        .finalize()
+    fn key_len_hint(&self) -> usize {
+        IndexKeyPrefix::len() + self.key.as_ref().len() + U32_LEN
+    }
+
+    fn serialize_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        let serializer = if (flags & WITH_SUBSPACE) != 0 {
+            KeySerializer::borrowed(buf).write(Subspace::Indexes.byte())
+        } else {
+            KeySerializer::borrowed(buf)
+        };
+
+        serializer
+            .write(self.account_id)
+            .write(self.collection)
+            .write(self.field)
+            .write(self.key.as_ref())
+            .write(self.document_id);
     }
 }
 
 impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for AnyKey<T> {
-    fn serialize(&self, flags: u32) -> Vec<u8> {
-        let key = self.key.as_ref();
-        if (flags & WITH_SUBSPACE) != 0 {
-            KeySerializer::new(key.len() + 1).write(self.subspace)
-        } else {
-            KeySerializer::new(key.len())
-        }
-        .write(key)
-        .finalize()
+    fn key_len_hint(&self) -> usize {
+        self.key.as_ref().len()
     }
 
-    fn subspace(&self) -> u8 {
+    fn serialize_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        let serializer = if (flags & WITH_SUBSPACE) != 0 {
+            KeySerializer::borrowed(buf).write(self.subspace.byte())
+        } else {
+            KeySerializer::borrowed(buf)
+        };
+
+        serializer.write(self.key.as_ref());
+    }
+
+    fn subspace(&self) -> Subspace {
         self.subspace
     }
 }
 
 const MAILBOX_COLLECTION: u8 = Collection::Mailbox as u8;
-const MAILBOX_COUNTER_FIELD: u8 = MailboxField::UidCounter as u8;
+const EMAIL_COLLECTION: u8 = Collection::Email as u8;
 const REG_ARCHIVED_ITEM: u16 = ObjectType::ArchivedItem as u16;
 const REG_SPAM_SAMPLE: u16 = ObjectType::SpamTrainingSample as u16;
 const REG_ACCOUNT: u16 = ObjectType::Account as u16;
@@ -494,21 +568,27 @@ const REPORT_INTERNAL_DMARC: u16 = ObjectType::DmarcInternalReport as u16;
 const REPORT_INTERNAL_TLS: u16 = ObjectType::TlsInternalReport as u16;
 
 impl ValueClass {
-    pub fn serialized_size(&self) -> usize {
+    pub fn key_len_hint(&self) -> usize {
         match self {
-            ValueClass::Property(_) => U32_LEN * 2 + 3,
-            ValueClass::IndexProperty(p) => match p {
-                IndexPropertyClass::Hash { .. } => U32_LEN * 2 + 3 + (U64_LEN * 2),
-                IndexPropertyClass::Integer { .. } => U32_LEN * 2 + 3 + U64_LEN,
-            },
-            ValueClass::Acl(_) => U32_LEN * 3 + 2,
+            ValueClass::Property(_) | ValueClass::Immutable(_) | ValueClass::MailboxUid => {
+                (U32_LEN * 2) + 2
+            }
+            ValueClass::IndexProperty(p) => {
+                (U32_LEN * 2)
+                    + 3
+                    + match p {
+                        IndexPropertyClass::Hash { .. } => U128_LEN,
+                        IndexPropertyClass::Integer { .. } => U64_LEN,
+                    }
+            }
+            ValueClass::Acl(_) => (U32_LEN * 3) + 1,
             ValueClass::InMemory(InMemoryClass::Counter(v) | InMemoryClass::Key(v)) => v.len(),
             ValueClass::Registry(registry) => match registry {
-                RegistryClass::Item { .. } => U16_LEN + U64_LEN + 1,
-                RegistryClass::Reference { .. } => ((U16_LEN + U64_LEN) * 2) + 1,
-                RegistryClass::Index { key, .. } => (U16_LEN * 2) + U64_LEN + key.len() + 1,
-                RegistryClass::PrimaryKey { key, .. } => (U16_LEN * 2) + key.len() + 1,
-                RegistryClass::IndexId { .. } => U16_LEN + U64_LEN + 1,
+                RegistryClass::Item { .. } => U16_LEN + U64_LEN,
+                RegistryClass::Reference { .. } => (U16_LEN + U64_LEN) * 2,
+                RegistryClass::Index { key, .. } => (U16_LEN * 2) + U64_LEN + key.len(),
+                RegistryClass::PrimaryKey { key, .. } => (U16_LEN * 2) + key.len(),
+                RegistryClass::IndexId { .. } => (U16_LEN * 2) + U64_LEN,
                 RegistryClass::IdCounter { .. } => U16_LEN + 1,
             },
             ValueClass::Blob(op) => match op {
@@ -517,95 +597,113 @@ impl ValueClass {
                     BLOB_HASH_LEN
                         + match to {
                             BlobLink::Id { .. } => U64_LEN,
-                            BlobLink::Document => U32_LEN * 2 + 1,
+                            BlobLink::Document => (U32_LEN * 2) + 1,
                             BlobLink::Temporary { .. } => U32_LEN + U64_LEN,
                         }
                 }
             },
-            ValueClass::TaskQueue(_) => (U64_LEN * 2) + 1,
+            ValueClass::TaskQueue(_) => U64_LEN * 2,
             ValueClass::Queue(q) => match q {
                 QueueClass::Message(_) => U64_LEN,
                 QueueClass::MessageEvent(_) => U64_LEN * 3,
-                QueueClass::QuotaCount(v) | QueueClass::QuotaSize(v) => v.len(),
+                QueueClass::QuotaCount(v) | QueueClass::QuotaSize(v) => v.len() + 1,
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
-                TelemetryClass::Span(_) | TelemetryClass::Metric(_) => U64_LEN + 1,
+                TelemetryClass::Span(_) | TelemetryClass::Metric(_) => U64_LEN,
             },
             ValueClass::DocumentId | ValueClass::Quota | ValueClass::TenantQuota(_) => U32_LEN + 1,
             ValueClass::ChangeId => U32_LEN,
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
-            ValueClass::NodeId(_) => (U16_LEN * 3) + 1,
+            ValueClass::NodeId(_) => U16_LEN + 1,
             ValueClass::SearchIndex(v) => match v {
                 SearchIndexClass::Term { term, .. } => U32_LEN + term.key_len() + 4,
-                SearchIndexClass::Document { .. } => U32_LEN * 2 + 1,
+                SearchIndexClass::Document { .. } => (U32_LEN * 2) + 1,
                 SearchIndexClass::GlobalTerm { term, .. } => term.key_len() + U16_LEN + 3,
                 SearchIndexClass::GlobalDocument { .. } => U64_LEN + 1,
-                SearchIndexClass::GlobalDocumentId { .. } => U16_LEN + 1,
-                SearchIndexClass::Queue { .. } => U32_LEN * 2 + U64_LEN + 1,
-                SearchIndexClass::QueueIndex { .. } => U32_LEN + 2,
-                SearchIndexClass::QueueStatus { .. } => U32_LEN + 3,
+                SearchIndexClass::GlobalDocumentId { .. } => U16_LEN + 2,
+                SearchIndexClass::Queue { .. } => (U32_LEN * 2) + U64_LEN + 1,
+                SearchIndexClass::QueueIndex { .. } | SearchIndexClass::QueueStatus { .. } => {
+                    U32_LEN + 3
+                }
             },
             ValueClass::Any(v) => v.key.len(),
         }
     }
 
-    pub fn subspace(&self, collection: u8) -> u8 {
+    pub fn subspace(&self, collection: u8) -> Subspace {
         match self {
             ValueClass::Property(field) => {
-                if collection == MAILBOX_COLLECTION && *field == MAILBOX_COUNTER_FIELD {
-                    SUBSPACE_COUNTER
-                } else {
-                    SUBSPACE_PROPERTY
-                }
+                debug_assert!(
+                    !(collection == MAILBOX_COLLECTION
+                        && *field == u8::from(MailboxField::UidCounter)),
+                    "the mailbox UID counter must be written as ValueClass::MailboxUid"
+                );
+                debug_assert!(
+                    !(collection == EMAIL_COLLECTION
+                        && (*field == u8::from(EmailField::Metadata)
+                            || *field == u8::from(EmailField::SortKeys))),
+                    "email field {field} must be written as ValueClass::Immutable"
+                );
+                Subspace::Property
             }
-            ValueClass::IndexProperty { .. } => SUBSPACE_PROPERTY,
-            ValueClass::Acl(_) => SUBSPACE_ACL,
-            ValueClass::TaskQueue { .. } => SUBSPACE_TASK_QUEUE,
+            ValueClass::Immutable(_) => Subspace::Immutable,
+            ValueClass::IndexProperty { .. } => Subspace::IndexProperty,
+            ValueClass::MailboxUid => Subspace::Counter,
+            ValueClass::Acl(_) => Subspace::Acl,
+            ValueClass::TaskQueue { .. } => Subspace::TaskQueue,
             ValueClass::Blob(op) => match op {
-                BlobOp::Commit { .. } | BlobOp::Link { .. } => SUBSPACE_BLOB_LINK,
+                BlobOp::Commit { .. } | BlobOp::Link { .. } => Subspace::BlobLink,
             },
             ValueClass::Registry(registry) => match registry {
                 RegistryClass::Item { object_id, .. } => match *object_id {
                     REG_ACCOUNT | REG_DOMAIN | REG_TENANT | REG_ROLE | REG_OAUTH_CLIENT
-                    | REG_MAILING_LIST | REG_MASKED_EMAIL | REG_PUBLIC_KEY => SUBSPACE_DIRECTORY,
-                    REG_ARCHIVED_ITEM => SUBSPACE_DELETED_ITEMS,
-                    REG_SPAM_SAMPLE => SUBSPACE_SPAM_SAMPLES,
-                    REG_TRACE => SUBSPACE_TELEMETRY_SPAN,
-                    REG_METRIC => SUBSPACE_TELEMETRY_METRIC,
+                    | REG_MAILING_LIST | REG_MASKED_EMAIL | REG_PUBLIC_KEY => Subspace::Directory,
+                    REG_ARCHIVED_ITEM => Subspace::DeletedItems,
+                    REG_SPAM_SAMPLE => Subspace::SpamSamples,
+                    REG_TRACE => Subspace::TelemetrySpan,
+                    REG_METRIC => Subspace::TelemetryMetric,
                     REPORT_EXTERNAL_ARF | REPORT_EXTERNAL_DMARC | REPORT_EXTERNAL_TLS => {
-                        SUBSPACE_REPORT_IN
+                        Subspace::ReportIn
                     }
-                    REPORT_INTERNAL_DMARC | REPORT_INTERNAL_TLS => SUBSPACE_REPORT_OUT,
-                    _ => SUBSPACE_REGISTRY,
+                    REPORT_INTERNAL_DMARC | REPORT_INTERNAL_TLS => Subspace::ReportOut,
+                    _ => Subspace::Registry,
                 },
                 RegistryClass::IndexId { .. } | RegistryClass::Index { .. } => {
-                    SUBSPACE_REGISTRY_IDX
+                    Subspace::RegistryIndex
                 }
                 RegistryClass::Reference { .. } | RegistryClass::PrimaryKey { .. } => {
-                    SUBSPACE_REGISTRY_PK
+                    Subspace::RegistryPrimaryKey
                 }
-                RegistryClass::IdCounter { .. } => SUBSPACE_COUNTER,
+                RegistryClass::IdCounter { .. } => Subspace::GlobalCounter,
             },
-            ValueClass::NodeId(_) => SUBSPACE_REGISTRY_PK,
+            ValueClass::NodeId(_) => Subspace::System,
             ValueClass::InMemory(lookup) => match lookup {
-                InMemoryClass::Key(_) => SUBSPACE_IN_MEMORY_VALUE,
-                InMemoryClass::Counter(_) => SUBSPACE_IN_MEMORY_COUNTER,
+                InMemoryClass::Key(_) => Subspace::InMemoryValue,
+                InMemoryClass::Counter(_) => Subspace::InMemoryCounter,
             },
             ValueClass::Queue(queue) => match queue {
-                QueueClass::Message(_) => SUBSPACE_QUEUE_MESSAGE,
-                QueueClass::MessageEvent(_) => SUBSPACE_QUEUE_EVENT,
-                QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_) => SUBSPACE_QUOTA,
+                QueueClass::Message(_) => Subspace::QueueMessage,
+                QueueClass::MessageEvent(_) => Subspace::QueueEvent,
+                QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_) => Subspace::Quota,
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
-                TelemetryClass::Span { .. } => SUBSPACE_TELEMETRY_SPAN,
-                TelemetryClass::Metric { .. } => SUBSPACE_TELEMETRY_METRIC,
+                TelemetryClass::Span { .. } => Subspace::TelemetrySpan,
+                TelemetryClass::Metric { .. } => Subspace::TelemetryMetric,
             },
-            ValueClass::DocumentId
-            | ValueClass::ChangeId
-            | ValueClass::Quota
-            | ValueClass::TenantQuota(_) => SUBSPACE_COUNTER,
-            ValueClass::ShareNotification { .. } => SUBSPACE_LOGS,
-            ValueClass::SearchIndex(_) => SUBSPACE_SEARCH_INDEX,
+            ValueClass::DocumentId | ValueClass::ChangeId | ValueClass::Quota => Subspace::Counter,
+            ValueClass::TenantQuota(_) => Subspace::GlobalCounter,
+            ValueClass::ShareNotification { .. } => Subspace::Logs,
+            ValueClass::SearchIndex(search) => match search {
+                SearchIndexClass::Term { .. }
+                | SearchIndexClass::GlobalTerm { .. }
+                | SearchIndexClass::GlobalDocumentId { .. } => Subspace::SearchTerm,
+                SearchIndexClass::Document { .. } | SearchIndexClass::GlobalDocument { .. } => {
+                    Subspace::SearchDocument
+                }
+                SearchIndexClass::Queue { .. }
+                | SearchIndexClass::QueueIndex { .. }
+                | SearchIndexClass::QueueStatus { .. } => Subspace::SearchQueue,
+            },
             ValueClass::Any(any) => any.subspace,
         }
     }
@@ -645,11 +743,150 @@ impl From<BlobOp> for ValueClass {
     }
 }
 
+impl RegistryClass {
+    pub fn prefix(object_id: u16, index_id: u16) -> Vec<u8> {
+        KeySerializer::new(U16_LEN * 2)
+            .write(object_id)
+            .write(index_id)
+            .finalize()
+    }
+
+    pub fn item_range(object_id: u16) -> (AnyKey<Vec<u8>>, AnyKey<Vec<u8>>) {
+        let subspace = ValueClass::Registry(RegistryClass::Item {
+            object_id,
+            item_id: 0,
+        })
+        .subspace(0);
+
+        (
+            AnyKey {
+                subspace,
+                key: KeySerializer::new(U16_LEN).write(object_id).finalize(),
+            },
+            AnyKey {
+                subspace,
+                key: KeySerializer::new(U16_LEN + U64_LEN)
+                    .write(object_id)
+                    .write(u64::MAX)
+                    .finalize(),
+            },
+        )
+    }
+
+    pub fn index_range(
+        object_id: u16,
+        from: (u16, &[u8], Option<u64>),
+        to: (u16, &[u8], Option<u64>),
+    ) -> (AnyKey<Vec<u8>>, AnyKey<Vec<u8>>) {
+        (
+            AnyKey {
+                subspace: Subspace::RegistryIndex,
+                key: Self::bound(object_id, from),
+            },
+            AnyKey {
+                subspace: Subspace::RegistryIndex,
+                key: Self::bound(object_id, to),
+            },
+        )
+    }
+
+    pub fn pk_range(
+        object_id: u16,
+        from: (u16, &[u8], Option<u64>),
+        to: (u16, &[u8], Option<u64>),
+    ) -> (AnyKey<Vec<u8>>, AnyKey<Vec<u8>>) {
+        (
+            AnyKey {
+                subspace: Subspace::RegistryPrimaryKey,
+                key: Self::bound(object_id, from),
+            },
+            AnyKey {
+                subspace: Subspace::RegistryPrimaryKey,
+                key: Self::bound(object_id, to),
+            },
+        )
+    }
+
+    fn bound(object_id: u16, (index_id, value, item_id): (u16, &[u8], Option<u64>)) -> Vec<u8> {
+        let serializer = KeySerializer::new((U16_LEN * 2) + value.len() + U64_LEN)
+            .write(object_id)
+            .write(index_id)
+            .write(value);
+
+        match item_id {
+            Some(item_id) => serializer.write(item_id),
+            None => serializer,
+        }
+        .finalize()
+    }
+}
+
+#[repr(u8)]
+pub enum GlobalCounterKind {
+    TenantQuota = 0x00,
+    RegistryId = 0x01,
+}
+
+#[repr(u8)]
+pub enum SystemKind {
+    SchemaVersion = 0x00,
+    NodeId = 0x01,
+}
+
+impl IndexPropertyClass {
+    pub const KIND_INTEGER: u8 = 0x00;
+    pub const KIND_HASH: u8 = 0x01;
+
+    pub fn key_len(&self) -> usize {
+        IndexKeyPrefix::len()
+            + 1
+            + match self {
+                IndexPropertyClass::Hash { .. } => U128_LEN,
+                IndexPropertyClass::Integer { .. } => U64_LEN,
+            }
+            + U32_LEN
+    }
+}
+
 impl SearchIndexClass {
-    pub const TYPE_TERM: u8 = 0 << 5;
-    pub const TYPE_DOCUMENT: u8 = 1 << 5;
-    pub const TYPE_DOCUMENT_ID: u8 = 2 << 5;
-    pub const TYPE_QUEUE: u8 = 3 << 5;
+    pub const QUEUE_CONTROL: u8 = u8::MAX;
+    pub const CONTROL_INDEX: u8 = 0x00;
+    pub const CONTROL_STATUS: u8 = 0x01;
+
+    pub fn control_range(
+        from: (SearchIndex, u32),
+        to: Option<(SearchIndex, u32)>,
+    ) -> (AnyKey<Vec<u8>>, AnyKey<Vec<u8>>) {
+        let begin = KeySerializer::new(U32_LEN + 3)
+            .write(Self::QUEUE_CONTROL)
+            .write(from.0.to_u8())
+            .write(from.1)
+            .write(Self::CONTROL_INDEX)
+            .finalize();
+        let end = match to {
+            Some((index, partition)) => KeySerializer::new(U32_LEN + 3)
+                .write(Self::QUEUE_CONTROL)
+                .write(index.to_u8())
+                .write(partition)
+                .write(u8::MAX)
+                .finalize(),
+            None => KeySerializer::new(2)
+                .write(Self::QUEUE_CONTROL)
+                .write(u8::MAX)
+                .finalize(),
+        };
+
+        (
+            AnyKey {
+                subspace: Subspace::SearchQueue,
+                key: begin,
+            },
+            AnyKey {
+                subspace: Subspace::SearchQueue,
+                key: end,
+            },
+        )
+    }
 
     pub fn queue_range(index: SearchIndex, partition: u32) -> (Self, Self) {
         let (from_prefix, to_prefix) = if matches!(index, SearchIndex::Tracing) {

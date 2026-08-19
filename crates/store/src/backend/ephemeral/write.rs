@@ -6,8 +6,7 @@
 
 use super::EphemeralStore;
 use crate::{
-    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_INDEXES,
-    SUBSPACE_LOGS, SUBSPACE_QUOTA,
+    IndexKey, Key, LogKey, Shape, Subspace,
     backend::deserialize_i64_le,
     write::{AssignedIds, Batch, MergeResult, Operation, ValueClass, ValueOp},
 };
@@ -24,7 +23,7 @@ impl EphemeralStore {
         let mut state = self.state.write();
 
         if has_changes {
-            let map = state.subspaces.entry(SUBSPACE_COUNTER).or_default();
+            let map = state.subspaces.entry(Subspace::Counter).or_default();
             for &account_id in batch.changes.keys() {
                 let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
                 let next = match map.get(&key) {
@@ -114,7 +113,7 @@ impl EphemeralStore {
                         key: key.as_slice(),
                     }
                     .serialize(0);
-                    let map = state.subspaces.entry(SUBSPACE_INDEXES).or_default();
+                    let map = state.subspaces.entry(Subspace::Indexes).or_default();
                     if *set {
                         map.insert(index_key, Vec::new());
                     } else {
@@ -128,7 +127,7 @@ impl EphemeralStore {
                         change_id,
                     }
                     .serialize(0);
-                    let map = state.subspaces.entry(SUBSPACE_LOGS).or_default();
+                    let map = state.subspaces.entry(Subspace::Logs).or_default();
                     map.insert(log_key, std::mem::take(set));
                 }
                 Operation::AssertValue {
@@ -173,7 +172,11 @@ impl EphemeralStore {
 
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
         let mut state = self.state.write();
-        for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
+        for subspace in Subspace::ALL
+            .iter()
+            .copied()
+            .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
+        {
             if let Some(map) = state.subspaces.get_mut(&subspace) {
                 let keys: Vec<Vec<u8>> = map
                     .iter()

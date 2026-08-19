@@ -6,8 +6,7 @@
 
 use super::{CF_INDEXES, CF_LOGS, CfHandle, RocksDbStore, into_error};
 use crate::{
-    Deserialize, IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER,
-    SUBSPACE_QUOTA,
+    Deserialize, IndexKey, Key, LogKey, Shape, Subspace,
     backend::deserialize_i64_le,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
@@ -69,8 +68,7 @@ impl RocksDbStore {
         let db = self.db.clone();
         self.spawn_worker(move || {
             db.delete_range_cf(
-                &db.cf_handle(std::str::from_utf8(&[from.subspace()]).unwrap())
-                    .unwrap(),
+                &db.subspace_handle(from.subspace()),
                 from.serialize(0),
                 to.serialize(0),
             )
@@ -82,10 +80,12 @@ impl RocksDbStore {
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
         let db = self.db.clone();
         self.spawn_worker(move || {
-            for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
-                let cf = db
-                    .cf_handle(std::str::from_utf8(&[subspace]).unwrap())
-                    .unwrap();
+            for subspace in Subspace::ALL
+                .iter()
+                .copied()
+                .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
+            {
+                let cf = db.subspace_handle(subspace);
 
                 let mut delete_keys = Vec::new();
 
@@ -147,7 +147,7 @@ impl RocksDBTransaction<'_, '_> {
             .transaction_opt(&WriteOptions::default(), &self.txn_opts);
 
         if has_changes {
-            let cf = self.db.cf_handle("n").unwrap();
+            let cf = self.db.subspace_handle(Subspace::Counter);
             for &account_id in self.batch.changes.keys() {
                 let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
                 let change_id = txn
@@ -167,6 +167,7 @@ impl RocksDBTransaction<'_, '_> {
             }
         }
 
+        let mut key_buf = Vec::with_capacity(64);
         for op in self.batch.ops.iter_mut() {
             match op {
                 Operation::AccountId {
@@ -188,93 +189,99 @@ impl RocksDBTransaction<'_, '_> {
                     document_id = *document_id_;
                 }
                 Operation::Value { class, op } => {
-                    let key = class.serialize(account_id, collection, document_id, 0);
+                    key_buf.clear();
+                    class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+                    let key = &key_buf;
                     let cf = self.db.subspace_handle(class.subspace(collection));
 
                     match op {
                         ValueOp::Set(value) => {
-                            txn.put_cf(&cf, &key, value)?;
+                            txn.put_cf(&cf, key, value)?;
                         }
                         ValueOp::SetFnc(set_op) => {
                             let value = (set_op.0)(&result)?;
 
-                            txn.put_cf(&cf, &key, value)?;
+                            txn.put_cf(&cf, key, value)?;
                         }
                         ValueOp::MergeFnc(merge_op) => {
                             let merge_result = (merge_op.0)(
                                 &result,
-                                txn.get_pinned_for_update_cf(&cf, &key, true)?.as_deref(),
+                                txn.get_pinned_for_update_cf(&cf, key, true)?.as_deref(),
                             )?;
 
                             match merge_result {
                                 MergeResult::Update(value) => {
-                                    txn.put_cf(&cf, &key, value)?;
+                                    txn.put_cf(&cf, key, value)?;
                                 }
                                 MergeResult::Delete => {
-                                    txn.delete_cf(&cf, &key)?;
+                                    txn.delete_cf(&cf, key)?;
                                 }
                                 MergeResult::Skip => (),
                             }
                         }
                         ValueOp::AtomicAdd(by) => {
-                            txn.merge_cf(&cf, &key, &by.to_le_bytes()[..])?;
+                            txn.merge_cf(&cf, key, &by.to_le_bytes()[..])?;
                         }
                         ValueOp::AddAndGet(by) => {
                             let num = txn
-                                .get_pinned_for_update_cf(&cf, &key, true)
+                                .get_pinned_for_update_cf(&cf, key, true)
                                 .map_err(CommitError::from)
                                 .and_then(|bytes| {
                                     if let Some(bytes) = bytes {
-                                        deserialize_i64_le(&key, &bytes)
+                                        deserialize_i64_le(key, &bytes)
                                             .map(|v| v + *by)
                                             .map_err(CommitError::from)
                                     } else {
                                         Ok(*by)
                                     }
                                 })?;
-                            txn.put_cf(&cf, &key, &num.to_le_bytes()[..])?;
+                            txn.put_cf(&cf, key, &num.to_le_bytes()[..])?;
                             result.push_counter_id(num);
                         }
                         ValueOp::Clear => {
-                            txn.delete_cf(&cf, &key)?;
+                            txn.delete_cf(&cf, key)?;
                         }
                     }
                 }
                 Operation::Index { field, key, set } => {
-                    let key = IndexKey {
+                    key_buf.clear();
+                    IndexKey {
                         account_id,
                         collection,
                         document_id,
                         field: *field,
                         key: &*key,
                     }
-                    .serialize(0);
+                    .serialize_into(&mut key_buf, 0);
+                    let key = &key_buf;
 
                     if *set {
-                        txn.put_cf(&self.cf_indexes, &key, [])?;
+                        txn.put_cf(&self.cf_indexes, key, [])?;
                     } else {
-                        txn.delete_cf(&self.cf_indexes, &key)?;
+                        txn.delete_cf(&self.cf_indexes, key)?;
                     }
                 }
                 Operation::Log { collection, set } => {
-                    let key = LogKey {
+                    key_buf.clear();
+                    LogKey {
                         account_id,
                         collection: u8::from(*collection),
                         change_id,
                     }
-                    .serialize(0);
+                    .serialize_into(&mut key_buf, 0);
 
-                    txn.put_cf(&self.cf_logs, &key, set)?;
+                    txn.put_cf(&self.cf_logs, &key_buf, set)?;
                 }
                 Operation::AssertValue {
                     class,
                     assert_value,
                 } => {
-                    let key = class.serialize(account_id, collection, document_id, 0);
+                    key_buf.clear();
+                    class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
                     let cf = self.db.subspace_handle(class.subspace(collection));
 
                     let matches = txn
-                        .get_pinned_for_update_cf(&cf, &key, true)?
+                        .get_pinned_for_update_cf(&cf, &key_buf, true)?
                         .map(|value| assert_value.matches(&value))
                         .unwrap_or_else(|| assert_value.is_none());
 

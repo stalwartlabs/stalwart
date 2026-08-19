@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::DocumentSet;
 use crate::{
-    Deserialize, IterateParams, Key, QueryResult, SUBSPACE_COUNTER, SUBSPACE_INDEXES,
-    SUBSPACE_LOGS, Store, U32_LEN, Value, ValueKey,
-    write::{
-        AnyClass, AnyKey, AssignedIds, Batch, BatchBuilder, Operation, ValueClass, ValueOp,
-        key::{DeserializeBigEndian, KeySerializer},
-    },
+    Deserialize, IterateParams, Key, QueryResult, Store, Subspace, U32_LEN, Value, ValueKey,
+    write::{AnyKey, AssignedIds, Batch, BatchBuilder, ValueClass, key::KeySerializer},
 };
 use compact_str::ToCompactString;
 use std::time::Instant;
@@ -310,87 +305,15 @@ impl Store {
         .caused_by(trc::location!())
     }
 
-    pub async fn delete_documents(
-        &self,
-        subspace: u8,
-        account_id: u32,
-        collection: u8,
-        collection_offset: Option<usize>,
-        document_ids: &impl DocumentSet,
-    ) -> trc::Result<()> {
-        // Serialize keys
-        let (from_key, to_key) = if collection_offset.is_some() {
-            (
-                KeySerializer::new(U32_LEN + 2)
-                    .write(account_id)
-                    .write(collection),
-                KeySerializer::new(U32_LEN + 2)
-                    .write(account_id)
-                    .write(collection + 1),
-            )
-        } else {
-            (
-                KeySerializer::new(U32_LEN).write(account_id),
-                KeySerializer::new(U32_LEN).write(account_id + 1),
-            )
-        };
-
-        // Find keys to delete
-        let mut delete_keys = Vec::new();
-        self.iterate(
-            IterateParams::new(
-                AnyKey {
-                    subspace,
-                    key: from_key.finalize(),
-                },
-                AnyKey {
-                    subspace,
-                    key: to_key.finalize(),
-                },
-            )
-            .no_values(),
-            |key, _| {
-                if collection_offset.is_none_or(|offset| {
-                    key.get(key.len() - U32_LEN - offset).copied() == Some(collection)
-                }) {
-                    let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
-                    if document_ids.contains(document_id) {
-                        delete_keys.push(key.to_vec());
-                    }
-                }
-
-                Ok(true)
-            },
-        )
-        .await
-        .caused_by(trc::location!())?;
-
-        // Remove keys
-        let mut batch = BatchBuilder::new();
-
-        for key in delete_keys {
-            if batch.is_large_batch() {
-                self.write(std::mem::take(&mut batch).build_all())
-                    .await
-                    .caused_by(trc::location!())?;
-            }
-            batch.any_op(Operation::Value {
-                class: ValueClass::Any(AnyClass { subspace, key }),
-                op: ValueOp::Clear,
-            });
-        }
-
-        if !batch.is_empty() {
-            self.write(batch.build_all())
-                .await
-                .caused_by(trc::location!())?;
-        }
-
-        Ok(())
-    }
-
     pub async fn danger_destroy_account(&self, account_id: u32) -> trc::Result<()> {
-        for subspace in [SUBSPACE_LOGS, SUBSPACE_INDEXES, SUBSPACE_COUNTER] {
+        for subspace in [
+            Subspace::Logs,
+            Subspace::Indexes,
+            Subspace::Counter,
+            Subspace::Property,
+            Subspace::Immutable,
+            Subspace::IndexProperty,
+        ] {
             self.delete_range(
                 AnyKey {
                     subspace,
@@ -417,23 +340,6 @@ impl Store {
                 collection: 0,
                 document_id: 0,
                 class: ValueClass::Acl(account_id + 1),
-            },
-        )
-        .await
-        .caused_by(trc::location!())?;
-
-        self.delete_range(
-            ValueKey {
-                account_id,
-                collection: 0,
-                document_id: 0,
-                class: ValueClass::Property(0),
-            },
-            ValueKey {
-                account_id: account_id + 1,
-                collection: 0,
-                document_id: 0,
-                class: ValueClass::Property(0),
             },
         )
         .await

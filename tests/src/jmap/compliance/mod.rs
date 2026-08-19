@@ -97,6 +97,12 @@ struct Record {
     detail: String,
 }
 
+#[derive(Clone, Copy)]
+pub struct SearchCaps {
+    pub stopword_terms: bool,
+    pub punctuated_header_values: bool,
+}
+
 pub struct CompCtx<'x> {
     pub primary: &'x Account,
     pub secondary: &'x Account,
@@ -114,6 +120,7 @@ pub struct CompCtx<'x> {
     pub identity_email: String,
     pub secondary_email: String,
     pub cross_account_id: Option<String>,
+    pub caps: SearchCaps,
     results: RefCell<Vec<Record>>,
 }
 
@@ -277,7 +284,13 @@ pub async fn test(test: &TestServer) {
 
     let cross_account_id = setup_cross_account(test, primary).await;
 
-    let ctx = build_ctx(primary, secondary, cross_account_id).await;
+    let search_store = test.server.search_store();
+    let caps = SearchCaps {
+        stopword_terms: !search_store.is_mysql(),
+        punctuated_header_values: !(search_store.is_mysql() || search_store.is_postgres()),
+    };
+
+    let ctx = build_ctx(primary, secondary, cross_account_id, caps).await;
 
     test.wait_for_tasks().await;
 
@@ -353,6 +366,7 @@ async fn build_ctx<'x>(
     primary: &'x Account,
     secondary: &'x Account,
     cross_account_id: Option<String>,
+    caps: SearchCaps,
 ) -> CompCtx<'x> {
     let session = primary.jmap_session_object().await.into_inner();
     let account_id = primary.id_string().to_string();
@@ -393,6 +407,7 @@ async fn build_ctx<'x>(
         identity_email: String::new(),
         secondary_email: String::new(),
         cross_account_id,
+        caps,
         results: RefCell::new(Vec::new()),
     };
 

@@ -5,16 +5,12 @@
  */
 
 use crate::{
-    IterateParams, RegistryStore, SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_PK, Store, U16_LEN,
-    U64_LEN, ValueKey,
+    IterateParams, RegistryStore, Store, U16_LEN, U64_LEN, ValueKey,
     registry::{
         RegistryFilter, RegistryFilterOp, RegistryFilterValue, RegistryObjectCounter,
         RegistryQuery, RegistryQueryStart,
     },
-    write::{
-        AnyClass, RegistryClass, ValueClass,
-        key::{DeserializeBigEndian, KeySerializer},
-    },
+    write::{RegistryClass, ValueClass, key::DeserializeBigEndian},
 };
 use ahash::AHashSet;
 use registry::{
@@ -189,21 +185,11 @@ impl RegistryStore {
 
         let object_id = object.to_id();
         let index_id = property.to_id();
-        let begin = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY_IDX,
-            key: KeySerializer::new(U16_LEN * 2)
-                .write(object_id)
-                .write(index_id)
-                .finalize(),
-        }));
-        let end = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY_IDX,
-            key: KeySerializer::new((U16_LEN * 2) + U64_LEN)
-                .write(object_id)
-                .write(index_id)
-                .write(u64::MAX)
-                .finalize(),
-        }));
+        let (begin, end) = RegistryClass::index_range(
+            object_id,
+            (index_id, &[], None),
+            (index_id, &[], Some(u64::MAX)),
+        );
 
         self.0
             .store
@@ -249,21 +235,11 @@ impl RegistryStore {
 
         let object_id = object.to_id();
         let index_id = property.to_id();
-        let begin = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY_PK,
-            key: KeySerializer::new(U16_LEN * 2)
-                .write(object_id)
-                .write(index_id)
-                .finalize(),
-        }));
-        let end = ValueKey::from(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_REGISTRY_PK,
-            key: KeySerializer::new((U16_LEN * 2) + U64_LEN)
-                .write(object_id)
-                .write(index_id)
-                .write(u64::MAX)
-                .finalize(),
-        }));
+        let (begin, end) = RegistryClass::pk_range(
+            object_id,
+            (index_id, &[], None),
+            (index_id, &[], Some(u64::MAX)),
+        );
 
         self.0
             .store
@@ -365,29 +341,12 @@ async fn index_range<T: RegistryQueryResults>(
     };
 
     let object_id = object.to_id();
-    let begin = ValueKey::from(ValueClass::Any(AnyClass {
-        subspace: SUBSPACE_REGISTRY_IDX,
-        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + from_value.len())
-            .write(object_id)
-            .write(from_index_id)
-            .write(from_value)
-            .write(from_doc_id)
-            .finalize(),
-    }));
-    let end = ValueKey::from(ValueClass::Any(AnyClass {
-        subspace: SUBSPACE_REGISTRY_IDX,
-        key: KeySerializer::new((U16_LEN * 2) + U64_LEN + end_value.len())
-            .write(object_id)
-            .write(end_index_id)
-            .write(end_value)
-            .write(end_doc_id)
-            .finalize(),
-    }));
-
-    let prefix = KeySerializer::new(U16_LEN * 2)
-        .write(object_id)
-        .write(index_id)
-        .finalize();
+    let (begin, end) = RegistryClass::index_range(
+        object_id,
+        (from_index_id, from_value, Some(from_doc_id)),
+        (end_index_id, end_value, Some(end_doc_id)),
+    );
+    let prefix = RegistryClass::prefix(object_id, index_id);
 
     store
         .iterate(
@@ -441,27 +400,12 @@ async fn pk_range<T: RegistryQueryResults>(
     };
 
     let object_id = object.to_id();
-    let begin = ValueKey::from(ValueClass::Any(AnyClass {
-        subspace: SUBSPACE_REGISTRY_PK,
-        key: KeySerializer::new((U16_LEN * 2) + from_value.len())
-            .write(object_id)
-            .write(from_index_id)
-            .write(from_value)
-            .finalize(),
-    }));
-    let end = ValueKey::from(ValueClass::Any(AnyClass {
-        subspace: SUBSPACE_REGISTRY_PK,
-        key: KeySerializer::new((U16_LEN * 2) + end_value.len())
-            .write(object_id)
-            .write(end_index_id)
-            .write(end_value)
-            .finalize(),
-    }));
-
-    let prefix = KeySerializer::new(U16_LEN * 2)
-        .write(object_id)
-        .write(index_id)
-        .finalize();
+    let (begin, end) = RegistryClass::pk_range(
+        object_id,
+        (from_index_id, from_value, None),
+        (end_index_id, end_value, None),
+    );
+    let prefix = RegistryClass::prefix(object_id, index_id);
 
     store
         .iterate(IterateParams::new(begin, end).ascending(), |key, value| {

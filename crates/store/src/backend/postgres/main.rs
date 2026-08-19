@@ -100,64 +100,20 @@ impl PostgresStore {
     pub(crate) async fn create_storage_tables(&self) -> trc::Result<()> {
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
 
-        for table in [
-            SUBSPACE_ACL,
-            SUBSPACE_TASK_QUEUE,
-            SUBSPACE_DELETED_ITEMS,
-            SUBSPACE_SPAM_SAMPLES,
-            SUBSPACE_BLOB_LINK,
-            SUBSPACE_IN_MEMORY_VALUE,
-            SUBSPACE_PROPERTY,
-            SUBSPACE_REGISTRY,
-            SUBSPACE_REGISTRY_PK,
-            SUBSPACE_QUEUE_MESSAGE,
-            SUBSPACE_QUEUE_EVENT,
-            SUBSPACE_REPORT_OUT,
-            SUBSPACE_REPORT_IN,
-            SUBSPACE_LOGS,
-            SUBSPACE_BLOBS,
-            SUBSPACE_DIRECTORY,
-            SUBSPACE_TELEMETRY_SPAN,
-            SUBSPACE_TELEMETRY_METRIC,
-            SUBSPACE_SEARCH_INDEX,
-        ] {
-            let table = char::from(table);
-            conn.execute(
-                &format!(
-                    "CREATE TABLE IF NOT EXISTS {table} (
-                        k BYTEA PRIMARY KEY,
-                        v BYTEA NOT NULL
-                    )"
-                ),
-                &[],
-            )
-            .await
-            .map_err(into_error)?;
-        }
+        for subspace in Subspace::ALL
+            .iter()
+            .copied()
+            .filter(|subspace| !subspace.is_internal_fts())
+        {
+            let table = subspace.name();
+            let columns = match subspace.shape() {
+                Shape::Value => "k BYTEA PRIMARY KEY, v BYTEA NOT NULL",
+                Shape::Presence => "k BYTEA PRIMARY KEY",
+                Shape::Counter => "k BYTEA PRIMARY KEY, v BIGINT NOT NULL DEFAULT 0",
+            };
 
-        for table in [SUBSPACE_INDEXES, SUBSPACE_REGISTRY_IDX] {
-            let table = char::from(table);
             conn.execute(
-                &format!(
-                    "CREATE TABLE IF NOT EXISTS {table} (
-                        k BYTEA PRIMARY KEY
-                    )"
-                ),
-                &[],
-            )
-            .await
-            .map_err(into_error)?;
-        }
-
-        for table in [SUBSPACE_COUNTER, SUBSPACE_QUOTA, SUBSPACE_IN_MEMORY_COUNTER] {
-            conn.execute(
-                &format!(
-                    "CREATE TABLE IF NOT EXISTS {} (
-                    k BYTEA PRIMARY KEY,
-                    v BIGINT NOT NULL DEFAULT 0
-                )",
-                    char::from(table)
-                ),
+                &format!("CREATE TABLE IF NOT EXISTS {table} ({columns})"),
                 &[],
             )
             .await

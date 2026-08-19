@@ -557,7 +557,7 @@ impl EmailSubmissionSet for Server {
         // Obtain message metadata
         let metadata_ = if let Some(metadata) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
                 account_id,
                 Collection::Email,
                 submission.email_id,

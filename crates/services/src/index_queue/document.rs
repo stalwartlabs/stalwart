@@ -26,7 +26,7 @@ pub(crate) async fn build_email_document(
 
     match server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+        .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
             account_id,
             Collection::Email,
             document_id,

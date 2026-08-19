@@ -5,12 +5,9 @@
  */
 
 use crate::{
-    IterateParams, RegistryStore, SUBSPACE_REGISTRY, U16_LEN, U64_LEN, ValueKey,
+    IterateParams, RegistryStore, U16_LEN, ValueKey,
     registry::{RegistryObject, local::RegistryInit},
-    write::{
-        AnyClass, RegistryClass, ValueClass,
-        key::{DeserializeBigEndian, KeySerializer},
-    },
+    write::{RegistryClass, ValueClass, key::DeserializeBigEndian},
 };
 use registry::{
     pickle::PickledStream,
@@ -57,46 +54,30 @@ impl RegistryStore {
         let object_type = T::OBJECT;
 
         let mut results = Vec::new();
+        let (begin, end) = RegistryClass::item_range(object_type.to_id());
         self.0
             .store
-            .iterate(
-                IterateParams::new(
-                    ValueKey::from(ValueClass::Any(AnyClass {
-                        subspace: SUBSPACE_REGISTRY,
-                        key: KeySerializer::new(U16_LEN)
-                            .write(object_type.to_id())
-                            .finalize(),
-                    })),
-                    ValueKey::from(ValueClass::Any(AnyClass {
-                        subspace: SUBSPACE_REGISTRY,
-                        key: KeySerializer::new(U16_LEN + U64_LEN)
-                            .write(object_type.to_id())
-                            .write(u64::MAX)
-                            .finalize(),
-                    })),
-                ),
-                |key, value| {
-                    let id = key.deserialize_be_u64(U16_LEN)?;
-                    let object = PickledStream::new(value)
-                        .and_then(|mut stream| T::unpickle(&mut stream))
-                        .ok_or_else(|| {
-                            trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
-                                .into_err()
-                                .caused_by(trc::location!())
-                                .id(id)
-                                .details(object_type.as_str())
-                                .ctx(trc::Key::Value, value)
-                        })?;
+            .iterate(IterateParams::new(begin, end), |key, value| {
+                let id = key.deserialize_be_u64(U16_LEN)?;
+                let object = PickledStream::new(value)
+                    .and_then(|mut stream| T::unpickle(&mut stream))
+                    .ok_or_else(|| {
+                        trc::EventType::Registry(trc::RegistryEvent::DeserializationError)
+                            .into_err()
+                            .caused_by(trc::location!())
+                            .id(id)
+                            .details(object_type.as_str())
+                            .ctx(trc::Key::Value, value)
+                    })?;
 
-                    results.push(RegistryObject {
-                        id: ObjectId::new(object_type, Id::new(id)),
-                        object,
-                        revision: xxhash_rust::xxh3::xxh3_64(value),
-                    });
+                results.push(RegistryObject {
+                    id: ObjectId::new(object_type, Id::new(id)),
+                    object,
+                    revision: xxhash_rust::xxh3::xxh3_64(value),
+                });
 
-                    Ok(true)
-                },
-            )
+                Ok(true)
+            })
             .await
             .caused_by(trc::location!())?;
 

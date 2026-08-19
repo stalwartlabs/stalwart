@@ -691,7 +691,7 @@ async fn message_headers(server: &Server, account_id: u32, document_id: u32) -> 
 async fn message_metadata(server: &Server, account_id: u32, document_id: u32) -> MessageMetadata {
     server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+        .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
             account_id,
             Collection::Email,
             document_id,

@@ -17,21 +17,17 @@ impl RocksDbStore {
     {
         let db = self.db.clone();
         self.spawn_worker(move || {
-            let subspace = &[key.subspace()];
+            let cf = db.subspace_handle(key.subspace());
             let key = key.serialize(0);
-            db.get_pinned_cf(
-                &db.cf_handle(unsafe { std::str::from_utf8_unchecked(subspace.as_slice()) })
-                    .unwrap(),
-                &key,
-            )
-            .map_err(into_error)
-            .and_then(|value| {
-                if let Some(value) = value {
-                    U::deserialize_with_key(&key, &value).map(Some)
-                } else {
-                    Ok(None)
-                }
-            })
+            db.get_pinned_cf(&cf, &key)
+                .map_err(into_error)
+                .and_then(|value| {
+                    if let Some(value) = value {
+                        U::deserialize_with_key(&key, &value).map(Some)
+                    } else {
+                        Ok(None)
+                    }
+                })
         })
         .await
     }
@@ -39,15 +35,11 @@ impl RocksDbStore {
     pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
         let db = self.db.clone();
         self.spawn_worker(move || {
-            let subspace = &[key.subspace()];
+            let cf = db.subspace_handle(key.subspace());
             let key = key.serialize(0);
-            db.get_pinned_cf(
-                &db.cf_handle(unsafe { std::str::from_utf8_unchecked(subspace.as_slice()) })
-                    .unwrap(),
-                &key,
-            )
-            .map_err(into_error)
-            .map(|value| value.is_some())
+            db.get_pinned_cf(&cf, &key)
+                .map_err(into_error)
+                .map(|value| value.is_some())
         })
         .await
     }

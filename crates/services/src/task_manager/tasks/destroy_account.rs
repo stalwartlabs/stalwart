@@ -170,13 +170,22 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
 
 pub async fn destroy_account_blobs(server: &Server, account_id: u32) -> trc::Result<()> {
     let mut delete_keys = Vec::new();
-    for (collection, field) in [
-        (Collection::Email, u8::from(EmailField::Metadata)),
-        (Collection::FileNode, u8::from(Field::ARCHIVE)),
-        (Collection::SieveScript, u8::from(Field::ARCHIVE)),
+    for (collection, class) in [
+        (
+            Collection::Email,
+            ValueClass::Immutable(EmailField::Metadata.into()),
+        ),
+        (
+            Collection::FileNode,
+            ValueClass::Property(Field::ARCHIVE.into()),
+        ),
+        (
+            Collection::SieveScript,
+            ValueClass::Property(Field::ARCHIVE.into()),
+        ),
     ] {
         server
-            .all_archives(account_id, collection, field, |document_id, archive| {
+            .all_archives(account_id, collection, class, |document_id, archive| {
                 match collection {
                     Collection::Email => {
                         let message = archive.unarchive::<MessageMetadata>()?;

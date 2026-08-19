@@ -72,7 +72,7 @@ impl EmailCopy for Server {
         // Obtain metadata
         let metadata = if let Some(metadata) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
                 from_account_id,
                 Collection::Email,
                 from_message_id,

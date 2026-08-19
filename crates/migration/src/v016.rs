@@ -15,9 +15,7 @@ use registry::{
 };
 use spam_filter::modules::classifier::SpamTrainer;
 use store::{
-    Deserialize, IterateParams, SUBSPACE_BLOB_LINK, SUBSPACE_DIRECTORY, SUBSPACE_QUOTA,
-    SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
-    SUBSPACE_TELEMETRY_SPAN, Serialize, SerializeInfallible, U32_LEN, U64_LEN,
+    Deserialize, IterateParams, Serialize, SerializeInfallible, Subspace, U32_LEN, U64_LEN,
     search::{SearchField, SearchFilter, SearchQuery},
     write::{
         AlignedBytes, AnyClass, AnyKey, Archive, Archiver, BatchBuilder, RegistryClass,
@@ -27,11 +25,11 @@ use store::{
 use trc::AddContext;
 use types::{blob::BlobId, blob_hash::BLOB_HASH_LEN};
 
-const LEGACY_SUBSPACE_BLOB_EXTRA: u8 = b'j'; // Now SUBSPACE_DELETED_ITEMS
-const LEGACY_SUBSPACE_BITMAP_ID: u8 = b'b'; // Now SUBSPACE_REGISTRY_IDX
-const LEGACY_SUBSPACE_SETTINGS: u8 = b's'; // Now SUBSPACE_REGISTRY
-const LEGACY_SUBSPACE_FTS_INDEX: u8 = b'g'; // Now SUBSPACE_REGISTRY_PK
-const LEGACY_SUBSPACE_TELEMETRY_INDEX: u8 = b'w'; // Now SUBSPACE_SPAM_SAMPLES
+const LEGACY_SUBSPACE_BLOB_EXTRA: Subspace = Subspace::DeletedItems;
+const LEGACY_SUBSPACE_BITMAP_ID: Subspace = Subspace::RegistryIndex;
+const LEGACY_SUBSPACE_SETTINGS: Subspace = Subspace::Registry;
+const LEGACY_SUBSPACE_FTS_INDEX: Subspace = Subspace::RegistryPrimaryKey;
+const LEGACY_SUBSPACE_TELEMETRY_INDEX: Subspace = Subspace::SpamSamples;
 
 pub async fn migrate_v0_16(server: &Server) -> trc::Result<()> {
     // Delete tracing index
@@ -56,11 +54,11 @@ pub async fn migrate_v0_16(server: &Server) -> trc::Result<()> {
         .store()
         .delete_range(
             AnyKey {
-                subspace: SUBSPACE_QUOTA,
+                subspace: Subspace::Quota,
                 key: vec![0x04],
             },
             AnyKey {
-                subspace: SUBSPACE_QUOTA,
+                subspace: Subspace::Quota,
                 key: vec![0x05],
             },
         )
@@ -74,12 +72,12 @@ pub async fn migrate_v0_16(server: &Server) -> trc::Result<()> {
         LEGACY_SUBSPACE_SETTINGS,
         LEGACY_SUBSPACE_BITMAP_ID,
         LEGACY_SUBSPACE_FTS_INDEX,
-        SUBSPACE_REPORT_IN,
-        SUBSPACE_REPORT_OUT,
-        SUBSPACE_DIRECTORY,
-        SUBSPACE_TELEMETRY_METRIC,
-        SUBSPACE_TELEMETRY_SPAN,
-        SUBSPACE_TASK_QUEUE,
+        Subspace::ReportIn,
+        Subspace::ReportOut,
+        Subspace::Directory,
+        Subspace::TelemetryMetric,
+        Subspace::TelemetrySpan,
+        Subspace::TaskQueue,
     ] {
         destroy_subspace(server.store(), namespace)
             .await
@@ -164,11 +162,11 @@ async fn migrate_blob_links(server: &Server) -> trc::Result<()> {
         .iterate(
             IterateParams::new(
                 AnyKey {
-                    subspace: SUBSPACE_BLOB_LINK,
+                    subspace: Subspace::BlobLink,
                     key: vec![0u8],
                 },
                 AnyKey {
-                    subspace: SUBSPACE_BLOB_LINK,
+                    subspace: Subspace::BlobLink,
                     key: vec![u8::MAX; 32],
                 },
             ),
@@ -212,7 +210,7 @@ async fn migrate_blob_links(server: &Server) -> trc::Result<()> {
     let mut batch = BatchBuilder::new();
     for key in delete_keys {
         batch.clear(ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_BLOB_LINK,
+            subspace: Subspace::BlobLink,
             key,
         }));
 
@@ -265,7 +263,7 @@ async fn migrate_blob_links(server: &Server) -> trc::Result<()> {
         batch
             .set(
                 ValueClass::Any(AnyClass {
-                    subspace: SUBSPACE_BLOB_LINK,
+                    subspace: Subspace::BlobLink,
                     key,
                 }),
                 ObjectId::new(ObjectType::ArchivedItem, item_id.into()).serialize(),

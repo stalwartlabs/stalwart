@@ -37,9 +37,9 @@ use registry::{
 };
 use std::time::Duration;
 use store::{
-    RegistryStore, SUBSPACE_PROPERTY, Store,
+    RegistryStore, Store, Subspace,
     registry::write::{RegistryWrite, RegistryWriteResult},
-    write::{AnyKey, BatchBuilder},
+    write::{AnyKey, BatchBuilder, key::SystemKind},
 };
 use types::id::Id;
 use utils::{DomainPart, is_valid_domain};
@@ -184,8 +184,8 @@ pub(crate) async fn bootstrap_set(
 
         // Make sure this is blank deployment
         let probe = store.get_value::<u32>(AnyKey {
-            subspace: SUBSPACE_PROPERTY,
-            key: vec![0u8],
+            subspace: Subspace::System,
+            key: vec![SystemKind::SchemaVersion as u8],
         });
         match tokio::time::timeout(Duration::from_secs(30), probe).await {
             Ok(Ok(None)) => {}

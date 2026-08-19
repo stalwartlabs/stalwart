@@ -544,7 +544,7 @@ impl TestServer {
         let metadata_ = self
             .server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
                 account_id,
                 Collection::Email,
                 document_id,

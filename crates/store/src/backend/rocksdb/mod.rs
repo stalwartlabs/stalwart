@@ -4,31 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::sync::Arc;
-
+use crate::Subspace;
 use rocksdb::{BoundColumnFamily, MultiThreaded, OptimisticTransactionDB};
-
-use crate::{SUBSPACE_BLOBS, SUBSPACE_INDEXES, SUBSPACE_LOGS};
+use std::sync::Arc;
 
 pub mod blob;
 pub mod main;
 pub mod read;
 pub mod write;
 
-static CF_LOGS: &str = unsafe { std::str::from_utf8_unchecked(&[SUBSPACE_LOGS]) };
-static CF_INDEXES: &str = unsafe { std::str::from_utf8_unchecked(&[SUBSPACE_INDEXES]) };
-static CF_BLOBS: &str = unsafe { std::str::from_utf8_unchecked(&[SUBSPACE_BLOBS]) };
+static CF_LOGS: &str = Subspace::Logs.name();
+static CF_INDEXES: &str = Subspace::Indexes.name();
+static CF_BLOBS: &str = Subspace::Blobs.name();
 
 pub(crate) trait CfHandle {
-    fn subspace_handle(&self, subspace: u8) -> Arc<BoundColumnFamily<'_>>;
+    fn subspace_handle(&self, subspace: Subspace) -> Arc<BoundColumnFamily<'_>>;
 }
 
 impl CfHandle for OptimisticTransactionDB<MultiThreaded> {
     #[inline(always)]
-    fn subspace_handle(&self, subspace: u8) -> Arc<BoundColumnFamily<'_>> {
-        let subspace = &[subspace];
-        self.cf_handle(unsafe { std::str::from_utf8_unchecked(subspace) })
-            .unwrap()
+    fn subspace_handle(&self, subspace: Subspace) -> Arc<BoundColumnFamily<'_>> {
+        self.cf_handle(subspace.name()).unwrap()
     }
 }
 

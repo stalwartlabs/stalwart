@@ -129,7 +129,7 @@ impl BatchBuilder {
 
     pub fn add(&mut self, class: impl Into<ValueClass>, value: i64) -> &mut Self {
         let class = class.into();
-        self.batch_size += class.serialized_size() + std::mem::size_of::<i64>();
+        self.batch_size += class.key_len_hint() + std::mem::size_of::<i64>();
         self.ops.push(Operation::Value {
             class,
             op: ValueOp::AtomicAdd(value),
@@ -140,7 +140,7 @@ impl BatchBuilder {
 
     pub fn add_and_get(&mut self, class: impl Into<ValueClass>, value: i64) -> &mut Self {
         let class = class.into();
-        self.batch_size += class.serialized_size() + (std::mem::size_of::<i64>() * 2);
+        self.batch_size += class.key_len_hint() + (std::mem::size_of::<i64>() * 2);
         self.ops.push(Operation::Value {
             class,
             op: ValueOp::AddAndGet(value),
@@ -152,7 +152,7 @@ impl BatchBuilder {
     pub fn set(&mut self, class: impl Into<ValueClass>, value: impl Into<Vec<u8>>) -> &mut Self {
         let class = class.into();
         let value = value.into();
-        self.batch_size += class.serialized_size() + value.len();
+        self.batch_size += class.key_len_hint() + value.len();
         self.ops.push(Operation::Value {
             class,
             op: ValueOp::Set(value),
@@ -167,7 +167,7 @@ impl BatchBuilder {
         fnc: impl Fn(&AssignedIds) -> trc::Result<Vec<u8>> + Send + Sync + 'static,
     ) -> &mut Self {
         let class = class.into();
-        self.batch_size += class.serialized_size();
+        self.batch_size += class.key_len_hint();
         self.ops.push(Operation::Value {
             class,
             op: ValueOp::SetFnc(SetOperation(Box::new(fnc))),
@@ -182,7 +182,7 @@ impl BatchBuilder {
         fnc: impl Fn(&AssignedIds, Option<&[u8]>) -> trc::Result<MergeResult> + Send + Sync + 'static,
     ) -> &mut Self {
         let class = class.into();
-        self.batch_size += class.serialized_size();
+        self.batch_size += class.key_len_hint();
         self.ops.push(Operation::Value {
             class,
             op: ValueOp::MergeFnc(MergeOperation(Box::new(fnc))),
@@ -198,7 +198,7 @@ impl BatchBuilder {
 
     pub fn clear(&mut self, class: impl Into<ValueClass>) -> &mut Self {
         let class = class.into();
-        self.batch_size += class.serialized_size();
+        self.batch_size += class.key_len_hint();
         self.ops.push(Operation::Value {
             class,
             op: ValueOp::Clear,
@@ -420,7 +420,7 @@ impl BatchBuilder {
 
     pub fn any_op(&mut self, op: Operation) -> &mut Self {
         if let Operation::Value { class, op } = &op {
-            self.batch_size += class.serialized_size();
+            self.batch_size += class.key_len_hint();
             if let ValueOp::Set(value) = op {
                 self.batch_size += value.len();
 

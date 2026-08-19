@@ -6,8 +6,7 @@
 
 use super::{MysqlStore, into_error};
 use crate::{
-    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
-    SUBSPACE_REGISTRY_IDX,
+    IndexKey, Key, LogKey, Shape, Subspace,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
         ValueClass, ValueOp,
@@ -105,6 +104,7 @@ impl MysqlStore {
             }
         }
 
+        let mut key_buf = Vec::with_capacity(64);
         for op in batch.ops.iter_mut() {
             match op {
                 Operation::AccountId {
@@ -126,14 +126,16 @@ impl MysqlStore {
                     document_id = *document_id_;
                 }
                 Operation::Value { class, op } => {
-                    let key = class.serialize(account_id, collection, document_id, 0);
+                    key_buf.clear();
+                    class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+                    let key = &key_buf;
                     let subspace = class.subspace(collection);
-                    let table = char::from(subspace);
+                    let table = subspace.name();
 
                     match op {
                         ValueOp::Set(value) => {
-                            if subspace != SUBSPACE_REGISTRY_IDX {
-                                let exists = asserted_values.get(&key);
+                            if !matches!(subspace.shape(), Shape::Presence) {
+                                let exists = asserted_values.get(key);
                                 let s = if let Some(exists) = exists {
                                     if *exists {
                                         trx.prep(format!(
@@ -175,13 +177,15 @@ impl MysqlStore {
                                     }
                                 }
                             } else {
-                                let s = trx.prep("INSERT IGNORE INTO b (k) VALUES (?)").await?;
+                                let s = trx
+                                    .prep(format!("INSERT IGNORE INTO {table} (k) VALUES (?)"))
+                                    .await?;
                                 trx.exec_drop(&s, (key,)).await?;
                             }
                         }
                         ValueOp::SetFnc(set_op) => {
                             let value = (set_op.0)(&result)?;
-                            let exists = asserted_values.get(&key);
+                            let exists = asserted_values.get(key);
                             let s = if let Some(exists) = exists {
                                 if *exists {
                                     trx.prep(format!("UPDATE {} SET v = :v WHERE k = :k", table))
@@ -254,7 +258,7 @@ impl MysqlStore {
                                 }
                                 MergeResult::Delete if exists => {
                                     // Update asserted value
-                                    if let Some(exists) = asserted_values.get_mut(&key) {
+                                    if let Some(exists) = asserted_values.get_mut(key) {
                                         *exists = false;
                                     }
 
@@ -309,7 +313,7 @@ impl MysqlStore {
                         }
                         ValueOp::Clear => {
                             // Update asserted value
-                            if let Some(exists) = asserted_values.get_mut(&key) {
+                            if let Some(exists) = asserted_values.get_mut(key) {
                                 *exists = false;
                             }
 
@@ -321,14 +325,16 @@ impl MysqlStore {
                     }
                 }
                 Operation::Index { field, key, set } => {
-                    let key = IndexKey {
+                    key_buf.clear();
+                    IndexKey {
                         account_id,
                         collection,
                         document_id,
                         field: *field,
                         key: &*key,
                     }
-                    .serialize(0);
+                    .serialize_into(&mut key_buf, 0);
+                    let key = &key_buf;
 
                     let s = if *set {
                         trx.prep("INSERT IGNORE INTO i (k) VALUES (?)").await?
@@ -338,12 +344,14 @@ impl MysqlStore {
                     trx.exec_drop(&s, (key,)).await?;
                 }
                 Operation::Log { collection, set } => {
-                    let key = LogKey {
+                    key_buf.clear();
+                    LogKey {
                         account_id,
                         collection: u8::from(*collection),
                         change_id,
                     }
-                    .serialize(0);
+                    .serialize_into(&mut key_buf, 0);
+                    let key = &key_buf;
 
                     let s = trx
                         .prep("INSERT INTO l (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)")
@@ -356,7 +364,7 @@ impl MysqlStore {
                     assert_value,
                 } => {
                     let key = class.serialize(account_id, collection, document_id, 0);
-                    let table = char::from(class.subspace(collection));
+                    let table = class.subspace(collection).name();
 
                     let s = trx
                         .prep(format!("SELECT v FROM {} WHERE k = ? FOR UPDATE", table))
@@ -383,9 +391,13 @@ impl MysqlStore {
 
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
-        for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
+        for subspace in Subspace::ALL
+            .iter()
+            .copied()
+            .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
+        {
             let s = conn
-                .prep(format!("DELETE FROM {} WHERE v = 0", char::from(subspace),))
+                .prep(format!("DELETE FROM {} WHERE v = 0", subspace.name()))
                 .await
                 .map_err(into_error)?;
             conn.exec_drop(&s, ()).await.map_err(into_error)?;
@@ -400,7 +412,7 @@ impl MysqlStore {
         let s = conn
             .prep(format!(
                 "DELETE FROM {} WHERE k >= ? AND k < ?",
-                char::from(from.subspace()),
+                from.subspace().name(),
             ))
             .await
             .map_err(into_error)?;

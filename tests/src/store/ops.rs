@@ -546,7 +546,7 @@ pub async fn test(test: &TestServer) {
             BatchBuilder::new()
                 .set(
                     ValueClass::Any(store::write::AnyClass {
-                        subspace: store::SUBSPACE_PROPERTY,
+                        subspace: store::Subspace::Property,
                         key: vec![0u8],
                     }),
                     vec![1u8],
@@ -595,7 +595,7 @@ pub async fn test(test: &TestServer) {
         db.write(
             BatchBuilder::new()
                 .clear(ValueClass::Any(store::write::AnyClass {
-                    subspace: store::SUBSPACE_PROPERTY,
+                    subspace: store::Subspace::Property,
                     key: vec![0u8],
                 }))
                 .build_all(),

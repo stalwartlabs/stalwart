@@ -7,7 +7,7 @@
 use crate::{Server, ipc::PushNotification};
 use std::time::Duration;
 use store::{
-    IterateParams, Key, LogKey, SUBSPACE_LOGS, U64_LEN,
+    IterateParams, Key, LogKey, Subspace, U64_LEN,
     write::{
         AnyClass, AssignedIds, BatchBuilder, QueueNotify, ValueClass, key::DeserializeBigEndian,
     },
@@ -159,7 +159,7 @@ impl Server {
                     let mut batch = BatchBuilder::new();
                     batch.with_account_id(account_id).set(
                         ValueClass::Any(AnyClass {
-                            subspace: SUBSPACE_LOGS,
+                            subspace: Subspace::Logs,
                             key: LogKey {
                                 account_id,
                                 collection,

@@ -34,7 +34,7 @@ use registry::{
 use std::future::Future;
 use std::{borrow::Cow, cmp::Ordering, fmt::Write, time::Instant};
 use store::{
-    IndexKeyPrefix, IterateParams, SerializeInfallible, U32_LEN, U128_LEN, ValueKey,
+    IterateParams, SerializeInfallible, U32_LEN, U128_LEN, ValueKey,
     ahash::AHashMap,
     write::{
         AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, SearchIndex,
@@ -777,7 +777,11 @@ impl EmailIngest for Server {
         }
 
         // Find thread ids
-        let key_len = IndexKeyPrefix::len() + U128_LEN + U32_LEN;
+        let thread_class = IndexPropertyClass::Hash {
+            property: EmailField::Threading.into(),
+            hash: result.thread_hash,
+        };
+        let key_len = thread_class.key_len();
         let document_id_pos = key_len - U32_LEN;
         let mut thread_merge = ThreadMerge::new();
         self.store()
@@ -903,7 +907,7 @@ impl EmailIngest for Server {
         if self.core.spam.classifier.is_some()
             && let Some(archive) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+                .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
                     account_id,
                     Collection::Email,
                     document_id,

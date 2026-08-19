@@ -358,14 +358,10 @@ async fn scan_partitions(
     status: Option<IndexStatusType>,
     max_results: usize,
 ) -> trc::Result<Vec<Id>> {
-    let from_key = ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueIndex {
-        index: index.unwrap_or(SearchIndex::Email),
-        partition: partition.unwrap_or(0),
-    }));
-    let to_key = ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::QueueStatus {
-        index: index.unwrap_or(SearchIndex::Tracing),
-        partition: partition.unwrap_or(u32::MAX),
-    }));
+    let (from_key, to_key) = SearchIndexClass::control_range(
+        (index.unwrap_or(SearchIndex::Email), partition.unwrap_or(0)),
+        index.map(|index| (index, partition.unwrap_or(u32::MAX))),
+    );
 
     // Every partition is stored as a queue index key optionally followed by a status key,
     // so a partition is only emitted once the next key reveals whether it has a status
@@ -382,7 +378,7 @@ async fn scan_partitions(
         .iterate(
             IterateParams::new(from_key, to_key).ascending().no_values(),
             |key, _| {
-                if key.len() < U32_LEN + 2 {
+                if key.len() != U32_LEN + 3 {
                     return Ok(true);
                 }
                 let Some(index) = SearchIndex::try_from_u8(key[1]) else {
@@ -395,7 +391,7 @@ async fn scan_partitions(
                 if partition.is_some_and(|partition| partition != queue_partition.partition) {
                     return Ok(true);
                 }
-                let is_status = key.len() > U32_LEN + 2;
+                let is_status = key[U32_LEN + 2] == SearchIndexClass::CONTROL_STATUS;
 
                 match &mut pending {
                     Some((last, has_status)) if *last == queue_partition => {

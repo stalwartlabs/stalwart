@@ -14,8 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use store::{
-    BlobStore, IterateParams, SUBSPACE_BLOBS, SUBSPACE_COUNTER, SUBSPACE_INDEXES, SUBSPACE_QUOTA,
-    Store, U32_LEN,
+    BlobStore, IterateParams, Shape, Store, Subspace, U32_LEN,
     write::{AnyClass, AnyKey, BatchBuilder, ValueClass, key::DeserializeBigEndian},
 };
 use types::{collection::Collection, field::Field};
@@ -48,7 +47,7 @@ impl Core {
     }
 }
 
-async fn subspace_has_data(store: &Store, subspace: u8) -> bool {
+async fn subspace_has_data(store: &Store, subspace: Subspace) -> bool {
     let mut has_data = false;
     store
         .iterate(
@@ -92,7 +91,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
     let mut batch = BatchBuilder::new();
 
     match reader.subspace {
-        SUBSPACE_BLOBS => {
+        Subspace::Blobs => {
             while let Some((key, value)) = reader.next() {
                 blob_store
                     .put_blob(&key, &value, CompressionAlgo::Lz4)
@@ -100,7 +99,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                     .failed("Failed to write blob");
             }
         }
-        SUBSPACE_COUNTER | SUBSPACE_QUOTA => {
+        subspace if matches!(subspace.shape(), Shape::Counter) => {
             while let Some((key, value)) = reader.next() {
                 batch.add(
                     ValueClass::Any(AnyClass {
@@ -122,7 +121,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                 }
             }
         }
-        SUBSPACE_INDEXES => {
+        Subspace::Indexes => {
             while let Some((key, _)) = reader.next() {
                 let account_id = key
                     .as_slice()
@@ -183,7 +182,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
 }
 
 struct KeyValueReader {
-    subspace: u8,
+    subspace: Subspace,
     file: FrameDecoder<BufReader<File>>,
 }
 
@@ -202,7 +201,8 @@ impl KeyValueReader {
 
         file.read_exact(&mut buf)
             .failed(&format!("Failed to read subspace from {path:?}"));
-        let subspace = buf[0];
+        let subspace = Subspace::try_from_byte(buf[0])
+            .unwrap_or_else(|| failed(&format!("Unknown subspace in {path:?}")));
 
         let mut buf = [0u8; 4];
         file.read_exact(&mut buf)

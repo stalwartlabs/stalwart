@@ -203,7 +203,7 @@ pub async fn blob_tests() {
                     vec![],
                 )
                 .set(
-                    ValueClass::Property(EmailField::Metadata.into()),
+                    ValueClass::Immutable(EmailField::Metadata.into()),
                     Archiver::new(MessageMetadata {
                         contents: Default::default(),
                         blob_hash: hash.clone(),

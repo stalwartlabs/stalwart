@@ -6,8 +6,7 @@
 
 use super::{SqliteStore, into_error};
 use crate::{
-    IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
-    SUBSPACE_REGISTRY_IDX,
+    IndexKey, Key, LogKey, Shape, Subspace,
     write::{AssignedIds, Batch, MergeResult, Operation, ValueClass, ValueOp},
 };
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
@@ -48,6 +47,7 @@ impl SqliteStore {
                 }
             }
 
+            let mut key_buf = Vec::with_capacity(64);
             for op in batch.ops.iter_mut() {
                 match op {
                     Operation::AccountId {
@@ -69,29 +69,34 @@ impl SqliteStore {
                         document_id = *document_id_;
                     }
                     Operation::Value { class, op } => {
-                        let key = class.serialize(account_id, collection, document_id, 0);
+                        key_buf.clear();
+                        class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+                        let key = &key_buf;
                         let subspace = class.subspace(collection);
-                        let table = char::from(subspace);
+                        let table = subspace.name();
 
                         match op {
                             ValueOp::Set(value) => {
-                                if subspace != SUBSPACE_REGISTRY_IDX {
+                                if !matches!(subspace.shape(), Shape::Presence) {
                                     trx.prepare_cached(&format!(
                                         "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
                                         table
                                     ))
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?
-                                    .execute([&key, value])
+                                    .execute([key.as_slice(), value.as_slice()])
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?;
                                 } else {
-                                    trx.prepare_cached("INSERT OR IGNORE INTO b (k) VALUES (?)")
-                                        .map_err(into_error)
-                                        .caused_by(trc::location!())?
-                                        .execute([&key])
-                                        .map_err(into_error)
-                                        .caused_by(trc::location!())?;
+                                    trx.prepare_cached(&format!(
+                                        "INSERT OR IGNORE INTO {} (k) VALUES (?)",
+                                        table
+                                    ))
+                                    .map_err(into_error)
+                                    .caused_by(trc::location!())?
+                                    .execute([&key])
+                                    .map_err(into_error)
+                                    .caused_by(trc::location!())?;
                                 }
                             }
                             ValueOp::SetFnc(set_op) => {
@@ -102,7 +107,7 @@ impl SqliteStore {
                                 ))
                                 .map_err(into_error)
                                 .caused_by(trc::location!())?
-                                .execute([&key, &value])
+                                .execute([key, &value])
                                 .map_err(into_error)
                                 .caused_by(trc::location!())?;
                             }
@@ -127,7 +132,7 @@ impl SqliteStore {
                                         ))
                                         .map_err(into_error)
                                         .caused_by(trc::location!())?
-                                        .execute([&key, &value])
+                                        .execute([key, &value])
                                         .map_err(into_error)
                                         .caused_by(trc::location!())?;
                                     }
@@ -198,14 +203,16 @@ impl SqliteStore {
                         }
                     }
                     Operation::Index { field, key, set } => {
-                        let key = IndexKey {
+                        key_buf.clear();
+                        IndexKey {
                             account_id,
                             collection,
                             document_id,
                             field: *field,
                             key: &*key,
                         }
-                        .serialize(0);
+                        .serialize_into(&mut key_buf, 0);
+                        let key = &key_buf;
 
                         if *set {
                             trx.prepare_cached("INSERT OR IGNORE INTO i (k) VALUES (?)")
@@ -224,17 +231,19 @@ impl SqliteStore {
                         }
                     }
                     Operation::Log { collection, set } => {
-                        let key = LogKey {
+                        key_buf.clear();
+                        LogKey {
                             account_id,
                             collection: u8::from(*collection),
                             change_id,
                         }
-                        .serialize(0);
+                        .serialize_into(&mut key_buf, 0);
+                        let key = &key_buf;
 
                         trx.prepare_cached("INSERT OR REPLACE INTO l (k, v) VALUES (?, ?)")
                             .map_err(into_error)
                             .caused_by(trc::location!())?
-                            .execute([&key, set])
+                            .execute([key.as_slice(), set.as_slice()])
                             .map_err(into_error)
                             .caused_by(trc::location!())?;
                     }
@@ -242,8 +251,10 @@ impl SqliteStore {
                         class,
                         assert_value,
                     } => {
-                        let key = class.serialize(account_id, collection, document_id, 0);
-                        let table = char::from(class.subspace(collection));
+                        key_buf.clear();
+                        class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+                        let key = &key_buf;
+                        let table = class.subspace(collection).name();
 
                         let matches = trx
                             .prepare_cached(&format!("SELECT v FROM {} WHERE k = ?", table))
@@ -277,8 +288,12 @@ impl SqliteStore {
         let manager = self.conn_pool.clone();
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            for subspace in [SUBSPACE_QUOTA, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER] {
-                conn.prepare_cached(&format!("DELETE FROM {} WHERE v = 0", char::from(subspace),))
+            for subspace in Subspace::ALL
+                .iter()
+                .copied()
+                .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
+            {
+                conn.prepare_cached(&format!("DELETE FROM {} WHERE v = 0", subspace.name()))
                     .map_err(into_error)
                     .caused_by(trc::location!())?
                     .execute([])
@@ -298,7 +313,7 @@ impl SqliteStore {
 
             conn.prepare_cached(&format!(
                 "DELETE FROM {} WHERE k >= ? AND k < ?",
-                char::from(from.subspace()),
+                from.subspace().name(),
             ))
             .map_err(into_error)
             .caused_by(trc::location!())?

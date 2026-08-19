@@ -5,7 +5,7 @@
  */
 
 use self::assert::AssertValue;
-use crate::backend::MAX_TOKEN_LENGTH;
+use crate::{Subspace, backend::MAX_TOKEN_LENGTH};
 use log::ChangeLogBuilder;
 use nlp::tokenizers::word::WordTokenizer;
 use rkyv::util::AlignedVec;
@@ -176,7 +176,9 @@ pub enum LogCollection {
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum ValueClass {
     Property(u8),
+    Immutable(u8),
     IndexProperty(IndexPropertyClass),
+    MailboxUid,
     Acl(u32),
     InMemory(InMemoryClass),
     TaskQueue(TaskQueueClass),
@@ -265,7 +267,7 @@ pub enum SearchIndex {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub struct AnyClass {
-    pub subspace: u8,
+    pub subspace: Subspace,
     pub key: Vec<u8>,
 }
 
@@ -370,7 +372,7 @@ pub enum BlobLink {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub struct AnyKey<T: AsRef<[u8]>> {
-    pub subspace: u8,
+    pub subspace: Subspace,
     pub key: T,
 }
 
@@ -521,13 +523,19 @@ impl From<CalendarNotificationField> for ValueClass {
 
 impl From<EmailField> for ValueClass {
     fn from(value: EmailField) -> Self {
-        ValueClass::Property(value.into())
+        match value {
+            EmailField::Metadata | EmailField::SortKeys => ValueClass::Immutable(value.into()),
+            _ => ValueClass::Property(value.into()),
+        }
     }
 }
 
 impl From<MailboxField> for ValueClass {
     fn from(value: MailboxField) -> Self {
-        ValueClass::Property(value.into())
+        match value {
+            MailboxField::UidCounter => ValueClass::MailboxUid,
+            _ => ValueClass::Property(value.into()),
+        }
     }
 }
 

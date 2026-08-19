@@ -183,11 +183,9 @@ impl PostgresStore {
                                 };
 
                                 if matches!(language, Language::None) {
-                                    let _ =
-                                        write!(query, "@@ {method}('{config}', ${value_pos})");
+                                    let _ = write!(query, "@@ {method}('{config}', ${value_pos})");
                                 } else {
-                                    let _ =
-                                        write!(query, "@@ ({method}('{config}', ${value_pos})");
+                                    let _ = write!(query, "@@ ({method}('{config}', ${value_pos})");
                                     for fallback in [PG_FALLBACK_LANG, PG_UNSTEMMED_LANG] {
                                         if fallback != config && self.ts_configs.contains(fallback)
                                         {

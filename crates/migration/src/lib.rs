@@ -9,9 +9,8 @@
 use crate::v016::migrate_v0_16;
 use common::{DATABASE_SCHEMA_VERSION, Server};
 use store::{
-    IterateParams, SUBSPACE_PROPERTY, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_REPORT_IN,
-    SUBSPACE_REPORT_OUT, SerializeInfallible,
-    write::{AnyClass, AnyKey, BatchBuilder, ValueClass},
+    IterateParams, SerializeInfallible, Subspace,
+    write::{AnyClass, AnyKey, BatchBuilder, ValueClass, key::SystemKind},
 };
 use trc::AddContext;
 
@@ -22,8 +21,8 @@ pub async fn try_migrate(server: &Server) -> trc::Result<()> {
     match server
         .store()
         .get_value::<u32>(AnyKey {
-            subspace: SUBSPACE_PROPERTY,
-            key: vec![0u8],
+            subspace: Subspace::System,
+            key: vec![SystemKind::SchemaVersion as u8],
         })
         .await
         .caused_by(trc::location!())?
@@ -75,8 +74,8 @@ async fn write_schema_version(server: &Server) -> trc::Result<()> {
     let mut batch = BatchBuilder::new();
     batch.set(
         ValueClass::Any(AnyClass {
-            subspace: SUBSPACE_PROPERTY,
-            key: vec![0u8],
+            subspace: Subspace::System,
+            key: vec![SystemKind::SchemaVersion as u8],
         }),
         DATABASE_SCHEMA_VERSION.serialize(),
     );
@@ -97,10 +96,10 @@ fn abort(message: &str) -> ! {
 
 async fn is_new_install(server: &Server) -> trc::Result<bool> {
     for subspace in [
-        SUBSPACE_QUEUE_MESSAGE,
-        SUBSPACE_REPORT_IN,
-        SUBSPACE_REPORT_OUT,
-        SUBSPACE_PROPERTY,
+        Subspace::QueueMessage,
+        Subspace::ReportIn,
+        Subspace::ReportOut,
+        Subspace::Property,
     ] {
         let mut has_data = false;
 

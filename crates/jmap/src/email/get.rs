@@ -158,7 +158,7 @@ impl EmailGet for Server {
             }
             let metadata_ = match self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+                .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
                     account_id,
                     Collection::Email,
                     id.document_id(),
