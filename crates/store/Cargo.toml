@@ -50,7 +50,7 @@ deadpool = { version = "0.13", features = ["managed"], optional = true }
 arc-swap = "1.9.2"
 bitpacking = "0.9.3"
 memchr = { version = "2.8" }
-rkyv = { version = "0.8.17", features = ["little_endian", "unaligned"] }
+rkyv.workspace = true
 compact_str = "0.10.0"
 gethostname = "1.1.0"
 radsort = "0.1.1"

@@ -9,7 +9,7 @@
 #[cfg_attr(feature = "test_mode", serde(tag = "type", content = "data"))]
 #[rkyv(derive(Debug))]
 pub enum DeadPropertyTag {
-    ElementStart(DeadElementTag),
+    ElementStart(Box<DeadElementTag>),
     ElementEnd,
     Text(String),
 }
@@ -38,7 +38,9 @@ impl From<&ArchivedDeadProperty> for DeadProperty {
 impl From<&ArchivedDeadPropertyTag> for DeadPropertyTag {
     fn from(tag: &ArchivedDeadPropertyTag) -> Self {
         match tag {
-            ArchivedDeadPropertyTag::ElementStart(tag) => DeadPropertyTag::ElementStart(tag.into()),
+            ArchivedDeadPropertyTag::ElementStart(tag) => {
+                DeadPropertyTag::ElementStart(Box::new(tag.as_ref().into()))
+            }
             ArchivedDeadPropertyTag::ElementEnd => DeadPropertyTag::ElementEnd,
             ArchivedDeadPropertyTag::Text(tag) => DeadPropertyTag::Text(tag.to_string()),
         }
@@ -124,7 +126,8 @@ impl DeadProperty {
     }
 
     pub fn add_element(&mut self, element: DeadElementTag, values: Vec<DeadPropertyTag>) {
-        self.0.push(DeadPropertyTag::ElementStart(element));
+        self.0
+            .push(DeadPropertyTag::ElementStart(Box::new(element)));
         self.0.extend(values);
         self.0.push(DeadPropertyTag::ElementEnd);
     }

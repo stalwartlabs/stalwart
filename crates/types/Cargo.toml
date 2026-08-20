@@ -9,7 +9,7 @@ trc = { path = "../trc" }
 jmap-tools = { version = "0.1" }
 hashify = "0.2"
 serde = { version = "1.0", features = ["derive"]}
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
 blake3 = "1.8.5"
 

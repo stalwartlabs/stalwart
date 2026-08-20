@@ -59,39 +59,39 @@ impl MessageWrapper {
             pending_recipients.into_iter().zip(delivery_result.status)
         {
             let status = match result {
-                LocalDeliveryStatus::Success => Status::Completed(HostResponse {
+                LocalDeliveryStatus::Success => Status::Completed(Box::new(HostResponse {
                     hostname: "localhost".into(),
                     response: Response {
                         code: 250,
                         esc: [2, 1, 5],
                         message: "OK".into(),
                     },
-                }),
+                })),
                 LocalDeliveryStatus::TemporaryFailure { reason } => {
-                    Status::TemporaryFailure(ErrorDetails {
+                    Status::TemporaryFailure(Box::new(ErrorDetails {
                         entity: "localhost".into(),
-                        details: Error::UnexpectedResponse(UnexpectedResponse {
+                        details: Error::UnexpectedResponse(Box::new(UnexpectedResponse {
                             command: format!("RCPT TO:<{rcpt_addr}>").into_boxed_str(),
                             response: Response {
                                 code: 451,
                                 esc: [4, 3, 0],
                                 message: reason.into(),
                             },
-                        }),
-                    })
+                        })),
+                    }))
                 }
                 LocalDeliveryStatus::PermanentFailure { code, reason } => {
-                    Status::PermanentFailure(ErrorDetails {
+                    Status::PermanentFailure(Box::new(ErrorDetails {
                         entity: "localhost".into(),
-                        details: Error::UnexpectedResponse(UnexpectedResponse {
+                        details: Error::UnexpectedResponse(Box::new(UnexpectedResponse {
                             command: format!("RCPT TO:<{rcpt_addr}>").into_boxed_str(),
                             response: Response {
                                 code: 550,
                                 esc: code,
                                 message: reason.into(),
                             },
-                        }),
-                    })
+                        })),
+                    }))
                 }
             };
             statuses.push(DeliveryResult::account(status, rcpt_idx));

@@ -15,6 +15,7 @@ const HASHED: u8 = 1 << 5;
 const LZ4_COMPRESSED: u8 = 1 << 4;
 
 const COMPRESS_WATERMARK: usize = 8192;
+const SERIALIZE_CAPACITY: usize = 1024;
 
 fn validate_marker_and_contents(bytes: &[u8]) -> Option<(bool, &[u8], ArchiveVersion)> {
     let (marker, contents) = bytes
@@ -129,7 +130,9 @@ where
         let trailer_len = U32_LEN + version_offset + 1;
         let mut bytes = rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(
             &self.inner,
-            Vec::with_capacity(std::mem::size_of::<T::Archived>() + trailer_len),
+            Vec::with_capacity(
+                (std::mem::size_of::<T::Archived>() + trailer_len).max(SERIALIZE_CAPACITY),
+            ),
         )
         .map_err(|err| {
             trc::StoreEvent::DeserializeError

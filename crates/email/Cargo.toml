@@ -35,7 +35,7 @@ rsa = { version = "0.9.10", features = ["sha2"] }
 rand = "0.8"
 sequoia-openpgp = { version = "2.4", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 hashify = "0.2"
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 compact_str = "0.10.0"
 tinyvec = { version = "1.12.0", features = ["alloc"] }
 

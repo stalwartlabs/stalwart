@@ -201,10 +201,10 @@ impl QueuedMessage {
                         && rcpt.queue == message.queue_name
                     {
                         rcpt.retry.due = retry_at;
-                        rcpt.status = Status::TemporaryFailure(ErrorDetails {
+                        rcpt.status = Status::TemporaryFailure(Box::new(ErrorDetails {
                             entity: "localhost".into(),
                             details: Error::RateLimited,
-                        });
+                        }));
                     }
                 }
 
@@ -583,12 +583,12 @@ impl QueuedMessage {
                     );
 
                     delivery_results.push(DeliveryResult::domain(
-                        Status::PermanentFailure(ErrorDetails {
+                        Status::PermanentFailure(Box::new(ErrorDetails {
                             entity: domain.into(),
                             details: Error::DnsError(
                                 "Domain does not accept messages (null MX)".into(),
                             ),
-                        }),
+                        })),
                         rcpt_idxs,
                     ));
                     continue 'next_route;
@@ -634,13 +634,13 @@ impl QueuedMessage {
                         );
 
                         if strict {
-                            last_status = Status::PermanentFailure(ErrorDetails {
+                            last_status = Status::PermanentFailure(Box::new(ErrorDetails {
                                 entity: envelope.mx.into(),
                                 details: Error::MtaStsError(
                                     format!("MX {:?} not authorized by policy.", envelope.mx)
                                         .into_boxed_str(),
                                 ),
-                            });
+                            }));
                             continue 'next_host;
                         }
                     } else {
@@ -759,12 +759,13 @@ impl QueuedMessage {
                                         }
 
                                         if strict {
-                                            last_status = Status::PermanentFailure(ErrorDetails {
-                                                entity: envelope.mx.into(),
-                                                details: Error::DaneError(
-                                                    "No valid TLSA records were found".into(),
-                                                ),
-                                            });
+                                            last_status =
+                                                Status::PermanentFailure(Box::new(ErrorDetails {
+                                                    entity: envelope.mx.into(),
+                                                    details: Error::DaneError(
+                                                        "No valid TLSA records were found".into(),
+                                                    ),
+                                                }));
                                             continue 'next_host;
                                         }
                                         None
@@ -802,12 +803,13 @@ impl QueuedMessage {
                                             .await;
                                     }
 
-                                    last_status = Status::TemporaryFailure(ErrorDetails {
-                                        entity: envelope.mx.into(),
-                                        details: Error::DaneError(
-                                            "Bogus TLSA records were found".into(),
-                                        ),
-                                    });
+                                    last_status =
+                                        Status::TemporaryFailure(Box::new(ErrorDetails {
+                                            entity: envelope.mx.into(),
+                                            details: Error::DaneError(
+                                                "Bogus TLSA records were found".into(),
+                                            ),
+                                        }));
                                     continue 'next_host;
                                 }
                                 Ok(TlsaResult::Missing) => {
@@ -842,12 +844,13 @@ impl QueuedMessage {
                                                 .await;
                                         }
 
-                                        last_status = Status::PermanentFailure(ErrorDetails {
-                                            entity: envelope.mx.into(),
-                                            details: Error::DaneError(
-                                                "No TLSA DNSSEC records found".into(),
-                                            ),
-                                        });
+                                        last_status =
+                                            Status::PermanentFailure(Box::new(ErrorDetails {
+                                                entity: envelope.mx.into(),
+                                                details: Error::DaneError(
+                                                    "No TLSA DNSSEC records found".into(),
+                                                ),
+                                            }));
                                         continue 'next_host;
                                     }
                                     None
@@ -892,12 +895,13 @@ impl QueuedMessage {
                                                     .await;
                                             }
 
-                                            last_status = Status::PermanentFailure(ErrorDetails {
-                                                entity: envelope.mx.into(),
-                                                details: Error::DaneError(
-                                                    "No TLSA records found".into(),
-                                                ),
-                                            });
+                                            last_status =
+                                                Status::PermanentFailure(Box::new(ErrorDetails {
+                                                    entity: envelope.mx.into(),
+                                                    details: Error::DaneError(
+                                                        "No TLSA records found".into(),
+                                                    ),
+                                                }));
                                             continue 'next_host;
                                         }
                                         None
@@ -949,10 +953,10 @@ impl QueuedMessage {
                                     .await;
                             }
 
-                            last_status = Status::TemporaryFailure(ErrorDetails {
+                            last_status = Status::TemporaryFailure(Box::new(ErrorDetails {
                                 entity: envelope.mx.into(),
                                 details: Error::DaneError("Bogus MX records were found".into()),
-                            });
+                            }));
                             continue 'next_host;
                         }
                         _ => {
@@ -985,12 +989,12 @@ impl QueuedMessage {
                                         .await;
                                 }
 
-                                last_status = Status::PermanentFailure(ErrorDetails {
+                                last_status = Status::PermanentFailure(Box::new(ErrorDetails {
                                     entity: envelope.mx.into(),
                                     details: Error::DaneError(
                                         "No TLSA DNSSEC records found".into(),
                                     ),
-                                });
+                                }));
                                 continue 'next_host;
                             }
                             None
@@ -1544,12 +1548,12 @@ impl MessageWrapper {
                         NextDsn = trc::Value::Timestamp(rcpt.notify.due),
                     );
 
-                    rcpt.status = Status::PermanentFailure(ErrorDetails {
+                    rcpt.status = Status::PermanentFailure(Box::new(ErrorDetails {
                         entity: rcpt.domain_part().into(),
                         details: Error::Io(
                             "Message expired without any delivery attempts made.".into(),
                         ),
-                    });
+                    }));
                 }
                 Status::Completed(_) | Status::PermanentFailure(_) => (),
                 _ => {
@@ -1596,9 +1600,9 @@ impl MessageWrapper {
     pub fn set_rcpt_rate_limit(&mut self, rcpt_idx: usize, retry_at: u64) {
         let rcpt = &mut self.message.recipients[rcpt_idx];
         rcpt.retry.due = retry_at;
-        rcpt.status = Status::TemporaryFailure(ErrorDetails {
+        rcpt.status = Status::TemporaryFailure(Box::new(ErrorDetails {
             entity: "localhost".into(),
             details: Error::RateLimited,
-        });
+        }));
     }
 }

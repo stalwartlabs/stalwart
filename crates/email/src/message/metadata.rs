@@ -12,7 +12,7 @@ use mail_parser::{
         quoted_printable::quoted_printable_decode,
     },
 };
-use rkyv::{boxed::ArchivedBox, primitive::ArchivedU16};
+use rkyv::{boxed::ArchivedBox, primitive::ArchivedU16, string::ArchivedString};
 use std::{borrow::Cow, collections::VecDeque, ops::Range};
 use types::blob_hash::BlobHash;
 use utils::chained_bytes::ChainedBytes;
@@ -62,7 +62,7 @@ pub struct MetadataHeader {
 #[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[rkyv(compare(PartialEq))]
 pub enum MetadataHeaderName {
-    Other(Box<str>),
+    Other(String),
     Subject,
     From,
     To,
@@ -158,10 +158,10 @@ pub enum MetadataHeaderName {
 pub enum MetadataHeaderValue {
     AddressList(Box<[MetadataAddress]>),
     AddressGroup(Box<[MetadataAddressGroup]>),
-    Text(Box<str>),
-    TextList(Box<[Box<str>]>),
+    Text(String),
+    TextList(Box<[String]>),
     DateTime(MetadataDateTime),
-    ContentType(MetadataContentType),
+    ContentType(Box<MetadataContentType>),
     Empty,
 }
 
@@ -181,30 +181,30 @@ pub struct MetadataDateTime {
 #[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[rkyv(compare(PartialEq))]
 pub struct MetadataAddress {
-    pub name: Option<Box<str>>,
-    pub address: Option<Box<str>>,
+    pub name: Option<String>,
+    pub address: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[rkyv(compare(PartialEq))]
 pub struct MetadataAddressGroup {
-    pub name: Option<Box<str>>,
+    pub name: Option<String>,
     pub addresses: Box<[MetadataAddress]>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[rkyv(compare(PartialEq))]
 pub struct MetadataContentType {
-    pub c_type: Box<str>,
-    pub c_subtype: Option<Box<str>>,
+    pub c_type: String,
+    pub c_subtype: Option<String>,
     pub attributes: Box<[MetadataAttribute]>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[rkyv(compare(PartialEq))]
 pub struct MetadataAttribute {
-    pub name: Box<str>,
-    pub value: Box<str>,
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug)]
@@ -783,11 +783,9 @@ impl From<HeaderName<'_>> for MetadataHeaderName {
                     "List-Unsubscribe-Post" => MetadataHeaderName::ListUnsubscribePost,
                     "Feedback-ID" => MetadataHeaderName::FeedbackId,
                 );
-                name.unwrap_or_else(|| {
-                    MetadataHeaderName::Other(value.into_owned().into_boxed_str())
-                })
+                name.unwrap_or_else(|| MetadataHeaderName::Other(value.into_owned()))
             }
-            other => MetadataHeaderName::Other(other.as_str().to_string().into_boxed_str()),
+            other => MetadataHeaderName::Other(other.as_str().to_string()),
         }
     }
 }
@@ -800,8 +798,8 @@ impl From<HeaderValue<'_>> for MetadataHeaderValue {
                     address
                         .into_iter()
                         .map(|a| MetadataAddress {
-                            name: a.name.map(|a| a.into_owned().into_boxed_str()),
-                            address: a.address.map(|a| a.into_owned().into_boxed_str()),
+                            name: a.name.map(|a| a.into_owned()),
+                            address: a.address.map(|a| a.into_owned()),
                         })
                         .collect(),
                 ),
@@ -809,28 +807,23 @@ impl From<HeaderValue<'_>> for MetadataHeaderValue {
                     groups
                         .into_iter()
                         .map(|g| MetadataAddressGroup {
-                            name: g.name.map(|a| a.into_owned().into_boxed_str()),
+                            name: g.name.map(|a| a.into_owned()),
                             addresses: g
                                 .addresses
                                 .into_iter()
                                 .map(|a| MetadataAddress {
-                                    name: a.name.map(|a| a.into_owned().into_boxed_str()),
-                                    address: a.address.map(|a| a.into_owned().into_boxed_str()),
+                                    name: a.name.map(|a| a.into_owned()),
+                                    address: a.address.map(|a| a.into_owned()),
                                 })
                                 .collect(),
                         })
                         .collect(),
                 ),
             },
-            HeaderValue::Text(text) => {
-                MetadataHeaderValue::Text(text.into_owned().into_boxed_str())
+            HeaderValue::Text(text) => MetadataHeaderValue::Text(text.into_owned()),
+            HeaderValue::TextList(texts) => {
+                MetadataHeaderValue::TextList(texts.into_iter().map(|v| v.into_owned()).collect())
             }
-            HeaderValue::TextList(texts) => MetadataHeaderValue::TextList(
-                texts
-                    .into_iter()
-                    .map(|v| v.into_owned().into_boxed_str())
-                    .collect(),
-            ),
             HeaderValue::DateTime(dt) => MetadataHeaderValue::DateTime(MetadataDateTime {
                 year: dt.year,
                 month: dt.month,
@@ -841,19 +834,21 @@ impl From<HeaderValue<'_>> for MetadataHeaderValue {
                 tz_hour: (if dt.tz_before_gmt { -1 } else { 1 }) * dt.tz_hour as i8,
                 tz_minute: dt.tz_minute,
             }),
-            HeaderValue::ContentType(ct) => MetadataHeaderValue::ContentType(MetadataContentType {
-                c_type: ct.c_type.into_owned().into_boxed_str(),
-                c_subtype: ct.c_subtype.map(|v| v.into_owned().into_boxed_str()),
-                attributes: ct
-                    .attributes
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|a| MetadataAttribute {
-                        name: a.name.into_owned().into_boxed_str(),
-                        value: a.value.into_owned().into_boxed_str(),
-                    })
-                    .collect(),
-            }),
+            HeaderValue::ContentType(ct) => {
+                MetadataHeaderValue::ContentType(Box::new(MetadataContentType {
+                    c_type: ct.c_type.into_owned(),
+                    c_subtype: ct.c_subtype.map(|v| v.into_owned()),
+                    attributes: ct
+                        .attributes
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|a| MetadataAttribute {
+                            name: a.name.into_owned(),
+                            value: a.value.into_owned(),
+                        })
+                        .collect(),
+                }))
+            }
             HeaderValue::Received(_) | HeaderValue::Empty => MetadataHeaderValue::Empty,
         }
     }
@@ -940,7 +935,7 @@ impl ArchivedMetadataHeaderValue {
         }
     }
 
-    pub fn as_text_list(&self) -> Option<&[ArchivedBox<str>]> {
+    pub fn as_text_list(&self) -> Option<&[ArchivedString]> {
         match self {
             ArchivedMetadataHeaderValue::Text(s) => Some(std::slice::from_ref(s)),
             ArchivedMetadataHeaderValue::TextList(l) => Some(l.as_ref()),
@@ -950,7 +945,7 @@ impl ArchivedMetadataHeaderValue {
 
     pub fn as_content_type(&self) -> Option<&ArchivedMetadataContentType> {
         match self {
-            ArchivedMetadataHeaderValue::ContentType(c) => Some(c),
+            ArchivedMetadataHeaderValue::ContentType(c) => Some(c.as_ref()),
             _ => None,
         }
     }
@@ -1096,7 +1091,9 @@ impl From<&ArchivedMetadataHeaderValue> for HeaderValue<'static> {
                     .collect(),
             ),
             ArchivedMetadataHeaderValue::DateTime(dt) => HeaderValue::DateTime(dt.into()),
-            ArchivedMetadataHeaderValue::ContentType(ct) => HeaderValue::ContentType(ct.into()),
+            ArchivedMetadataHeaderValue::ContentType(ct) => {
+                HeaderValue::ContentType(ct.as_ref().into())
+            }
             ArchivedMetadataHeaderValue::Empty => HeaderValue::Empty,
         }
     }

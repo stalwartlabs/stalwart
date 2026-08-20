@@ -39,7 +39,7 @@ pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
 rsa = "0.9.10"
 sha1 = "0.11"
 sha2 = "0.11"
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 form-data = { version = "0.6.0", features = ["sync"], default-features = false }
 mime = "0.3.17"
 percent-encoding = "2.3.2"

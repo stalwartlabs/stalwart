@@ -17,7 +17,6 @@ use dav_proto::{RequestHeaders, schema::request::LockInfo};
 use groupware::cache::GroupwareCache;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use std::collections::HashMap;
 use store::ValueKey;
 use store::dispatch::lookup::KeyValue;
 use store::write::serialize::rkyv_deserialize;
@@ -26,6 +25,7 @@ use store::{Serialize, U32_LEN};
 use trc::AddContext;
 use types::collection::Collection;
 use types::dead_property::DeadProperty;
+use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Default, Clone)]
 pub struct ResourceState<'x> {
@@ -40,7 +40,7 @@ pub struct ResourceState<'x> {
 
 #[derive(Debug, Default, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub(crate) struct LockData {
-    locks: HashMap<String, LockItems>,
+    locks: VecMap<String, LockItems>,
 }
 
 #[derive(Debug, Default, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -252,10 +252,7 @@ impl LockRequestHandler for Server {
                     return Err(DavError::Code(StatusCode::PRECONDITION_FAILED));
                 }
             } else {
-                let locks = lock_data
-                    .locks
-                    .entry(resource_path.to_string())
-                    .or_insert_with(Default::default);
+                let locks = lock_data.locks.get_mut_or_insert(resource_path.to_string());
                 locks.0.push(LockItem::default());
                 locks.0.last_mut().unwrap()
             };
@@ -619,28 +616,38 @@ impl LockRequestHandler for Server {
 
 impl LockData {
     pub fn remove_lock(&mut self, lock_id: u64) -> bool {
-        for (lock_path, lock_items) in self.locks.iter_mut() {
-            for (idx, lock_item) in lock_items.0.iter().enumerate() {
-                if lock_item.lock_id == lock_id {
-                    lock_items.0.swap_remove(idx);
-                    if lock_items.0.is_empty() {
-                        let lock_path = lock_path.clone();
-                        self.locks.remove(&lock_path);
-                    }
-                    return true;
-                }
-            }
+        let Some((pos, idx)) = self
+            .locks
+            .inner
+            .iter()
+            .enumerate()
+            .find_map(|(pos, entry)| {
+                entry
+                    .value
+                    .0
+                    .iter()
+                    .position(|lock_item| lock_item.lock_id == lock_id)
+                    .map(|idx| (pos, idx))
+            })
+        else {
+            return false;
+        };
+
+        let lock_items = &mut self.locks.inner[pos].value;
+        lock_items.0.swap_remove(idx);
+        if lock_items.0.is_empty() {
+            self.locks.swap_remove(pos);
         }
 
-        false
+        true
     }
 
     pub fn remove_expired(&mut self) -> u64 {
         let mut max_expire = 0;
         let now = now();
 
-        self.locks.retain(|_, locks| {
-            locks.0.retain(|lock| {
+        self.locks.inner.retain_mut(|entry| {
+            entry.value.0.retain(|lock| {
                 if lock.expires > now {
                     max_expire = std::cmp::max(max_expire, lock.expires);
                     true
@@ -649,7 +656,7 @@ impl LockData {
                 }
             });
 
-            !locks.0.is_empty()
+            !entry.value.0.is_empty()
         });
 
         max_expire
@@ -896,9 +903,9 @@ mod tests {
     use super::*;
 
     fn sample_lock_data() -> LockData {
-        let mut locks = HashMap::new();
+        let mut locks = VecMap::new();
         for (path, lock_id) in [("calendar/work", 7u64), ("addressbook/home", 11)] {
-            locks.insert(
+            locks.set(
                 path.to_string(),
                 LockItems(vec![LockItem {
                     lock_id,

@@ -52,7 +52,7 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 num_cpus = "1.17.0"
 chrono = "0.4"
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 compact_str = "0.10.0"
 hashify = { version = "0.2" }
 base64 = "0.23"

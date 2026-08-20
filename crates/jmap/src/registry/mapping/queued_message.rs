@@ -117,10 +117,10 @@ pub(crate) async fn queued_message_set(
                 .iter()
                 .any(|(address, _)| address.as_str() == rcpt.address.as_ref())
             {
-                rcpt.status = Status::PermanentFailure(ErrorDetails {
+                rcpt.status = Status::PermanentFailure(Box::new(ErrorDetails {
                     entity: "localhost".into(),
                     details: queue::Error::Io("Delivery canceled.".into()),
-                });
+                }));
                 has_changes = true;
                 modified_rcpts.insert(idx);
             }

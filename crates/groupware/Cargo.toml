@@ -15,7 +15,7 @@ registry = { path = "../registry" }
 calcard = { version = "0.3", features = ["rkyv"] }
 hashify = "0.2"
 tokio = { version = "1.53", features = ["net", "macros"] }
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 percent-encoding = "2.3.2"
 compact_str = "0.10.0"
 ahash = { version = "0.8" }

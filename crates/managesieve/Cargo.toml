@@ -25,7 +25,7 @@ parking_lot = "0.12"
 ahash = { version = "0.8" }
 md5 = "0.8.1"
 compact_str = "0.10.0"
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 
 [features]
 test_mode = []

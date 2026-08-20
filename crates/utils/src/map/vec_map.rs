@@ -291,6 +291,25 @@ impl<K: Archive + Eq + PartialEq, V: Archive> ArchivedVecMap<K, V> {
     > {
         self.inner.iter().map(|kv| (&kv.key, &kv.value))
     }
+
+    #[inline(always)]
+    pub fn values(&self) -> impl Iterator<Item = &<V as rkyv::Archive>::Archived> {
+        self.inner.iter().map(|kv| &kv.value)
+    }
+
+    #[inline(always)]
+    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&<V as rkyv::Archive>::Archived>
+    where
+        <K as rkyv::Archive>::Archived: PartialEq<Q>,
+    {
+        self.inner.iter().find_map(|kv| {
+            if kv.key == *key {
+                Some(&kv.value)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl<K: Eq + PartialEq, V> IntoIterator for VecMap<K, V> {

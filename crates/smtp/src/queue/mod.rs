@@ -172,11 +172,11 @@ pub enum Status<T, E> {
     #[serde(rename = "scheduled")]
     Scheduled,
     #[serde(rename = "completed")]
-    Completed(T),
+    Completed(Box<T>),
     #[serde(rename = "temp_fail")]
-    TemporaryFailure(E),
+    TemporaryFailure(Box<E>),
     #[serde(rename = "perm_fail")]
-    PermanentFailure(E),
+    PermanentFailure(Box<E>),
 }
 
 #[derive(
@@ -207,7 +207,7 @@ pub struct HostResponse<T> {
 )]
 pub enum Error {
     DnsError(Box<str>),
-    UnexpectedResponse(UnexpectedResponse),
+    UnexpectedResponse(Box<UnexpectedResponse>),
     ConnectionError(Box<str>),
     TlsError(Box<str>),
     DaneError(Box<str>),

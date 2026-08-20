@@ -241,10 +241,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                     BlobId = message.message.blob_hash.to_hex(),
                     CausedBy = trc::location!()
                 );
-                Err(Status::TemporaryFailure(ErrorDetails {
+                Err(Status::TemporaryFailure(Box::new(ErrorDetails {
                     entity: "localhost".into(),
                     details: Error::Io("Queue system error.".into()),
-                }))
+                })))
             }
             Err(err) => {
                 trc::error!(
@@ -253,10 +253,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
                         .caused_by(trc::location!())
                 );
 
-                Err(Status::TemporaryFailure(ErrorDetails {
+                Err(Status::TemporaryFailure(Box::new(ErrorDetails {
                     entity: "localhost".into(),
                     details: Error::Io("Queue system error.".into()),
-                }))
+                })))
             }
         }
     }

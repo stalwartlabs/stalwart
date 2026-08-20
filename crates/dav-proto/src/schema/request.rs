@@ -256,7 +256,7 @@ impl DavDeadProperty for ArchivedDeadProperty {
             match tag {
                 ArchivedDeadPropertyTag::ElementStart(start) => {
                     if depth == 0 {
-                        tag_start = Some(DeadElementTag::from(start));
+                        tag_start = Some(DeadElementTag::from(start.as_ref()));
                     } else {
                         tags.push(tag.into());
                     }

@@ -341,10 +341,10 @@ mod tests {
                         LockScope::Exclusive,
                     )
                     .with_owner(DeadProperty(vec![
-                        DeadPropertyTag::ElementStart(DeadElementTag {
+                        DeadPropertyTag::ElementStart(Box::new(DeadElementTag {
                             name: "D:href".to_string(),
                             attrs: None,
-                        }),
+                        })),
                         DeadPropertyTag::Text("http://example.org/~ejw/contact.html".to_string()),
                         DeadPropertyTag::ElementEnd,
                     ]))

@@ -124,23 +124,23 @@ impl DnsLookup for Server {
                                 ..
                             }
                         ) {
-                            Status::PermanentFailure(ErrorDetails {
+                            Status::PermanentFailure(Box::new(ErrorDetails {
                                 entity: remote_host.hostname().into(),
                                 details: Error::DnsError("no MX record found.".into()),
-                            })
+                            }))
                         } else {
-                            Status::PermanentFailure(ErrorDetails {
+                            Status::PermanentFailure(Box::new(ErrorDetails {
                                 entity: remote_host.hostname().into(),
                                 details: Error::ConnectionError("record not found for MX".into()),
-                            })
+                            }))
                         }
                     } else {
-                        Status::TemporaryFailure(ErrorDetails {
+                        Status::TemporaryFailure(Box::new(ErrorDetails {
                             entity: remote_host.hostname().into(),
                             details: Error::ConnectionError(
                                 format!("lookup error: {err}").into_boxed_str(),
                             ),
-                        })
+                        }))
                     }
                 })?,
             HostOrIp::Ip(ip) => vec![ip],
@@ -151,16 +151,16 @@ impl DnsLookup for Server {
             if remote_ips.iter().any(|ip| ip.is_loopback()) {
                 remote_ips.retain(|ip| !ip.is_loopback());
                 if remote_ips.is_empty() {
-                    return Err(Status::PermanentFailure(ErrorDetails {
+                    return Err(Status::PermanentFailure(Box::new(ErrorDetails {
                         entity: remote_host.hostname().into(),
                         details: Error::ConnectionError("host resolves loopback address".into()),
-                    }));
+                    })));
                 }
             }
 
             Ok(remote_ips)
         } else {
-            Err(Status::TemporaryFailure(ErrorDetails {
+            Err(Status::TemporaryFailure(Box::new(ErrorDetails {
                 entity: remote_host.hostname().into(),
                 details: Error::DnsError(
                     format!(
@@ -171,7 +171,7 @@ impl DnsLookup for Server {
                     )
                     .into_boxed_str(),
                 ),
-            }))
+            })))
         }
     }
 }

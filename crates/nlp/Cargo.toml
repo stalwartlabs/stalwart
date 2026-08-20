@@ -18,7 +18,7 @@ psl = "2"
 maplit = "1.0.2"
 hashify = "0.2.9"
 rand = "0.10.2"
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 
 [features]
 test_mode = []

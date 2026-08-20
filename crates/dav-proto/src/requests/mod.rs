@@ -25,7 +25,9 @@ impl DavParser for DeadProperty {
         loop {
             match stream.token()? {
                 Token::ElementStart { raw, .. } | Token::UnknownElement(raw) => {
-                    items.0.push(DeadPropertyTag::ElementStart((&raw).into()));
+                    items
+                        .0
+                        .push(DeadPropertyTag::ElementStart(Box::new((&raw).into())));
                     depth += 1;
                 }
                 Token::ElementEnd => {
@@ -60,10 +62,10 @@ pub trait NsDeadProperty {
 impl NsDeadProperty for DeadProperty {
     fn single_with_ns(namespace: Namespace, name: &str) -> Self {
         DeadProperty(vec![
-            DeadPropertyTag::ElementStart(DeadElementTag {
+            DeadPropertyTag::ElementStart(Box::new(DeadElementTag {
                 name: format!("{}:{name}", namespace.prefix()),
                 attrs: None,
-            }),
+            })),
             DeadPropertyTag::ElementEnd,
         ])
     }

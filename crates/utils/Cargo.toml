@@ -34,7 +34,7 @@ psl = "2"
 idna = "1.1"
 quick_cache = "0.7"
 fast-float = "0.2.0"
-rkyv = { version = "0.8.17", features = ["little_endian"] }
+rkyv.workspace = true
 compact_str = "0.10.0"
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 farmhash = "1.1.5"

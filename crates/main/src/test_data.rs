@@ -154,14 +154,14 @@ fn sample_queued_messages(blob_hashes: Vec<BlobHash>) -> Vec<Message> {
                     },
                     expires: QueueExpiry::Ttl(365 * 24 * 3600),
                     queue: Default::default(),
-                    status: Status::Completed(HostResponse {
+                    status: Status::Completed(Box::new(HostResponse {
                         hostname: "mx.example.org".into(),
                         response: Response {
                             code: 250,
                             esc: [2, 1, 5],
                             message: "OK".into(),
                         },
-                    }),
+                    })),
                     flags: RCPT_DSN_SENT,
                     orcpt: Some("rfc822;bob@example.org".into()),
                 },
@@ -191,17 +191,17 @@ fn sample_queued_messages(blob_hashes: Vec<BlobHash>) -> Vec<Message> {
                 },
                 expires: QueueExpiry::Ttl(365 * 24 * 3600),
                 queue: Default::default(),
-                status: Status::TemporaryFailure(ErrorDetails {
+                status: Status::TemporaryFailure(Box::new(ErrorDetails {
                     entity: "mx.remote.net".into(),
-                    details: Error::UnexpectedResponse(UnexpectedResponse {
+                    details: Error::UnexpectedResponse(Box::new(UnexpectedResponse {
                         command: "RCPT TO".into(),
                         response: Response {
                             code: 450,
                             esc: [4, 2, 1],
                             message: "Mailbox temporarily unavailable".into(),
                         },
-                    }),
-                }),
+                    })),
+                })),
                 flags: 0,
                 orcpt: None,
             }],
@@ -230,10 +230,10 @@ fn sample_queued_messages(blob_hashes: Vec<BlobHash>) -> Vec<Message> {
                 },
                 expires: QueueExpiry::Ttl(365 * 24 * 3600),
                 queue: Default::default(),
-                status: Status::TemporaryFailure(ErrorDetails {
+                status: Status::TemporaryFailure(Box::new(ErrorDetails {
                     entity: "mx.bigcorp.com".into(),
                     details: Error::ConnectionError("Rejected by policy".into()),
-                }),
+                })),
                 flags: RCPT_SPAM_PAYLOAD,
                 orcpt: None,
             }],

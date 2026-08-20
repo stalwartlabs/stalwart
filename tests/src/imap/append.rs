@@ -9,6 +9,8 @@ use crate::utils::server::TestServer;
 use imap_proto::ResponseType;
 use std::{fs, io};
 
+const APPEND_INTERNALDATE: &str = "01-Jan-2024 00:00:00 +0000";
+
 pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, test: &TestServer) {
     println!("Running APPEND tests...");
 
@@ -35,7 +37,7 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, t
         let raw_message = fs::read(&file_name).unwrap();
 
         imap.send(&format!(
-            "APPEND INBOX (Flag_{}) {{{}}}",
+            "APPEND INBOX (Flag_{}) \"{}\" {{{}}}",
             file_name
                 .file_name()
                 .unwrap()
@@ -44,6 +46,7 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, t
                 .split_once('.')
                 .unwrap()
                 .0,
+            APPEND_INTERNALDATE,
             raw_message.len()
         ))
         .await;

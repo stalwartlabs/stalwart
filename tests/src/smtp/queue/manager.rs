@@ -125,10 +125,10 @@ fn delivery_events() {
         }
     }
 
-    message.rcpt_mut("a").status = Status::PermanentFailure(ErrorDetails {
+    message.rcpt_mut("a").status = Status::PermanentFailure(Box::new(ErrorDetails {
         entity: "localhost".into(),
         details: Error::ConcurrencyLimited,
-    });
+    }));
     assert_eq!(
         message.next_event(None).unwrap(),
         message.rcpt("b").retry.due
@@ -138,10 +138,10 @@ fn delivery_events() {
         message.rcpt("b").retry.due
     );
 
-    message.rcpt_mut("b").status = Status::PermanentFailure(ErrorDetails {
+    message.rcpt_mut("b").status = Status::PermanentFailure(Box::new(ErrorDetails {
         entity: "localhost".into(),
         details: Error::ConcurrencyLimited,
-    });
+    }));
     assert_eq!(
         message.next_event(None).unwrap(),
         message.rcpt("c").retry.due
@@ -151,10 +151,10 @@ fn delivery_events() {
         message.rcpt("c").retry.due
     );
 
-    message.rcpt_mut("c").status = Status::PermanentFailure(ErrorDetails {
+    message.rcpt_mut("c").status = Status::PermanentFailure(Box::new(ErrorDetails {
         entity: "localhost".into(),
         details: Error::ConcurrencyLimited,
-    });
+    }));
     assert!(message.next_event(None).is_none());
 }
 

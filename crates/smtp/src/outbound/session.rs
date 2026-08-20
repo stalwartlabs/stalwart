@@ -189,10 +189,10 @@ impl MessageWrapper {
                         accepted_rcpts.push((
                             rcpt,
                             rcpt_idx,
-                            Status::Completed(HostResponse {
+                            Status::Completed(Box::new(HostResponse {
                                 hostname: params.hostname.into(),
                                 response: response.into_box(),
-                            }),
+                            })),
                         ));
                     }
                     severity => {
@@ -208,16 +208,16 @@ impl MessageWrapper {
 
                         let response = ErrorDetails {
                             entity: params.hostname.into(),
-                            details: Error::UnexpectedResponse(UnexpectedResponse {
+                            details: Error::UnexpectedResponse(Box::new(UnexpectedResponse {
                                 command: cmd.trim().into(),
                                 response: response.into_box(),
-                            }),
+                            })),
                         };
                         statuses.push(DeliveryResult::account(
                             if severity == Severity::PermanentNegativeCompletion {
-                                Status::PermanentFailure(response)
+                                Status::PermanentFailure(Box::new(response))
                             } else {
-                                Status::TemporaryFailure(response)
+                                Status::TemporaryFailure(Box::new(response))
                             },
                             *rcpt_idx,
                         ));
@@ -347,10 +347,10 @@ impl MessageWrapper {
                                             Elapsed = time.elapsed(),
                                         );
 
-                                        Status::Completed(HostResponse {
+                                        Status::Completed(Box::new(HostResponse {
                                             hostname: params.hostname.into(),
                                             response,
-                                        })
+                                        }))
                                     }
                                     severity => {
                                         trc::event!(
@@ -365,7 +365,7 @@ impl MessageWrapper {
 
                                         let response = ErrorDetails {
                                             entity: params.hostname.into(),
-                                            details: Error::UnexpectedResponse(
+                                            details: Error::UnexpectedResponse(Box::new(
                                                 UnexpectedResponse {
                                                     command: bdat_cmd
                                                         .as_deref()
@@ -373,12 +373,12 @@ impl MessageWrapper {
                                                         .into(),
                                                     response,
                                                 },
-                                            ),
+                                            )),
                                         };
                                         if severity == Severity::PermanentNegativeCompletion {
-                                            Status::PermanentFailure(response)
+                                            Status::PermanentFailure(Box::new(response))
                                         } else {
-                                            Status::TemporaryFailure(response)
+                                            Status::TemporaryFailure(Box::new(response))
                                         }
                                     }
                                 };

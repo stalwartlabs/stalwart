@@ -196,10 +196,10 @@ async fn strategies() {
             notify: Schedule::now(),
             expires: QueueExpiry::Ttl(3600),
             queue: QueueName::new("test").unwrap(),
-            status: Status::TemporaryFailure(ErrorDetails {
+            status: Status::TemporaryFailure(Box::new(ErrorDetails {
                 entity: "test.example.com".into(),
                 details: Error::TlsError("TLS handshake failed".into()),
-            }),
+            })),
             flags: 0,
             orcpt: None,
         }],
