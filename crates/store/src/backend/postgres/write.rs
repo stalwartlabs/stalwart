@@ -89,10 +89,10 @@ impl PostgresStore {
             .start()
             .await?;
         let mut result = AssignedIds::default();
-        let has_changes = !batch.changes.is_empty();
+        let has_changes = !batch.change_accounts.is_empty();
 
         if has_changes {
-            for &account_id in batch.changes.keys() {
+            for &account_id in batch.change_accounts {
                 let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
                 let s = trx
                     .prepare_cached(concat!(
@@ -116,7 +116,7 @@ impl PostgresStore {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.set_current_change_id(account_id)?;
+                        change_id = result.set_current_change_id(account_id);
                     }
                 }
                 Operation::Collection {
@@ -347,6 +347,10 @@ impl PostgresStore {
                     trx.execute(&s, &[&key]).await?;
                 }
                 Operation::Log { collection, set } => {
+                    debug_assert!(
+                        change_id != 0,
+                        "no change id was allocated for this account"
+                    );
                     key_buf.clear();
                     LogKey {
                         account_id,

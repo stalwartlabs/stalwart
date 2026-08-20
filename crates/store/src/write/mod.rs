@@ -50,6 +50,10 @@ pub enum ArchiveVersion {
 
 pub type ArchiveBytes = Vec<u8>;
 
+const _: () = assert!(std::mem::size_of::<rkyv::primitive::FixedUsize>() == 4);
+const _: () = assert!(std::mem::align_of::<rkyv::primitive::ArchivedU64>() == 1);
+const _: () = assert!(std::mem::align_of::<rkyv::string::ArchivedString>() == 1);
+
 pub struct Archiver<T>
 where
     T: rkyv::Archive
@@ -95,7 +99,7 @@ pub(crate) const MAX_COMMIT_TIME: Duration = Duration::from_secs(3600);
 
 #[derive(Debug)]
 pub struct Batch<'x> {
-    pub(crate) changes: &'x VecMap<u32, ChangedCollection>,
+    pub(crate) change_accounts: &'x [u32],
     pub(crate) ops: &'x mut [Operation],
 }
 
@@ -112,6 +116,7 @@ pub struct BatchBuilder {
     current_document_id: Option<u32>,
     changes: VecMap<u32, ChangeLogBuilder>,
     changed_collections: VecMap<u32, ChangedCollection>,
+    change_accounts: Vec<u32>,
     has_assertions: bool,
     batch_size: usize,
     batch_ops: usize,
@@ -420,7 +425,7 @@ impl AssignedIds {
         }));
     }
 
-    pub fn last_change_id(&self, account_id: u32) -> trc::Result<u64> {
+    pub fn change_id(&self, account_id: u32) -> Option<u64> {
         self.ids
             .iter()
             .filter_map(|id| match id {
@@ -430,11 +435,14 @@ impl AssignedIds {
                 _ => None,
             })
             .next_back()
-            .ok_or_else(|| {
-                trc::StoreEvent::UnexpectedError
-                    .caused_by(trc::location!())
-                    .ctx(trc::Key::Reason, "No change ids were created")
-            })
+    }
+
+    pub fn last_change_id(&self, account_id: u32) -> trc::Result<u64> {
+        self.change_id(account_id).ok_or_else(|| {
+            trc::StoreEvent::UnexpectedError
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Reason, "No change ids were created")
+        })
     }
 
     pub fn current_change_id(&self) -> trc::Result<u64> {
@@ -445,10 +453,9 @@ impl AssignedIds {
         })
     }
 
-    pub(crate) fn set_current_change_id(&mut self, account_id: u32) -> trc::Result<u64> {
-        let change_id = self.last_change_id(account_id)?;
-        self.current_change_id = Some(change_id);
-        Ok(change_id)
+    pub(crate) fn set_current_change_id(&mut self, account_id: u32) -> u64 {
+        self.current_change_id = self.change_id(account_id);
+        self.current_change_id.unwrap_or_default()
     }
 
     pub fn last_counter_id(&self) -> trc::Result<i64> {

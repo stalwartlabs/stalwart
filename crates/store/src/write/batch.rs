@@ -35,6 +35,7 @@ impl BatchBuilder {
             current_document_id: None,
             changes: Default::default(),
             changed_collections: Default::default(),
+            change_accounts: Vec::new(),
             batch_size: 0,
             batch_ops: 0,
             has_assertions: false,
@@ -364,7 +365,13 @@ impl BatchBuilder {
     fn serialize_changes(&mut self) {
         if !self.changes.is_empty() {
             for (account_id, changelog) in std::mem::take(&mut self.changes) {
+                if changelog.changes.is_empty() && changelog.vanished.is_empty() {
+                    continue;
+                }
                 self.with_account_id(account_id);
+                if !self.change_accounts.contains(&account_id) {
+                    self.change_accounts.push(account_id);
+                }
 
                 // Serialize changes
                 for (collection, changes) in changelog.changes.into_iter() {
@@ -477,7 +484,7 @@ impl BatchBuilder {
 
     pub fn build_one(&mut self, commit_point: CommitPoint) -> Batch<'_> {
         Batch {
-            changes: &self.changed_collections,
+            change_accounts: &self.change_accounts,
             ops: &mut self.ops[commit_point.offset_start..commit_point.offset_end],
         }
     }
@@ -485,7 +492,7 @@ impl BatchBuilder {
     pub fn build_all(&mut self) -> Batch<'_> {
         self.serialize_changes();
         Batch {
-            changes: &self.changed_collections,
+            change_accounts: &self.change_accounts,
             ops: self.ops.as_mut_slice(),
         }
     }

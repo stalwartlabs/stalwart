@@ -140,7 +140,7 @@ impl RocksDBTransaction<'_, '_> {
         let mut document_id = u32::MAX;
         let mut change_id = 0u64;
         let mut result = AssignedIds::default();
-        let has_changes = !self.batch.changes.is_empty();
+        let has_changes = !self.batch.change_accounts.is_empty();
 
         let txn = self
             .db
@@ -148,7 +148,7 @@ impl RocksDBTransaction<'_, '_> {
 
         if has_changes {
             let cf = self.db.subspace_handle(Subspace::Counter);
-            for &account_id in self.batch.changes.keys() {
+            for &account_id in self.batch.change_accounts {
                 let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
                 let change_id = txn
                     .get_pinned_for_update_cf(&cf, &key, true)
@@ -175,7 +175,7 @@ impl RocksDBTransaction<'_, '_> {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.set_current_change_id(account_id)?;
+                        change_id = result.set_current_change_id(account_id);
                     }
                 }
                 Operation::Collection {
@@ -262,6 +262,10 @@ impl RocksDBTransaction<'_, '_> {
                     }
                 }
                 Operation::Log { collection, set } => {
+                    debug_assert!(
+                        change_id != 0,
+                        "no change id was allocated for this account"
+                    );
                     key_buf.clear();
                     LogKey {
                         account_id,

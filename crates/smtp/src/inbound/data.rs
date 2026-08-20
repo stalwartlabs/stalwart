@@ -155,8 +155,14 @@ impl<T: SessionStream> Session<T> {
             {
                 for output in &dkim_output {
                     if let Some(rcpt) = output.failure_report_addr() {
-                        self.send_dkim_report(rcpt, &auth_message, &rate, rejected, output)
-                            .await;
+                        Box::pin(self.send_dkim_report(
+                            rcpt,
+                            &auth_message,
+                            &rate,
+                            rejected,
+                            output,
+                        ))
+                        .await;
                     }
                 }
             }
@@ -419,7 +425,7 @@ impl<T: SessionStream> Session<T> {
 
                 // Send DMARC report
                 if dmarc_output.requested_reports() && !is_report {
-                    self.send_dmarc_report(
+                    Box::pin(self.send_dmarc_report(
                         &auth_message,
                         &auth_results,
                         rejected,
@@ -427,7 +433,7 @@ impl<T: SessionStream> Session<T> {
                         &dkim_output,
                         dkim2_output.as_ref(),
                         &arc_output,
-                    )
+                    ))
                     .await;
                 }
 
@@ -532,16 +538,15 @@ impl<T: SessionStream> Session<T> {
                 .await
                 .unwrap_or(true)
         {
-            match self
-                .spam_classify(
-                    &parsed_message,
-                    &dkim_output,
-                    dkim2_output.as_ref(),
-                    (&arc_output).into(),
-                    dmarc_result.as_ref(),
-                    dmarc_policy.as_ref(),
-                )
-                .await
+            match Box::pin(self.spam_classify(
+                &parsed_message,
+                &dkim_output,
+                dkim2_output.as_ref(),
+                (&arc_output).into(),
+                dmarc_result.as_ref(),
+                dmarc_policy.as_ref(),
+            ))
+            .await
             {
                 SpamFilterAction::Allow(score) => {
                     // Add headers
@@ -598,8 +603,7 @@ impl<T: SessionStream> Session<T> {
 
         // Run Milter filters
         let mut modifications = Vec::new();
-        match self
-            .run_milters(Stage::Data, (&auth_message).into(), message_id.into())
+        match Box::pin(self.run_milters(Stage::Data, (&auth_message).into(), message_id.into()))
             .await
         {
             Ok(modifications_) => {
@@ -613,8 +617,7 @@ impl<T: SessionStream> Session<T> {
         };
 
         // Run MTA Hooks
-        match self
-            .run_mta_hooks(Stage::Data, (&auth_message).into(), message_id.into())
+        match Box::pin(self.run_mta_hooks(Stage::Data, (&auth_message).into(), message_id.into()))
             .await
         {
             Ok(modifications_) => {

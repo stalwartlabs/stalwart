@@ -18,13 +18,13 @@ impl EphemeralStore {
         let mut document_id = u32::MAX;
         let mut change_id = 0u64;
         let mut result = AssignedIds::default();
-        let has_changes = !batch.changes.is_empty();
+        let has_changes = !batch.change_accounts.is_empty();
 
         let mut state = self.state.write();
 
         if has_changes {
             let map = state.subspaces.entry(Subspace::Counter).or_default();
-            for &account_id in batch.changes.keys() {
+            for &account_id in batch.change_accounts {
                 let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
                 let next = match map.get(&key) {
                     Some(bytes) => deserialize_i64_le(&key, bytes)? + 1,
@@ -42,7 +42,7 @@ impl EphemeralStore {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.set_current_change_id(account_id)?;
+                        change_id = result.set_current_change_id(account_id);
                     }
                 }
                 Operation::Collection {
@@ -121,6 +121,10 @@ impl EphemeralStore {
                     }
                 }
                 Operation::Log { collection, set } => {
+                    debug_assert!(
+                        change_id != 0,
+                        "no change id was allocated for this account"
+                    );
                     let log_key = LogKey {
                         account_id,
                         collection: u8::from(*collection),

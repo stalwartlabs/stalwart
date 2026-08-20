@@ -105,22 +105,12 @@ impl Deserialize for Archive<ArchiveBytes> {
 
 #[inline]
 fn lz4_deflate(archive: &[u8]) -> trc::Result<ArchiveBytes> {
-    lz4_flex::block::uncompressed_size(archive)
-        .and_then(|(uncompressed_size, archive)| {
-            let mut bytes = Vec::with_capacity(uncompressed_size);
-            unsafe {
-                // SAFETY: `new_len` is equal to `capacity` and vector is initialized by lz4_flex.
-                bytes.set_len(uncompressed_size);
-            }
-            lz4_flex::decompress_into(archive, &mut bytes)?;
-            Ok(bytes)
-        })
-        .map_err(|err| {
-            trc::StoreEvent::DecompressError
-                .ctx(trc::Key::Value, archive)
-                .caused_by(trc::location!())
-                .reason(err)
-        })
+    lz4_flex::block::decompress_size_prepended(archive).map_err(|err| {
+        trc::StoreEvent::DecompressError
+            .ctx(trc::Key::Value, archive)
+            .caused_by(trc::location!())
+            .reason(err)
+    })
 }
 
 impl<T> Serialize for Archiver<T>
@@ -214,6 +204,8 @@ impl Archive<ArchiveBytes> {
                 rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
             > + rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
     {
+        const { assert!(std::mem::align_of::<T::Archived>() == 1) };
+
         let bytes = self.as_bytes();
         if self.version != ArchiveVersion::Unversioned {
             if bytes.len() >= std::mem::size_of::<T::Archived>() {
@@ -248,6 +240,8 @@ impl Archive<ArchiveBytes> {
                 rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
             > + rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
     {
+        const { assert!(std::mem::align_of::<T::Archived>() == 1) };
+
         let bytes = self.as_bytes();
         if bytes.len() >= std::mem::size_of::<T::Archived>() {
             rkyv::access::<T::Archived, rkyv::rancor::Error>(bytes).map_err(|err| {
@@ -465,6 +459,8 @@ where
     T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
         + rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
 {
+    const { assert!(std::mem::align_of::<T::Archived>() == 1) };
+
     rkyv::access::<T::Archived, rkyv::rancor::Error>(input).map_err(|err| {
         trc::StoreEvent::DataCorruption
             .caused_by(trc::location!())

@@ -34,7 +34,7 @@ impl FdbStore {
     pub(crate) async fn write(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
         let start = Instant::now();
         let mut retry_count = 0;
-        let has_changes = !batch.changes.is_empty();
+        let has_changes = !batch.change_accounts.is_empty();
 
         loop {
             let mut account_id = u32::MAX;
@@ -46,7 +46,7 @@ impl FdbStore {
             let trx = self.db.create_trx().map_err(into_error)?;
 
             if has_changes {
-                for &account_id in batch.changes.keys() {
+                for &account_id in batch.change_accounts {
                     debug_assert!(account_id != u32::MAX);
                     let key = ValueClass::ChangeId.serialize(account_id, 0, 0, WITH_SUBSPACE);
                     let change_id =
@@ -68,7 +68,7 @@ impl FdbStore {
                     } => {
                         account_id = *account_id_;
                         if has_changes {
-                            change_id = result.set_current_change_id(account_id)?;
+                            change_id = result.set_current_change_id(account_id);
                         }
                     }
                     Operation::Collection {
@@ -210,6 +210,10 @@ impl FdbStore {
                         }
                     }
                     Operation::Log { collection, set } => {
+                        debug_assert!(
+                            change_id != 0,
+                            "no change id was allocated for this account"
+                        );
                         key_buf.clear();
                         LogKey {
                             account_id,

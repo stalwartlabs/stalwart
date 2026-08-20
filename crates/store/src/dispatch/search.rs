@@ -18,30 +18,33 @@ use trc::AddContext;
 
 impl SearchStore {
     pub async fn query_account(&self, mut query: SearchQuery) -> trc::Result<Vec<u32>> {
+        let comparators = std::mem::take(&mut query.comparators);
+        let results = self.filter_account(query).await?;
+
+        Ok(match results.len().cmp(&1) {
+            Ordering::Equal => vec![results.min().unwrap()],
+            Ordering::Less => vec![],
+            Ordering::Greater if !comparators.is_empty() => {
+                QueryResults::new(results, comparators).into_sorted()
+            }
+            Ordering::Greater => results.iter().collect(),
+        })
+    }
+
+    pub async fn filter_account(&self, query: SearchQuery) -> trc::Result<RoaringBitmap> {
+        debug_assert!(query.comparators.is_empty());
+
         // Pre-filter by mask
         if query.mask.is_empty() {
-            return Ok(vec![]);
+            return Ok(RoaringBitmap::new());
         }
 
         // If the store does not support FTS, use the internal FTS store
         if let Some(store) = self.internal_fts() {
-            let comparators = std::mem::take(&mut query.comparators);
-            let results = store.query_account(query).await?;
-
-            return match results.len().cmp(&1) {
-                Ordering::Equal => Ok(vec![results.min().unwrap()]),
-                Ordering::Less => Ok(vec![]),
-                Ordering::Greater => {
-                    if !comparators.is_empty() {
-                        Ok(QueryResults::new(results, comparators).into_sorted())
-                    } else {
-                        Ok(results.iter().collect())
-                    }
-                }
-            };
+            return store.query_account(query).await;
         }
 
-        // If all filters and comparators are external, delegate to the underlying store
+        // If all filters are external, delegate to the underlying store
         let mut account_id = u32::MAX;
         let mut has_local_filters = false;
         let mut has_external_filters = false;
@@ -72,17 +75,15 @@ impl SearchStore {
                 .caused_by(trc::location!()));
         }
 
-        if !has_local_filters && !has_external_filters && query.comparators.is_empty() {
-            return Ok(query.mask.iter().collect());
+        if !has_local_filters && !has_external_filters {
+            return Ok(query.mask);
         }
 
         if !has_local_filters {
             return self
                 .sub_query(query.index, &query.filters)
                 .await
-                .map(|results| {
-                    QueryResults::new(results & query.mask, query.comparators).into_sorted()
-                })
+                .map(|results| results & query.mask)
                 .caused_by(trc::location!());
         }
 
@@ -115,23 +116,11 @@ impl SearchStore {
         };
 
         // Merge results locally
-        let results = SearchQuery::new(query.index)
+        Ok(SearchQuery::new(query.index)
             .with_filters(filters)
             .with_mask(query.mask)
-            .filter();
-
-        let total_results = results.results().len();
-        match total_results.cmp(&1) {
-            Ordering::Equal => Ok(vec![results.results().min().unwrap()]),
-            Ordering::Less => Ok(vec![]),
-            Ordering::Greater => {
-                if !query.comparators.is_empty() {
-                    Ok(results.with_comparators(query.comparators).into_sorted())
-                } else {
-                    Ok(results.results().iter().collect())
-                }
-            }
-        }
+            .filter()
+            .into_bitmap())
     }
 
     async fn sub_query(

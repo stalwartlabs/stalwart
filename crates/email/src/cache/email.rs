@@ -10,7 +10,11 @@ use common::{
     auth::AccessToken, sharing::EffectiveAcl,
 };
 use compact_str::CompactString;
-use store::{ValueKey, ahash::AHashMap, roaring::RoaringBitmap};
+use store::{
+    ValueKey,
+    ahash::{AHashMap, AHashSet},
+    roaring::RoaringBitmap,
+};
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, keyword::Keyword};
 use utils::map::bitmap::Bitmap;
@@ -161,6 +165,53 @@ impl MessagesCacheBuilder {
             keywords: self.keywords.into_boxed_slice(),
             size,
         }
+    }
+}
+
+pub fn thread_keywords(
+    cache: &MessageStoreCache,
+    keyword: &Keyword,
+    match_all: bool,
+    documents: Option<&RoaringBitmap>,
+) -> RoaringBitmap {
+    let threads = documents.map(|documents| {
+        documents
+            .iter()
+            .filter_map(|document_id| cache.email_by_id(&document_id).map(|item| item.thread_id))
+            .collect::<AHashSet<_>>()
+    });
+    let mut thread_keywords: AHashMap<u32, (bool, bool)> = AHashMap::new();
+    for item in cache.emails.items.iter() {
+        if threads
+            .as_ref()
+            .is_none_or(|threads| threads.contains(&item.thread_id))
+        {
+            let has_keyword = cache.has_keyword(item, keyword);
+            let entry = thread_keywords
+                .entry(item.thread_id)
+                .or_insert((false, true));
+            entry.0 |= has_keyword;
+            entry.1 &= has_keyword;
+        }
+    }
+
+    let matches = |document_id: &u32| {
+        cache.email_by_id(document_id).is_some_and(|item| {
+            thread_keywords
+                .get(&item.thread_id)
+                .is_some_and(|(has_any, has_all)| if match_all { *has_all } else { *has_any })
+        })
+    };
+
+    match documents {
+        Some(documents) => documents.iter().filter(matches).collect(),
+        None => cache
+            .emails
+            .items
+            .iter()
+            .map(|item| item.document_id)
+            .filter(matches)
+            .collect(),
     }
 }
 

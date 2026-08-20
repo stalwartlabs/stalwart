@@ -890,3 +890,53 @@ impl PartialEq for ResourceState<'_> {
 }
 
 impl Eq for ResourceState<'_> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_lock_data() -> LockData {
+        let mut locks = HashMap::new();
+        for (path, lock_id) in [("calendar/work", 7u64), ("addressbook/home", 11)] {
+            locks.insert(
+                path.to_string(),
+                LockItems(vec![LockItem {
+                    lock_id,
+                    owner: 42,
+                    expires: now() + 3600,
+                    depth_infinity: true,
+                    exclusive: false,
+                    owner_dav: None,
+                }]),
+            );
+        }
+        LockData { locks }
+    }
+
+    #[test]
+    fn archived_lock_data_is_alignment_free() {
+        assert_eq!(std::mem::align_of::<ArchivedLockData>(), 1);
+
+        let archive = Archiver::new(sample_lock_data())
+            .untrusted()
+            .serialize()
+            .expect("serialize");
+        let contents = &archive[..archive.len() - 1];
+
+        for offset in 0..8 {
+            let mut buf = vec![0u8; offset];
+            buf.extend_from_slice(contents);
+
+            let archived = store::write::serialize::rkyv_unarchive::<LockData>(&buf[offset..])
+                .unwrap_or_else(|err| panic!("offset {offset}: {err:?}"));
+
+            let mut lock_ids = archived
+                .locks
+                .values()
+                .flat_map(|items| items.0.iter().map(|item| item.lock_id.to_native()))
+                .collect::<Vec<_>>();
+            lock_ids.sort_unstable();
+            assert_eq!(lock_ids, vec![7, 11], "offset {offset}");
+        }
+    }
+}

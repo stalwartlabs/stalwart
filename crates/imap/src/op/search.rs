@@ -15,7 +15,7 @@ use email::{
         MessageCacheFetch,
         email::{MessageCacheAccess, SearchOperator},
     },
-    message::sortkeys::{EmailSortKeys, MessageComparator, MessageSortField},
+    message::sortkeys::{EmailSortKeys, MessageCacheField, MessageComparator, MessageSortField},
 };
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
@@ -32,7 +32,7 @@ use std::{str::FromStr, sync::Arc, time::Instant};
 use store::{
     query::log::Query,
     roaring::RoaringBitmap,
-    search::{EmailSearchField, KeyValueMatch, SearchComparator, SearchFilter, SearchQuery},
+    search::{EmailSearchField, KeyValueMatch, SearchFilter, SearchQuery},
     write::{SearchIndex, now},
 };
 use tokio::sync::watch;
@@ -707,59 +707,27 @@ impl<T: SessionStream> SessionData<T> {
         let mut comparators = Vec::with_capacity(imap_comparator.len());
         for comparator in imap_comparator {
             comparators.push(match comparator.sort {
-                search::Sort::Arrival => MessageComparator::Search(SearchComparator::sorted_set(
-                    cache
-                        .emails
-                        .items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, m)| (m.document_id, i as u32))
-                        .collect(),
-                    comparator.ascending,
-                )),
+                search::Sort::Arrival => MessageComparator::Cache {
+                    field: MessageCacheField::ReceivedAt,
+                    ascending: comparator.ascending,
+                },
                 search::Sort::Cc => {
                     return Err(trc::ImapEvent::Error
                         .into_err()
                         .details("Sorting by CC is not supported."));
                 }
-                search::Sort::Date => {
-                    let mut sorted = cache
-                        .emails
-                        .items
-                        .iter()
-                        .map(|m| (m.received_at as i64 + m.sent_at as i64, m.document_id))
-                        .collect::<Vec<_>>();
-                    sorted.sort_unstable_by_key(|(ts, _)| *ts);
-
-                    let mut set = store::ahash::AHashMap::with_capacity(sorted.len());
-                    let mut rank = 0u32;
-                    let mut prev_ts = None;
-                    for (ts, document_id) in sorted {
-                        if prev_ts.is_some_and(|prev| prev != ts) {
-                            rank += 1;
-                        }
-                        set.insert(document_id, rank);
-                        prev_ts = Some(ts);
-                    }
-
-                    MessageComparator::Search(SearchComparator::sorted_set(
-                        set,
-                        comparator.ascending,
-                    ))
-                }
+                search::Sort::Date => MessageComparator::Cache {
+                    field: MessageCacheField::SentAt,
+                    ascending: comparator.ascending,
+                },
                 search::Sort::From | search::Sort::DisplayFrom => MessageComparator::SortKey {
                     field: MessageSortField::From,
                     ascending: comparator.ascending,
                 },
-                search::Sort::Size => MessageComparator::Search(SearchComparator::sorted_set(
-                    cache
-                        .emails
-                        .items
-                        .iter()
-                        .map(|m| (m.document_id, m.size))
-                        .collect(),
-                    comparator.ascending,
-                )),
+                search::Sort::Size => MessageComparator::Cache {
+                    field: MessageCacheField::Size,
+                    ascending: comparator.ascending,
+                },
                 search::Sort::Subject => MessageComparator::SortKey {
                     field: MessageSortField::Subject,
                     ascending: comparator.ascending,
@@ -775,6 +743,7 @@ impl<T: SessionStream> SessionData<T> {
         self.server
             .query_emails(
                 mailbox.id.account_id,
+                &cache,
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(filters)
                     .with_account_id(mailbox.id.account_id)

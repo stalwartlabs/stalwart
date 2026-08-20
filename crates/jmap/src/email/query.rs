@@ -5,13 +5,13 @@
  */
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
-use common::{MessageStoreCache, Server, auth::AccessToken};
+use common::{Server, auth::AccessToken};
 use email::{
     cache::{
         MessageCacheFetch,
-        email::{MessageCacheAccess, SearchOperator},
+        email::{MessageCacheAccess, SearchOperator, thread_keywords},
     },
-    message::sortkeys::{EmailSortKeys, MessageComparator, MessageSortField},
+    message::sortkeys::{EmailSortKeys, MessageCacheField, MessageComparator, MessageSortField},
 };
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -21,9 +21,9 @@ use mail_parser::HeaderName;
 use nlp::language::Language;
 use std::future::Future;
 use store::{
-    ahash::{AHashMap, AHashSet},
+    ahash::AHashSet,
     roaring::RoaringBitmap,
-    search::{EmailSearchField, KeyValueMatch, SearchComparator, SearchFilter, SearchQuery},
+    search::{EmailSearchField, KeyValueMatch, SearchFilter, SearchQuery},
     write::SearchIndex,
 };
 use trc::AddContext;
@@ -211,18 +211,29 @@ impl EmailQuery for Server {
                                 .map(|m| m.document_id),
                         )));
                     }
-                    EmailFilter::AllInThreadHaveKeyword(keyword) => filters.push(
-                        SearchFilter::is_in_set(thread_keywords(&cached_messages, keyword, true)),
-                    ),
-                    EmailFilter::SomeInThreadHaveKeyword(keyword) => filters.push(
-                        SearchFilter::is_in_set(thread_keywords(&cached_messages, keyword, false)),
-                    ),
+                    EmailFilter::AllInThreadHaveKeyword(keyword) => {
+                        filters.push(SearchFilter::is_in_set(thread_keywords(
+                            &cached_messages,
+                            &keyword,
+                            true,
+                            None,
+                        )))
+                    }
+                    EmailFilter::SomeInThreadHaveKeyword(keyword) => {
+                        filters.push(SearchFilter::is_in_set(thread_keywords(
+                            &cached_messages,
+                            &keyword,
+                            false,
+                            None,
+                        )))
+                    }
                     EmailFilter::NoneInThreadHaveKeyword(keyword) => {
                         filters.push(SearchFilter::Not);
                         filters.push(SearchFilter::is_in_set(thread_keywords(
                             &cached_messages,
-                            keyword,
+                            &keyword,
                             false,
+                            None,
                         )));
                         filters.push(SearchFilter::End);
                     }
@@ -313,27 +324,14 @@ impl EmailQuery for Server {
             .unwrap_or_default()
         {
             comparators.push(match comparator.property {
-                EmailComparator::ReceivedAt => {
-                    MessageComparator::Search(SearchComparator::sorted_set(
-                        cached_messages
-                            .emails
-                            .items
-                            .iter()
-                            .enumerate()
-                            .map(|(i, m)| (m.document_id, i as u32))
-                            .collect(),
-                        comparator.is_ascending,
-                    ))
-                }
-                EmailComparator::Size => MessageComparator::Search(SearchComparator::sorted_set(
-                    cached_messages
-                        .emails
-                        .items
-                        .iter()
-                        .map(|m| (m.document_id, m.size))
-                        .collect(),
-                    comparator.is_ascending,
-                )),
+                EmailComparator::ReceivedAt => MessageComparator::Cache {
+                    field: MessageCacheField::ReceivedAt,
+                    ascending: comparator.is_ascending,
+                },
+                EmailComparator::Size => MessageComparator::Cache {
+                    field: MessageCacheField::Size,
+                    ascending: comparator.is_ascending,
+                },
                 EmailComparator::From => MessageComparator::SortKey {
                     field: MessageSortField::From,
                     ascending: comparator.is_ascending,
@@ -346,53 +344,28 @@ impl EmailQuery for Server {
                     field: MessageSortField::Subject,
                     ascending: comparator.is_ascending,
                 },
-                EmailComparator::SentAt => {
-                    let mut sorted = cached_messages
-                        .emails
-                        .items
-                        .iter()
-                        .map(|m| (m.received_at as i64 + m.sent_at as i64, m.document_id))
-                        .collect::<Vec<_>>();
-                    sorted.sort_unstable_by_key(|(ts, _)| *ts);
-
-                    let mut set = store::ahash::AHashMap::with_capacity(sorted.len());
-                    let mut rank = 0u32;
-                    let mut prev_ts = None;
-                    for (ts, document_id) in sorted {
-                        if prev_ts.is_some_and(|prev| prev != ts) {
-                            rank += 1;
-                        }
-                        set.insert(document_id, rank);
-                        prev_ts = Some(ts);
-                    }
-
-                    MessageComparator::Search(SearchComparator::sorted_set(
-                        set,
-                        comparator.is_ascending,
-                    ))
-                }
-                EmailComparator::HasKeyword(keyword) => {
-                    MessageComparator::Search(SearchComparator::set(
-                        RoaringBitmap::from_iter(
-                            cached_messages
-                                .with_keyword(&keyword)
-                                .map(|item| item.document_id),
-                        ),
-                        comparator.is_ascending,
-                    ))
-                }
-                EmailComparator::AllInThreadHaveKeyword(keyword) => {
-                    MessageComparator::Search(SearchComparator::set(
-                        thread_keywords(&cached_messages, keyword, true),
-                        comparator.is_ascending,
-                    ))
-                }
-                EmailComparator::SomeInThreadHaveKeyword(keyword) => {
-                    MessageComparator::Search(SearchComparator::set(
-                        thread_keywords(&cached_messages, keyword, false),
-                        comparator.is_ascending,
-                    ))
-                }
+                EmailComparator::SentAt => MessageComparator::Cache {
+                    field: MessageCacheField::SentAt,
+                    ascending: comparator.is_ascending,
+                },
+                EmailComparator::HasKeyword(keyword) => MessageComparator::Cache {
+                    field: MessageCacheField::Keyword(keyword),
+                    ascending: comparator.is_ascending,
+                },
+                EmailComparator::AllInThreadHaveKeyword(keyword) => MessageComparator::Cache {
+                    field: MessageCacheField::ThreadKeyword {
+                        keyword,
+                        match_all: true,
+                    },
+                    ascending: comparator.is_ascending,
+                },
+                EmailComparator::SomeInThreadHaveKeyword(keyword) => MessageComparator::Cache {
+                    field: MessageCacheField::ThreadKeyword {
+                        keyword,
+                        match_all: false,
+                    },
+                    ascending: comparator.is_ascending,
+                },
                 other => {
                     return Err(trc::JmapEvent::UnsupportedSort
                         .into_err()
@@ -404,6 +377,7 @@ impl EmailQuery for Server {
         let results = self
             .query_emails(
                 account_id,
+                &cached_messages,
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(filters)
                     .with_account_id(account_id)
@@ -466,48 +440,4 @@ impl EmailQuery for Server {
 
         response.build()
     }
-}
-
-fn thread_keywords(cache: &MessageStoreCache, keyword: Keyword, match_all: bool) -> RoaringBitmap {
-    let keyword_doc_ids =
-        RoaringBitmap::from_iter(cache.with_keyword(&keyword).map(|item| item.document_id));
-    if keyword_doc_ids.is_empty() {
-        return keyword_doc_ids;
-    }
-    let mut not_matched_ids = RoaringBitmap::new();
-    let mut matched_ids = RoaringBitmap::new();
-
-    let mut thread_map: AHashMap<u32, RoaringBitmap> = AHashMap::new();
-
-    for item in &cache.emails.items {
-        thread_map
-            .entry(item.thread_id)
-            .or_default()
-            .insert(item.document_id);
-    }
-
-    for item in &cache.emails.items {
-        let keyword_doc_id = item.document_id;
-        if !keyword_doc_ids.contains(keyword_doc_id)
-            || matched_ids.contains(keyword_doc_id)
-            || not_matched_ids.contains(keyword_doc_id)
-        {
-            continue;
-        }
-
-        if let Some(thread_doc_ids) = thread_map.get(&item.thread_id) {
-            let mut thread_tag_intersection = thread_doc_ids.clone();
-            thread_tag_intersection &= &keyword_doc_ids;
-
-            if (match_all && &thread_tag_intersection == thread_doc_ids)
-                || (!match_all && !thread_tag_intersection.is_empty())
-            {
-                matched_ids |= thread_doc_ids;
-            } else if !thread_tag_intersection.is_empty() {
-                not_matched_ids |= &thread_tag_intersection;
-            }
-        }
-    }
-
-    matched_ids
 }

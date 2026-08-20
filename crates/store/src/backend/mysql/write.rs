@@ -71,7 +71,7 @@ impl MysqlStore {
         conn: &mut Conn,
         batch: &mut Batch<'_>,
     ) -> Result<AssignedIds, CommitError> {
-        let has_changes = !batch.changes.is_empty();
+        let has_changes = !batch.change_accounts.is_empty();
         let mut account_id = u32::MAX;
         let mut collection = u8::MAX;
         let mut document_id = u32::MAX;
@@ -85,7 +85,7 @@ impl MysqlStore {
         let mut result = AssignedIds::default();
 
         if has_changes {
-            for &account_id in batch.changes.keys() {
+            for &account_id in batch.change_accounts {
                 let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
                 let s = trx
                     .prep(concat!(
@@ -112,7 +112,7 @@ impl MysqlStore {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.set_current_change_id(account_id)?;
+                        change_id = result.set_current_change_id(account_id);
                     }
                 }
                 Operation::Collection {
@@ -347,6 +347,10 @@ impl MysqlStore {
                     trx.exec_drop(&s, (key,)).await?;
                 }
                 Operation::Log { collection, set } => {
+                    debug_assert!(
+                        change_id != 0,
+                        "no change id was allocated for this account"
+                    );
                     key_buf.clear();
                     LogKey {
                         account_id,
