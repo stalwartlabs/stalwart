@@ -37,10 +37,12 @@ impl SpamFilterAnalyzeReplyTo for Server {
                     is_from_list = true;
                 }
 
+                HeaderName::AutoSubmitted => {
+                    is_from_list = true;
+                }
                 HeaderName::Other(name) if !is_from_list => {
                     is_from_list = name.eq_ignore_ascii_case("X-To-Get-Off-This-List")
-                        || name.eq_ignore_ascii_case("X-List")
-                        || name.eq_ignore_ascii_case("Auto-Submitted");
+                        || name.eq_ignore_ascii_case("X-List");
                 }
                 _ => {}
             }

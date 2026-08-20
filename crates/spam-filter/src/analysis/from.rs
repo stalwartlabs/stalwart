@@ -36,18 +36,17 @@ impl SpamFilterAnalyzeFrom for Server {
                         .get(header.offset_start as usize..header.offset_end as usize)
                         .unwrap_or_default();
                 }
-                HeaderName::Other(name) => {
-                    if name.eq_ignore_ascii_case("X-Confirm-Reading-To") {
-                        crt = ctx
-                            .input
-                            .header_as_address(header)
-                            .map(|s| Email::new(s.as_ref()));
-                    } else if name.eq_ignore_ascii_case("Disposition-Notification-To") {
-                        dnt = ctx
-                            .input
-                            .header_as_address(header)
-                            .map(|s| Email::new(s.as_ref()));
-                    }
+                HeaderName::DispositionNotificationTo => {
+                    dnt = ctx
+                        .input
+                        .header_as_address(header)
+                        .map(|s| Email::new(s.as_ref()));
+                }
+                HeaderName::Other(name) if name.eq_ignore_ascii_case("X-Confirm-Reading-To") => {
+                    crt = ctx
+                        .input
+                        .header_as_address(header)
+                        .map(|s| Email::new(s.as_ref()));
                 }
                 _ => {}
             }

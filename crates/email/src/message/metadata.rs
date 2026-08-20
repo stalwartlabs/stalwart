@@ -59,98 +59,206 @@ pub struct MetadataHeader {
     pub end: u16,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
-#[rkyv(compare(PartialEq))]
-pub enum MetadataHeaderName {
-    Other(String),
-    Subject,
-    From,
-    To,
-    Cc,
-    Date,
-    Bcc,
-    ReplyTo,
-    Sender,
-    Comments,
-    InReplyTo,
-    Keywords,
-    Received,
-    MessageId,
-    References,
-    ReturnPath,
-    MimeVersion,
-    ContentDescription,
-    ContentId,
-    ContentLanguage,
-    ContentLocation,
-    ContentTransferEncoding,
-    ContentType,
-    ContentDisposition,
-    ResentTo,
-    ResentFrom,
-    ResentBcc,
-    ResentCc,
-    ResentSender,
-    ResentDate,
-    ResentMessageId,
-    ListArchive,
-    ListHelp,
-    ListId,
-    ListOwner,
-    ListPost,
-    ListSubscribe,
-    ListUnsubscribe,
-    DkimSignature,
-    ArcAuthenticationResults,
-    ArcMessageSignature,
-    ArcSeal,
+macro_rules! metadata_header_names {
+    ($($variant:ident, $name:literal;)+) => {
+        #[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+        #[rkyv(compare(PartialEq))]
+        pub enum MetadataHeaderName {
+            Other(String),
+            $($variant,)+
+        }
 
-    // Delivery/Routing
-    DeliveredTo,
-    XOriginalTo,
-    ReturnReceiptTo,
-    DispositionNotificationTo,
-    ErrorsTo,
+        impl MetadataHeaderName {
+            pub fn parse(name: &[u8]) -> Option<MetadataHeaderName> {
+                hashify::tiny_map_ignore_case!(name,
+                    $($name => MetadataHeaderName::$variant,)+
+                )
+            }
+        }
 
-    // Authentication
-    AuthenticationResults,
-    ReceivedSpf,
+        impl ArchivedMetadataHeaderName {
+            pub fn as_str(&self) -> &str {
+                match self {
+                    $(ArchivedMetadataHeaderName::$variant => $name,)+
+                    ArchivedMetadataHeaderName::Other(name) => name.as_ref(),
+                }
+            }
+        }
+    };
+}
 
-    // Spam/Virus
-    XSpamStatus,
-    XSpamScore,
-    XSpamFlag,
-    XSpamResult,
-
-    // Priority
-    Importance,
-    Priority,
-    XPriority,
-    XMSMailPriority,
-
-    // Client/Agent
-    XMailer,
-    UserAgent,
-    XMimeOLE,
-
-    // Network/Origin
-    XOriginatingIp,
-    XForwardedTo,
-    XForwardedFor,
-
-    // Auto-response
-    AutoSubmitted,
-    XAutoResponseSuppress,
-    Precedence,
-
-    // Organization/Threading
-    Organization,
-    ThreadIndex,
-    ThreadTopic,
-
-    // List (additional)
-    ListUnsubscribePost,
-    FeedbackId,
+metadata_header_names! {
+    Subject, "Subject";
+    From, "From";
+    To, "To";
+    Cc, "Cc";
+    Date, "Date";
+    Bcc, "Bcc";
+    ReplyTo, "Reply-To";
+    Sender, "Sender";
+    Comments, "Comments";
+    InReplyTo, "In-Reply-To";
+    Keywords, "Keywords";
+    Received, "Received";
+    MessageId, "Message-ID";
+    References, "References";
+    ReturnPath, "Return-Path";
+    MimeVersion, "MIME-Version";
+    ContentDescription, "Content-Description";
+    ContentId, "Content-ID";
+    ContentLanguage, "Content-Language";
+    ContentLocation, "Content-Location";
+    ContentTransferEncoding, "Content-Transfer-Encoding";
+    ContentType, "Content-Type";
+    ContentDisposition, "Content-Disposition";
+    ResentTo, "Resent-To";
+    ResentFrom, "Resent-From";
+    ResentBcc, "Resent-Bcc";
+    ResentCc, "Resent-Cc";
+    ResentSender, "Resent-Sender";
+    ResentDate, "Resent-Date";
+    ResentMessageId, "Resent-Message-ID";
+    ListArchive, "List-Archive";
+    ListHelp, "List-Help";
+    ListId, "List-ID";
+    ListOwner, "List-Owner";
+    ListPost, "List-Post";
+    ListSubscribe, "List-Subscribe";
+    ListUnsubscribe, "List-Unsubscribe";
+    DkimSignature, "DKIM-Signature";
+    ArcAuthenticationResults, "ARC-Authentication-Results";
+    ArcMessageSignature, "ARC-Message-Signature";
+    ArcSeal, "ARC-Seal";
+    DeliveredTo, "Delivered-To";
+    XOriginalTo, "X-Original-To";
+    ReturnReceiptTo, "Return-Receipt-To";
+    DispositionNotificationTo, "Disposition-Notification-To";
+    ErrorsTo, "Errors-To";
+    AuthenticationResults, "Authentication-Results";
+    ReceivedSpf, "Received-SPF";
+    XSpamStatus, "X-Spam-Status";
+    XSpamScore, "X-Spam-Score";
+    XSpamFlag, "X-Spam-Flag";
+    XSpamResult, "X-Spam-Result";
+    Importance, "Importance";
+    Priority, "Priority";
+    XPriority, "X-Priority";
+    XMSMailPriority, "X-MSMail-Priority";
+    XMailer, "X-Mailer";
+    UserAgent, "User-Agent";
+    XMimeOLE, "X-MimeOLE";
+    XOriginatingIp, "X-Originating-IP";
+    XForwardedTo, "X-Forwarded-To";
+    XForwardedFor, "X-Forwarded-For";
+    AutoSubmitted, "Auto-Submitted";
+    XAutoResponseSuppress, "X-Auto-Response-Suppress";
+    Precedence, "Precedence";
+    Organization, "Organization";
+    ThreadIndex, "Thread-Index";
+    ThreadTopic, "Thread-Topic";
+    ListUnsubscribePost, "List-Unsubscribe-Post";
+    FeedbackId, "Feedback-ID";
+    AcceptLanguage, "Accept-Language";
+    ArchivedAt, "Archived-At";
+    OriginalRecipient, "Original-Recipient";
+    OriginalSubject, "Original-Subject";
+    TlsRequired, "TLS-Required";
+    Author, "Author";
+    Dkim2Signature, "DKIM2-Signature";
+    MessageInstance, "Message-Instance";
+    XUniversallyUniqueIdentifier, "X-Universally-Unique-Identifier";
+    XVirusScanned, "X-Virus-Scanned";
+    XMailFrom, "X-MailFrom";
+    XMailmanVersion, "X-Mailman-Version";
+    MessageIdHash, "Message-ID-Hash";
+    XMessageIdHash, "X-Message-ID-Hash";
+    XMailmanRuleMisses, "X-Mailman-Rule-Misses";
+    XSpamLevel, "X-Spam-Level";
+    XReceived, "X-Received";
+    XGmMessageState, "X-Gm-Message-State";
+    XGoogleDkimSignature, "X-Google-DKIM-Signature";
+    XMailboxLine, "X-Mailbox-Line";
+    XGmGg, "X-Gm-Gg";
+    XOriginalFrom, "X-Original-From";
+    XGoogleSmtpSource, "X-Google-Smtp-Source";
+    XMsTnefCorrelator, "X-MS-TNEF-Correlator";
+    XMsHasAttach, "X-MS-Has-Attach";
+    XMeProxy, "X-ME-Proxy";
+    XMeProxyCause, "X-ME-Proxy-Cause";
+    XMeSender, "X-ME-Sender";
+    XGmFeatures, "X-Gm-Features";
+    XMsExchangeTransportCrossTenantHeadersStamped, "X-MS-Exchange-Transport-CrossTenantHeadersStamped";
+    XMsPublicTrafficType, "X-MS-PublicTrafficType";
+    XOriginatorOrg, "X-OriginatorOrg";
+    XMsExchangeCrossTenantNetworkMessageId, "X-MS-Exchange-CrossTenant-Network-Message-Id";
+    XMsExchangeCrossTenantAuthSource, "X-MS-Exchange-CrossTenant-AuthSource";
+    XMsExchangeCrossTenantAuthAs, "X-MS-Exchange-CrossTenant-AuthAs";
+    XMsExchangeCrossTenantOriginalArrivalTime, "X-MS-Exchange-CrossTenant-OriginalArrivalTime";
+    XMicrosoftAntispam, "X-Microsoft-Antispam";
+    XMsExchangeCrossTenantId, "X-MS-Exchange-CrossTenant-Id";
+    XMsTrafficTypeDiagnostic, "X-MS-TrafficTypeDiagnostic";
+    XMicrosoftAntispamMessageInfo, "X-Microsoft-Antispam-Message-Info";
+    XMsOffice365FilteringCorrelationId, "X-MS-Office365-Filtering-Correlation-Id";
+    XMsExchangeCrossTenantFromEntityHeader, "X-MS-Exchange-CrossTenant-FromEntityHeader";
+    XMsExchangeAntiSpamMessageDataChunkCount, "X-MS-Exchange-AntiSpam-MessageData-ChunkCount";
+    XMsExchangeAntiSpamMessageData0, "X-MS-Exchange-AntiSpam-MessageData-0";
+    XMsExchangeSenderADCheck, "X-MS-Exchange-SenderADCheck";
+    XForefrontAntispamReport, "X-Forefront-Antispam-Report";
+    XMsExchangeAntiSpamRelay, "X-MS-Exchange-AntiSpam-Relay";
+    XMsExchangeCrossTenantMailboxType, "X-MS-Exchange-CrossTenant-MailboxType";
+    XMsExchangeCrossTenantUserPrincipalName, "X-MS-Exchange-CrossTenant-UserPrincipalName";
+    XGitHubReason, "X-GitHub-Reason";
+    XGitHubRecipientAddress, "X-GitHub-Recipient-Address";
+    XGitHubRecipient, "X-GitHub-Recipient";
+    Destinations, "Destinations";
+    XGitHubSender, "X-GitHub-Sender";
+    XGitHubNotifyPlatform, "X-GitHub-Notify-Platform";
+    XThreadId, "X-ThreadId";
+    XSesOutgoing, "X-SES-Outgoing";
+    XProofpointVirusVersion, "X-Proofpoint-Virus-Version";
+    XGitHubAssignees, "X-GitHub-Assignees";
+    XGitHubLabels, "X-GitHub-Labels";
+    BimiSelector, "BIMI-Selector";
+    XStripeEid, "X-Stripe-EID";
+    XAttachmentId, "X-Attachment-Id";
+    XTestIDTracker, "X-Test-IDTracker";
+    XIetfIDTracker, "X-IETF-IDTracker";
+    XPmMessageId, "X-Pm-Message-ID";
+    XAntiAbuse, "X-AntiAbuse";
+    Autocrypt, "Autocrypt";
+    XComplaintsTo, "X-Complaints-To";
+    XProofpointOrigGuid, "X-Proofpoint-ORIG-GUID";
+    XProofpointGuid, "X-Proofpoint-GUID";
+    XGitHubIssueState, "X-GitHub-IssueState";
+    XMsReactions, "X-MS-Reactions";
+    XPmMtaPool, "X-Pm-MTA-Pool";
+    XPmRcpt, "X-Pm-RCPT";
+    XProofpointSpamDetailsEnc, "X-Proofpoint-Spam-Details-Enc";
+    XPmMessageOptions, "X-Pm-Message-Options";
+    XSenderId, "X-Sender-ID";
+    XGitHubPullRequestStatus, "X-GitHub-PullRequestStatus";
+    XAuthorityAnalysis, "X-Authority-Analysis";
+    XForwardedEncrypted, "X-Forwarded-Encrypted";
+    XMsExchangeAntiSpamExternalHopMessageDataChunkCount, "X-MS-Exchange-AntiSpam-ExternalHop-MessageData-ChunkCount";
+    XMsExchangeAntiSpamExternalHopMessageData0, "X-MS-Exchange-AntiSpam-ExternalHop-MessageData-0";
+    XMsExchangeCrossTenantRmsPersistedConsumerOrg, "X-MS-Exchange-CrossTenant-RMS-PersistedConsumerOrg";
+    XExchangeRoutingPolicyChecked, "X-Exchange-RoutingPolicyChecked";
+    XMsExchangeCrossTenantOriginalAttributedTenantConnectingIp, "X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp";
+    XMsExchangeMessageSentRepresentingType, "X-MS-Exchange-MessageSentRepresentingType";
+    XMsExchangeTransportCrossTenantHeadersStripped, "X-MS-Exchange-Transport-CrossTenantHeadersStripped";
+    XMsOffice365FilteringCorrelationIdPrvs, "X-MS-Office365-Filtering-Correlation-Id-Prvs";
+    XMicrosoftAntispamMessageInfoOriginal, "X-Microsoft-Antispam-Message-Info-Original";
+    XMsExchangeAuthenticationResults, "X-MS-Exchange-Authentication-Results";
+    XForefrontAntispamReportUntrusted, "X-Forefront-Antispam-Report-Untrusted";
+    XMsExchangeAtpMessageProperties, "X-MS-Exchange-AtpMessageProperties";
+    XMicrosoftAntispamUntrusted, "X-Microsoft-Antispam-Untrusted";
+    XMsExchangeAntiSpamMessageData1, "X-MS-Exchange-AntiSpam-MessageData-1";
+    XMissiveId, "X-Missive-Id";
+    XIadbIpReverse, "X-IADB-IP-Reverse";
+    XReportAbuse, "X-Report-Abuse";
+    DkimFilter, "DKIM-Filter";
+    XMeReceived, "X-ME-Received";
+    XProofpointSpamDetails, "X-Proofpoint-Spam-Details";
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
@@ -692,100 +800,11 @@ impl ArchivedMessageMetadataPart {
 
 impl From<HeaderName<'_>> for MetadataHeaderName {
     fn from(value: HeaderName<'_>) -> Self {
-        match value {
-            HeaderName::Subject => MetadataHeaderName::Subject,
-            HeaderName::From => MetadataHeaderName::From,
-            HeaderName::To => MetadataHeaderName::To,
-            HeaderName::Cc => MetadataHeaderName::Cc,
-            HeaderName::Date => MetadataHeaderName::Date,
-            HeaderName::Bcc => MetadataHeaderName::Bcc,
-            HeaderName::ReplyTo => MetadataHeaderName::ReplyTo,
-            HeaderName::Sender => MetadataHeaderName::Sender,
-            HeaderName::Comments => MetadataHeaderName::Comments,
-            HeaderName::InReplyTo => MetadataHeaderName::InReplyTo,
-            HeaderName::Keywords => MetadataHeaderName::Keywords,
-            HeaderName::Received => MetadataHeaderName::Received,
-            HeaderName::MessageId => MetadataHeaderName::MessageId,
-            HeaderName::References => MetadataHeaderName::References,
-            HeaderName::ReturnPath => MetadataHeaderName::ReturnPath,
-            HeaderName::MimeVersion => MetadataHeaderName::MimeVersion,
-            HeaderName::ContentDescription => MetadataHeaderName::ContentDescription,
-            HeaderName::ContentId => MetadataHeaderName::ContentId,
-            HeaderName::ContentLanguage => MetadataHeaderName::ContentLanguage,
-            HeaderName::ContentLocation => MetadataHeaderName::ContentLocation,
-            HeaderName::ContentTransferEncoding => MetadataHeaderName::ContentTransferEncoding,
-            HeaderName::ContentType => MetadataHeaderName::ContentType,
-            HeaderName::ContentDisposition => MetadataHeaderName::ContentDisposition,
-            HeaderName::ResentTo => MetadataHeaderName::ResentTo,
-            HeaderName::ResentFrom => MetadataHeaderName::ResentFrom,
-            HeaderName::ResentBcc => MetadataHeaderName::ResentBcc,
-            HeaderName::ResentCc => MetadataHeaderName::ResentCc,
-            HeaderName::ResentSender => MetadataHeaderName::ResentSender,
-            HeaderName::ResentDate => MetadataHeaderName::ResentDate,
-            HeaderName::ResentMessageId => MetadataHeaderName::ResentMessageId,
-            HeaderName::ListArchive => MetadataHeaderName::ListArchive,
-            HeaderName::ListHelp => MetadataHeaderName::ListHelp,
-            HeaderName::ListId => MetadataHeaderName::ListId,
-            HeaderName::ListOwner => MetadataHeaderName::ListOwner,
-            HeaderName::ListPost => MetadataHeaderName::ListPost,
-            HeaderName::ListSubscribe => MetadataHeaderName::ListSubscribe,
-            HeaderName::ListUnsubscribe => MetadataHeaderName::ListUnsubscribe,
-            HeaderName::DkimSignature => MetadataHeaderName::DkimSignature,
-            HeaderName::ArcAuthenticationResults => MetadataHeaderName::ArcAuthenticationResults,
-            HeaderName::ArcMessageSignature => MetadataHeaderName::ArcMessageSignature,
-            HeaderName::ArcSeal => MetadataHeaderName::ArcSeal,
-            HeaderName::Other(value) => {
-                let name = hashify::tiny_map_ignore_case!(value.as_bytes(),
-                    // Delivery/Routing
-                    "Delivered-To" => MetadataHeaderName::DeliveredTo,
-                    "X-Original-To" => MetadataHeaderName::XOriginalTo,
-                    "Return-Receipt-To" => MetadataHeaderName::ReturnReceiptTo,
-                    "Disposition-Notification-To" => MetadataHeaderName::DispositionNotificationTo,
-                    "Errors-To" => MetadataHeaderName::ErrorsTo,
+        let known = MetadataHeaderName::parse(value.as_str().as_bytes());
 
-                    // Authentication
-                    "Authentication-Results" => MetadataHeaderName::AuthenticationResults,
-                    "Received-SPF" => MetadataHeaderName::ReceivedSpf,
-
-                    // Spam/Virus
-                    "X-Spam-Status" => MetadataHeaderName::XSpamStatus,
-                    "X-Spam-Score" => MetadataHeaderName::XSpamScore,
-                    "X-Spam-Flag" => MetadataHeaderName::XSpamFlag,
-                    "X-Spam-Result" => MetadataHeaderName::XSpamResult,
-
-                    // Priority
-                    "Importance" => MetadataHeaderName::Importance,
-                    "Priority" => MetadataHeaderName::Priority,
-                    "X-Priority" => MetadataHeaderName::XPriority,
-                    "X-MSMail-Priority" => MetadataHeaderName::XMSMailPriority,
-
-                    // Client/Agent
-                    "X-Mailer" => MetadataHeaderName::XMailer,
-                    "User-Agent" => MetadataHeaderName::UserAgent,
-                    "X-MimeOLE" => MetadataHeaderName::XMimeOLE,
-
-                    // Network/Origin
-                    "X-Originating-IP" => MetadataHeaderName::XOriginatingIp,
-                    "X-Forwarded-To" => MetadataHeaderName::XForwardedTo,
-                    "X-Forwarded-For" => MetadataHeaderName::XForwardedFor,
-
-                    // Auto-response
-                    "Auto-Submitted" => MetadataHeaderName::AutoSubmitted,
-                    "X-Auto-Response-Suppress" => MetadataHeaderName::XAutoResponseSuppress,
-                    "Precedence" => MetadataHeaderName::Precedence,
-
-                    // Organization/Threading
-                    "Organization" => MetadataHeaderName::Organization,
-                    "Thread-Index" => MetadataHeaderName::ThreadIndex,
-                    "Thread-Topic" => MetadataHeaderName::ThreadTopic,
-
-                    // List (additional)
-                    "List-Unsubscribe-Post" => MetadataHeaderName::ListUnsubscribePost,
-                    "Feedback-ID" => MetadataHeaderName::FeedbackId,
-                );
-                name.unwrap_or_else(|| MetadataHeaderName::Other(value.into_owned()))
-            }
-            other => MetadataHeaderName::Other(other.as_str().to_string()),
+        match known {
+            Some(name) => name,
+            None => MetadataHeaderName::Other(value.into_string()),
         }
     }
 }
@@ -994,82 +1013,6 @@ impl ArchivedMetadataHeaderName {
                 | ArchivedMetadataHeaderName::ContentType
                 | ArchivedMetadataHeaderName::ContentDisposition
         )
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            ArchivedMetadataHeaderName::Subject => "Subject",
-            ArchivedMetadataHeaderName::From => "From",
-            ArchivedMetadataHeaderName::To => "To",
-            ArchivedMetadataHeaderName::Cc => "Cc",
-            ArchivedMetadataHeaderName::Date => "Date",
-            ArchivedMetadataHeaderName::Bcc => "Bcc",
-            ArchivedMetadataHeaderName::ReplyTo => "Reply-To",
-            ArchivedMetadataHeaderName::Sender => "Sender",
-            ArchivedMetadataHeaderName::Comments => "Comments",
-            ArchivedMetadataHeaderName::InReplyTo => "In-Reply-To",
-            ArchivedMetadataHeaderName::Keywords => "Keywords",
-            ArchivedMetadataHeaderName::Received => "Received",
-            ArchivedMetadataHeaderName::MessageId => "Message-ID",
-            ArchivedMetadataHeaderName::References => "References",
-            ArchivedMetadataHeaderName::ReturnPath => "Return-Path",
-            ArchivedMetadataHeaderName::MimeVersion => "MIME-Version",
-            ArchivedMetadataHeaderName::ContentDescription => "Content-Description",
-            ArchivedMetadataHeaderName::ContentId => "Content-ID",
-            ArchivedMetadataHeaderName::ContentLanguage => "Content-Language",
-            ArchivedMetadataHeaderName::ContentLocation => "Content-Location",
-            ArchivedMetadataHeaderName::ContentTransferEncoding => "Content-Transfer-Encoding",
-            ArchivedMetadataHeaderName::ContentType => "Content-Type",
-            ArchivedMetadataHeaderName::ContentDisposition => "Content-Disposition",
-            ArchivedMetadataHeaderName::ResentTo => "Resent-To",
-            ArchivedMetadataHeaderName::ResentFrom => "Resent-From",
-            ArchivedMetadataHeaderName::ResentBcc => "Resent-Bcc",
-            ArchivedMetadataHeaderName::ResentCc => "Resent-Cc",
-            ArchivedMetadataHeaderName::ResentSender => "Resent-Sender",
-            ArchivedMetadataHeaderName::ResentDate => "Resent-Date",
-            ArchivedMetadataHeaderName::ResentMessageId => "Resent-Message-ID",
-            ArchivedMetadataHeaderName::ListArchive => "List-Archive",
-            ArchivedMetadataHeaderName::ListHelp => "List-Help",
-            ArchivedMetadataHeaderName::ListId => "List-ID",
-            ArchivedMetadataHeaderName::ListOwner => "List-Owner",
-            ArchivedMetadataHeaderName::ListPost => "List-Post",
-            ArchivedMetadataHeaderName::ListSubscribe => "List-Subscribe",
-            ArchivedMetadataHeaderName::ListUnsubscribe => "List-Unsubscribe",
-            ArchivedMetadataHeaderName::ArcAuthenticationResults => "ARC-Authentication-Results",
-            ArchivedMetadataHeaderName::ArcMessageSignature => "ARC-Message-Signature",
-            ArchivedMetadataHeaderName::ArcSeal => "ARC-Seal",
-            ArchivedMetadataHeaderName::DkimSignature => "DKIM-Signature",
-            ArchivedMetadataHeaderName::DeliveredTo => "Delivered-To",
-            ArchivedMetadataHeaderName::XOriginalTo => "X-Original-To",
-            ArchivedMetadataHeaderName::ReturnReceiptTo => "Return-Receipt-To",
-            ArchivedMetadataHeaderName::DispositionNotificationTo => "Disposition-Notification-To",
-            ArchivedMetadataHeaderName::ErrorsTo => "Errors-To",
-            ArchivedMetadataHeaderName::AuthenticationResults => "Authentication-Results",
-            ArchivedMetadataHeaderName::ReceivedSpf => "Received-SPF",
-            ArchivedMetadataHeaderName::XSpamStatus => "X-Spam-Status",
-            ArchivedMetadataHeaderName::XSpamScore => "X-Spam-Score",
-            ArchivedMetadataHeaderName::XSpamFlag => "X-Spam-Flag",
-            ArchivedMetadataHeaderName::XSpamResult => "X-Spam-Result",
-            ArchivedMetadataHeaderName::Importance => "Importance",
-            ArchivedMetadataHeaderName::Priority => "Priority",
-            ArchivedMetadataHeaderName::XPriority => "X-Priority",
-            ArchivedMetadataHeaderName::XMSMailPriority => "X-MSMail-Priority",
-            ArchivedMetadataHeaderName::XMailer => "X-Mailer",
-            ArchivedMetadataHeaderName::UserAgent => "User-Agent",
-            ArchivedMetadataHeaderName::XMimeOLE => "X-MimeOLE",
-            ArchivedMetadataHeaderName::XOriginatingIp => "X-Originating-IP",
-            ArchivedMetadataHeaderName::XForwardedTo => "X-Forwarded-To",
-            ArchivedMetadataHeaderName::XForwardedFor => "X-Forwarded-For",
-            ArchivedMetadataHeaderName::AutoSubmitted => "Auto-Submitted",
-            ArchivedMetadataHeaderName::XAutoResponseSuppress => "X-Auto-Response-Suppress",
-            ArchivedMetadataHeaderName::Precedence => "Precedence",
-            ArchivedMetadataHeaderName::Organization => "Organization",
-            ArchivedMetadataHeaderName::ThreadIndex => "Thread-Index",
-            ArchivedMetadataHeaderName::ThreadTopic => "Thread-Topic",
-            ArchivedMetadataHeaderName::ListUnsubscribePost => "List-Unsubscribe-Post",
-            ArchivedMetadataHeaderName::FeedbackId => "Feedback-ID",
-            ArchivedMetadataHeaderName::Other(name) => name.as_ref(),
-        }
     }
 }
 

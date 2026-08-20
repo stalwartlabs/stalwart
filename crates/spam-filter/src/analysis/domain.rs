@@ -79,9 +79,7 @@ impl SpamFilterAnalyzeDomain for Server {
                         domains.insert(ElementLocation::new(mid_domain.fqdn, Location::HeaderMid));
                     }
                 }
-                (HeaderName::Other(name), _)
-                    if name.eq_ignore_ascii_case("Disposition-Notification-To") =>
-                {
+                (HeaderName::DispositionNotificationTo, _) => {
                     if let Some(address) = MessageStream::new(
                         ctx.input
                             .message

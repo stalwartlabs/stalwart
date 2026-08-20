@@ -77,7 +77,7 @@ impl HeaderToValue for Vec<Header<'_>> {
             _ => return Value::Null,
         };
 
-        let is_raw = matches!(form, HeaderForm::Raw) || matches!(header_name, HeaderName::Other(_));
+        let is_raw = matches!(form, HeaderForm::Raw) || !header_name.is_structured();
         let mut headers = Vec::new();
         let header_name = header_name.as_str();
         for header in self.iter().rev() {
@@ -332,7 +332,7 @@ impl HeaderToValue for ArchivedMessageMetadataPart {
             _ => return Value::Null,
         };
 
-        let is_raw = matches!(form, HeaderForm::Raw) || matches!(header_name, HeaderName::Other(_));
+        let is_raw = matches!(form, HeaderForm::Raw) || !header_name.is_structured();
         let mut headers = Vec::new();
         let header_name = header_name.as_str();
         for header in self.headers.iter().rev() {

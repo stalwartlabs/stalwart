@@ -259,7 +259,7 @@ impl EmailIngest for Server {
                 if self.core.smtp.session.data.add_delivered_to {
                     extra_headers = format!("Delivered-To: {deliver_to}\r\n");
                     extra_headers_parsed.push(Header {
-                        name: HeaderName::Other("Delivered-To".into()),
+                        name: HeaderName::DeliveredTo,
                         value: HeaderValue::Text(deliver_to.into()),
                         offset_field: 0,
                         offset_start: 13,
