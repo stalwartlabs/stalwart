@@ -22,7 +22,7 @@ use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -92,7 +92,7 @@ impl VacationResponseGet for Server {
             if let Some(document_id) = self.get_vacation_sieve_script_id(account_id).await?
                 && let Some(sieve_) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::SieveScript,
                         document_id,

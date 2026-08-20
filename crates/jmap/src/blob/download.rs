@@ -12,7 +12,7 @@ use groupware::cache::GroupwareCache;
 use registry::schema::enums::Permission;
 use std::future::Future;
 use store::ValueKey;
-use store::write::{AlignedBytes, Archive};
+use store::write::{Archive, ArchiveBytes};
 use trc::AddContext;
 use types::acl::Acl;
 use types::blob::{BlobClass, BlobId};
@@ -63,7 +63,7 @@ impl BlobDownload for Server {
                     ) if *collection == Collection::Email as u8 => {
                         let Some(archive) = self
                             .store()
-                            .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+                            .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                                 *account_id,
                                 Collection::Email,
                                 *document_id,

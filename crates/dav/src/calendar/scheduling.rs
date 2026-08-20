@@ -36,7 +36,7 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use store::{ahash::AHashMap, write::BatchBuilder};
 use trc::AddContext;
@@ -105,7 +105,7 @@ impl CalendarEventNotificationHandler for Server {
         // Fetch event
         let event_ = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::CalendarEventNotification,
                 resource.document_id(),
@@ -189,7 +189,7 @@ impl CalendarEventNotificationHandler for Server {
         let document_id = resource.document_id();
         let event_ = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::CalendarEventNotification,
                 document_id,

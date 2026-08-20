@@ -63,7 +63,7 @@ use std::{path::PathBuf, str::FromStr, sync::Arc};
 use store::{
     RegistryStore, Store, ValueKey,
     registry::{RegistryQuery, bootstrap::Bootstrap, write::RegistryWrite},
-    write::{AlignedBytes, Archive, now},
+    write::{Archive, ArchiveBytes, now},
 };
 use tokio::sync::{mpsc, watch};
 use trc::EventType;
@@ -544,7 +544,7 @@ impl TestServer {
         let metadata_ = self
             .server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                 account_id,
                 Collection::Email,
                 document_id,

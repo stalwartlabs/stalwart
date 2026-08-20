@@ -25,7 +25,7 @@ use registry::schema::enums::Permission;
 use store::write::{BatchBuilder, ValueClass};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -100,7 +100,7 @@ impl CalendarDeleteRequestHandler for Server {
 
             let calendar_ = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Calendar,
                     document_id,
@@ -189,7 +189,7 @@ impl CalendarDeleteRequestHandler for Server {
 
             let event_ = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEvent,
                     document_id,

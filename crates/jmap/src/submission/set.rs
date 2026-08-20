@@ -37,7 +37,7 @@ use std::{borrow::Cow, future::Future};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, now},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::EmailField, id::Id};
@@ -155,7 +155,7 @@ impl EmailSubmissionSet for Server {
             let document_id = id.document_id();
             let submission = if let Some(submission) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::EmailSubmission,
                     document_id,
@@ -266,7 +266,7 @@ impl EmailSubmissionSet for Server {
             let document_id = id.document_id();
             if let Some(submission) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::EmailSubmission,
                     document_id,
@@ -516,7 +516,7 @@ impl EmailSubmissionSet for Server {
         // Fetch identity's mailFrom
         let identity_mail_from = if let Some(identity) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::Identity,
                 submission.identity_id,
@@ -557,7 +557,7 @@ impl EmailSubmissionSet for Server {
         // Obtain message metadata
         let metadata_ = if let Some(metadata) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                 account_id,
                 Collection::Email,
                 submission.email_id,

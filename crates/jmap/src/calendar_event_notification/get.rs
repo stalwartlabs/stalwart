@@ -27,7 +27,7 @@ use jmap_proto::{
 };
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, serialize::rkyv_deserialize},
+    write::{Archive, ArchiveBytes, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
 use types::{
@@ -88,7 +88,7 @@ impl CalendarEventNotificationGet for Server {
             let document_id = id.document_id();
             let _event = if let Some(event) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEventNotification,
                     document_id,

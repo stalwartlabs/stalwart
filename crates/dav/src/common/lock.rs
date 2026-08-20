@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use store::ValueKey;
 use store::dispatch::lookup::KeyValue;
 use store::write::serialize::rkyv_deserialize;
-use store::write::{AlignedBytes, Archive, Archiver, now};
+use store::write::{Archive, ArchiveBytes, Archiver, now};
 use store::{Serialize, U32_LEN};
 use trc::AddContext;
 use types::collection::Collection;
@@ -65,7 +65,7 @@ struct LockCache<'x> {
 
 enum LockArchive<'x> {
     Unarchived(&'x ArchivedLockData),
-    Archived(Archive<AlignedBytes>),
+    Archived(Archive<ArchiveBytes>),
 }
 
 #[derive(Default)]
@@ -140,7 +140,7 @@ impl LockRequestHandler for Server {
             .unwrap_or_default();
         let mut lock_data = if let Some(lock_data) = self
             .in_memory_store()
-            .key_get::<Archive<AlignedBytes>>(resource_hash.as_slice())
+            .key_get::<Archive<ArchiveBytes>>(resource_hash.as_slice())
             .await
             .caused_by(trc::location!())?
         {
@@ -525,7 +525,7 @@ impl LockRequestHandler for Server {
                         resource_state.document_id.filter(|&id| id != u32::MAX)
                         && let Some(archive) = self
                             .store()
-                            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                                 resource_state.account_id,
                                 resource_state.collection,
                                 document_id,
@@ -745,7 +745,7 @@ impl<'x> LockCaches<'x> {
     ) -> trc::Result<bool> {
         if let Some(lock_archive) = server
             .in_memory_store()
-            .key_get::<Archive<AlignedBytes>>(resource_state.lock_key().as_slice())
+            .key_get::<Archive<ArchiveBytes>>(resource_state.lock_key().as_slice())
             .await
             .caused_by(trc::location!())?
         {

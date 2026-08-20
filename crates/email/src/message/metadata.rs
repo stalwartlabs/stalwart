@@ -12,7 +12,7 @@ use mail_parser::{
         quoted_printable::quoted_printable_decode,
     },
 };
-use rkyv::{boxed::ArchivedBox, rend::u16_le};
+use rkyv::{boxed::ArchivedBox, primitive::ArchivedU16};
 use std::{borrow::Cow, collections::VecDeque, ops::Range};
 use types::blob_hash::BlobHash;
 use utils::chained_bytes::ChainedBytes;
@@ -337,7 +337,7 @@ impl<'x> DecodedRawMessage<'x> {
 
 impl ArchivedMessageMetadata {
     #[inline(always)]
-    pub fn message_id(&self, message_id: u16_le) -> &ArchivedMessageMetadataContents {
+    pub fn message_id(&self, message_id: ArchivedU16) -> &ArchivedMessageMetadataContents {
         &self.contents[u16::from(message_id) as usize]
     }
 
@@ -586,7 +586,7 @@ impl ArchivedMessageMetadataPart {
         matches!(self.body, ArchivedMetadataPartType::Message(_))
     }
 
-    pub fn sub_parts(&self) -> Option<&ArchivedBox<[u16_le]>> {
+    pub fn sub_parts(&self) -> Option<&ArchivedBox<[ArchivedU16]>> {
         if let ArchivedMetadataPartType::Multipart(parts) = &self.body {
             Some(parts)
         } else {

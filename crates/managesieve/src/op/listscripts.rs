@@ -11,7 +11,7 @@ use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::SieveField};
@@ -41,7 +41,7 @@ impl<T: SessionStream> Session<T> {
             if let Some(script_) = self
                 .server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::SieveScript,
                     document_id,

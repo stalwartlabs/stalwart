@@ -32,7 +32,7 @@ use std::{
 };
 use store::{
     Deserialize, IterateParams, ValueKey,
-    write::{AlignedBytes, Archive, QueueClass, ValueClass, now},
+    write::{Archive, ArchiveBytes, QueueClass, ValueClass, now},
 };
 use trc::{AddContext, SpamEvent};
 use types::id::Id;
@@ -382,7 +382,7 @@ impl Server {
                 .get_blob(SPAM_CLASSIFIER_KEY, 0..usize::MAX)
                 .await
                 .and_then(|archive| match archive {
-                    Some(archive) => <Archive<AlignedBytes> as Deserialize>::deserialize(&archive)
+                    Some(archive) => <Archive<ArchiveBytes> as Deserialize>::deserialize(&archive)
                         .and_then(|archive| archive.deserialize_untrusted::<SpamClassifier>())
                         .map(Some),
                     None => Ok(None),

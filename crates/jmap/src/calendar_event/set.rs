@@ -50,7 +50,7 @@ use store::{
     ValueKey,
     ahash::AHashSet,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder, now, serialize::rkyv_deserialize},
+    write::{Archive, ArchiveBytes, BatchBuilder, now, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
 use types::{
@@ -179,7 +179,7 @@ impl CalendarEventSet for Server {
             let document_id = id.document_id();
             let calendar_event_ = if let Some(calendar_event_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEvent,
                     document_id,
@@ -491,7 +491,7 @@ impl CalendarEventSet for Server {
 
             let Some(calendar_event_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEvent,
                     document_id,
@@ -622,7 +622,7 @@ impl CalendarEventSet for Server {
             } else if let Some(show_without_time) = use_default_alerts
                 && let Some(_calendar) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::Calendar,
                         name.parent_id,

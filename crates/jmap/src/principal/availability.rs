@@ -37,7 +37,7 @@ use std::{collections::hash_map::Entry, future::Future};
 use store::{
     ValueKey,
     ahash::AHashMap,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -196,7 +196,7 @@ impl PrincipalGetAvailability for Server {
                 let document_id = resource.document_id;
                 let Some(archive) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::CalendarEvent,
                         document_id,

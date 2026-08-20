@@ -9,7 +9,7 @@ use crate::DestroyArchive;
 use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, now},
 };
 use trc::AddContext;
 use types::collection::{Collection, VanishedCollection};
@@ -140,7 +140,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
         for document_id in children_ids {
             if let Some(card_) = server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::ContactCard,
                     document_id,

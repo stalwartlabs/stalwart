@@ -30,7 +30,7 @@ use std::future::Future;
 use store::{
     Serialize, SerializeInfallible, ValueKey,
     rand::{RngExt, rng},
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -219,7 +219,7 @@ impl SieveScriptSet for Server {
             let document_id = id.document_id();
             if let Some(sieve_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::SieveScript,
                     document_id,

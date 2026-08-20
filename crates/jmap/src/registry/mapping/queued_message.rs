@@ -41,7 +41,7 @@ use store::{
     Deserialize, IterateParams, U64_LEN, ValueKey,
     ahash::AHashSet,
     registry::{RegistryFilterOp, RegistryQuery},
-    write::{AlignedBytes, Archive, QueueClass, ValueClass, key::DeserializeBigEndian, now},
+    write::{Archive, ArchiveBytes, QueueClass, ValueClass, key::DeserializeBigEndian, now},
 };
 use trc::AddContext;
 use types::{blob::BlobId, blob_hash::BlobHash, id::Id};
@@ -414,7 +414,7 @@ pub(crate) async fn queued_message_query(
             .iterate(
                 IterateParams::new(from_key, to_key).ascending(),
                 |key, value| {
-                    let message_ = <Archive<AlignedBytes> as Deserialize>::deserialize(value)
+                    let message_ = <Archive<ArchiveBytes> as Deserialize>::deserialize(value)
                         .add_context(|ctx| ctx.ctx(trc::Key::Key, key))?;
                     let message = message_
                         .unarchive::<queue::Message>()

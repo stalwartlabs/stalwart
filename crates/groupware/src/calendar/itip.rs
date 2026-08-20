@@ -35,7 +35,7 @@ use common::{
 };
 use store::{
     ValueKey, rand,
-    write::{AlignedBytes, Archive, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, now},
 };
 use trc::AddContext;
 use types::{
@@ -164,7 +164,7 @@ impl ItipIngest for Server {
         if let Some(document_id) = document_id {
             if let Some(archive) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEvent,
                     document_id,
@@ -432,7 +432,7 @@ impl ItipIngest for Server {
         let response = if let Some(rsvp) = decode_rsvp_response(self, query).await {
             if let Some(archive) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     rsvp.account_id,
                     Collection::CalendarEvent,
                     rsvp.document_id,

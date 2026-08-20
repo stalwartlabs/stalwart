@@ -41,7 +41,7 @@ use store::write::{BlobLink, RegistryClass, now};
 use store::{
     Deserialize, IterateParams, Serialize, ValueKey,
     write::{
-        AlignedBytes, Archive, Archiver, BatchBuilder, BlobOp, ValueClass,
+        Archive, ArchiveBytes, Archiver, BatchBuilder, BlobOp, ValueClass,
         key::DeserializeBigEndian,
     },
 };
@@ -133,7 +133,7 @@ impl SpamClassifier for Server {
                 .get_blob(SPAM_TRAINER_KEY, 0..usize::MAX)
                 .await
                 .and_then(|archive| match archive {
-                    Some(archive) => <Archive<AlignedBytes> as Deserialize>::deserialize(&archive)
+                    Some(archive) => <Archive<ArchiveBytes> as Deserialize>::deserialize(&archive)
                         .and_then(|archive| archive.deserialize_untrusted::<SpamTrainer>())
                         .map(Some),
                     None => Ok(None),

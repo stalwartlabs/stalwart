@@ -423,9 +423,11 @@ impl CalendarQueryHandler {
     ) -> Option<String> {
         let mut out = String::with_capacity(event.size.to_native() as usize);
         let _v = [0.into()];
-        let mut component_iter: Iter<'_, rkyv::rend::u32_le> = _v.iter();
-        let mut component_stack: Vec<(&ArchivedICalendarComponent, Iter<'_, rkyv::rend::u32_le>)> =
-            Vec::with_capacity(4);
+        let mut component_iter: Iter<'_, rkyv::primitive::ArchivedU32> = _v.iter();
+        let mut component_stack: Vec<(
+            &ArchivedICalendarComponent,
+            Iter<'_, rkyv::primitive::ArchivedU32>,
+        )> = Vec::with_capacity(4);
 
         if data.expand.is_some() {
             self.expanded_times.sort_unstable_by_key(|a| a.start);

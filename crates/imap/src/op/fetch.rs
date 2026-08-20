@@ -39,11 +39,11 @@ use registry::schema::enums::Permission;
 use std::{borrow::Cow, sync::Arc, time::Instant};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use store::{
     query::log::{Change, Query},
-    rkyv::rend::u16_le,
+    rkyv::primitive::ArchivedU16,
     write::BatchBuilder,
 };
 use types::{
@@ -454,7 +454,7 @@ impl<T: SessionStream> SessionData<T> {
                 let Some(metadata_) = self
                     .server
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                         account_id,
                         Collection::Email,
                         id,
@@ -678,7 +678,7 @@ impl<T: SessionStream> SessionData<T> {
                 merge_keywords(
                     &mut batch,
                     data.thread_id,
-                    KeywordDiff::default().with_added(Keyword::Seen),
+                    KeywordDiff::added(Keyword::Seen),
                 );
                 batch.commit_point();
             }
@@ -961,7 +961,7 @@ impl AsImapDataItemPart for ArchivedMessageMetadataContents {
 impl AsImapDataItem for ArchivedMessageMetadata {
     fn body_structure(&'_ self, decoded: &DecodedParts<'_>, is_extended: bool) -> BodyPart<'_> {
         let mut stack = Vec::new();
-        let base_part = [u16_le::from_native(0)];
+        let base_part = [ArchivedU16::from_native(0)];
         let mut parts = base_part.as_slice().iter();
         let mut message = &self.contents[0];
         let mut root_part = None;

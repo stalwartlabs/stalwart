@@ -39,7 +39,7 @@ use smtp_proto::{MailFrom, RcptTo};
 use std::{str::FromStr, sync::Arc, time::Duration};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, now},
+    write::{Archive, ArchiveBytes, now},
 };
 use trc::{AddContext, TaskManagerEvent};
 use types::collection::Collection;
@@ -139,7 +139,7 @@ async fn send_email_alarm(
     // Fetch event
     let Some(event_) = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::CalendarEvent,
             document_id,
@@ -323,7 +323,7 @@ async fn send_display_alarm(
     let document_id = task.document_id.document_id();
     let Some(event_) = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::CalendarEvent,
             document_id,

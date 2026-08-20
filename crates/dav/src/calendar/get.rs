@@ -19,7 +19,7 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -82,7 +82,7 @@ impl CalendarGetRequestHandler for Server {
         // Fetch event
         let event_ = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::CalendarEvent,
                 resource.document_id(),

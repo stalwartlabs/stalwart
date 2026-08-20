@@ -13,7 +13,7 @@ use jmap_proto::{
 use jmap_tools::{Map, Value};
 use store::{
     Serialize, ValueKey,
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::PrincipalField, id::Id};
@@ -27,7 +27,7 @@ pub trait ParticipantIdentityGet: Sync + Send {
     fn participant_identity_get_or_create(
         &self,
         account_id: u32,
-    ) -> impl Future<Output = trc::Result<Option<Archive<AlignedBytes>>>> + Send;
+    ) -> impl Future<Output = trc::Result<Option<Archive<ArchiveBytes>>>> + Send;
 }
 
 impl ParticipantIdentityGet for Server {
@@ -115,10 +115,10 @@ impl ParticipantIdentityGet for Server {
     async fn participant_identity_get_or_create(
         &self,
         account_id: u32,
-    ) -> trc::Result<Option<Archive<AlignedBytes>>> {
+    ) -> trc::Result<Option<Archive<ArchiveBytes>>> {
         if let Some(identities) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                 account_id,
                 Collection::Principal,
                 0,
@@ -167,7 +167,7 @@ impl ParticipantIdentityGet for Server {
         self.commit_batch(batch).await.caused_by(trc::location!())?;
 
         self.store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                 account_id,
                 Collection::Principal,
                 0,

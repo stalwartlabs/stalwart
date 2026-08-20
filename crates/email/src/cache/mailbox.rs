@@ -11,7 +11,7 @@ use common::{
 };
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use store::{ahash::AHashMap, roaring::RoaringBitmap};
 use trc::AddContext;
@@ -46,7 +46,7 @@ pub(crate) async fn update_mailbox_cache(
         if *is_update
             && let Some(archive) = server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Mailbox,
                     *document_id,

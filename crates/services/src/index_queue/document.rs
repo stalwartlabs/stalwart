@@ -10,7 +10,7 @@ use groupware::{calendar::CalendarEvent, contact::ContactCard};
 use store::{
     ValueKey,
     search::IndexDocument,
-    write::{AlignedBytes, Archive, SearchIndex},
+    write::{Archive, ArchiveBytes, SearchIndex},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::EmailField};
@@ -26,7 +26,7 @@ pub(crate) async fn build_email_document(
 
     match server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
             account_id,
             Collection::Email,
             document_id,
@@ -73,7 +73,7 @@ pub(crate) async fn build_calendar_document(
 
     match server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::CalendarEvent,
             document_id,
@@ -106,7 +106,7 @@ pub(crate) async fn build_contact_document(
 
     match server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::ContactCard,
             document_id,

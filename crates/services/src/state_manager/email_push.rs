@@ -32,7 +32,7 @@ use mail_parser::{HeaderName, HeaderValue};
 use std::iter::Peekable;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -81,7 +81,7 @@ pub async fn build_email_push_object(
 
     let Some(metadata_archive) = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
             account_id,
             Collection::Email,
             document_id,

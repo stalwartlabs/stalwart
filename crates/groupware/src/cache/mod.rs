@@ -27,7 +27,7 @@ use store::{
     SerializeInfallible, ValueKey,
     ahash::AHashMap,
     query::log::{Change, Query},
-    write::{AlignedBytes, Archive, BatchBuilder, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, ValueClass},
 };
 use trc::{AddContext, StoreEvent};
 use types::{
@@ -277,7 +277,7 @@ impl GroupwareCache for Server {
                         let document_id = document_id as u32;
                         if let Some(archive) = self
                             .store()
-                            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                                 account_id,
                                 Collection::CalendarEventNotification,
                                 document_id,
@@ -494,7 +494,7 @@ async fn process_changes(
                 let document_id = id as u32;
                 if let Some(archive) = server
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         collection.collection(false),
                         document_id,
@@ -522,7 +522,7 @@ async fn process_changes(
                 let document_id = id as u32;
                 if let Some(archive) = server
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         collection.collection(true),
                         document_id,
@@ -613,7 +613,7 @@ async fn full_cache_build(
 }
 
 fn resource_from_archive(
-    archive: Archive<AlignedBytes>,
+    archive: Archive<ArchiveBytes>,
     document_id: u32,
     collection: SyncCollection,
     is_container: bool,

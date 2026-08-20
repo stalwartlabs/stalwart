@@ -24,7 +24,7 @@ use store::{
     ahash::AHashMap,
     dispatch::lookup::KeyValue,
     write::{
-        AlignedBytes, Archive, ArchiveVersion, Archiver, BatchBuilder, BlobLink, BlobOp, ValueClass,
+        Archive, ArchiveBytes, ArchiveVersion, Archiver, BatchBuilder, BlobLink, BlobOp, ValueClass,
     },
 };
 use trc::{AddContext, SieveEvent, SmtpEvent};
@@ -661,7 +661,7 @@ impl SieveScriptIngest for Server {
         // Obtain script object
         let Some(script_object) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::SieveScript,
                 document_id,
@@ -695,7 +695,7 @@ impl SieveScriptIngest for Server {
 
         // Obtain the precompiled script
         if let Some(script) = script_bytes.get(script_offset..).and_then(|bytes| {
-            <Archive<AlignedBytes> as Deserialize>::deserialize(bytes)
+            <Archive<ArchiveBytes> as Deserialize>::deserialize(bytes)
                 .ok()?
                 .deserialize::<Sieve>()
                 .ok()

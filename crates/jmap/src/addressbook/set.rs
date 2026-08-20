@@ -25,7 +25,7 @@ use rand::{RngExt, distr::Alphanumeric};
 use store::{
     SerializeInfallible, ValueKey,
     ahash::AHashSet,
-    write::{AlignedBytes, Archive, BatchBuilder, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -153,7 +153,7 @@ impl AddressBookSet for Server {
             let document_id = id.document_id();
             let address_book_ = if let Some(address_book_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::AddressBook,
                     document_id,
@@ -251,7 +251,7 @@ impl AddressBookSet for Server {
 
                 let Some(address_book_) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::AddressBook,
                         document_id,
@@ -320,7 +320,7 @@ impl AddressBookSet for Server {
                 for document_id in destroy_children {
                     if let Some(card_) = self
                         .store()
-                        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                             account_id,
                             Collection::ContactCard,
                             document_id,

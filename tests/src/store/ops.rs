@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use store::{
     U64_LEN, ValueKey,
     rand::{self, RngExt},
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder, MergeResult, ValueClass},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, MergeResult, ValueClass},
 };
 use types::collection::Collection;
 use types::collection::SyncCollection;
@@ -907,7 +907,7 @@ pub async fn test(test: &TestServer) {
     let mut change_ids = AHashSet::new();
     for document_id in 0..1000 {
         let archive = db
-            .get_value::<Archive<AlignedBytes>>(ValueKey {
+            .get_value::<Archive<ArchiveBytes>>(ValueKey {
                 account_id: 0,
                 collection: 0,
                 document_id,

@@ -23,7 +23,7 @@ use std::borrow::Cow;
 use std::future::Future;
 use store::{
     Serialize, SerializeInfallible, ValueKey,
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -109,7 +109,7 @@ impl VacationResponseSet for Server {
             let (mut sieve, prev_sieve) = if let Some(document_id) = document_id {
                 let prev_sieve = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::SieveScript,
                         document_id,

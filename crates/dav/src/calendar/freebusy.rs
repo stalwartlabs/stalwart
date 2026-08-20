@@ -24,7 +24,7 @@ use hyper::StatusCode;
 use std::str::FromStr;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use store::{
     ahash::AHashMap,
@@ -166,7 +166,7 @@ impl CalendarFreebusyRequestHandler for Server {
             for document_id in document_ids {
                 let Some(archive) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::CalendarEvent,
                         document_id,

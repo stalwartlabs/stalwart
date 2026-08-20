@@ -26,7 +26,7 @@ use sha2::{Digest, Sha256};
 use std::{borrow::Cow, future::Future};
 use store::{
     dispatch::lookup::KeyValue,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 
@@ -82,7 +82,7 @@ impl TokenHandler for Server {
                 // Obtain code
                 match self
                     .in_memory_store()
-                    .key_get::<Archive<AlignedBytes>>(KeyValue::<()>::build_key(
+                    .key_get::<Archive<ArchiveBytes>>(KeyValue::<()>::build_key(
                         KV_OAUTH,
                         code.as_bytes(),
                     ))
@@ -158,7 +158,7 @@ impl TokenHandler for Server {
                 // Obtain code
                 if let Some(auth_code_) = self
                     .in_memory_store()
-                    .key_get::<Archive<AlignedBytes>>(KeyValue::<()>::build_key(
+                    .key_get::<Archive<ArchiveBytes>>(KeyValue::<()>::build_key(
                         KV_OAUTH,
                         device_code.as_bytes(),
                     ))

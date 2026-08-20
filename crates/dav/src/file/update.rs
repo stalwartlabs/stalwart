@@ -27,7 +27,7 @@ use hyper::StatusCode;
 use store::write::{BatchBuilder, now};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -83,7 +83,7 @@ impl FileUpdateRequestHandler for Server {
             // Update
             let node_ = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::FileNode,
                     document_id,

@@ -25,7 +25,7 @@ use std::future::Future;
 use store::{
     ValueKey,
     backend::MAX_TOKEN_LENGTH,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, field::EmailField};
@@ -139,7 +139,7 @@ impl EmailSearchSnippet for Server {
             }
             let metadata_ = match self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                     account_id,
                     Collection::Email,
                     document_id,

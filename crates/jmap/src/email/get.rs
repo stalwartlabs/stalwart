@@ -28,7 +28,7 @@ use mail_parser::HeaderValue;
 use std::future::Future;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::{AddContext, StoreEvent};
 use types::{
@@ -183,7 +183,7 @@ impl EmailGet for Server {
             let message = if needs_metadata {
                 metadata_ = match self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                         account_id,
                         Collection::Email,
                         id.document_id(),

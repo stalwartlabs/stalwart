@@ -20,7 +20,7 @@ use email::{
     message::{
         delete::EmailDeletion,
         ingest::{EmailIngest, IngestEmail, IngestSource},
-        messagedata::merge_keywords,
+        messagedata::{KeywordDiff, merge_keywords},
     },
 };
 use http_proto::HttpSessionData;
@@ -809,6 +809,7 @@ impl EmailSet for Server {
                 continue 'update;
             };
             let mut new_data = data.clone();
+            let mut has_keyword_replace = false;
 
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
@@ -830,6 +831,7 @@ impl EmailSet for Server {
                         );
                     }
                     (Key::Property(EmailProperty::Keywords), Value::Object(keywords_)) => {
+                        has_keyword_replace = true;
                         new_data.set_keywords(
                             keywords_
                                 .into_expanded_boolean_set()
@@ -1057,7 +1059,15 @@ impl EmailSet for Server {
                     )
                     .caused_by(trc::location!())?;
             } else {
-                merge_keywords(&mut batch, data.thread_id, new_data.keyword_diff(&data));
+                merge_keywords(
+                    &mut batch,
+                    data.thread_id,
+                    if has_keyword_replace {
+                        KeywordDiff::replace(new_data.keywords().collect())
+                    } else {
+                        new_data.keyword_diff(&data)
+                    },
+                );
             }
 
             if let Some(train_spam) = train_spam {

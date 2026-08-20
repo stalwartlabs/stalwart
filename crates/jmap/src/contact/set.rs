@@ -25,7 +25,7 @@ use store::{
     ValueKey,
     ahash::AHashSet,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -140,7 +140,7 @@ impl ContactCardSet for Server {
             let document_id = id.document_id();
             let contact_card_ = if let Some(contact_card_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::ContactCard,
                     document_id,
@@ -317,7 +317,7 @@ impl ContactCardSet for Server {
 
             let Some(contact_card_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::ContactCard,
                     document_id,

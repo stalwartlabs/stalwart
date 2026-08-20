@@ -24,7 +24,7 @@ use hyper::StatusCode;
 use store::write::{BatchBuilder, ValueClass};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -77,7 +77,7 @@ impl CardDeleteRequestHandler for Server {
         if delete_resource.is_container() {
             let book_ = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::AddressBook,
                     document_id,
@@ -169,7 +169,7 @@ impl CardDeleteRequestHandler for Server {
 
             let card_ = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::ContactCard,
                     document_id,

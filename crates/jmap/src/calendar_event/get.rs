@@ -36,7 +36,7 @@ use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -220,7 +220,7 @@ impl CalendarEventGet for Server {
 
             let Some(_calendar_event) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEvent,
                     document_id,

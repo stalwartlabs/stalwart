@@ -14,7 +14,7 @@ use std::{borrow::Cow, fmt::Debug};
 use store::{
     Serialize, SerializeInfallible, U64_LEN,
     write::{
-        AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations,
+        Archive, ArchiveBytes, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations,
         SearchIndex, ValueClass,
     },
 };
@@ -299,7 +299,7 @@ impl<T: IndexableAndSerializableObject> SerializableObject for T {
             let (offset, archive) = Archiver::new(self).serialize_versioned()?;
             let offset = offset as usize;
             batch
-                .set_archive_hash(Archive::<AlignedBytes>::extract_hash(&archive))
+                .set_archive_hash(Archive::<ArchiveBytes>::extract_hash(&archive))
                 .set_fnc(Field::ARCHIVE, archive, move |ids, bytes| {
                     let change_id = ids.current_change_id()?;
                     bytes[offset..offset + U64_LEN].copy_from_slice(&change_id.to_be_bytes());
@@ -308,7 +308,7 @@ impl<T: IndexableAndSerializableObject> SerializableObject for T {
         } else {
             let archive = Archiver::new(self).serialize()?;
             batch
-                .set_archive_hash(Archive::<AlignedBytes>::extract_hash(&archive))
+                .set_archive_hash(Archive::<ArchiveBytes>::extract_hash(&archive))
                 .set(Field::ARCHIVE, archive);
         }
 

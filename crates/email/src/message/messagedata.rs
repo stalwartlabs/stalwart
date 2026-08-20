@@ -184,7 +184,7 @@ impl MessageData {
     }
 
     pub fn keyword_diff(&self, prev_data: &MessageData) -> KeywordDiff {
-        KeywordDiff {
+        KeywordDiff::Patch {
             added: self.keywords & !prev_data.keywords,
             removed: prev_data.keywords & !self.keywords,
             added_extra: self
@@ -262,57 +262,70 @@ impl Serialize for MessageData {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct KeywordDiff {
-    added: u32,
-    removed: u32,
-    added_extra: Vec<CompactString>,
-    removed_extra: Vec<CompactString>,
+#[derive(Debug)]
+pub enum KeywordDiff {
+    Replace(Vec<Keyword>),
+    Patch {
+        added: u32,
+        removed: u32,
+        added_extra: Vec<CompactString>,
+        removed_extra: Vec<CompactString>,
+    },
 }
 
 impl KeywordDiff {
-    pub fn with_added(mut self, keyword: Keyword) -> Self {
-        match keyword.into_id() {
-            Ok(id) => self.added |= 1 << id,
-            Err(name) => self.added_extra.push(name),
-        }
-        self
+    pub fn replace(keywords: Vec<Keyword>) -> Self {
+        KeywordDiff::Replace(keywords)
     }
 
-    pub fn with_removed(mut self, keyword: Keyword) -> Self {
-        match keyword.into_id() {
-            Ok(id) => self.removed |= 1 << id,
-            Err(name) => self.removed_extra.push(name),
-        }
-        self
-    }
+    pub fn added(keyword: Keyword) -> Self {
+        let (added, added_extra) = match keyword.into_id() {
+            Ok(id) => (1 << id, Vec::new()),
+            Err(name) => (0, vec![name]),
+        };
 
-    pub fn is_empty(&self) -> bool {
-        self.added == 0
-            && self.removed == 0
-            && self.added_extra.is_empty()
-            && self.removed_extra.is_empty()
+        KeywordDiff::Patch {
+            added,
+            removed: 0,
+            added_extra,
+            removed_extra: Vec::new(),
+        }
     }
 
     fn apply(&self, data: &mut MessageData) -> bool {
         let prev_keywords = data.keywords;
-        let prev_extra_len = data.keywords_extra.len();
 
-        data.keywords = (data.keywords | self.added) & !self.removed;
-        if !self.removed_extra.is_empty() {
-            data.keywords_extra
-                .retain(|k| !self.removed_extra.contains(k));
-        }
+        match self {
+            KeywordDiff::Replace(keywords) => {
+                let prev_extra = data.keywords_extra.clone();
+                data.set_keywords(keywords.clone());
 
-        let mut extra_changed = data.keywords_extra.len() != prev_extra_len;
-        for keyword in &self.added_extra {
-            if !data.keywords_extra.contains(keyword) {
-                data.keywords_extra.push(keyword.clone());
-                extra_changed = true;
+                data.keywords != prev_keywords || data.keywords_extra != prev_extra
+            }
+            KeywordDiff::Patch {
+                added,
+                removed,
+                added_extra,
+                removed_extra,
+            } => {
+                let prev_extra_len = data.keywords_extra.len();
+
+                data.keywords = (data.keywords | added) & !removed;
+                if !removed_extra.is_empty() {
+                    data.keywords_extra.retain(|k| !removed_extra.contains(k));
+                }
+
+                let mut extra_changed = data.keywords_extra.len() != prev_extra_len;
+                for keyword in added_extra {
+                    if !data.keywords_extra.contains(keyword) {
+                        data.keywords_extra.push(keyword.clone());
+                        extra_changed = true;
+                    }
+                }
+
+                data.keywords != prev_keywords || extra_changed
             }
         }
-
-        data.keywords != prev_keywords || extra_changed
     }
 }
 

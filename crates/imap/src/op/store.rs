@@ -14,7 +14,10 @@ use common::network::SessionStream;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::TRASH_ID,
-    message::{ingest::EmailIngest, messagedata::merge_keywords},
+    message::{
+        ingest::EmailIngest,
+        messagedata::{KeywordDiff, merge_keywords},
+    },
 };
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
@@ -289,8 +292,7 @@ impl<T: SessionStream> SessionData<T> {
                 }
             }
 
-            let keyword_diff = new_data.keyword_diff(&data);
-            if keyword_diff.is_empty() {
+            if !new_data.has_keyword_changes(&data) {
                 continue;
             }
 
@@ -336,7 +338,14 @@ impl<T: SessionStream> SessionData<T> {
                 .with_account_id(account_id)
                 .with_collection(Collection::Email)
                 .with_document(*id);
-            merge_keywords(&mut batch, data.thread_id, keyword_diff);
+            merge_keywords(
+                &mut batch,
+                data.thread_id,
+                match arguments.operation {
+                    Operation::Set => KeywordDiff::replace(set_keywords.clone()),
+                    Operation::Add | Operation::Clear => new_data.keyword_diff(&data),
+                },
+            );
 
             // Add spam train task
             if let Some(learn_spam) = train_spam {

@@ -29,7 +29,7 @@ use store::{
     IndexKey, IterateParams, SerializeInfallible, U32_LEN, ValueKey,
     roaring::RoaringBitmap,
     write::{
-        AlignedBytes, Archive, BatchBuilder, Operation, TaskQueueClass, ValueClass, ValueOp,
+        Archive, ArchiveBytes, BatchBuilder, Operation, TaskQueueClass, ValueClass, ValueOp,
         key::DeserializeBigEndian, now,
     },
 };
@@ -104,7 +104,7 @@ impl ItipAutoExpunge for Server {
             // Fetch event
             if let Some(event_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEventNotification,
                     document_id,
@@ -297,7 +297,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
         for document_id in children_ids {
             if let Some(event_) = server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::CalendarEvent,
                     document_id,
@@ -563,7 +563,7 @@ impl ArchivedCalendarEvent {
         for event_name in self.names.iter() {
             if let Some(calendar_) = server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_info.account_id(),
                     Collection::Calendar,
                     event_name.parent_id.to_native(),

@@ -22,7 +22,7 @@ use store::{
     IterateParams, U32_LEN, ValueKey,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
-        AlignedBytes, Archive, BatchBuilder, SearchIndex, SearchIndexClass, ValueClass,
+        Archive, ArchiveBytes, BatchBuilder, SearchIndex, SearchIndexClass, ValueClass,
         key::DeserializeBigEndian,
     },
 };
@@ -641,7 +641,7 @@ async fn delete_email_metadata(
 ) -> trc::Result<()> {
     match server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
             account_id,
             Collection::Email,
             document_id,

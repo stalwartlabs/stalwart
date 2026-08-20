@@ -25,7 +25,7 @@ use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -452,12 +452,12 @@ impl<T: SessionStream> SessionData<T> {
         &self,
         arguments: &Arguments,
         validate: bool,
-    ) -> trc::Result<(MailboxId, Archive<AlignedBytes>, AccessToken)> {
+    ) -> trc::Result<(MailboxId, Archive<ArchiveBytes>, AccessToken)> {
         if let Some(mailbox) = self.get_mailbox_by_name(&arguments.mailbox_name) {
             if let Some(values) = self
                 .server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     mailbox.account_id,
                     Collection::Mailbox,
                     mailbox.mailbox_id,

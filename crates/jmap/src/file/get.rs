@@ -16,7 +16,7 @@ use jmap_tools::{Map, Value};
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, now},
+    write::{Archive, ArchiveBytes, now},
 };
 use trc::AddContext;
 use types::{
@@ -126,7 +126,7 @@ impl FileNodeGet for Server {
             }
             let _file_node = if let Some(file_node) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::FileNode,
                     document_id,

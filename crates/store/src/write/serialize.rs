@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{ARCHIVE_ALIGNMENT, AlignedBytes, Archive, ArchiveVersion, Archiver};
+use super::{Archive, ArchiveBytes, ArchiveVersion, Archiver};
 use crate::{Deserialize, Serialize, SerializeInfallible, U32_LEN, U64_LEN, Value};
 use compact_str::format_compact;
-use rkyv::util::AlignedVec;
 use roaring::{RoaringBitmap, RoaringTreemap};
 
 const MAGIC_MARKER: u8 = 1 << 7;
@@ -61,7 +60,7 @@ fn validate_marker_and_contents(bytes: &[u8]) -> Option<(bool, &[u8], ArchiveVer
     }
 }
 
-impl Deserialize for Archive<AlignedBytes> {
+impl Deserialize for Archive<ArchiveBytes> {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
         let (is_uncompressed, contents, version) =
             validate_marker_and_contents(bytes).ok_or_else(|| {
@@ -73,14 +72,12 @@ impl Deserialize for Archive<AlignedBytes> {
             })?;
 
         if is_uncompressed {
-            let mut bytes = AlignedVec::with_capacity(contents.len());
-            bytes.extend_from_slice(contents);
             Ok(Archive {
                 version,
-                inner: AlignedBytes::Aligned(bytes),
+                inner: contents.to_vec(),
             })
         } else {
-            aligned_lz4_deflate(contents).map(|inner| Archive { version, inner })
+            lz4_deflate(contents).map(|inner| Archive { version, inner })
         }
     }
 
@@ -96,36 +93,27 @@ impl Deserialize for Archive<AlignedBytes> {
 
         if is_uncompressed {
             bytes.truncate(contents.len());
-            if bytes.as_ptr().addr() & (ARCHIVE_ALIGNMENT - 1) == 0 {
-                Ok(Archive {
-                    version,
-                    inner: AlignedBytes::Vec(bytes),
-                })
-            } else {
-                let mut aligned = AlignedVec::with_capacity(bytes.len());
-                aligned.extend_from_slice(&bytes);
-                Ok(Archive {
-                    version,
-                    inner: AlignedBytes::Aligned(aligned),
-                })
-            }
+            Ok(Archive {
+                version,
+                inner: bytes,
+            })
         } else {
-            aligned_lz4_deflate(contents).map(|inner| Archive { version, inner })
+            lz4_deflate(contents).map(|inner| Archive { version, inner })
         }
     }
 }
 
 #[inline]
-fn aligned_lz4_deflate(archive: &[u8]) -> trc::Result<AlignedBytes> {
+fn lz4_deflate(archive: &[u8]) -> trc::Result<ArchiveBytes> {
     lz4_flex::block::uncompressed_size(archive)
         .and_then(|(uncompressed_size, archive)| {
-            let mut bytes = AlignedVec::with_capacity(uncompressed_size);
+            let mut bytes = Vec::with_capacity(uncompressed_size);
             unsafe {
                 // SAFETY: `new_len` is equal to `capacity` and vector is initialized by lz4_flex.
                 bytes.set_len(uncompressed_size);
             }
             lz4_flex::decompress_into(archive, &mut bytes)?;
-            Ok(AlignedBytes::Aligned(bytes))
+            Ok(bytes)
         })
         .map_err(|err| {
             trc::StoreEvent::DecompressError
@@ -213,13 +201,10 @@ where
     }
 }
 
-impl Archive<AlignedBytes> {
+impl Archive<ArchiveBytes> {
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        match &self.inner {
-            AlignedBytes::Vec(bytes) => bytes.as_slice(),
-            AlignedBytes::Aligned(bytes) => bytes.as_slice(),
-        }
+        self.inner.as_slice()
     }
 
     pub fn unarchive<T>(&self) -> trc::Result<&<T as rkyv::Archive>::Archived>
@@ -346,10 +331,7 @@ impl Archive<AlignedBytes> {
     }
 
     pub fn into_inner(self) -> Vec<u8> {
-        let mut bytes = match self.inner {
-            AlignedBytes::Vec(bytes) => bytes,
-            AlignedBytes::Aligned(bytes) => bytes.to_vec(),
-        };
+        let mut bytes = self.inner;
         match self.version {
             ArchiveVersion::Versioned { change_id, hash } => {
                 bytes.extend_from_slice(&hash.to_be_bytes());
@@ -576,11 +558,11 @@ impl<T> From<Value<'static>> for Archive<T> {
     }
 }
 
-impl Default for Archive<AlignedBytes> {
+impl Default for Archive<ArchiveBytes> {
     fn default() -> Self {
         Archive {
             version: ArchiveVersion::Unversioned,
-            inner: AlignedBytes::Aligned(AlignedVec::new()),
+            inner: Vec::new(),
         }
     }
 }

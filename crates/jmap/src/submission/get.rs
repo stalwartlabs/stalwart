@@ -23,7 +23,7 @@ use store::{
     IterateParams, U32_LEN, ValueKey,
     rkyv::option::ArchivedOption,
     write::{
-        AlignedBytes, Archive, IndexPropertyClass, ValueClass, key::DeserializeBigEndian, now,
+        Archive, ArchiveBytes, IndexPropertyClass, ValueClass, key::DeserializeBigEndian, now,
     },
 };
 use trc::AddContext;
@@ -115,7 +115,7 @@ impl EmailSubmissionGet for Server {
             let document_id = id.document_id();
             let submission_ = if let Some(submission) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::EmailSubmission,
                     document_id,

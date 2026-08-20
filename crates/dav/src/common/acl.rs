@@ -25,7 +25,7 @@ use hyper::StatusCode;
 use rkyv::vec::ArchivedVec;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use store::{ahash::AHashSet, roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
@@ -112,7 +112,7 @@ impl DavAclHandler for Server {
         // Fetch node
         let archive = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 collection,
                 resource.document_id(),
@@ -224,7 +224,7 @@ impl DavAclHandler for Server {
 
         let archive = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 uri.account_id,
                 uri.collection,
                 uri.resource,

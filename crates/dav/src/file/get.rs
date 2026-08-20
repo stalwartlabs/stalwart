@@ -20,7 +20,7 @@ use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, now},
+    write::{Archive, ArchiveBytes, now},
 };
 use trc::AddContext;
 use types::{
@@ -63,7 +63,7 @@ impl FileGetRequestHandler for Server {
         // Fetch node
         let node_ = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::FileNode,
                 resource.resource,

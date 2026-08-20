@@ -34,7 +34,7 @@ use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, now},
 };
 use trc::AddContext;
 use types::{
@@ -147,7 +147,7 @@ impl FileNodeCopy for Server {
 
             let Some(source) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     from_account_id,
                     Collection::FileNode,
                     from_document_id,

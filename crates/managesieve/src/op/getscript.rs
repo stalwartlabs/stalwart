@@ -12,7 +12,7 @@ use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{blob::BlobSection, blob_hash::BlobHash, collection::Collection};
@@ -38,7 +38,7 @@ impl<T: SessionStream> Session<T> {
         let sieve_ = self
             .server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::SieveScript,
                 document_id,

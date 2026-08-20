@@ -19,7 +19,7 @@ use registry::schema::enums::{Permission, StorageQuota};
 use std::time::Instant;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, id::Id};
@@ -94,7 +94,7 @@ impl<T: SessionStream> SessionData<T> {
         let mailbox_ = self
             .server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 params.account_id,
                 Collection::Mailbox,
                 mailbox_id,

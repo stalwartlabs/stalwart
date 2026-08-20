@@ -11,7 +11,7 @@ use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::EmailField};
@@ -30,7 +30,7 @@ impl<T: SessionStream> Session<T> {
             if let Some(metadata_) = self
                 .server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                     mailbox.account_id,
                     Collection::Email,
                     message.id,

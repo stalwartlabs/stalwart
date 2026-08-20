@@ -21,7 +21,7 @@ use jmap_tools::{Key, Map, Property, Value};
 use std::future::Future;
 use store::{
     Serialize, ValueKey,
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, now},
 };
 use trc::{AddContext, ServerEvent};
 use types::{collection::Collection, field::PrincipalField, id::Id};
@@ -61,7 +61,7 @@ impl PushSubscriptionFetch for Server {
 
         let Some(subscriptions_) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                 account_id,
                 Collection::Principal,
                 0,

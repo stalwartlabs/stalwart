@@ -30,7 +30,7 @@ use rand::{RngExt, distr::Alphanumeric};
 use store::{
     SerializeInfallible, ValueKey,
     ahash::AHashSet,
-    write::{AlignedBytes, Archive, BatchBuilder, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -158,7 +158,7 @@ impl CalendarSet for Server {
             let document_id = id.document_id();
             let calendar_ = if let Some(calendar_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Calendar,
                     document_id,
@@ -249,7 +249,7 @@ impl CalendarSet for Server {
 
                 let Some(calendar_) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::Calendar,
                         document_id,
@@ -322,7 +322,7 @@ impl CalendarSet for Server {
                 for document_id in destroy_children {
                     if let Some(event_) = self
                         .store()
-                        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                             account_id,
                             Collection::CalendarEvent,
                             document_id,

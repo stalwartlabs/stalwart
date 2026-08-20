@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use std::{collections::BTreeMap, sync::atomic::Ordering};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, keyword::Keyword, special_use::SpecialUse};
@@ -410,7 +410,7 @@ impl<T: SessionStream> SessionData<T> {
             || self
                 .server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Mailbox,
                     document_id,

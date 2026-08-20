@@ -35,7 +35,7 @@ use std::future::Future;
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder, assert::AssertValue},
+    write::{Archive, ArchiveBytes, BatchBuilder, assert::AssertValue},
 };
 use trc::AddContext;
 use types::{
@@ -190,7 +190,7 @@ impl MailboxSet for Server {
             let document_id = id.document_id();
             if let Some(mailbox) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Mailbox,
                     document_id,
@@ -527,7 +527,7 @@ impl MailboxSet for Server {
 
                 if let Some(mailbox_) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         ctx.account_id,
                         Collection::Mailbox,
                         parent_document_id,

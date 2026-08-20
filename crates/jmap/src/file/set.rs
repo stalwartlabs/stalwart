@@ -27,7 +27,7 @@ use jmap_tools::{JsonPointerItem, Key, Value};
 use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::{AlignedBytes, Archive, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, now},
 };
 use trc::AddContext;
 use types::{
@@ -332,7 +332,7 @@ impl FileNodeSet for Server {
             let document_id = id.document_id();
             let file_node_ = if let Some(file_node_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::FileNode,
                     document_id,
@@ -916,7 +916,7 @@ pub(super) async fn fetch_existing_modified(
     document_id: u32,
 ) -> trc::Result<i64> {
     Ok(store
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::FileNode,
             document_id,

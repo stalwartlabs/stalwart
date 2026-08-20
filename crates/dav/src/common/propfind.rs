@@ -61,7 +61,7 @@ use std::sync::Arc;
 use store::{
     ValueKey,
     registry::RegistryQuery,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use store::{
     ahash::AHashMap,
@@ -105,7 +105,7 @@ pub(crate) struct PropFindAccountData {
     pub resources: Option<Arc<DavResources>>,
     pub quota: Option<PropFindAccountQuota>,
     pub owner: Option<Href>,
-    pub locks: Option<Archive<AlignedBytes>>,
+    pub locks: Option<Archive<ArchiveBytes>>,
     pub locks_not_found: bool,
 }
 
@@ -435,7 +435,7 @@ impl PropFindRequestHandler for Server {
                 )
             } else if let Some(archive) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     collection,
                     document_id,
@@ -1648,7 +1648,7 @@ impl PropFindData {
         if data.locks.is_none() && !data.locks_not_found {
             data.locks = server
                 .in_memory_store()
-                .key_get::<Archive<AlignedBytes>>(
+                .key_get::<Archive<ArchiveBytes>>(
                     build_lock_key(account_id, collection_container).as_slice(),
                 )
                 .await

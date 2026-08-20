@@ -18,7 +18,7 @@ use store::{
     Deserialize, IterateParams, Serialize, SerializeInfallible, Subspace, U32_LEN, U64_LEN,
     search::{SearchField, SearchFilter, SearchQuery},
     write::{
-        AlignedBytes, AnyClass, AnyKey, Archive, Archiver, BatchBuilder, RegistryClass,
+        AnyClass, AnyKey, Archive, ArchiveBytes, Archiver, BatchBuilder, RegistryClass,
         SearchIndex, ValueClass, key::DeserializeBigEndian, now,
     },
 };
@@ -99,7 +99,7 @@ async fn migrate_spam_model(server: &Server) -> trc::Result<()> {
         .get_blob(SPAM_TRAINER_KEY, 0..usize::MAX)
         .await
         .and_then(|archive| match archive {
-            Some(archive) => <Archive<AlignedBytes> as Deserialize>::deserialize(&archive)
+            Some(archive) => <Archive<ArchiveBytes> as Deserialize>::deserialize(&archive)
                 .and_then(|archive| archive.deserialize_untrusted::<SpamTrainer>())
                 .map(Some),
             None => Ok(None),

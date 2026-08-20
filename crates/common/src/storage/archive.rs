@@ -8,7 +8,7 @@ use crate::Server;
 use store::{
     Deserialize, IterateParams, U32_LEN, ValueKey,
     dispatch::DocumentSet,
-    write::{AlignedBytes, Archive, ValueClass, key::DeserializeBigEndian},
+    write::{Archive, ArchiveBytes, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::Field};
@@ -23,7 +23,7 @@ impl Server {
     ) -> trc::Result<()>
     where
         I: DocumentSet + Send + Sync,
-        CB: FnMut(u32, Archive<AlignedBytes>) -> trc::Result<bool> + Send + Sync,
+        CB: FnMut(u32, Archive<ArchiveBytes>) -> trc::Result<bool> + Send + Sync,
     {
         let collection: u8 = collection.into();
 
@@ -48,7 +48,7 @@ impl Server {
                 |key, value| {
                     let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
                     if documents.contains(document_id) {
-                        <Archive<AlignedBytes> as Deserialize>::deserialize(value)
+                        <Archive<ArchiveBytes> as Deserialize>::deserialize(value)
                             .and_then(|archive| cb(document_id, archive))
                     } else {
                         Ok(true)
@@ -71,7 +71,7 @@ impl Server {
         mut cb: CB,
     ) -> trc::Result<()>
     where
-        CB: FnMut(u32, Archive<AlignedBytes>) -> trc::Result<()> + Send + Sync,
+        CB: FnMut(u32, Archive<ArchiveBytes>) -> trc::Result<()> + Send + Sync,
     {
         let collection: u8 = collection.into();
 
@@ -95,7 +95,7 @@ impl Server {
                 ),
                 |key, value| {
                     let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
-                    let archive = <Archive<AlignedBytes> as Deserialize>::deserialize(value)?;
+                    let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(value)?;
                     cb(document_id, archive)?;
 
                     Ok(true)

@@ -19,7 +19,7 @@ use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -149,7 +149,7 @@ impl IdentitySet for Server {
             let document_id = id.document_id();
             let identity_ = if let Some(identity_) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Identity,
                     document_id,

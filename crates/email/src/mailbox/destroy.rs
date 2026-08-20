@@ -17,7 +17,7 @@ use common::{
 };
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, SearchIndex},
+    write::{Archive, ArchiveBytes, SearchIndex},
 };
 use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
@@ -167,7 +167,7 @@ impl MailboxDestroy for Server {
         // Obtain mailbox
         if let Some(mailbox_) = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::Mailbox,
                 document_id,

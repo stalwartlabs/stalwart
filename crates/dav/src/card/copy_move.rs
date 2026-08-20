@@ -25,7 +25,7 @@ use hyper::StatusCode;
 use store::write::BatchBuilder;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -450,7 +450,7 @@ async fn copy_card(
     // Fetch card
     let card_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::ContactCard,
             from_document_id,
@@ -522,7 +522,7 @@ async fn copy_card(
         // Overwrite card on destination
         let card_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 to_account_id,
                 Collection::ContactCard,
                 to_document_id,
@@ -575,7 +575,7 @@ async fn move_card(
     // Fetch card
     let card_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::ContactCard,
             from_document_id,
@@ -680,7 +680,7 @@ async fn move_card(
         // Overwrite card on destination
         let card_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 to_account_id,
                 Collection::ContactCard,
                 to_document_id,
@@ -730,7 +730,7 @@ async fn rename_card(
     // Fetch card
     let card_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::ContactCard,
             document_id,
@@ -789,7 +789,7 @@ async fn copy_container(
     // Fetch book
     let book_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::AddressBook,
             from_document_id,
@@ -835,7 +835,7 @@ async fn copy_container(
         // Overwrite destination
         let book_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 to_account_id,
                 Collection::AddressBook,
                 to_document_id,
@@ -882,7 +882,7 @@ async fn copy_container(
     for from_child_document_id in from_children_ids {
         if let Some(card_) = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 from_account_id,
                 Collection::ContactCard,
                 from_child_document_id,
@@ -999,7 +999,7 @@ async fn rename_container(
     // Fetch book
     let book_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::AddressBook,
             document_id,

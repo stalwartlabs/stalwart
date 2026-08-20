@@ -34,7 +34,7 @@ use store::{
         distr::{Alphanumeric, StandardUniform},
         rng,
     },
-    write::AlignedBytes,
+    write::ArchiveBytes,
 };
 use trc::AddContext;
 use utils::DomainPart;
@@ -369,7 +369,7 @@ impl OAuthApiHandler for Server {
                 let mut result = LoginResponse::Failure;
                 if let Some(auth_code_) = self
                     .in_memory_store()
-                    .key_get::<Archive<AlignedBytes>>(KeyValue::<()>::build_key(
+                    .key_get::<Archive<ArchiveBytes>>(KeyValue::<()>::build_key(
                         KV_OAUTH,
                         code.as_bytes(),
                     ))

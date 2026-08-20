@@ -22,7 +22,7 @@ use jmap_tools::{Key, Map, Value};
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, ValueClass},
+    write::{Archive, ArchiveBytes, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -114,7 +114,7 @@ impl CalendarGet for Server {
             }
             let _calendar = if let Some(calendar) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Calendar,
                     document_id,

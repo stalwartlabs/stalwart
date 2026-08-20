@@ -46,7 +46,7 @@ use store::{
     rand::{self},
     registry::{RegistryFilter, RegistryQuery},
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder, RegistryClass, ValueClass, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, RegistryClass, ValueClass, now},
 };
 use trc::{AddContext, StoreEvent};
 use types::{
@@ -551,7 +551,7 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
     for &mailbox_id in cache.mailboxes.index.keys() {
         let mailbox = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::Mailbox,
                 mailbox_id,

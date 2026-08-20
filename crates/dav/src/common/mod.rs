@@ -30,7 +30,7 @@ use groupware::{
 };
 use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
-use store::write::{AlignedBytes, Archive, BatchBuilder};
+use store::write::{Archive, ArchiveBytes, BatchBuilder};
 use types::{
     TimeRange, acl::ArchivedAclGrant, collection::Collection, dead_property::ArchivedDeadProperty,
 };
@@ -305,7 +305,7 @@ pub(crate) enum ArchivedResource<'x> {
 
 impl<'x> ArchivedResource<'x> {
     pub fn from_archive(
-        archive: &'x Archive<AlignedBytes>,
+        archive: &'x Archive<ArchiveBytes>,
         collection: Collection,
     ) -> trc::Result<Self> {
         match collection {

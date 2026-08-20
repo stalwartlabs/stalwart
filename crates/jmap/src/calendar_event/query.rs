@@ -24,7 +24,7 @@ use store::{
     ValueKey,
     roaring::RoaringBitmap,
     search::{CalendarSearchField, SearchComparator, SearchFilter, SearchQuery},
-    write::{AlignedBytes, Archive, SearchIndex},
+    write::{Archive, ArchiveBytes, SearchIndex},
 };
 use trc::AddContext;
 use types::{
@@ -376,7 +376,7 @@ impl CalendarEventQuery for Server {
             for document_id in results {
                 let Some(_calendar_event) = self
                     .store()
-                    .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                         account_id,
                         Collection::CalendarEvent,
                         document_id,

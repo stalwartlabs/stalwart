@@ -6,7 +6,7 @@
 
 use store::{
     Deserialize, Serialize,
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder, MergeResult},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, MergeResult},
 };
 use trc::AddContext;
 use types::{acl::AclGrant, collection::SyncCollection, field::Field, special_use::SpecialUse};
@@ -101,7 +101,7 @@ pub fn merge_subscription(batch: &mut BatchBuilder, subscriber: u32, subscribe: 
                 .caused_by(trc::location!()));
         };
 
-        let mut mailbox = <Archive<AlignedBytes> as Deserialize>::deserialize(bytes)
+        let mut mailbox = <Archive<ArchiveBytes> as Deserialize>::deserialize(bytes)
             .and_then(|archive| archive.deserialize::<Mailbox>())
             .caused_by(trc::location!())?;
 

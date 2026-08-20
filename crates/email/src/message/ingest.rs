@@ -42,7 +42,7 @@ use store::{
     },
 };
 use store::{
-    write::{AlignedBytes, Archive, RegistryClass},
+    write::{Archive, ArchiveBytes, RegistryClass},
     xxhash_rust::xxh3::xxh3_128,
 };
 use tinyvec::TinyVec;
@@ -907,7 +907,7 @@ impl EmailIngest for Server {
         if self.core.spam.classifier.is_some()
             && let Some(archive) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::immutable(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
                     account_id,
                     Collection::Email,
                     document_id,

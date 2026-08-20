@@ -8,7 +8,6 @@ use self::assert::AssertValue;
 use crate::{Subspace, backend::MAX_TOKEN_LENGTH};
 use log::ChangeLogBuilder;
 use nlp::tokenizers::word::WordTokenizer;
-use rkyv::util::AlignedVec;
 use std::{
     collections::HashSet,
     hash::Hash,
@@ -36,8 +35,6 @@ pub mod lazybitmap;
 pub mod log;
 pub mod serialize;
 
-pub(crate) const ARCHIVE_ALIGNMENT: usize = 16;
-
 #[derive(Debug, Clone)]
 pub struct Archive<T> {
     pub inner: T,
@@ -51,11 +48,7 @@ pub enum ArchiveVersion {
     Unversioned,
 }
 
-#[derive(Debug, Clone)]
-pub enum AlignedBytes {
-    Aligned(AlignedVec<ARCHIVE_ALIGNMENT>),
-    Vec(Vec<u8>),
-}
+pub type ArchiveBytes = Vec<u8>;
 
 pub struct Archiver<T>
 where

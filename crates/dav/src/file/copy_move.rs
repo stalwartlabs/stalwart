@@ -24,7 +24,7 @@ use hyper::StatusCode;
 use std::sync::Arc;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use store::{
     ahash::AHashMap,
@@ -373,7 +373,7 @@ async fn move_container(
     if from_account_id == to_account_id {
         let node_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 from_account_id,
                 Collection::FileNode,
                 from_document_id,
@@ -480,7 +480,7 @@ async fn copy_container(
     for (document_id, _) in copy_files.into_iter() {
         let node_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 from_account_id,
                 Collection::FileNode,
                 document_id,
@@ -576,7 +576,7 @@ async fn overwrite_and_delete_item(
     // dest_node is the current file at the destination
     let dest_node_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             to_account_id,
             Collection::FileNode,
             to_document_id,
@@ -592,7 +592,7 @@ async fn overwrite_and_delete_item(
     // source_node is the file to be copied
     let source_node__ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::FileNode,
             from_document_id,
@@ -657,7 +657,7 @@ async fn overwrite_item(
     // dest_node is the current file at the destination
     let dest_node_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             to_account_id,
             Collection::FileNode,
             to_document_id,
@@ -673,7 +673,7 @@ async fn overwrite_item(
     // source_node is the file to be copied
     let mut source_node = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::FileNode,
             from_document_id,
@@ -724,7 +724,7 @@ async fn move_item(
 
     let node_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::FileNode,
             from_document_id,
@@ -807,7 +807,7 @@ async fn copy_item(
 
     let mut node = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::FileNode,
             from_document_id,
@@ -859,7 +859,7 @@ async fn rename_item(
 
     let node_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::FileNode,
             from_document_id,

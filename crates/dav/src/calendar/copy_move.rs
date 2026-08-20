@@ -26,7 +26,7 @@ use hyper::StatusCode;
 use store::write::{BatchBuilder, now};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -468,7 +468,7 @@ async fn copy_event(
     // Fetch event
     let event_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::CalendarEvent,
             from_document_id,
@@ -543,7 +543,7 @@ async fn copy_event(
         // Overwrite event on destination
         let event_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 to_account_id,
                 Collection::CalendarEvent,
                 to_document_id,
@@ -602,7 +602,7 @@ async fn move_event(
     // Fetch event
     let event_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::CalendarEvent,
             from_document_id,
@@ -721,7 +721,7 @@ async fn move_event(
         // Overwrite event on destination
         let event_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 to_account_id,
                 Collection::CalendarEvent,
                 to_document_id,
@@ -772,7 +772,7 @@ async fn rename_event(
     // Fetch event
     let event_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::CalendarEvent,
             document_id,
@@ -831,7 +831,7 @@ async fn copy_container(
     // Fetch calendar
     let calendar_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             from_account_id,
             Collection::Calendar,
             from_document_id,
@@ -884,7 +884,7 @@ async fn copy_container(
         // Overwrite destination
         let calendar_ = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 to_account_id,
                 Collection::Calendar,
                 to_document_id,
@@ -933,7 +933,7 @@ async fn copy_container(
     for from_child_document_id in from_children_ids {
         if let Some(event_) = server
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 from_account_id,
                 Collection::CalendarEvent,
                 from_child_document_id,
@@ -1052,7 +1052,7 @@ async fn rename_container(
     // Fetch calendar
     let calendar_ = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::Calendar,
             document_id,

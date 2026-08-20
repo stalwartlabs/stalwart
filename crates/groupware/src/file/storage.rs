@@ -9,7 +9,7 @@ use crate::DestroyArchive;
 use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, now},
 };
 use trc::AddContext;
 use types::collection::{Collection, VanishedCollection};
@@ -136,7 +136,7 @@ impl DestroyArchive<Vec<u32>> {
         for document_id in self.0 {
             if let Some(node) = server
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::FileNode,
                     document_id,

@@ -33,7 +33,7 @@ use std::str::FromStr;
 use store::write::BatchBuilder;
 use store::{
     ValueKey,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -121,7 +121,7 @@ impl CalendarPropPatchRequestHandler for Server {
         // Fetch archive
         let archive = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 collection,
                 document_id,

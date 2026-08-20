@@ -23,7 +23,7 @@ use registry::{
 };
 use store::{
     Deserialize, ValueKey,
-    write::{AlignedBytes, Archive, SearchIndex, serialize::RawValue},
+    write::{Archive, ArchiveBytes, SearchIndex, serialize::RawValue},
 };
 use store::{
     write::{BatchBuilder, IndexPropertyClass, ValueClass},
@@ -89,7 +89,7 @@ impl EmailCopy for Server {
         let Some(metadata_bytes) = metadata_bytes else {
             return Ok(Err(CopyMessageError::NotFound));
         };
-        let archive = <Archive<AlignedBytes> as Deserialize>::deserialize(&metadata_bytes.0)
+        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(&metadata_bytes.0)
             .caused_by(trc::location!())?;
         let metadata = archive
             .unarchive::<MessageMetadata>()

@@ -17,7 +17,7 @@ use store::{
     SerializeInfallible, ValueKey,
     rkyv::{option::ArchivedOption, vec::ArchivedVec},
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, BatchBuilder, assert::AssertValue},
+    write::{Archive, ArchiveBytes, BatchBuilder, assert::AssertValue},
     xxhash_rust::xxh3::Xxh3,
 };
 use trc::AddContext;
@@ -84,7 +84,7 @@ impl IdentityGet for Server {
             }
             let _identity = if let Some(identity) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Identity,
                     document_id,
@@ -191,7 +191,7 @@ impl IdentityGet for Server {
         for document_id in &identity_ids {
             if let Some(identity) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::Identity,
                     document_id,

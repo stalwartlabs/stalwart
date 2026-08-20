@@ -36,7 +36,7 @@ use std::str::FromStr;
 use store::{
     Serialize, ValueKey,
     rand::{RngExt, rng},
-    write::{AlignedBytes, Archive, Archiver, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, now},
 };
 use trc::{AddContext, ServerEvent};
 use types::{collection::Collection, field::PrincipalField, id::Id};
@@ -67,7 +67,7 @@ impl PushSubscriptionSet for Server {
         let account_id = access_token.account_id();
         let subscriptions_archive = self
             .store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                 account_id,
                 Collection::Principal,
                 0,

@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use store::write::key::DeserializeBigEndian;
 use store::write::{
-    AlignedBytes, Archive, Archiver, BatchBuilder, BlobLink, BlobOp, MergeResult, QueueClass,
+    Archive, ArchiveBytes, Archiver, BatchBuilder, BlobLink, BlobOp, MergeResult, QueueClass,
     RegistryClass, ValueClass, now,
 };
 use store::{Deserialize, IterateParams, Serialize, SerializeInfallible, U64_LEN, ValueKey};
@@ -82,7 +82,7 @@ pub trait SmtpSpool: Sync + Send {
     fn read_message_archive(
         &self,
         id: QueueId,
-    ) -> impl Future<Output = trc::Result<Option<Archive<AlignedBytes>>>> + Send;
+    ) -> impl Future<Output = trc::Result<Option<Archive<ArchiveBytes>>>> + Send;
 }
 
 impl SmtpSpool for Server {
@@ -323,9 +323,9 @@ impl SmtpSpool for Server {
     async fn read_message_archive(
         &self,
         id: QueueId,
-    ) -> trc::Result<Option<Archive<AlignedBytes>>> {
+    ) -> trc::Result<Option<Archive<ArchiveBytes>>> {
         self.store()
-            .get_value::<Archive<AlignedBytes>>(ValueKey::from(ValueClass::Queue(
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::from(ValueClass::Queue(
                 QueueClass::Message(id),
             )))
             .await
@@ -700,7 +700,7 @@ impl MessageWrapper {
             batch.merge_fnc(
                 ValueClass::Queue(QueueClass::Message(queue_id)),
                 move |_, bytes| {
-                    let mut cur_message = <Archive<AlignedBytes> as Deserialize>::deserialize(
+                    let mut cur_message = <Archive<ArchiveBytes> as Deserialize>::deserialize(
                         bytes.ok_or_else(|| {
                             trc::StoreEvent::NotFound
                                 .into_err()
@@ -861,7 +861,7 @@ impl MessageWrapper {
         batch.merge_fnc(
             ValueClass::Queue(QueueClass::Message(queue_id)),
             move |_, bytes| {
-                let mut cur_message = <Archive<AlignedBytes> as Deserialize>::deserialize(
+                let mut cur_message = <Archive<ArchiveBytes> as Deserialize>::deserialize(
                     bytes.ok_or_else(|| {
                         trc::StoreEvent::NotFound
                             .into_err()

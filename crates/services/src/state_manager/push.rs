@@ -23,7 +23,7 @@ use std::{
 use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::{AlignedBytes, Archive, now},
+    write::{Archive, ArchiveBytes, now},
 };
 use tokio::sync::mpsc;
 use trc::{AddContext, PushSubscriptionEvent, ServerEvent};
@@ -503,7 +503,7 @@ async fn load_push_subscriptions(
 
     if let Some(push_subscriptions) = server
         .store()
-        .get_value::<Archive<AlignedBytes>>(ValueKey::property(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
             account_id,
             Collection::Principal,
             0,

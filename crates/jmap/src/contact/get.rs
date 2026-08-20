@@ -17,7 +17,7 @@ use jmap_tools::{Map, Value};
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
@@ -107,7 +107,7 @@ impl ContactCardGet for Server {
 
             let _contact = if let Some(contact) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::ContactCard,
                     document_id,

@@ -15,7 +15,7 @@ use jmap_tools::{Map, Value};
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    write::{AlignedBytes, Archive, ValueClass},
+    write::{Archive, ArchiveBytes, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -104,7 +104,7 @@ impl AddressBookGet for Server {
             }
             let _address_book = if let Some(address_book) = self
                 .store()
-                .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
                     Collection::AddressBook,
                     document_id,
