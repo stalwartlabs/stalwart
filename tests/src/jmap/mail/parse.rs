@@ -145,6 +145,36 @@ pub async fn test(test: &TestServer) {
         }
     }
 
+    // fetchAllBodyValues includes text/* attachments, but not non-text parts
+    // reclassified as text after a transfer-decoding failure.
+    let test_file = test_dir
+        .parent()
+        .unwrap()
+        .join("email_get")
+        .join("multipart_mixed.eml");
+    let blob_id = client
+        .upload(None, fs::read(test_file).unwrap(), None)
+        .await
+        .unwrap()
+        .take_blob_id();
+    let mut request = client.build();
+    request
+        .parse_email()
+        .blob_ids([blob_id.as_str()])
+        .properties([email::Property::BodyValues])
+        .fetch_all_body_values(true)
+        .max_body_value_bytes(100);
+    let email = request
+        .send_parse_email()
+        .await
+        .unwrap()
+        .parsed(&blob_id)
+        .unwrap();
+
+    assert!(email.body_value("6").is_some());
+    assert!(email.body_value("4").is_none());
+    assert!(email.body_value("5").is_none());
+
     // Test header parsing on a temporary blob
     let mut test_file = test_dir;
     test_file.push("headers.eml");

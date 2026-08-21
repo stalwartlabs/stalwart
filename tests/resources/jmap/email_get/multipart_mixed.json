@@ -153,6 +153,11 @@
       "value": "This could have been part of the previous part, but\nillustrates explicit versus implicit typing o...",
       "isEncodingProblem": false,
       "isTruncated": true
+    },
+    "6": {
+      "value": "This is <bold><italic>enriched.</italic></bold>\n<smaller>as defined in RFC 1896</smaller>\n\nIsn't ...",
+      "isEncodingProblem": false,
+      "isTruncated": true
     }
   },
   "textBody": [

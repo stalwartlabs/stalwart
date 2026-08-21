@@ -400,14 +400,21 @@ impl EmailGet for Server {
                     EmailProperty::BodyValues => {
                         let mut body_values = Map::with_capacity(contents.parts.len());
                         for (part_id, part) in contents.parts.iter().enumerate() {
-                            if ((contents.is_html_part(part_id as u16)
-                                && (fetch_all_body_values || fetch_html_body_values))
-                                || (contents.is_text_part(part_id as u16)
-                                    && (fetch_all_body_values || fetch_text_body_values)))
-                                && matches!(
-                                    part.body,
-                                    ArchivedMetadataPartType::Text | ArchivedMetadataPartType::Html
-                                )
+                            // RFC 8621 section 4.2: fetchAllBodyValues includes any text/* part in bodyStructure,
+                            // not only parts listed in textBody or htmlBody. Per RFC 2045, a missing
+                            // Content-Type header defaults to text/plain.
+                            let is_text_type = part
+                                .content_type()
+                                .is_none_or(|ct| ct.ctype().eq_ignore_ascii_case("text"));
+                            if matches!(
+                                part.body,
+                                ArchivedMetadataPartType::Text | ArchivedMetadataPartType::Html
+                            ) && is_text_type
+                                && (fetch_all_body_values
+                                    || (contents.is_html_part(part_id as u16)
+                                        && fetch_html_body_values)
+                                    || (contents.is_text_part(part_id as u16)
+                                        && fetch_text_body_values))
                             {
                                 let contents = part.decode_contents(&raw_message);
 
