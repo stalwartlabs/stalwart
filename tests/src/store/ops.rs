@@ -10,7 +10,10 @@ use std::collections::HashSet;
 use store::{
     U64_LEN, ValueKey,
     rand::{self, RngExt},
-    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, MergeResult, ValueClass},
+    write::{
+        Archive, ArchiveBytes, Archiver, BatchBuilder, Compression, Dictionary, MergeResult,
+        ValueClass,
+    },
 };
 use types::collection::Collection;
 use types::collection::SyncCollection;
@@ -867,7 +870,10 @@ pub async fn test(test: &TestServer) {
                     vec![0u8; 100000]
                 };
 
-                let (offset, archived_value) = Archiver::new(value).serialize_versioned().unwrap();
+                let (offset, archived_value) =
+                    Archiver::with_compression(value, Compression::Zstd(Some(Dictionary::Common)))
+                        .serialize_versioned()
+                        .unwrap();
 
                 builder
                     .with_account_id(0)

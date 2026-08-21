@@ -24,7 +24,8 @@ use store::{
     ahash::AHashMap,
     dispatch::lookup::KeyValue,
     write::{
-        Archive, ArchiveBytes, ArchiveVersion, Archiver, BatchBuilder, BlobLink, BlobOp, ValueClass,
+        Archive, ArchiveBytes, ArchiveVersion, Archiver, BatchBuilder, BlobLink, BlobOp,
+        Compression, Dictionary, ValueClass,
     },
 };
 use trc::{AddContext, SieveEvent, SmtpEvent};
@@ -717,7 +718,11 @@ impl SieveScriptIngest for Server {
             ) {
                 Ok(sieve) => {
                     // Store updated compiled sieve script
-                    let sieve = Archiver::new(sieve).untrusted();
+                    let sieve = Archiver::with_compression(
+                        sieve,
+                        Compression::Zstd(Some(Dictionary::Sieve)),
+                    )
+                    .untrusted();
                     let compiled_bytes = sieve.serialize().caused_by(trc::location!())?;
                     let mut updated_sieve_bytes =
                         Vec::with_capacity(script_offset + compiled_bytes.len());

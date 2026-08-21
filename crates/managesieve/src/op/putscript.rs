@@ -13,7 +13,7 @@ use sieve::compiler::ErrorType;
 use std::time::Instant;
 use store::{
     Serialize, ValueKey,
-    write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, Compression, Dictionary},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::SieveField};
@@ -81,10 +81,13 @@ impl<T: SessionStream> Session<T> {
         {
             Ok(compiled_script) => {
                 script_bytes.extend(
-                    Archiver::new(compiled_script)
-                        .untrusted()
-                        .serialize()
-                        .caused_by(trc::location!())?,
+                    Archiver::with_compression(
+                        compiled_script,
+                        Compression::Zstd(Some(Dictionary::Sieve)),
+                    )
+                    .untrusted()
+                    .serialize()
+                    .caused_by(trc::location!())?,
                 );
             }
             Err(err) => {

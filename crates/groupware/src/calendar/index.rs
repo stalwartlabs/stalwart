@@ -28,7 +28,7 @@ use nlp::language::{
 use store::{
     U32_LEN,
     search::{CalendarSearchField, IndexDocument, SearchField},
-    write::SearchIndex,
+    write::{ArchiveCompression, Compression, Dictionary, SearchIndex},
     xxhash_rust::xxh3,
 };
 use types::{
@@ -474,4 +474,16 @@ impl ArchivedCalendarEvent {
 
         document
     }
+}
+
+impl ArchiveCompression for Calendar {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
+}
+
+impl ArchiveCompression for CalendarEvent {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Calendar));
+}
+
+impl ArchiveCompression for CalendarEventNotification {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Calendar));
 }

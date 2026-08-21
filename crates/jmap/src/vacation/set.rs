@@ -23,7 +23,7 @@ use std::borrow::Cow;
 use std::future::Future;
 use store::{
     Serialize, SerializeInfallible, ValueKey,
-    write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, Compression, Dictionary},
 };
 use trc::AddContext;
 use types::{
@@ -426,10 +426,13 @@ impl VacationResponseSet for Server {
 
                 // Serialize script
                 script.extend(
-                    Archiver::new(compiled_script)
-                        .untrusted()
-                        .serialize()
-                        .caused_by(trc::location!())?,
+                    Archiver::with_compression(
+                        compiled_script,
+                        Compression::Zstd(Some(Dictionary::Sieve)),
+                    )
+                    .untrusted()
+                    .serialize()
+                    .caused_by(trc::location!())?,
                 );
 
                 Ok(script)

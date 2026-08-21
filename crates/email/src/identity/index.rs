@@ -6,6 +6,7 @@
 
 use super::{ArchivedIdentity, Identity};
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
+use store::write::{ArchiveCompression, Compression, Dictionary};
 use types::collection::SyncCollection;
 
 impl IndexableObject for Identity {
@@ -32,4 +33,8 @@ impl IndexableAndSerializableObject for Identity {
     fn is_versioned() -> bool {
         false
     }
+}
+
+impl ArchiveCompression for Identity {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
 }

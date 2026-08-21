@@ -20,7 +20,7 @@ use hyper::StatusCode;
 use store::ValueKey;
 use store::dispatch::lookup::KeyValue;
 use store::write::serialize::rkyv_deserialize;
-use store::write::{Archive, ArchiveBytes, Archiver, now};
+use store::write::{Archive, ArchiveBytes, ArchiveCompression, Archiver, Compression, now};
 use store::{Serialize, U32_LEN};
 use trc::AddContext;
 use types::collection::Collection;
@@ -41,6 +41,10 @@ pub struct ResourceState<'x> {
 #[derive(Debug, Default, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub(crate) struct LockData {
     locks: VecMap<String, LockItems>,
+}
+
+impl ArchiveCompression for LockData {
+    const COMPRESSION: Compression = Compression::None;
 }
 
 #[derive(Debug, Default, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

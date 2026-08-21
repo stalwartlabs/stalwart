@@ -240,3 +240,7 @@ impl FormData {
         self.fields.iter()
     }
 }
+
+impl store::write::ArchiveCompression for OAuthCode {
+    const COMPRESSION: store::write::Compression = store::write::Compression::None;
+}

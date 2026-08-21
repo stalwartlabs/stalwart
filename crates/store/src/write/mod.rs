@@ -30,10 +30,13 @@ pub mod assert;
 pub mod batch;
 pub mod bitpack;
 pub mod blob;
+pub mod compress;
 pub mod key;
 pub mod lazybitmap;
 pub mod log;
 pub mod serialize;
+
+pub use compress::{ArchiveCompression, Compression, Dictionary};
 
 #[derive(Debug, Clone)]
 pub struct Archive<T> {
@@ -67,6 +70,7 @@ where
 {
     pub inner: T,
     pub flags: u8,
+    pub compression: Compression,
 }
 
 #[derive(Debug, Default)]

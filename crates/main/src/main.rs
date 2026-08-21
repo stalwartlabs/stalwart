@@ -40,6 +40,9 @@ async fn main() -> std::io::Result<()> {
     // Build the shared outbound TLS configurations
     utils::http::init_shared_tls_configs();
 
+    // Prepare the archive compression dictionaries
+    store::write::compress::init();
+
     // Load config and apply macros
     let mut init = Box::pin(BootManager::init()).await;
 

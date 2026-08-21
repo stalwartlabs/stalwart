@@ -62,6 +62,10 @@ pub struct SerializedCert {
     pub private_key: Vec<u8>,
 }
 
+impl store::write::ArchiveCompression for SerializedCert {
+    const COMPRESSION: store::write::Compression = store::write::Compression::None;
+}
+
 pub struct PemCert {
     pub certificate: String,
     pub private_key: String,

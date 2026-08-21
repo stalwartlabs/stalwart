@@ -6,6 +6,7 @@
 
 use super::{ArchivedMailbox, Mailbox};
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
+use store::write::{ArchiveCompression, Compression, Dictionary};
 use types::{acl::AclGrant, collection::SyncCollection};
 
 impl IndexableObject for Mailbox {
@@ -45,4 +46,8 @@ impl IndexableAndSerializableObject for Mailbox {
     fn is_versioned() -> bool {
         false
     }
+}
+
+impl ArchiveCompression for Mailbox {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
 }

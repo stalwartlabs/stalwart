@@ -21,7 +21,10 @@ use mail_parser::{
 };
 use store::{
     Serialize,
-    write::{Archiver, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, ValueClass},
+    write::{
+        ArchiveCompression, Archiver, BatchBuilder, BlobLink, BlobOp, Compression, Dictionary,
+        IndexPropertyClass, ValueClass,
+    },
     xxhash_rust::xxh3::xxh3_128,
 };
 use trc::AddContext;
@@ -278,4 +281,8 @@ impl IndexMessage for BatchBuilder {
 
         Ok(self)
     }
+}
+
+impl ArchiveCompression for MessageMetadata {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Email));
 }

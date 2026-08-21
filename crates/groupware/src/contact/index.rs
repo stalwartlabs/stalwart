@@ -17,7 +17,7 @@ use nlp::language::{
 };
 use store::{
     search::{ContactSearchField, IndexDocument, SearchField},
-    write::SearchIndex,
+    write::{ArchiveCompression, Compression, Dictionary, SearchIndex},
     xxhash_rust::xxh3,
 };
 use types::{acl::AclGrant, collection::SyncCollection, field::ContactField};
@@ -316,4 +316,12 @@ impl ArchivedContactCard {
 
         document
     }
+}
+
+impl ArchiveCompression for AddressBook {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
+}
+
+impl ArchiveCompression for ContactCard {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Contact));
 }

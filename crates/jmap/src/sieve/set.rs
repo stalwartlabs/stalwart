@@ -30,7 +30,7 @@ use std::future::Future;
 use store::{
     Serialize, SerializeInfallible, ValueKey,
     rand::{RngExt, rng},
-    write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, Compression, Dictionary},
 };
 use trc::AddContext;
 use types::{
@@ -541,7 +541,7 @@ impl SieveScriptSet for Server {
                     match self.core.sieve.untrusted_compiler.compile(&bytes) {
                         Ok(script) => {
                             changes.size = bytes.len() as u32;
-                            bytes.extend(Archiver::new(script).untrusted().serialize().caused_by(trc::location!())?);
+                            bytes.extend(Archiver::with_compression(script, Compression::Zstd(Some(Dictionary::Sieve))).untrusted().serialize().caused_by(trc::location!())?);
                             bytes.into()
                         }
                         Err(err) => {

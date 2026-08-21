@@ -6,6 +6,7 @@
 
 use super::{ArchivedSieveScript, SieveScript};
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
+use store::write::{ArchiveCompression, Compression, Dictionary};
 use types::{collection::SyncCollection, field::SieveField};
 
 impl IndexableObject for SieveScript {
@@ -54,4 +55,8 @@ impl IndexableObject for &ArchivedSieveScript {
         ]
         .into_iter()
     }
+}
+
+impl ArchiveCompression for SieveScript {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
 }

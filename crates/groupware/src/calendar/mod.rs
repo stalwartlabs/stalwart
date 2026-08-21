@@ -445,3 +445,8 @@ impl From<SupportedComponent> for ICalendarComponentType {
         }
     }
 }
+
+impl store::write::ArchiveCompression for ParticipantIdentities {
+    const COMPRESSION: store::write::Compression =
+        store::write::Compression::Zstd(Some(store::write::Dictionary::Common));
+}

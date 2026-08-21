@@ -37,7 +37,7 @@ use std::{
 };
 use store::ahash::AHashSet;
 use store::rand::seq::SliceRandom;
-use store::write::{BlobLink, RegistryClass, now};
+use store::write::{ArchiveCompression, BlobLink, Compression, RegistryClass, now};
 use store::{
     Deserialize, IterateParams, Serialize, ValueKey,
     write::{
@@ -529,12 +529,24 @@ impl SpamClassifier for Server {
                 last_trained_at: now(),
             },
         });
+        let (trainer_bytes, classifier_bytes, classifier) =
+            tokio::task::spawn_blocking(move || {
+                let trainer_bytes = Archiver::new(trainer).serialize();
+                let classifier_bytes = classifier.serialize();
+                (trainer_bytes, classifier_bytes, classifier)
+            })
+            .await
+            .map_err(|err| {
+                trc::EventType::Server(trc::ServerEvent::ThreadError)
+                    .reason(err)
+                    .details("Spam model serialization failed")
+                    .caused_by(trc::location!())
+            })?;
+
         self.blob_store()
             .put_blob(
                 SPAM_TRAINER_KEY,
-                &Archiver::new(trainer)
-                    .serialize()
-                    .caused_by(trc::location!())?,
+                &trainer_bytes.caused_by(trc::location!())?,
                 self.core.email.compression,
             )
             .await
@@ -542,7 +554,7 @@ impl SpamClassifier for Server {
         self.blob_store()
             .put_blob(
                 SPAM_CLASSIFIER_KEY,
-                &classifier.serialize().caused_by(trc::location!())?,
+                &classifier_bytes.caused_by(trc::location!())?,
                 self.core.email.compression,
             )
             .await
@@ -1492,4 +1504,8 @@ impl<'x> Default for Tokens<'x> {
     fn default() -> Self {
         Tokens(HashMap::with_capacity(128))
     }
+}
+
+impl ArchiveCompression for SpamTrainer {
+    const COMPRESSION: Compression = Compression::Zstd(None);
 }

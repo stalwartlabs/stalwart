@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Archive, ArchiveBytes, ArchiveVersion, Archiver};
+use super::{
+    Archive, ArchiveBytes, ArchiveVersion, Archiver,
+    compress::{ArchiveCompression, Compression, compress, compress_watermark, decompress},
+};
 use crate::{Deserialize, Serialize, SerializeInfallible, U32_LEN, U64_LEN, Value};
 use compact_str::format_compact;
 use roaring::{RoaringBitmap, RoaringTreemap};
@@ -13,57 +16,72 @@ const MAGIC_MARKER: u8 = 1 << 7;
 const VERSIONED: u8 = 1 << 6;
 const HASHED: u8 = 1 << 5;
 const LZ4_COMPRESSED: u8 = 1 << 4;
+const ZSTD_COMPRESSED: u8 = 1 << 3;
 
-const COMPRESS_WATERMARK: usize = 8192;
 const SERIALIZE_CAPACITY: usize = 1024;
 
-fn validate_marker_and_contents(bytes: &[u8]) -> Option<(bool, &[u8], ArchiveVersion)> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Encoding {
+    Plain,
+    Zstd,
+    Lz4,
+}
+
+fn split_hash(encoding: Encoding, contents: &[u8]) -> Option<(&[u8], u32)> {
+    match encoding {
+        Encoding::Zstd => contents
+            .get(contents.len().checked_sub(U32_LEN)?..)?
+            .try_into()
+            .ok()
+            .map(|hash| (contents, u32::from_be_bytes(hash))),
+        Encoding::Plain | Encoding::Lz4 => contents
+            .split_at_checked(contents.len().checked_sub(U32_LEN)?)
+            .and_then(|(contents, archive_hash)| {
+                let hash = xxhash_rust::xxh3::xxh3_64(contents) as u32;
+                (hash.to_be_bytes().as_slice() == archive_hash).then_some((contents, hash))
+            }),
+    }
+}
+
+fn validate_marker_and_contents(bytes: &[u8]) -> Option<(Encoding, &[u8], ArchiveVersion)> {
     let (marker, contents) = bytes
         .split_last()
         .filter(|(marker, _)| (**marker & MAGIC_MARKER) != 0)?;
-    let is_uncompressed = (marker & LZ4_COMPRESSED) == 0;
+    let encoding = if marker & ZSTD_COMPRESSED != 0 {
+        Encoding::Zstd
+    } else if marker & LZ4_COMPRESSED != 0 {
+        Encoding::Lz4
+    } else {
+        Encoding::Plain
+    };
+
     if marker & VERSIONED != 0 {
         let (contents, change_id) = contents
-            .split_at_checked(contents.len() - U64_LEN)
+            .split_at_checked(contents.len().checked_sub(U64_LEN)?)
             .and_then(|(contents, change_id)| {
                 change_id
                     .try_into()
                     .ok()
                     .map(|change_id| (contents, u64::from_be_bytes(change_id)))
             })?;
-        contents
-            .split_at_checked(contents.len() - U32_LEN)
-            .and_then(|(contents, archive_hash)| {
-                let hash = xxhash_rust::xxh3::xxh3_64(contents) as u32;
-                if hash.to_be_bytes().as_slice() == archive_hash {
-                    Some((
-                        is_uncompressed,
-                        contents,
-                        ArchiveVersion::Versioned { change_id, hash },
-                    ))
-                } else {
-                    None
-                }
-            })
+        split_hash(encoding, contents).map(|(contents, hash)| {
+            (
+                encoding,
+                contents,
+                ArchiveVersion::Versioned { change_id, hash },
+            )
+        })
     } else if marker & HASHED != 0 {
-        contents
-            .split_at_checked(contents.len() - U32_LEN)
-            .and_then(|(contents, archive_hash)| {
-                let hash = xxhash_rust::xxh3::xxh3_64(contents) as u32;
-                if hash.to_be_bytes().as_slice() == archive_hash {
-                    Some((is_uncompressed, contents, ArchiveVersion::Hashed { hash }))
-                } else {
-                    None
-                }
-            })
+        split_hash(encoding, contents)
+            .map(|(contents, hash)| (encoding, contents, ArchiveVersion::Hashed { hash }))
     } else {
-        Some((is_uncompressed, contents, ArchiveVersion::Unversioned))
+        Some((encoding, contents, ArchiveVersion::Unversioned))
     }
 }
 
 impl Deserialize for Archive<ArchiveBytes> {
     fn deserialize(bytes: &[u8]) -> trc::Result<Self> {
-        let (is_uncompressed, contents, version) =
+        let (encoding, contents, version) =
             validate_marker_and_contents(bytes).ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .into_err()
@@ -72,19 +90,19 @@ impl Deserialize for Archive<ArchiveBytes> {
                     .caused_by(trc::location!())
             })?;
 
-        if is_uncompressed {
-            Ok(Archive {
+        match encoding {
+            Encoding::Plain => Ok(Archive {
                 version,
                 inner: contents.to_vec(),
-            })
-        } else {
-            lz4_deflate(contents).map(|inner| Archive { version, inner })
+            }),
+            Encoding::Zstd => zstd_inflate(contents).map(|inner| Archive { version, inner }),
+            Encoding::Lz4 => lz4_deflate(contents).map(|inner| Archive { version, inner }),
         }
     }
 
     fn deserialize_owned(mut bytes: Vec<u8>) -> trc::Result<Self> {
-        let (is_uncompressed, contents, version) = validate_marker_and_contents(&bytes)
-            .ok_or_else(|| {
+        let (encoding, contents, version) =
+            validate_marker_and_contents(&bytes).ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .into_err()
                     .details("Archive integrity compromised")
@@ -92,16 +110,29 @@ impl Deserialize for Archive<ArchiveBytes> {
                     .caused_by(trc::location!())
             })?;
 
-        if is_uncompressed {
-            bytes.truncate(contents.len());
-            Ok(Archive {
-                version,
-                inner: bytes,
-            })
-        } else {
-            lz4_deflate(contents).map(|inner| Archive { version, inner })
+        match encoding {
+            Encoding::Plain => {
+                let contents_len = contents.len();
+                bytes.truncate(contents_len);
+                Ok(Archive {
+                    version,
+                    inner: bytes,
+                })
+            }
+            Encoding::Zstd => zstd_inflate(contents).map(|inner| Archive { version, inner }),
+            Encoding::Lz4 => lz4_deflate(contents).map(|inner| Archive { version, inner }),
         }
     }
+}
+
+#[inline]
+fn zstd_inflate(archive: &[u8]) -> trc::Result<ArchiveBytes> {
+    decompress(archive).map_err(|err| {
+        trc::StoreEvent::DecompressError
+            .ctx(trc::Key::Value, archive)
+            .caused_by(trc::location!())
+            .reason(err)
+    })
 }
 
 #[inline]
@@ -128,7 +159,7 @@ where
     fn serialize(&self) -> trc::Result<Vec<u8>> {
         let version_offset = ((self.flags & VERSIONED != 0) as usize) * U64_LEN;
         let trailer_len = U32_LEN + version_offset + 1;
-        let mut bytes = rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(
+        let bytes = rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(
             &self.inner,
             Vec::with_capacity(
                 (std::mem::size_of::<T::Archived>() + trailer_len).max(SERIALIZE_CAPACITY),
@@ -139,47 +170,27 @@ where
                 .caused_by(trc::location!())
                 .reason(err)
         })?;
-        let input_len = bytes.len();
 
-        if input_len > COMPRESS_WATERMARK {
-            let mut compressed = vec![
-                self.flags | LZ4_COMPRESSED;
-                lz4_flex::block::get_maximum_output_size(input_len)
-                    + (U32_LEN * 2)
-                    + version_offset
-                    + 1
-            ];
+        if let Compression::Zstd(dictionary) = self.compression
+            && bytes.len() >= compress_watermark(dictionary)
+        {
+            let mut compressed =
+                compress(dictionary, &bytes, version_offset + 1).map_err(|err| {
+                    trc::StoreEvent::UnexpectedError
+                        .caused_by(trc::location!())
+                        .reason(err)
+                })?;
 
-            // Compress the data
-            let compressed_len =
-                lz4_flex::compress_into(&bytes, &mut compressed[U32_LEN..]).unwrap();
-
-            if compressed_len < input_len {
-                // Prepend the length of the uncompressed data
-                compressed[..U32_LEN].copy_from_slice(&(input_len as u32).to_le_bytes());
-
-                if self.flags & HASHED != 0 {
-                    // Hash the compressed data including the length
-                    let hash =
-                        xxhash_rust::xxh3::xxh3_64(&compressed[..compressed_len + U32_LEN]) as u32;
-
-                    // Add the hash
-                    let hashed_len = compressed_len + (U32_LEN * 2);
-                    compressed[compressed_len + U32_LEN..hashed_len]
-                        .copy_from_slice(&hash.to_be_bytes());
-                    compressed[hashed_len..hashed_len + version_offset].fill(0);
-
-                    // Truncate to the actual size
-                    compressed.truncate(hashed_len + version_offset + 1);
-                } else {
-                    // Truncate to the actual size
-                    compressed.truncate(compressed_len + U32_LEN + 1);
+            if compressed.len() < bytes.len() {
+                if version_offset != 0 {
+                    compressed.extend_from_slice(0u64.to_be_bytes().as_slice());
                 }
-
+                compressed.push(self.flags | ZSTD_COMPRESSED);
                 return Ok(compressed);
             }
         }
 
+        let mut bytes = bytes;
         bytes.reserve_exact(trailer_len);
         if self.flags & HASHED != 0 {
             let hash = (xxhash_rust::xxh3::xxh3_64(&bytes) as u32).to_be_bytes();
@@ -327,25 +338,6 @@ impl Archive<ArchiveBytes> {
         })
     }
 
-    pub fn into_inner(self) -> Vec<u8> {
-        let mut bytes = self.inner;
-        match self.version {
-            ArchiveVersion::Versioned { change_id, hash } => {
-                bytes.extend_from_slice(&hash.to_be_bytes());
-                bytes.extend_from_slice(&change_id.to_be_bytes());
-                bytes.push(MAGIC_MARKER | VERSIONED | HASHED);
-            }
-            ArchiveVersion::Hashed { hash } => {
-                bytes.extend_from_slice(&hash.to_be_bytes());
-                bytes.push(MAGIC_MARKER | HASHED);
-            }
-            ArchiveVersion::Unversioned => {
-                bytes.push(MAGIC_MARKER);
-            }
-        }
-        bytes
-    }
-
     pub fn extract_hash(bytes: &[u8]) -> Option<u32> {
         let marker = *bytes.last()?;
         if marker & VERSIONED != 0 {
@@ -364,7 +356,8 @@ impl Archive<ArchiveBytes> {
 
 impl<T> Archiver<T>
 where
-    T: rkyv::Archive
+    T: ArchiveCompression
+        + rkyv::Archive
         + for<'a> rkyv::Serialize<
             rkyv::api::high::HighSerializer<
                 Vec<u8>,
@@ -374,9 +367,26 @@ where
         >,
 {
     pub fn new(inner: T) -> Self {
+        Self::with_compression(inner, T::COMPRESSION)
+    }
+}
+
+impl<T> Archiver<T>
+where
+    T: rkyv::Archive
+        + for<'a> rkyv::Serialize<
+            rkyv::api::high::HighSerializer<
+                Vec<u8>,
+                rkyv::ser::allocator::ArenaHandle<'a>,
+                rkyv::rancor::Error,
+            >,
+        >,
+{
+    pub fn with_compression(inner: T, compression: Compression) -> Self {
         Self {
             inner,
             flags: MAGIC_MARKER | HASHED,
+            compression,
         }
     }
 
@@ -388,6 +398,7 @@ where
         Self {
             inner: self.inner,
             flags: self.flags | VERSIONED,
+            compression: self.compression,
         }
     }
 
@@ -395,6 +406,7 @@ where
         Self {
             inner: self.inner,
             flags: MAGIC_MARKER,
+            compression: self.compression,
         }
     }
 
@@ -609,5 +621,258 @@ impl Deserialize for RoaringTreemap {
                 .caused_by(trc::location!())
                 .reason(err)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::write::{
+        Compression, Dictionary,
+        assert::{AssertValue, ToAssertValue},
+        compress::{COMPRESS_WATERMARK, COMPRESS_WATERMARK_DICTIONARY},
+    };
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+    struct Compressible {
+        headers: String,
+        parts: Vec<u32>,
+    }
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+    struct Tiny {
+        value: u32,
+    }
+
+    impl ArchiveCompression for Compressible {
+        const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Email));
+    }
+
+    impl ArchiveCompression for Tiny {
+        const COMPRESSION: Compression = Compression::None;
+    }
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+    struct Undictionaried {
+        headers: String,
+    }
+
+    impl ArchiveCompression for Undictionaried {
+        const COMPRESSION: Compression = Compression::Zstd(None);
+    }
+
+    fn sample(repeats: usize) -> Compressible {
+        Compressible {
+            headers: "Content-Type: text/plain; charset=utf-8\r\nSubject: hello\r\n"
+                .repeat(repeats),
+            parts: (0..repeats as u32).collect(),
+        }
+    }
+
+    #[test]
+    fn compressed_round_trip() {
+        let value = sample(64);
+        let bytes = Archiver::new(value).serialize().expect("serialize");
+
+        assert_ne!(bytes[bytes.len() - 1] & ZSTD_COMPRESSED, 0);
+        assert_ne!(bytes[bytes.len() - 1] & HASHED, 0);
+
+        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes).expect("read");
+        assert_eq!(
+            archive.deserialize::<Compressible>().expect("unarchive"),
+            sample(64)
+        );
+
+        let hash = Archive::<ArchiveBytes>::extract_hash(&bytes).expect("hash");
+        assert_eq!(archive.version, ArchiveVersion::Hashed { hash });
+        assert!(archive.to_assert_value().matches(&bytes));
+    }
+
+    #[test]
+    fn compression_shrinks_the_value() {
+        let value = sample(64);
+        let compressed = Archiver::new(value).serialize().expect("serialize");
+        let plain = Archiver::with_compression(sample(64), Compression::None)
+            .serialize()
+            .expect("serialize");
+
+        assert!(
+            compressed.len() * 3 < plain.len(),
+            "{} vs {}",
+            compressed.len(),
+            plain.len()
+        );
+    }
+
+    #[test]
+    fn values_below_the_watermark_are_stored_verbatim() {
+        let bytes = Archiver::new(Undictionaried {
+            headers: "x".repeat(16),
+        })
+        .serialize()
+        .expect("serialize");
+
+        assert!(bytes.len() < COMPRESS_WATERMARK);
+        assert_eq!(bytes[bytes.len() - 1] & ZSTD_COMPRESSED, 0);
+
+        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes).expect("read");
+        assert_eq!(
+            archive
+                .deserialize::<Undictionaried>()
+                .expect("unarchive")
+                .headers,
+            "x".repeat(16)
+        );
+        assert!(archive.to_assert_value().matches(&bytes));
+    }
+
+    #[test]
+    fn the_watermark_depends_on_the_dictionary() {
+        let headers = "Content-Type: text/plain; charset=utf-8\r\nSubject: hello\r\n".repeat(2);
+        assert!((COMPRESS_WATERMARK_DICTIONARY..COMPRESS_WATERMARK).contains(&headers.len()));
+
+        let without = Archiver::new(Undictionaried {
+            headers: headers.clone(),
+        })
+        .serialize()
+        .expect("serialize");
+        let with = Archiver::new(Compressible {
+            headers,
+            parts: Vec::new(),
+        })
+        .serialize()
+        .expect("serialize");
+
+        assert_eq!(without[without.len() - 1] & ZSTD_COMPRESSED, 0);
+        assert_ne!(with[with.len() - 1] & ZSTD_COMPRESSED, 0);
+        assert!(with.len() < without.len());
+
+        for bytes in [without, with] {
+            let archive =
+                <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes).expect("read");
+            assert!(archive.to_assert_value().matches(&bytes));
+        }
+    }
+
+    #[test]
+    fn uncompressed_types_are_never_compressed() {
+        let bytes = Archiver::new(Tiny { value: 42 })
+            .serialize()
+            .expect("serialize");
+
+        assert_eq!(bytes[bytes.len() - 1] & ZSTD_COMPRESSED, 0);
+        assert_eq!(
+            <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes)
+                .expect("read")
+                .deserialize::<Tiny>()
+                .expect("unarchive"),
+            Tiny { value: 42 }
+        );
+    }
+
+    #[test]
+    fn versioned_round_trip() {
+        let (offset, mut bytes) = Archiver::new(sample(64))
+            .serialize_versioned()
+            .expect("serialize");
+        let offset = offset as usize;
+        bytes[offset..offset + U64_LEN].copy_from_slice(&1234u64.to_be_bytes());
+
+        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes).expect("read");
+        let hash = Archive::<ArchiveBytes>::extract_hash(&bytes).expect("hash");
+        assert_eq!(
+            archive.version,
+            ArchiveVersion::Versioned {
+                change_id: 1234,
+                hash
+            }
+        );
+        assert_eq!(
+            archive.deserialize::<Compressible>().expect("unarchive"),
+            sample(64)
+        );
+        assert!(archive.to_assert_value().matches(&bytes));
+    }
+
+    #[test]
+    fn owned_and_borrowed_reads_agree() {
+        for value in [sample(1), sample(64)] {
+            let expected = value.headers.clone();
+            let bytes = Archiver::new(value).serialize().expect("serialize");
+
+            let borrowed =
+                <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes).expect("read");
+            let owned = <Archive<ArchiveBytes> as Deserialize>::deserialize_owned(bytes.clone())
+                .expect("read owned");
+
+            assert_eq!(borrowed.inner, owned.inner);
+            assert_eq!(borrowed.version, owned.version);
+            assert_eq!(
+                borrowed.deserialize::<Compressible>().expect("a").headers,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn corruption_is_rejected() {
+        let bytes = Archiver::new(sample(64)).serialize().expect("serialize");
+        let body_len = bytes.len() - 1;
+
+        let mut detected = 0;
+        let mut total = 0;
+        for byte in 0..body_len {
+            for bit in 0..8 {
+                let mut corrupted = bytes.clone();
+                corrupted[byte] ^= 1 << bit;
+                total += 1;
+                match <Archive<ArchiveBytes> as Deserialize>::deserialize(&corrupted) {
+                    Err(_) => detected += 1,
+                    Ok(archive) => {
+                        if archive.inner
+                            != <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes)
+                                .unwrap()
+                                .inner
+                        {
+                            panic!("byte {byte} bit {bit} decoded to different contents");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            detected * 100 / total >= 99,
+            "only {detected} of {total} corruptions rejected"
+        );
+    }
+
+    #[test]
+    fn legacy_lz4_archives_are_still_readable() {
+        let value = sample(64);
+        let body = rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(&value, Vec::new())
+            .expect("rkyv");
+
+        let mut stored = lz4_flex::block::compress_prepend_size(&body);
+        let hash = (xxhash_rust::xxh3::xxh3_64(&stored) as u32).to_be_bytes();
+        stored.extend_from_slice(&hash);
+        stored.push(MAGIC_MARKER | HASHED | LZ4_COMPRESSED);
+
+        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(&stored).expect("read");
+        assert_eq!(
+            archive.deserialize::<Compressible>().expect("unarchive"),
+            value
+        );
+        assert!(archive.to_assert_value().matches(&stored));
+    }
+
+    #[test]
+    fn assert_value_detects_a_changed_archive() {
+        let old = Archiver::new(sample(64)).serialize().expect("serialize");
+        let new = Archiver::new(sample(65)).serialize().expect("serialize");
+
+        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(&old).expect("read");
+        assert!(archive.to_assert_value().matches(&old));
+        assert!(!archive.to_assert_value().matches(&new));
+        assert!(!AssertValue::None.matches(&old));
     }
 }

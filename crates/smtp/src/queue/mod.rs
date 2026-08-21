@@ -16,7 +16,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     time::{Duration, Instant, SystemTime},
 };
-use store::write::now;
+use store::write::{ArchiveCompression, Compression, Dictionary, now};
 use types::blob_hash::BlobHash;
 use utils::DomainPart;
 
@@ -637,18 +637,6 @@ impl Display for ArchivedErrorDetails {
     }
 }
 
-/*
-
-pub trait DisplayArchivedResponse {
-    fn to_string(&self) -> String;
+impl ArchiveCompression for Message {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
 }
-
-impl DisplayArchivedResponse for ArchivedResponse<Box<str>> {
-    fn to_string(&self) -> String {
-        format!(
-            "Code: {}, Enhanced code: {}.{}.{}, Message: {}",
-            self.code, self.esc[0], self.esc[1], self.esc[2], self.message,
-        )
-    }
-}
-*/

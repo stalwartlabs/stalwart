@@ -6,6 +6,7 @@
 
 use super::{ArchivedFileNode, FileNode};
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
+use store::write::{ArchiveCompression, Compression, Dictionary};
 use types::{acl::AclGrant, collection::SyncCollection};
 
 impl IndexableObject for FileNode {
@@ -94,4 +95,8 @@ impl ArchivedFileNode {
                 .map_or(0, |f| f.size.to_native() as usize)
             + std::mem::size_of::<FileNode>()
     }
+}
+
+impl ArchiveCompression for FileNode {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
 }

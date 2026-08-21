@@ -8,7 +8,10 @@ use super::{ArchivedEmailSubmission, EmailSubmission};
 use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
 use store::{
     U32_LEN, U64_LEN,
-    write::{IndexPropertyClass, ValueClass, key::KeySerializer},
+    write::{
+        ArchiveCompression, Compression, Dictionary, IndexPropertyClass, ValueClass,
+        key::KeySerializer,
+    },
 };
 use types::{collection::SyncCollection, field::EmailSubmissionField};
 
@@ -68,4 +71,8 @@ impl IndexableAndSerializableObject for EmailSubmission {
     fn is_versioned() -> bool {
         false
     }
+}
+
+impl ArchiveCompression for EmailSubmission {
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
 }

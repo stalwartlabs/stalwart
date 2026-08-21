@@ -14,8 +14,8 @@ use std::{borrow::Cow, fmt::Debug};
 use store::{
     Serialize, SerializeInfallible, U64_LEN,
     write::{
-        Archive, ArchiveBytes, Archiver, BatchBuilder, BlobLink, BlobOp, IntoOperations,
-        SearchIndex, ValueClass,
+        Archive, ArchiveBytes, ArchiveCompression, Archiver, BatchBuilder, BlobLink, BlobOp,
+        IntoOperations, SearchIndex, ValueClass,
     },
 };
 use types::{
@@ -232,6 +232,7 @@ pub trait IndexableObject: Sync + Send {
 
 pub trait IndexableAndSerializableObject:
     IndexableObject
+    + ArchiveCompression
     + rkyv::Archive
     + for<'a> rkyv::Serialize<
         rkyv::api::high::HighSerializer<

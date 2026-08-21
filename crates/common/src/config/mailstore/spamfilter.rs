@@ -42,6 +42,10 @@ pub enum SpamClassifier {
     Disabled,
 }
 
+impl store::write::ArchiveCompression for SpamClassifier {
+    const COMPRESSION: store::write::Compression = store::write::Compression::Zstd(None);
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SpamFilterConfig {
     pub enabled: bool,
