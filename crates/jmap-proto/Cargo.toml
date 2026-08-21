@@ -20,3 +20,6 @@ compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
+
+[lints]
+workspace = true

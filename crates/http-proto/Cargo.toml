@@ -22,3 +22,6 @@ compact_str = "0.10.0"
 test_mode = []
 dev_mode = []
 enterprise = []
+
+[lints]
+workspace = true

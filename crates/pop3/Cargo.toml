@@ -20,3 +20,6 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc
 
 [features]
 test_mode = []
+
+[lints]
+workspace = true

@@ -48,3 +48,6 @@ enterprise = []
 mysql = []
 postgres = []
 sqlite = []
+
+[lints]
+workspace = true

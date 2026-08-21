@@ -78,3 +78,6 @@ dev_mode = [ "common/dev_mode",
              "http/dev_mode",
              "http_proto/dev_mode",
              "jmap/dev_mode" ]
+
+[lints]
+workspace = true

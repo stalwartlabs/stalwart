@@ -20,3 +20,6 @@ lz4_flex = { version = "0.14", features = ["alloc"], default-features = false }
 [features]
 test_mode = []
 enterprise = []
+
+[lints]
+workspace = true

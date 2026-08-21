@@ -28,3 +28,6 @@ chrono = "0.4.45"
 test_mode = []
 dev_mode = []
 enterprise = []
+
+[lints]
+workspace = true

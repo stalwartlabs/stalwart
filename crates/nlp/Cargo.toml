@@ -26,3 +26,6 @@ test_mode = []
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
 bincode = "2.0.1"
+
+[lints]
+workspace = true

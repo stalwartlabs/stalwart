@@ -16,3 +16,6 @@ compact_str = "0.10.0"
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
+
+[lints]
+workspace = true

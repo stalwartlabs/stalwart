@@ -64,3 +64,6 @@ enterprise = []
 #[[bench]]
 #name = "hash"
 #harness = false
+
+[lints]
+workspace = true

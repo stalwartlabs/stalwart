@@ -459,22 +459,18 @@ pub(crate) async fn schedule_account_destruction(
     #[cfg(not(feature = "enterprise"))]
     let status = TaskStatus::now();
 
-    let account_domain_id;
-    let account_name;
-    let account_type;
-
-    match account {
-        Account::User(account) => {
-            account_domain_id = account.domain_id;
-            account_name = account.name.clone();
-            account_type = AccountType::User;
-        }
-        Account::Group(account) => {
-            account_domain_id = account.domain_id;
-            account_name = account.name.clone();
-            account_type = AccountType::Group;
-        }
-    }
+    let (account_domain_id, account_name, account_type) = match account {
+        Account::User(account) => (
+            account.domain_id,
+            account.name.clone(),
+            AccountType::User,
+        ),
+        Account::Group(account) => (
+            account.domain_id,
+            account.name.clone(),
+            AccountType::Group,
+        ),
+    };
 
     let mut batch = BatchBuilder::new();
     batch.schedule_task(Task::DestroyAccount(TaskDestroyAccount {

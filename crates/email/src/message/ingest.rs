@@ -818,9 +818,11 @@ impl EmailIngest for Server {
 
                             if message_ids.len() == references.len() / U128_LEN
                                 && references
-                                    .chunks_exact(U128_LEN)
+                                    .as_chunks::<U128_LEN>()
+                                    .0
+                                    .iter()
                                     .zip(message_ids.iter())
-                                    .all(|(a, b)| u128::from_be_bytes(a.try_into().unwrap()) == *b)
+                                    .all(|(a, b)| u128::from_be_bytes(*a) == *b)
                             {
                                 result.duplicate_ids.push(document_id);
                             }

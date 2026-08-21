@@ -463,26 +463,21 @@ impl PyzorConfig {
 impl ClassifierConfig {
     pub async fn parse(bp: &mut Bootstrap) -> Option<Self> {
         let classifier = bp.setting_infallible::<structs::SpamClassifier>().await;
-        let w_params;
-        let i_params;
-        let log_scale;
-        let l2_normalize;
-
-        match classifier.model {
-            structs::SpamClassifierModel::FtrlFh(model) => {
-                log_scale = model.feature_log_scale;
-                l2_normalize = model.feature_l2_normalize;
-                w_params = FtrlParameters::parse(&model.parameters);
-                i_params = None;
-            }
-            structs::SpamClassifierModel::FtrlCcfh(model) => {
-                log_scale = model.feature_log_scale;
-                l2_normalize = model.feature_l2_normalize;
-                w_params = FtrlParameters::parse(&model.parameters);
-                i_params = Some(FtrlParameters::parse(&model.indicator_parameters));
-            }
+        let (log_scale, l2_normalize, w_params, i_params) = match classifier.model {
+            structs::SpamClassifierModel::FtrlFh(model) => (
+                model.feature_log_scale,
+                model.feature_l2_normalize,
+                FtrlParameters::parse(&model.parameters),
+                None,
+            ),
+            structs::SpamClassifierModel::FtrlCcfh(model) => (
+                model.feature_log_scale,
+                model.feature_l2_normalize,
+                FtrlParameters::parse(&model.parameters),
+                Some(FtrlParameters::parse(&model.indicator_parameters)),
+            ),
             structs::SpamClassifierModel::Disabled => return None,
-        }
+        };
 
         ClassifierConfig {
             w_params,

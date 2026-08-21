@@ -22,3 +22,6 @@ kafka = ["rdkafka"]
 redis = ["dep:redis", "futures"]
 enterprise = []
 test_mode = []
+
+[lints]
+workspace = true

@@ -30,3 +30,6 @@ rkyv.workspace = true
 [features]
 test_mode = []
 enterprise = []
+
+[lints]
+workspace = true
