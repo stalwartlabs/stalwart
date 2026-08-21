@@ -32,23 +32,14 @@ impl SpamFilterAnalyzeLlm for Server {
             } else {
                 return;
             };
-            let fmt_rcpt = |rcpt: &Recipient| match &rcpt.name {
-                Some(name) => format!("{name} <{}>", rcpt.email.address),
-                None => rcpt.email.address.clone(),
-            };
-            let prompt = format!(
-                "{prompt}\n\nFrom: {from}\nTo: {to}\nEnvelope-To: {envelope_to}\nSubject: {subject}\n\n{body}",
-                prompt = config.prompt,
-                from = fmt_rcpt(&ctx.output.from),
-                to = ctx
-                    .output
-                    .recipients_to
-                    .iter()
-                    .map(fmt_rcpt)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                envelope_to = ctx.input.env_rcpt_orig_to.join(", "),
-                subject = ctx.output.subject,
+
+            let prompt = build_prompt(
+                &config.prompt,
+                &ctx.output.from,
+                &ctx.output.recipients_to,
+                &ctx.input.env_rcpt_orig_to,
+                &ctx.output.subject,
+                body,
             );
 
             match config
@@ -122,5 +113,106 @@ impl SpamFilterAnalyzeLlm for Server {
                 }
             }
         }
+    }
+}
+
+fn build_prompt(
+    prompt: &str,
+    from: &Recipient,
+    recipients_to: &[Recipient],
+    env_rcpt_to: &[&str],
+    subject: &str,
+    body: &str,
+) -> String {
+    let mut result = String::with_capacity(prompt.len() + body.len() + subject.len());
+    result.push_str(prompt);
+    result.push_str("\n\nFrom: ");
+    push_recipient(&mut result, from);
+    result.push_str("\nTo: ");
+    for (idx, rcpt) in recipients_to.iter().take(16).enumerate() {
+        if idx > 0 {
+            result.push_str(", ");
+        }
+        push_recipient(&mut result, rcpt);
+    }
+    result.push_str("\nEnvelope-To: ");
+    for (idx, rcpt) in env_rcpt_to.iter().enumerate() {
+        if idx > 0 {
+            result.push_str(", ");
+        }
+        result.push_str(rcpt);
+    }
+    result.push_str("\nSubject: ");
+    result.push_str(shorten(subject, 64));
+    result.push_str("\n\n");
+    result.push_str(shorten(body, 512));
+    result
+}
+
+fn push_recipient(result: &mut String, rcpt: &Recipient) {
+    if let Some(name) = &rcpt.name {
+        result.push_str(name);
+        result.push_str(" <");
+        result.push_str(&rcpt.email.address);
+        result.push('>');
+    } else {
+        result.push_str(&rcpt.email.address);
+    }
+}
+
+fn shorten(input: &str, mut index: usize) -> &str {
+    index = index.min(input.len());
+    while !input.is_char_boundary(index) {
+        index += 1;
+    }
+    &input[..index]
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{Email, Recipient};
+
+    fn rcpt(name: Option<&str>, address: &str) -> Recipient {
+        Recipient {
+            email: Email::new(address),
+            name: name.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn build_llm_prompt() {
+        let prompt = build_prompt(
+            "Classify this message.",
+            &rcpt(Some("Alice"), "alice@example.com"),
+            &[
+                rcpt(Some("Bob"), "bob@example.com"),
+                rcpt(None, "carol@example.com"),
+            ],
+            &["dave@example.com", "erin@example.com"],
+            "Hello world",
+            "This is the body.",
+        );
+
+        assert_eq!(
+            prompt,
+            concat!(
+                "Classify this message.\n",
+                "\n",
+                "From: Alice <alice@example.com>\n",
+                "To: Bob <bob@example.com>, carol@example.com\n",
+                "Envelope-To: dave@example.com, erin@example.com\n",
+                "Subject: Hello world\n",
+                "\n",
+                "This is the body."
+            )
+        );
+    }
+
+    #[test]
+    fn shorten_at_char_boundary() {
+        assert_eq!(shorten("hello", 10), "hello");
+        assert_eq!(shorten("hello", 3), "hel");
+        assert_eq!(shorten("h\u{e9}llo", 2), "h\u{e9}");
     }
 }
