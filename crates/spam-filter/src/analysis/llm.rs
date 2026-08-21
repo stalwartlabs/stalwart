@@ -9,7 +9,7 @@ use std::{future::Future, time::Instant};
 use common::Server;
 use trc::AiEvent;
 
-use crate::SpamFilterContext;
+use crate::{Recipient, SpamFilterContext};
 
 pub trait SpamFilterAnalyzeLlm: Sync + Send {
     fn spam_filter_analyze_llm(
@@ -32,9 +32,23 @@ impl SpamFilterAnalyzeLlm for Server {
             } else {
                 return;
             };
+            let fmt_rcpt = |rcpt: &Recipient| match &rcpt.name {
+                Some(name) => format!("{name} <{}>", rcpt.email.address),
+                None => rcpt.email.address.clone(),
+            };
             let prompt = format!(
-                "{}\n\nSubject: {}\n\n{}",
-                config.prompt, ctx.output.subject, body
+                "{prompt}\n\nFrom: {from}\nTo: {to}\nEnvelope-To: {envelope_to}\nSubject: {subject}\n\n{body}",
+                prompt = config.prompt,
+                from = fmt_rcpt(&ctx.output.from),
+                to = ctx
+                    .output
+                    .recipients_to
+                    .iter()
+                    .map(fmt_rcpt)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                envelope_to = ctx.input.env_rcpt_orig_to.join(", "),
+                subject = ctx.output.subject,
             );
 
             match config
