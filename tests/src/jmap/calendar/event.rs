@@ -997,6 +997,71 @@ END:VCALENDAR
         .await
         .assert_destroyed(&[Id::from_str(&yearly_event_id).unwrap()]);
 
+    // RFC 8620 §5.3: `updated` lists any property that changed in a way not explicitly
+    // requested by the PatchObject.
+    let response = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [json!({
+                "calendarIds": { &calendar1_id: true },
+                "@type": "Event",
+                "title": "Set disclosure",
+                "start": "2006-03-01T10:00:00",
+                "timeZone": "Europe/Vatican",
+                "duration": "PT1H"
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let event_id = response.created(0).id().to_string();
+    let response = account
+        .jmap_update(
+            MethodObject::CalendarEvent,
+            [(&event_id, json!({ "useDefaultAlerts": false }))],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let updated = response.updated(&event_id).clone();
+    let response = account
+        .jmap_method_calls(json!([[
+            "CalendarEvent/get",
+            {
+                "accountId": account.id_string(),
+                "ids": [&event_id],
+                "properties": ["useDefaultAlerts"]
+            },
+            "c0"
+        ]]))
+        .await;
+    assert!(
+        response.list()[0]["useDefaultAlerts"] == false || updated["useDefaultAlerts"] == true,
+        "RFC 8620 §5.3: useDefaultAlerts was stored as true but not reported in `updated`"
+    );
+
+    // RFC 8620 §5.3: a patch whose parent does not exist is rejected with `invalidPatch`.
+    let response = account
+        .jmap_update(
+            MethodObject::CalendarEvent,
+            [(
+                &event_id,
+                json!({ "recurrenceOverrides/2006-03-08T10:00:00/title": "Moved" }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    assert_eq!(
+        response.not_updated(&event_id)["type"],
+        "invalidPatch",
+        "RFC 8620 §5.3: an invalid patch must be rejected with `invalidPatch`"
+    );
+    account
+        .jmap_destroy(
+            MethodObject::CalendarEvent,
+            [event_id.as_str()],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+
     // Clean up
     test.wait_for_tasks().await;
     account.destroy_all_calendars().await;

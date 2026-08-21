@@ -58,6 +58,30 @@ pub async fn test(test: &TestServer) {
     );
     let change_id = response.state();
 
+    // RFC 8620 §5.1: with `properties: null`, all properties of the object are returned.
+    let response = account
+        .jmap_method_calls(json!([[
+            "Calendar/get",
+            {
+                "accountId": account.id_string(),
+                "ids": [&default_calendar_id],
+                "properties": null
+            },
+            "c0"
+        ]]))
+        .await;
+    for property in [
+        "isVisible",
+        "includeInAvailability",
+        "defaultAlertsWithTime",
+        "defaultAlertsWithoutTime",
+    ] {
+        assert!(
+            response.list()[0].get(property).is_some(),
+            "RFC 8620 §5.1: Calendar/get with `properties: null` omits {property}"
+        );
+    }
+
     // Create Calendar
     let calendar_id = account
         .jmap_create(

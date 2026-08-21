@@ -29,6 +29,11 @@ pub async fn test(test: &TestServer) {
             Vec::<&str>::new(),
         )
         .await;
+    // RFC 8620 §5.1: every /get response carries a `state` argument.
+    assert!(
+        response.method_response()["state"].is_string(),
+        "RFC 8620 §5.1: ParticipantIdentity/get must return `state`"
+    );
     response.list_array().assert_is_equal(json!([
       {
         "id": "a",

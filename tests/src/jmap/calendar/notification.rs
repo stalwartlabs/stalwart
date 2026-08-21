@@ -120,6 +120,25 @@ pub async fn test(test: &TestServer) {
             .await;
         let notification = &response.list()[0];
         *event_id = notification.text_field("calendarEventId").to_string();
+
+        // RFC 8620 §5.1: with `properties: null`, all properties of the object are returned.
+        let all_properties = client
+            .jmap_method_calls(json!([[
+                "CalendarEventNotification/get",
+                {
+                    "accountId": client.id_string(),
+                    "ids": [notification_id],
+                    "properties": null
+                },
+                "c0"
+            ]]))
+            .await;
+        for property in ["calendarEventId", "event", "eventPatch"] {
+            assert!(
+                all_properties.list()[0].get(property).is_some(),
+                "RFC 8620 §5.1: CalendarEventNotification/get with `properties: null` omits {property}"
+            );
+        }
         notification.assert_is_equal(json!({
           "id": &notification_id,
           "created": &notification.text_field("created"),

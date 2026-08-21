@@ -87,6 +87,13 @@ pub async fn run(ctx: &CompCtx<'_>) {
         error_unknown_capability(ctx),
     )
     .await;
+    ctx.run("core/error-not-json-type", error_not_json_type(ctx))
+        .await;
+    ctx.run(
+        "core/error-unknown-capability-type",
+        error_unknown_capability_type(ctx),
+    )
+    .await;
     ctx.run("core/error-empty-using", error_empty_using(ctx))
         .await;
     ctx.run(
@@ -113,6 +120,16 @@ pub async fn run(ctx: &CompCtx<'_>) {
     ctx.run(
         "core/error-invalid-arguments-bad-type",
         error_invalid_arguments_bad_type(ctx),
+    )
+    .await;
+    ctx.run(
+        "core/error-invalid-arguments-bad-filter-type",
+        error_invalid_arguments_bad_filter_type(ctx),
+    )
+    .await;
+    ctx.run(
+        "core/error-invalid-arguments-unparseable-state",
+        error_invalid_arguments_unparseable_state(ctx),
     )
     .await;
     ctx.run(
@@ -146,6 +163,11 @@ pub async fn run(ctx: &CompCtx<'_>) {
     ctx.run(
         "core/result-ref-wrong-method-name",
         result_ref_wrong_method_name(ctx),
+    )
+    .await;
+    ctx.run(
+        "core/result-ref-into-set-response",
+        result_ref_into_set_response(ctx),
     )
     .await;
     ctx.run(
@@ -411,6 +433,43 @@ async fn error_unknown_capability(ctx: &CompCtx<'_>) -> TestOutcome {
     )
 }
 
+// RFC 8620 §3.6.1: a body that does not parse as I-JSON is `notJSON`; `notRequest` is
+// for a body that parsed but does not match the Request object.
+async fn error_not_json_type(ctx: &CompCtx<'_>) -> TestOutcome {
+    let resp = ctx
+        .primary
+        .jmap_raw_post("this is not json", "application/json")
+        .await;
+    check_eq(
+        request_error_type(&resp),
+        "urn:ietf:params:jmap:error:notJSON".to_string(),
+        "RFC 8620 §3.6.1 error type",
+    )
+}
+
+// RFC 8620 §3.6.1: an unsupported capability in `using` is `unknownCapability`.
+async fn error_unknown_capability_type(ctx: &CompCtx<'_>) -> TestOutcome {
+    let body = json!({
+        "using": [CORE, "urn:fake:nonexistent"],
+        "methodCalls": [["Core/echo", {}, "c0"]]
+    });
+    let resp = ctx
+        .primary
+        .jmap_raw_post(body.to_string(), "application/json")
+        .await;
+    check_eq(
+        request_error_type(&resp),
+        "urn:ietf:params:jmap:error:unknownCapability".to_string(),
+        "RFC 8620 §3.6.1 error type",
+    )
+}
+
+fn request_error_type(resp: &crate::utils::jmap::RawResponse) -> String {
+    resp.json()
+        .and_then(|v| v["type"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
 async fn error_empty_using(ctx: &CompCtx<'_>) -> TestOutcome {
     let resp = ctx
         .primary
@@ -511,6 +570,57 @@ async fn error_invalid_arguments_bad_type(ctx: &CompCtx<'_>) -> TestOutcome {
         resp.error_type_at(0).unwrap_or(""),
         "invalidArguments",
         "type",
+    )
+}
+
+// RFC 8620 §3.2 types method arguments as `String[*]`, so a wrongly typed argument
+// value still matches the Request object; §3.6.2 covers it with a method-level
+// `invalidArguments`. A request-level `notRequest` discards the whole batch.
+async fn error_invalid_arguments_bad_filter_type(ctx: &CompCtx<'_>) -> TestOutcome {
+    let body = json!({
+        "using": default_using(),
+        "methodCalls": [[
+            "Email/query",
+            { "accountId": ctx.account_id(), "filter": { "inMailbox": ["not-an-id"] } },
+            "c0"
+        ]]
+    });
+    let resp = ctx
+        .primary
+        .jmap_raw_post(body.to_string(), "application/json")
+        .await;
+    check_eq(
+        resp.status,
+        200,
+        "RFC 8620 §3.6.2: method-level error, not a request-level one",
+    )?;
+    let resp = resp.json().unwrap_or_default();
+    check_eq(
+        resp["methodResponses"][0][1]["type"].as_str().unwrap_or(""),
+        "invalidArguments",
+        "RFC 8620 §3.6.2 error type",
+    )
+}
+
+// Same as above, for a `sinceState` the server cannot parse. The body is sent as a
+// string so that `sinceState` precedes `maxChanges`: with the members in the other
+// order the same call is answered with a method-level error.
+async fn error_invalid_arguments_unparseable_state(ctx: &CompCtx<'_>) -> TestOutcome {
+    let body = format!(
+        r#"{{"using":["{CORE}","{MAIL}"],"methodCalls":[["Mailbox/changes",{{"accountId":"{}","sinceState":"!not-a-state!","maxChanges":100}},"c0"]]}}"#,
+        ctx.account_id()
+    );
+    let resp = ctx.primary.jmap_raw_post(body, "application/json").await;
+    check_eq(
+        resp.status,
+        200,
+        "RFC 8620 §3.6.2: method-level error, not a request-level one",
+    )?;
+    let resp = resp.json().unwrap_or_default();
+    check_eq(
+        resp["methodResponses"][0][1]["type"].as_str().unwrap_or(""),
+        "invalidArguments",
+        "RFC 8620 §3.6.2 error type",
     )
 }
 
@@ -695,6 +805,50 @@ async fn result_ref_wrong_method_name(ctx: &CompCtx<'_>) -> TestOutcome {
         resp.error_type_at(1).unwrap_or(""),
         "invalidResultReference",
         "type",
+    )
+}
+
+// RFC 8620 §3.7: the resolution algorithm only requires a previous response with the
+// given call id and method name and a resolvable pointer; it does not restrict which
+// method's response may be referenced. `/destroyed` is an `Id[]`, the type `ids` wants.
+async fn result_ref_into_set_response(ctx: &CompCtx<'_>) -> TestOutcome {
+    let resp = ctx
+        .primary
+        .jmap_request(
+            &default_using(),
+            json!([[
+                "Mailbox/set",
+                { "accountId": ctx.account_id(), "create": { "m": { "name": "result-ref-into-set" } } },
+                "c0"
+            ]]),
+        )
+        .await;
+    let mailbox_id = resp.response_at(0)["created"]["m"]["id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    check(!mailbox_id.is_empty(), "setup: Mailbox/set create")?;
+    let resp = ctx
+        .primary
+        .jmap_request(
+            &default_using(),
+            json!([
+                ["Mailbox/set", { "accountId": ctx.account_id(), "destroy": [mailbox_id] }, "set"],
+                [
+                    "Mailbox/get",
+                    {
+                        "accountId": ctx.account_id(),
+                        "#ids": { "resultOf": "set", "name": "Mailbox/set", "path": "/destroyed" }
+                    },
+                    "get"
+                ]
+            ]),
+        )
+        .await;
+    check_eq(
+        resp.name_at(1),
+        "Mailbox/get",
+        "RFC 8620 §3.7: a reference into a /set response must resolve",
     )
 }
 
