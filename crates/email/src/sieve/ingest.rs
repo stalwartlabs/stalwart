@@ -20,13 +20,10 @@ use sieve::{Envelope, Event, Input, Mailbox, Recipient, Sieve, SpamStatus};
 use std::{borrow::Cow, sync::Arc};
 use std::{future::Future, str::FromStr};
 use store::{
-    Deserialize, Serialize, ValueKey,
+    ValueKey,
     ahash::AHashMap,
     dispatch::lookup::KeyValue,
-    write::{
-        Archive, ArchiveBytes, ArchiveVersion, Archiver, BatchBuilder, BlobLink, BlobOp,
-        Compression, Dictionary, ValueClass,
-    },
+    write::{Archive, ArchiveBytes, ArchiveVersion, ValueClass, serialize::rkyv_deserialize},
 };
 use trc::{AddContext, SieveEvent, SmtpEvent};
 use types::{
@@ -76,7 +73,7 @@ pub trait SieveScriptIngest: Sync + Send {
         name: &str,
     ) -> impl Future<Output = trc::Result<Option<Sieve>>> + Send;
 
-    fn sieve_script_compile(
+    fn sieve_script_load(
         &self,
         account_id: u32,
         document_id: u32,
@@ -613,7 +610,7 @@ impl SieveScriptIngest for Server {
             .await
             .caused_by(trc::location!())?
         {
-            if let Some(script) = self.sieve_script_compile(account_id, document_id).await? {
+            if let Some(script) = self.sieve_script_load(account_id, document_id).await? {
                 Ok(Some(ActiveScript {
                     document_id,
                     script: Arc::new(script.script),
@@ -645,7 +642,7 @@ impl SieveScriptIngest for Server {
             .caused_by(trc::location!())?
             .min()
         {
-            self.sieve_script_compile(account_id, document_id)
+            self.sieve_script_load(account_id, document_id)
                 .await
                 .map(|script| script.map(|s| s.script))
         } else {
@@ -653,8 +650,7 @@ impl SieveScriptIngest for Server {
         }
     }
 
-    #[allow(clippy::blocks_in_conditions)]
-    async fn sieve_script_compile(
+    async fn sieve_script_load(
         &self,
         account_id: u32,
         document_id: u32,
@@ -672,113 +668,16 @@ impl SieveScriptIngest for Server {
             return Ok(None);
         };
 
-        // Obtain the sieve script length
         let version = script_object.version;
-        let unarchived_script = script_object
+        let script_object = script_object
             .unarchive::<SieveScript>()
             .caused_by(trc::location!())?;
-        let script_offset = u32::from(unarchived_script.size) as usize;
 
-        // Obtain the sieve script blob
-        let script_bytes = self
-            .core
-            .storage
-            .blob
-            .get_blob(unarchived_script.blob_hash.0.as_ref(), 0..usize::MAX)
-            .await
-            .caused_by(trc::location!())?
-            .ok_or_else(|| {
-                trc::StoreEvent::NotFound
-                    .into_err()
-                    .caused_by(trc::location!())
-                    .document_id(document_id)
-            })?;
-
-        // Obtain the precompiled script
-        if let Some(script) = script_bytes.get(script_offset..).and_then(|bytes| {
-            <Archive<ArchiveBytes> as Deserialize>::deserialize(bytes)
-                .ok()?
-                .deserialize::<Sieve>()
-                .ok()
-        }) {
-            Ok(Some(CompiledScript {
-                script,
-                name: unarchived_script.name.as_str().into(),
-                version,
-            }))
-        } else {
-            // Deserialization failed, probably because the script compiler version changed
-            match self.core.sieve.untrusted_compiler.compile(
-                script_bytes.get(0..script_offset).ok_or_else(|| {
-                    trc::StoreEvent::NotFound
-                        .into_err()
-                        .caused_by(trc::location!())
-                        .document_id(document_id)
-                })?,
-            ) {
-                Ok(sieve) => {
-                    // Store updated compiled sieve script
-                    let sieve = Archiver::with_compression(
-                        sieve,
-                        Compression::Zstd(Some(Dictionary::Sieve)),
-                    )
-                    .untrusted();
-                    let compiled_bytes = sieve.serialize().caused_by(trc::location!())?;
-                    let mut updated_sieve_bytes =
-                        Vec::with_capacity(script_offset + compiled_bytes.len());
-                    updated_sieve_bytes.extend_from_slice(&script_bytes[0..script_offset]);
-                    updated_sieve_bytes.extend_from_slice(&compiled_bytes);
-
-                    // Store updated blob
-                    let (new_blob_hash, new_blob_hold) = self
-                        .put_temporary_blob(account_id, &updated_sieve_bytes, 60)
-                        .await?;
-                    let mut new_script_object =
-                        rkyv::deserialize(unarchived_script).caused_by(trc::location!())?;
-                    let blob_hash =
-                        std::mem::replace(&mut new_script_object.blob_hash, new_blob_hash.clone());
-                    let new_archive = Archiver::new(new_script_object);
-
-                    // Update script object
-                    let mut batch = BatchBuilder::new();
-                    batch
-                        .with_account_id(account_id)
-                        .with_collection(Collection::SieveScript)
-                        .with_document(document_id)
-                        .assert_value(SieveField::Archive, &script_object)
-                        .set(
-                            SieveField::Archive,
-                            new_archive.serialize().caused_by(trc::location!())?,
-                        )
-                        .clear(BlobOp::Link {
-                            hash: blob_hash,
-                            to: BlobLink::Document,
-                        })
-                        .set(
-                            BlobOp::Link {
-                                hash: new_blob_hash,
-                                to: BlobLink::Document,
-                            },
-                            Vec::new(),
-                        )
-                        .clear(new_blob_hold);
-                    self.store()
-                        .write(batch.build_all())
-                        .await
-                        .caused_by(trc::location!())?;
-
-                    Ok(Some(CompiledScript {
-                        script: sieve.into_inner(),
-                        name: new_archive.into_inner().name,
-                        version,
-                    }))
-                }
-                Err(error) => Err(trc::StoreEvent::UnexpectedError
-                    .caused_by(trc::location!())
-                    .reason(error)
-                    .details("Failed to compile Sieve script")),
-            }
-        }
+        Ok(Some(CompiledScript {
+            script: rkyv_deserialize(&*script_object.script).caused_by(trc::location!())?,
+            name: script_object.name.as_str().into(),
+            version,
+        }))
     }
 }
 

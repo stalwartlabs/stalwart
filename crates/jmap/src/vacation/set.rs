@@ -22,8 +22,8 @@ use mail_parser::decoders::html::html_to_text;
 use std::borrow::Cow;
 use std::future::Future;
 use store::{
-    Serialize, SerializeInfallible, ValueKey,
-    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, Compression, Dictionary},
+    SerializeInfallible, ValueKey,
+    write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -132,9 +132,8 @@ impl VacationResponseSet for Server {
                 (
                     SieveScript {
                         name: "vacation".into(),
-                        blob_hash: Default::default(),
-                        size: 0,
                         vacation_response: VacationResponse::default().into(),
+                        ..Default::default()
                     },
                     None,
                 )
@@ -421,19 +420,8 @@ impl VacationResponseSet for Server {
 
         match self.core.sieve.untrusted_compiler.compile(&script) {
             Ok(compiled_script) => {
-                // Update blob length
                 obj.size = script.len() as u32;
-
-                // Serialize script
-                script.extend(
-                    Archiver::with_compression(
-                        compiled_script,
-                        Compression::Zstd(Some(Dictionary::Sieve)),
-                    )
-                    .untrusted()
-                    .serialize()
-                    .caused_by(trc::location!())?,
-                );
+                *obj.script = compiled_script;
 
                 Ok(script)
             }

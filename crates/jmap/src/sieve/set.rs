@@ -28,9 +28,9 @@ use registry::schema::enums::StorageQuota;
 use sieve::compiler::ErrorType;
 use std::future::Future;
 use store::{
-    Serialize, SerializeInfallible, ValueKey,
+    SerializeInfallible, ValueKey,
     rand::{RngExt, rng},
-    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, Compression, Dictionary},
+    write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
 use types::{
@@ -518,7 +518,7 @@ impl SieveScriptSet for Server {
                 !matches!(blob_id.class, BlobClass::Linked { account_id, collection, document_id: d } if account_id == ctx.account_id && collection == u8::from(Collection::SieveScript) && *document_id == d)
             }) {
                 // Check access
-                if let Some(mut bytes) = self.blob_download(&blob_id, ctx.access_token).await? {
+                if let Some(bytes) = self.blob_download(&blob_id, ctx.access_token).await? {
                     // Check quota
                     match self
                         .has_available_quota(ctx.account_cache, bytes.len() as u64)
@@ -541,7 +541,7 @@ impl SieveScriptSet for Server {
                     match self.core.sieve.untrusted_compiler.compile(&bytes) {
                         Ok(script) => {
                             changes.size = bytes.len() as u32;
-                            bytes.extend(Archiver::with_compression(script, Compression::Zstd(Some(Dictionary::Sieve))).untrusted().serialize().caused_by(trc::location!())?);
+                            changes.script = Box::new(script);
                             bytes.into()
                         }
                         Err(err) => {

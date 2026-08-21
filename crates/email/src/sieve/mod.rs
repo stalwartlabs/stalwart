@@ -25,12 +25,12 @@ pub struct ActiveScript {
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
-#[rkyv(derive(Debug))]
 pub struct SieveScript {
     pub name: String,
     pub blob_hash: BlobHash,
     pub size: u32,
     pub vacation_response: Option<VacationResponse>,
+    pub script: Box<Sieve>,
 }
 
 #[derive(
@@ -52,6 +52,7 @@ impl SieveScript {
             blob_hash,
             vacation_response: None,
             size: 0,
+            script: Box::default(),
         }
     }
 
@@ -72,6 +73,11 @@ impl SieveScript {
 
     pub fn with_vacation_response(mut self, vacation_response: VacationResponse) -> Self {
         self.vacation_response = Some(vacation_response);
+        self
+    }
+
+    pub fn with_script(mut self, script: Sieve) -> Self {
+        self.script = Box::new(script);
         self
     }
 }

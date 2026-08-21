@@ -12,8 +12,8 @@ use registry::schema::enums::{Permission, StorageQuota};
 use sieve::compiler::ErrorType;
 use std::time::Instant;
 use store::{
-    Serialize, ValueKey,
-    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, Compression, Dictionary},
+    ValueKey,
+    write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::SieveField};
@@ -35,7 +35,7 @@ impl<T: SessionStream> Session<T> {
             })?
             .trim()
             .to_string();
-        let mut script_bytes = tokens
+        let script_bytes = tokens
             .next()
             .ok_or_else(|| {
                 trc::ManageSieveEvent::Error
@@ -72,24 +72,14 @@ impl<T: SessionStream> Session<T> {
         }
 
         // Compile script
-        match self
+        let compiled_script = match self
             .server
             .core
             .sieve
             .untrusted_compiler
             .compile(&script_bytes)
         {
-            Ok(compiled_script) => {
-                script_bytes.extend(
-                    Archiver::with_compression(
-                        compiled_script,
-                        Compression::Zstd(Some(Dictionary::Sieve)),
-                    )
-                    .untrusted()
-                    .serialize()
-                    .caused_by(trc::location!())?,
-                );
-            }
+            Ok(compiled_script) => compiled_script,
             Err(err) => {
                 return Err(if let ErrorType::ScriptTooLong = &err.error_type() {
                     trc::ManageSieveEvent::Error
@@ -102,7 +92,7 @@ impl<T: SessionStream> Session<T> {
                         .details(err.to_string())
                 });
             }
-        }
+        };
 
         // Validate name
         if let Some(document_id) = self.validate_name(account_id, &name).await? {
@@ -146,7 +136,8 @@ impl<T: SessionStream> Session<T> {
                                 .deserialize()
                                 .caused_by(trc::location!())?
                                 .with_size(script_size as u32)
-                                .with_blob_hash(blob_hash.clone()),
+                                .with_blob_hash(blob_hash.clone())
+                                .with_script(compiled_script),
                         )
                         .with_current(script)
                         .with_changed_by(account.account_tenant_ids()),
@@ -190,7 +181,8 @@ impl<T: SessionStream> Session<T> {
                     ObjectIndexBuilder::<(), _>::new()
                         .with_changes(
                             SieveScript::new(name.clone(), blob_hash.clone())
-                                .with_size(script_size as u32),
+                                .with_size(script_size as u32)
+                                .with_script(compiled_script),
                         )
                         .with_changed_by(account.account_tenant_ids()),
                 )

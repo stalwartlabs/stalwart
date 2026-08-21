@@ -58,5 +58,5 @@ impl IndexableObject for &ArchivedSieveScript {
 }
 
 impl ArchiveCompression for SieveScript {
-    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
+    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Sieve));
 }
