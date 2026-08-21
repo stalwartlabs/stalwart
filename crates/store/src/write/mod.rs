@@ -53,6 +53,8 @@ pub enum ArchiveVersion {
 
 pub type ArchiveBytes = Vec<u8>;
 
+pub const DOCUMENT_ID_SET: u32 = 0;
+
 const _: () = assert!(std::mem::size_of::<rkyv::primitive::FixedUsize>() == 4);
 const _: () = assert!(std::mem::align_of::<rkyv::primitive::ArchivedU64>() == 1);
 const _: () = assert!(std::mem::align_of::<rkyv::string::ArchivedString>() == 1);

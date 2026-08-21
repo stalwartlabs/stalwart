@@ -208,72 +208,81 @@ impl AccountIndexer {
         let mut batch = BatchBuilder::new();
 
         // Build terms
-        let mut num_merge_ops = 0;
+        let mut postings = Vec::with_capacity(self.terms.len());
         for (term, fields) in self.terms {
             for (field, blocks) in fields {
                 for (block_id, documents) in blocks {
-                    if documents.is_empty() {
-                        continue;
-                    }
-                    let block_base = (block_id as u32) << ACCOUNT_BLOCK_SHIFT;
-
-                    batch.merge_fnc(
-                        SearchIndexClass::Term {
-                            index,
-                            account_id,
-                            field,
-                            term,
-                            block_id,
-                        },
-                        move |_, bytes| {
-                            if let Some(bytes) = bytes {
-                                let mut map = LazyBitmap::deserialize_delta(bytes, block_base)?;
-                                let mut has_changes = false;
-                                for (document_id, do_insert) in &documents {
-                                    if *do_insert {
-                                        has_changes |= map.0.insert(*document_id);
-                                    } else {
-                                        has_changes |= map.0.remove(*document_id);
-                                    }
-                                }
-                                if has_changes {
-                                    if !map.0.is_empty() {
-                                        Ok(MergeResult::Update(map.serialize_optimized(block_base)))
-                                    } else {
-                                        Ok(MergeResult::Delete)
-                                    }
-                                } else {
-                                    Ok(MergeResult::Skip)
-                                }
-                            } else {
-                                let mut map = RoaringBitmap::new();
-                                for (document_id, do_insert) in &documents {
-                                    if *do_insert {
-                                        map.insert(*document_id);
-                                    }
-                                }
-                                if !map.is_empty() {
-                                    Ok(MergeResult::Update(
-                                        LazyBitmap(map).serialize_optimized(block_base),
-                                    ))
-                                } else {
-                                    Ok(MergeResult::Skip)
-                                }
-                            }
-                        },
-                    );
-                    if num_merge_ops >= 1000 {
-                        batch.add_commit_point();
-                        num_merge_ops = 0;
-                    } else {
-                        num_merge_ops += 1;
+                    if !documents.is_empty() {
+                        postings.push((field, term, block_id, documents));
                     }
                 }
             }
         }
+        postings.sort_unstable_by(|a, b| {
+            term_key_order(a.0, &a.1, a.2).cmp(&term_key_order(b.0, &b.1, b.2))
+        });
+
+        let mut num_merge_ops = 0;
+        for (field, term, block_id, documents) in postings {
+            let block_base = (block_id as u32) << ACCOUNT_BLOCK_SHIFT;
+
+            batch.merge_fnc(
+                SearchIndexClass::Term {
+                    index,
+                    account_id,
+                    field,
+                    term,
+                    block_id,
+                },
+                move |_, bytes| {
+                    if let Some(bytes) = bytes {
+                        let mut map = LazyBitmap::deserialize_delta(bytes, block_base)?;
+                        let mut has_changes = false;
+                        for (document_id, do_insert) in &documents {
+                            if *do_insert {
+                                has_changes |= map.0.insert(*document_id);
+                            } else {
+                                has_changes |= map.0.remove(*document_id);
+                            }
+                        }
+                        if has_changes {
+                            if !map.0.is_empty() {
+                                Ok(MergeResult::Update(map.serialize_optimized(block_base)))
+                            } else {
+                                Ok(MergeResult::Delete)
+                            }
+                        } else {
+                            Ok(MergeResult::Skip)
+                        }
+                    } else {
+                        let mut map = RoaringBitmap::new();
+                        for (document_id, do_insert) in &documents {
+                            if *do_insert {
+                                map.insert(*document_id);
+                            }
+                        }
+                        if !map.is_empty() {
+                            Ok(MergeResult::Update(
+                                LazyBitmap(map).serialize_optimized(block_base),
+                            ))
+                        } else {
+                            Ok(MergeResult::Skip)
+                        }
+                    }
+                },
+            );
+            if num_merge_ops >= 1000 {
+                batch.add_commit_point();
+                num_merge_ops = 0;
+            } else {
+                num_merge_ops += 1;
+            }
+        }
 
         // Add documents
-        for (document_id, document) in self.documents {
+        let mut documents = self.documents.into_iter().collect::<Vec<_>>();
+        documents.sort_unstable_by_key(|(document_id, _)| *document_id);
+        for (document_id, document) in documents {
             if let Some(document) = document {
                 batch
                     .set(
@@ -388,65 +397,74 @@ impl GlobalIndexer {
         let mut batch = BatchBuilder::new();
 
         // Build terms
-        let mut num_merge_ops = 0;
+        let mut postings = Vec::with_capacity(self.terms.len());
         for (term, fields) in self.terms {
             for (field, blocks) in fields {
                 for (block_id, document_ids) in blocks {
-                    let key = if field != SearchField::Id.u8_id() {
-                        SearchIndexClass::GlobalTerm {
-                            index,
-                            field,
-                            term,
-                            block_id,
-                        }
-                    } else {
-                        SearchIndexClass::GlobalDocumentId { index, block_id }
-                    };
-
-                    batch.merge_fnc(key, move |_, bytes| {
-                        if let Some(bytes) = bytes {
-                            let mut treemap = LazyTreemap::deserialize_delta(
-                                bytes,
-                                (block_id as u64) << GLOBAL_BUCKET_SHIFT,
-                            )?;
-                            let cur_len = treemap.0.len();
-                            for document_id in &document_ids {
-                                treemap.0.insert(*document_id);
-                            }
-                            if treemap.0.len() > cur_len {
-                                Ok(MergeResult::Update(
-                                    treemap
-                                        .serialize_delta((block_id as u64) << GLOBAL_BUCKET_SHIFT),
-                                ))
-                            } else {
-                                Ok(MergeResult::Skip)
-                            }
-                        } else {
-                            let mut treemap = RoaringTreemap::new();
-
-                            for document_id in &document_ids {
-                                treemap.insert(*document_id);
-                            }
-
-                            Ok(MergeResult::Update(
-                                LazyTreemap(treemap)
-                                    .serialize_delta((block_id as u64) << GLOBAL_BUCKET_SHIFT),
-                            ))
-                        }
-                    });
-
-                    if num_merge_ops >= 1000 {
-                        batch.add_commit_point();
-                        num_merge_ops = 0;
-                    } else {
-                        num_merge_ops += 1;
-                    }
+                    postings.push((field, term, block_id, document_ids));
                 }
+            }
+        }
+        postings.sort_unstable_by(|a, b| {
+            term_key_order(a.0, &a.1, a.2).cmp(&term_key_order(b.0, &b.1, b.2))
+        });
+
+        let mut num_merge_ops = 0;
+        for (field, term, block_id, document_ids) in postings {
+            let key = if field != SearchField::Id.u8_id() {
+                SearchIndexClass::GlobalTerm {
+                    index,
+                    field,
+                    term,
+                    block_id,
+                }
+            } else {
+                SearchIndexClass::GlobalDocumentId { index, block_id }
+            };
+
+            batch.merge_fnc(key, move |_, bytes| {
+                if let Some(bytes) = bytes {
+                    let mut treemap = LazyTreemap::deserialize_delta(
+                        bytes,
+                        (block_id as u64) << GLOBAL_BUCKET_SHIFT,
+                    )?;
+                    let cur_len = treemap.0.len();
+                    for document_id in &document_ids {
+                        treemap.0.insert(*document_id);
+                    }
+                    if treemap.0.len() > cur_len {
+                        Ok(MergeResult::Update(
+                            treemap.serialize_delta((block_id as u64) << GLOBAL_BUCKET_SHIFT),
+                        ))
+                    } else {
+                        Ok(MergeResult::Skip)
+                    }
+                } else {
+                    let mut treemap = RoaringTreemap::new();
+
+                    for document_id in &document_ids {
+                        treemap.insert(*document_id);
+                    }
+
+                    Ok(MergeResult::Update(
+                        LazyTreemap(treemap)
+                            .serialize_delta((block_id as u64) << GLOBAL_BUCKET_SHIFT),
+                    ))
+                }
+            });
+
+            if num_merge_ops >= 1000 {
+                batch.add_commit_point();
+                num_merge_ops = 0;
+            } else {
+                num_merge_ops += 1;
             }
         }
 
         // Add documents
-        for (document_id, document) in self.documents {
+        let mut documents = self.documents.into_iter().collect::<Vec<_>>();
+        documents.sort_unstable_by_key(|(document_id, _)| *document_id);
+        for (document_id, document) in documents {
             batch
                 .set(
                     SearchIndexClass::GlobalDocument { index, document_id },
@@ -621,4 +639,8 @@ pub(crate) fn deserialize_term_fields(
     }
 
     Some(())
+}
+
+fn term_key_order(field: u8, term: &CheekyHash, block_id: u16) -> (u8, &[u8], usize, u16) {
+    (field, term.as_key(), term.len(), block_id)
 }

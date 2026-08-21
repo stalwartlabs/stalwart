@@ -22,6 +22,21 @@ pub const MAX_ARCHIVE_SIZE: usize = 64 * 1024 * 1024;
 
 const EMAIL_DICTIONARY: &[u8] = include_bytes!("../../../../resources/zstd/email-v1.dict");
 
+// TODO: only `Email` is trained. `Common`, `Calendar`, `Contact` and `Sieve` are placeholders
+// pointing at the email dictionary and have to be trained before release:
+//
+//   Common   - the small archives that take the default: Mailbox, Identity, EmailSubmission,
+//              SieveScript, the SMTP queue Message, PushSubscriptions, ParticipantIdentities,
+//              Calendar, AddressBook and FileNode. Highest value of the four: between 128 and 512
+//              bytes a dictionary encodes 4 to 5 times faster and stores 20% less than none.
+//   Calendar - CalendarEvent and CalendarEventNotification, dominated by iCalendar content.
+//   Contact  - ContactCard, dominated by vCard content.
+//   Sieve    - compiled Sieve scripts, which are rkyv-encoded bytecode rather than text.
+//
+// Entries may be retrained but never removed or reordered: a frame records the identifier of the
+// dictionary it was written with, and a value becomes undecodable if that identifier disappears
+// from the table.
+
 const DICTIONARIES: [&[u8]; 5] = [
     EMAIL_DICTIONARY,
     EMAIL_DICTIONARY,

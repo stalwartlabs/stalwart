@@ -15,6 +15,7 @@ use jmap_tools::{Map, Value};
 use std::{collections::BTreeSet, future::Future};
 use store::{
     SerializeInfallible, ValueKey,
+    ahash::AHashMap,
     rkyv::{option::ArchivedOption, vec::ArchivedVec},
     roaring::RoaringBitmap,
     write::{Archive, ArchiveBytes, BatchBuilder, assert::AssertValue},
@@ -178,11 +179,12 @@ impl IdentityGet for Server {
             .caused_by(trc::location!())?;
 
         let mut identity_ids = self
-            .document_ids(account_id, Collection::Identity, IdentityField::DocumentId)
+            .document_id_set(account_id, Collection::Identity, IdentityField::DocumentId)
             .await?;
         if stored_hash == Some(addresses_hash) {
             return Ok(identity_ids);
         }
+        let mut identity_id_changes = AHashMap::new();
 
         // Determine which addresses are missing and which identities are no longer valid
         let member_of = &account_info.account().id_member_of;
@@ -245,7 +247,6 @@ impl IdentityGet for Server {
                 next_document_id -= 1;
                 batch
                     .with_document(document_id)
-                    .tag(IdentityField::DocumentId)
                     .custom(ObjectIndexBuilder::<(), _>::new().with_changes(Identity {
                         name,
                         email: email.to_string(),
@@ -253,6 +254,7 @@ impl IdentityGet for Server {
                     }))
                     .caused_by(trc::location!())?
                     .commit_point();
+                identity_id_changes.insert(document_id, true);
                 identity_ids.insert(document_id);
             }
         }
@@ -261,11 +263,15 @@ impl IdentityGet for Server {
         for document_id in obsolete_ids {
             batch
                 .with_document(document_id)
-                .untag(IdentityField::DocumentId)
                 .clear(Field::ARCHIVE)
                 .log_item_delete(SyncCollection::Identity, None)
                 .commit_point();
+            identity_id_changes.insert(document_id, false);
             identity_ids.remove(document_id);
+        }
+
+        if !identity_id_changes.is_empty() {
+            batch.merge_document_ids(IdentityField::DocumentId, identity_id_changes);
         }
 
         batch
@@ -283,7 +289,7 @@ impl IdentityGet for Server {
         match self.commit_batch(batch).await {
             Ok(_) => Ok(identity_ids),
             Err(err) if err.is_assertion_failure() => self
-                .document_ids(account_id, Collection::Identity, IdentityField::DocumentId)
+                .document_id_set(account_id, Collection::Identity, IdentityField::DocumentId)
                 .await
                 .caused_by(trc::location!()),
             Err(err) => Err(err.caused_by(trc::location!())),

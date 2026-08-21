@@ -5,8 +5,9 @@
  */
 
 use store::{
-    IndexKey, IndexKeyPrefix, IterateParams, U32_LEN, roaring::RoaringBitmap,
-    write::key::DeserializeBigEndian,
+    IndexKey, IndexKeyPrefix, IterateParams, U32_LEN, ValueKey,
+    roaring::RoaringBitmap,
+    write::{DOCUMENT_ID_SET, key::DeserializeBigEndian},
 };
 use trc::AddContext;
 use types::collection::Collection;
@@ -14,6 +15,24 @@ use types::collection::Collection;
 use crate::Server;
 
 impl Server {
+    pub async fn document_id_set(
+        &self,
+        account_id: u32,
+        collection: Collection,
+        field: impl Into<u8>,
+    ) -> trc::Result<RoaringBitmap> {
+        self.store()
+            .get_value::<RoaringBitmap>(ValueKey::property(
+                account_id,
+                collection,
+                DOCUMENT_ID_SET,
+                field,
+            ))
+            .await
+            .caused_by(trc::location!())
+            .map(Option::unwrap_or_default)
+    }
+
     pub async fn document_ids(
         &self,
         account_id: u32,

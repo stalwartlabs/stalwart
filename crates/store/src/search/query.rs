@@ -496,7 +496,7 @@ impl AccountContext<'_> {
                     let begin =
                         codec::account_document_key(self.index, self.account_id, document_id);
                     let mut end = begin.clone();
-                    end.push(0);
+                    end.push(u8::MAX);
                     IterateParams::new(codec::document_key(begin), codec::document_key(end))
                 })
                 .collect::<Vec<_>>();

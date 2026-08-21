@@ -19,6 +19,7 @@ use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
     ValueKey,
+    ahash::AHashMap,
     write::{Archive, ArchiveBytes, BatchBuilder},
 };
 use trc::AddContext;
@@ -43,8 +44,9 @@ impl IdentitySet for Server {
     ) -> trc::Result<SetResponse<identity::Identity>> {
         let account_id = request.account_id.document_id();
         let identity_ids = self
-            .document_ids(account_id, Collection::Identity, IdentityField::DocumentId)
+            .document_id_set(account_id, Collection::Identity, IdentityField::DocumentId)
             .await?;
+        let mut identity_id_changes = AHashMap::new();
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let account_info = self
@@ -123,10 +125,10 @@ impl IdentitySet for Server {
                 .with_account_id(account_id)
                 .with_collection(Collection::Identity)
                 .with_document(document_id)
-                .tag(IdentityField::DocumentId)
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(identity))
                 .caused_by(trc::location!())?
                 .commit_point();
+            identity_id_changes.insert(document_id, true);
             response.created(id, document_id);
         }
 
@@ -210,14 +212,21 @@ impl IdentitySet for Server {
                     .with_account_id(account_id)
                     .with_collection(Collection::Identity)
                     .with_document(document_id)
-                    .untag(IdentityField::DocumentId)
                     .clear(Field::ARCHIVE)
                     .log_item_delete(SyncCollection::Identity, None)
                     .commit_point();
+                identity_id_changes.insert(document_id, false);
                 response.destroyed.push(id);
             } else {
                 response.not_destroyed.append(id, SetError::not_found());
             }
+        }
+
+        if !identity_id_changes.is_empty() {
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Identity)
+                .merge_document_ids(IdentityField::DocumentId, identity_id_changes);
         }
 
         // Write changes

@@ -9,17 +9,19 @@ use super::{
     ValueOp, assert::ToAssertValue, log::VanishedItem,
 };
 use crate::{
-    SerializeInfallible, U32_LEN,
+    Deserialize, Serialize, SerializeInfallible, U32_LEN,
     search::GLOBAL_BUCKET_SHIFT,
     write::{
-        AssignedIds, LogCollection, MergeOperation, MergeResult, SearchIndex, SearchIndexClass,
-        SetOperation, TaskQueueClass,
+        AssignedIds, DOCUMENT_ID_SET, LogCollection, MergeOperation, MergeResult, SearchIndex,
+        SearchIndexClass, SetOperation, TaskQueueClass,
     },
 };
+use ahash::AHashMap;
 use registry::{
     schema::structs::Task,
     types::{EnumImpl, ObjectImpl},
 };
+use roaring::RoaringBitmap;
 use types::{
     collection::{Collection, SyncCollection, VanishedCollection},
     field::FieldType,
@@ -126,6 +128,39 @@ impl BatchBuilder {
     #[inline(always)]
     pub fn untag(&mut self, field: impl FieldType) -> &mut Self {
         self.unindex(field, vec![])
+    }
+
+    pub fn merge_document_ids(
+        &mut self,
+        field: impl FieldType,
+        changes: AHashMap<u32, bool>,
+    ) -> &mut Self {
+        self.with_document(DOCUMENT_ID_SET).merge_fnc(
+            ValueClass::Property(field.into()),
+            move |_, bytes| {
+                let mut document_ids = match bytes {
+                    Some(bytes) => RoaringBitmap::deserialize(bytes)?,
+                    None => RoaringBitmap::new(),
+                };
+                let mut has_changes = false;
+
+                for (document_id, do_insert) in &changes {
+                    if *do_insert {
+                        has_changes |= document_ids.insert(*document_id);
+                    } else {
+                        has_changes |= document_ids.remove(*document_id);
+                    }
+                }
+
+                if !has_changes {
+                    Ok(MergeResult::Skip)
+                } else if !document_ids.is_empty() {
+                    Ok(MergeResult::Update(document_ids.serialize()?))
+                } else {
+                    Ok(MergeResult::Delete)
+                }
+            },
+        )
     }
 
     pub fn add(&mut self, class: impl Into<ValueClass>, value: i64) -> &mut Self {

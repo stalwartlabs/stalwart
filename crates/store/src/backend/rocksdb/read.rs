@@ -8,7 +8,7 @@ use super::{RocksDbStore, into_error};
 use crate::{
     Deserialize, IterateParams, Key, ValueKey, backend::rocksdb::CfHandle, write::ValueClass,
 };
-use rocksdb::{Direction, IteratorMode, ReadOptions};
+use rocksdb::ReadOptions;
 
 impl RocksDbStore {
     pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -107,19 +107,39 @@ impl RocksDbStore {
         self.spawn_worker(move || {
             let cf = db.subspace_handle(ranges[0].begin.subspace());
 
-            'outer: for params in &ranges {
+            for params in &ranges {
                 let begin = params.begin.serialize(0);
                 let end = params.end.serialize(0);
+                let mut upper_bound = Vec::with_capacity(end.len() + 1);
 
-                for row in db.iterator_cf(&cf, IteratorMode::From(&begin, Direction::Forward)) {
-                    let (key, value) = row.map_err(into_error)?;
-                    if key.as_ref() > end.as_slice() {
+                upper_bound.extend_from_slice(&end);
+                upper_bound.push(0u8);
+
+                let mut read_opts = ReadOptions::default();
+                read_opts.set_iterate_lower_bound(begin.as_slice());
+                read_opts.set_iterate_upper_bound(upper_bound);
+
+                let mut it = db.raw_iterator_cf_opt(&cf, read_opts);
+                it.seek(&begin);
+
+                while it.valid() {
+                    let Some(key) = it.key() else {
                         break;
+                    };
+                    let value = if params.values {
+                        it.value().unwrap_or_default()
+                    } else {
+                        &[][..]
+                    };
+
+                    if !cb(key, value)? {
+                        return Ok(());
                     }
-                    if !cb(&key, &value)? {
-                        break 'outer;
-                    }
+
+                    it.next();
                 }
+
+                it.status().map_err(into_error)?;
             }
 
             Ok(())
