@@ -83,7 +83,7 @@ rasn-cms = "0.28"
 rasn-pkix = "0.28"
 sequoia-openpgp = { version = "2.4", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 zxcvbn = "3.1.1"
-pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
+pkcs8 = { version = "0.11.0", features = ["alloc", "std"] }
 quick-xml = "0.41"
 
 [target.'cfg(unix)'.dependencies]
