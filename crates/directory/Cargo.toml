@@ -30,7 +30,7 @@ md5 = "0.8.1"
 futures = "0.3"
 regex = "1.13.1"
 serde = { version = "1.0", features = ["derive"]}
-totp-rs = { version = "5.7.2", features = ["otpauth"] }
+totp-rs = { version = "6.0.0", features = ["otpauth"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 serde_json = "1.0"
 base64 = "0.23"
