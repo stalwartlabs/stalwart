@@ -1021,9 +1021,9 @@ dependencies = [
 
 [[package]]
 name = "calcard"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee9a6e16e988648bc62127d1e570c49d249a39ffa43c63284f43ba958769cb93"
+checksum = "f908fcb612ff8729e4302e071562bfbb0f7cdeb1b791e06024e7f11eedb83d9c"
 dependencies = [
  "ahash",
  "chrono",
@@ -1086,9 +1086,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.3"
+version = "1.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "509591b7bcd67f4ef775afad7662703b4935daaa6ec0e5605cfb1090b32a2b6d"
+checksum = "0ad534f4357a5264cce5019c989cf66a4f0dc4e0d1b1d15f8aacec0ff7360273"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1348,7 +1348,7 @@ dependencies = [
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "sieve-rs",
+ "sieve-rs 0.8.0",
  "smtp-proto",
  "socket2 0.6.5",
  "store",
@@ -2318,9 +2318,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.17.0"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
+checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 
 [[package]]
 name = "elliptic-curve"
@@ -2376,7 +2376,7 @@ dependencies = [
  "sequoia-openpgp",
  "serde",
  "serde_json",
- "sieve-rs",
+ "sieve-rs 0.8.0",
  "smtp-proto",
  "spam-filter",
  "store",
@@ -3007,9 +3007,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.17"
+version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f877e75f39e9827ec50a572dd592684ac28c029578726c85f1b2aa6ab807449"
+checksum = "839c0e8a181239723652be9062bb56ca5bf5f64011f73b623f6f4fc59086a228"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -3616,9 +3616,9 @@ checksum = "e590f038c1464a96894fd6d10127e90a8be4509f56ff7ecef851b15cee0b7caa"
 
 [[package]]
 name = "icu_provider"
-version = "2.3.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92a7ed671a6aad807a8651a2e1782a6598fda9ce5185dd8158549e95a91c6428"
+checksum = "d27bbb9d3abbefac45d55f647c9de1d44aafcd1186eb91879afef17c396c3e73"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
@@ -3987,7 +3987,7 @@ dependencies = [
  "services",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "sieve-rs",
+ "sieve-rs 0.8.0",
  "smtp",
  "smtp-proto",
  "spam-filter",
@@ -4557,7 +4557,7 @@ dependencies = [
  "rkyv",
  "rustls",
  "rustls-pemfile",
- "sieve-rs",
+ "sieve-rs 0.8.0",
  "store",
  "tokio",
  "tokio-rustls",
@@ -6027,9 +6027,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.225"
+version = "2.1.226"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d71c4a0dab830345e50e8d0dc881bf219d0a9ff261dd2500d36e7cd24427d1e"
+checksum = "7bc88482eea924ca3a2f56a547454169af58deef35567965eb4fc2392a834841"
 dependencies = [
  "psl-types",
 ]
@@ -7660,6 +7660,23 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "sieve-rs"
 version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd00a548fde57bd0c8e7c13ae65fc5fe30bd923ff8655c81e010f3f02a90997b"
+dependencies = [
+ "ahash",
+ "arc-swap",
+ "fancy-regex 0.19.0",
+ "hashify",
+ "mail-builder 0.5.0",
+ "mail-parser",
+ "rkyv",
+]
+
+[[package]]
+name = "sieve-rs"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9277a6d903bf7b75264384229099ecf32c5f6b6f0c79f5448d6715df8e068157"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -7819,7 +7836,7 @@ dependencies = [
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "sieve-rs",
+ "sieve-rs 0.8.0",
  "smtp-proto",
  "spam-filter",
  "store",
@@ -8349,7 +8366,7 @@ dependencies = [
  "serial_test",
  "services",
  "sha2 0.11.0",
- "sieve-rs",
+ "sieve-rs 0.7.3",
  "smtp",
  "smtp-proto",
  "spam-filter",
@@ -10479,9 +10496,9 @@ dependencies = [
 
 [[package]]
 name = "zerovec-derive"
-version = "0.11.5"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f212a141d820099d57ffafb9569be9617a6f27d3dc881fbee8fb56642f917a9"
+checksum = "34df6fc39dbd26ddc9c10e6a2984476e13acce22e64e4487636ef494369225da"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -1,4 +1,4 @@
-/target
+target/
 *.failed
 *_failed
 run.sh
@@ -6,3 +6,4 @@ run.sh
 !.gitignore
 !.gitattributes
 !.github
+resources/zstd-builder/Cargo.lock

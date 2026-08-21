@@ -1,0 +1,34 @@
+[package]
+name = "zstd-builder"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+common = { path = "../../crates/common" }
+email = { path = "../../crates/email" }
+groupware = { path = "../../crates/groupware" }
+jmap_proto = { path = "../../crates/jmap-proto" }
+smtp = { path = "../../crates/smtp" }
+store = { path = "../../crates/store" }
+types = { path = "../../crates/types" }
+utils = { path = "../../crates/utils" }
+calcard = { version = "0.3", features = ["rkyv"] }
+mail-parser = { version = "0.11", features = ["full_encoding"] }
+rkyv = { version = "0.8.17", features = ["little_endian", "unaligned"] }
+sieve-rs = { version = "0.8", features = ["rkyv"] }
+smtp-proto = { version = "0.2.3", features = ["rkyv"] }
+xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
+zstd = { version = "0.13", features = ["zdict_builder", "experimental"] }
+
+[patch.crates-io]
+hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+hickory-net = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+sieve-rs = { path = "../../../sieve" }
+
+[profile.release]
+opt-level = 2
+debug = false

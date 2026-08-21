@@ -27,7 +27,7 @@ pub fn register_local_domain(plugin_id: u32, fnc_map: &mut FunctionMap) {
 
 pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
     let store = match &ctx.arguments[0] {
-        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_str()),
+        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_ref()),
         _ => Some(ctx.server.core.storage.memory.clone()),
     }
     .ok_or_else(|| {
@@ -53,7 +53,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
 
 pub async fn exec_get(ctx: PluginContext<'_>) -> trc::Result<Variable> {
     match &ctx.arguments[0] {
-        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_str()),
+        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_ref()),
         _ => Some(ctx.server.core.storage.memory.clone()),
     }
     .ok_or_else(|| {
@@ -74,7 +74,7 @@ pub async fn exec_set(ctx: PluginContext<'_>) -> trc::Result<Variable> {
     };
 
     match &ctx.arguments[0] {
-        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_str()),
+        Variable::String(v) if !v.is_empty() => ctx.server.get_lookup_store(v.as_ref()),
         _ => Some(ctx.server.core.storage.memory.clone()),
     }
     .ok_or_else(|| {

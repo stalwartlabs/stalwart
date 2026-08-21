@@ -24,13 +24,13 @@ pub fn fn_count<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
 
 pub fn fn_sort<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     let is_asc = v[1].to_bool();
-    let mut arr = (*v[0].to_array()).clone();
+    let mut arr = (*v[0].to_array()).to_vec();
     if is_asc {
         arr.sort_unstable();
     } else {
         arr.sort_unstable_by(|a, b| b.cmp(a));
     }
-    arr.into()
+    Variable::Array(arr.into())
 }
 
 pub fn fn_dedup<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {

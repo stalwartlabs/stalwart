@@ -19,14 +19,8 @@ pub mod plugins;
 #[serde(tag = "action")]
 #[serde(rename_all = "camelCase")]
 pub enum ScriptModification {
-    SetEnvelope {
-        name: Envelope,
-        value: String,
-    },
-    AddHeader {
-        name: Arc<String>,
-        value: Arc<String>,
-    },
+    SetEnvelope { name: Envelope, value: String },
+    AddHeader { name: Arc<str>, value: Arc<str> },
 }
 
 pub fn into_sieve_value(value: Value) -> Variable {

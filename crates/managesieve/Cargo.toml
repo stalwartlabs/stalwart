@@ -16,7 +16,7 @@ email = { path = "../email" }
 trc = { path = "../trc" }
 registry = { path = "../registry" }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
-sieve-rs = { version = "0.7", features = ["rkyv"] } 
+sieve-rs = { version = "0.8", features = ["rkyv"] } 
 rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 rustls-pemfile = "2.2"
 tokio = { version = "1.53", features = ["full"] }
