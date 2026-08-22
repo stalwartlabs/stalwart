@@ -6,8 +6,9 @@ use sieve::Compiler;
 use types::blob_hash::BlobHash;
 
 use crate::{
+    constants,
     corpus::{Corpus, Rng, Stats, archive, collect_files, normalize_crlf},
-    testsuite,
+    testsuite, vacation,
 };
 
 pub fn build(dir: &Path, stats: &mut Stats) -> std::io::Result<Corpus> {
@@ -54,13 +55,22 @@ pub fn build(dir: &Path, stats: &mut Stats) -> std::io::Result<Corpus> {
         };
 
         let mut rng = Rng::new(index as u64 + 1);
+        let Some(script) = constants::sanitize(&script, &mut rng) else {
+            stats.skipped += 1;
+            continue;
+        };
+        let Ok(script) = script.to_bytes() else {
+            stats.skipped += 1;
+            continue;
+        };
+
         let name_len = rng.range(4, 20);
         let sample = archive(&SieveScript {
             name: rng.token(name_len),
             blob_hash: BlobHash::generate(&raw),
             size: raw.len() as u32,
             vacation_response: rng.chance(10).then(|| vacation(&mut rng)),
-            script: Box::new(script),
+            script,
         });
 
         if is_testsuite {
@@ -70,6 +80,8 @@ pub fn build(dir: &Path, stats: &mut Stats) -> std::io::Result<Corpus> {
         }
         stats.read += 1;
     }
+
+    vacation::build(&compiler, &mut corpus, stats);
 
     Ok(corpus)
 }

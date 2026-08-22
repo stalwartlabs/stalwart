@@ -1,4 +1,5 @@
 mod calendar;
+mod constants;
 mod contact;
 mod corpus;
 mod metadata;
@@ -6,6 +7,7 @@ mod script;
 mod testsuite;
 mod synthetic;
 mod train;
+mod vacation;
 
 use std::path::{Path, PathBuf};
 

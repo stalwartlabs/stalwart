@@ -421,7 +421,8 @@ impl VacationResponseSet for Server {
         match self.core.sieve.untrusted_compiler.compile(&script) {
             Ok(compiled_script) => {
                 obj.size = script.len() as u32;
-                *obj.script = compiled_script;
+                obj.set_script(&compiled_script)
+                    .caused_by(trc::location!())?;
 
                 Ok(script)
             }

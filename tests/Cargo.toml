@@ -48,7 +48,7 @@ smtp-proto = { version = "0.2" }
 mail-auth = { version = "0.12", features = ["test"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = "0.5.0"
-sieve-rs = { version = "0.7", features = ["rkyv"] } 
+sieve-rs = { version = "0.8", features = ["rkyv"] }
 utils = { path = "../crates/utils", features = ["test_mode"] }
 jmap-client = { version = "0.4", features = ["websockets", "debug", "async"] }
 tokio = { version = "1.53", features = ["full"] }

@@ -8,6 +8,7 @@ use crate::{
     jmap::mail::submission::{MockMessage, assert_message_delivery, spawn_mock_smtp_server},
     utils::{dns::DnsCache, server::TestServer, smtp::SmtpConnection},
 };
+use ::email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use jmap_client::{
     Error,
     core::set::{SetError, SetErrorType},
@@ -15,11 +16,17 @@ use jmap_client::{
     sieve::query::{Comparator, Filter},
 };
 use registry::schema::{prelude::ObjectType, structs::SieveUserScript};
+use sieve::Sieve;
 use std::{
     fs,
     path::PathBuf,
     time::{Duration, Instant},
 };
+use store::{
+    Serialize, ValueKey,
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
+};
+use types::{collection::Collection, field::SieveField};
 
 pub async fn test(test: &TestServer) {
     println!("Running Sieve tests...");
@@ -540,6 +547,78 @@ pub async fn test(test: &TestServer) {
         }
         panic!("Email {:?} not found in: {:#?}", subject, emails);
     }
+
+    // Scripts compiled by an older compiler version are recompiled on ingest
+    client
+        .sieve_script_create("test_recompile", get_script("test_recompile"), true)
+        .await
+        .unwrap();
+    let account_id = account.id().document_id();
+    let document_id = server
+        .sieve_script_get_active_id(account_id)
+        .await
+        .unwrap()
+        .expect("No active Sieve script found.");
+    let script_key = ValueKey::archive(account_id, Collection::SieveScript, document_id);
+    let mut script = server
+        .store()
+        .get_value::<Archive<ArchiveBytes>>(script_key.clone())
+        .await
+        .unwrap()
+        .expect("Sieve script not found.")
+        .deserialize::<SieveScript>()
+        .unwrap();
+    assert!(Sieve::from_bytes(&script.script).is_ok());
+    script.script.clear();
+    let mut batch = BatchBuilder::new();
+    batch
+        .with_account_id(account_id)
+        .with_collection(Collection::SieveScript)
+        .with_document(document_id)
+        .set(
+            SieveField::Archive,
+            Archiver::new(script).serialize().unwrap(),
+        );
+    server.store().write(batch.build_all()).await.unwrap();
+
+    lmtp.ingest(
+        "bill@remote.org",
+        &["jdoe@example.com"],
+        concat!(
+            "From: bill@remote.org\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: Recompile me\r\n",
+            "\r\n",
+            "Was this script recompiled?"
+        ),
+    )
+    .await;
+
+    assert!(
+        !client
+            .mailbox_query(
+                mailbox::query::Filter::name("Recompiled").into(),
+                None::<Vec<_>>
+            )
+            .await
+            .unwrap()
+            .ids()
+            .is_empty(),
+        "Sieve script was not recompiled."
+    );
+    let script = server
+        .store()
+        .get_value::<Archive<ArchiveBytes>>(script_key)
+        .await
+        .unwrap()
+        .expect("Sieve script not found.")
+        .deserialize::<SieveScript>()
+        .unwrap();
+    assert!(
+        Sieve::from_bytes(&script.script).is_ok(),
+        "Recompiled Sieve script was not stored."
+    );
+    assert_eq!(script.name, "test_recompile");
 
     // Remove test data
     client.sieve_script_deactivate().await.unwrap();

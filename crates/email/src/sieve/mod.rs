@@ -25,12 +25,13 @@ pub struct ActiveScript {
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
+#[rkyv(derive(Debug))]
 pub struct SieveScript {
     pub name: String,
     pub blob_hash: BlobHash,
     pub size: u32,
     pub vacation_response: Option<VacationResponse>,
-    pub script: Box<Sieve>,
+    pub script: Vec<u8>,
 }
 
 #[derive(
@@ -52,7 +53,7 @@ impl SieveScript {
             blob_hash,
             vacation_response: None,
             size: 0,
-            script: Box::default(),
+            script: Vec::new(),
         }
     }
 
@@ -76,9 +77,20 @@ impl SieveScript {
         self
     }
 
-    pub fn with_script(mut self, script: Sieve) -> Self {
-        self.script = Box::new(script);
-        self
+    pub fn with_script(mut self, script: &Sieve) -> trc::Result<Self> {
+        self.set_script(script)?;
+        Ok(self)
+    }
+
+    pub fn set_script(&mut self, script: &Sieve) -> trc::Result<()> {
+        self.script = script.to_bytes().map_err(|err| {
+            trc::StoreEvent::UnexpectedError
+                .caused_by(trc::location!())
+                .reason(err)
+                .details("Failed to serialize compiled Sieve script")
+        })?;
+
+        Ok(())
     }
 }
 

@@ -541,7 +541,7 @@ impl SieveScriptSet for Server {
                     match self.core.sieve.untrusted_compiler.compile(&bytes) {
                         Ok(script) => {
                             changes.size = bytes.len() as u32;
-                            changes.script = Box::new(script);
+                            changes.set_script(&script).caused_by(trc::location!())?;
                             bytes.into()
                         }
                         Err(err) => {

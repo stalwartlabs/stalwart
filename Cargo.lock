@@ -79,16 +79,16 @@ dependencies = [
 
 [[package]]
 name = "aes-gcm"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdf011db2e21ce0d575593d749db5554b47fed37aff429e4dc50bc91ac93a028"
+checksum = "7f2b8006a0c83f52b62ba44a97b58bf76fe2f70a329e588f67f89691d93d498f"
 dependencies = [
  "aead 0.6.1",
  "aes 0.9.2",
  "cipher 0.5.2",
  "ctr 0.10.1",
+ "ctutils",
  "ghash 0.6.0",
- "subtle",
 ]
 
 [[package]]
@@ -1348,7 +1348,7 @@ dependencies = [
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "sieve-rs 0.8.0",
+ "sieve-rs",
  "smtp-proto",
  "socket2 0.6.5",
  "store",
@@ -2352,7 +2352,7 @@ name = "email"
 version = "0.16.19"
 dependencies = [
  "aes 0.9.2",
- "aes-gcm 0.11.0",
+ "aes-gcm 0.11.1",
  "aes-gcm-siv",
  "cbc 0.2.1",
  "chacha20poly1305",
@@ -2376,7 +2376,7 @@ dependencies = [
  "sequoia-openpgp",
  "serde",
  "serde_json",
- "sieve-rs 0.8.0",
+ "sieve-rs",
  "smtp-proto",
  "spam-filter",
  "store",
@@ -3950,7 +3950,7 @@ dependencies = [
 name = "jmap"
 version = "0.16.19"
 dependencies = [
- "aes-gcm 0.11.0",
+ "aes-gcm 0.11.1",
  "aes-gcm-siv",
  "async-stream",
  "base64 0.23.1",
@@ -3987,7 +3987,7 @@ dependencies = [
  "services",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "sieve-rs 0.8.0",
+ "sieve-rs",
  "smtp",
  "smtp-proto",
  "spam-filter",
@@ -4164,9 +4164,9 @@ dependencies = [
 
 [[package]]
 name = "keccak"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffd9697dc4a9a62e2da93389f34400b77a28f0287711263cabb203b3ccb9c0e4"
+checksum = "d8f198d1db720e4940b5a493201d199d9f24f568f8f746bd13706243a2f71598"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
@@ -4417,9 +4417,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.33"
+version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lru"
@@ -4528,9 +4528,9 @@ dependencies = [
 
 [[package]]
 name = "mail-parser"
-version = "0.11.7"
+version = "0.11.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d1bb2f9fb98d69b0369be719dc8ab2f535a959e3761128c5c044fae97f68c12"
+checksum = "0b3a9080c1fb8190e232df37a10aa1b3d6b08be084e537069913f025e0ce86c5"
 dependencies = [
  "encoding_rs",
  "hashify",
@@ -4557,7 +4557,7 @@ dependencies = [
  "rkyv",
  "rustls",
  "rustls-pemfile",
- "sieve-rs 0.8.0",
+ "sieve-rs",
  "store",
  "tokio",
  "tokio-rustls",
@@ -7045,9 +7045,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.14"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0527518605e68109d875e248ea259b6758801cf165e4b2c2733ae3b51f12535a"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -7467,7 +7467,7 @@ dependencies = [
 name = "services"
 version = "0.16.19"
 dependencies = [
- "aes-gcm 0.11.0",
+ "aes-gcm 0.11.1",
  "aes-gcm-siv",
  "aho-corasick",
  "base64 0.23.1",
@@ -7613,7 +7613,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be176f1a57ce4e3d31c1a166222d9768de5954f811601fb7ca06fc8203905ce1"
 dependencies = [
  "digest 0.11.3",
- "keccak 0.2.1",
+ "keccak 0.2.2",
 ]
 
 [[package]]
@@ -7623,7 +7623,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09057cb2149ad4cbd2da1e26b351f9a4c354219421229c69c3063e6f61947c4a"
 dependencies = [
  "digest 0.11.3",
- "keccak 0.2.1",
+ "keccak 0.2.2",
  "sponge-cursor",
 ]
 
@@ -7659,24 +7659,9 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sieve-rs"
-version = "0.7.3"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd00a548fde57bd0c8e7c13ae65fc5fe30bd923ff8655c81e010f3f02a90997b"
-dependencies = [
- "ahash",
- "arc-swap",
- "fancy-regex 0.19.0",
- "hashify",
- "mail-builder 0.5.0",
- "mail-parser",
- "rkyv",
-]
-
-[[package]]
-name = "sieve-rs"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9277a6d903bf7b75264384229099ecf32c5f6b6f0c79f5448d6715df8e068157"
+checksum = "0cc5f9ebe4ba923a82f7524bee0d37a67b829d9befdd32e6840839d14ce6354e"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -7836,7 +7821,7 @@ dependencies = [
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "sieve-rs 0.8.0",
+ "sieve-rs",
  "smtp-proto",
  "spam-filter",
  "store",
@@ -8366,7 +8351,7 @@ dependencies = [
  "serial_test",
  "services",
  "sha2 0.11.0",
- "sieve-rs 0.7.3",
+ "sieve-rs",
  "smtp",
  "smtp-proto",
  "spam-filter",
@@ -9235,9 +9220,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.24.1"
+version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cefc03fd367c0c6d4305de1b312cf00248c4114f4a0418ce6a6af769e3b0bd9"
+checksum = "f053576934f05a761a402421fbbe3d425d9366f75f978806a037b3ca481abecc"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",

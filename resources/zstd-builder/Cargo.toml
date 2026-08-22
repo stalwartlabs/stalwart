@@ -16,9 +16,11 @@ store = { path = "../../crates/store" }
 types = { path = "../../crates/types" }
 utils = { path = "../../crates/utils" }
 calcard = { version = "0.3", features = ["rkyv"] }
+mail-builder = { version = "0.5" }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 rkyv = { version = "0.8.17", features = ["little_endian", "unaligned"] }
-sieve-rs = { version = "0.8", features = ["rkyv"] }
+serde_json = "1.0"
+sieve-rs = { version = "0.8", features = ["rkyv", "serde"] }
 smtp-proto = { version = "0.2.3", features = ["rkyv"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 zstd = { version = "0.13", features = ["zdict_builder", "experimental"] }
