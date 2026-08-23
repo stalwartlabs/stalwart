@@ -272,7 +272,11 @@ impl CalendarPublishStore for Server {
     }
 
     fn build_publish_url(&self, link: &CalendarPublishLink, secret: Option<&str>) -> String {
-        let base = if let Some(url) = &self.core.groupware.itip_http_rsvp_url {
+        let base = if !self.core.network.http.url_https.is_empty() {
+            self.core.network.http.url_https
+                .trim_end_matches('/')
+                .to_string()
+        } else if let Some(url) = &self.core.groupware.itip_http_rsvp_url {
             url.replace("/calendar/rsvp", "")
                 .trim_end_matches('/')
                 .to_string()
