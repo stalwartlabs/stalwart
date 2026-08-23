@@ -453,7 +453,7 @@ impl ParseHttp for Server {
                 self.is_http_anonymous_request_allowed(session.remote_ip)
                     .await?;
 
-                if matches!(req.method(), Method::GET | Method::HEAD) {
+                if req.method() == Method::GET || req.method() == Method::HEAD {
                     let mut segments = Vec::new();
                     while let Some(p) = path.next() {
                         if !p.is_empty() {
@@ -463,8 +463,7 @@ impl ParseHttp for Server {
                     let subpath = segments.join("/");
                     return self
                         .http_ics_handle(&subpath, req.method() == Method::HEAD)
-                        .await
-                        .map(|response| response.into_http_response());
+                        .await;
                 }
             }
             "calendar" => {

@@ -31,20 +31,20 @@ pub enum CalendarPublishLinkProperty {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CalendarPublishLinkValue {
-    Id(String),
+    Id(Id),
     CalendarId(Id),
     Access(PublishAccess),
     Visibility(PublishVisibility),
     Date(UTCDate),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PublishAccess {
     Public,
     Private,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PublishVisibility {
     Full,
     Busy,
@@ -105,7 +105,7 @@ impl Element for CalendarPublishLinkValue {
 
     fn to_cow(&self) -> Cow<'static, str> {
         match self {
-            CalendarPublishLinkValue::Id(id) => id.clone().into(),
+            CalendarPublishLinkValue::Id(id) => id.as_string().into(),
             CalendarPublishLinkValue::CalendarId(id) => id.to_string().into(),
             CalendarPublishLinkValue::Access(a) => match a {
                 PublishAccess::Public => "public",
@@ -150,7 +150,7 @@ impl FromStr for CalendarPublishLinkProperty {
 impl JmapObject for CalendarPublishLink {
     type Property = CalendarPublishLinkProperty;
     type Element = CalendarPublishLinkValue;
-    type Id = String;
+    type Id = Id;
     type Filter = ();
     type Comparator = ();
     type GetArguments = ();
@@ -161,48 +161,33 @@ impl JmapObject for CalendarPublishLink {
     const ID_PROPERTY: Self::Property = CalendarPublishLinkProperty::Id;
 }
 
-impl From<String> for CalendarPublishLinkValue {
-    fn from(id: String) -> Self {
-        CalendarPublishLinkValue::Id(id)
-    }
-}
-
 impl From<Id> for CalendarPublishLinkValue {
     fn from(id: Id) -> Self {
         CalendarPublishLinkValue::CalendarId(id)
     }
 }
 
-impl TryFrom<AnyId> for String {
-    type Error = ();
-
-    fn try_from(_: AnyId) -> Result<Self, Self::Error> {
-        Err(())
+impl From<String> for CalendarPublishLinkValue {
+    fn from(_: String) -> Self {
+        unreachable!("CalendarPublishLink ids are JMAP Id values")
     }
 }
 
 impl JmapObjectId for CalendarPublishLinkValue {
     fn as_id(&self) -> Option<Id> {
         match self {
+            CalendarPublishLinkValue::Id(id) => Some(*id),
             CalendarPublishLinkValue::CalendarId(id) => Some(*id),
             _ => None,
         }
     }
 
     fn as_any_id(&self) -> Option<AnyId> {
-        if let CalendarPublishLinkValue::CalendarId(id) = self {
-            Some(AnyId::Id(*id))
-        } else {
-            None
-        }
+        self.as_id().map(AnyId::Id)
     }
 
     fn as_id_ref(&self) -> Option<&str> {
-        if let CalendarPublishLinkValue::Id(id) = self {
-            Some(id)
-        } else {
-            None
-        }
+        None
     }
 
     fn try_set_id(&mut self, id: AnyId) -> bool {

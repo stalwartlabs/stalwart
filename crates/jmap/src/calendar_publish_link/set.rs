@@ -9,22 +9,26 @@ use groupware::{
     cache::GroupwareCache,
     calendar::publish_link::{
         CalendarPublishLink, MAX_PRIVATE_LINKS_PER_CALENDAR, MAX_PUBLIC_LINKS_PER_CALENDAR,
-        PublishAccess, PublishVisibility, format_uuid, parse_uuid,
+        PublishAccess, PublishVisibility,
     },
-    calendar::publish_http::create_publish_link_secret,
+    calendar::publish_http::{CalendarPublishStore, clear_publish_link, create_publish_link_secret},
 };
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
-    object::calendar_publish_link::{
-        self, CalendarPublishLinkProperty, CalendarPublishLinkValue, PublishAccess as JmapAccess,
-        PublishVisibility as JmapVisibility,
+    object::{
+        JmapObjectId,
+        calendar_publish_link::{
+            self, CalendarPublishLinkProperty, CalendarPublishLinkValue, PublishAccess as JmapAccess,
+            PublishVisibility as JmapVisibility,
+        },
     },
+    request::MaybeInvalid,
 };
 use jmap_tools::{Key, Map, Value};
 use store::write::{BatchBuilder, now};
 use trc::AddContext;
-use types::{acl::Acl, collection::SyncCollection};
+use types::{acl::Acl, collection::SyncCollection, id::Id};
 use utils::map::bitmap::Bitmap;
 
 pub trait CalendarPublishLinkSet: Sync + Send {
@@ -44,6 +48,7 @@ impl CalendarPublishLinkSet for Server {
         let account_id = request.account_id.document_id();
         let mut response =
             SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let cache = self
             .fetch_dav_resources(
                 access_token.account_id(),
@@ -52,6 +57,12 @@ impl CalendarPublishLinkSet for Server {
             )
             .await?;
         let existing_links = self.list_publish_links(account_id).await?;
+        let mut next_document_id = existing_links
+            .iter()
+            .map(|l| l.document_id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         let mut batch = BatchBuilder::new();
 
         'create: for (id, object) in request.unwrap_create() {
@@ -63,13 +74,13 @@ impl CalendarPublishLinkSet for Server {
 
             for (property, value) in object.into_expanded_object() {
                 match property {
-                    CalendarPublishLinkProperty::CalendarId => {
+                    Key::Property(CalendarPublishLinkProperty::CalendarId) => {
                         calendar_id = value
                             .into_element()
                             .and_then(|e| e.as_id())
                             .map(|id| id.document_id());
                     }
-                    CalendarPublishLinkProperty::Access => {
+                    Key::Property(CalendarPublishLinkProperty::Access) => {
                         access = match value.into_element() {
                             Some(CalendarPublishLinkValue::Access(JmapAccess::Public)) => {
                                 PublishAccess::Public
@@ -77,7 +88,7 @@ impl CalendarPublishLinkSet for Server {
                             _ => PublishAccess::Private,
                         };
                     }
-                    CalendarPublishLinkProperty::Visibility => {
+                    Key::Property(CalendarPublishLinkProperty::Visibility) => {
                         visibility = match value.into_element() {
                             Some(CalendarPublishLinkValue::Visibility(JmapVisibility::Busy)) => {
                                 PublishVisibility::Busy
@@ -85,16 +96,16 @@ impl CalendarPublishLinkSet for Server {
                             _ => PublishVisibility::Full,
                         };
                     }
-                    CalendarPublishLinkProperty::Label => {
-                        label = value.into_string();
+                    Key::Property(CalendarPublishLinkProperty::Label) => {
+                        label = value.into_string().map(|s| s.into_owned());
                     }
-                    CalendarPublishLinkProperty::ExpiresAt => {
+                    Key::Property(CalendarPublishLinkProperty::ExpiresAt) => {
                         expires_at = value.into_element().and_then(|e| match e {
                             CalendarPublishLinkValue::Date(d) => Some(d.timestamp()),
                             _ => None,
                         });
                     }
-                    CalendarPublishLinkProperty::Secret => {
+                    Key::Property(CalendarPublishLinkProperty::Secret) => {
                         response.not_created.append(
                             id,
                             SetError::invalid_properties()
@@ -174,7 +185,11 @@ impl CalendarPublishLinkSet for Server {
                 (None, None)
             };
 
+            let document_id = next_document_id;
+            next_document_id = next_document_id.saturating_add(1);
+
             let link = CalendarPublishLink::new(
+                document_id,
                 calendar_id,
                 access,
                 visibility,
@@ -188,7 +203,7 @@ impl CalendarPublishLinkSet for Server {
             let mut created = Map::with_capacity(4);
             created.insert_unchecked(
                 CalendarPublishLinkProperty::Id,
-                Value::Element(CalendarPublishLinkValue::Id(format_uuid(&link.link_id))),
+                Value::Element(CalendarPublishLinkValue::Id(Id::from(document_id))),
             );
             created.insert_unchecked(CalendarPublishLinkProperty::Url, Value::Str(url.into()));
             if let Some(secret) = secret_token {
@@ -201,20 +216,31 @@ impl CalendarPublishLinkSet for Server {
         }
 
         'update: for (id, object) in request.unwrap_update() {
-            let link_id = match parse_uuid(&id) {
-                Some(link_id) => link_id,
-                None => {
-                    response.not_updated.append(id, SetError::not_found());
+            let id = match id {
+                MaybeInvalid::Value(id) => id,
+                invalid => {
+                    response.not_updated.append(invalid, SetError::not_found());
                     continue 'update;
                 }
             };
-            let mut link = match self.get_publish_link(account_id, link_id).await? {
+            if will_destroy.contains(&id) {
+                response.not_updated.append(id, SetError::will_destroy());
+                continue 'update;
+            }
+
+            let document_id = id.document_id();
+            let mut link = match existing_links
+                .iter()
+                .find(|l| l.document_id == document_id)
+                .cloned()
+            {
                 Some(link) => link,
                 None => {
                     response.not_updated.append(id, SetError::not_found());
                     continue 'update;
                 }
             };
+
             if let Err(err) =
                 assert_calendar_publish_acl(access_token, account_id, link.calendar_id, &cache)
             {
@@ -224,7 +250,7 @@ impl CalendarPublishLinkSet for Server {
 
             for (property, value) in object.into_expanded_object() {
                 match property {
-                    CalendarPublishLinkProperty::Secret => {
+                    Key::Property(CalendarPublishLinkProperty::Secret) => {
                         response.not_updated.append(
                             id,
                             SetError::invalid_properties()
@@ -233,10 +259,10 @@ impl CalendarPublishLinkSet for Server {
                         );
                         continue 'update;
                     }
-                    CalendarPublishLinkProperty::Label => {
-                        link.label = value.into_string();
+                    Key::Property(CalendarPublishLinkProperty::Label) => {
+                        link.label = value.into_string().map(|s| s.into_owned());
                     }
-                    CalendarPublishLinkProperty::Visibility => {
+                    Key::Property(CalendarPublishLinkProperty::Visibility) => {
                         link.visibility = match value.into_element() {
                             Some(CalendarPublishLinkValue::Visibility(JmapVisibility::Busy)) => {
                                 PublishVisibility::Busy
@@ -244,7 +270,7 @@ impl CalendarPublishLinkSet for Server {
                             _ => PublishVisibility::Full,
                         };
                     }
-                    CalendarPublishLinkProperty::ExpiresAt => {
+                    Key::Property(CalendarPublishLinkProperty::ExpiresAt) => {
                         link.expires_at = value.into_element().and_then(|e| match e {
                             CalendarPublishLinkValue::Date(d) => Some(d.timestamp()),
                             _ => None,
@@ -254,18 +280,15 @@ impl CalendarPublishLinkSet for Server {
                 }
             }
             self.store_publish_link(&mut batch, account_id, &link)?;
-            response.updated.push(id);
+            response.updated.append(id, None);
         }
 
-        for id in request.unwrap_destroy() {
-            let link_id = match parse_uuid(&id) {
-                Some(link_id) => link_id,
-                None => {
-                    response.not_destroyed.append(id, SetError::not_found());
-                    continue;
-                }
-            };
-            if let Some(link) = self.get_publish_link(account_id, link_id).await? {
+        for id in will_destroy {
+            let document_id = id.document_id();
+            if let Some(link) = existing_links
+                .iter()
+                .find(|l| l.document_id == document_id)
+            {
                 if let Err(err) = assert_calendar_publish_acl(
                     access_token,
                     account_id,
@@ -275,7 +298,7 @@ impl CalendarPublishLinkSet for Server {
                     response.not_destroyed.append(id, err);
                     continue;
                 }
-                Self::clear_publish_link(&mut batch, account_id, link_id);
+                clear_publish_link(&mut batch, account_id, link.link_id);
                 response.destroyed.push(id);
             } else {
                 response.not_destroyed.append(id, SetError::not_found());
@@ -302,7 +325,7 @@ fn assert_calendar_publish_acl(
     if access_token.is_member(account_id) {
         return Ok(());
     }
-    let required = Bitmap::from_iter([Acl::ModifyItems, Acl::Administer]);
+    let required = Bitmap::from_iter([Acl::ModifyItems, Acl::Modify]);
     if cache.has_access_to_container(access_token, calendar_id, required) {
         Ok(())
     } else {

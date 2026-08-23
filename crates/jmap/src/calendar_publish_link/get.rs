@@ -5,17 +5,16 @@
  */
 
 use common::Server;
-use groupware::calendar::publish_link::format_uuid;
+use groupware::calendar::publish_http::CalendarPublishStore;
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::calendar_publish_link::{
         self, CalendarPublishLinkProperty, CalendarPublishLinkValue, PublishAccess,
         PublishVisibility,
     },
-    request::IntoValid,
+    request::{IntoValid, MaybeInvalid},
 };
 use jmap_tools::{Map, Value};
-use trc::AddContext;
 use types::id::Id;
 
 pub trait CalendarPublishLinkGet: Sync + Send {
@@ -43,15 +42,12 @@ impl CalendarPublishLinkGet for Server {
         ]);
 
         let account_id = request.account_id.document_id();
-        let filter_ids = request
-            .ids
-            .take()
-            .map(|ids| {
-                ids.unwrap()
-                    .into_valid()
-                    .map(|id| id.as_ref().to_string())
-                    .collect::<std::collections::HashSet<_>>()
-            });
+        let filter_ids = request.ids.take().map(|ids| {
+            ids.unwrap()
+                .into_valid()
+                .map(|id| id.document_id())
+                .collect::<std::collections::HashSet<_>>()
+        });
 
         let links = self.list_publish_links(account_id).await?;
         let mut response = GetResponse {
@@ -61,25 +57,27 @@ impl CalendarPublishLinkGet for Server {
             not_found: vec![],
         };
 
-        for link in links {
-            let id = format_uuid(&link.link_id);
-            if filter_ids.as_ref().is_some_and(|ids| !ids.contains(&id)) {
+        for link in &links {
+            if filter_ids
+                .as_ref()
+                .is_some_and(|ids| !ids.contains(&link.document_id))
+            {
                 continue;
             }
             if response.list.len() >= self.core.jmap.get_max_objects {
                 break;
             }
             response.list.push(build_publish_link_object(
-                &link,
+                link,
                 &properties,
-                self.build_publish_url(&link, None),
+                self.build_publish_url(link, None),
             ));
         }
 
         if let Some(ids) = filter_ids {
-            for id in ids {
-                if !links.iter().any(|l| format_uuid(&l.link_id) == id) {
-                    response.not_found.push(id);
+            for document_id in ids {
+                if !links.iter().any(|l| l.document_id == document_id) {
+                    response.not_found.push(MaybeInvalid::Value(Id::from(document_id)));
                 }
             }
         }
@@ -93,12 +91,11 @@ fn build_publish_link_object(
     properties: &[CalendarPublishLinkProperty],
     url: String,
 ) -> Value<'static, CalendarPublishLinkProperty, CalendarPublishLinkValue> {
-    let id = format_uuid(&link.link_id);
     let mut result = Map::with_capacity(properties.len());
     for property in properties {
         let value = match property {
             CalendarPublishLinkProperty::Id => {
-                Value::Element(CalendarPublishLinkValue::Id(id.clone()))
+                Value::Element(CalendarPublishLinkValue::Id(Id::from(link.document_id)))
             }
             CalendarPublishLinkProperty::CalendarId => Value::Element(
                 CalendarPublishLinkValue::CalendarId(Id::from(link.calendar_id)),

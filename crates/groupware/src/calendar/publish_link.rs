@@ -38,6 +38,7 @@ pub enum PublishVisibility {
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq, Default,
 )]
 pub struct CalendarPublishLink {
+    pub document_id: u32,
     pub link_id: [u8; 16],
     pub calendar_id: u32,
     pub access: PublishAccess,
@@ -82,6 +83,7 @@ impl PublishLinkSecret {
 
 impl CalendarPublishLink {
     pub fn new(
+        document_id: u32,
         calendar_id: u32,
         access: PublishAccess,
         visibility: PublishVisibility,
@@ -91,6 +93,7 @@ impl CalendarPublishLink {
         expires_at: Option<i64>,
     ) -> Self {
         CalendarPublishLink {
+            document_id,
             link_id: rand::random(),
             calendar_id,
             access,

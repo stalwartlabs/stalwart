@@ -81,6 +81,9 @@ impl Response<'_> {
                         GetResponseMethod::ShareNotification(response) => {
                             response.eval_jptr(path, &mut results)
                         }
+                        GetResponseMethod::CalendarPublishLink(response) => {
+                            response.eval_jptr(path, &mut results)
+                        }
                         GetResponseMethod::PrincipalAvailability(response) => {
                             response.eval_jptr(path, &mut results)
                         }

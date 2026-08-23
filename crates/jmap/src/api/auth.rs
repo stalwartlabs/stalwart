@@ -238,6 +238,7 @@ impl JmapAuthorization for AccessToken {
                 }
                 MethodObject::ParticipantIdentity => Permission::JmapParticipantIdentityChanges,
                 MethodObject::ShareNotification => Permission::JmapShareNotificationChanges,
+                MethodObject::CalendarPublishLink => Permission::JmapCalendarChanges,
                 MethodObject::Principal => Permission::JmapPrincipalChanges,
                 MethodObject::AddressBook => Permission::JmapAddressBookChanges,
                 MethodObject::Core

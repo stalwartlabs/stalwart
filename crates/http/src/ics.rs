@@ -5,13 +5,22 @@
  */
 
 use common::Server;
-use dav_proto::schema::property::Rfc1123DateTime;
 use groupware::calendar::{
     publish_http::{CalendarPublishStore, parse_ics_http_path},
 };
 use http_proto::HttpResponse;
 use hyper::{header, StatusCode};
+use trc::AddContext;
 use utils::cheeky_hash::CheekyHash;
+
+fn http_date(timestamp: i64) -> String {
+    chrono::DateTime::from_timestamp(timestamp, 0)
+        .map(|dt| {
+            dt.format("%a, %d %b %Y %H:%M:%S GMT")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
 
 pub trait IcsHttpHandler: Sync + Send {
     fn http_ics_handle(
@@ -39,10 +48,10 @@ impl IcsHttpHandler for Server {
             .await
             .caused_by(trc::location!())?;
 
-        let mut response = HttpResponse::new(StatusCode::OK)
+        let response = HttpResponse::new(StatusCode::OK)
             .with_content_type("text/calendar; charset=utf-8")
             .with_etag(etag)
-            .with_last_modified(Rfc1123DateTime::new(last_modified).to_string())
+            .with_last_modified(http_date(last_modified))
             .with_header(header::CACHE_CONTROL, "private, max-age=300")
             .with_header("X-Robots-Tag", "noindex");
 

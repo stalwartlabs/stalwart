@@ -405,6 +405,7 @@ impl IntermediateChangesResponse {
                 ChangesResponseMethod::ShareNotification(transmute_response(self.response))
             }
             MethodObject::ParticipantIdentity
+            | MethodObject::CalendarPublishLink
             | MethodObject::Core
             | MethodObject::Blob
             | MethodObject::PushSubscription

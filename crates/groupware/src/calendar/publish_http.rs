@@ -12,7 +12,7 @@ use directory::core::secret::{hash_secret, verify_secret_hash};
 use crate::cache::GroupwareCache;
 use registry::schema::enums::PasswordHashAlgorithm;
 use store::{
-    Deserialize, IterateParams, ValueKey,
+    Deserialize, IterateParams, Serialize, SerializeInfallible, ValueKey,
     write::{AlignedBytes, Archive, Archiver, BatchBuilder, ValueClass, now},
 };
 use trc::AddContext;
@@ -47,6 +47,38 @@ pub trait CalendarPublishStore: Sync + Send {
         account_id: u32,
         link: &CalendarPublishLink,
     ) -> impl Future<Output = trc::Result<String>> + Send;
+
+    fn store_publish_link(
+        &self,
+        batch: &mut BatchBuilder,
+        account_id: u32,
+        link: &CalendarPublishLink,
+    ) -> trc::Result<()>;
+
+    fn list_publish_links(
+        &self,
+        account_id: u32,
+    ) -> impl Future<Output = trc::Result<Vec<CalendarPublishLink>>> + Send;
+
+    fn build_publish_url(&self, link: &CalendarPublishLink, secret: Option<&str>) -> String;
+
+    fn touch_publish_link_if_stale(
+        &self,
+        account_id: u32,
+        link: &CalendarPublishLink,
+    ) -> impl Future<Output = trc::Result<()>> + Send;
+}
+
+pub fn clear_publish_link(batch: &mut BatchBuilder, account_id: u32, link_id: [u8; 16]) {
+    batch.clear(ValueClass::CalendarPublishLink {
+        link_id,
+        account_id,
+    });
+    batch.clear(ValueClass::CalendarPublishLinkLookup { link_id });
+}
+
+fn not_found() -> trc::Error {
+    trc::ResourceEvent::NotFound.into_err()
 }
 
 impl CalendarPublishStore for Server {
@@ -64,11 +96,7 @@ impl CalendarPublishStore for Server {
             .await
             .caused_by(trc::location!())?;
         value
-            .map(|archive| {
-                archive
-                    .unarchive::<CalendarPublishLink>()
-                    .caused_by(trc::location!())
-            })
+            .map(|archive| archive.deserialize::<CalendarPublishLink>())
             .transpose()
     }
 
@@ -88,25 +116,25 @@ impl CalendarPublishStore for Server {
         let account_id = self
             .lookup_publish_link_account(link_id)
             .await?
-            .ok_or_else(|| trc::HttpEvent::NotFound.into_err())?;
+            .ok_or_else(not_found)?;
         let link = self
             .get_publish_link(account_id, link_id)
             .await?
-            .ok_or_else(|| trc::HttpEvent::NotFound.into_err())?;
+            .ok_or_else(not_found)?;
 
         if is_public && link.access != PublishAccess::Public {
-            return Err(trc::HttpEvent::NotFound.into_err());
+            return Err(not_found());
         }
         if !is_public {
             if link.access != PublishAccess::Private {
-                return Err(trc::HttpEvent::NotFound.into_err());
+                return Err(not_found());
             }
             let Some(secret_hash) = &link.secret_hash else {
-                return Err(trc::HttpEvent::NotFound.into_err());
+                return Err(not_found());
             };
-            let provided = secret.ok_or_else(|| trc::HttpEvent::NotFound.into_err())?;
+            let provided = secret.ok_or_else(not_found)?;
             if !verify_secret_hash(secret_hash, provided.as_bytes()).await? {
-                return Err(trc::HttpEvent::NotFound.into_err());
+                return Err(not_found());
             }
         }
 
@@ -114,7 +142,7 @@ impl CalendarPublishStore for Server {
         if let Some(expires) = link.expires_at
             && expires <= now_ts
         {
-            return Err(trc::HttpEvent::NotFound.into_err());
+            return Err(not_found());
         }
 
         Ok((account_id, link))
@@ -131,7 +159,7 @@ impl CalendarPublishStore for Server {
             .caused_by(trc::location!())?;
         let calendar_id = link.calendar_id;
         if !resources.has_container_id(&calendar_id) {
-            return Err(trc::HttpEvent::NotFound.into_err());
+            return Err(not_found());
         }
 
         let now_ts = now() as i64;
@@ -176,9 +204,9 @@ impl CalendarPublishStore for Server {
                 .caused_by(trc::location!())?;
             if let Some(event_) = event_ {
                 let event = event_
-                    .unarchive::<super::CalendarEvent>()
+                    .deserialize::<super::CalendarEvent>()
                     .caused_by(trc::location!())?;
-                let mut event_ical = event.data.event.clone();
+                let mut event_ical = event.data.event;
                 apply_publish_visibility(&mut event_ical, link.visibility);
                 merge_events_into_calendar(&mut ical, &event_ical);
             }
@@ -186,41 +214,31 @@ impl CalendarPublishStore for Server {
 
         Ok(ical.to_string())
     }
-}
 
-impl Server {
-    pub fn store_publish_link(
+    fn store_publish_link(
         &self,
         batch: &mut BatchBuilder,
         account_id: u32,
         link: &CalendarPublishLink,
     ) -> trc::Result<()> {
-        let archive = Archiver::archive(link).caused_by(trc::location!())?;
+        let archive = Archiver::new(link.clone());
         batch.set(
             ValueClass::CalendarPublishLink {
                 link_id: link.link_id,
                 account_id,
             },
-            archive.serialize(),
+            archive.serialize()?,
         );
         batch.set(
             ValueClass::CalendarPublishLinkLookup {
                 link_id: link.link_id,
             },
-            account_id,
+            account_id.serialize(),
         );
         Ok(())
     }
 
-    pub fn clear_publish_link(batch: &mut BatchBuilder, account_id: u32, link_id: [u8; 16]) {
-        batch.clear(ValueClass::CalendarPublishLink {
-            link_id,
-            account_id,
-        });
-        batch.clear(ValueClass::CalendarPublishLinkLookup { link_id });
-    }
-
-    pub async fn list_publish_links(
+    async fn list_publish_links(
         &self,
         account_id: u32,
     ) -> trc::Result<Vec<CalendarPublishLink>> {
@@ -237,11 +255,12 @@ impl Server {
             .iterate(
                 IterateParams::new(begin, end).ascending(),
                 |_, value| {
-                    let archive = Archive::<AlignedBytes>::deserialize(value)
-                        .caused_by(trc::location!())?;
+                    let archive =
+                        <Archive<AlignedBytes> as Deserialize>::deserialize(value)
+                            .caused_by(trc::location!())?;
                     links.push(
                         archive
-                            .unarchive::<CalendarPublishLink>()
+                            .deserialize::<CalendarPublishLink>()
                             .caused_by(trc::location!())?,
                     );
                     Ok(true)
@@ -252,21 +271,14 @@ impl Server {
         Ok(links)
     }
 
-    pub fn ics_publish_base_url(&self) -> String {
-        if let Some(url) = &self.core.groupware.itip_http_rsvp_url {
+    fn build_publish_url(&self, link: &CalendarPublishLink, secret: Option<&str>) -> String {
+        let base = if let Some(url) = &self.core.groupware.itip_http_rsvp_url {
             url.replace("/calendar/rsvp", "")
                 .trim_end_matches('/')
                 .to_string()
         } else {
-            format!(
-                "https://{}",
-                self.core.email.system.default_hostname.as_str()
-            )
-        }
-    }
-
-    pub fn build_publish_url(&self, link: &CalendarPublishLink, secret: Option<&str>) -> String {
-        let base = self.ics_publish_base_url();
+            format!("https://{}", self.core.email.default_domain_name.as_str())
+        };
         let id = format_uuid(&link.link_id);
         match link.access {
             PublishAccess::Public => format!("{base}/ics/public/{id}.ics"),
@@ -280,11 +292,7 @@ impl Server {
         }
     }
 
-    pub async fn hash_publish_secret(secret: &[u8]) -> trc::Result<String> {
-        hash_secret(PasswordHashAlgorithm::Argon2id, secret.to_vec()).await
-    }
-
-    pub async fn touch_publish_link_if_stale(
+    async fn touch_publish_link_if_stale(
         &self,
         account_id: u32,
         link: &CalendarPublishLink,
@@ -307,18 +315,18 @@ impl Server {
 pub fn parse_ics_http_path(path: &str) -> trc::Result<([u8; 16], Option<String>, bool)> {
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     if parts.len() == 2 && parts[0] == "public" {
-        let link_id = parse_uuid(parts[1]).ok_or_else(|| trc::HttpEvent::NotFound.into_err())?;
+        let link_id = parse_uuid(parts[1]).ok_or_else(not_found)?;
         return Ok((link_id, None, true));
     }
     if parts.len() == 2 {
-        let link_id = parse_uuid(parts[0]).ok_or_else(|| trc::HttpEvent::NotFound.into_err())?;
+        let link_id = parse_uuid(parts[0]).ok_or_else(not_found)?;
         let secret = parts[1]
             .strip_suffix(".ics")
             .unwrap_or(parts[1])
             .to_string();
         return Ok((link_id, Some(secret), false));
     }
-    Err(trc::HttpEvent::NotFound.into_err())
+    Err(not_found())
 }
 
 fn is_resource_in_time_range(resource: &DavResource, filter: &TimeRange) -> bool {
@@ -385,7 +393,6 @@ fn redact_event_to_busy(component: &mut calcard::icalendar::ICalendarComponent) 
                 | ICalendarProperty::Attendee
                 | ICalendarProperty::Organizer
                 | ICalendarProperty::Url
-                | ICalendarProperty::Alarm
         )
     });
     component.component_ids.clear();

@@ -48,6 +48,9 @@ impl Response<'_> {
                 GetRequestMethod::ContactCard(request) => request.resolve_references(self)?,
                 GetRequestMethod::FileNode(request) => request.resolve_references(self)?,
                 GetRequestMethod::ShareNotification(request) => request.resolve_references(self)?,
+                GetRequestMethod::CalendarPublishLink(request) => {
+                    request.resolve_references(self)?
+                }
                 GetRequestMethod::Calendar(request) => request.resolve_references(self)?,
                 GetRequestMethod::CalendarEvent(request) => request.resolve_references(self)?,
                 GetRequestMethod::CalendarEventNotification(request) => {
@@ -85,6 +88,9 @@ impl Response<'_> {
                     request.resolve_references(self, 1, false)?
                 }
                 SetRequestMethod::ShareNotification(request) => {
+                    request.resolve_references(self, 1, false)?
+                }
+                SetRequestMethod::CalendarPublishLink(request) => {
                     request.resolve_references(self, 1, false)?
                 }
                 SetRequestMethod::Calendar(request) => {
