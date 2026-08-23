@@ -12,7 +12,6 @@ use groupware::calendar::{
 use http_proto::HttpResponse;
 use hyper::{header, StatusCode};
 use utils::cheeky_hash::CheekyHash;
-use utils::cheeky_hash::CheekyHash;
 
 pub trait IcsHttpHandler: Sync + Send {
     fn http_ics_handle(
