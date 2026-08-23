@@ -177,12 +177,15 @@ impl FdbStore {
                                         | SUBSPACE_TELEMETRY_SPAN
                                         | SUBSPACE_SEARCH_INDEX
                                         | SUBSPACE_LOGS
+                                        | SUBSPACE_PUBLISH_LINK
                                 ) && matches!(
                                     class,
                                     ValueClass::Property(_)
                                         | ValueClass::Queue(_)
                                         | ValueClass::Registry(RegistryClass::Item { .. })
                                         | ValueClass::ShareNotification { .. }
+                                        | ValueClass::CalendarPublishLink { .. }
+                                        | ValueClass::CalendarPublishLinkLookup { .. }
                                         | ValueClass::Telemetry(TelemetryClass::Metric { .. })
                                         | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
                                         | ValueClass::InMemory(_)

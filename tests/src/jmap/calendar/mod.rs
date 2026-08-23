@@ -10,3 +10,4 @@ pub mod calendars;
 pub mod event;
 pub mod identity;
 pub mod notification;
+pub mod publish_link;

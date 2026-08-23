@@ -124,6 +124,7 @@ pub const SUBSPACE_TELEMETRY_METRIC: u8 = b'x';
 pub const SUBSPACE_SEARCH_INDEX: u8 = b'z';
 pub const SUBSPACE_DELETED_ITEMS: u8 = b'j';
 pub const SUBSPACE_SPAM_SAMPLES: u8 = b'w';
+pub const SUBSPACE_PUBLISH_LINK: u8 = b'v';
 
 // TODO: Remove in v1.0
 pub const LEGACY_SUBSPACE_BITMAP_TEXT: u8 = b'v';

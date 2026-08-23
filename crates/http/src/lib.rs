@@ -9,6 +9,7 @@
 pub mod api;
 pub mod auth;
 pub mod form;
+pub mod ics;
 pub mod request;
 
 use common::Inner;

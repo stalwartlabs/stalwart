@@ -85,6 +85,7 @@ impl JmapAuthorization for AccessToken {
                 }
                 GetRequestMethod::ParticipantIdentity(_) => Permission::JmapParticipantIdentityGet,
                 GetRequestMethod::ShareNotification(_) => Permission::JmapShareNotificationGet,
+                GetRequestMethod::CalendarPublishLink(_) => Permission::JmapCalendarGet,
                 GetRequestMethod::Registry(_) => {
                     let MethodObject::Registry(object_type) = object else {
                         unreachable!()
@@ -198,6 +199,13 @@ impl JmapAuthorization for AccessToken {
                         Permission::JmapParticipantIdentityCreate,
                         Permission::JmapParticipantIdentityUpdate,
                         Permission::JmapParticipantIdentityDestroy,
+                    ),
+                    SetRequestMethod::CalendarPublishLink(s) => validate_set(
+                        s,
+                        self,
+                        Permission::JmapCalendarCreate,
+                        Permission::JmapCalendarUpdate,
+                        Permission::JmapCalendarDestroy,
                     ),
                     SetRequestMethod::Registry(s) => {
                         let MethodObject::Registry(object_type) = object else {

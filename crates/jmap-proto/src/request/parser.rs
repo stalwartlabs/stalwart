@@ -241,6 +241,15 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
+            (MethodFunction::Get, MethodObject::CalendarPublishLink) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::Get(GetRequestMethod::CalendarPublishLink(value))
+                }
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
             (MethodFunction::Get, MethodObject::SearchSnippet) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::SearchSnippet(value),
                 Err(err) => RequestMethod::invalid(err),
@@ -359,6 +368,15 @@ impl<'de> Visitor<'de> for CallVisitor {
             },
             (MethodFunction::Set, MethodObject::ShareNotification) => match seq.next_element() {
                 Ok(Some(value)) => RequestMethod::Set(SetRequestMethod::ShareNotification(value)),
+                Err(err) => RequestMethod::invalid(err),
+                Ok(None) => {
+                    return Err(de::Error::invalid_length(1, &self));
+                }
+            },
+            (MethodFunction::Set, MethodObject::CalendarPublishLink) => match seq.next_element() {
+                Ok(Some(value)) => {
+                    RequestMethod::Set(SetRequestMethod::CalendarPublishLink(value))
+                }
                 Err(err) => RequestMethod::invalid(err),
                 Ok(None) => {
                     return Err(de::Error::invalid_length(1, &self));

@@ -17,6 +17,7 @@ use crate::{
         get::CalendarEventNotificationGet, query::CalendarEventNotificationQuery,
         set::CalendarEventNotificationSet,
     },
+    calendar_publish_link::{get::CalendarPublishLinkGet, set::CalendarPublishLinkSet},
     changes::{get::ChangesLookup, query::QueryChanges},
     contact::{
         copy::JmapContactCardCopy, get::ContactCardGet, parse::ContactCardParse,
@@ -181,6 +182,9 @@ impl RequestHandler for Server {
                                         set_response.update_created_ids(&mut response);
                                     }
                                     SetResponseMethod::ParticipantIdentity(set_response) => {
+                                        set_response.update_created_ids(&mut response);
+                                    }
+                                    SetResponseMethod::CalendarPublishLink(set_response) => {
                                         set_response.update_created_ids(&mut response);
                                     }
                                     SetResponseMethod::CalendarEventNotification(_) => {}
@@ -364,6 +368,12 @@ impl RequestHandler for Server {
                     access_token.assert_is_member(req.account_id)?;
 
                     self.share_notification_get(*req).await?.into()
+                }
+                GetRequestMethod::CalendarPublishLink(mut req) => {
+                    resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.calendar_publish_link_get(*req).await?.into()
                 }
                 GetRequestMethod::Registry(mut req) => {
                     resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
@@ -571,6 +581,12 @@ impl RequestHandler for Server {
                     access_token.assert_is_member(req.account_id)?;
 
                     self.participant_identity_set(*req).await?.into()
+                }
+                SetRequestMethod::CalendarPublishLink(mut req) => {
+                    resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
+                    access_token.assert_has_access(req.account_id, Collection::Calendar)?;
+
+                    self.calendar_publish_link_set(*req, access_token).await?.into()
                 }
                 SetRequestMethod::Registry(mut req) => {
                     resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;

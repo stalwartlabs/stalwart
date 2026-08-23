@@ -13,7 +13,7 @@ use crate::{
     SUBSPACE_IN_MEMORY_VALUE, SUBSPACE_INDEXES, SUBSPACE_LOGS, SUBSPACE_PROPERTY,
     SUBSPACE_QUEUE_EVENT, SUBSPACE_QUEUE_MESSAGE, SUBSPACE_QUOTA, SUBSPACE_REGISTRY,
     SUBSPACE_REGISTRY_IDX, SUBSPACE_REGISTRY_PK, SUBSPACE_REPORT_IN, SUBSPACE_REPORT_OUT,
-    SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
+    SUBSPACE_SEARCH_INDEX, SUBSPACE_SPAM_SAMPLES, SUBSPACE_PUBLISH_LINK, SUBSPACE_TASK_QUEUE, SUBSPACE_TELEMETRY_METRIC,
     SUBSPACE_TELEMETRY_SPAN, U16_LEN, U32_LEN, U64_LEN, ValueKey, WITH_SUBSPACE,
     write::{
         BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexId, SearchIndexType,
@@ -362,6 +362,13 @@ impl ValueClass {
                 .write(*notify_account_id)
                 .write(u8::from(SyncCollection::ShareNotification))
                 .write(*notification_id),
+            ValueClass::CalendarPublishLink {
+                link_id,
+                account_id,
+            } => serializer.write(*account_id).write(link_id.as_slice()),
+            ValueClass::CalendarPublishLinkLookup { link_id } => {
+                serializer.write(0u8).write(link_id.as_slice())
+            }
             ValueClass::SearchIndex(index) => match &index.typ {
                 SearchIndexType::Term { field, hash } => {
                     let class = index.index.as_u8();
@@ -525,6 +532,8 @@ impl ValueClass {
             ValueClass::DocumentId | ValueClass::Quota | ValueClass::TenantQuota(_) => U32_LEN + 1,
             ValueClass::ChangeId => U32_LEN,
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
+            ValueClass::CalendarPublishLink { .. } => U32_LEN + 16,
+            ValueClass::CalendarPublishLinkLookup { .. } => 1 + 16,
             ValueClass::NodeId(_) => (U16_LEN * 3) + 1,
             ValueClass::SearchIndex(v) => match &v.typ {
                 SearchIndexType::Term { hash, .. } => U64_LEN + hash.len() + 2,
@@ -594,6 +603,9 @@ impl ValueClass {
             | ValueClass::Quota
             | ValueClass::TenantQuota(_) => SUBSPACE_COUNTER,
             ValueClass::ShareNotification { .. } => SUBSPACE_LOGS,
+            ValueClass::CalendarPublishLink { .. } | ValueClass::CalendarPublishLinkLookup { .. } => {
+                SUBSPACE_PUBLISH_LINK
+            }
             ValueClass::SearchIndex(_) => SUBSPACE_SEARCH_INDEX,
             ValueClass::Any(any) => any.subspace,
         }

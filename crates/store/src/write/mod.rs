@@ -179,6 +179,13 @@ pub enum ValueClass {
         notification_id: u64,
         notify_account_id: u32,
     },
+    CalendarPublishLink {
+        link_id: [u8; 16],
+        account_id: u32,
+    },
+    CalendarPublishLinkLookup {
+        link_id: [u8; 16],
+    },
     DocumentId,
     ChangeId,
     Quota,

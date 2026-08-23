@@ -94,6 +94,7 @@ impl RocksDbStore {
             (SUBSPACE_TELEMETRY_METRIC, CfProfile::Scan),
             (SUBSPACE_SEARCH_INDEX, CfProfile::Scan),
             (SUBSPACE_SPAM_SAMPLES, CfProfile::Churn),
+            (SUBSPACE_PUBLISH_LINK, CfProfile::PointLookup),
             (SUBSPACE_REGISTRY_IDX, CfProfile::Scan),
             (SUBSPACE_REGISTRY_PK, CfProfile::PointLookup),
             (SUBSPACE_DIRECTORY, CfProfile::PointLookup),

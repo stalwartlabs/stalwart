@@ -23,6 +23,7 @@ use common::{
     network::{SessionData, SessionManager, SessionStream},
 };
 use dav::{DavMethod, request::DavRequestHandler};
+use crate::ics::IcsHttpHandler;
 use groupware::{DavResourceName, calendar::itip::ItipIngest};
 use http_proto::{
     DownloadResponse, HtmlResponse, HttpContext, HttpRequest, HttpResponse, HttpResponseBody,
@@ -446,6 +447,24 @@ impl ParseHttp for Server {
                         .handle_autoconfig_request(req.uri().query())
                         .await
                         .map(|resource| resource.into_http_response());
+                }
+            }
+            "ics" => {
+                self.is_http_anonymous_request_allowed(session.remote_ip)
+                    .await?;
+
+                if matches!(req.method(), Method::GET | Method::HEAD) {
+                    let mut segments = Vec::new();
+                    while let Some(p) = path.next() {
+                        if !p.is_empty() {
+                            segments.push(p);
+                        }
+                    }
+                    let subpath = segments.join("/");
+                    return self
+                        .http_ics_handle(&subpath, req.method() == Method::HEAD)
+                        .await
+                        .map(|response| response.into_http_response());
                 }
             }
             "calendar" => {

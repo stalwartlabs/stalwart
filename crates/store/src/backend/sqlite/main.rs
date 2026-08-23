@@ -66,6 +66,7 @@ impl SqliteStore {
             SUBSPACE_TASK_QUEUE,
             SUBSPACE_DELETED_ITEMS,
             SUBSPACE_SPAM_SAMPLES,
+            SUBSPACE_PUBLISH_LINK,
             SUBSPACE_BLOB_LINK,
             SUBSPACE_IN_MEMORY_VALUE,
             SUBSPACE_PROPERTY,

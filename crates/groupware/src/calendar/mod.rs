@@ -9,6 +9,8 @@ pub mod dates;
 pub mod expand;
 pub mod index;
 pub mod itip;
+pub mod publish_link;
+pub mod publish_http;
 pub mod storage;
 
 use calcard::icalendar::{

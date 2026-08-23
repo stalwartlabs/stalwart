@@ -28,6 +28,7 @@ pub mod blob;
 pub mod calendar;
 pub mod calendar_event;
 pub mod calendar_event_notification;
+pub mod calendar_publish_link;
 pub mod changes;
 pub mod contact;
 pub mod email;

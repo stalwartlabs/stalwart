@@ -46,6 +46,7 @@ use crate::{
         quota::Quota,
         registry::Registry,
         share_notification::ShareNotification,
+        calendar_publish_link::CalendarPublishLink,
         sieve::Sieve,
         thread::Thread,
         vacation_response::VacationResponse,
@@ -97,6 +98,7 @@ pub enum GetResponseMethod {
     CalendarEventNotification(CalendarEventNotificationGetResponse),
     ParticipantIdentity(GetResponse<ParticipantIdentity>),
     ShareNotification(GetResponse<ShareNotification>),
+    CalendarPublishLink(GetResponse<CalendarPublishLink>),
     Registry(GetResponse<Registry>),
 }
 
@@ -118,6 +120,7 @@ pub enum SetResponseMethod {
     CalendarEvent(Box<SetResponse<CalendarEvent>>),
     CalendarEventNotification(Box<SetResponse<CalendarEventNotification>>),
     ParticipantIdentity(Box<SetResponse<ParticipantIdentity>>),
+    CalendarPublishLink(Box<SetResponse<CalendarPublishLink>>),
     Registry(Box<SetResponse<Registry>>),
 }
 
@@ -571,9 +574,21 @@ impl From<SetResponse<ShareNotification>> for ResponseMethod<'_> {
     }
 }
 
+impl From<SetResponse<CalendarPublishLink>> for ResponseMethod<'_> {
+    fn from(response: SetResponse<CalendarPublishLink>) -> Self {
+        ResponseMethod::Set(SetResponseMethod::CalendarPublishLink(Box::new(response)))
+    }
+}
+
 impl From<GetResponse<ShareNotification>> for ResponseMethod<'_> {
     fn from(response: GetResponse<ShareNotification>) -> Self {
         ResponseMethod::Get(GetResponseMethod::ShareNotification(response))
+    }
+}
+
+impl From<GetResponse<CalendarPublishLink>> for ResponseMethod<'_> {
+    fn from(response: GetResponse<CalendarPublishLink>) -> Self {
+        ResponseMethod::Get(GetResponseMethod::CalendarPublishLink(response))
     }
 }
 

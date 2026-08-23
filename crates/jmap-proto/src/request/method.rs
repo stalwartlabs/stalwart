@@ -40,6 +40,7 @@ pub enum MethodObject {
     FileNode,
     ParticipantIdentity,
     ShareNotification,
+    CalendarPublishLink,
     Registry(ObjectType),
 }
 
@@ -60,7 +61,8 @@ impl MethodObject {
             MethodObject::Calendar
             | MethodObject::CalendarEvent
             | MethodObject::CalendarEventNotification
-            | MethodObject::ParticipantIdentity => Capability::Calendars,
+            | MethodObject::ParticipantIdentity
+            | MethodObject::CalendarPublishLink => Capability::Calendars,
             MethodObject::AddressBook | MethodObject::ContactCard => Capability::Contacts,
             MethodObject::FileNode => Capability::FileNode,
             MethodObject::Registry(_) => Capability::Stalwart,
@@ -234,6 +236,9 @@ impl MethodName {
             }
             (MethodFunction::Set, MethodObject::ParticipantIdentity) => "ParticipantIdentity/set",
 
+            (MethodFunction::Get, MethodObject::CalendarPublishLink) => "CalendarPublishLink/get",
+            (MethodFunction::Set, MethodObject::CalendarPublishLink) => "CalendarPublishLink/set",
+
             (MethodFunction::Echo, MethodObject::Core) => "Core/echo",
             (method, MethodObject::Registry(obj)) => {
                 return Cow::Owned(format!("x:{}/{}", obj.as_str(), method.as_str()));
@@ -352,6 +357,9 @@ impl MethodName {
             "ParticipantIdentity/changes" => (MethodObject::ParticipantIdentity, MethodFunction::Changes),
             "ParticipantIdentity/set" => (MethodObject::ParticipantIdentity, MethodFunction::Set),
 
+            "CalendarPublishLink/get" => (MethodObject::CalendarPublishLink, MethodFunction::Get),
+            "CalendarPublishLink/set" => (MethodObject::CalendarPublishLink, MethodFunction::Set),
+
             "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
 
         ).or_else(|| {
@@ -396,6 +404,7 @@ impl Display for MethodObject {
             MethodObject::CalendarEvent => "CalendarEvent",
             MethodObject::CalendarEventNotification => "CalendarEventNotification",
             MethodObject::ShareNotification => "ShareNotification",
+            MethodObject::CalendarPublishLink => "CalendarPublishLink",
             MethodObject::Registry(obj) => {
                 f.write_str("x:")?;
                 return f.write_str(obj.as_str());

@@ -35,6 +35,7 @@ use crate::{
         identity::Identity, mailbox::Mailbox, participant_identity::ParticipantIdentity,
         principal::Principal, push_subscription::PushSubscription, quota::Quota,
         registry::Registry, share_notification::ShareNotification, sieve::Sieve, thread::Thread,
+        calendar_publish_link::CalendarPublishLink,
         vacation_response::VacationResponse,
     },
     request::{capability::CapabilityIds, reference::MaybeIdReference},
@@ -110,6 +111,7 @@ pub enum GetRequestMethod {
     CalendarEventNotification(Box<GetRequest<CalendarEventNotification>>),
     ParticipantIdentity(Box<GetRequest<ParticipantIdentity>>),
     ShareNotification(Box<GetRequest<ShareNotification>>),
+    CalendarPublishLink(Box<GetRequest<CalendarPublishLink>>),
     Registry(Box<GetRequest<Registry>>),
 }
 
@@ -130,6 +132,7 @@ pub enum SetRequestMethod<'x> {
     CalendarEvent(Box<SetRequest<'x, CalendarEvent>>),
     CalendarEventNotification(Box<SetRequest<'x, CalendarEventNotification>>),
     ParticipantIdentity(Box<SetRequest<'x, ParticipantIdentity>>),
+    CalendarPublishLink(Box<SetRequest<'x, CalendarPublishLink>>),
     Registry(Box<SetRequest<'x, Registry>>),
 }
 
