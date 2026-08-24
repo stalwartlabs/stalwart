@@ -769,6 +769,7 @@ class Converter:
         self._pick_default_domain()
         accounts = self._build_accounts()
         mailing_lists = self._build_mailing_lists()
+        self._reconcile_domain_tenants(domains, accounts, mailing_lists)
         dkim_signatures = self._build_dkim_signatures()
         certificates = self._build_certificates()
 
@@ -1082,6 +1083,126 @@ class Converter:
         if tname and tname in self.tenant_name_to_cid:
             body["memberTenantId"] = "#" + self.tenant_name_to_cid[tname]
         return (self._account_cid(gid), body)
+
+    def _reconcile_domain_tenants(
+        self,
+        domains: dict[str, dict[str, Any]],
+        accounts: dict[str, dict[str, Any]],
+        mailing_lists: dict[str, dict[str, Any]],
+    ) -> None:
+        """Make each domain's tenant agree with the accounts that use it.
+
+        In v0.15 a domain's tenant and a principal's tenant were independent:
+        a tenant-scoped user could sit on a domain that belonged to no tenant
+        at all, which happened whenever the domain was never declared as an
+        explicit `domain` principal (it was then inferred from an email
+        address here, and inferred domains carry no tenant).
+
+        v0.16 rejects that. A tenant-scoped Account may only reference a
+        Domain owned by the same tenant - as a primary domain or as an alias -
+        and the server answers `invalidForeignKey` on the Domain reference if
+        it does not. The reverse is allowed: a global (tenant-less) account
+        may live on a tenant-owned domain.
+
+        So where a domain has no tenant but every tenant-scoped account using
+        it agrees on one, adopt that tenant for the domain. That keeps the
+        accounts intact and is the only assignment that can make the plan
+        apply. Where the referrers genuinely disagree, stop: v0.16 cannot
+        represent the configuration, and silently dropping accounts to force
+        the plan through would lose mailboxes.
+        """
+        # domain cid -> tenant cids required by the tenant-scoped principals
+        # that reference it, with one example referrer name each for errors.
+        required: dict[str, dict[str, str]] = defaultdict(dict)
+
+        def note(obj: dict[str, Any], label: str) -> None:
+            t_ref = obj.get("memberTenantId")
+            if not isinstance(t_ref, str) or not t_ref:
+                return  # a global principal constrains nothing
+            for d_ref in self._domain_refs(obj):
+                required[d_ref].setdefault(t_ref, label)
+
+        for obj in accounts.values():
+            note(obj, f"{obj.get('@type', 'Account')} {obj.get('name', '?')!r}")
+        for obj in mailing_lists.values():
+            note(obj, f"MailingList {obj.get('name', '?')!r}")
+
+        adopted = 0
+        for d_cid, wanted in sorted(required.items()):
+            dom = domains.get(d_cid)
+            if dom is None:
+                continue
+            dname = dom.get("name", d_cid)
+
+            if len(wanted) > 1:
+                detail = ", ".join(
+                    f"{self._tenant_name_for_ref(t)!r} (e.g. {who})"
+                    for t, who in sorted(wanted.items())
+                )
+                raise ConvertError(
+                    f"domain {dname!r} is used by principals from more than one "
+                    f"tenant: {detail}. v0.16 requires every tenant-scoped "
+                    f"account to sit on a domain owned by its own tenant, and a "
+                    f"domain can belong to at most one tenant. Split these "
+                    f"principals across per-tenant domains in v0.15, or move "
+                    f"them into a single tenant, then re-run the dump."
+                )
+
+            t_ref, who = next(iter(wanted.items()))
+            current = dom.get("memberTenantId")
+            if current == t_ref:
+                continue
+            if current:
+                raise ConvertError(
+                    f"domain {dname!r} belongs to tenant "
+                    f"{self._tenant_name_for_ref(current)!r}, but {who} belongs "
+                    f"to tenant {self._tenant_name_for_ref(t_ref)!r} and uses it. "
+                    f"v0.16 rejects an account whose tenant differs from its "
+                    f"domain's. Fix the ownership in v0.15, then re-run the dump."
+                )
+
+            dom["memberTenantId"] = t_ref
+            self.domain_cid_to_tenant_cid[d_cid] = t_ref[1:] if t_ref.startswith("#") else t_ref
+            adopted += 1
+            print(
+                f"note: assigning domain {dname!r} to tenant "
+                f"{self._tenant_name_for_ref(t_ref)!r}: it had no tenant of its "
+                f"own, and {who} - which uses it - belongs to that tenant "
+                f"(v0.16 requires them to match)",
+                file=sys.stderr,
+            )
+
+        if adopted:
+            print(
+                f"note: {adopted} domain(s) adopted a tenant to satisfy v0.16's "
+                f"account/domain tenant rule",
+                file=sys.stderr,
+            )
+
+    @staticmethod
+    def _domain_refs(obj: dict[str, Any]) -> list[str]:
+        """Every domain client-id an account or mailing list references."""
+        refs: list[str] = []
+
+        def add(ref: Any) -> None:
+            if isinstance(ref, str) and ref.startswith("#"):
+                refs.append(ref[1:])
+
+        add(obj.get("domainId"))
+        aliases = obj.get("aliases")
+        if isinstance(aliases, dict):
+            for alias in aliases.values():
+                if isinstance(alias, dict):
+                    add(alias.get("domainId"))
+        return refs
+
+    def _tenant_name_for_ref(self, ref: str) -> str:
+        """Map a "#create-N" tenant reference back to its v0.15 tenant name."""
+        cid = ref[1:] if ref.startswith("#") else ref
+        for name, c in self.tenant_name_to_cid.items():
+            if c == cid:
+                return name
+        return cid
 
     def _build_account_quotas(self, p: dict[str, Any]) -> dict[str, int]:
         quotas: dict[str, int] = {}
